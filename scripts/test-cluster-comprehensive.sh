@@ -112,42 +112,22 @@ if test_endpoint "/api" "Internal server error" "Backend API" "500"; then
     tests_passed=$((tests_passed + 1))
 fi
 
-# Test Grafana (should redirect to login and serve proper Grafana login page)
+# Grafana is ClusterIP-only (not on the ingress); test it via port-forward instead.
 tests_total=$((tests_total + 1))
-echo "🔍 Testing Grafana: /grafana"
-response=$(curl -s -w "\n%{http_code}" "http://localhost:8080/grafana")
+echo "🔍 Testing Grafana (via port-forward, not the public ingress)"
+kubectl port-forward service/grafana-service 3000:3000 -n econ-graph > /dev/null 2>&1 &
+grafana_pf_pid=$!
+sleep 2
+http_status=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000/login" || echo "000")
+kill $grafana_pf_pid 2>/dev/null || true
+wait $grafana_pf_pid 2>/dev/null || true
 
-# Extract HTTP status code (last line)
-http_status=$(echo "$response" | tail -n1)
-# Extract response body (all but last line)
-response_body=$(echo "$response" | sed '$d')
-
-echo "  📊 HTTP Status: $http_status (expected: 302)"
-
-if [ "$http_status" = "302" ]; then
-    # Check if it redirects to login
-    location=$(curl -s -I "http://localhost:8080/grafana" | grep -i "location:" | cut -d' ' -f2- | tr -d '\r\n')
-    echo "  📍 Redirect Location: $location"
-
-    if echo "$location" | grep -q "login"; then
-        # Test the login page to make sure it's Grafana, not frontend
-        # Use the actual redirect location from the response
-        login_url="http://localhost:8080$location"
-        login_response=$(curl -s "$login_url")
-        if echo "$login_response" | grep -q "Grafana" && ! echo "$login_response" | grep -q "EconGraph"; then
-            echo "  ✅ PASS - Grafana redirects to login and serves proper Grafana login page"
-            tests_passed=$((tests_passed + 1))
-        else
-            echo "  ❌ FAIL - Grafana login page shows wrong content (frontend instead of Grafana)"
-            echo "  Response: $(echo "$login_response" | head -1 | cut -c1-100)..."
-        fi
-    else
-        echo "  ❌ FAIL - Grafana doesn't redirect to login page"
-    fi
+echo "  📊 HTTP Status: $http_status (expected: 200)"
+if [ "$http_status" = "200" ]; then
+    echo "  ✅ PASS - Grafana login page reachable via port-forward"
+    tests_passed=$((tests_passed + 1))
 else
-    echo "  ❌ FAIL - Grafana doesn't return 302 redirect"
-    echo "  HTTP Status: $http_status"
-    echo "  Response: $(echo "$response_body" | head -1 | cut -c1-100)..."
+    echo "  ❌ FAIL - Grafana not reachable via port-forward"
 fi
 
 echo ""
@@ -215,7 +195,7 @@ if [ $tests_passed -eq $tests_total ]; then
     echo "📋 Available Services:"
     echo "  • Frontend: http://localhost:8080/"
     echo "  • Admin UI: http://localhost:8080/admin"
-    echo "  • Grafana: http://localhost:8080/grafana"
+    echo "  • Grafana: kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
     echo "  • Backend API: http://localhost:8080/api"
     echo "  • GraphQL: http://localhost:8080/graphql"
     echo ""

@@ -311,7 +311,7 @@ newgrp microk8s
 - Frontend: https://www.econ-graph.com
 - Backend: https://www.econ-graph.com/api
 - Admin: https://www.econ-graph.com/admin
-- Grafana: https://www.econ-graph.com/grafana
+- Grafana: not on the public ingress; `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
 
 #### **Kind (Alternative for Docker-based Development)**
 ```bash

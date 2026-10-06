@@ -33,7 +33,7 @@ const TRANSFORMATION_DESCRIPTIONS: Record<string, string> = {
   'Year-over-Year': 'Year-over-Year % Change',
   'Quarter-over-Quarter': 'Quarter-over-Quarter % Change',
   'Month-over-Month': 'Month-over-Month % Change',
-  'Change since first observation': '% Change since First Observation',
+  'Change since first available value': '% Change since First Available Value',
   'Log difference': 'Log Difference',
 };
 

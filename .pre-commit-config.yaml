@@ -114,9 +114,13 @@ repos:
 
       - id: npm-audit
         name: NPM Security Audit
-        entry: bash -c 'cd frontend && npm audit --audit-level moderate && cd ../admin-frontend && npm audit --audit-level moderate'
+        # Both frontend and admin-frontend are gated via the one
+        # frontend/scripts/check-npm-audit.mjs, which allows only
+        # documented, unfixable exceptions listed in each package's own
+        # scripts/npm-audit-allowlist.json (see those files).
+        entry: bash -c 'cd frontend && node scripts/check-npm-audit.mjs . && cd ../admin-frontend && node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json'
         language: system
-        files: '^(frontend|admin-frontend)/package.*\.json$'
+        files: '^(frontend|admin-frontend)/package.*\.json$|^frontend/scripts/check-npm-audit\.mjs$|^(frontend|admin-frontend)/scripts/npm-audit-allowlist\.json$'
         pass_filenames: false
 
   # Database migration validation

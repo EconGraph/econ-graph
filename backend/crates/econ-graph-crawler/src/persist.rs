@@ -21,7 +21,7 @@
 //! datasets have the single measure `value`. Callers check the series against the
 //! [`DatasetCatalog`] first; persistence only resolves the synced row.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
@@ -31,13 +31,16 @@ use diesel::sql_types::{
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
-use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataSource};
-use econ_graph_core::schema::{data_sources, series_metadata};
+use econ_graph_core::models::{
+    Code, DataSource, DatasetComponents, NewCrawlAttempt, NewDataSource,
+};
+use econ_graph_core::schema::{data_sources, datasets, series_metadata};
 use econ_graph_core::DatabasePool;
 use uuid::Uuid;
 
 use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
 use crate::dataset::{DatasetCatalog, SeriesDataset};
+use crate::http::Validators;
 use crate::series_id::stable_series_id;
 use crate::source::SourceId;
 
@@ -196,14 +199,17 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
 /// and are only rewritten (bumping `updated_at` through its trigger) when one of them changed.
 /// Returns the number of definitions synced.
 pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> AppResult<usize> {
-    use econ_graph_core::models::DatasetComponents;
     let defs: Vec<_> = catalog.iter().collect();
     let mut conn = pool.get().await.map_err(conn_err)?;
     conn.transaction::<usize, AppError, _>(async move |conn| {
         for (source, def) in &defs {
             let source_id = data_source_id_conn(conn, *source).await?;
-            let row = def.to_new_dataset(source_id);
+            let mut row = def.to_new_dataset(source_id);
             row.validate_components()?;
+            // Preserve any codes a previous `refresh_reference_data` run merged in for a code
+            // the file doesn't list (e.g. a BLS code the toml hasn't been updated for yet): the
+            // file's own codes still win where both define the same one.
+            merge_existing_codes(conn, source_id, &row.code, &mut row.dimensions).await?;
             diesel::sql_query(
                 "INSERT INTO datasets (source_id, code, name, description, dimensions, measures, \
                      attributes, default_measure) \
@@ -231,6 +237,517 @@ pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> App
         Ok(defs.len())
     })
     .await
+}
+
+/// Adds any code in the stored `(source_id, code)` dataset's dimensions that `dimensions`
+/// doesn't already have for that dimension name, so a dynamically fetched code
+/// ([`merge_dataset_dimension_codes`]) survives the next [`sync_datasets`] run even if the
+/// checked-in file hasn't been updated for it. A code `dimensions` already defines is left as
+/// the file wrote it. No-op if the dataset has no existing row (first sync).
+async fn merge_existing_codes(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    code: &str,
+    dimensions: &mut DatasetComponents,
+) -> AppResult<()> {
+    use datasets::dsl;
+    let existing: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(code))
+        .select(dsl::dimensions)
+        // Locked against a concurrent `merge_dataset_dimension_codes` until this sync commits.
+        .for_update()
+        .first(conn)
+        .await
+        .optional()?;
+    let Some(existing) = existing else {
+        return Ok(());
+    };
+    for dim in &mut dimensions.0 {
+        let Some(existing_codes) = existing
+            .0
+            .iter()
+            .find(|d| d.name == dim.name)
+            .and_then(|d| d.codes.as_ref())
+        else {
+            continue;
+        };
+        let codes = dim.codes.get_or_insert_with(Vec::new);
+        for existing_code in existing_codes {
+            if !codes.iter().any(|c| c.code == existing_code.code) {
+                codes.push(existing_code.clone());
+            }
+        }
+        codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+    }
+    Ok(())
+}
+
+/// Cached `ETag` for `url`, one of `source`'s own reference files (e.g. a BLS code list), from
+/// the last successful [`set_reference_file_etag`]. `None` if never fetched or the source sent
+/// no `ETag`.
+pub async fn reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<Option<String>> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+    }
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag FROM reference_file_cache WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row.and_then(|r| r.etag))
+}
+
+/// Records `etag` (the response header from the fetch that found `url` changed, or `None` if the
+/// source sent none) as the validator to send next time.
+pub async fn set_reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    etag: Option<&str>,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache (source_id, url, etag, fetched_at) \
+             VALUES ($1, $2, $3, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET \
+             etag = EXCLUDED.etag, fetched_at = EXCLUDED.fetched_at",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Nullable<Text>, _>(etag)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// What a fetch needs to know about a stored series to skip unchanged data: its dataset (for
+/// [`FetchedSeries::unchanged`](crate::adapter::FetchedSeries::unchanged)) and the validators
+/// stored by its last successful fetch (`None` if it stored none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFetchState {
+    pub dataset: SeriesDataset,
+    pub validators: Option<Validators>,
+}
+
+/// [`StoredFetchState`] of each of `external_ids` that has an `economic_series` row; ids without
+/// one (never fetched) are absent, so the adapter fetches them in full.
+pub async fn stored_fetch_state(
+    pool: &DatabasePool,
+    source: SourceId,
+    external_ids: &[String],
+) -> AppResult<HashMap<String, StoredFetchState>> {
+    use econ_graph_core::models::SeriesDimensions;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Text)]
+        external_id: String,
+        #[diesel(sql_type = Text)]
+        code: String,
+        #[diesel(sql_type = Jsonb)]
+        dimensions: SeriesDimensions,
+        #[diesel(sql_type = Bool)]
+        has_validators: bool,
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        last_modified: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        content_sha256: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        version: Option<String>,
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let rows: Vec<Row> = diesel::sql_query(
+        "SELECT es.external_id, d.code, es.dimensions, (v.series_id IS NOT NULL) AS has_validators, \
+                v.etag, v.last_modified, v.content_sha256, v.version \
+         FROM economic_series es \
+         JOIN datasets d ON d.id = es.dataset_id \
+         LEFT JOIN series_fetch_validators v ON v.series_id = es.id \
+         WHERE es.source_id = $1 AND es.external_id = ANY($2)",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Array<Text>, _>(external_ids)
+    .load(&mut conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let validators = r.has_validators.then_some(Validators {
+                etag: r.etag,
+                last_modified: r.last_modified,
+                content_sha256: r.content_sha256,
+                version: r.version,
+            });
+            (
+                r.external_id,
+                StoredFetchState {
+                    dataset: SeriesDataset {
+                        code: r.code,
+                        dimensions: r.dimensions,
+                    },
+                    validators,
+                },
+            )
+        })
+        .collect())
+}
+
+/// Replaces `series_id`'s `series_fetch_validators` row with `validators`, or deletes it.
+async fn set_series_validators_conn(
+    conn: &mut AsyncPgConnection,
+    series_id: Uuid,
+    validators: Option<&Validators>,
+) -> AppResult<()> {
+    let Some(v) = validators else {
+        diesel::sql_query("DELETE FROM series_fetch_validators WHERE series_id = $1")
+            .bind::<SqlUuid, _>(series_id)
+            .execute(conn)
+            .await?;
+        return Ok(());
+    };
+    diesel::sql_query(
+        "INSERT INTO series_fetch_validators \
+             (series_id, etag, last_modified, content_sha256, version, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, NOW()) \
+         ON CONFLICT (series_id) DO UPDATE SET \
+             etag = EXCLUDED.etag, last_modified = EXCLUDED.last_modified, \
+             content_sha256 = EXCLUDED.content_sha256, version = EXCLUDED.version, \
+             updated_at = EXCLUDED.updated_at",
+    )
+    .bind::<SqlUuid, _>(series_id)
+    .bind::<Nullable<Text>, _>(v.etag.as_deref())
+    .bind::<Nullable<Text>, _>(v.last_modified.as_deref())
+    .bind::<Nullable<Text>, _>(v.content_sha256.as_deref())
+    .bind::<Nullable<Text>, _>(v.version.as_deref())
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Validators stored for `url` (a resource `source`'s adapter checks before re-reading it, such as
+/// a catalog file discovery lists series from) by [`set_url_validators_conn`]. `None` if never
+/// stored. Shares `reference_file_cache` with [`reference_file_etag`].
+pub async fn url_validators(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<Option<Validators>> {
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        last_modified: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        content_sha256: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        version: Option<String>,
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag, last_modified, content_sha256, version FROM reference_file_cache \
+         WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row.map(|r| Validators {
+        etag: r.etag,
+        last_modified: r.last_modified,
+        content_sha256: r.content_sha256,
+        version: r.version,
+    }))
+}
+
+/// Stores `validators` for `url` (see [`url_validators`]), for a caller whose data write is
+/// already committed (a reference-file refresh). A discovery's validators go through the worker
+/// instead ([`Discovery::Changed`](crate::adapter::Discovery::Changed)), in its own transaction.
+pub async fn set_url_validators(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    validators: &Validators,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    set_url_validators_conn(&mut conn, source, url, validators).await
+}
+
+/// Stores `validators` for `url` (see [`url_validators`]). Connection form: the worker calls it in
+/// the transaction that writes the discovery the validators describe.
+pub(crate) async fn set_url_validators_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    url: &str,
+    validators: &Validators,
+) -> AppResult<()> {
+    let source_id = data_source_id_conn(conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache \
+             (source_id, url, etag, last_modified, content_sha256, version, fetched_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET \
+             etag = EXCLUDED.etag, last_modified = EXCLUDED.last_modified, \
+             content_sha256 = EXCLUDED.content_sha256, version = EXCLUDED.version, \
+             fetched_at = EXCLUDED.fetched_at",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Nullable<Text>, _>(validators.etag.as_deref())
+    .bind::<Nullable<Text>, _>(validators.last_modified.as_deref())
+    .bind::<Nullable<Text>, _>(validators.content_sha256.as_deref())
+    .bind::<Nullable<Text>, _>(validators.version.as_deref())
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// What [`reference_file_cache`] holds for one of a source's reference files.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReferenceFileCache {
+    /// The validator to send next time (see [`reference_file_etag`]).
+    pub etag: Option<String>,
+    /// What the adapter kept from the copy that `etag` names ([`set_reference_file_payload`]),
+    /// for files whose contents aren't merged into another table. `None` if never stored.
+    pub payload: Option<serde_json::Value>,
+}
+
+/// The cached `ETag` and payload of `url`, one of `source`'s reference files. Both `None` if it
+/// was never fetched.
+pub async fn reference_file_cache(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<ReferenceFileCache> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Jsonb>)]
+        payload: Option<serde_json::Value>,
+    }
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag, payload FROM reference_file_cache WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row
+        .map(|r| ReferenceFileCache {
+            etag: r.etag,
+            payload: r.payload,
+        })
+        .unwrap_or_default())
+}
+
+/// Stores what an adapter kept from a copy of `url` (`payload`), for files whose contents aren't
+/// merged into another table. Called from inside [`crate::reference_file::refresh`]'s apply
+/// step, which then stores that copy's `ETag` ([`set_reference_file_etag`], which leaves the
+/// payload alone), so a later `304` pairs with the payload it validates. A new row gets no
+/// `ETag` until then.
+pub async fn set_reference_file_payload(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    payload: &serde_json::Value,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache (source_id, url, etag, payload, fetched_at) \
+             VALUES ($1, $2, NULL, $3, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET payload = EXCLUDED.payload",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Jsonb, _>(payload)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// Forgets the stored `ETag` of `url` (if it has a row), so the next conditional GET downloads
+/// the file again. The row (and its payload) stays, so a seed migration still sees the file as
+/// present and leaves it alone.
+pub async fn clear_reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "UPDATE reference_file_cache SET etag = NULL WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// The codes of `source`'s dataset `dataset_code`, dimension `dimension_name`, by code, as stored
+/// (the dataset file's codes plus any [`merge_dataset_dimension_codes`] added). Empty if the
+/// dataset or dimension isn't stored or has no codes.
+pub async fn dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<BTreeMap<String, Code>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let dims: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(dims
+        .into_iter()
+        .flat_map(|d| d.0)
+        .filter(|d| d.name == dimension_name)
+        .flat_map(|d| d.codes.unwrap_or_default())
+        .map(|c| (c.code.clone(), c))
+        .collect())
+}
+
+/// [`merge_dataset_dimension_code_entries`] for plain `(code, label)` pairs.
+pub async fn merge_dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    labels: &[(String, String)],
+) -> AppResult<bool> {
+    let entries: Vec<Code> = labels.iter().map(|(c, l)| Code::new(c, l)).collect();
+    merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
+}
+
+/// Merges `entries` into `source`'s dataset `dataset_code`, dimension `dimension_name`: adds a
+/// code that isn't there yet, and for one that is, updates its label plus its `unit` and
+/// `description` where the entry has one (a missing one keeps what is stored). Skips the write
+/// (but still returns `true`) when the merged codes equal what's already stored, so
+/// `updated_at` doesn't move on every refresh of a source whose files carry no `ETag` of their
+/// own for [`reference_file::refresh`](crate::reference_file::refresh) to short-circuit on.
+/// Returns whether anything was merged: `false` (nothing written) when the dataset or dimension
+/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one) or the dimension
+/// uses a shared `codelist`. The caller should then not treat the fetch that produced `entries`
+/// as consumed, e.g. by caching its `ETag`.
+pub async fn merge_dataset_dimension_code_entries(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    entries: &[Code],
+) -> AppResult<bool> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    conn.transaction::<bool, AppError, _>(async move |conn| {
+        let row: Option<(Uuid, DatasetComponents)> = dsl::datasets
+            .filter(dsl::source_id.eq(source_id))
+            .filter(dsl::code.eq(dataset_code))
+            .select((dsl::id, dsl::dimensions))
+            // Locked: two refreshes merging different dimensions of one dataset (the worker's
+            // startup refresh and a discovery job) would otherwise each write back the whole
+            // `dimensions` array and drop the other's codes.
+            .for_update()
+            .first(conn)
+            .await
+            .optional()?;
+        let Some((id, mut dims)) = row else {
+            return Ok(false);
+        };
+        let Some(dim) = dims.0.iter_mut().find(|d| d.name == dimension_name) else {
+            return Ok(false);
+        };
+        // A dimension labelled by a shared code list takes no inline codes (it may not have
+        // both); like `seed_reference_codes`, store nothing, so the ETag isn't cached either.
+        if dim.codelist.is_some() {
+            return Ok(false);
+        }
+        let mut before = dim.codes.clone().unwrap_or_default();
+        before.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        let mut codes = before.clone();
+        for entry in entries {
+            match codes.iter_mut().find(|c| c.code == entry.code) {
+                Some(existing) => {
+                    existing.label = entry.label.clone();
+                    if entry.unit.is_some() {
+                        existing.unit = entry.unit.clone();
+                    }
+                    if entry.description.is_some() {
+                        existing.description = entry.description.clone();
+                    }
+                }
+                None => codes.push(entry.clone()),
+            }
+        }
+        codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        if codes == before {
+            // Nothing changed: skip the write so `updated_at` doesn't move on every refresh of a
+            // source (like FHFA's) with no conditional GET to short-circuit on first. The
+            // dataset and dimension were still found (and not codelist-backed), so this is
+            // `true`, not the "nothing to merge into" `false` above.
+            return Ok(true);
+        }
+        dim.codes = Some(codes);
+        diesel::update(dsl::datasets.filter(dsl::id.eq(id)))
+            .set(dsl::dimensions.eq(dims))
+            .execute(conn)
+            .await?;
+        Ok(true)
+    })
+    .await
+}
+
+/// Current labels of `source`'s dataset `dataset_code`, dimension `dimension_name`: whatever the
+/// checked-in catalog declared plus anything [`merge_dataset_dimension_codes`] has merged since.
+/// Empty if the dataset or dimension isn't declared, or has no codes yet.
+pub async fn dataset_dimension_labels(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<HashMap<String, String>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let dims: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(dims
+        .and_then(|d| d.0.into_iter().find(|d| d.name == dimension_name))
+        .and_then(|d| d.codes)
+        .map(|codes| codes.into_iter().map(|c| (c.code, c.label)).collect())
+        .unwrap_or_default())
 }
 
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
@@ -399,6 +916,8 @@ async fn upsert_points(
 ///   fetch response carries no metadata (Census BDS) rely on that row. A new row with neither
 ///   gets `external_id` as its title and [`UNKNOWN_FREQUENCY`]. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
+/// - Validators: `fetched.validators` replaces the series' `series_fetch_validators` row (`None`
+///   deletes it), in the same transaction as the points ([`stored_fetch_state`] reads it back).
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
 ///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
 ///   only if it differs.
@@ -488,6 +1007,7 @@ pub(crate) async fn persist_series_conn(
     .get_result(&mut *conn)
     .await?;
     let series_id = row.id;
+    set_series_validators_conn(conn, series_id, fetched.validators.as_ref()).await?;
 
     let points: Vec<&FetchedPoint> = unique.values().copied().collect();
     let (mut upserted, mut new) = (0usize, 0usize);
@@ -714,8 +1234,41 @@ pub(crate) async fn retire_unlisted_conn(
     Ok(retirement)
 }
 
+/// Deactivates the `series_metadata` row for `(source, external_id)`, if any, when
+/// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound) confirms the series doesn't exist
+/// at the source and no `economic_series` row was ever created for it (nothing else to mark).
+/// Mirrors [`retire_unlisted_conn`]'s semantics exactly, so the usual discovery/retirement flow
+/// (not a timed retry) is what revives it: the next catalog discovery that lists the id again
+/// reactivates it (`persist_discovered_conn` always sets `is_active = true` on conflict).
+pub(crate) async fn deactivate_metadata_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<()> {
+    // A read-only lookup, like `find_series_id_conn`: this runs on a NotFound error path, so it
+    // must not create a `data_sources` row (unlike `data_source_id_conn`) when there's nothing to
+    // deactivate anyway.
+    use series_metadata::dsl as sm;
+    diesel::update(sm::series_metadata)
+        .filter(
+            sm::source_id.eq_any(
+                data_sources::table
+                    .filter(data_sources::name.eq(data_source_template(source).name))
+                    .select(data_sources::id),
+            ),
+        )
+        .filter(sm::external_id.eq(external_id))
+        .filter(sm::is_active)
+        .set(sm::is_active.eq(false))
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
-/// on failure, sets `economic_series.crawl_status = 'failed'` with the error message.
+/// on failure, sets `economic_series.crawl_status` to `'not_found'` (the error is
+/// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound), confirming the source doesn't
+/// have the series) or `'failed'` (anything else), with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
     series_id: Uuid,
@@ -765,12 +1318,18 @@ pub(crate) async fn record_attempt_conn(
         .execute(&mut *conn)
         .await?;
     if !attempt.success {
+        let status = if attempt.error_kind.as_deref() == Some("not_found") {
+            "not_found"
+        } else {
+            "failed"
+        };
         diesel::sql_query(
-            "UPDATE economic_series SET crawl_status = 'failed', crawl_error_message = $2 \
+            "UPDATE economic_series SET crawl_status = $3, crawl_error_message = $2 \
              WHERE id = $1",
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())
+        .bind::<Text, _>(status)
         .execute(&mut *conn)
         .await?;
     }
@@ -826,4 +1385,10 @@ mod tests {
 }
 
 #[cfg(test)]
-mod stable_id_tests;
+mod reference_data_tests;
+#[cfg(test)]
+mod release_sources_tests;
+#[cfg(test)]
+pub(crate) mod stable_id_tests;
+#[cfg(test)]
+mod validator_tests;

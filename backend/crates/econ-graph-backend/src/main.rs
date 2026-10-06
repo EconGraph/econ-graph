@@ -93,6 +93,49 @@ async fn health_check() -> Result<impl warp::Reply, Infallible> {
     })))
 }
 
+/// Liveness: this process is up and serving HTTP. No database access, so a slow or down
+/// database never gets this pod killed and restarted.
+async fn livez_handler() -> Result<impl warp::Reply, Infallible> {
+    metrics::record_http_request("GET", "/livez", 200, 0.0);
+    Ok(warp::reply::json(&json!({ "status": "alive" })))
+}
+
+/// Readiness (and startup): the database must be reachable and its applied schema must be at
+/// least as new as this binary's minimum. Unlike `/health`, this can actually fail, so a pod
+/// whose database is down or mid-migration is taken out of rotation instead of serving errors.
+async fn readyz_handler(pool: DatabasePool) -> Result<impl warp::Reply, Infallible> {
+    use warp::http::StatusCode;
+
+    // k8s's probe timeout (3s, see backend-deployment.yaml) is well under the pool's 30s
+    // connection_timeout, so bound the check itself rather than let a down database make this
+    // handler outlive the probe that's waiting on it.
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        econ_graph_core::readiness_check(&pool),
+    )
+    .await;
+
+    let (status, body) = match outcome {
+        Ok(Ok(())) => (StatusCode::OK, json!({ "status": "ready" })),
+        Ok(Err(e)) => {
+            tracing::warn!("readiness check failed: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "status": "not_ready", "reason": e.to_string() }),
+            )
+        }
+        Err(_) => {
+            tracing::warn!("readiness check timed out");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "status": "not_ready", "reason": "readiness check timed out" }),
+            )
+        }
+    };
+    metrics::record_http_request("GET", "/readyz", status.as_u16(), 0.0);
+    Ok(warp::reply::with_status(warp::reply::json(&body), status))
+}
+
 /// Landing-page entry for `/playground`, shown only when the playground is served.
 const PLAYGROUND_ENDPOINT_HTML: &str = r#"        <div class="endpoint">
             <div><span class="method">GET</span> <code>/playground</code></div>
@@ -148,11 +191,6 @@ async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> 
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/health</code></div>
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
-        </div>
-
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/metrics</code></div>
-            <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
         </div>
 
 <!--MCP_ENDPOINT-->
@@ -351,6 +389,94 @@ async fn graphql_bad_request(
     }
 }
 
+/// The largest `/graphql` request body accepted, in bytes. GraphQL operations are small; the
+/// biggest in the repo is under 10 KB.
+const GRAPHQL_BODY_LIMIT: usize = 1024 * 1024;
+
+/// A `/graphql` body of more than [`GRAPHQL_BODY_LIMIT`] bytes.
+#[derive(Debug)]
+struct GraphqlBodyTooLarge;
+
+impl warp::reject::Reject for GraphqlBodyTooLarge {}
+
+/// Collects a request body, giving up as soon as more than `limit` bytes have arrived.
+///
+/// This counts the bytes actually received rather than trusting `Content-Length`, which a
+/// chunked request can carry alongside a much larger body.
+async fn read_graphql_body<S, B>(body: S, limit: usize) -> Result<Vec<u8>, warp::Rejection>
+where
+    S: tokio_stream::Stream<Item = Result<B, warp::Error>>,
+    B: warp::hyper::body::Buf,
+{
+    use tokio_stream::StreamExt as _;
+    use warp::hyper::body::Buf as _;
+
+    let mut body = std::pin::pin!(body);
+    let mut collected = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let mut chunk = chunk.map_err(|_| warp::reject::reject())?;
+        if collected.len() + chunk.remaining() > limit {
+            return Err(warp::reject::custom(GraphqlBodyTooLarge));
+        }
+        while chunk.has_remaining() {
+            let bytes = chunk.chunk();
+            collected.extend_from_slice(bytes);
+            let read = bytes.len();
+            chunk.advance(read);
+        }
+    }
+    Ok(collected)
+}
+
+/// The `/graphql` request filter: a `GET` carries its query in the URL, and a `POST` body is
+/// refused once it exceeds [`GRAPHQL_BODY_LIMIT`] bytes, before it is buffered or parsed. It
+/// extracts what `async_graphql_warp::graphql` does, and rejects a body that isn't a GraphQL
+/// request the same way.
+fn graphql_request<E>(
+    executor: E,
+) -> impl Filter<Extract = ((E, async_graphql::Request),), Error = warp::Rejection> + Clone
+where
+    E: async_graphql::Executor,
+{
+    let post_executor = executor.clone();
+    let get = warp::get().and(async_graphql_warp::graphql(executor));
+    let post = warp::post()
+        .and(warp::header::optional::<String>("content-type"))
+        .and(warp::body::stream())
+        .and_then(move |content_type: Option<String>, body| {
+            let executor = post_executor.clone();
+            async move {
+                let bytes = read_graphql_body(body, GRAPHQL_BODY_LIMIT).await?;
+                let request = async_graphql::http::receive_batch_body(
+                    content_type,
+                    bytes.as_slice(),
+                    async_graphql::http::MultipartOptions::default(),
+                )
+                .await
+                .and_then(async_graphql::BatchRequest::into_single)
+                .map_err(|e| warp::reject::custom(async_graphql_warp::GraphQLBadRequest(e)))?;
+                Ok::<_, warp::Rejection>((executor, request))
+            }
+        });
+    get.or(post).unify()
+}
+
+/// An oversize `/graphql` body is answered 413 in GraphQL's own error shape. Every other
+/// rejection passes through.
+async fn graphql_body_too_large(
+    rejection: warp::Rejection,
+) -> Result<warp::reply::Response, warp::Rejection> {
+    if rejection.find::<GraphqlBodyTooLarge>().is_none() {
+        return Err(rejection);
+    }
+    Ok(warp::reply::with_status(
+        warp::reply::json(&json!({"errors": [{"message":
+            format!("Request body is larger than {GRAPHQL_BODY_LIMIT} bytes")}]})),
+        warp::http::StatusCode::PAYLOAD_TOO_LARGE,
+    )
+    .into_response())
+}
+
 /// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
 /// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
 /// the frontend, not this process).
@@ -372,7 +498,7 @@ fn build_routes(
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
         .and(warp::header::headers_cloned())
-        .and(async_graphql_warp::graphql(schema))
+        .and(graphql_request(schema))
         .and_then(
             move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
                   (_schema, request): (
@@ -411,6 +537,7 @@ fn build_routes(
         );
 
     let graphql_filter = graphql_filter.recover(graphql_bad_request);
+    let graphql_filter = graphql_filter.recover(graphql_body_too_large);
 
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_filter =
@@ -424,8 +551,18 @@ fn build_routes(
                 }
             });
 
-    // Health check
+    // Health check (kept for existing callers; static, never fails)
     let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
+
+    // Liveness: process is up, no database access.
+    let livez_filter = warp::path("livez").and(warp::get()).and_then(livez_handler);
+
+    // Readiness: database reachable and schema at least as new as this binary needs.
+    let pool_for_readyz = pool.clone();
+    let readyz_filter = warp::path("readyz").and(warp::get()).and_then(move || {
+        let pool = pool_for_readyz.clone();
+        async move { readyz_handler(pool).await }
+    });
 
     // Metrics endpoint for Prometheus
     let metrics_filter = warp::path("metrics")
@@ -446,6 +583,8 @@ fn build_routes(
         .or(graphql_filter)
         .or(playground_filter)
         .or(health_filter)
+        .or(livez_filter)
+        .or(readyz_filter)
         .or(metrics_filter)
         .or(mcp_filter)
         .with(cors)
@@ -518,20 +657,6 @@ async fn main() -> AppResult<()> {
         "🌍 Reference data loaded from {}: {} areas",
         econ_graph_core::reference::data_dir().display(),
         areas.all().len()
-    );
-
-    // GraphQL labels dataset dimension values from this too ($CRAWLER_DATA_DIR): fail at
-    // startup, not the first time a Census-shaped series is queried.
-    let us_states = econ_graph_crawler::reference::us_states().map_err(|e| {
-        let error = AppError::ConfigError(e.to_string());
-        error.log_with_context("Application startup reference data");
-        eprintln!("❌ {}", e);
-        error
-    })?;
-    info!(
-        "🇺🇸 Reference data loaded from {}: {} states",
-        econ_graph_crawler::reference::data_dir().display(),
-        us_states.len()
     );
 
     // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
@@ -648,6 +773,8 @@ async fn main() -> AppResult<()> {
         info!("  - GET /playground - GraphQL Playground");
     }
     info!("  - GET /health - Health check");
+    info!("  - GET /livez - Liveness probe");
+    info!("  - GET /readyz - Readiness probe");
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
 
@@ -1101,6 +1228,24 @@ mod playground_tests {
         assert!(!landing_page(false).await.contains("/playground"));
     }
 
+    /// The landing page is public, so it must not name the internal `/metrics` endpoint.
+    #[tokio::test]
+    async fn landing_page_does_not_mention_metrics() {
+        assert!(!landing_page(true).await.contains("/metrics"));
+        assert!(!landing_page(false).await.contains("/metrics"));
+    }
+
+    /// `/livez` and `/readyz` are probe endpoints for the orchestrator, not part of the public
+    /// API, so the landing page must not name them either.
+    #[tokio::test]
+    async fn landing_page_does_not_mention_liveness_or_readiness_probes() {
+        for playground in [true, false] {
+            let page = landing_page(playground).await;
+            assert!(!page.contains("/livez"), "{page}");
+            assert!(!page.contains("/readyz"), "{page}");
+        }
+    }
+
     /// The playground is served only when explicitly turned on.
     #[test]
     fn playground_is_off_unless_explicitly_enabled() {
@@ -1172,7 +1317,7 @@ mod mcp_flag_off_tests {
 
 #[cfg(test)]
 mod route_tests {
-    use super::build_routes;
+    use super::{build_routes, read_graphql_body, GraphqlBodyTooLarge, GRAPHQL_BODY_LIMIT};
     use econ_graph_core::DatabasePool;
     use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
@@ -1290,6 +1435,73 @@ mod route_tests {
         assert_eq!(res.status(), 405);
     }
 
+    /// A `{ __typename }` request padded with trailing spaces to exactly `len` bytes.
+    fn padded_request(len: usize) -> String {
+        let body = r#"{"query": "{ __typename }"}"#;
+        format!("{body}{}", " ".repeat(len - body.len()))
+    }
+
+    /// A `/graphql` body of exactly the limit is answered; one byte more is a JSON 413 with
+    /// CORS headers. `GET` and the preflight are untouched.
+    #[tokio::test]
+    async fn oversize_graphql_body_is_a_json_413() {
+        let post = |body: String| {
+            warp::test::request()
+                .method("POST")
+                .path("/graphql")
+                .header("origin", "http://localhost:3000")
+                .header("content-type", "application/json")
+                .body(body)
+        };
+        let res = post(padded_request(GRAPHQL_BODY_LIMIT))
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200, "{:?}", res.body());
+
+        let res = post(padded_request(GRAPHQL_BODY_LIMIT + 1))
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 413);
+        let body: serde_json::Value = serde_json::from_slice(res.body()).unwrap();
+        assert!(
+            body["errors"][0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("1048576")),
+            "{body}"
+        );
+        assert_eq!(
+            res.headers()["access-control-allow-origin"],
+            "http://localhost:3000"
+        );
+
+        let res = warp::test::request()
+            .method("GET")
+            .path("/graphql?query=%7B__typename%7D")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+        let res = warp::test::request()
+            .method("OPTIONS")
+            .path("/graphql")
+            .header("origin", "http://localhost:3000")
+            .header("access-control-request-method", "POST")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// The limit counts the bytes that arrive, not the `Content-Length` a chunked request may
+    /// carry alongside a larger body (warp's test client always sets an honest length).
+    #[tokio::test]
+    async fn graphql_body_limit_counts_streamed_bytes() {
+        let chunk = |n: usize| Ok::<_, warp::Error>(warp::hyper::body::Bytes::from(vec![b'a'; n]));
+        let at_limit = tokio_stream::iter(vec![chunk(600), chunk(400)]);
+        assert_eq!(read_graphql_body(at_limit, 1000).await.unwrap().len(), 1000);
+        let over = tokio_stream::iter(vec![chunk(600), chunk(401)]);
+        let rejection = read_graphql_body(over, 1000).await.unwrap_err();
+        assert!(rejection.find::<GraphqlBodyTooLarge>().is_some());
+    }
+
     /// `GET /playground` answers 200 through the full route set when enabled.
     #[tokio::test]
     async fn playground_route_answers_when_enabled() {
@@ -1310,5 +1522,28 @@ mod route_tests {
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 404);
+    }
+
+    /// `/livez` never touches the database, so it answers 200 even behind an unreachable pool.
+    #[tokio::test]
+    async fn livez_answers_200_even_when_the_database_is_unreachable() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/livez")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `/readyz` must not report ready when the database can't be reached: this is the bug
+    /// ECO-230 fixes, where `/health` served all three probes and never caught this.
+    #[tokio::test]
+    async fn readyz_answers_503_when_the_database_is_unreachable() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/readyz")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 503);
     }
 }

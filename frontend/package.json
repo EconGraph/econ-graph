@@ -162,7 +162,8 @@
     "@types/d3-dispatch": "3.0.4",
     "webpack-dev-server": "^5.1.0",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "source-map-js": "^1.2.2"
   },
   "resolutions": {
     "@types/d3-dispatch": "3.0.4"

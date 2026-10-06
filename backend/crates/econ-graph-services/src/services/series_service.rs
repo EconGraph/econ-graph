@@ -1,5 +1,7 @@
 use chrono::Datelike;
+use diesel::dsl::sql;
 use diesel::prelude::*;
+use diesel::sql_types::{Array, Bool, Text};
 use diesel::SelectableHelper;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
@@ -90,7 +92,19 @@ pub async fn list_series(
     }
 
     if let Some(frequency) = params.frequency {
-        query = query.filter(economic_series::frequency.eq(frequency));
+        // Sources store their own frequency text verbatim (FRED: "Weekly, Ending Friday", BLS:
+        // "Semi-Annual", ...), so an exact match misses most rows; match the same prefixes
+        // `SeriesFrequency` classifies raw text by instead.
+        let (patterns, exact_frequency) = super::frequency_filter(&frequency);
+        if let Some(patterns) = patterns {
+            query = query.filter(
+                sql::<Bool>("frequency ILIKE ANY(")
+                    .bind::<Array<Text>, _>(patterns)
+                    .sql(")"),
+            );
+        } else if let Some(raw) = exact_frequency {
+            query = query.filter(economic_series::frequency.eq(raw));
+        }
     }
 
     if let Some(search_query) = params.query {
@@ -341,7 +355,7 @@ pub enum PageContext {
     Days(i64),
     /// The point just before the page.
     PreviousPoint,
-    /// The series' first point (the base of a percent change).
+    /// The series' earliest usable (non-null, non-zero) point, the base of a percent change.
     FirstPoint,
 }
 
@@ -352,7 +366,7 @@ async fn load_context(
     first: &DataPoint,
     context: PageContext,
 ) -> Result<Vec<DataPoint>, diesel::result::Error> {
-    use data_points::dsl::{date, id, revision_date};
+    use data_points::dsl::{date, id, revision_date, value};
 
     // (date, revision_date, id) < first's, spelled out for Diesel.
     let before_first = date.lt(first.date).or(date.eq(first.date).and(
@@ -380,7 +394,11 @@ async fn load_context(
                 .await
         }
         PageContext::FirstPoint => {
-            in_page_order(earlier)
+            // The percent-change base is the series' earliest *usable* value: a null or zero
+            // reading at the very first date (or several) is skipped. `.ne` on a nullable column
+            // already excludes NULLs under SQL's three-valued logic, so this one filter covers
+            // both.
+            in_page_order(earlier.filter(value.ne(bigdecimal::BigDecimal::from(0))))
                 .limit(1)
                 .load::<DataPoint>(conn)
                 .await

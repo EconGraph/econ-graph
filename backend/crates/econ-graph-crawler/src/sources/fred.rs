@@ -20,7 +20,9 @@
 //! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
 //! discovery's own request count equal to its size (under two hundred, not unbounded), while still
 //! checking each series' live notes against [`is_copyright_restricted`] as a safety net before
-//! it is discovered.
+//! it is discovered. [`FredAdapter::fetch`] repeats the same check, so a series id fetched
+//! directly (a manual `triggerCrawl`, or a scheduled refresh of an already-stored series) without
+//! going through discovery is refused too, rather than only kept out of the curated list.
 //!
 //! # Vintages
 //!
@@ -42,6 +44,21 @@
 //!   revisions) are picked up.
 //! - **Paging**: FRED returns at most [`OBSERVATIONS_PAGE_SIZE`] rows per request. Pages are
 //!   requested with `offset` until `count` rows have arrived (at most [`MAX_OBSERVATION_PAGES`]).
+//!
+//! # Re-crawls
+//!
+//! Series are refreshed more often than most of them change (a monthly series weekly), and an
+//! incremental fetch still returns every date's value in effect the day before the known
+//! vintage, so an unchanged series would re-read and re-upsert its whole history. `/series`, which
+//! every fetch requests for metadata anyway, gives `last_updated`, which FRED moves whenever the
+//! series' data changes, revisions included. It is stored, prefixed with [`PARSE_VERSION`], as the
+//! series' validator `version`, and
+//! an incremental fetch whose `last_updated` matches the stored one skips `/series/observations`:
+//! the series is marked crawled with the new metadata and keeps its points
+//! ([`FetchedSeries::unchanged`]). A first fetch (no known vintage), a series that stored no
+//! `last_updated`, a response without one, or a failure reading the stored value fetches the
+//! observations as before. QA verifies against the live API that `last_updated` moves on a
+//! revision.
 //!
 //! FRED reports errors as JSON `{"error_code": 400, "error_message": "Bad Request.  ..."}`
 //! with the same HTTP status. An unknown `series_id` is HTTP **400** (not 404) with the message
@@ -65,6 +82,8 @@ use crate::adapter::{
 };
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
+use crate::http::Validators;
+use crate::persist;
 use crate::reference::fred_series;
 use crate::source::SourceId;
 
@@ -77,6 +96,11 @@ const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
 /// Code of the dataset every FRED series belongs to. It has no dimensions: a FRED series id is
 /// an opaque key, not a combination of dimension values.
 pub const DATASET: &str = "FRED";
+
+/// How this adapter reads observations, prefixed to the stored `last_updated` (see
+/// [Re-crawls](self#re-crawls)). Bump it whenever a parsing change should rewrite already-stored
+/// series instead of waiting for FRED to update each one.
+pub const PARSE_VERSION: &str = "fred-1";
 
 /// FRED's marker for a missing observation.
 const MISSING_VALUE: &str = ".";
@@ -163,12 +187,13 @@ impl FredAdapter {
             .ok_or_else(|| CrawlError::Auth("FRED_API_KEY not set".into()))
     }
 
+    /// The series' metadata and its `last_updated` (`None` if FRED sent none).
     async fn fetch_metadata(
         &self,
         ctx: &CrawlCtx,
         api_key: &str,
         series_id: &str,
-    ) -> Result<NewSeriesMetadataLite, CrawlError> {
+    ) -> Result<(NewSeriesMetadataLite, Option<String>), CrawlError> {
         let body: SeriesResponse = ctx
             .http
             .get_json(
@@ -185,13 +210,16 @@ impl FredAdapter {
         let s = body.seriess.into_iter().next().ok_or_else(|| {
             CrawlError::NotFound(format!("FRED series {series_id}: no metadata returned"))
         })?;
-        Ok(NewSeriesMetadataLite {
-            title: s.title,
-            description: non_empty(s.notes),
-            units: non_empty(s.units),
-            frequency: non_empty(s.frequency),
-            seasonal_adjustment: non_empty(s.seasonal_adjustment),
-        })
+        Ok((
+            NewSeriesMetadataLite {
+                title: s.title,
+                description: non_empty(s.notes),
+                units: non_empty(s.units),
+                frequency: non_empty(s.frequency),
+                seasonal_adjustment: non_empty(s.seasonal_adjustment),
+            },
+            non_empty(s.last_updated),
+        ))
     }
 
     /// Every observation vintage of `series_id`, paged (see [Vintages](self#vintages)).
@@ -275,7 +303,7 @@ impl FredAdapter {
 
         for id in ids {
             match self.fetch_metadata(ctx, api_key, id).await {
-                Ok(meta) => {
+                Ok((meta, _)) => {
                     any_ok = true;
                     if is_copyright_restricted(meta.description.as_deref()) {
                         tracing::info!(id, "dropping copyright-restricted series");
@@ -352,7 +380,9 @@ impl SourceAdapter for FredAdapter {
     }
 
     /// `/series` (metadata), then every vintage of the observations on or after `since` from
-    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows).
+    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows). Refuses with
+    /// [`CrawlError::Permanent`] if the series' notes are copyright-restricted (see
+    /// [`is_copyright_restricted`]), whether or not it was reached via discovery.
     async fn fetch_series(
         &self,
         ctx: &CrawlCtx,
@@ -390,7 +420,29 @@ impl FredAdapter {
         known_vintage: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
         let api_key = self.api_key(ctx)?;
-        let metadata = self.fetch_metadata(ctx, api_key, external_id).await?;
+        let (metadata, last_updated) = self.fetch_metadata(ctx, api_key, external_id).await?;
+        if is_copyright_restricted(metadata.description.as_deref()) {
+            tracing::warn!(
+                series_id = external_id,
+                "refusing to fetch copyright-restricted series"
+            );
+            return Err(CrawlError::Permanent(format!(
+                "FRED {external_id}: copyright-restricted, refusing to fetch"
+            )));
+        }
+        let validators = last_updated.map(|v| Validators {
+            version: Some(format!("{PARSE_VERSION}:{v}")),
+            ..Validators::default()
+        });
+        if known_vintage.is_some()
+            && validators.is_some()
+            && stored_validators(ctx, external_id).await == validators
+        {
+            return Ok(FetchedSeries {
+                metadata: Some(metadata),
+                ..FetchedSeries::unchanged(fred_dataset(), validators.unwrap_or_default())
+            });
+        }
         let points = self
             .fetch_observations(ctx, api_key, external_id, since, known_vintage)
             .await?;
@@ -398,7 +450,21 @@ impl FredAdapter {
             metadata: Some(metadata),
             points,
             dataset: fred_dataset(),
+            validators,
         })
+    }
+}
+
+/// The validators `external_id` stored with its last fetch; `None` if it stored none or they
+/// can't be read (the fetch is then a full one).
+async fn stored_validators(ctx: &CrawlCtx, external_id: &str) -> Option<Validators> {
+    match persist::stored_fetch_state(&ctx.pool, SourceId::Fred, &[external_id.to_string()]).await {
+        Ok(mut stored) => stored.remove(external_id)?.validators,
+        Err(error) => {
+            tracing::warn!(series_id = external_id, %error,
+                "FRED: reading stored validators failed; fetching observations");
+            None
+        }
     }
 }
 
@@ -521,6 +587,10 @@ struct FredSeries {
     frequency: Option<String>,
     #[serde(default)]
     seasonal_adjustment: Option<String>,
+    /// When FRED last changed the series (e.g. `2026-08-28 07:54:02-05`), observations and
+    /// revisions included. See [Re-crawls](self#re-crawls).
+    #[serde(default)]
+    last_updated: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -646,6 +716,36 @@ mod tests {
         assert_eq!(param(&q, "observation_start"), None);
     }
 
+    /// A manually triggered crawl (triggerCrawl) must not pull in a series copyright-restriction
+    /// would otherwise exclude from discovery: `fetch_series` checks `notes` itself and refuses
+    /// before fetching observations, so the restricted series is never persisted.
+    #[tokio::test]
+    async fn fetch_series_refuses_a_copyright_restricted_series() {
+        let mock = MockSource::start().await;
+        let restricted = restricted_fixture("CBBTCUSD", "Coinbase Bitcoin");
+        mock.mount(
+            &Route::get("/series").query("series_id", "CBBTCUSD"),
+            Reply::json_str(restricted),
+        )
+        .await;
+        // No /series/observations route mounted: if the adapter fetched observations anyway,
+        // the request would fail with a connection/404 error instead of this one, failing the
+        // assertion below.
+
+        let err = FredAdapter::new(mock.base_url())
+            .fetch_series(&test_ctx(), "CBBTCUSD", None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            CrawlError::Permanent(
+                "FRED CBBTCUSD: copyright-restricted, refusing to fetch".to_string()
+            )
+        );
+        let reqs = mock.received_requests().await;
+        assert_eq!(reqs.len(), 1, "must not fetch observations");
+    }
+
     #[tokio::test]
     async fn incremental_fetch_asks_only_for_vintages_from_the_known_one() {
         let mock = MockSource::start().await;
@@ -705,6 +805,109 @@ mod tests {
             Some(EARLIEST_REALTIME_START)
         );
         assert!(FredAdapter::default().tracks_vintages());
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_last_updated_skips_the_observations() {
+        use crate::dataset::DatasetCatalog;
+        use crate::persist::stable_id_tests::{database_url, FreshDb};
+
+        let Some(admin_url) = database_url() else {
+            return;
+        };
+        let db = FreshDb::create(&admin_url, "econgraph_fred_validators").await;
+        let mut catalog = DatasetCatalog::empty();
+        catalog.load_adapter(&FredAdapter::default()).unwrap();
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = mock_gdp().await;
+        let adapter = FredAdapter::new(mock.base_url());
+        let observation_requests = || async {
+            mock.received_requests()
+                .await
+                .iter()
+                .filter(|r| r.url.path() == "/series/observations")
+                .count()
+        };
+
+        // A first fetch stores `last_updated` with the points.
+        let first = adapter
+            .fetch_series_incremental(&ctx, "GDP", None, None)
+            .await
+            .unwrap();
+        let version = Validators {
+            version: Some(format!("{PARSE_VERSION}:2026-08-28 07:54:02-05")),
+            ..Validators::default()
+        };
+        assert_eq!(first.validators.as_ref(), Some(&version));
+        persist::persist_series(&db.pool, SourceId::Fred, "GDP", &first)
+            .await
+            .unwrap();
+        assert_eq!(observation_requests().await, 1);
+
+        // Unchanged: metadata is refreshed, observations aren't requested.
+        let known = Some(d("2026-04-29"));
+        let again = adapter
+            .fetch_series_incremental(&ctx, "GDP", None, known)
+            .await
+            .unwrap();
+        assert_eq!(
+            again,
+            FetchedSeries {
+                metadata: first.metadata.clone(),
+                ..FetchedSeries::unchanged(fred_dataset(), version)
+            }
+        );
+        assert_eq!(observation_requests().await, 1);
+
+        // Without a known vintage (no stored points) the observations are always fetched.
+        adapter
+            .fetch_series_incremental(&ctx, "GDP", None, None)
+            .await
+            .unwrap();
+        assert_eq!(observation_requests().await, 2);
+
+        // A series that became copyright-restricted is refused even though its stored
+        // `last_updated` still matches.
+        mock.reset().await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(SERIES_GDP.replace(
+                "BEA Account Code: A191RC",
+                "Copyright, 2026, All rights reserved.",
+            )),
+        )
+        .await;
+        let refused = adapter
+            .fetch_series_incremental(&ctx, "GDP", None, known)
+            .await
+            .unwrap_err();
+        assert!(matches!(refused, CrawlError::Permanent(_)), "{refused:?}");
+
+        // A new `last_updated` fetches the observations again.
+        mock.reset().await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(SERIES_GDP.replace("2026-08-28 07:54:02-05", "2026-09-25 07:52:02-05")),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series/observations"),
+            Reply::json_str(OBS_GDP_SINCE),
+        )
+        .await;
+        let changed = adapter
+            .fetch_series_incremental(&ctx, "GDP", None, known)
+            .await
+            .unwrap();
+        assert!(!changed.points.is_empty());
+        assert_eq!(
+            changed.validators.and_then(|v| v.version).as_deref(),
+            Some(format!("{PARSE_VERSION}:2026-09-25 07:52:02-05").as_str())
+        );
+
+        db.drop().await;
     }
 
     #[test]
@@ -1023,6 +1226,19 @@ mod tests {
             )
     }
 
+    /// [`series_fixture`] with `notes` replaced by copyright-restricted wording (the Coinbase
+    /// `CBBTCUSD` family's actual FRED notes), for tests of [`is_copyright_restricted`] callers.
+    fn restricted_fixture(id: &str, title: &str) -> String {
+        let notes_field = "\"notes\": \"BEA Account Code: A191RC\\n\\nGross domestic product \
+            (GDP), the featured measure of U.S. output, is the market value of the goods and \
+            services produced by labor and property located in the United States.\"";
+        series_fixture(id, title).replace(
+            notes_field,
+            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
+                      with prior written permission.\"",
+        )
+    }
+
     #[tokio::test]
     async fn discover_ids_looks_up_each_curated_id() {
         let mock = MockSource::start().await;
@@ -1071,14 +1287,7 @@ mod tests {
     #[tokio::test]
     async fn discover_ids_drops_copyright_restricted_series_as_a_safety_net() {
         let mock = MockSource::start().await;
-        let notes_field = "\"notes\": \"BEA Account Code: A191RC\\n\\nGross domestic product \
-            (GDP), the featured measure of U.S. output, is the market value of the goods and \
-            services produced by labor and property located in the United States.\"";
-        let restricted = series_fixture("CBBTCUSD", "Coinbase Bitcoin").replace(
-            notes_field,
-            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
-                      with prior written permission.\"",
-        );
+        let restricted = restricted_fixture("CBBTCUSD", "Coinbase Bitcoin");
         mock.mount(
             &Route::get("/series").query("series_id", "CBBTCUSD"),
             Reply::json_str(restricted),
