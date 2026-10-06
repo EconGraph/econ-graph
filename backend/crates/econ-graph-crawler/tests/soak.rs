@@ -34,12 +34,13 @@ use chrono::{DateTime, NaiveDate, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use econ_graph_core::models::{CrawlQueueItem, NewCrawlQueueItem};
-use econ_graph_core::schema::crawl_queue;
+use econ_graph_core::schema::{crawl_queue, datasets, economic_series};
 use econ_graph_core::DatabasePool;
 use econ_graph_crawler::sources::{bls::BlsAdapter, fred::FredAdapter};
 use econ_graph_crawler::{
-    AdapterRegistry, ApiKeys, CrawlCtx, CrawlError, DiscoveredSeries, FetchedSeries, HttpConfig,
-    HttpFetcher, SourceAdapter, SourceId, SourcePolicy, Worker, WorkerConfig,
+    AdapterRegistry, ApiKeys, CrawlCtx, CrawlError, DatasetCatalog, DiscoveredSeries,
+    FetchedSeries, HttpConfig, HttpFetcher, SourceAdapter, SourceId, SourcePolicy, Worker,
+    WorkerConfig,
 };
 use rand::{RngExt, SeedableRng};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -65,10 +66,30 @@ struct Upstream {
     log: Arc<Mutex<Vec<(Instant, String, u16)>>>,
     fred_series: String,
     fred_obs: String,
-    bls: String,
+    /// Template `data` points from `bls/cpi_monthly.json`'s one series, replayed under each
+    /// requested id ([`bls_response`](Self::bls_response)): `BlsAdapter::fetch_group` matches a
+    /// response's `seriesID` against the id it requested and ignores anything else, so a canned
+    /// fixed `seriesID` would starve every `soak_*` job of data (`NotFound`, since none of their
+    /// ids are `CUUR0000SA0`).
+    bls_data: serde_json::Value,
 }
 
 impl Upstream {
+    /// Every id BLS was asked for in this request (`DataRequest::seriesid`), for building a
+    /// response and for flaky-detection below.
+    fn bls_request_ids(req: &Request) -> Vec<String> {
+        serde_json::from_slice::<serde_json::Value>(&req.body)
+            .ok()
+            .and_then(|v| {
+                v["seriesid"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|id| id.as_str().map(str::to_string))
+                        .collect()
+                })
+            })
+            .unwrap_or_default()
+    }
+
     fn series_of(&self, req: &Request) -> String {
         match self.api {
             Api::Fred => req
@@ -77,11 +98,28 @@ impl Upstream {
                 .find(|(k, _)| k == "series_id")
                 .map(|(_, v)| v.into_owned())
                 .unwrap_or_default(),
-            Api::Bls => serde_json::from_slice::<serde_json::Value>(&req.body)
-                .ok()
-                .and_then(|v| v["seriesid"][0].as_str().map(str::to_string))
+            Api::Bls => Self::bls_request_ids(req)
+                .into_iter()
+                .next()
                 .unwrap_or_default(),
         }
+    }
+
+    /// A `REQUEST_SUCCEEDED` BLS response with the template data under every id this request
+    /// asked for, so `BlsAdapter::fetch_group`'s `seriesID` match (bls.rs's `fetch_group`) finds
+    /// each of them instead of dropping them as unrequested.
+    fn bls_response(&self, req: &Request) -> String {
+        let series: Vec<serde_json::Value> = Self::bls_request_ids(req)
+            .into_iter()
+            .map(|id| serde_json::json!({"seriesID": id, "data": self.bls_data}))
+            .collect();
+        serde_json::json!({
+            "status": "REQUEST_SUCCEEDED",
+            "responseTime": 1,
+            "message": [],
+            "Results": {"series": series},
+        })
+        .to_string()
     }
 }
 
@@ -107,13 +145,13 @@ impl Respond for Upstream {
             )
         } else {
             let body = match (self.api, req.url.path().ends_with("/observations")) {
-                (Api::Fred, true) => &self.fred_obs,
-                (Api::Fred, false) => &self.fred_series,
-                (Api::Bls, _) => &self.bls,
+                (Api::Fred, true) => self.fred_obs.clone(),
+                (Api::Fred, false) => self.fred_series.clone(),
+                (Api::Bls, _) => self.bls_response(req),
             };
             (
                 200,
-                ResponseTemplate::new(200).set_body_raw(body.clone(), "application/json"),
+                ResponseTemplate::new(200).set_body_raw(body, "application/json"),
             )
         };
         self.log.lock().unwrap().push((now, series, status));
@@ -131,6 +169,13 @@ async fn start_upstream(api: Api, flaky: HashSet<String>, seed: u64) -> Mocked {
     let read = |p: &str| std::fs::read_to_string(format!("{FIXTURES}/{p}")).expect(p);
     let log = Arc::new(Mutex::new(Vec::new()));
     let server = MockServer::start().await;
+    let bls_fixture: serde_json::Value =
+        serde_json::from_str(&read("bls/cpi_monthly.json")).expect("parse bls fixture");
+    let bls_data = bls_fixture["Results"]["series"][0]["data"].clone();
+    assert!(
+        bls_data.is_array(),
+        "bls fixture has no Results.series[0].data array"
+    );
     Mock::given(wiremock::matchers::any())
         .respond_with(Upstream {
             api,
@@ -139,7 +184,7 @@ async fn start_upstream(api: Api, flaky: HashSet<String>, seed: u64) -> Mocked {
             log: log.clone(),
             fred_series: read("fred/series_gdp.json"),
             fred_obs: read("fred/observations_gdp.json"),
-            bls: read("bls/cpi_monthly.json"),
+            bls_data,
         })
         .mount(&server)
         .await;
@@ -272,6 +317,13 @@ async fn make_worker(
         inner: Arc::new(BlsAdapter::new(bls.base.clone())),
         t: tracker.clone(),
     }));
+    // Every series needs a dataset (econ_graph_crawler_worker's main.rs and seed_fixtures.rs do
+    // the same load-then-sync before building a `Worker`), or the empty default catalog rejects
+    // every job.
+    let datasets = DatasetCatalog::load(&reg).expect("dataset catalog");
+    econ_graph_crawler::persist::sync_datasets(&ctx.pool, &datasets)
+        .await
+        .expect("sync datasets");
     Worker::new(
         ctx,
         reg,
@@ -286,6 +338,7 @@ async fn make_worker(
             queue_retention: None,
         },
     )
+    .with_datasets(datasets)
 }
 
 #[derive(Queryable, Debug)]
@@ -541,6 +594,33 @@ async fn run_phase(
             assert_eq!(row.status, "completed", "non-flaky job failed: {row:?}");
         }
     }
+
+    // ---- BLS soak ids land in the catch-all dataset ----
+    // `soak_{name}_bls_NNN` matches none of BLS's survey prefixes (CU/CE/LN/LA), so every soak
+    // BLS series must land in BlsAdapter's dimensionless `other` dataset; it is not a real survey
+    // worth a layout of its own.
+    {
+        let bls_ids: Vec<String> = (0..n_per_source)
+            .map(|i| format!("soak_{name}_bls_{i:03}"))
+            .collect();
+        let mut conn = admin.get().await.unwrap();
+        let codes: Vec<String> = economic_series::table
+            .inner_join(datasets::table)
+            .filter(economic_series::external_id.eq_any(&bls_ids))
+            .select(datasets::code)
+            .load(&mut conn)
+            .await
+            .unwrap();
+        // Every non-flaky BLS job completed (asserted above) and wrote its series row, so this
+        // also guards that they were actually written, not just that none landed elsewhere.
+        assert_eq!(codes.len(), n_per_source - n_flaky, "{codes:?}");
+        assert_eq!(
+            codes.into_iter().collect::<HashSet<_>>(),
+            HashSet::from([econ_graph_crawler::sources::bls::OTHER_DATASET.to_string()]),
+            "soak BLS series should all land in BLS's catch-all dataset"
+        );
+    }
+
     PhaseReport {
         fred_excess,
         bls_excess,
