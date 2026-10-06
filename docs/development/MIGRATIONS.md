@@ -45,12 +45,18 @@ recorded versions it no longer has, so:
   the head of the old chain first (check out the commit before the squash and start the backend
   once).
 
-Two limits, both only affecting development databases:
+Two limits, both only affecting databases that were never deployed from a tag:
 
 - "Has the last version" means "ran the last migration", not "ran all of them". A database that
-  applied the last replaced migration from a PR branch before an earlier one merged skips the
-  squash and silently lacks the earlier migration's changes. If you ran migrations from
-  unmerged branches during the release, recreate your database after the squash.
+  ran the last replaced migration before an earlier-numbered one existed skips the squash and
+  silently lacks the earlier migration's changes. That happens when it ran migrations from an
+  unmerged PR branch, and also when migrations merged out of version order: on release/v4.0,
+  `2026-10-02-000500` merged on 2026-10-02 but `2026-10-02-000400` only on 2026-10-06, so a
+  database migrated from release/v4.0 in between, or from `main` before `000400` reached it,
+  has `20261002000500` without `series_fetch_validators`. Before squashing, check whether the
+  last replaced version was also the last to merge (`git log --diff-filter=A` on each replaced
+  directory). If not, every database built in between must first run the chain to its head
+  (start the backend once on the commit before the squash), or be recreated after it.
 - A database that ran the old chain keeps the replaced versions in `__diesel_schema_migrations`.
   `run_pending_migrations` ignores them, but `diesel migration revert` / `redo` stop with
   `UnknownMigrationVersion` when they reach one, or with the squash's own error when they reach
@@ -67,7 +73,8 @@ Steps:
    two recorded and runs only the new squash. An unshipped migration that is not being squashed
    and sorts before the last squashed version would run before the squash on a new database;
    renumber it after the squashed version in the same PR (rule 2 allows it). After a release
-   branch is cut, check `main` as well as the release branch.
+   branch is cut, check `main` as well as the release branch, and forward-port any release
+   migration that `main` still lacks before forward-porting the squash.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
    constraints and indexes, final seed rows. Keep column order the same as the chain produced.
    Name the directory with the last replaced version, e.g. `2026-10-02-000500_v4_0_baseline`.
