@@ -45,7 +45,7 @@ recorded versions it no longer has, so:
   the head of the old chain first (check out the commit before the squash and start the backend
   once).
 
-Two limits, both only affecting databases that were never deployed from a tag:
+Three limits, all only affecting databases that were never deployed from a tag:
 
 - "Has the last version" means "ran the last migration", not "ran all of them". A database that
   ran the last replaced migration before an earlier-numbered one existed skips the squash and
