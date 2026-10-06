@@ -815,10 +815,11 @@ impl BlsAdapter {
     /// GET) and stores the rows of `wanted` (the curated ids of that survey) as the file's payload, for
     /// [`discover`](SourceAdapter::discover). When the stored rows weren't looked up for every id
     /// in `wanted` (a newly curated series, or a file applied before rows were kept), the stored
-    /// `ETag` is forgotten first, so the file is downloaded again rather than answered by a
-    /// `304`. For a file with [`title_labels`](SeriesFileSpec::title_labels) (LN), also merges
-    /// every series' title into that dimension's codes; if they had nowhere to land (the dataset
-    /// isn't synced yet), the `ETag` isn't stored, so the next refresh downloads the file again.
+    /// validators are forgotten first, so the file is downloaded and applied again rather than
+    /// answered as unchanged. For a file with [`title_labels`](SeriesFileSpec::title_labels) (LN),
+    /// also merges every series' title into that dimension's codes; if they had nowhere to land
+    /// (the dataset isn't synced yet), the validators aren't stored, so the next refresh applies
+    /// the file again.
     async fn refresh_series_file(
         &self,
         ctx: &CrawlCtx,
@@ -834,7 +835,7 @@ impl BlsAdapter {
             .await?
             .is_some_and(|p| wanted.is_subset(&p.requested));
         if !covered {
-            persist::clear_reference_file_etag(&ctx.pool, SourceId::Bls, &url)
+            persist::clear_reference_file_validators(&ctx.pool, SourceId::Bls, &url)
                 .await
                 .map_err(db_err)?;
         }
@@ -2455,10 +2456,12 @@ mod tests {
             assert_eq!(cache.payload.is_some(), stored, "{survey}");
         }
 
+        // A new version of the file (an identical body would be answered as unchanged by its
+        // hash, keeping the rows and what they were looked up for).
         mock.reset().await;
         mock.mount(
             &Route::get("/ln/ln.series"),
-            Reply::text(LN_SERIES).header("ETag", "\"v2\""),
+            Reply::text(format!("{LN_SERIES}\n")).header("ETag", "\"v2\""),
         )
         .await;
         assert!(adapter

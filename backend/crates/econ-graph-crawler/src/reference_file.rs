@@ -11,11 +11,13 @@
 //! An adapter lists the files that back a dataset dimension's `codes` in
 //! [`SourceAdapter::code_lists`](crate::adapter::SourceAdapter::code_lists); the default
 //! [`refresh_reference_data`](crate::adapter::SourceAdapter::refresh_reference_data) runs
-//! [`refresh_code_list`] on each. That is [`refresh`]: a conditional GET with the `ETag` stored
-//! in `reference_file_cache`. `304` keeps what is stored; `200` goes through the parser, the
-//! labels are merged into the dataset, and the new `ETag` is stored. The `ETag` is stored only
-//! once the labels landed, so a body that fails to parse, or arrives before its dataset row
-//! exists, is fetched again next time.
+//! [`refresh_code_list`] on each. That is [`refresh`]: a conditional GET with the validators
+//! stored in `reference_file_cache` (`If-None-Match` from the `ETag`, `If-Modified-Since` from
+//! the `Last-Modified`), see [`HttpFetcher::get_text_if_changed`]. A `304`, or a `200` whose
+//! body hashes to the stored SHA-256, keeps what is stored; any other `200` goes through the
+//! parser, the labels are merged into the dataset, and the new validators are stored. They are
+//! stored only once the labels landed, so a body that fails to parse, or arrives before its
+//! dataset row exists, is fetched again next time.
 //!
 //! # Seed
 //!
@@ -25,8 +27,9 @@
 //! parsed by the same [`CodeList::parse`]. It calls the SQL function `seed_reference_codes` once
 //! per file, which does nothing when `reference_file_cache` already has a row for that URL (this
 //! database has crawled or been seeded with it), and otherwise merges the labels into the
-//! dataset's dimension and stores the `ETag` the file was downloaded with. The first refresh then
-//! sends that `ETag`, so only a file the source changed since the recording is downloaded again.
+//! dataset's dimension and stores the validators the file was downloaded with (its `ETag`,
+//! `Last-Modified` and body SHA-256). The first refresh then sends those, so only a file the
+//! source changed since the recording is applied again.
 //! A seed may create the dataset row with just that dimension; the worker's `sync_datasets` fills
 //! in the rest from `data/datasets/{source}.toml` and keeps the seeded codes.
 
@@ -41,13 +44,13 @@ use econ_graph_core::models::{Code, DatasetComponent};
 use crate::adapter::CrawlCtx;
 use crate::dataset::DatasetCatalog;
 use crate::error::CrawlError;
-use crate::http::{ConditionalText, HttpFetcher};
+use crate::http::{HttpFetcher, IfChanged, Validators};
 use crate::persist;
 use crate::source::SourceId;
 
 /// What [`refresh`]'s `apply` returns for one body: parse it and store what the adapter needs.
 /// `Ok(false)` means there was nowhere to store it (e.g. the dataset row doesn't exist yet), so
-/// the `ETag` is not stored and the next refresh downloads the file again.
+/// the validators are not stored and the next refresh applies the file again.
 pub type Apply<'a> = Pin<Box<dyn Future<Output = Result<bool, CrawlError>> + Send + 'a>>;
 
 /// Parses one of a source's code-list files into code entries (code and label, plus a unit or
@@ -131,8 +134,8 @@ fn db_err(source: SourceId, url: &str) -> impl Fn(econ_graph_core::error::AppErr
     move |e| CrawlError::Transient(format!("{what}: {e}"))
 }
 
-/// Downloads `file` with a conditional GET on its stored `ETag` and, if it changed, hands the
-/// body to `apply` and stores the new `ETag` (see the module docs). `apply` gets the body by
+/// Downloads `file` with a conditional GET on its stored validators and, if it changed, hands
+/// the body to `apply` and stores the new validators (see the module docs). `apply` gets the body by
 /// value so the future it returns borrows nothing from `refresh`.
 ///
 /// Returns whether anything was applied.
@@ -159,20 +162,29 @@ where
     F: FnMut(String) -> Apply<'a>,
 {
     let db_err = db_err(file.source, file.url);
-    let etag = persist::reference_file_etag(&ctx.pool, file.source, file.url)
+    let known = persist::url_validators(&ctx.pool, file.source, file.url)
         .await
         .map_err(&db_err)?;
-    let ConditionalText::Modified { body, etag } = ctx
+    let (body, validators) = match ctx
         .http
-        .get_text_conditional(file.source, request_url, etag.as_deref())
+        .get_reference_file_if_changed(file.source, request_url, known.as_ref())
         .await?
-    else {
-        return Ok(false);
+    {
+        IfChanged::Unchanged { validators } => {
+            // The server may have sent a new `ETag` or `Last-Modified` for the same body.
+            if known.as_ref() != Some(&validators) {
+                persist::set_url_validators(&ctx.pool, file.source, file.url, &validators)
+                    .await
+                    .map_err(&db_err)?;
+            }
+            return Ok(false);
+        }
+        IfChanged::Changed { body, validators } => (body, validators),
     };
     if !apply(body).await? {
         return Ok(false);
     }
-    persist::set_reference_file_etag(&ctx.pool, file.source, file.url, etag.as_deref())
+    persist::set_url_validators(&ctx.pool, file.source, file.url, &validators)
         .await
         .map_err(&db_err)?;
     Ok(true)
@@ -262,8 +274,8 @@ pub struct SeedEntry {
     pub dimension: DatasetComponent,
     /// Where the file was downloaded from.
     pub url: String,
-    /// The `ETag` it was served with, if any.
-    pub etag: Option<String>,
+    /// What it was served with (`ETag`, `Last-Modified`) and its body's SHA-256.
+    pub validators: Validators,
     /// Its codes, sorted by code.
     pub codes: Vec<Code>,
 }
@@ -300,7 +312,7 @@ pub async fn download_seed_entries(
                 ))
             })?;
         match download_seed_codes(http, source, list).await {
-            Ok((etag, codes)) => {
+            Ok((validators, codes)) => {
                 let mut dimension = DatasetComponent::from(dimension);
                 dimension.codes = None;
                 dimension.codelist = None;
@@ -308,7 +320,7 @@ pub async fn download_seed_entries(
                     dataset: list.dataset.to_string(),
                     dimension,
                     url: list.url.clone(),
-                    etag,
+                    validators,
                     codes,
                 });
             }
@@ -324,19 +336,19 @@ async fn download_seed_codes(
     http: &HttpFetcher,
     source: SourceId,
     list: &CodeList,
-) -> Result<(Option<String>, Vec<Code>), CrawlError> {
-    let ConditionalText::Modified { body, etag } = http
-        .get_text_conditional(source, list.request_url(), None)
+) -> Result<(Validators, Vec<Code>), CrawlError> {
+    let IfChanged::Changed { body, validators } = http
+        .get_reference_file_if_changed(source, list.request_url(), None)
         .await?
     else {
         return Err(CrawlError::Transient(format!(
-            "{}: 304 to an unconditional request",
+            "{}: unchanged to an unconditional request",
             list.url
         )));
     };
     let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
     codes.sort_by(|a, b| a.code.cmp(&b.code));
-    Ok((etag, codes))
+    Ok((validators, codes))
 }
 
 /// A SQL string literal.
@@ -350,8 +362,8 @@ fn sql_opt(s: Option<&str>) -> String {
 
 /// The `up.sql` and `down.sql` of a seed migration for `source` holding `entries`, recorded at
 /// `recorded_at`. `up.sql` makes sure the data source row exists and calls
-/// `seed_reference_codes` once per entry; `down.sql` forgets the seeded `ETag`s (the labels stay,
-/// as a crawl would have left them).
+/// `seed_reference_codes` once per entry; `down.sql` forgets the seeded validators (the labels
+/// stay, as a crawl would have left them).
 pub fn seed_migration_sql(
     source: SourceId,
     recorded_at: DateTime<Utc>,
@@ -385,26 +397,30 @@ pub fn seed_migration_sql(
         sql_opt(ds.api_key_name.as_deref()),
     );
     let mut down = String::from(
-        "-- Forgets the seeded ETags, so the next crawl downloads these files again.\n",
+        "-- Forgets the seeded validators, so the next crawl applies these files again.\n",
     );
     for e in entries {
         let json_err = |err: serde_json::Error| CrawlError::Permanent(format!("{}: {err}", e.url));
         let dimension = serde_json::to_string(&e.dimension).map_err(json_err)?;
         let codes = serde_json::to_string(&e.codes).map_err(json_err)?;
         up.push_str(&format!(
-            "\nSELECT seed_reference_codes(\n    {},\n    {},\n    {}::jsonb,\n    {},\n    {},\n    {}::jsonb\n);\n",
+            "\nSELECT seed_reference_codes(\n    {},\n    {},\n    {}::jsonb,\n    {},\n    {},\n    {},\n    {},\n    {}::jsonb\n);\n",
             sql_literal(&ds.name),
             sql_literal(&e.dataset),
             sql_literal(&dimension),
             sql_literal(&e.url),
-            sql_opt(e.etag.as_deref()),
+            sql_opt(e.validators.etag.as_deref()),
+            sql_opt(e.validators.last_modified.as_deref()),
+            sql_opt(e.validators.content_sha256.as_deref()),
             sql_literal(&codes),
         ));
         down.push_str(&format!(
             "DELETE FROM reference_file_cache\nWHERE url = {} AND etag IS NOT DISTINCT FROM {}\n    \
+             AND content_sha256 IS NOT DISTINCT FROM {}\n    \
              AND source_id = (SELECT id FROM data_sources WHERE name = {});\n",
             sql_literal(&e.url),
-            sql_opt(e.etag.as_deref()),
+            sql_opt(e.validators.etag.as_deref()),
+            sql_opt(e.validators.content_sha256.as_deref()),
             sql_literal(&ds.name),
         ));
     }
@@ -501,7 +517,12 @@ mod tests {
                 codelist: None,
             },
             url: STATES_URL.into(),
-            etag: Some("\"abc\"".into()),
+            validators: Validators {
+                etag: Some("\"abc\"".into()),
+                last_modified: Some("Wed, 01 Oct 2026 00:00:00 GMT".into()),
+                content_sha256: Some("f00d".into()),
+                version: None,
+            },
             codes: vec![Code::new("01", "Alabama")],
         };
         let at = "2026-10-02T03:00:00Z".parse().unwrap();
@@ -511,8 +532,14 @@ mod tests {
         assert!(up.contains("SELECT seed_reference_codes("), "{up}");
         assert!(up.contains(&format!("'{STATES_URL}'")), "{up}");
         assert!(up.contains("'\"abc\"'"), "{up}");
+        assert!(up.contains("'Wed, 01 Oct 2026 00:00:00 GMT'"), "{up}");
+        assert!(up.contains("'f00d'"), "{up}");
         assert!(up.contains(r#"[{"code":"01","label":"Alabama"}]"#), "{up}");
         assert!(down.contains("DELETE FROM reference_file_cache"), "{down}");
+        assert!(
+            down.contains("content_sha256 IS NOT DISTINCT FROM 'f00d'"),
+            "{down}"
+        );
     }
 
     /// The whole path: record a seed from a download, apply it to a new database, sync the
@@ -537,7 +564,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("econgraph-seed-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let at = "2026-10-02T03:00:00Z".parse().unwrap();
+        let at = "2026-10-07T03:00:00Z".parse().unwrap();
         let out = crate::cli::record_reference_seeds(
             &adapter,
             &ApiKeys::default(),
@@ -552,7 +579,7 @@ mod tests {
         assert!(out.contains("bds.state: 51 codes"), "{out}");
         // Recording again replaces the earlier migration rather than adding a second one,
         // whose seed would never load behind the first.
-        let later = "2026-10-02T04:00:00Z".parse().unwrap();
+        let later = "2026-10-07T04:00:00Z".parse().unwrap();
         let out = crate::cli::record_reference_seeds(
             &adapter,
             &ApiKeys::default(),
@@ -569,7 +596,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert_eq!(dirs, ["2026-10-02-040000_seed_census_reference_codes"]);
+        assert_eq!(dirs, ["2026-10-07-040000_seed_census_reference_codes"]);
         // A second recording in the same second would reuse the version Diesel already ran;
         // it is refused, and the existing recording stays.
         let e = crate::cli::record_reference_seeds(
@@ -585,7 +612,7 @@ mod tests {
         .unwrap_err();
         assert!(e.to_string().contains("already taken"), "{e}");
         assert!(dir
-            .join("2026-10-02-040000_seed_census_reference_codes/up.sql")
+            .join("2026-10-07-040000_seed_census_reference_codes/up.sql")
             .is_file());
         let migration = dir.join(&dirs[0]);
         let up = std::fs::read_to_string(migration.join("up.sql")).unwrap();
@@ -682,7 +709,7 @@ mod tests {
             &db.pool,
             r#"SELECT seed_reference_codes('U.S. Census Bureau', 'bds',
                 '{"name":"state","label":"State","type":"string"}'::jsonb,
-                'https://example.test/state.txt', NULL,
+                'https://example.test/state.txt', NULL, NULL, NULL,
                 '[{"code":"01","label":"Alabama"},{"code":"06","label":"California"}]'::jsonb)"#,
         )
         .await;
@@ -755,6 +782,89 @@ mod tests {
         db.drop().await;
     }
 
+    /// A source that sends no `ETag` is still answered as unchanged: by `If-Modified-Since` from
+    /// the stored `Last-Modified`, or, from a server that ignores that too, by the body's SHA-256.
+    /// A seed recorded from a body stores the same validators, so the first crawl doesn't apply an
+    /// unchanged file again.
+    #[tokio::test]
+    async fn files_without_an_etag_are_skipped_by_last_modified_or_body_hash() {
+        let Some(admin_url) = database_url() else {
+            return;
+        };
+        let db = FreshDb::create(&admin_url, "econgraph_reference_validators").await;
+        let mock = MockSource::start().await;
+        const LM: &str = "Wed, 01 Oct 2026 00:00:00 GMT";
+        mock.mount(
+            &Route::get("/lm.txt"),
+            Reply::text("A").header("Last-Modified", LM),
+        )
+        .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/lm.txt"))
+            .and(|r: &wiremock::Request| {
+                r.headers
+                    .get("If-Modified-Since")
+                    .is_some_and(|v| v.as_bytes() == LM.as_bytes())
+            })
+            .respond_with(wiremock::ResponseTemplate::new(304))
+            .with_priority(1)
+            .mount(mock.server())
+            .await;
+        mock.mount(&Route::get("/plain.txt"), Reply::text("B"))
+            .await;
+        mock.mount(&Route::get("/seeded.txt"), Reply::text("Alabama"))
+            .await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+
+        for (path, body) in [("/lm.txt", "A"), ("/plain.txt", "B")] {
+            let url = mock.url(path);
+            let file = ReferenceFile {
+                source: SourceId::Census,
+                url: &url,
+            };
+            let mut applied = Vec::new();
+            for _ in 0..2 {
+                refresh(&ctx, &file, |b| {
+                    applied.push(b);
+                    Box::pin(async { Ok(true) })
+                })
+                .await
+                .unwrap();
+            }
+            assert_eq!(applied, [body], "{path}");
+            let stored = persist::url_validators(&db.pool, SourceId::Census, &url)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(stored.content_sha256.is_some(), "{path}: {stored:?}");
+            assert_eq!(
+                stored.last_modified.as_deref(),
+                (path == "/lm.txt").then_some(LM),
+                "{path}"
+            );
+        }
+
+        let parse: ParseCodes = Arc::new(|b| Ok(vec![Code::new("01", b.trim())]));
+        let list = CodeList::new(mock.url("/seeded.txt"), "bds", "state", parse);
+        let got = download_seed_entries(
+            &ctx.http,
+            SourceId::Census,
+            std::slice::from_ref(&list),
+            &catalog(&census(&mock)),
+        )
+        .await
+        .unwrap();
+        assert!(got.entries[0].validators.content_sha256.is_some());
+        let at = "2026-10-06T00:00:00Z".parse().unwrap();
+        let (up, _) = seed_migration_sql(SourceId::Census, at, &got.entries).unwrap();
+        execute(&db.pool, &up).await;
+        assert!(!refresh_code_list(&ctx, SourceId::Census, &list)
+            .await
+            .unwrap());
+        db.drop().await;
+    }
+
     /// Labels with quotes, backslashes and dollar signs survive the generated SQL unchanged.
     #[tokio::test]
     async fn seed_sql_keeps_awkward_labels_intact() {
@@ -774,7 +884,10 @@ mod tests {
                 codelist: None,
             },
             url: "https://example.test/it's.txt".into(),
-            etag: Some(r#"W/"a'b""#.into()),
+            validators: Validators {
+                etag: Some(r#"W/"a'b""#.into()),
+                ..Validators::default()
+            },
             codes: vec![Code::new("01", awkward)],
         };
         let at = "2026-10-02T03:00:00Z".parse().unwrap();

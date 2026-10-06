@@ -553,7 +553,7 @@ impl BeaAdapter {
             source: SourceId::Bea,
             url: table_titles_cache_key(dataset),
         };
-        // The key sits in the query string because `get_text_conditional` has no separate query
+        // The key sits in the query string because `get_reference_file_if_changed` has no query
         // parameter; that's fine, `Target::new`'s `SECRET_PARAMS` already redacts `userid` from
         // logged URLs (see http.rs), the same as every other BEA request this adapter makes. It
         // never reaches `reference_file_cache`: `refresh_at` stores `file.url` (the keyless

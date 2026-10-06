@@ -138,9 +138,9 @@ pub enum Command {
     },
 }
 
-/// Version of the migration that creates `seed_reference_codes`
-/// (`2026-10-02-000250_seed_reference_codes`); every seed migration's version must be later.
-const SEED_FUNCTION_VERSION: &str = "2026-10-02-000250";
+/// Version of the migration that defines `seed_reference_codes` as seeds call it
+/// (`2026-10-06-000100_seed_reference_validators`); every seed migration's version must be later.
+const SEED_FUNCTION_VERSION: &str = "2026-10-06-000100";
 
 /// `backend/migrations` of the checkout this binary was built from.
 const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
@@ -370,7 +370,7 @@ pub async fn record_reference_seeds(
     let version = recorded_at.format("%Y-%m-%d-%H%M%S").to_string();
     let name = format!("{version}{suffix}");
     if version.as_str() <= SEED_FUNCTION_VERSION {
-        bail!("{name} would not run after migration {SEED_FUNCTION_VERSION}, which creates seed_reference_codes; check the clock");
+        bail!("{name} would not run after migration {SEED_FUNCTION_VERSION}, which defines seed_reference_codes; check the clock");
     }
     let mut names = Vec::new();
     for entry in std::fs::read_dir(migrations_dir)
@@ -419,12 +419,13 @@ pub async fn record_reference_seeds(
     for e in &entries {
         let _ = writeln!(
             out,
-            "  {}.{}: {} codes from {} (etag {})",
+            "  {}.{}: {} codes from {} (etag {}, last-modified {})",
             e.dataset,
             e.dimension.name,
             e.codes.len(),
             e.url,
-            e.etag.as_deref().unwrap_or("none")
+            e.validators.etag.as_deref().unwrap_or("none"),
+            e.validators.last_modified.as_deref().unwrap_or("none")
         );
     }
     for f in &failed {
