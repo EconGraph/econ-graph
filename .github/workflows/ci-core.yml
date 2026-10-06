@@ -139,8 +139,11 @@ jobs:
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
             - 'frontend/.license-checker.json'
+            - 'frontend/scripts/check-npm-audit.mjs'
+            - 'frontend/scripts/npm-audit-allowlist.json'
             - 'admin-frontend/package.json'
             - 'admin-frontend/package-lock.json'
+            - 'admin-frontend/scripts/npm-audit-allowlist.json'
           # Docker Build Test builds the whole backend and frontend inside the
           # image, so a dependency or toolchain bump can break it with no
           # Dockerfile touched (a new -sys crate needing a system library, an
@@ -1062,7 +1065,10 @@ jobs:
       run: npm ci
 
     - name: Run npm security audit
-      run: npm audit --audit-level moderate
+      # Gates every production and dev dependency, with narrow, documented
+      # exceptions for advisories with no upstream fix (see
+      # scripts/npm-audit-allowlist.json) instead of a blanket --omit=dev.
+      run: node scripts/check-npm-audit.mjs .
       working-directory: frontend
 
     - name: Install admin-frontend dependencies
@@ -1070,7 +1076,11 @@ jobs:
       run: npm ci
 
     - name: Run admin-frontend npm security audit
-      run: npm audit --audit-level moderate
+      # Gates every production and dev dependency, with narrow, documented
+      # exceptions for advisories with no upstream fix (see
+      # scripts/npm-audit-allowlist.json), via the same script frontend uses
+      # (ECO-394/ECO-395) — kept as one copy since they'd otherwise drift.
+      run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
       working-directory: admin-frontend
 
   license-compliance:

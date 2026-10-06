@@ -1,0 +1,8 @@
+[
+  {
+    "id": "GHSA-hp3w-g68c-fv3c",
+    "package": "sprintf-js",
+    "reason": "sprintf-js <=1.1.3 (unbounded precision specifier DoS) has no patched release upstream (1.1.3 is the latest). Pulled in only via devDependencies (jest/nyc/@storybook/test-runner -> argparse -> sprintf-js), never shipped in the production bundle. npm's suggested fix force-upgrades @storybook/test-runner to a breaking major version.",
+    "reviewBy": "2027-04-06"
+  }
+]
