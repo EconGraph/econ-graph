@@ -19,7 +19,7 @@ Results can be filtered by source, frequency and active status, and are paged wi
 
 ## Schema
 
-Schema (in the v4.0.0 baseline migration, `backend/migrations/2026-10-01-000100_v4_0_baseline`):
+Schema (in the v4.0.0 baseline migration, `backend/migrations/2026-10-02-000500_v4_0_baseline`):
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
