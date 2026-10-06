@@ -207,10 +207,12 @@ struct SchemaVersionRow {
     version: String,
 }
 
-/// The latest migration version applied on `conn`, via `conn` directly rather than a pool, so
-/// a caller can run it inside its own transaction (tests use this to check the comparison
-/// against a deleted row without ever committing that delete).
-async fn latest_schema_version(conn: &mut AsyncPgConnection) -> AppResult<String> {
+/// The schema-version half of [`readiness_check`], run directly on `conn` rather than a pool so
+/// a caller can run it inside its own transaction: the database's latest applied migration must
+/// be at least as new as this binary's own minimum (`>=`, not `==`): a pod still running the
+/// previous binary, while a newer one is mid-rollout migrating the database further ahead, stays
+/// ready rather than flipping to not-ready on a schema it can still work with.
+async fn check_schema_version(conn: &mut AsyncPgConnection) -> AppResult<()> {
     let row: SchemaVersionRow = diesel_async::RunQueryDsl::get_result(
         diesel::sql_query(
             "SELECT version FROM __diesel_schema_migrations ORDER BY version DESC LIMIT 1",
@@ -219,28 +221,24 @@ async fn latest_schema_version(conn: &mut AsyncPgConnection) -> AppResult<String
     )
     .await
     .map_err(|e| AppError::DatabaseError(format!("Failed to read schema version: {}", e)))?;
-    Ok(row.version)
+
+    let minimum = minimum_schema_version()?;
+    if row.version < minimum {
+        return Err(AppError::DatabaseError(format!(
+            "database schema version {} is older than this binary's minimum {}",
+            row.version, minimum
+        )));
+    }
+    Ok(())
 }
 
-/// Readiness check for Kubernetes' `/readyz`: the database must be reachable, and its latest
-/// applied migration must be at least as new as this binary's own minimum (`>=`, not `==`): a
-/// pod still running the previous binary, while a newer one is mid-rollout migrating the
-/// database further ahead, stays ready rather than flipping to not-ready on a schema it can
-/// still work with.
+/// Readiness check for Kubernetes' `/readyz`: the database must be reachable and its schema
+/// current enough; see [`check_schema_version`].
 pub async fn readiness_check(pool: &DatabasePool) -> AppResult<()> {
     let mut conn = pool.get().await.map_err(|e| {
         AppError::InternalError(format!("Failed to get database connection: {}", e))
     })?;
-
-    let latest = latest_schema_version(&mut conn).await?;
-    let minimum = minimum_schema_version()?;
-    if latest < minimum {
-        return Err(AppError::DatabaseError(format!(
-            "database schema version {} is older than this binary's minimum {}",
-            latest, minimum
-        )));
-    }
-    Ok(())
+    check_schema_version(&mut conn).await
 }
 
 #[cfg(test)]
@@ -411,32 +409,32 @@ mod tests {
         // or restored by hand: even a cancelled test run (its pooled connection dropped
         // mid-transaction) leaves this database, which other tests and local dev setups
         // share, completely unchanged, since Postgres rolls back an open transaction when its
-        // connection closes.
+        // connection closes. Nothing between BEGIN and ROLLBACK unwraps or asserts: a pooled
+        // connection goes back to the pool on drop without closing it, so a panic while the
+        // transaction is still open would hand a later pool user a connection sitting inside
+        // it, with the row still deleted.
         let mut conn = pool.get().await.expect("Should get a connection");
         diesel::sql_query("BEGIN")
             .execute(&mut conn)
             .await
             .expect("should start a transaction");
 
-        diesel::sql_query("DELETE FROM __diesel_schema_migrations WHERE version = $1")
-            .bind::<diesel::sql_types::Text, _>(minimum.clone())
-            .execute(&mut conn)
-            .await
-            .expect("should delete the latest migration row");
-
-        let latest_after_delete = latest_schema_version(&mut conn)
-            .await
-            .expect("should still read a version after deleting the newest one");
-        assert!(
-            latest_after_delete < minimum,
-            "deleting this binary's newest migration row should leave an older latest version: \
-             {latest_after_delete} is not older than {minimum}"
-        );
+        let delete_result =
+            diesel::sql_query("DELETE FROM __diesel_schema_migrations WHERE version = $1")
+                .bind::<diesel::sql_types::Text, _>(minimum)
+                .execute(&mut conn)
+                .await;
+        let check_result = check_schema_version(&mut conn).await;
 
         diesel::sql_query("ROLLBACK")
             .execute(&mut conn)
             .await
-            .expect("should roll back, undoing the delete regardless of the assertion above");
+            .expect("should roll back, undoing the delete regardless of what happened above");
+
+        delete_result.expect("should delete the latest migration row");
+        let err = check_result
+            .expect_err("a schema missing this binary's newest migration should not be ready");
+        assert!(matches!(err, AppError::DatabaseError(_)), "{err:?}");
 
         readiness_check(&pool)
             .await
