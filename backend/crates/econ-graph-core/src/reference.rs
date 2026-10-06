@@ -13,8 +13,15 @@
 //! check it at startup ([`areas`]) rather than on first use.
 //!
 //! `countries.csv` holds one row per area: every ISO 3166-1 country plus Kosovo, keyed by ISO
-//! alpha-3, and World Bank aggregates (World, Euro area, income groups, ...) keyed by their
-//! World Bank code, with no ISO codes. It is built by `backend/scripts/build_countries_csv.py`.
+//! alpha-3, and the World Bank aggregates we carry (World, Euro area, income groups, ...) keyed
+//! by their World Bank code, with no ISO codes. It is built by
+//! `backend/scripts/build_countries_csv.py`.
+//!
+//! An aggregate's row has no name: the aggregate belongs to the source that publishes it, which
+//! names it in the dataset that uses it (a dataset's codes for a dimension on this list override
+//! its names; see [`DatasetComponent::area_label`](crate::models::DatasetComponent::area_label)).
+//! The World Bank crawl fetches those names from the World Bank. Nor does the file carry World
+//! Bank regions or income groups: like aggregate names, they are the World Bank's to publish.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -34,7 +41,7 @@ pub const COUNTRIES_FILE: &str = "countries.csv";
 pub const MIN_ISO_COUNTRIES: usize = 249;
 
 /// Columns of `countries.csv`, in order.
-const COLUMNS: [&str; 10] = [
+const COLUMNS: [&str; 8] = [
     "key",
     "kind",
     "iso2",
@@ -43,8 +50,6 @@ const COLUMNS: [&str; 10] = [
     "wb_code",
     "sdmx_ref_area",
     "name",
-    "region",
-    "income_group",
 ];
 
 /// A reference data file that is missing, malformed or incomplete. The message names the file.
@@ -77,18 +82,15 @@ pub struct Area {
     /// ISO 3166-1 numeric, e.g. `840` (written `840`, `004`, ...). `None` for aggregates and
     /// Kosovo.
     pub iso_numeric: Option<u16>,
-    /// World Bank economy or aggregate code, e.g. `USA`, `EMU`. `None` for Taiwan, and after
-    /// the build script's `--world-bank` run for every country the World Bank does not publish
-    /// (before it, other countries default to their ISO alpha-3).
+    /// World Bank economy or aggregate code, e.g. `USA`, `EMU`: a country's ISO alpha-3,
+    /// except `None` for Taiwan, which the World Bank does not publish.
     pub wb_code: Option<String>,
     /// SDMX `REF_AREA` code (ISO alpha-2, the CL_AREA convention), e.g. `US`.
     pub sdmx_ref_area: Option<String>,
-    /// Display name, e.g. `United States`.
+    /// A country's name, e.g. `United States`. For an aggregate, its key (`EMU`): the file
+    /// names no aggregate, so a dataset's own label for it
+    /// ([`DatasetComponent::area_label`](crate::models::DatasetComponent::area_label)) names it.
     pub name: String,
-    /// World Bank region code, e.g. `NAC`, where known.
-    pub region: Option<String>,
-    /// World Bank income group code, e.g. `HIC`, where known.
-    pub income_group: Option<String>,
 }
 
 /// The rows of `countries.csv`, with lookups by each code.
@@ -192,9 +194,7 @@ struct RawArea {
     iso_numeric: Option<String>,
     wb_code: Option<String>,
     sdmx_ref_area: Option<String>,
-    name: String,
-    region: Option<String>,
-    income_group: Option<String>,
+    name: Option<String>,
 }
 
 /// Parses the CSV text (header line first; `#` comment lines skipped) and checks every row.
@@ -279,32 +279,38 @@ fn check_row(raw: RawArea) -> Result<Area, String> {
     for (column, code) in [
         ("wb_code", &raw.wb_code),
         ("sdmx_ref_area", &raw.sdmx_ref_area),
-        ("region", &raw.region),
-        ("income_group", &raw.income_group),
     ] {
         // Upper case only, since lookups upper-case the query.
         check_code(column, code.as_ref(), 0, |b| {
             b.is_ascii_uppercase() || b.is_ascii_digit()
         })?;
     }
-    if raw.name.trim().is_empty() {
-        return Err("empty name".into());
-    }
-    match raw.kind {
+    let name = match raw.kind {
         AreaKind::Country => {
             if raw.iso3.as_deref() != Some(raw.key.as_str()) || raw.iso2.is_none() {
                 return Err("a country needs iso2 and iso3, and its key must be its iso3".into());
             }
+            match raw.name {
+                Some(name) if !name.trim().is_empty() => name,
+                _ => return Err("empty name".into()),
+            }
         }
         AreaKind::Aggregate => {
+            if raw.name.is_some() {
+                return Err(
+                    "an aggregate must not have a name (the source that publishes it names it)"
+                        .into(),
+                );
+            }
             if raw.iso2.is_some() || raw.iso3.is_some() || raw.iso_numeric.is_some() {
                 return Err("an aggregate must not have ISO codes".into());
             }
             if raw.wb_code.as_deref() != Some(raw.key.as_str()) {
                 return Err("an aggregate's key must be its wb_code".into());
             }
+            raw.key.clone()
         }
-    }
+    };
     Ok(Area {
         key: raw.key,
         kind: raw.kind,
@@ -314,9 +320,7 @@ fn check_row(raw: RawArea) -> Result<Area, String> {
         iso_numeric: raw.iso_numeric.map(|n| n.parse().expect("three digits")),
         wb_code: raw.wb_code,
         sdmx_ref_area: raw.sdmx_ref_area,
-        name: raw.name,
-        region: raw.region,
-        income_group: raw.income_group,
+        name,
     })
 }
 
@@ -340,8 +344,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const HEADER: &str =
-        "key,kind,iso2,iso3,iso_numeric,wb_code,sdmx_ref_area,name,region,income_group\n";
+    const HEADER: &str = "key,kind,iso2,iso3,iso_numeric,wb_code,sdmx_ref_area,name\n";
 
     fn shipped() -> Areas {
         load_areas(
@@ -362,7 +365,7 @@ mod tests {
             let l = |x: usize| char::from(b'A' + u8::try_from(x).unwrap());
             let key = format!("Q{}{}", l(n / 26), l(n % 26));
             let iso2 = format!("{}{}", l(10 + n / 26), l(n % 26));
-            text.push_str(&format!("{key},country,{iso2},{key},{},,,Pad,,\n", 100 + n));
+            text.push_str(&format!("{key},country,{iso2},{key},{},,,Pad\n", 100 + n));
         }
         parse_areas(&text)
     }
@@ -470,7 +473,11 @@ mod tests {
             );
             assert_eq!(a.wb_code.as_deref(), Some(a.key.as_str()));
         }
-        assert_eq!(areas.by_wb_code("EMU").unwrap().name, "Euro area");
+        assert_eq!(
+            areas.by_wb_code("EMU").unwrap().name,
+            "EMU",
+            "named by its key"
+        );
     }
 
     /// Each lookup finds the row, ignoring case; unknown codes find nothing.
@@ -535,19 +542,15 @@ mod tests {
     fn parses_rows() {
         let areas = parse_rows(
             "# comment\n\
-             BES,country,BQ,BES,535,BES,BQ,\"Bonaire, Sint Eustatius and Saba\",LCN,HIC\n\
-             XKX,country,XK,XKX,,XKX,XK,Kosovo,,\n\
-             WLD,aggregate,,,,WLD,,World,,\n",
+             BES,country,BQ,BES,535,BES,BQ,\"Bonaire, Sint Eustatius and Saba\"\n\
+             XKX,country,XK,XKX,,XKX,XK,Kosovo\n\
+             WLD,aggregate,,,,WLD,,\n",
         )
         .unwrap();
         let bes = areas.by_key("BES").unwrap();
         assert_eq!(bes.name, "Bonaire, Sint Eustatius and Saba");
-        assert_eq!(
-            (bes.region.as_deref(), bes.income_group.as_deref()),
-            (Some("LCN"), Some("HIC"))
-        );
         assert_eq!(areas.by_key("XKX").unwrap().iso_numeric, None);
-        assert_eq!(areas.by_key("WLD").unwrap().region, None);
+        assert_eq!(areas.by_key("WLD").unwrap().name, "WLD");
     }
 
     /// Malformed rows are rejected with the offending row and column.
@@ -555,81 +558,77 @@ mod tests {
     fn rejects_malformed_rows() {
         for (rows, needle) in [
             (
-                "USA,nation,US,USA,840,USA,US,United States,,\n",
+                "USA,nation,US,USA,840,USA,US,United States\n",
                 "unknown variant",
             ),
-            ("USA,country,US,USA,840,USA,US,,,\n", "empty name"),
+            ("USA,country,US,USA,840,USA,US,\n", "empty name"),
             (
-                "USA,country,U,USA,840,USA,US,United States,,\n",
+                "USA,country,U,USA,840,USA,US,United States\n",
                 "invalid iso2",
             ),
             (
-                "USA,country,us,USA,840,USA,US,United States,,\n",
+                "USA,country,us,USA,840,USA,US,United States\n",
                 "invalid iso2",
             ),
             (
-                "USA,country,US,USA,84,USA,US,United States,,\n",
+                "USA,country,US,USA,84,USA,US,United States\n",
                 "invalid iso_numeric",
             ),
             (
-                "USA,country,US,USA,84a,USA,US,United States,,\n",
+                "USA,country,US,USA,84a,USA,US,United States\n",
                 "invalid iso_numeric",
             ),
             (
-                "USA,country,US,USA,840,U-A,US,United States,,\n",
+                "USA,country,US,USA,840,U-A,US,United States\n",
                 "invalid wb_code",
             ),
             (
-                "USA,country,US,USA,840,usa,US,United States,,\n",
+                "USA,country,US,USA,840,usa,US,United States\n",
                 "invalid wb_code",
             ),
             (
-                "USA,country,US,USA,840,USA,us,United States,,\n",
+                "USA,country,US,USA,840,USA,us,United States\n",
                 "invalid sdmx_ref_area",
             ),
             (
-                "USA,country,US,,840,USA,US,United States,,\n",
+                "USA,country,US,,840,USA,US,United States\n",
                 "must be its iso3",
             ),
             (
-                "USA,country,US,USB,840,USA,US,United States,,\n",
+                "USA,country,US,USB,840,USA,US,United States\n",
                 "must be its iso3",
             ),
+            ("USA,country,,USA,840,USA,US,United States\n", "needs iso2"),
             (
-                "USA,country,,USA,840,USA,US,United States,,\n",
-                "needs iso2",
-            ),
-            (
-                "EMU,aggregate,,,,EMU,,Euro area,,\nEMU,aggregate,,,,EMU,,Euro area,,\n",
+                "EMU,aggregate,,,,EMU,,\nEMU,aggregate,,,,EMU,,\n",
                 "duplicate key",
             ),
+            ("EMU,aggregate,EU,,,EMU,,\n", "must not have ISO codes"),
+            ("EMU,aggregate,,,978,EMU,,\n", "must not have ISO codes"),
+            ("EMU,aggregate,,,,,,\n", "must be its wb_code"),
             (
-                "EMU,aggregate,EU,,,EMU,,Euro area,,\n",
-                "must not have ISO codes",
+                "EMU,aggregate,,,,EMU,,Euro area\n",
+                "aggregate must not have a name",
             ),
+            ("USA,country,US,USA,840,USA,US,\n", "empty name"),
             (
-                "EMU,aggregate,,,978,EMU,,Euro area,,\n",
-                "must not have ISO codes",
-            ),
-            ("EMU,aggregate,,,,,,Euro area,,\n", "must be its wb_code"),
-            (
-                "USA,country,US,USA,840,USA,US,United States,,\n\
-                 USB,country,US,USB,841,USB,UB,Other,,\n",
+                "USA,country,US,USA,840,USA,US,United States\n\
+                 USB,country,US,USB,841,USB,UB,Other\n",
                 "duplicate iso2",
             ),
             (
-                "USA,country,US,USA,840,USA,US,United States,,\n\
-                 USB,country,UB,USB,840,USB,UB,Other,,\n",
+                "USA,country,US,USA,840,USA,US,United States\n\
+                 USB,country,UB,USB,840,USB,UB,Other\n",
                 "duplicate iso_numeric 840",
             ),
             (
-                "USA,country,US,USA,840,USA,US,United States,,\n\
-                 USB,country,UB,USB,841,USA,UB,Other,,\n",
+                "USA,country,US,USA,840,USA,US,United States\n\
+                 USB,country,UB,USB,841,USA,UB,Other\n",
                 "duplicate wb_code",
             ),
             (
-                "USA,country,US,USA,840,USA,US,United States,,\n\
-                 USB,country,UB,USB,841,USB,US,Other,,\n",
+                "USA,country,US,USA,840,USA,US,United States\n\
+                 USB,country,UB,USB,841,USB,US,Other\n",
                 "duplicate sdmx_ref_area",
             ),
         ] {
@@ -644,7 +643,7 @@ mod tests {
         let e = parse_areas("key,name\nUSA,United States\n").unwrap_err();
         assert!(e.contains("expected header"), "{e}");
         let e = parse_areas(&format!(
-            "{HEADER}USA,country,US,USA,840,USA,US,United States,,\n"
+            "{HEADER}USA,country,US,USA,840,USA,US,United States\n"
         ))
         .unwrap_err();
         assert!(e.contains("at least 249") && e.contains("got 1"), "{e}");
