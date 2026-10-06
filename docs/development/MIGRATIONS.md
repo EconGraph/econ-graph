@@ -28,7 +28,7 @@ are below.
 
 | Release | Migration | Replaces |
 |---------|-----------|----------|
-| v4.0.0 | `2026-10-01-000100_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
+| v4.0.0 | `2026-10-02-000500_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in before tagging. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
 
 ## Squashing at a release
 
@@ -70,7 +70,9 @@ Steps:
    branch is cut, check `main` as well as the release branch.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
    constraints and indexes, final seed rows. Keep column order the same as the chain produced.
-   Name the directory with the last replaced version, e.g. `2026-10-01-000100_v4_0_baseline`.
+   Name the directory with the last replaced version, e.g. `2026-10-02-000500_v4_0_baseline`.
+   Folding more migrations into an unreleased squash works the same way: the squash is renamed
+   to the version of the last migration folded in.
    Its `down.sql` only raises an error: on an upgraded database that version belongs to the last
    replaced migration, so `diesel migration revert` there would otherwise drop the whole schema
    while looking like a revert of one small change. Recreate the database to start over.
