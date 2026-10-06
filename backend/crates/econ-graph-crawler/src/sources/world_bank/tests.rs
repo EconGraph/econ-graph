@@ -1310,6 +1310,84 @@ async fn a_discovery_that_skipped_an_indicator_stores_no_version() {
     assert_eq!(validator, None);
 }
 
+/// An incomplete discovery keeps the version stored by the last complete one, and that can't
+/// hide the indicator it skipped: the stored version still differs from the probes until a
+/// discovery reads every indicator, so each later discovery runs in full again rather than
+/// returning `Unchanged`.
+#[tokio::test]
+async fn an_incomplete_discovery_is_retried_in_full() {
+    let Some(db) = validator_db("econgraph_wb_incomplete_discovery").await else {
+        return;
+    };
+    let mock = MockSource::start().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP))
+        .await;
+    // Every probe answers; every other full request is an "Invalid value" error.
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::query_param("per_page", "1")).respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_raw(
+                    br#"[{"page": 1, "pages": 1, "lastupdated": "2026-07-01"}, null]"#.to_vec(),
+                    "application/json",
+                ),
+            ),
+        )
+        .await;
+    mount_invalid_fallback(&mock).await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+
+    // The last complete discovery saw an older NY.GDP.PCAP.CD.
+    let current = adapter
+        .catalog_version(&ctx, reference::wdi_indicators().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let older = current.replace(
+        &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-07-01"),
+        &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-01-01"),
+    );
+    assert_ne!(older, current);
+    persist::set_url_validators(
+        &db.pool,
+        SourceId::WorldBank,
+        &adapter.catalog_key(),
+        &Validators {
+            version: Some(older),
+            ..Validators::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let full = |reqs: &[wiremock::Request]| {
+        reqs.iter()
+            .filter(|r| {
+                r.url.path().ends_with("/NY.GDP.PCAP.CD")
+                    && r.url
+                        .query_pairs()
+                        .any(|(k, v)| k == "per_page" && v == PER_PAGE)
+            })
+            .count()
+    };
+    for run in 1..=2 {
+        let Discovery::Changed { found, validator } =
+            adapter.discover_if_changed(&ctx).await.unwrap()
+        else {
+            panic!("run {run}: an indicator moved since the stored version")
+        };
+        assert!(!found.is_empty(), "run {run}");
+        assert_eq!(
+            validator, None,
+            "run {run}: incomplete, so nothing to store"
+        );
+        assert_eq!(full(&mock.received_requests().await), run);
+    }
+
+    db.drop().await;
+}
+
 #[test]
 fn shared_validators_need_one_stored_version() {
     let state = |version: Option<&str>| StoredFetchState {

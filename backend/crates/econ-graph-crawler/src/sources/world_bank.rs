@@ -652,7 +652,10 @@ impl SourceAdapter for WorldBankAdapter {
         }
         let (found, complete, full_version) = self.discover_all(ctx).await?;
         let version = full_version.or(version);
-        // Only a discovery that read every indicator may vouch for the catalog.
+        // Only a discovery that read every indicator may vouch for the catalog. An incomplete one
+        // keeps the last complete discovery's version: an indicator that moved since then (the
+        // reason this one ran in full) still differs from it, so the next discovery runs in full
+        // too, and one that didn't move was listed by that discovery.
         let validator = version.filter(|_| complete).map(|version| {
             (
                 key,
