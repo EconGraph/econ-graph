@@ -139,6 +139,8 @@ jobs:
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
             - 'frontend/.license-checker.json'
+            - 'frontend/scripts/check-npm-audit.mjs'
+            - 'frontend/scripts/npm-audit-allowlist.json'
             - 'admin-frontend/package.json'
             - 'admin-frontend/package-lock.json'
           # Docker Build Test builds the whole backend and frontend inside the
@@ -1062,7 +1064,10 @@ jobs:
       run: npm ci
 
     - name: Run npm security audit
-      run: npm audit --audit-level moderate
+      # Gates every production and dev dependency, with narrow, documented
+      # exceptions for advisories with no upstream fix (see
+      # scripts/npm-audit-allowlist.json) instead of a blanket --omit=dev.
+      run: node scripts/check-npm-audit.mjs .
       working-directory: frontend
 
     - name: Install admin-frontend dependencies
