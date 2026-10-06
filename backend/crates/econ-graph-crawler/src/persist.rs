@@ -1045,8 +1045,41 @@ pub(crate) async fn retire_unlisted_conn(
     Ok(retirement)
 }
 
+/// Deactivates the `series_metadata` row for `(source, external_id)`, if any, when
+/// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound) confirms the series doesn't exist
+/// at the source and no `economic_series` row was ever created for it (nothing else to mark).
+/// Mirrors [`retire_unlisted_conn`]'s semantics exactly, so the usual discovery/retirement flow
+/// (not a timed retry) is what revives it: the next catalog discovery that lists the id again
+/// reactivates it (`persist_discovered_conn` always sets `is_active = true` on conflict).
+pub(crate) async fn deactivate_metadata_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<()> {
+    // A read-only lookup, like `find_series_id_conn`: this runs on a NotFound error path, so it
+    // must not create a `data_sources` row (unlike `data_source_id_conn`) when there's nothing to
+    // deactivate anyway.
+    use series_metadata::dsl as sm;
+    diesel::update(sm::series_metadata)
+        .filter(
+            sm::source_id.eq_any(
+                data_sources::table
+                    .filter(data_sources::name.eq(data_source_template(source).name))
+                    .select(data_sources::id),
+            ),
+        )
+        .filter(sm::external_id.eq(external_id))
+        .filter(sm::is_active)
+        .set(sm::is_active.eq(false))
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
-/// on failure, sets `economic_series.crawl_status = 'failed'` with the error message.
+/// on failure, sets `economic_series.crawl_status` to `'not_found'` (the error is
+/// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound), confirming the source doesn't
+/// have the series) or `'failed'` (anything else), with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
     series_id: Uuid,
@@ -1096,12 +1129,18 @@ pub(crate) async fn record_attempt_conn(
         .execute(&mut *conn)
         .await?;
     if !attempt.success {
+        let status = if attempt.error_kind.as_deref() == Some("not_found") {
+            "not_found"
+        } else {
+            "failed"
+        };
         diesel::sql_query(
-            "UPDATE economic_series SET crawl_status = 'failed', crawl_error_message = $2 \
+            "UPDATE economic_series SET crawl_status = $3, crawl_error_message = $2 \
              WHERE id = $1",
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())
+        .bind::<Text, _>(status)
         .execute(&mut *conn)
         .await?;
     }
