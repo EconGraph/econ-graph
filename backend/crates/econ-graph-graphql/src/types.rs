@@ -607,6 +607,7 @@ pub enum SeriesFrequencyType {
     Weekly,
     Monthly,
     Quarterly,
+    SemiAnnual,
     Annual,
     Irregular,
 }

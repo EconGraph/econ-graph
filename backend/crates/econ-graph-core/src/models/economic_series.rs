@@ -101,6 +101,7 @@ pub enum SeriesFrequency {
     Weekly,
     Monthly,
     Quarterly,
+    SemiAnnual,
     Annual,
     Irregular,
 }
@@ -112,6 +113,7 @@ impl std::fmt::Display for SeriesFrequency {
             SeriesFrequency::Weekly => write!(f, "Weekly"),
             SeriesFrequency::Monthly => write!(f, "Monthly"),
             SeriesFrequency::Quarterly => write!(f, "Quarterly"),
+            SeriesFrequency::SemiAnnual => write!(f, "Semi-Annual"),
             SeriesFrequency::Annual => write!(f, "Annual"),
             SeriesFrequency::Irregular => write!(f, "Irregular"),
         }
@@ -125,9 +127,60 @@ impl From<String> for SeriesFrequency {
             "weekly" | "w" => SeriesFrequency::Weekly,
             "monthly" | "m" => SeriesFrequency::Monthly,
             "quarterly" | "q" => SeriesFrequency::Quarterly,
+            "semi-annual" | "semiannual" | "semi annual" | "s" => SeriesFrequency::SemiAnnual,
             "annual" | "a" | "yearly" | "y" => SeriesFrequency::Annual,
             _ => SeriesFrequency::Irregular,
         }
+    }
+}
+
+impl SeriesFrequency {
+    /// Case-insensitive prefixes that a source's raw, stored `frequency` text starts with when it
+    /// describes this frequency. Sources don't agree on one spelling: FRED stores long descriptive
+    /// text like "Weekly, Ending Friday" or "Daily, Close", BLS stores "Semi-Annual", others store
+    /// a bare label like "Monthly" — but all of them start with one of these prefixes.
+    fn raw_prefixes(&self) -> &'static [&'static str] {
+        match self {
+            SeriesFrequency::Daily => &["daily"],
+            SeriesFrequency::Weekly => &["weekly"],
+            SeriesFrequency::Monthly => &["monthly"],
+            SeriesFrequency::Quarterly => &["quarterly"],
+            SeriesFrequency::SemiAnnual => &["semi-annual", "semiannual", "semi annual"],
+            SeriesFrequency::Annual => &["annual", "yearly"],
+            // No source emits one agreed string for "irregular", so there's no prefix to filter
+            // on: `sql_like_patterns` is empty, and an Irregular filter matches no rows rather
+            // than every unclassified one. That's unchanged from the exact-match filter this
+            // replaced (`frequency = 'Irregular'`, which no adapter ever wrote either).
+            SeriesFrequency::Irregular => &[],
+        }
+    }
+
+    /// Classifies a source's raw stored `frequency` text (e.g. "Weekly, Ending Friday") by the
+    /// prefix it starts with, rather than requiring an exact match. Falls back to `Irregular` when
+    /// no known prefix matches.
+    pub fn classify_raw(raw: &str) -> Self {
+        let lower = raw.trim().to_lowercase();
+        [
+            SeriesFrequency::Daily,
+            SeriesFrequency::Weekly,
+            SeriesFrequency::SemiAnnual,
+            SeriesFrequency::Monthly,
+            SeriesFrequency::Quarterly,
+            SeriesFrequency::Annual,
+        ]
+        .into_iter()
+        .find(|variant| variant.raw_prefixes().iter().any(|p| lower.starts_with(p)))
+        .unwrap_or(SeriesFrequency::Irregular)
+    }
+
+    /// SQL `ILIKE` patterns (e.g. `"daily%"`) matching every raw frequency text a source might
+    /// store for this frequency, built from the same prefixes [`Self::classify_raw`] matches
+    /// against, so a `WHERE frequency ILIKE ANY(...)` filter agrees with how stored text classifies.
+    pub fn sql_like_patterns(&self) -> Vec<String> {
+        self.raw_prefixes()
+            .iter()
+            .map(|p| format!("{p}%"))
+            .collect()
     }
 }
 
