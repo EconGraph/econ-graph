@@ -194,6 +194,13 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--allowlist'])).toThrow(/--allowlist needs a value/);
   });
 
+  it('throws when a flag is immediately followed by another flag instead of a value', () => {
+    // --dir --allowlist admin-frontend must not take "--allowlist" as the directory.
+    expect(() => parseArgs(['--dir', '--allowlist', 'admin-frontend'])).toThrow(
+      /--dir needs a value/
+    );
+  });
+
   it('throws on an unrecognized flag instead of treating it as a directory', () => {
     expect(() => parseArgs(['--bogus', '.'])).toThrow(/unexpected argument: --bogus/);
   });

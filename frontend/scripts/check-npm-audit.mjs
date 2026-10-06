@@ -133,7 +133,12 @@ export function parseArgs(argv) {
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dir' || argv[i] === '--allowlist') {
-      if (i + 1 >= argv.length) throw new Error(`${argv[i]} needs a value`);
+      // A following flag (e.g. `--dir --allowlist admin-frontend`) is never a legitimate path —
+      // treat it the same as a missing value instead of swallowing the next flag as this one's
+      // argument.
+      if (i + 1 >= argv.length || argv[i + 1].startsWith('-')) {
+        throw new Error(`${argv[i]} needs a value`);
+      }
       if (argv[i] === '--dir') dir = argv[++i];
       else allowlistArg = argv[++i];
     } else if (argv[i].startsWith('--')) {
