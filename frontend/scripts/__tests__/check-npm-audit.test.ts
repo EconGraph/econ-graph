@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findAdvisories,
+  parseArgs,
   parseAuditReport,
   staleAllowlistEntries,
   unallowedAdvisories,
@@ -157,5 +158,54 @@ describe('parseAuditReport', () => {
     expect(() => parseAuditReport(JSON.stringify({ auditReportVersion: 2 }))).toThrow(
       /vulnerabilities/
     );
+  });
+});
+
+describe('parseArgs', () => {
+  // This script is shared between frontend/ and admin-frontend/ (ECO-395): admin-frontend
+  // invokes it with --dir/--allowlist pointed at its own directory and allowlist file.
+  it('defaults to the current directory and no allowlist override when given nothing', () => {
+    expect(parseArgs([])).toEqual({ dir: '.', allowlistArg: undefined });
+  });
+
+  it('takes a bare positional argument as the directory (frontend/admin-frontend\'s own call)', () => {
+    expect(parseArgs(['.'])).toEqual({ dir: '.', allowlistArg: undefined });
+  });
+
+  it('takes --dir and --allowlist for another package (admin-frontend calling this copy)', () => {
+    expect(parseArgs(['--dir', 'admin-frontend', '--allowlist', 'admin-frontend/scripts/npm-audit-allowlist.json'])).toEqual({
+      dir: 'admin-frontend',
+      allowlistArg: 'admin-frontend/scripts/npm-audit-allowlist.json',
+    });
+  });
+
+  it('--dir overrides a bare positional directory', () => {
+    expect(parseArgs(['.', '--dir', 'admin-frontend'])).toEqual({
+      dir: 'admin-frontend',
+      allowlistArg: undefined,
+    });
+  });
+
+  it('throws on --dir with no value, rather than silently falling back to "."', () => {
+    expect(() => parseArgs(['--dir'])).toThrow(/--dir needs a value/);
+  });
+
+  it('throws on --allowlist with no value, rather than silently using the default allowlist', () => {
+    expect(() => parseArgs(['--allowlist'])).toThrow(/--allowlist needs a value/);
+  });
+
+  it('throws when a flag is immediately followed by another flag instead of a value', () => {
+    // --dir --allowlist admin-frontend must not take "--allowlist" as the directory.
+    expect(() => parseArgs(['--dir', '--allowlist', 'admin-frontend'])).toThrow(
+      /--dir needs a value/
+    );
+  });
+
+  it('throws on an unrecognized flag instead of treating it as a directory', () => {
+    expect(() => parseArgs(['--bogus', '.'])).toThrow(/unexpected argument: --bogus/);
+  });
+
+  it('throws on an unexpected second positional argument', () => {
+    expect(() => parseArgs(['a', 'b'])).toThrow(/unexpected argument: b/);
   });
 });
