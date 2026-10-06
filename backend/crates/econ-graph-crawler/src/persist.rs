@@ -562,9 +562,9 @@ pub async fn reference_file_cache(
 
 /// Stores what an adapter kept from a copy of `url` (`payload`), for files whose contents aren't
 /// merged into another table. Called from inside [`crate::reference_file::refresh`]'s apply
-/// step, which then stores that copy's `ETag` ([`set_reference_file_etag`], which leaves the
-/// payload alone), so a later `304` pairs with the payload it validates. A new row gets no
-/// `ETag` until then.
+/// step, which then stores that copy's validators ([`set_url_validators`], which leaves the
+/// payload alone), so a later unchanged answer pairs with the payload it validates. A new row
+/// gets no validators until then.
 pub async fn set_reference_file_payload(
     pool: &DatabasePool,
     source: SourceId,
@@ -586,10 +586,10 @@ pub async fn set_reference_file_payload(
     Ok(())
 }
 
-/// Forgets the stored `ETag` of `url` (if it has a row), so the next conditional GET downloads
-/// the file again. The row (and its payload) stays, so a seed migration still sees the file as
-/// present and leaves it alone.
-pub async fn clear_reference_file_etag(
+/// Forgets the stored validators of `url` (if it has a row), so the next refresh applies the file
+/// again rather than answering it as unchanged. The row (and its payload) stays, so a seed
+/// migration still sees the file as present and leaves it alone.
+pub async fn clear_reference_file_validators(
     pool: &DatabasePool,
     source: SourceId,
     url: &str,
@@ -597,7 +597,9 @@ pub async fn clear_reference_file_etag(
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
     diesel::sql_query(
-        "UPDATE reference_file_cache SET etag = NULL WHERE source_id = $1 AND url = $2",
+        "UPDATE reference_file_cache \
+         SET etag = NULL, last_modified = NULL, content_sha256 = NULL, version = NULL \
+         WHERE source_id = $1 AND url = $2",
     )
     .bind::<SqlUuid, _>(source_id)
     .bind::<Text, _>(url)

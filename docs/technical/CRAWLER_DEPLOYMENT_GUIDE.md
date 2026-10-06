@@ -119,15 +119,15 @@ whether jobs are actually being enqueued and completed on this cadence.
 
 ## Source reference data
 
-Labels a source publishes itself (Census state names, BLS code labels) are crawled, never shipped as data files: the worker refreshes each adapter's code lists at startup and before each catalog discovery, with a conditional GET on the `ETag` stored in `reference_file_cache`.
+Labels a source publishes itself (Census state names, BLS code labels) are crawled, never shipped as data files: the worker refreshes each adapter's code lists at startup and before each catalog discovery, with a conditional GET on the validators stored in `reference_file_cache` (`If-None-Match` from the `ETag`, `If-Modified-Since` from the `Last-Modified`). A file whose body hashes the same as the stored copy also counts as unchanged, for sources that honour neither header.
 
-A new database can get those labels before the first crawl from a seed migration, `backend/migrations/<timestamp>_seed_<source>_reference_codes/`, which loads them with the `ETag` they were downloaded with, and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
+A new database can get those labels before the first crawl from a seed migration, `backend/migrations/<timestamp>_seed_<source>_reference_codes/`, which loads them with the validators they were downloaded with (`ETag`, `Last-Modified` and body SHA-256), and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
 
 ```bash
 cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS
 ```
 
-It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: a made-up `ETag` would let a `304` keep wrong labels.
+It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: made-up validators would let the crawl keep wrong labels as unchanged.
 
 ## Retries
 
