@@ -1,5 +1,7 @@
 use chrono::Datelike;
+use diesel::dsl::sql;
 use diesel::prelude::*;
+use diesel::sql_types::{Array, Bool, Text};
 use diesel::SelectableHelper;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
@@ -90,7 +92,19 @@ pub async fn list_series(
     }
 
     if let Some(frequency) = params.frequency {
-        query = query.filter(economic_series::frequency.eq(frequency));
+        // Sources store their own frequency text verbatim (FRED: "Weekly, Ending Friday", BLS:
+        // "Semi-Annual", ...), so an exact match misses most rows; match the same prefixes
+        // `SeriesFrequency` classifies raw text by instead.
+        let (patterns, exact_frequency) = super::frequency_filter(&frequency);
+        if let Some(patterns) = patterns {
+            query = query.filter(
+                sql::<Bool>("frequency ILIKE ANY(")
+                    .bind::<Array<Text>, _>(patterns)
+                    .sql(")"),
+            );
+        } else if let Some(raw) = exact_frequency {
+            query = query.filter(economic_series::frequency.eq(raw));
+        }
     }
 
     if let Some(search_query) = params.query {
