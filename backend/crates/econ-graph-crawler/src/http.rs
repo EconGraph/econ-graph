@@ -67,7 +67,7 @@ impl Default for HttpConfig {
     }
 }
 
-/// Total timeout of a [`HttpFetcher::get_text_conditional`] request: reference files can be
+/// Total timeout of a [`HttpFetcher::get_reference_file_if_changed`] request: reference files can be
 /// tens of megabytes, too big for the per-request [`HttpConfig::timeout`] on a slow link. Kept
 /// short enough that BLS's nine reference files, one attempt each, fit well inside a discovery
 /// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
@@ -282,11 +282,8 @@ impl HttpFetcher {
     /// [`ConditionalText::NotModified`] on a `304` response instead of fetching the body again.
     /// On any other successful status, returns the body and the response's own `ETag` (`None` if
     /// the server didn't send one), for the caller to store and pass back next time.
-    ///
-    /// These are whole reference files (BLS's `la.series` is the full LAUS series catalog), so
-    /// the request gets [`REFERENCE_FILE_TIMEOUT`] instead of [`HttpConfig::timeout`], and no
-    /// in-process retry: a refresh runs inside a discovery job, which must not hold its queue row
-    /// for several long downloads per file, and the next scheduled refresh tries again anyway.
+    /// Equivalent to [`get_reference_file_if_changed`](Self::get_reference_file_if_changed) with
+    /// only an `ETag`.
     pub async fn get_text_conditional(
         &self,
         source: SourceId,
@@ -297,16 +294,36 @@ impl HttpFetcher {
             etag: Some(e.to_owned()),
             ..Validators::default()
         });
+        Ok(
+            match self
+                .get_reference_file_if_changed(source, url, known.as_ref())
+                .await?
+            {
+                IfChanged::Unchanged { .. } => ConditionalText::NotModified,
+                IfChanged::Changed { body, validators } => ConditionalText::Modified {
+                    body,
+                    etag: validators.etag,
+                },
+            },
+        )
+    }
+
+    /// [`get_text_if_changed`](Self::get_text_if_changed) for one of a source's reference files.
+    ///
+    /// These are whole files (BLS's `la.series` is the full LAUS series catalog), so the request
+    /// gets [`REFERENCE_FILE_TIMEOUT`] instead of [`HttpConfig::timeout`], and no in-process
+    /// retry: a refresh runs inside a discovery job, which must not hold its queue row for several
+    /// long downloads per file, and the next scheduled refresh tries again anyway.
+    pub async fn get_reference_file_if_changed(
+        &self,
+        source: SourceId,
+        url: &str,
+        known: Option<&Validators>,
+    ) -> Result<IfChanged, CrawlError> {
         let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
         target.timeout = Some(REFERENCE_FILE_TIMEOUT.max(self.inner.config.timeout));
         target.extra_attempts = 0;
-        Ok(match self.if_changed(target, known.as_ref()).await? {
-            IfChanged::Unchanged { .. } => ConditionalText::NotModified,
-            IfChanged::Changed { body, validators } => ConditionalText::Modified {
-                body,
-                etag: validators.etag,
-            },
-        })
+        self.if_changed(target, known).await
     }
 
     /// GET `url` with `query` appended, skipping the body when it hasn't changed since `known`.

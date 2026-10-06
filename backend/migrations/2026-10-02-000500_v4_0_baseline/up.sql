@@ -80,16 +80,17 @@ LANGUAGE sql IMMUTABLE AS $$
     ) ELSE FALSE END
 $$;
 
--- Seeds a source's reference codes into a new database, from a file recorded with the ETag it was
--- downloaded with. Called by the generated `*_seed_{source}_reference_codes` migrations (see
+-- Seeds a source's reference codes into a new database, from a file recorded with the validators
+-- it was downloaded with (ETag, Last-Modified, body SHA-256). Called by the generated `*_seed_{source}_reference_codes` migrations (see
 -- backend/crates/econ-graph-crawler/src/reference_file.rs), one call per file.
 --
 -- Does nothing when `reference_file_cache` already has a row for the file: this database has
 -- crawled it (or been seeded with it) and the crawl keeps it current. Otherwise the codes are
 -- merged into the dataset's dimension (codes it already has keep their labels; a dimension with a
 -- shared `codelist` is left alone and nothing is stored), creating the
--- dataset row or the dimension if needed, and the file's ETag is stored so the first crawl only
--- downloads the file again if the source changed it. `sync_datasets` later fills in the rest of
+-- dataset row or the dimension if needed, and the file's validators are stored so the first crawl
+-- answers the file as unchanged unless the source changed it, even for a source that sends no
+-- ETag (If-Modified-Since, or the same body hash). `sync_datasets` later fills in the rest of
 -- the dataset from its toml file and keeps these codes.
 CREATE FUNCTION seed_reference_codes(
     p_source TEXT,
@@ -97,6 +98,8 @@ CREATE FUNCTION seed_reference_codes(
     p_dimension JSONB,
     p_url TEXT,
     p_etag TEXT,
+    p_last_modified TEXT,
+    p_content_sha256 TEXT,
     p_codes JSONB
 ) RETURNS VOID
 LANGUAGE plpgsql AS $$
@@ -160,7 +163,8 @@ BEGIN
         ELSE datasets.dimensions || jsonb_build_array(v_dimension)
     END;
 
-    INSERT INTO reference_file_cache (source_id, url, etag) VALUES (v_source_id, p_url, p_etag);
+    INSERT INTO reference_file_cache (source_id, url, etag, last_modified, content_sha256)
+    VALUES (v_source_id, p_url, p_etag, p_last_modified, p_content_sha256);
 END
 $$;
 

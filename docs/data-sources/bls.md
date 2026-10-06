@@ -15,7 +15,7 @@ years, without one 10. Background: [BLS API experimental findings](../technical/
   `base_period` ("Index 1982-84=100"), the CE data type label (from `ce.datatype`) or the LA
   measure label. LN's flat files have no units, so LN series have units only after a fetch
   with a key. Before each scheduled discovery the worker re-fetches each file by conditional
-  GET (`ETag`) and stores the curated series' rows (`reference_file_cache.payload`);
+  GET (`ETag`/`Last-Modified`, or an unchanged body hash) and stores the curated series' rows (`reference_file_cache.payload`);
   discovery reads those rows and makes no API call. The files go through the shared
   reference-file refresh (`reference_file::refresh`); no seed migration carries them (seeds
   hold code lists only), so a new database lists these series after its first successful

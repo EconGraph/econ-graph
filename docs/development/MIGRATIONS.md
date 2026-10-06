@@ -45,7 +45,7 @@ recorded versions it no longer has, so:
   the head of the old chain first (check out the commit before the squash and start the backend
   once).
 
-Two limits, both only affecting databases that were never deployed from a tag:
+Three limits, all only affecting databases that were never deployed from a tag:
 
 - "Has the last version" means "ran the last migration", not "ran all of them". A database that
   ran the last replaced migration before an earlier-numbered one existed skips the squash and
@@ -64,6 +64,18 @@ Two limits, both only affecting databases that were never deployed from a tag:
   FROM __diesel_schema_migrations
   WHERE version = '20261002000500'
     AND to_regclass('public.series_fetch_validators') IS NULL;
+  ```
+- Folding a change into a squash that some database has already run (it has the squash's
+  version recorded) does not reach that database. On release/v4.0, `seed_reference_codes` gained
+  its Last-Modified and body hash arguments in the baseline itself after the baseline had merged
+  (ECO-396), so a database migrated from release/v4.0 before that keeps the six-argument
+  function, and a recorded seed migration fails on it with "function seed_reference_codes(...)
+  does not exist". Recreate such a database. This query returns a row on one:
+
+  ```sql
+  SELECT oid::regprocedure
+  FROM pg_proc
+  WHERE proname = 'seed_reference_codes' AND pronargs = 6;
   ```
 - A database that ran the old chain keeps the replaced versions in `__diesel_schema_migrations`.
   `run_pending_migrations` ignores them, but `diesel migration revert` / `redo` stop with
