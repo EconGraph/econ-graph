@@ -139,9 +139,10 @@ jobs:
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
             - 'frontend/.license-checker.json'
+            - 'frontend/scripts/check-npm-audit.mjs'
+            - 'frontend/scripts/npm-audit-allowlist.json'
             - 'admin-frontend/package.json'
             - 'admin-frontend/package-lock.json'
-            - 'admin-frontend/scripts/check-npm-audit.mjs'
             - 'admin-frontend/scripts/npm-audit-allowlist.json'
           # Docker Build Test builds the whole backend and frontend inside the
           # image, so a dependency or toolchain bump can break it with no
@@ -1077,8 +1078,9 @@ jobs:
     - name: Run admin-frontend npm security audit
       # Gates every production and dev dependency, with narrow, documented
       # exceptions for advisories with no upstream fix (see
-      # scripts/npm-audit-allowlist.json). Mirrors frontend's gate (ECO-394).
-      run: node scripts/check-npm-audit.mjs .
+      # scripts/npm-audit-allowlist.json), via the same script frontend uses
+      # (ECO-394/ECO-395) — kept as one copy since they'd otherwise drift.
+      run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
       working-directory: admin-frontend
 
   license-compliance:

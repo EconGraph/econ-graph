@@ -1065,3 +1065,346 @@ mod contract {
         },
     }
 }
+
+/// Every request not matched by an earlier mount answers as an indicator with no rows, updated
+/// `2026-07-01` (the fixtures' `lastupdated`).
+async fn mount_empty_fallback(mock: &MockSource) {
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET")).respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_raw(
+                    br#"[{"page": 1, "pages": 1, "lastupdated": "2026-07-01"}, null]"#.to_vec(),
+                    "application/json",
+                ),
+            ),
+        )
+        .await;
+}
+
+async fn validator_db(name: &str) -> Option<crate::persist::stable_id_tests::FreshDb> {
+    use crate::dataset::DatasetCatalog;
+    use crate::persist::stable_id_tests::{database_url, FreshDb};
+    let admin_url = database_url()?;
+    let db = FreshDb::create(&admin_url, name).await;
+    let mut catalog = DatasetCatalog::empty();
+    catalog.load_adapter(&WorldBankAdapter::default()).unwrap();
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    Some(db)
+}
+
+fn full_requests(reqs: &[wiremock::Request]) -> usize {
+    reqs.iter()
+        .filter(|r| {
+            r.url
+                .query_pairs()
+                .any(|(k, v)| k == "per_page" && v == PER_PAGE)
+        })
+        .count()
+}
+
+#[tokio::test]
+async fn an_unchanged_indicator_is_not_refetched() {
+    let Some(db) = validator_db("econgraph_wb_fetch_validators").await else {
+        return;
+    };
+    let mock = MockSource::start().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP))
+        .await;
+    mount_empty_fallback(&mock).await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let requested = ids(&["wdi/NY.GDP.PCAP.CD.USA", "wdi/NY.GDP.PCAP.CD.DEU"]);
+
+    let first = adapter.fetch_batch(&ctx, &requested, None).await.unwrap();
+    let lastupdated = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+    let version = Validators {
+        version: Some(adapter.series_version("NY.GDP.PCAP.CD", lastupdated)),
+        ..Validators::default()
+    };
+    assert!(version
+        .version
+        .as_deref()
+        .unwrap()
+        .starts_with(&format!("{PARSE_VERSION}:2026-07-01:")));
+    for id in &requested {
+        let f = first[id].as_ref().unwrap();
+        assert_eq!(f.validators.as_ref(), Some(&version));
+        persist::persist_series(&db.pool, SourceId::WorldBank, id, f)
+            .await
+            .unwrap();
+    }
+    assert_eq!(full_requests(&mock.received_requests().await), 1);
+
+    let again = adapter.fetch_batch(&ctx, &requested, None).await.unwrap();
+    for id in &requested {
+        assert_eq!(
+            again[id].as_ref().unwrap(),
+            &FetchedSeries::unchanged(first[id].as_ref().unwrap().dataset.clone(), version.clone()),
+            "{id}"
+        );
+    }
+    let reqs = mock.received_requests().await;
+    assert_eq!(
+        full_requests(&reqs),
+        1,
+        "the probe alone answers an unchanged indicator"
+    );
+    assert_eq!(reqs.len(), 2);
+
+    // A series never fetched makes the indicator a full fetch.
+    let mixed = ids(&["wdi/NY.GDP.PCAP.CD.USA", "wdi/NY.GDP.PCAP.CD.WLD"]);
+    let out = adapter.fetch_batch(&ctx, &mixed, None).await.unwrap();
+    assert!(mixed
+        .iter()
+        .all(|id| !out[id].as_ref().unwrap().points.is_empty()));
+    assert_eq!(full_requests(&mock.received_requests().await), 2);
+
+    // A newer lastupdated makes it a full fetch too.
+    let mut conn = db.pool.get().await.unwrap();
+    diesel_async::RunQueryDsl::execute(
+        diesel::sql_query("UPDATE series_fetch_validators SET version = 'wb-1:2026-01-01'"),
+        &mut conn,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let out = adapter.fetch_batch(&ctx, &requested, None).await.unwrap();
+    assert!(!out["wdi/NY.GDP.PCAP.CD.USA"]
+        .as_ref()
+        .unwrap()
+        .points
+        .is_empty());
+    assert_eq!(full_requests(&mock.received_requests().await), 3);
+
+    // A renamed indicator rewrites its series' titles though its data hasn't moved.
+    for id in &requested {
+        persist::persist_series(&db.pool, SourceId::WorldBank, id, out[id].as_ref().unwrap())
+            .await
+            .unwrap();
+    }
+    let out = adapter.fetch_batch(&ctx, &requested, None).await.unwrap();
+    assert!(out["wdi/NY.GDP.PCAP.CD.USA"]
+        .as_ref()
+        .unwrap()
+        .points
+        .is_empty());
+    assert_eq!(full_requests(&mock.received_requests().await), 3);
+    persist::merge_dataset_dimension_code_entries(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+        &[Code::new("NY.GDP.PCAP.CD", "GDP per capita, renamed")],
+    )
+    .await
+    .unwrap();
+    let out = adapter.fetch_batch(&ctx, &requested, None).await.unwrap();
+    let usa = out["wdi/NY.GDP.PCAP.CD.USA"].as_ref().unwrap();
+    assert!(!usa.points.is_empty());
+    assert!(
+        usa.metadata
+            .as_ref()
+            .unwrap()
+            .title
+            .starts_with("GDP per capita, renamed"),
+        "{:?}",
+        usa.metadata
+    );
+    assert_eq!(full_requests(&mock.received_requests().await), 4);
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn discovery_is_unchanged_until_an_indicator_updates() {
+    let Some(db) = validator_db("econgraph_wb_discovery_validators").await else {
+        return;
+    };
+    let mock = MockSource::start().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP))
+        .await;
+    mount_empty_fallback(&mock).await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+
+    let Discovery::Changed {
+        found,
+        validator: Some((key, validators)),
+    } = adapter.discover_if_changed(&ctx).await.unwrap()
+    else {
+        panic!("first discovery must list every indicator")
+    };
+    assert!(!found.is_empty());
+    assert_eq!(key, mock.url("/country/all/indicator"));
+    let version = validators.version.clone().unwrap();
+    assert!(
+        version.starts_with(&format!("{PARSE_VERSION}|")),
+        "{version}"
+    );
+    assert!(
+        version.contains(&format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-07-01:")),
+        "{version}"
+    );
+    let mut conn = db.pool.get().await.unwrap();
+    persist::set_url_validators_conn(&mut conn, SourceId::WorldBank, &key, &validators)
+        .await
+        .unwrap();
+    let before = full_requests(&mock.received_requests().await);
+    assert_eq!(
+        adapter.discover_if_changed(&ctx).await.unwrap(),
+        Discovery::Unchanged
+    );
+    assert_eq!(full_requests(&mock.received_requests().await), before);
+
+    // Any indicator with a different lastupdated means a full discovery.
+    let stale = Validators {
+        version: Some(version.replace(
+            &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-07-01"),
+            &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-01-01"),
+        )),
+        ..Validators::default()
+    };
+    persist::set_url_validators_conn(&mut conn, SourceId::WorldBank, &key, &stale)
+        .await
+        .unwrap();
+    drop(conn);
+    assert!(matches!(
+        adapter.discover_if_changed(&ctx).await.unwrap(),
+        Discovery::Changed {
+            validator: Some(_),
+            ..
+        }
+    ));
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_discovery_that_skipped_an_indicator_stores_no_version() {
+    let mock = MockSource::start().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP))
+        .await;
+    // Probes (per_page=1) would succeed, but with nothing stored there are none; every other full
+    // request is an "Invalid value" error.
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::query_param("per_page", "1")).respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_raw(
+                    br#"[{"page": 1, "pages": 1, "lastupdated": "2026-07-01"}, null]"#.to_vec(),
+                    "application/json",
+                ),
+            ),
+        )
+        .await;
+    mount_invalid_fallback(&mock).await;
+    let Discovery::Changed { found, validator } = WorldBankAdapter::new(mock.base_url())
+        .discover_if_changed(&test_ctx())
+        .await
+        .unwrap()
+    else {
+        panic!("nothing stored, so not Unchanged")
+    };
+    assert!(!found.is_empty());
+    assert_eq!(validator, None);
+}
+
+/// An incomplete discovery keeps the version stored by the last complete one, and that can't
+/// hide the indicator it skipped: the stored version still differs from the probes until a
+/// discovery reads every indicator, so each later discovery runs in full again rather than
+/// returning `Unchanged`.
+#[tokio::test]
+async fn an_incomplete_discovery_is_retried_in_full() {
+    let Some(db) = validator_db("econgraph_wb_incomplete_discovery").await else {
+        return;
+    };
+    let mock = MockSource::start().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP))
+        .await;
+    // Every probe answers; every other full request is an "Invalid value" error.
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::query_param("per_page", "1")).respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_raw(
+                    br#"[{"page": 1, "pages": 1, "lastupdated": "2026-07-01"}, null]"#.to_vec(),
+                    "application/json",
+                ),
+            ),
+        )
+        .await;
+    mount_invalid_fallback(&mock).await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+
+    // The last complete discovery saw an older NY.GDP.PCAP.CD.
+    let current = adapter
+        .catalog_version(&ctx, reference::wdi_indicators().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let older = current.replace(
+        &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-07-01"),
+        &format!("NY.GDP.PCAP.CD={PARSE_VERSION}:2026-01-01"),
+    );
+    assert_ne!(older, current);
+    persist::set_url_validators(
+        &db.pool,
+        SourceId::WorldBank,
+        &adapter.catalog_key(),
+        &Validators {
+            version: Some(older),
+            ..Validators::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let full = |reqs: &[wiremock::Request]| {
+        reqs.iter()
+            .filter(|r| {
+                r.url.path().ends_with("/NY.GDP.PCAP.CD")
+                    && r.url
+                        .query_pairs()
+                        .any(|(k, v)| k == "per_page" && v == PER_PAGE)
+            })
+            .count()
+    };
+    for run in 1..=2 {
+        let Discovery::Changed { found, validator } =
+            adapter.discover_if_changed(&ctx).await.unwrap()
+        else {
+            panic!("run {run}: an indicator moved since the stored version")
+        };
+        assert!(!found.is_empty(), "run {run}");
+        assert_eq!(
+            validator, None,
+            "run {run}: incomplete, so nothing to store"
+        );
+        assert_eq!(full(&mock.received_requests().await), run);
+    }
+
+    db.drop().await;
+}
+
+#[test]
+fn shared_validators_need_one_stored_version() {
+    let state = |version: Option<&str>| StoredFetchState {
+        dataset: SeriesDataset::default(),
+        validators: Some(Validators {
+            version: version.map(str::to_owned),
+            ..Validators::default()
+        }),
+    };
+    let stored = HashMap::from([
+        ("a".to_string(), state(Some("2026-07-01"))),
+        ("b".to_string(), state(Some("2026-07-01"))),
+        ("c".to_string(), state(Some("2026-01-01"))),
+        ("d".to_string(), state(None)),
+    ]);
+    assert!(shared_validators(["a", "b"], &stored).is_some());
+    assert_eq!(shared_validators(["a", "c"], &stored), None);
+    assert_eq!(shared_validators(["a", "d"], &stored), None);
+    assert_eq!(shared_validators(["a", "missing"], &stored), None);
+}

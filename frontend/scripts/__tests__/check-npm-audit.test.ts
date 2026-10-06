@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findAdvisories,
+  parseArgs,
   parseAuditReport,
   staleAllowlistEntries,
   unallowedAdvisories,
@@ -106,6 +107,15 @@ describe('unallowedAdvisories', () => {
     const advisories = [{ id: 'GHSA-68fv-2mgg-jv7q', package: 'source-map-js', severity: 'high' }];
     expect(unallowedAdvisories(advisories, allowlist)).toEqual(advisories);
   });
+
+  it('does not excuse an advisory whose id matches but whose package does not', () => {
+    // A GHSA id allowlisted for one package must not suppress the same id surfacing against a
+    // different package (a typo in the allowlist, or an id npm reused across unrelated packages).
+    const advisories = [
+      { id: 'GHSA-hp3w-g68c-fv3c', package: 'some-other-package', severity: 'moderate' },
+    ];
+    expect(unallowedAdvisories(advisories, allowlist)).toEqual(advisories);
+  });
 });
 
 describe('staleAllowlistEntries', () => {
@@ -118,6 +128,14 @@ describe('staleAllowlistEntries', () => {
     const allowlist = [{ id: 'GHSA-hp3w-g68c-fv3c', package: 'sprintf-js' }];
     const advisories = [{ id: 'GHSA-hp3w-g68c-fv3c', package: 'sprintf-js', severity: 'moderate' }];
     expect(staleAllowlistEntries(advisories, allowlist)).toEqual([]);
+  });
+
+  it('flags an allowlist entry whose id matches but whose package does not', () => {
+    const allowlist = [{ id: 'GHSA-hp3w-g68c-fv3c', package: 'sprintf-js' }];
+    const advisories = [
+      { id: 'GHSA-hp3w-g68c-fv3c', package: 'some-other-package', severity: 'moderate' },
+    ];
+    expect(staleAllowlistEntries(advisories, allowlist)).toEqual(allowlist);
   });
 });
 
@@ -140,5 +158,31 @@ describe('parseAuditReport', () => {
     expect(() => parseAuditReport(JSON.stringify({ auditReportVersion: 2 }))).toThrow(
       /vulnerabilities/
     );
+  });
+});
+
+describe('parseArgs', () => {
+  // This script is shared between frontend/ and admin-frontend/ (ECO-395): admin-frontend
+  // invokes it with --dir/--allowlist pointed at its own directory and allowlist file.
+  it('defaults to the current directory and no allowlist override when given nothing', () => {
+    expect(parseArgs([])).toEqual({ dir: '.', allowlistArg: undefined });
+  });
+
+  it('takes a bare positional argument as the directory (frontend/admin-frontend\'s own call)', () => {
+    expect(parseArgs(['.'])).toEqual({ dir: '.', allowlistArg: undefined });
+  });
+
+  it('takes --dir and --allowlist for another package (admin-frontend calling this copy)', () => {
+    expect(parseArgs(['--dir', 'admin-frontend', '--allowlist', 'admin-frontend/scripts/npm-audit-allowlist.json'])).toEqual({
+      dir: 'admin-frontend',
+      allowlistArg: 'admin-frontend/scripts/npm-audit-allowlist.json',
+    });
+  });
+
+  it('--dir overrides a bare positional directory', () => {
+    expect(parseArgs(['.', '--dir', 'admin-frontend'])).toEqual({
+      dir: 'admin-frontend',
+      allowlistArg: undefined,
+    });
   });
 });

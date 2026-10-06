@@ -1112,6 +1112,7 @@ fn build_series(
         metadata,
         points,
         dataset,
+        validators: None,
     })
 }
 
