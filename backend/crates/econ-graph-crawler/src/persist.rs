@@ -40,6 +40,7 @@ use uuid::Uuid;
 
 use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
 use crate::dataset::{DatasetCatalog, SeriesDataset};
+use crate::http::Validators;
 use crate::series_id::stable_series_id;
 use crate::source::SourceId;
 
@@ -328,6 +329,191 @@ pub async fn set_reference_file_etag(
     .bind::<Text, _>(url)
     .bind::<Nullable<Text>, _>(etag)
     .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// What a fetch needs to know about a stored series to skip unchanged data: its dataset (for
+/// [`FetchedSeries::unchanged`](crate::adapter::FetchedSeries::unchanged)) and the validators
+/// stored by its last successful fetch (`None` if it stored none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFetchState {
+    pub dataset: SeriesDataset,
+    pub validators: Option<Validators>,
+}
+
+/// [`StoredFetchState`] of each of `external_ids` that has an `economic_series` row; ids without
+/// one (never fetched) are absent, so the adapter fetches them in full.
+pub async fn stored_fetch_state(
+    pool: &DatabasePool,
+    source: SourceId,
+    external_ids: &[String],
+) -> AppResult<HashMap<String, StoredFetchState>> {
+    use econ_graph_core::models::SeriesDimensions;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Text)]
+        external_id: String,
+        #[diesel(sql_type = Text)]
+        code: String,
+        #[diesel(sql_type = Jsonb)]
+        dimensions: SeriesDimensions,
+        #[diesel(sql_type = Bool)]
+        has_validators: bool,
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        last_modified: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        content_sha256: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        version: Option<String>,
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let rows: Vec<Row> = diesel::sql_query(
+        "SELECT es.external_id, d.code, es.dimensions, (v.series_id IS NOT NULL) AS has_validators, \
+                v.etag, v.last_modified, v.content_sha256, v.version \
+         FROM economic_series es \
+         JOIN datasets d ON d.id = es.dataset_id \
+         LEFT JOIN series_fetch_validators v ON v.series_id = es.id \
+         WHERE es.source_id = $1 AND es.external_id = ANY($2)",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Array<Text>, _>(external_ids)
+    .load(&mut conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let validators = r.has_validators.then_some(Validators {
+                etag: r.etag,
+                last_modified: r.last_modified,
+                content_sha256: r.content_sha256,
+                version: r.version,
+            });
+            (
+                r.external_id,
+                StoredFetchState {
+                    dataset: SeriesDataset {
+                        code: r.code,
+                        dimensions: r.dimensions,
+                    },
+                    validators,
+                },
+            )
+        })
+        .collect())
+}
+
+/// Replaces `series_id`'s `series_fetch_validators` row with `validators`, or deletes it.
+async fn set_series_validators_conn(
+    conn: &mut AsyncPgConnection,
+    series_id: Uuid,
+    validators: Option<&Validators>,
+) -> AppResult<()> {
+    let Some(v) = validators else {
+        diesel::sql_query("DELETE FROM series_fetch_validators WHERE series_id = $1")
+            .bind::<SqlUuid, _>(series_id)
+            .execute(conn)
+            .await?;
+        return Ok(());
+    };
+    diesel::sql_query(
+        "INSERT INTO series_fetch_validators \
+             (series_id, etag, last_modified, content_sha256, version, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, NOW()) \
+         ON CONFLICT (series_id) DO UPDATE SET \
+             etag = EXCLUDED.etag, last_modified = EXCLUDED.last_modified, \
+             content_sha256 = EXCLUDED.content_sha256, version = EXCLUDED.version, \
+             updated_at = EXCLUDED.updated_at",
+    )
+    .bind::<SqlUuid, _>(series_id)
+    .bind::<Nullable<Text>, _>(v.etag.as_deref())
+    .bind::<Nullable<Text>, _>(v.last_modified.as_deref())
+    .bind::<Nullable<Text>, _>(v.content_sha256.as_deref())
+    .bind::<Nullable<Text>, _>(v.version.as_deref())
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Validators stored for `url` (a resource `source`'s adapter checks before re-reading it, such as
+/// a catalog file discovery lists series from) by [`set_url_validators_conn`]. `None` if never
+/// stored. Shares `reference_file_cache` with [`reference_file_etag`].
+pub async fn url_validators(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<Option<Validators>> {
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        last_modified: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        content_sha256: Option<String>,
+        #[diesel(sql_type = Nullable<Text>)]
+        version: Option<String>,
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag, last_modified, content_sha256, version FROM reference_file_cache \
+         WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row.map(|r| Validators {
+        etag: r.etag,
+        last_modified: r.last_modified,
+        content_sha256: r.content_sha256,
+        version: r.version,
+    }))
+}
+
+/// Stores `validators` for `url` (see [`url_validators`]), for a caller whose data write is
+/// already committed (a reference-file refresh). A discovery's validators go through the worker
+/// instead ([`Discovery::Changed`](crate::adapter::Discovery::Changed)), in its own transaction.
+pub async fn set_url_validators(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    validators: &Validators,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    set_url_validators_conn(&mut conn, source, url, validators).await
+}
+
+/// Stores `validators` for `url` (see [`url_validators`]). Connection form: the worker calls it in
+/// the transaction that writes the discovery the validators describe.
+pub(crate) async fn set_url_validators_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    url: &str,
+    validators: &Validators,
+) -> AppResult<()> {
+    let source_id = data_source_id_conn(conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache \
+             (source_id, url, etag, last_modified, content_sha256, version, fetched_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET \
+             etag = EXCLUDED.etag, last_modified = EXCLUDED.last_modified, \
+             content_sha256 = EXCLUDED.content_sha256, version = EXCLUDED.version, \
+             fetched_at = EXCLUDED.fetched_at",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Nullable<Text>, _>(validators.etag.as_deref())
+    .bind::<Nullable<Text>, _>(validators.last_modified.as_deref())
+    .bind::<Nullable<Text>, _>(validators.content_sha256.as_deref())
+    .bind::<Nullable<Text>, _>(validators.version.as_deref())
+    .execute(conn)
     .await?;
     Ok(())
 }
@@ -730,6 +916,8 @@ async fn upsert_points(
 ///   fetch response carries no metadata (Census BDS) rely on that row. A new row with neither
 ///   gets `external_id` as its title and [`UNKNOWN_FREQUENCY`]. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
+/// - Validators: `fetched.validators` replaces the series' `series_fetch_validators` row (`None`
+///   deletes it), in the same transaction as the points ([`stored_fetch_state`] reads it back).
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
 ///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
 ///   only if it differs.
@@ -819,6 +1007,7 @@ pub(crate) async fn persist_series_conn(
     .get_result(&mut *conn)
     .await?;
     let series_id = row.id;
+    set_series_validators_conn(conn, series_id, fetched.validators.as_ref()).await?;
 
     let points: Vec<&FetchedPoint> = unique.values().copied().collect();
     let (mut upserted, mut new) = (0usize, 0usize);
@@ -1162,3 +1351,5 @@ mod reference_data_tests;
 mod release_sources_tests;
 #[cfg(test)]
 pub(crate) mod stable_id_tests;
+#[cfg(test)]
+mod validator_tests;
