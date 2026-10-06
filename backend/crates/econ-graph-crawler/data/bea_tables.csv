@@ -1,14 +1,13 @@
 # Curated BEA tables the crawler discovers and fetches (see src/sources/bea.rs).
 # dataset: BEA dataset name (NIPA or Regional). table_name: BEA's TableName.
 # frequencies: BEA Frequency codes the table is crawled at, separated by spaces
-# (A annual, Q quarterly, M monthly; Regional tables are annual). title: short table
-# name used in series titles, with the frequency appended for NIPA; it may contain
-# commas, since it is the last column (quote it as in any CSV).
-dataset,table_name,frequencies,title
-NIPA,T10101,A Q,"Real GDP, percent change from preceding period"
-NIPA,T10105,A Q,"GDP, current dollars"
-NIPA,T10106,A Q,"Real GDP, chained dollars"
-NIPA,T20100,A Q,Personal income and its disposition
-NIPA,T20600,M,Personal income and its disposition
-NIPA,T20804,M,PCE price indexes
-Regional,SAGDP2N,A,"GDP by state, current dollars"
+# (A annual, Q quarterly, M monthly; Regional tables are annual). Titles come from
+# BEA's own GetParameterValues(TableName) on each crawl, not from this file.
+dataset,table_name,frequencies
+NIPA,T10101,A Q
+NIPA,T10105,A Q
+NIPA,T10106,A Q
+NIPA,T20100,A Q
+NIPA,T20600,M
+NIPA,T20804,M
+Regional,SAGDP2N,A
