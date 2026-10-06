@@ -562,9 +562,9 @@ pub async fn reference_file_cache(
 
 /// Stores what an adapter kept from a copy of `url` (`payload`), for files whose contents aren't
 /// merged into another table. Called from inside [`crate::reference_file::refresh`]'s apply
-/// step, which then stores that copy's `ETag` ([`set_reference_file_etag`], which leaves the
-/// payload alone), so a later `304` pairs with the payload it validates. A new row gets no
-/// `ETag` until then.
+/// step, which then stores that copy's validators ([`set_url_validators`], which leaves the
+/// payload alone), so a later unchanged answer pairs with the payload it validates. A new row
+/// gets no validators until then.
 pub async fn set_reference_file_payload(
     pool: &DatabasePool,
     source: SourceId,

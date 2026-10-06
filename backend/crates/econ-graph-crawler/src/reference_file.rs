@@ -808,6 +808,8 @@ mod tests {
             })
             .respond_with(wiremock::ResponseTemplate::new(304))
             .with_priority(1)
+            // The second `/lm.txt` refresh must be this 304, not the body hash fallback.
+            .expect(1)
             .mount(mock.server())
             .await;
         mock.mount(&Route::get("/plain.txt"), Reply::text("B"))
@@ -844,6 +846,7 @@ mod tests {
                 "{path}"
             );
         }
+        mock.server().verify().await;
 
         let parse: ParseCodes = Arc::new(|b| Ok(vec![Code::new("01", b.trim())]));
         let list = CodeList::new(mock.url("/seeded.txt"), "bds", "state", parse);
