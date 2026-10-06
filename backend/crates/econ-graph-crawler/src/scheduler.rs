@@ -34,6 +34,15 @@
 //!    or annual discovered series is retried after 14 days, not twice its interval. With purging
 //!    disabled the backoff is the full twice-the-interval.
 //!
+//!    Series whose `crawl_status` is `not_found` (the source returned `CrawlError::NotFound`, a
+//!    firmer signal than a generic failure) back off **ten times** the interval instead, so a
+//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. A series
+//!    the source reports NotFound before it ever gets an `economic_series` row has its
+//!    `series_metadata` row deactivated instead (`persist::deactivate_metadata_conn`) and so
+//!    isn't a candidate at all; it comes back only when a later catalog discovery lists the id
+//!    again (see [`coverage`](crate::coverage) for how this keeps it out of coverage's
+//!    denominator).
+//!
 //!    Discovered series and refreshes of existing series take turns in the batch, each kind
 //!    oldest first (never-crawled series first; discovered series never tried before ones whose
 //!    last fetch failed), so neither starves the other.
@@ -190,6 +199,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
+               AND NOT EXISTS ( \
+                     SELECT 1 FROM datasets d \
+                     WHERE d.id = es.dataset_id AND d.code = 'legacy') \
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
@@ -215,11 +227,13 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                  WHERE q.source = c.code AND q.series_id = c.external_id \
                    AND q.kind = 'fetch_series' \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
-           AND CASE WHEN c.crawl_status = 'failed' THEN \
+           AND CASE WHEN c.crawl_status IN ('failed', 'not_found') THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
-                            '-infinity'::timestamptz) <= NOW() - 2 * c.refresh \
+                            '-infinity'::timestamptz) \
+                       <= NOW() - (CASE WHEN c.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
+                          * c.refresh \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
          ) \
@@ -377,7 +391,7 @@ impl RefreshScheduler {
         let codes: Vec<String> = sources.iter().map(|s| s.as_str().to_string()).collect();
         // Only read when Census is scheduled; the pattern is unused otherwise.
         let census_ids = if sources.contains(&SourceId::Census) {
-            crate::sources::census::fetchable_id_regex()?
+            crate::sources::census::fetchable_id_regex()
         } else {
             String::new()
         };
@@ -833,7 +847,8 @@ mod tests {
         let ids = [
             "bds/national..T15CX",
             "bds/state.06.T15CX",
-            "bds/state.03.T15CX",
+            "bds/state.72.T15CX",
+            "bds/state.57.T15CX",
             "bds/state..T15CX",
             "bds/county.001.T15CX",
             "bds/national.06.T15CX",
@@ -1010,6 +1025,57 @@ mod tests {
         assert_eq!(queued_series(p).await, expected);
     }
 
+    /// Series the dataset migration parked in a source's `legacy` dataset have no adapter that can
+    /// fetch them, so they are never due, however stale.
+    #[tokio::test]
+    async fn legacy_dataset_series_are_never_due() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let fred = persist::data_source_id(p, SourceId::Fred).await.unwrap();
+        let stale = seed(
+            p,
+            SourceId::Fred,
+            "t15c_legacy_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
+        seed(
+            p,
+            SourceId::Fred,
+            "t15c_current_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
+        exec(
+            p,
+            &format!(
+                "INSERT INTO datasets (source_id, code, name) \
+                 VALUES ('{fred}', 'legacy', 'FRED series from before datasets') \
+                 ON CONFLICT (source_id, code) DO NOTHING"
+            ),
+        )
+        .await;
+        exec(
+            p,
+            &format!(
+                "UPDATE economic_series SET dataset_id = \
+                     (SELECT id FROM datasets WHERE source_id = '{fred}' AND code = 'legacy') \
+                 WHERE id = '{stale}'"
+            ),
+        )
+        .await;
+
+        let s = scheduler(p, &[SourceId::Fred], DEFAULT_BATCH_LIMIT);
+        s.tick().await.unwrap();
+        let queued = queued_series(p).await;
+        assert!(queued.contains("FRED/t15c_current_stale"), "{queued:?}");
+        assert!(!queued.contains("FRED/t15c_legacy_stale"), "{queued:?}");
+    }
+
     #[tokio::test]
     async fn batch_limit_takes_oldest_first() {
         let Some(db) = db().await else { return };
@@ -1101,6 +1167,37 @@ mod tests {
                 "FRED/t15c_never_old",
                 "FRED/t15c_ok10",
             ])
+        );
+    }
+
+    /// A `not_found` series backs off ten times its interval (not twice, like a plain `failed`),
+    /// since `CrawlError::NotFound` is a firmer signal than a generic failure (ECO-254).
+    #[tokio::test]
+    async fn not_found_series_back_off_ten_times_the_interval() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let nf = Some("not_found");
+        // Monthly = 7 days, so not_found series need 70.
+        seed(p, SourceId::Fred, "t15c_nf60", "Monthly", Some(60.0), nf).await;
+        seed(p, SourceId::Fred, "t15c_nf75", "Monthly", Some(75.0), nf).await;
+        // A plain 'failed' series at the same age is already due (needs only 14).
+        seed(
+            p,
+            SourceId::Fred,
+            "t15c_f60",
+            "Monthly",
+            Some(60.0),
+            Some("failed"),
+        )
+        .await;
+
+        scheduler(p, &[SourceId::Fred], DEFAULT_BATCH_LIMIT)
+            .tick()
+            .await
+            .unwrap();
+        assert_eq!(
+            queued_series(p).await,
+            set(&["FRED/t15c_nf75", "FRED/t15c_f60"])
         );
     }
 

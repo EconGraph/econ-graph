@@ -72,6 +72,7 @@ pub mod persist;
 pub mod policy;
 pub mod rate_limit;
 pub mod reference;
+pub mod reference_file;
 pub mod scheduler;
 pub mod series_id;
 pub mod source;
@@ -82,12 +83,12 @@ pub mod testkit;
 pub mod worker;
 
 pub use adapter::{
-    AdapterRegistry, ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
-    NewSeriesMetadataLite, SourceAdapter,
+    AdapterRegistry, ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, Discovery, FetchedPoint,
+    FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
 };
 pub use dataset::{DatasetCatalog, DatasetDef, SeriesDataset};
 pub use error::CrawlError;
-pub use http::{HttpConfig, HttpFetcher};
+pub use http::{ConditionalText, HttpConfig, HttpFetcher, IfChanged, Validators};
 pub use policy::SourcePolicy;
 pub use rate_limit::{SourcePermit, SourceRateLimiter};
 pub use scheduler::{RefreshScheduler, SchedulerConfig, SchedulerTickStats};

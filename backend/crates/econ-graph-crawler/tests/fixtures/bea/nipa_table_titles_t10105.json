@@ -1,0 +1,18 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETPARAMETERVALUES"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "NIPA"},
+    {"ParameterName": "PARAMETERNAME", "ParameterValue": "TABLENAME"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "ParamValue": [
+    {"TableName": "T10105", "Description": "Table 1.1.5. Gross Domestic Product"}
+   ]
+  }
+ }
+}

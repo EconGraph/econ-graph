@@ -143,6 +143,7 @@ fn empty_fetch() -> FetchedSeries {
         metadata: None,
         points: Vec::new(),
         dataset: flat(),
+        validators: None,
     }
 }
 
@@ -221,6 +222,7 @@ impl SourceAdapter for TestAdapter {
             }),
             points,
             dataset: test_dataset(external_id),
+            validators: None,
         })
     }
 }
@@ -327,6 +329,17 @@ async fn series_row(
             economic_series::end_date,
             economic_series::crawl_status,
         ))
+        .first(&mut conn)
+        .await
+        .optional()
+        .unwrap()
+}
+
+async fn metadata_is_active(pool: &DatabasePool, external_id: &str) -> Option<bool> {
+    let mut conn = pool.get().await.unwrap();
+    series_metadata::table
+        .filter(series_metadata::external_id.eq(external_id))
+        .select(series_metadata::is_active)
         .first(&mut conn)
         .await
         .optional()
@@ -570,6 +583,7 @@ async fn revision_filter_picks_latest_and_as_of_revisions() {
                 revision("2024-01-01", "2", "2024-03-01", false),
             ],
             dataset: flat(),
+            validators: None,
         },
     )
     .await
@@ -657,6 +671,7 @@ async fn exclude_synthetic_legacy_rows_keeps_asof_and_original_only_correct() {
                 revision("2025-04-01", "30485.729", "2025-09-25", false),
             ],
             dataset: flat(),
+            validators: None,
         },
     )
     .await
@@ -723,6 +738,7 @@ async fn revision_filter_breaks_same_day_ties_and_pages_after_filtering() {
                 revision("2024-03-01", "30", "2024-04-01", true),
             ],
             dataset: flat(),
+            validators: None,
         },
     )
     .await
@@ -788,11 +804,24 @@ async fn fred_vintages_first_and_incremental_fetch() {
         .unwrap()
     };
     let mock = MockSource::start().await;
-    mock.mount(
-        &Route::get("/series").query("series_id", ID),
-        Reply::json_str(fixture("series_gdp.json")),
-    )
-    .await;
+    // FRED moves `last_updated` with the new vintages, so the second fetch reads them (an
+    // unchanged `last_updated` would skip the observations).
+    let series = fixture("series_gdp.json");
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/series"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(series.clone()))
+        .up_to_n_times(1)
+        .mount(mock.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/series"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(
+                series.replace("2026-08-28 07:54:02-05", "2026-09-28 07:50:00-05"),
+            ),
+        )
+        .mount(mock.server())
+        .await;
     mock.mount_expect(
         &Route::get("/series/observations")
             .query("series_id", ID)
@@ -845,6 +874,7 @@ async fn fred_vintages_first_and_incremental_fetch() {
             metadata: None,
             dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
             points: vec![revision("2025-04-01", "30485.729", "2025-04-01", true)],
+            validators: None,
         },
     )
     .await
@@ -1000,6 +1030,23 @@ async fn rate_limited_retries_after_retry_after_without_counting() {
 async fn not_found_fails_permanently() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await; // nothing mounted: 404
+                                          // A catalog-discovered series with no economic_series row yet (ECO-254: this is the
+                                          // "discovered-but-empty forever" case coverage used to overcount).
+    persist::persist_discovered(
+        &db.pool,
+        SRC,
+        &[DiscoveredSeries {
+            dataset: flat(),
+            data_url: None,
+            external_id: "t5_missing".into(),
+            title: "Missing".into(),
+            description: None,
+            units: None,
+            frequency: None,
+        }],
+    )
+    .await
+    .unwrap();
     let w = worker(&db.pool, &mock);
     let id = enqueue(
         &db.pool,
@@ -1017,7 +1064,57 @@ async fn not_found_fails_permanently() {
     assert!(it.locked_by.is_none());
     assert!(it.finished_at.is_some());
     assert!(it.error_message.unwrap().contains("not found"));
+    // No economic_series row is created for a confirmed-NotFound series with none yet...
     assert!(series_row(&db.pool, "t5_missing").await.is_none());
+    // ...instead its series_metadata row is deactivated, so coverage stops counting it as
+    // discovered. It comes back only if a later catalog discovery lists it again.
+    assert_eq!(
+        metadata_is_active(&db.pool, "t5_missing").await,
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn not_found_on_existing_series_sets_not_found_status() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await; // nothing mounted: 404
+                                          // Catalog-discovered *and* already fetched once with no points, so both the series_metadata
+                                          // and economic_series rows exist (the usual shape once a series has been tried before).
+    persist::persist_discovered(
+        &db.pool,
+        SRC,
+        &[DiscoveredSeries {
+            dataset: flat(),
+            data_url: None,
+            external_id: "t5_gone".into(),
+            title: "Gone".into(),
+            description: None,
+            units: None,
+            frequency: None,
+        }],
+    )
+    .await
+    .unwrap();
+    let write = persist::persist_series(&db.pool, SRC, "t5_gone", &empty_fetch())
+        .await
+        .unwrap();
+    let w = worker(&db.pool, &mock);
+    let id = enqueue(&db.pool, SRC.as_str(), "t5_gone", JobKind::FetchSeries, 5).await;
+    let outcome = w.run_once().await.expect("claimed");
+    assert!(matches!(outcome, JobOutcome::Failed { .. }), "{outcome:?}");
+    assert_eq!(item(&db.pool, id).await.status, "failed");
+    // crawl_status is the NotFound-specific value, distinct from a generic transient/parse
+    // 'failed', so coverage (ECO-254) can exclude it from "discovered" while it has no data.
+    let (.., status) = series_row(&db.pool, "t5_gone").await.unwrap();
+    assert_eq!(status.as_deref(), Some("not_found"));
+    assert_eq!(
+        attempts(&db.pool, write.series_id).await,
+        vec![(false, Some("not_found".into()), Some(0))]
+    );
+    // Its series_metadata row is left active (unlike the no-economic_series-row case): coverage's
+    // query excludes it by joining the two, not by deactivating metadata out from under a series
+    // that's actually still being tracked.
+    assert_eq!(metadata_is_active(&db.pool, "t5_gone").await, Some(true));
 }
 
 #[tokio::test]
@@ -2018,6 +2115,7 @@ impl BatchAdapter {
                 is_original_release: true,
             }],
             dataset: flat(),
+            validators: None,
         })
     }
 
@@ -2636,6 +2734,7 @@ fn lease_response(title: &str, value: i32) -> FetchedSeries {
             is_original_release: true,
         }],
         dataset: flat(),
+        validators: None,
     }
 }
 
@@ -3137,6 +3236,7 @@ async fn fetch_without_metadata_takes_the_discovered_title_units_and_frequency()
         metadata,
         points: vec![point.clone()],
         dataset: flat(),
+        validators: None,
     };
     let stored = |pool: DatabasePool| async move {
         let mut conn = pool.get().await.unwrap();
@@ -3189,4 +3289,306 @@ async fn fetch_without_metadata_takes_the_discovered_title_units_and_frequency()
             "Annual".to_string(),
         )
     );
+}
+
+// ---------------------------------------------------------------------------
+// Validators: unchanged discovery and unchanged fetches
+// ---------------------------------------------------------------------------
+
+/// Like [`TestAdapter`], but checks its catalog and series with
+/// [`HttpFetcher::get_text_if_changed`](crate::HttpFetcher::get_text_if_changed) against the
+/// validators stored by the last successful job.
+struct ConditionalAdapter {
+    base_url: String,
+}
+
+#[async_trait]
+impl SourceAdapter for ConditionalAdapter {
+    fn id(&self) -> SourceId {
+        SRC
+    }
+
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        Some("t5_cond_")
+    }
+
+    fn datasets(&self) -> &[&str] {
+        &[DATASET, FLAT]
+    }
+
+    async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        match self.discover_if_changed(ctx).await? {
+            Discovery::Changed { found, .. } => Ok(found),
+            Discovery::Unchanged => Ok(Vec::new()),
+        }
+    }
+
+    async fn discover_if_changed(&self, ctx: &CrawlCtx) -> Result<Discovery, CrawlError> {
+        let url = format!("{}/catalog", self.base_url);
+        let known = persist::url_validators(&ctx.pool, SRC, &url)
+            .await
+            .map_err(db_error)?;
+        let (body, validators) = match ctx
+            .http
+            .get_text_if_changed(SRC, &url, &[], known.as_ref())
+            .await?
+        {
+            crate::IfChanged::Unchanged { .. } => return Ok(Discovery::Unchanged),
+            crate::IfChanged::Changed { body, validators } => (body, validators),
+        };
+        let body: CatalogBody = serde_json::from_str(&body).unwrap();
+        let found = body
+            .series
+            .into_iter()
+            .map(|(id, title)| DiscoveredSeries {
+                dataset: flat(),
+                data_url: None,
+                external_id: id,
+                title,
+                description: None,
+                units: None,
+                frequency: Some("Monthly".into()),
+            })
+            .collect();
+        Ok(Discovery::Changed {
+            found,
+            validator: Some((url, validators)),
+        })
+    }
+
+    async fn fetch_series(
+        &self,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        _since: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        let url = format!("{}/series/{external_id}", self.base_url);
+        let stored = persist::stored_fetch_state(&ctx.pool, SRC, &[external_id.to_string()])
+            .await
+            .map_err(db_error)?
+            .remove(external_id);
+        let known = stored.as_ref().and_then(|s| s.validators.as_ref());
+        match ctx.http.get_text_if_changed(SRC, &url, &[], known).await? {
+            crate::IfChanged::Unchanged { validators } => Ok(FetchedSeries::unchanged(
+                stored.expect("unchanged needs a stored series").dataset,
+                validators,
+            )),
+            crate::IfChanged::Changed { body, validators } => {
+                let body: SeriesBody = serde_json::from_str(&body).unwrap();
+                Ok(FetchedSeries {
+                    metadata: Some(NewSeriesMetadataLite {
+                        title: body.title,
+                        ..Default::default()
+                    }),
+                    points: body
+                        .points
+                        .into_iter()
+                        .map(|(date, v)| FetchedPoint {
+                            date,
+                            value: v.map(|v| BigDecimal::from_str(&v).unwrap()),
+                            revision_date: date,
+                            is_original_release: true,
+                        })
+                        .collect(),
+                    dataset: flat(),
+                    validators: Some(validators),
+                })
+            }
+        }
+    }
+}
+
+fn conditional_worker(pool: &DatabasePool, mock: &MockSource) -> Worker {
+    let mut r = AdapterRegistry::new();
+    r.register(Arc::new(ConditionalAdapter {
+        base_url: mock.base_url(),
+    }));
+    Worker::new(ctx(pool), r, config("t5-worker")).with_datasets(test_catalog())
+}
+
+/// Serves `body` with `ETag: etag` at `path`, and `304` to a request that sends that ETag back.
+async fn mount_with_etag(mock: &MockSource, path: &str, body: serde_json::Value, etag: &str) {
+    use wiremock::matchers::header;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path(path))
+        .and(header("if-none-match", etag))
+        .respond_with(ResponseTemplate::new(304).insert_header("ETag", etag))
+        .mount(mock.server())
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path(path))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(body)
+                .insert_header("ETag", etag),
+        )
+        .mount(mock.server())
+        .await;
+}
+
+#[tokio::test]
+async fn unchanged_discovery_writes_and_retires_nothing() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    mount_with_etag(
+        &mock,
+        "/catalog",
+        serde_json::json!({"series": [["t5_cond_a", "Series A"], ["t5_cond_b", "Series B"]]}),
+        "\"c1\"",
+    )
+    .await;
+    let w = conditional_worker(&db.pool, &mock);
+    let discover = || async {
+        enqueue(
+            &db.pool,
+            SRC.as_str(),
+            "catalog",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
+        match w.run_once().await {
+            Some(JobOutcome::Completed(stats)) => stats,
+            other => panic!("discovery did not complete: {other:?}"),
+        }
+    };
+    let mut conn = db.pool.get().await.unwrap();
+    let active = |id: &'static str| {
+        let pool = db.pool.clone();
+        async move {
+            let mut conn = pool.get().await.unwrap();
+            series_metadata::table
+                .filter(series_metadata::external_id.eq(id))
+                .select(series_metadata::is_active)
+                .first::<bool>(&mut conn)
+                .await
+                .unwrap()
+        }
+    };
+
+    assert_eq!(discover().await.metadata_written, 2);
+    let url = mock.url("/catalog");
+    let stored = persist::url_validators(&db.pool, SRC, &url).await.unwrap();
+    assert_eq!(stored.and_then(|v| v.etag).as_deref(), Some("\"c1\""));
+
+    // Mark a row so a rewrite would show.
+    diesel::update(series_metadata::table.filter(series_metadata::external_id.eq("t5_cond_a")))
+        .set(series_metadata::title.eq("untouched"))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    // Unchanged (304): nothing written, nothing retired.
+    assert_eq!(discover().await.metadata_written, 0);
+    let title: String = series_metadata::table
+        .filter(series_metadata::external_id.eq("t5_cond_a"))
+        .select(series_metadata::title)
+        .first(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(title, "untouched");
+    assert!(active("t5_cond_a").await && active("t5_cond_b").await);
+    let sent: Vec<_> = mock
+        .received_requests()
+        .await
+        .into_iter()
+        .filter_map(|r| {
+            r.headers
+                .get("if-none-match")
+                .map(|v| v.to_str().unwrap().to_string())
+        })
+        .collect();
+    assert_eq!(sent, ["\"c1\""]);
+
+    // A changed catalog is written, retires what it dropped, and stores its new validator.
+    mock.reset().await;
+    mount_with_etag(
+        &mock,
+        "/catalog",
+        serde_json::json!({"series": [["t5_cond_a", "Series A v2"]]}),
+        "\"c2\"",
+    )
+    .await;
+    assert_eq!(discover().await.metadata_written, 1);
+    assert!(active("t5_cond_a").await);
+    assert!(!active("t5_cond_b").await);
+    let stored = persist::url_validators(&db.pool, SRC, &url).await.unwrap();
+    assert_eq!(stored.and_then(|v| v.etag).as_deref(), Some("\"c2\""));
+
+    diesel::sql_query("DELETE FROM reference_file_cache WHERE url = $1")
+        .bind::<diesel::sql_types::Text, _>(&url)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn unchanged_fetch_marks_the_series_crawled_and_keeps_its_points() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    mount_with_etag(
+        &mock,
+        "/series/t5_cond_s",
+        serde_json::json!({"title": "Cond", "points": [["2024-01-01", "1"], ["2024-02-01", "2"]]}),
+        "\"s1\"",
+    )
+    .await;
+    let w = conditional_worker(&db.pool, &mock);
+
+    enqueue(&db.pool, SRC.as_str(), "t5_cond_s", JobKind::FetchSeries, 5).await;
+    let Some(JobOutcome::Completed(stats)) = w.run_once().await else {
+        panic!("first fetch did not complete")
+    };
+    assert_eq!(stats.points_written, 2);
+    let series_id = stats.series_id.unwrap();
+
+    let mut conn = db.pool.get().await.unwrap();
+    diesel::update(economic_series::table.find(series_id))
+        .set(economic_series::last_crawled_at.eq(Utc::now() - chrono::Duration::days(30)))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    enqueue(&db.pool, SRC.as_str(), "t5_cond_s", JobKind::FetchSeries, 5).await;
+    let Some(JobOutcome::Completed(stats)) = w.run_once().await else {
+        panic!("second fetch did not complete")
+    };
+    assert_eq!((stats.points_written, stats.new_points), (0, 0));
+
+    let (title, crawled): (String, Option<chrono::DateTime<Utc>>) = economic_series::table
+        .find(series_id)
+        .select((economic_series::title, economic_series::last_crawled_at))
+        .first(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(title, "Cond");
+    assert!(crawled.unwrap() > Utc::now() - chrono::Duration::minutes(5));
+    let points: i64 = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(points, 2);
+    let state = persist::stored_fetch_state(&db.pool, SRC, &["t5_cond_s".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(
+        state["t5_cond_s"]
+            .validators
+            .as_ref()
+            .and_then(|v| v.etag.as_deref()),
+        Some("\"s1\"")
+    );
+    let attempts: Vec<bool> = crawl_attempts::table
+        .filter(crawl_attempts::series_id.eq(series_id))
+        .select(crawl_attempts::success)
+        .load(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(attempts, [true, true]);
 }

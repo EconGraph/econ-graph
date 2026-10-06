@@ -64,6 +64,69 @@ mod simple_tests {
         assert_eq!(series.frequency, "monthly");
         assert!(series.is_active);
     }
+
+    #[test]
+    fn classify_raw_matches_each_source_adapter_spelling() {
+        // REQUIREMENT: classify_raw must recognize every frequency string the release-1 source
+        // adapters emit, not just the bare label, so a search filter finds series from any source.
+        use SeriesFrequency::*;
+
+        let cases = [
+            // FRED stores long descriptive text, not a bare label.
+            ("Daily, Close", Daily),
+            ("Weekly, Ending Friday", Weekly),
+            ("Monthly", Monthly),
+            ("Quarterly", Quarterly),
+            ("Annual", Annual),
+            ("Semiannual", SemiAnnual),
+            // BEA
+            ("Annual", Annual),
+            // BLS
+            ("Monthly", Monthly),
+            ("Quarterly", Quarterly),
+            ("Semi-Annual", SemiAnnual),
+            // FHFA (title-cased)
+            ("Monthly", Monthly),
+            // World Bank / Census BDS
+            ("Annual", Annual),
+            // Unknown text falls back to Irregular.
+            ("Biennial", Irregular),
+            ("", Irregular),
+        ];
+
+        for (raw, expected) in cases {
+            assert_eq!(
+                SeriesFrequency::classify_raw(raw),
+                expected,
+                "classify_raw({raw:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn sql_like_patterns_match_classify_raw() {
+        // REQUIREMENT: the SQL patterns used to filter on frequency must agree with classify_raw,
+        // so a WHERE ... ILIKE ANY(patterns) filter finds exactly what classify_raw would accept.
+        for variant in [
+            SeriesFrequency::Daily,
+            SeriesFrequency::Weekly,
+            SeriesFrequency::Monthly,
+            SeriesFrequency::Quarterly,
+            SeriesFrequency::SemiAnnual,
+            SeriesFrequency::Annual,
+        ] {
+            for pattern in variant.sql_like_patterns() {
+                let prefix = pattern.strip_suffix('%').expect("pattern ends with %");
+                assert_eq!(
+                    SeriesFrequency::classify_raw(prefix),
+                    variant,
+                    "pattern {pattern:?} should classify back to {variant:?}"
+                );
+            }
+        }
+
+        assert!(SeriesFrequency::Irregular.sql_like_patterns().is_empty());
+    }
 }
 
 // Complex database integration tests disabled - replaced with modern async integration tests

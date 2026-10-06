@@ -36,8 +36,9 @@ series:
 - `us`: one national series per variable, `bds/national..{VARIABLE}` (e.g. `bds/national..ESTAB`);
 - `state`: one series per state and DC, `bds/state.{FIPS}.{VARIABLE}` with the two-digit
   state FIPS code (e.g. `bds/state.06.ESTAB` for California), 51 per variable. The states
-  come from `backend/crates/econ-graph-crawler/data/us_states.csv`, which the crawler reads at
-  runtime from `CRAWLER_DATA_DIR` (shared with the FHFA adapter).
+  come from the Census Bureau's state FIPS file
+  (<https://www2.census.gov/geo/docs/reference/state.txt>), which the crawler downloads on every
+  crawl; FIPS codes `01` to `56` are the states and DC, and the territories are dropped.
 
 Finer levels (county, metro area) have thousands of areas and are skipped.
 
@@ -69,8 +70,8 @@ missing observations.
 
 ## Database
 
-The data source row ("U.S. Census Bureau") is visible and enabled. Migration
-`2026-09-28-000001_census_api_key_required` marks it as requiring `CENSUS_API_KEY`. Discovered
+The data source row ("U.S. Census Bureau") is visible and enabled. Its seed row
+in the v4.0.0 baseline migration (`2026-10-02-000500_v4_0_baseline`) marks it as requiring `CENSUS_API_KEY`. Discovered
 series are written as `EconomicSeries` rows keyed by the external IDs above when `crawler-worker`
 runs the discovery job.
 

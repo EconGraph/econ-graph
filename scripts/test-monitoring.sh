@@ -20,8 +20,16 @@ NAMESPACE="econ-graph"
 TEST_EMAIL="monitoring-test-$(date +%s)@example.com"
 TEST_NAME="Monitoring Test User"
 BACKEND_URL="http://localhost:30080"
-GRAFANA_URL="http://localhost:30001"
+# Grafana is ClusterIP-only; run
+# `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
+# in another shell first, or set GRAFANA_URL to wherever you've forwarded it.
+GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 LOKI_URL="http://localhost:3100"
+
+# Grafana session cookies go in a private temp file, not a fixed world-readable
+# path (CWE-377), and are removed however the script exits.
+COOKIES=$(mktemp)
+trap 'rm -f "$COOKIES"' EXIT
 
 # Function to print colored output
 print_status() {
@@ -312,7 +320,7 @@ authenticate_grafana() {
     # HTTP error response, so success is judged from the exit status rather
     # than from the response body being nonempty.
     if printf '%s' "$login_body" |
-        curl -sSf -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
+        curl -sSf -c "$COOKIES" -X POST "$GRAFANA_URL/login" \
             -H "Content-Type: application/json" \
             -d @- >/dev/null 2>&1; then
         print_status "SUCCESS" "Grafana authentication successful"
@@ -328,7 +336,7 @@ test_grafana_datasources() {
     print_status "INFO" "Testing Grafana datasources..."
 
     # Get datasources using authenticated session
-    local datasources_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" 2>/dev/null)
+    local datasources_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" 2>/dev/null)
 
     if [ -n "$datasources_response" ]; then
         print_status "SUCCESS" "Grafana datasources API accessible"
@@ -343,7 +351,7 @@ test_grafana_datasources() {
                 print_status "SUCCESS" "Loki datasource ID: $loki_id"
 
                 # Test Loki datasource connectivity
-                local test_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources/$loki_id/health" 2>/dev/null)
+                local test_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources/$loki_id/health" 2>/dev/null)
                 if [ -n "$test_response" ]; then
                     print_status "SUCCESS" "Loki datasource health check passed"
                     return 0
@@ -369,7 +377,7 @@ test_grafana_datasources() {
 test_grafana_datasources_with_uids() {
     print_status "INFO" "Testing Grafana datasources with UID validation..."
 
-    local datasources_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" 2>/dev/null)
+    local datasources_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" 2>/dev/null)
 
     if [ -z "$datasources_response" ]; then
         print_status "ERROR" "Failed to get datasources from Grafana API"
@@ -400,8 +408,8 @@ test_dashboard_datasource_references() {
     local failed=0
 
     # Test that dashboards exist and are accessible
-    local overview_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
-    local logging_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
+    local overview_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
+    local logging_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
 
     if [ -z "$overview_response" ] || [ "$overview_response" = "[]" ]; then
         print_status "ERROR" "EconGraph dashboard not found in Grafana"
@@ -434,7 +442,7 @@ test_comprehensive_log_queries() {
     print_status "INFO" "Testing comprehensive log queries..."
 
     # Test auth logs
-    local auth_query_response=$(curl -s -b /tmp/grafana_cookies.txt \
+    local auth_query_response=$(curl -s -b "$COOKIES" \
         "$GRAFANA_URL/api/datasources/proxy/$loki_id/loki/api/v1/query_range?query=%7Bjob%3D%22econ-graph-logs%22%7D%20%7C%3D%20%22auth%22&start=$start_time&end=$current_time&limit=5" 2>/dev/null)
 
     local auth_count=$(echo "$auth_query_response" | jq '.data.result | length' 2>/dev/null || echo "0")
@@ -445,7 +453,7 @@ test_comprehensive_log_queries() {
     fi
 
     # Test error logs
-    local error_query_response=$(curl -s -b /tmp/grafana_cookies.txt \
+    local error_query_response=$(curl -s -b "$COOKIES" \
         "$GRAFANA_URL/api/datasources/proxy/$loki_id/loki/api/v1/query_range?query=%7Bjob%3D%22econ-graph-logs%22%7D%20%7C%3D%20%22error%22&start=$start_time&end=$current_time&limit=5" 2>/dev/null)
 
     local error_count=$(echo "$error_query_response" | jq '.data.result | length' 2>/dev/null || echo "0")
@@ -456,7 +464,7 @@ test_comprehensive_log_queries() {
     fi
 
     # Test database logs
-    local db_query_response=$(curl -s -b /tmp/grafana_cookies.txt \
+    local db_query_response=$(curl -s -b "$COOKIES" \
         "$GRAFANA_URL/api/datasources/proxy/$loki_id/loki/api/v1/query_range?query=%7Bjob%3D%22econ-graph-logs%22%7D%20%7C%3D%20%22database%22&start=$start_time&end=$current_time&limit=5" 2>/dev/null)
 
     local db_count=$(echo "$db_query_response" | jq '.data.result | length' 2>/dev/null || echo "0")
@@ -474,7 +482,7 @@ test_prometheus_metrics() {
     print_status "INFO" "Testing Prometheus metrics..."
 
     # Test basic Prometheus query
-    local prometheus_response=$(curl -s -b /tmp/grafana_cookies.txt \
+    local prometheus_response=$(curl -s -b "$COOKIES" \
         "$GRAFANA_URL/api/datasources/proxy/$prometheus_id/api/v1/query?query=up" 2>/dev/null)
 
     if [ -n "$prometheus_response" ]; then
@@ -496,7 +504,7 @@ check_grafana_dashboard_errors() {
     local failed=0
 
     # Get list of dashboards
-    local dashboards_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
+    local dashboards_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/search?query=econgraph" 2>/dev/null)
 
     if [ -z "$dashboards_response" ] || [ "$dashboards_response" = "[]" ]; then
         print_status "ERROR" "No EconGraph dashboards found"
@@ -511,7 +519,7 @@ check_grafana_dashboard_errors() {
             print_status "INFO" "Checking dashboard with UID: $uid"
 
             # Get dashboard details
-            local dashboard_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/dashboards/uid/$uid" 2>/dev/null)
+            local dashboard_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/dashboards/uid/$uid" 2>/dev/null)
 
             if [ -n "$dashboard_response" ]; then
                 # Check for datasource errors in the dashboard JSON
@@ -521,7 +529,7 @@ check_grafana_dashboard_errors() {
                     print_status "INFO" "Dashboard $uid uses datasource UIDs: $(echo $datasource_errors | tr '\n' ' ')"
 
                     # Check if any datasource UIDs are not found
-                    local datasources_response=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" 2>/dev/null)
+                    local datasources_response=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" 2>/dev/null)
                     local available_uids=$(echo "$datasources_response" | jq -r '.[].uid' 2>/dev/null | sort -u)
 
                     for required_uid in $datasource_errors; do
@@ -581,21 +589,19 @@ test_grafana_dashboard_data() {
     fi
 
     # Get datasource info for testing
-    local loki_id=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Loki") | .id' 2>/dev/null)
-    local loki_uid=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Loki") | .uid' 2>/dev/null)
-    local prometheus_id=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Prometheus") | .id' 2>/dev/null)
-    local prometheus_uid=$(curl -s -b /tmp/grafana_cookies.txt "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Prometheus") | .uid' 2>/dev/null)
+    local loki_id=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Loki") | .id' 2>/dev/null)
+    local loki_uid=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Loki") | .uid' 2>/dev/null)
+    local prometheus_id=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Prometheus") | .id' 2>/dev/null)
+    local prometheus_uid=$(curl -s -b "$COOKIES" "$GRAFANA_URL/api/datasources" | jq -r '.[] | select(.name=="Prometheus") | .uid' 2>/dev/null)
 
     # Validate UIDs are consistent and expected
     if [ "$loki_uid" != "loki-uid" ]; then
         print_status "ERROR" "Loki UID mismatch: expected 'loki-uid', got '$loki_uid'"
-        rm -f /tmp/grafana_cookies.txt
         return 1
     fi
 
     if [ "$prometheus_uid" != "prometheus-uid" ]; then
         print_status "ERROR" "Prometheus UID mismatch: expected 'prometheus-uid', got '$prometheus_uid'"
-        rm -f /tmp/grafana_cookies.txt
         return 1
     fi
 
@@ -604,7 +610,6 @@ test_grafana_dashboard_data() {
     # Test dashboard datasource references
     if ! test_dashboard_datasource_references; then
         print_status "ERROR" "Dashboard datasource reference tests failed"
-        rm -f /tmp/grafana_cookies.txt
         return 1
     fi
 
@@ -612,7 +617,7 @@ test_grafana_dashboard_data() {
     local current_time=$(date -u +%s)000000000
     local start_time=$((current_time - 3600000000000)) # 1 hour ago
 
-    local proxy_response=$(curl -s -b /tmp/grafana_cookies.txt \
+    local proxy_response=$(curl -s -b "$COOKIES" \
         "$GRAFANA_URL/api/datasources/proxy/$loki_id/loki/api/v1/query_range?query=%7Bjob%3D%22econ-graph-logs%22%7D&start=$start_time&end=$current_time&limit=5" 2>/dev/null)
 
     if [ -n "$proxy_response" ]; then
@@ -631,18 +636,13 @@ test_grafana_dashboard_data() {
             print_status "INFO" "Available dashboards:"
             print_status "INFO" "  - EconGraph Platform Overview: $GRAFANA_URL/d/econgraph-overview/econgraph-platform-overview"
             print_status "INFO" "  - EconGraph Logs & Debugging: $GRAFANA_URL/d/econgraph-logging/econgraph-logs-and-debugging"
-
-            # Clean up cookies
-            rm -f /tmp/grafana_cookies.txt
             return 0
         else
             print_status "ERROR" "Grafana can query Loki but returned 0 results"
-            rm -f /tmp/grafana_cookies.txt
             return 1
         fi
     else
         print_status "ERROR" "Grafana Loki proxy not accessible"
-        rm -f /tmp/grafana_cookies.txt
         return 1
     fi
 }
@@ -683,6 +683,9 @@ main() {
     else
         print_status "INFO" "Backend deployment not found yet; skipping backend readiness wait"
     fi
+    # Grafana is ClusterIP-only; run
+    # `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
+    # in another shell before this script, or this wait will time out.
     wait_for_service "Grafana" "$GRAFANA_URL" || exit 1
     echo
 

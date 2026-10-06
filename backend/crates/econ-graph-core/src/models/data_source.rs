@@ -146,9 +146,9 @@ impl DataSource {
             base_url: "https://api.worldbank.org/v2".to_string(),
             api_key_required: false,
             rate_limit_per_minute: 1000,
-            is_visible: false,
-            is_enabled: false,
-            requires_admin_approval: true,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures".to_string()),
             api_key_name: None,
@@ -165,9 +165,9 @@ impl DataSource {
             base_url: "https://apps.bea.gov/api/data".to_string(),
             api_key_required: true,
             rate_limit_per_minute: 1000,
-            is_visible: false,
-            is_enabled: false,
-            requires_admin_approval: true,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some(
                 "https://apps.bea.gov/api/bea_web_service_api_user_guide.htm".to_string(),
@@ -598,6 +598,28 @@ mod _inline_tests {
             world_bank.rate_limit_per_minute, 1000,
             "World Bank allows higher rate limits"
         );
+    }
+
+    /// ECO-392: BEA and World Bank must come up enabled and visible, same as every other source
+    /// the release build registers (the v4.0.0 baseline migration seeds their rows the same way).
+    #[test]
+    fn release_sources_are_enabled_and_visible() {
+        for source in [
+            DataSource::fred(),
+            DataSource::bls(),
+            DataSource::census(),
+            DataSource::bea(),
+            DataSource::world_bank(),
+            DataSource::fhfa(),
+        ] {
+            assert!(source.is_visible, "{}: not visible", source.name);
+            assert!(source.is_enabled, "{}: not enabled", source.name);
+            assert!(
+                !source.requires_admin_approval,
+                "{}: requires admin approval",
+                source.name
+            );
+        }
     }
 
     #[test]

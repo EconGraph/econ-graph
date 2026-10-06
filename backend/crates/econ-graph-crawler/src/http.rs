@@ -10,7 +10,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use rand::RngExt;
-use reqwest::header::{HeaderMap, ACCEPT, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::header::{
+    HeaderMap, ACCEPT, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
+    RETRY_AFTER,
+};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -64,6 +67,61 @@ impl Default for HttpConfig {
     }
 }
 
+/// Total timeout of a [`HttpFetcher::get_text_conditional`] request: reference files can be
+/// tens of megabytes, too big for the per-request [`HttpConfig::timeout`] on a slow link. Kept
+/// short enough that BLS's nine reference files, one attempt each, fit well inside a discovery
+/// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
+pub const REFERENCE_FILE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A successful (or `304`) response: the status, the response's `ETag` and `Last-Modified` if it
+/// sent them, and the body (empty for `304`).
+struct RawResponse {
+    status: StatusCode,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    body: String,
+}
+
+/// What a later fetch needs to tell whether a source resource changed since it was last read.
+///
+/// `etag` and `last_modified` are the response headers, sent back as `If-None-Match` and
+/// `If-Modified-Since`. `content_sha256` is the hex SHA-256 of the body, which catches an
+/// unchanged re-download from a server that honours neither header. `version` is a
+/// version the adapter sets itself (FRED's `last_updated`, the World Bank's `lastupdated`, or the
+/// adapter's own parser version); the fetcher never compares it, and keeps `known`'s on an
+/// [`IfChanged::Unchanged`] result.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Validators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub content_sha256: Option<String>,
+    pub version: Option<String>,
+}
+
+/// Outcome of [`HttpFetcher::get_text_if_changed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IfChanged {
+    /// The resource is the one `known` described: the server answered `304`, or re-sent a body
+    /// with the same SHA-256. `validators` are the ones to store for next time (the server may
+    /// have sent a new `ETag` or `Last-Modified` with an identical body), with `known`'s `version`.
+    Unchanged { validators: Validators },
+    /// A new body, with its validators (`version` is `None`: the caller sets it).
+    Changed {
+        body: String,
+        validators: Validators,
+    },
+}
+
+/// Outcome of [`HttpFetcher::get_text_conditional`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionalText {
+    /// The server confirmed the cached copy is still current; the caller keeps using it.
+    NotModified,
+    /// A fresh body, with the `ETag` to send next time (`None` if the server sent none, in
+    /// which case the caller has no validator to use for a future conditional GET).
+    Modified { body: String, etag: Option<String> },
+}
+
 /// Rate-limited, retrying HTTP client shared by all adapters. Cheap to clone.
 ///
 /// Every request method:
@@ -99,6 +157,14 @@ struct Target {
     url: Url,
     body: Option<Vec<u8>>,
     accept_json: bool,
+    /// `If-None-Match` value to send, for a conditional GET ([`HttpFetcher::get_text_if_changed`]).
+    if_none_match: Option<String>,
+    /// `If-Modified-Since` value to send, for a conditional GET.
+    if_modified_since: Option<String>,
+    /// Overrides [`HttpConfig::timeout`] for this request.
+    timeout: Option<Duration>,
+    /// In-process retries after the first attempt ([`EXTRA_ATTEMPTS`] unless overridden).
+    extra_attempts: u32,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
@@ -140,6 +206,10 @@ impl Target {
             url,
             body,
             accept_json,
+            if_none_match: None,
+            if_modified_since: None,
+            timeout: None,
+            extra_attempts: EXTRA_ATTEMPTS,
         })
     }
 
@@ -205,7 +275,102 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<String, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, false)?;
-        self.execute(&target).await
+        Ok(self.execute(&target).await?.body)
+    }
+
+    /// Conditional GET of `url`: sends `If-None-Match: etag` when `etag` is given, and returns
+    /// [`ConditionalText::NotModified`] on a `304` response instead of fetching the body again.
+    /// On any other successful status, returns the body and the response's own `ETag` (`None` if
+    /// the server didn't send one), for the caller to store and pass back next time.
+    ///
+    /// These are whole reference files (BLS's `la.series` is the full LAUS series catalog), so
+    /// the request gets [`REFERENCE_FILE_TIMEOUT`] instead of [`HttpConfig::timeout`], and no
+    /// in-process retry: a refresh runs inside a discovery job, which must not hold its queue row
+    /// for several long downloads per file, and the next scheduled refresh tries again anyway.
+    pub async fn get_text_conditional(
+        &self,
+        source: SourceId,
+        url: &str,
+        etag: Option<&str>,
+    ) -> Result<ConditionalText, CrawlError> {
+        let known = etag.map(|e| Validators {
+            etag: Some(e.to_owned()),
+            ..Validators::default()
+        });
+        let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
+        target.timeout = Some(REFERENCE_FILE_TIMEOUT.max(self.inner.config.timeout));
+        target.extra_attempts = 0;
+        Ok(match self.if_changed(target, known.as_ref()).await? {
+            IfChanged::Unchanged { .. } => ConditionalText::NotModified,
+            IfChanged::Changed { body, validators } => ConditionalText::Modified {
+                body,
+                etag: validators.etag,
+            },
+        })
+    }
+
+    /// GET `url` with `query` appended, skipping the body when it hasn't changed since `known`.
+    ///
+    /// Sends `If-None-Match` and `If-Modified-Since` from `known`'s `etag` and `last_modified`.
+    /// A `304` is [`IfChanged::Unchanged`], keeping `known`'s validators except where the `304`
+    /// sent new ones. A `200` whose body hashes to `known.content_sha256` is also `Unchanged`
+    /// (the server ignored or doesn't support the conditional headers), with the response's
+    /// validators. Any other success is [`IfChanged::Changed`]. With `known = None` the request is
+    /// a plain GET that returns `Changed` with the validators to store; a `304` to a request that
+    /// sent no conditional header is a `Transient` error, never `Unchanged`.
+    pub async fn get_text_if_changed(
+        &self,
+        source: SourceId,
+        url: &str,
+        query: &[(&str, &str)],
+        known: Option<&Validators>,
+    ) -> Result<IfChanged, CrawlError> {
+        let target = Target::new(source, Method::GET, url, query, None, false)?;
+        self.if_changed(target, known).await
+    }
+
+    /// [`get_text_if_changed`](Self::get_text_if_changed) for a `target` already built (with its
+    /// own timeout or retries).
+    async fn if_changed(
+        &self,
+        mut target: Target,
+        known: Option<&Validators>,
+    ) -> Result<IfChanged, CrawlError> {
+        if let Some(k) = known {
+            target.if_none_match = k.etag.clone();
+            target.if_modified_since = k.last_modified.clone();
+        }
+        let resp = self.execute(&target).await?;
+        if resp.status == StatusCode::NOT_MODIFIED {
+            if target.if_none_match.is_none() && target.if_modified_since.is_none() {
+                return Err(CrawlError::Transient(format!(
+                    "{}: 304 Not Modified to an unconditional request",
+                    target.context()
+                )));
+            }
+            let mut validators = known.cloned().unwrap_or_default();
+            if resp.etag.is_some() {
+                validators.etag = resp.etag;
+            }
+            if resp.last_modified.is_some() {
+                validators.last_modified = resp.last_modified;
+            }
+            return Ok(IfChanged::Unchanged { validators });
+        }
+        let mut validators = Validators {
+            etag: resp.etag,
+            last_modified: resp.last_modified,
+            content_sha256: Some(sha256_hex(resp.body.as_bytes())),
+            version: None,
+        };
+        if known.and_then(|k| k.content_sha256.as_deref()) == validators.content_sha256.as_deref() {
+            validators.version = known.and_then(|k| k.version.clone());
+            return Ok(IfChanged::Unchanged { validators });
+        }
+        Ok(IfChanged::Changed {
+            body: resp.body,
+            validators,
+        })
     }
 
     /// Records `err` in `CRAWLER_METRICS`, for a caller that fetched a successful (HTTP 200)
@@ -231,7 +396,7 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<T, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, true)?;
-        let text = self.execute(&target).await?;
+        let text = self.execute(&target).await?.body;
         decode(&target, &text)
     }
 
@@ -246,23 +411,23 @@ impl HttpFetcher {
             CrawlError::Permanent(format!("{source}: serializing request body: {e}"))
         })?;
         let target = Target::new(source, Method::POST, url, &[], Some(bytes), true)?;
-        let text = self.execute(&target).await?;
+        let text = self.execute(&target).await?.body;
         decode(&target, &text)
     }
 
     /// Runs the attempt loop: first attempt plus up to [`EXTRA_ATTEMPTS`] retries.
-    async fn execute(&self, target: &Target) -> Result<String, CrawlError> {
+    async fn execute(&self, target: &Target) -> Result<RawResponse, CrawlError> {
         let mut attempt: u32 = 0;
         loop {
             let err = match self.attempt(target).await {
-                Ok(body) => return Ok(body),
+                Ok(resp) => return Ok(resp),
                 Err(e) => e,
             };
             if !err.is_retryable() {
                 tracing::debug!(source = %target.source, url = %target.redacted, error = %err, "request failed");
                 return Err(err);
             }
-            if attempt >= EXTRA_ATTEMPTS {
+            if attempt >= target.extra_attempts {
                 tracing::warn!(
                     source = %target.source,
                     url = %target.redacted,
@@ -299,8 +464,9 @@ impl HttpFetcher {
         }
     }
 
-    /// One rate-limited request, including reading the body.
-    async fn attempt(&self, target: &Target) -> Result<String, CrawlError> {
+    /// One rate-limited request, including reading the body. A `304` response (only possible
+    /// when [`Target::if_none_match`] was sent) is treated as success, with an empty body.
+    async fn attempt(&self, target: &Target) -> Result<RawResponse, CrawlError> {
         let _permit = self.inner.limiter.acquire(target.source).await;
 
         let mut request = self
@@ -309,6 +475,15 @@ impl HttpFetcher {
             .request(target.method.clone(), target.url.clone());
         if target.accept_json {
             request = request.header(ACCEPT, "application/json");
+        }
+        if let Some(etag) = &target.if_none_match {
+            request = request.header(IF_NONE_MATCH, etag.clone());
+        }
+        if let Some(date) = &target.if_modified_since {
+            request = request.header(IF_MODIFIED_SINCE, date.clone());
+        }
+        if let Some(timeout) = target.timeout {
+            request = request.timeout(timeout);
         }
         if let Some(body) = &target.body {
             request = request
@@ -323,6 +498,15 @@ impl HttpFetcher {
         };
 
         let status = response.status();
+        if status == StatusCode::NOT_MODIFIED {
+            self.record_request(target, status.as_str(), start);
+            return Ok(RawResponse {
+                status,
+                etag: header_string(response.headers(), ETAG),
+                last_modified: header_string(response.headers(), LAST_MODIFIED),
+                body: String::new(),
+            });
+        }
         if !status.is_success() {
             let retry_after = parse_retry_after(response.headers());
             // Include a scrubbed snippet of the body: many APIs (FRED, BLS) explain the
@@ -344,6 +528,8 @@ impl HttpFetcher {
             return Err(err);
         }
 
+        let etag = header_string(response.headers(), ETAG);
+        let last_modified = header_string(response.headers(), LAST_MODIFIED);
         match response.text().await {
             Ok(body) => {
                 self.record_request(target, status.as_str(), start);
@@ -352,7 +538,12 @@ impl HttpFetcher {
                     &target.host,
                     body.len() as u64,
                 );
-                Ok(body)
+                Ok(RawResponse {
+                    status,
+                    etag,
+                    last_modified,
+                    body,
+                })
             }
             Err(e) => Err(self.transport_error(target, e, start)),
         }
@@ -378,7 +569,7 @@ impl HttpFetcher {
             CrawlError::Transient(format!(
                 "{}: timed out after {:?}: {detail}",
                 target.context(),
-                self.inner.config.timeout
+                target.timeout.unwrap_or(self.inner.config.timeout)
             ))
         } else if permanent {
             CrawlError::Permanent(format!("{}: {detail}", target.context()))
@@ -501,6 +692,23 @@ fn endpoint_label(url: &Url) -> String {
         })
         .unwrap_or_default();
     format!("/{}", segments.join("/"))
+}
+
+/// `name`'s value, if present and visible ASCII.
+fn header_string(headers: &HeaderMap, name: reqwest::header::HeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// `Retry-After` as delta-seconds or an HTTP-date (a date in the past means "now").
@@ -1036,5 +1244,242 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_returns_body_and_etag_on_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("a,b\n1,2\n")
+                    .insert_header("ETag", "\"v1\""),
+            )
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            ConditionalText::Modified {
+                body: "a,b\n1,2\n".to_string(),
+                etag: Some("\"v1\"".to_string()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_sends_if_none_match_and_handles_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .and(header("if-none-match", "\"v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                Some("\"v1\""),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got, ConditionalText::NotModified);
+    }
+
+    /// A reference file gets one attempt: a 500 is returned, not retried in-process.
+    #[tokio::test]
+    async fn get_text_conditional_does_not_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap_err();
+        assert!(err.is_retryable(), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_with_no_response_etag_is_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("x"))
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            ConditionalText::Modified {
+                body: "x".to_string(),
+                etag: None,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_sends_both_validators_and_keeps_known_on_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .and(header("if-none-match", "\"v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            etag: Some("\"v1\"".into()),
+            last_modified: Some("Tue, 01 Sep 2026 00:00:00 GMT".into()),
+            content_sha256: Some("abc".into()),
+            version: Some("ignored".into()),
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got, IfChanged::Unchanged { validators: known });
+        // (wiremock's `header` matcher splits values on commas, so an HTTP-date is checked here.)
+        let sent = server.received_requests().await.unwrap();
+        assert_eq!(
+            sent[0].headers.get("if-modified-since").unwrap(),
+            "Tue, 01 Sep 2026 00:00:00 GMT"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_takes_new_headers_from_a_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(304).insert_header("ETag", "\"v2\""))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            etag: Some("\"v1\"".into()),
+            ..Validators::default()
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            IfChanged::Unchanged {
+                validators: Validators {
+                    etag: Some("\"v2\"".into()),
+                    ..Validators::default()
+                }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_detects_an_identical_body_without_header_support() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("same")
+                    .insert_header("Last-Modified", "Wed, 02 Sep 2026 00:00:00 GMT"),
+            )
+            .mount(&server)
+            .await;
+        let url = format!("{}/r", server.uri());
+        let IfChanged::Changed { body, validators } = fetcher()
+            .get_text_if_changed(SourceId::Fred, &url, &[], None)
+            .await
+            .unwrap()
+        else {
+            panic!("a first fetch is always Changed")
+        };
+        assert_eq!(body, "same");
+        assert_eq!(
+            validators,
+            Validators {
+                etag: None,
+                last_modified: Some("Wed, 02 Sep 2026 00:00:00 GMT".into()),
+                // sha256("same")
+                content_sha256: Some(
+                    "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5".into()
+                ),
+                version: None,
+            }
+        );
+        let again = fetcher()
+            .get_text_if_changed(SourceId::Fred, &url, &[], Some(&validators))
+            .await
+            .unwrap();
+        assert_eq!(again, IfChanged::Unchanged { validators });
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_returns_a_different_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("new"))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            content_sha256: Some(sha256_hex(b"old")),
+            ..Validators::default()
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(got, IfChanged::Changed { ref body, .. } if body == "new"),
+            "{got:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_304_to_an_unconditional_request_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let url = format!("{}/r", server.uri());
+        let only_hash = Validators {
+            content_sha256: Some("ff".into()),
+            ..Validators::default()
+        };
+        for known in [None, Some(&only_hash)] {
+            let err = fetcher()
+                .get_text_if_changed(SourceId::Fred, &url, &[], known)
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind(), "transient", "{err}");
+        }
     }
 }

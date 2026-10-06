@@ -16,6 +16,10 @@ spec:
       labels:
         app: econ-graph-backend
         component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9876"
+        prometheus.io/path: "/metrics"
     spec:
       initContainers:
       - name: wait-for-postgres
@@ -84,8 +88,8 @@ spec:
         # Shared reference data (countries.csv) copied into the image; matches its ENV.
         - name: REFERENCE_DATA_DIR
           value: /app/reference
-        # The crawler's reference data (us_states.csv), also copied into the image; GraphQL
-        # labels dataset dimension values from it.
+        # The crawler's data directory, also copied into the image, for the crawler code the
+        # backend links in (the adapter registry behind trigger-crawl validation).
         - name: CRAWLER_DATA_DIR
           value: /app/data
         - name: CORS_ALLOWED_ORIGINS
@@ -113,9 +117,13 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        # startupProbe and readinessProbe hit /readyz (database reachable AND schema at least
+        # as new as this binary needs), so a pod is never routed traffic before migrations
+        # have actually caught up. livenessProbe hits /livez, which only checks the process is
+        # up, so a slow or briefly-down database can't get a healthy pod killed and restarted.
         startupProbe:
           httpGet:
-            path: /health
+            path: /readyz
             port: 9876
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -123,7 +131,7 @@ spec:
           failureThreshold: 30  # Allow up to 150 seconds for startup (30 * 5s)
         livenessProbe:
           httpGet:
-            path: /health
+            path: /livez
             port: 9876
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -131,7 +139,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /health
+            path: /readyz
             port: 9876
           initialDelaySeconds: 15  # Increased from 5 to allow for migrations
           periodSeconds: 5

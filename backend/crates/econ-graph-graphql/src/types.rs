@@ -247,7 +247,16 @@ impl EconomicSeriesType {
         let pool = ctx.data::<DatabasePool>()?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        let filter = filter.unwrap_or_default();
+        // As in `seriesData`: a transformation reads the latest revisions unless the filter
+        // picks a revision mode, so it never compares one date's revisions with each other.
+        let transformed = transformation.is_some_and(|t| t != DataTransformationType::None);
+        let chose_mode = filter.as_ref().is_some_and(|f| {
+            f.as_of.is_some() || f.original_only == Some(true) || f.latest_revision_only.is_some()
+        });
+        let mut filter = filter.unwrap_or_default();
+        if transformed && !chose_mode {
+            filter.latest_revision_only = Some(true);
+        }
 
         // Query data points directly from database
         use diesel::{ExpressionMethods, QueryDsl};
@@ -598,6 +607,7 @@ pub enum SeriesFrequencyType {
     Weekly,
     Monthly,
     Quarterly,
+    SemiAnnual,
     Annual,
     Irregular,
 }
@@ -729,6 +739,8 @@ pub struct DataFilterInput {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
+    /// Keep only each date's newest revision. Defaults to true when a `transformation` is
+    /// requested (and `asOf`/`originalOnly` are not), otherwise false.
     pub latest_revision_only: Option<bool>,
     /// Return each observation as it was known on this day (its newest revision published on or
     /// before it). Takes precedence over `latestRevisionOnly`.

@@ -411,6 +411,10 @@ input DataFilter {
 	startDate: NaiveDate
 	endDate: NaiveDate
 	originalOnly: Boolean
+	"""
+	Keep only each date's newest revision. Defaults to true when a `transformation` is
+	requested (and `asOf`/`originalOnly` are not), otherwise false.
+	"""
 	latestRevisionOnly: Boolean
 	"""
 	Return each observation as it was known on this day (its newest revision published on or
@@ -810,6 +814,10 @@ type Query {
 	time in date order. `totalCount` counts every matching point; read the next page with
 	`after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
 	has the values it would have in the whole series.
+	
+	A series can hold several revisions of one date's value. A `transformation` is computed
+	over the latest revisions unless the filter picks a revision mode (`asOf`, `originalOnly`,
+	or `latestRevisionOnly: false` for every stored revision).
 	"""
 	seriesData(		seriesId: ID!,		filter: DataFilter,		transformation: DataTransformation,
 		"""
@@ -822,11 +830,12 @@ type Query {
 		after: String
 	): DataPointConnection!
 	"""
-	Crawler status, derived from the crawl queue (workers keep no other state).
+	Crawler status, derived from the crawl queue (workers keep no other state; requires
+	`admin.system:read`).
 	"""
 	crawlerStatus: CrawlerStatus!
 	"""
-	Get queue statistics
+	Get queue statistics (requires `admin.system:read`)
 	"""
 	queueStatistics: QueueStatistics!
 	"""
@@ -1015,6 +1024,7 @@ enum SeriesFrequency {
 	WEEKLY
 	MONTHLY
 	QUARTERLY
+	SEMI_ANNUAL
 	ANNUAL
 	IRREGULAR
 }

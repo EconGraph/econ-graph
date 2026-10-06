@@ -1,9 +1,14 @@
-//! Each protected resolver asks for exactly one fine-grained role.
+//! Each protected resolver asks for exactly one fine-grained role. Four of them (updateUser,
+//! deleteUser, suspendUser, activateUser) also gate on `require_manageable`, which runs before
+//! the pool is touched and passes without a database when the caller acts on their own account.
 //!
 //! For every resolver, a caller holding only that role gets past the check, and a caller
 //! holding every other role is refused. None of these cases needs a database: the pool never
 //! connects, so an allowed call fails later, on its first query, with an error that is not an
-//! authorization error.
+//! authorization error. The four `require_manageable`-gated resolvers target the caller's own
+//! id here so the self-action path clears the gate before failing on the pool; acting on
+//! another user is covered separately below, proving the gate runs before any connection is
+//! attempted.
 
 use crate::graphql::context::GraphQLContext;
 use crate::graphql::schema::create_schema_with_data;
@@ -64,7 +69,11 @@ fn is_auth_error(message: &str) -> bool {
 }
 
 /// Every protected resolver, the role it requires, and a request that reaches it.
-fn protected() -> Vec<(&'static str, Role, String)> {
+///
+/// `self_id` is the id the four `require_manageable`-gated mutations target: passing the
+/// caller's own id lets the self-action path clear that gate so the resolver reaches the
+/// (unreachable) pool, the same as every other entry here.
+fn protected(self_id: Uuid) -> Vec<(&'static str, Role, String)> {
     let id = Uuid::new_v4();
     vec![
         (
@@ -75,22 +84,22 @@ fn protected() -> Vec<(&'static str, Role, String)> {
         (
             "updateUser",
             Role::AdminUsersUpdate,
-            format!(r#"mutation {{ updateUser(id: "{id}", input: {{ name: "a" }}) {{ __typename }} }}"#),
+            format!(r#"mutation {{ updateUser(id: "{self_id}", input: {{ name: "a" }}) {{ __typename }} }}"#),
         ),
         (
             "deleteUser",
             Role::AdminUsersDelete,
-            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+            format!(r#"mutation {{ deleteUser(id: "{self_id}") }}"#),
         ),
         (
             "suspendUser",
             Role::AdminUsersSuspend,
-            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+            format!(r#"mutation {{ suspendUser(id: "{self_id}") }}"#),
         ),
         (
             "activateUser",
             Role::AdminUsersSuspend,
-            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
+            format!(r#"mutation {{ activateUser(id: "{self_id}") }}"#),
         ),
         (
             "createAnnotation",
@@ -129,6 +138,16 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "{ systemHealth { __typename } }".into(),
         ),
         (
+            "crawlerStatus",
+            Role::AdminSystemRead,
+            "{ crawlerStatus { isRunning } }".into(),
+        ),
+        (
+            "queueStatistics",
+            Role::AdminSystemRead,
+            "{ queueStatistics { totalItems } }".into(),
+        ),
+        (
             "securityEvents",
             Role::AdminSecurityRead,
             "{ securityEvents { __typename } }".into(),
@@ -143,8 +162,11 @@ fn protected() -> Vec<(&'static str, Role, String)> {
 
 #[tokio::test]
 async fn each_resolver_allows_a_caller_holding_only_its_role() {
-    for (name, role, query) in protected() {
-        let errs = errors(caller_with(user(), [role]), &query).await;
+    // One caller for every entry, so the `require_manageable`-gated resolvers can target its
+    // own id and clear that gate too.
+    let me = user();
+    for (name, role, query) in protected(me.id) {
+        let errs = errors(caller_with(me.clone(), [role]), &query).await;
         assert!(
             !errs.iter().any(|e| is_auth_error(e)),
             "{name} with only {role}: {errs:?}"
@@ -154,7 +176,7 @@ async fn each_resolver_allows_a_caller_holding_only_its_role() {
 
 #[tokio::test]
 async fn each_resolver_denies_a_caller_holding_every_other_role() {
-    for (name, role, query) in protected() {
+    for (name, role, query) in protected(Uuid::new_v4()) {
         let others = Role::all().iter().copied().filter(|&r| r != role);
         let errs = errors(caller_with(user(), others), &query).await;
         assert_eq!(errs.len(), 1, "{name} without {role}: {errs:?}");
@@ -167,7 +189,7 @@ async fn each_resolver_denies_a_caller_holding_every_other_role() {
 
 #[tokio::test]
 async fn each_resolver_asks_an_anonymous_caller_to_sign_in() {
-    for (name, _, query) in protected() {
+    for (name, _, query) in protected(Uuid::new_v4()) {
         let errs = errors(GraphQLContext::anonymous(), &query).await;
         assert_eq!(errs.len(), 1, "{name}: {errs:?}");
         assert!(
@@ -183,6 +205,38 @@ async fn a_caller_with_no_roles_may_read_their_own_user_record() {
     let query = format!(r#"{{ user(userId: "{}") {{ __typename }} }}"#, me.id);
     let errs = errors(caller_with(me, []), &query).await;
     assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
+}
+
+/// Regression for #260: a narrow-role caller acting on another user is refused by
+/// `require_manageable` before the resolver ever calls `pool.get()`. The pool here never
+/// connects, so the single "Insufficient permissions" error (not a connection error) proves
+/// the gate runs first.
+#[tokio::test]
+async fn gate_denies_another_user_before_the_pool_connects() {
+    let id = Uuid::new_v4();
+    for (role, query) in [
+        (
+            Role::AdminUsersUpdate,
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ name: "a" }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            Role::AdminUsersDelete,
+            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+        ),
+        (
+            Role::AdminUsersSuspend,
+            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+        ),
+        (
+            Role::AdminUsersSuspend,
+            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
+        ),
+    ] {
+        let errs = errors(caller_with(user(), [role]), &query).await;
+        assert_eq!(errs, ["Insufficient permissions"], "{query}: {errs:?}");
+    }
 }
 
 /// The legacy all-staff check is gone for good: resolvers name the one role they need.
@@ -245,9 +299,16 @@ async fn changing_is_active_needs_the_suspend_role() {
     assert_eq!(errs.len(), 1, "{errs:?}");
     assert!(errs[0].contains("Insufficient permissions"), "{errs:?}");
 
+    // A narrow two-role caller only clears `require_manageable` on their own account, so
+    // target the caller's own id here to reach the (unreachable) pool, as above.
+    let me = user();
+    let self_query = format!(
+        r#"mutation {{ updateUser(id: "{}", input: {{ isActive: false }}) {{ __typename }} }}"#,
+        me.id
+    );
     let errs = errors(
-        caller_with(user(), [Role::AdminUsersUpdate, Role::AdminUsersSuspend]),
-        &query,
+        caller_with(me, [Role::AdminUsersUpdate, Role::AdminUsersSuspend]),
+        &self_query,
     )
     .await;
     assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
