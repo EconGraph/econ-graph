@@ -22,7 +22,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -125,15 +125,25 @@ export function parseAuditReport(stdout) {
 
 /** Parses `[--dir <path>] [--allowlist <path>] [<dir>]`: `--dir`/a bare positional pick the
  * directory to audit (defaulting to the current directory), `--allowlist` picks the allowlist
- * file (defaulting to the one next to this script). */
+ * file (defaulting to the one next to this script). A later `--dir` wins over an earlier bare
+ * positional, so a caller can't be overridden by an unexpected positional slipping in first. */
 export function parseArgs(argv) {
   let dir;
   let allowlistArg;
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--dir') dir = argv[++i];
-    else if (argv[i] === '--allowlist') allowlistArg = argv[++i];
-    else positional.push(argv[i]);
+    if (argv[i] === '--dir' || argv[i] === '--allowlist') {
+      if (i + 1 >= argv.length) throw new Error(`${argv[i]} needs a value`);
+      if (argv[i] === '--dir') dir = argv[++i];
+      else allowlistArg = argv[++i];
+    } else if (argv[i].startsWith('--')) {
+      throw new Error(`unexpected argument: ${argv[i]}`);
+    } else {
+      positional.push(argv[i]);
+    }
+  }
+  if (positional.length > 1) {
+    throw new Error(`unexpected argument: ${positional[1]}`);
   }
   return { dir: dir ?? positional[0] ?? '.', allowlistArg };
 }
@@ -142,6 +152,7 @@ function main() {
   const { dir, allowlistArg } = parseArgs(process.argv.slice(2));
   const cwd = resolve(dir);
   const allowlistPath = allowlistArg ? resolve(allowlistArg) : defaultAllowlistPath;
+  const allowlistDisplayPath = relative(process.cwd(), allowlistPath);
   const report = runAudit(cwd);
   const allowlist = loadAllowlist(allowlistPath);
   const advisories = findAdvisories(report);
@@ -156,14 +167,14 @@ function main() {
       }
       console.error(
         '\nEither fix it (upgrade, or an `overrides` entry pinning a patched version), or add an ' +
-          `entry to ${allowlistPath} with a reason and review date if no fix exists upstream.`
+          `entry to ${allowlistDisplayPath} with a reason and review date if no fix exists upstream.`
       );
     }
     if (stale.length > 0) {
       console.error(
         (unallowed.length > 0 ? '\n' : '') +
-          `FAIL: these ${allowlistPath} entries no longer match any advisory in this audit — ` +
-          'remove them (that\'s the allowlist "shrinking to empty", not a bug in this check):\n'
+          `FAIL: these ${allowlistDisplayPath} entries no longer match any advisory in this audit ` +
+          '— remove them (that\'s the allowlist "shrinking to empty", not a bug in this check):\n'
       );
       for (const entry of stale) {
         console.error(`  - ${entry.id} (${entry.package}): ${entry.reason}`);

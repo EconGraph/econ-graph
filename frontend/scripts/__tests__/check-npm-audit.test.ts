@@ -185,4 +185,20 @@ describe('parseArgs', () => {
       allowlistArg: undefined,
     });
   });
+
+  it('throws on --dir with no value, rather than silently falling back to "."', () => {
+    expect(() => parseArgs(['--dir'])).toThrow(/--dir needs a value/);
+  });
+
+  it('throws on --allowlist with no value, rather than silently using the default allowlist', () => {
+    expect(() => parseArgs(['--allowlist'])).toThrow(/--allowlist needs a value/);
+  });
+
+  it('throws on an unrecognized flag instead of treating it as a directory', () => {
+    expect(() => parseArgs(['--bogus', '.'])).toThrow(/unexpected argument: --bogus/);
+  });
+
+  it('throws on an unexpected second positional argument', () => {
+    expect(() => parseArgs(['a', 'b'])).toThrow(/unexpected argument: b/);
+  });
 });
