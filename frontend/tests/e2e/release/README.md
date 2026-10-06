@@ -5,15 +5,17 @@ the frontend release build against the real backend on Postgres 18. The database
 is seeded from recorded fixtures through the crawler adapters, so nothing
 touches the network and no API keys are needed. This suite is the release exit
 check (release 1 exit criterion 5). The other specs under `tests/e2e/` belong to
-the older configs, which skip this directory — except `world-map/world-map-mocked.spec.ts`
-and `world-map/world-atlas.spec.ts` (ECO-282), which only mock GraphQL via `page.route` and
-so also run under the older `global-analysis` and default/mobile configs; everything else
-here needs this suite's seeded backend.
+the older configs, which skip this directory — except
+`world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`
+(ECO-282), which only mock GraphQL via `page.route` and so also run under the
+older `global-analysis` and default/mobile configs; everything else here needs
+this suite's seeded backend.
 
-A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts` and the
-phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone width the app once loaded
-behind its open nav drawer, so nothing on the page could be reached). `release` skips `mobile/`.
-Run one project with `--project`, e.g. `scripts/release-e2e.sh --project release-mobile`.
+A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts`
+and the phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone
+width the app once loaded behind its open nav drawer, so nothing on the page
+could be reached). `release` skips `mobile/`. Run one project with `--project`,
+e.g. `scripts/release-e2e.sh --project release-mobile`.
 
 ## Run it
 
@@ -129,9 +131,9 @@ In this mode (`env.ts`):
 - `auth/`: sign-in and annotation privacy (the auth area's spec).
 - `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`: the
   map's zoom, projection, click-through, table, tooltip and indicator-refetch
-  behavior, and the outline's load-without-a-network-request and
-  failure/Reload cases, all against mocked GraphQL responses (`page.route`)
-  rather than this suite's seeded backend (ECO-282).
+  behavior, and the outline's load-without-a-network-request and failure/Reload
+  cases, all against mocked GraphQL responses (`page.route`) rather than this
+  suite's seeded backend (ECO-282).
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
   pages load with the phone nav drawer closed, the menu opens it and picking a
   page closes it, and the map's zoom controls leave the map uncovered (ECO-335).
