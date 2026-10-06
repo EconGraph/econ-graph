@@ -29,6 +29,13 @@ About 50 curated World Development Indicators, listed in
   (`sourceNote`) are not shipped in the csv: `refresh_reference_data` fetches them from
   `GET /indicator/{id}?format=json` on each scheduled crawl and merges them into the `wdi`
   dataset's `indicator` dimension codes and into each series' title/description.
+- **Aggregate names**: the shared country table carries the aggregates we crawl (World, Euro
+  area, European Union, income groups) by code only. `refresh_reference_data` also fetches
+  `GET /country?format=json&per_page=1000` and merges the World Bank's names for those
+  aggregates into the `wdi` dataset's `area` dimension codes; the API prefers them to the
+  shared list, so countries keep their ISO names. Series titles name an aggregate by the
+  `country.value` its data rows carry. World Bank regions and income levels are in the same
+  response but not stored yet.
 - **Dropped**: `obs_status` and `decimal` — `data_points` has no attribute columns in train
   1 (the dataset still declares them, for the schema). WDI leaves `obs_status` empty for
   nearly every row. Rows for an area outside the shared country table (regional aggregates

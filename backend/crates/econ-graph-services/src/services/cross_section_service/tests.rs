@@ -5,7 +5,7 @@
 // once, never drop the schema, and give every test its own data source.
 //
 // The seeded dataset is `wdi` with dimensions `indicator` (GDP, POP) and `area` (the
-// countries code list), over BRA, DEU, JPN, USA and the aggregate WLD:
+// countries code list, naming the aggregate WLD "World"), over BRA, DEU, JPN, USA and WLD:
 //
 // | GDP  | 2021                  | 2022 | 2023                    |
 // |------|-----------------------|------|-------------------------|
@@ -135,6 +135,8 @@ async fn seed() -> Seeded {
     ]);
     let mut area = DatasetComponent::new("area", "Area", ComponentType::String);
     area.codelist = Some(COUNTRIES_CODELIST.to_string());
+    // The dataset's own name for the aggregate, as the World Bank crawl stores it.
+    area.codes = Some(vec![Code::new("WLD", "World")]);
     let dataset = Dataset::create(
         &pool,
         &NewDataset::long(
@@ -542,6 +544,7 @@ async fn areas_come_from_the_reference_file_with_aggregates_marked() {
 
     let wld = by_key["WLD"].area.as_ref().expect("WLD area");
     assert_eq!(wld.kind, AreaKind::Aggregate);
+    assert_eq!(wld.name, "World", "named by the dataset");
     assert_eq!(wld.iso3, None);
     assert_eq!(by_key["WLD"].value, Some(dec("8000")));
 }

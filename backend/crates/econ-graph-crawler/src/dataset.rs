@@ -246,6 +246,14 @@ impl DatasetDef {
                     c.name
                 ));
             }
+            // A source's own labels for a shared list's codes come from its crawl, never the file.
+            if c.codelist.is_some() && c.codes.is_some() {
+                return Err(format!(
+                    "dataset {code}: component {} sets both codes and codelist (labels for a \
+                     code list's codes come from the source's crawl, not this file)",
+                    c.name
+                ));
+            }
             if let Some(list) = c.codelist.as_deref().filter(|l| !CODELISTS.contains(l)) {
                 return Err(format!(
                     "dataset {code}: component {} names unknown codelist {list:?} (known: \
@@ -272,7 +280,7 @@ impl DatasetDef {
                  other measures as a dimension"
             ));
         }
-        // The rules the database row must also meet (codes vs codelist, duplicate codes, ...).
+        // The rules the database row must also meet (duplicate codes, known codelist names, ...).
         self.to_new_dataset(Uuid::nil())
             .validate_components()
             .map_err(|e| e.to_string())

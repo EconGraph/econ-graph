@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
+use crate::reference::Area;
 use crate::schema::datasets;
 
 /// Name of the single measure every train 1 dataset has.
@@ -75,7 +76,10 @@ pub struct DatasetComponent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     /// Inline code list: labels (and, for indicator-like dimensions, units) of the values
-    /// this component takes. At most one of `codes` and `codelist` is set.
+    /// this component takes. With a `codelist`, the dataset's own labels for some of that
+    /// list's codes, which take precedence over the list's (e.g. the World Bank's names for the
+    /// aggregates it publishes; see [`Self::area_label`]); the dataset file never declares
+    /// these, the source's crawl stores them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codes: Option<Vec<Code>>,
     /// Name of a shared code list loaded at runtime from reference data, e.g. `countries`, so
@@ -125,6 +129,22 @@ impl DatasetComponent {
     /// The single decimal `value` measure of a long dataset.
     pub fn value_measure() -> Self {
         Self::new(VALUE_MEASURE, "Value", ComponentType::Decimal)
+    }
+
+    /// This component's own code for `code`, if its inline `codes` list one.
+    pub fn code(&self, code: &str) -> Option<&Code> {
+        self.codes.as_deref()?.iter().find(|c| c.code == code)
+    }
+
+    /// The label of `area` on this (countries code list) dimension: the dataset's own label for
+    /// its key where the dataset stores one, otherwise the shared list's name. An aggregate has
+    /// no name of its own in the shared list (its [`Area::name`] is its key), so the source
+    /// that publishes it names it here.
+    ///
+    /// [`Area::name`]: crate::reference::Area::name
+    pub fn area_label<'a>(&'a self, area: &'a Area) -> &'a str {
+        self.code(&area.key)
+            .map_or(area.name.as_str(), |c| c.label.as_str())
     }
 }
 
@@ -224,9 +244,8 @@ impl NewDataset {
     }
 
     /// Checks what the database cannot: component names are non-empty and unique across
-    /// dimensions, measures and attributes; a component has at most one of `codes` and
-    /// `codelist`, no repeated codes and only a [`KNOWN_CODELISTS`] name; and there is at least
-    /// one measure, including the default one.
+    /// dimensions, measures and attributes; a component has no repeated codes and only a
+    /// [`KNOWN_CODELISTS`] name; and there is at least one measure, including the default one.
     pub fn validate_components(&self) -> AppResult<()> {
         let invalid = |msg: String| Err(AppError::ValidationError(msg));
         if self.code.trim().is_empty() {
@@ -258,12 +277,6 @@ impl NewDataset {
             if !seen.insert(component.name.as_str()) {
                 return invalid(format!(
                     "dataset {} declares component {:?} more than once",
-                    self.code, component.name
-                ));
-            }
-            if component.codes.is_some() && component.codelist.is_some() {
-                return invalid(format!(
-                    "dataset {} component {:?} sets both codes and codelist",
                     self.code, component.name
                 ));
             }

@@ -315,7 +315,6 @@ pub async fn download_seed_entries(
             Ok((validators, codes)) => {
                 let mut dimension = DatasetComponent::from(dimension);
                 dimension.codes = None;
-                dimension.codelist = None;
                 out.entries.push(SeedEntry {
                     dataset: list.dataset.to_string(),
                     dimension,

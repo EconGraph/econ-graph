@@ -77,6 +77,10 @@ Three limits, all only affecting databases that were never deployed from a tag:
   FROM pg_proc
   WHERE proname = 'seed_reference_codes' AND pronargs = 6;
   ```
+
+  Likewise a database migrated from release/v4.0 before ECO-398 keeps the version of that
+  function that skips a dimension with a shared code list, so a World Bank seed leaves out the
+  aggregate names (the first crawl's refresh still fetches them). Recreate it as well.
 - A database that ran the old chain keeps the replaced versions in `__diesel_schema_migrations`.
   `run_pending_migrations` ignores them, but `diesel migration revert` / `redo` stop with
   `UnknownMigrationVersion` when they reach one, or with the squash's own error when they reach

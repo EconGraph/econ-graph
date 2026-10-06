@@ -81,17 +81,19 @@ LANGUAGE sql IMMUTABLE AS $$
 $$;
 
 -- Seeds a source's reference codes into a new database, from a file recorded with the validators
--- it was downloaded with (ETag, Last-Modified, body SHA-256). Called by the generated `*_seed_{source}_reference_codes` migrations (see
+-- it was downloaded with (ETag, Last-Modified, body SHA-256). Called by the generated
+-- `*_seed_{source}_reference_codes` migrations (see
 -- backend/crates/econ-graph-crawler/src/reference_file.rs), one call per file.
 --
 -- Does nothing when `reference_file_cache` already has a row for the file: this database has
 -- crawled it (or been seeded with it) and the crawl keeps it current. Otherwise the codes are
--- merged into the dataset's dimension (codes it already has keep their labels; a dimension with a
--- shared `codelist` is left alone and nothing is stored), creating the
--- dataset row or the dimension if needed, and the file's validators are stored so the first crawl
--- answers the file as unchanged unless the source changed it, even for a source that sends no
--- ETag (If-Modified-Since, or the same body hash). `sync_datasets` later fills in the rest of
--- the dataset from its toml file and keeps these codes.
+-- merged into the dataset's dimension (codes it already has keep their labels; on a dimension
+-- with a shared `codelist`, such as the WDI area dimension, they are the dataset's own labels for
+-- some of that list's codes, which readers prefer to the list's), creating the dataset row
+-- (keeping the dimension's `codelist`) or the dimension if needed. The file's validators are
+-- stored so the first crawl answers the file as unchanged unless the source changed it, even for
+-- a source that sends no ETag (If-Modified-Since, or the same body hash). `sync_datasets` later
+-- fills in the rest of the dataset from its toml file and keeps these codes.
 CREATE FUNCTION seed_reference_codes(
     p_source TEXT,
     p_dataset TEXT,
@@ -113,7 +115,7 @@ DECLARE
             ORDER BY c ->> 'code'
         ) AS u(c)
     );
-    v_dimension JSONB := (p_dimension - 'codes' - 'codelist') || jsonb_build_object('codes', v_codes);
+    v_dimension JSONB := (p_dimension - 'codes') || jsonb_build_object('codes', v_codes);
 BEGIN
     SELECT id INTO v_source_id FROM data_sources WHERE name = p_source;
     IF v_source_id IS NULL THEN
@@ -121,16 +123,6 @@ BEGIN
     END IF;
     IF EXISTS (
         SELECT 1 FROM reference_file_cache WHERE source_id = v_source_id AND url = p_url
-    ) THEN
-        RETURN;
-    END IF;
-    -- A dimension labelled by a shared code list takes no inline codes (it may not have both),
-    -- and the crawl's merge skips it the same way, so nothing is stored for the file.
-    IF EXISTS (
-        SELECT 1
-        FROM datasets AS ds, jsonb_array_elements(ds.dimensions) AS d
-        WHERE ds.source_id = v_source_id AND ds.code = p_dataset
-            AND d ->> 'name' = p_dimension ->> 'name' AND d ? 'codelist'
     ) THEN
         RETURN;
     END IF;
