@@ -119,14 +119,16 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::adapter::{
-    BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite,
-    SourceAdapter,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
 use crate::persist;
 use crate::reference::{data_dir, DATA_DIR_ENV};
-use crate::reference_file::{refresh_at, ReferenceFile};
+#[cfg(test)]
+use crate::reference_file::{download_seed_entries, seed_migration_sql};
+use crate::reference_file::{labels_only, refresh_code_list, CodeList};
 use crate::source::SourceId;
 use econ_graph_core::error::AppError;
 
@@ -520,24 +522,20 @@ impl BeaAdapter {
         Ok(values.param_value)
     }
 
-    /// Conditionally re-fetches BEA's own titles for every `TableName` of `dataset`
+    /// Conditionally re-fetches BEA's own titles for every `TableName` of `list`'s dataset
     /// (`GetParameterValues`, `ParameterName=TableName`; its `ParamValue` rows are named after
     /// the parameter itself, `TableName`/`Description`, for NIPA, or the generic `Key`/`Desc`
     /// every other `GetParameterValues*` call on Regional uses — [`TableNameValue`] accepts
-    /// either), merges them into `dataset`'s `table_name` dimension
-    /// ([`crate::reference_file::refresh_at`], so `bea_tables.csv` doesn't need a curated title column
-    /// and the GraphQL code list carries them too) and refreshes the in-process cache
+    /// either), merges them into the dataset's `table_name` dimension
+    /// ([`refresh_code_list`], so `bea_tables.csv` doesn't need a curated title column and the
+    /// GraphQL code list carries them too — a response with no rows is a `Parse` error, same as
+    /// any other empty code list, never a silent no-op) and refreshes the in-process cache
     /// [`table_titles`](Self::table_titles) reads. The only method that touches the database or
     /// fetches titles over the network; called by
     /// [`refresh_reference_data`](SourceAdapter::refresh_reference_data), so its failure (BEA or
     /// the database) never fails a `discover` or `fetch_*` already in flight — it still reloads
     /// the cache from the database either way (below), so only a database that truly has nothing
     /// yet leaves the cache as it was.
-    ///
-    /// Uses [`refresh_at`] rather than a plain [`CodeList`](crate::reference_file::CodeList)
-    /// (whose `url` doubles as the `reference_file_cache` key): BEA's request URL carries the
-    /// API key, which must never land in that table, so the cache key is a stable, keyless
-    /// label ([`table_titles_cache_key`]) and the keyed URL is only ever used for the request.
     ///
     /// Reloads the in-process cache from the database after every refresh attempt, applied or
     /// not (a `304`, or an `apply` that found nowhere to merge into), rather than trusting
@@ -546,43 +544,21 @@ impl BeaAdapter {
     async fn refresh_table_titles(
         &self,
         ctx: &CrawlCtx,
-        key: &str,
+        list: &CodeList,
         dataset: BeaDataset,
     ) -> Result<(), CrawlError> {
-        let file = ReferenceFile {
-            source: SourceId::Bea,
-            url: table_titles_cache_key(dataset),
-        };
-        // The key sits in the query string because `get_reference_file_if_changed` has no query
-        // parameter; that's fine, `Target::new`'s `SECRET_PARAMS` already redacts `userid` from
-        // logged URLs (see http.rs), the same as every other BEA request this adapter makes. It
-        // never reaches `reference_file_cache`: `refresh_at` stores `file.url` (the keyless
-        // cache key above), not this request URL.
-        let request_url = format!(
-            "{}/?UserID={key}&method=GetParameterValues&DatasetName={}&ParameterName=TableName&ResultFormat=JSON",
-            self.base_url,
-            dataset.api_name(),
-        );
-        let dataset_code = dataset.code();
-        let refreshed = refresh_at(ctx, &file, &request_url, |body| {
-            let request_url = request_url.clone();
-            Box::pin(async move {
-                let labels = parse_table_titles(&body).inspect_err(|e| {
+        // `refresh_code_list`'s own HTTP layer already counts a transport/status error; a `parse`
+        // error (BEA answered 200 with an in-body error envelope) comes from `apply`, after that,
+        // so it needs its own record here or it's silently dropped from `crawler_errors_total`.
+        let refreshed = refresh_code_list(ctx, SourceId::Bea, list)
+            .await
+            .inspect_err(|e| {
+                if e.kind() == "parse" {
                     ctx.http
-                        .record_response_error(SourceId::Bea, &request_url, e)
-                })?;
-                persist::merge_dataset_dimension_codes(
-                    &ctx.pool,
-                    SourceId::Bea,
-                    dataset_code,
-                    "table_name",
-                    &labels,
-                )
-                .await
-                .map_err(db_err)
-            })
-        })
-        .await;
+                        .record_response_error(SourceId::Bea, list.request_url(), e);
+                }
+            });
+        let dataset_code = dataset.code();
         // Reload from the database either way, even on a failed refresh (BEA down, rate
         // limited, a bad body): a prior process instance's merge, or this process's own earlier
         // one, may already be there, and skipping the reload would otherwise blank the
@@ -969,14 +945,52 @@ impl SourceAdapter for BeaAdapter {
         true
     }
 
+    /// BEA's titles for every NIPA and Regional `TableName`, one [`CodeList`] per dataset.
+    /// `request_url` carries the API key (`UserID`), since BEA's `GetParameterValues` needs one
+    /// and it must never land in `url`, the `reference_file_cache` key (`HttpFetcher` redacts it
+    /// from logs and errors regardless, the same as every other BEA request). No key, no lists:
+    /// there is nothing this adapter could seed or refresh without one, same as every other BEA
+    /// request ([`api_key`](Self::api_key)'s `Permanent` error when `BEA_API_KEY` isn't set).
+    fn code_lists(&self, keys: &ApiKeys) -> Vec<CodeList> {
+        let Some(key) = keys.bea.as_deref() else {
+            return Vec::new();
+        };
+        [BeaDataset::Nipa, BeaDataset::Regional]
+            .into_iter()
+            .map(|dataset| CodeList {
+                request_url: Some(format!(
+                    "{}/?UserID={key}&method=GetParameterValues&DatasetName={}&ParameterName=TableName&ResultFormat=JSON",
+                    self.base_url,
+                    dataset.api_name(),
+                )),
+                ..CodeList::new(
+                    table_titles_cache_key(dataset),
+                    dataset.code(),
+                    "table_name",
+                    labels_only(parse_table_titles),
+                )
+            })
+            .collect()
+    }
+
     /// Fetches BEA's own titles for every NIPA and Regional `TableName` and merges them into
     /// `bea_tables.csv`'s curated tables' `table_name` dimension (see
-    /// [`refresh_table_titles`](Self::refresh_table_titles)).
+    /// [`refresh_table_titles`](Self::refresh_table_titles)). No key: the same `Permanent` error
+    /// [`api_key`](Self::api_key) always gives BEA requests without one, since
+    /// [`code_lists`](Self::code_lists) returns nothing to refresh.
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
-        let key = self.api_key(ctx)?;
+        let lists = self.code_lists(&ctx.keys);
+        if lists.is_empty() {
+            return Err(self.api_key(ctx).unwrap_err());
+        }
         let mut errors = Vec::new();
-        for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
-            if let Err(e) = self.refresh_table_titles(ctx, key, dataset).await {
+        for list in &lists {
+            let dataset = if list.dataset == NIPA_DATASET {
+                BeaDataset::Nipa
+            } else {
+                BeaDataset::Regional
+            };
+            if let Err(e) = self.refresh_table_titles(ctx, list, dataset).await {
                 errors.push(format!("{}: {e}", dataset.api_name()));
             }
         }
@@ -1697,6 +1711,68 @@ mod tests {
             .query("DatasetName", dataset)
             .query("ParameterName", "TableName")
             .query("ResultFormat", "JSON")
+    }
+
+    /// The [`CodeList`] `adapter.code_lists()` builds for `dataset`, with `TEST_API_KEY`.
+    fn table_titles_code_list(adapter: &BeaAdapter, dataset: BeaDataset) -> CodeList {
+        let keys = ApiKeys {
+            bea: Some(TEST_API_KEY.to_string()),
+            ..ApiKeys::default()
+        };
+        adapter
+            .code_lists(&keys)
+            .into_iter()
+            .find(|list| {
+                list.dataset
+                    == match dataset {
+                        BeaDataset::Nipa => NIPA_DATASET,
+                        BeaDataset::Regional => REGIONAL_DATASET,
+                    }
+            })
+            .unwrap()
+    }
+
+    /// `code_lists()`'s `url` (the `reference_file_cache` key and seed-migration identity) never
+    /// carries the `UserID` key that `request_url` needs, and neither does a seed recorded from
+    /// it: not `SeedEntry::url`, nor the generated migration SQL.
+    #[tokio::test]
+    async fn code_lists_never_puts_the_api_key_in_the_seed() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &table_titles_route("NIPA"),
+            Reply::json_str(NIPA_TABLE_TITLES),
+        )
+        .await;
+        let adapter = BeaAdapter::new(mock.base_url());
+        let list = table_titles_code_list(&adapter, BeaDataset::Nipa);
+        assert!(!list.url.contains(TEST_API_KEY), "{}", list.url);
+        assert!(list.request_url().contains(TEST_API_KEY));
+
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bea,
+                &[NIPA_DATASET, REGIONAL_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bea.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let download = download_seed_entries(&test_ctx().http, SourceId::Bea, &[list], &catalog)
+            .await
+            .unwrap();
+        assert!(download.failures.is_empty(), "{:?}", download.failures);
+        assert!(!download.entries[0].url.contains(TEST_API_KEY));
+
+        let at = "2026-10-02T03:00:00Z".parse().unwrap();
+        let (up, down) = seed_migration_sql(SourceId::Bea, at, &download.entries).unwrap();
+        assert!(!up.contains(TEST_API_KEY), "{up}");
+        assert!(!down.contains(TEST_API_KEY), "{down}");
     }
 
     async fn mount_discovery(mock: &MockSource) {
@@ -2440,6 +2516,7 @@ mod tests {
         );
         let ids = ["bea_nipa/T10105.1.Q".to_string()];
         assert_eq!(a.fetch_batch(&ctx, &ids, None).await.unwrap_err(), expected);
+        assert_eq!(a.refresh_reference_data(&ctx).await.unwrap_err(), expected);
         assert!(mock.received_requests().await.is_empty());
     }
 
@@ -2573,8 +2650,9 @@ mod tests {
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
         let adapter = BeaAdapter::new(mock.base_url());
+        let nipa_list = table_titles_code_list(&adapter, BeaDataset::Nipa);
         adapter
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .refresh_table_titles(&ctx, &nipa_list, BeaDataset::Nipa)
             .await
             .unwrap();
 
@@ -2610,8 +2688,9 @@ mod tests {
         )
         .await;
         let fresh = BeaAdapter::new(mock.base_url());
+        let fresh_nipa_list = table_titles_code_list(&fresh, BeaDataset::Nipa);
         fresh
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .refresh_table_titles(&ctx, &fresh_nipa_list, BeaDataset::Nipa)
             .await
             .unwrap();
         assert_eq!(
@@ -2640,8 +2719,9 @@ mod tests {
             1,
         )
         .await;
+        let regional_list = table_titles_code_list(&adapter, BeaDataset::Regional);
         adapter
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Regional)
+            .refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
             .await
             .unwrap();
         assert_eq!(
@@ -2680,8 +2760,9 @@ mod tests {
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
         let adapter = BeaAdapter::new(mock.base_url());
+        let nipa_list = table_titles_code_list(&adapter, BeaDataset::Nipa);
         let e = adapter
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .refresh_table_titles(&ctx, &nipa_list, BeaDataset::Nipa)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "transient", "{e}");
@@ -2757,8 +2838,9 @@ mod tests {
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
         let adapter = BeaAdapter::new(mock.base_url());
+        let nipa_list = table_titles_code_list(&adapter, BeaDataset::Nipa);
         let e = adapter
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .refresh_table_titles(&ctx, &nipa_list, BeaDataset::Nipa)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "transient", "{e}");

@@ -76,16 +76,16 @@
 //! # Concurrency
 //!
 //! Discovery and every fetch batch download the same master file, so two workers can end up
-//! downloading it at once even though [`MAX_BATCH`] normally covers the whole catalog in one
-//! fetch. A process-local in-flight reservation, keyed by the master URL, makes the second
-//! download a no-op instead: it makes no request and fails with a retryable [`CrawlError::Busy`]
-//! (exponential backoff with jitter), which the worker reschedules without counting a failed
-//! attempt (see [`worker`](crate::worker)). The reservation is one process's in-memory state: it
-//! does nothing for two separate `crawler-worker` processes downloading at once, and does not
-//! cover the reference-data download [`code_lists`](SourceAdapter::code_lists) makes through
-//! [`reference_file::refresh`](crate::reference_file::refresh) (which runs before discovery in
-//! the same job, not concurrently with it). Recovering a
-//! reservation left behind by a crawler crash is
+//! downloading it at once even though [`MAX_BATCH`] normally covers the whole catalog in one fetch.
+//! A process-local in-flight reservation, keyed by the master URL, makes the second download a
+//! no-op instead: it makes no request, reads nothing from the database, and fails with a retryable
+//! [`CrawlError::Busy`] (exponential backoff with jitter), which the worker reschedules without
+//! counting a failed attempt (see [`worker`](crate::worker)). The reservation is one process's
+//! in-memory state: it does nothing for two separate `crawler-worker` processes downloading at
+//! once, and does not cover the reference-data download [`code_lists`](SourceAdapter::code_lists)
+//! makes through [`reference_file::refresh`](crate::reference_file::refresh) (which runs before
+//! discovery in the same job, not concurrently with it). Recovering a reservation left behind by a
+//! crawler crash is
 //! [ECO-257](https://linear.app/econgraph/issue/ECO-257/recover-shared-download-reservations-after-crawler-crashes);
 //! today a crash simply loses the in-memory reservation along with the rest of the process.
 //!
@@ -426,9 +426,9 @@ const CONTENTION_MAX_BACKOFF: Duration = Duration::from_secs(30);
 static IN_FLIGHT: LazyLock<Mutex<HashMap<String, u32>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Holds a URL's in-flight reservation until dropped, which releases it whether `master` finishes
-/// normally, fails, or its future is cancelled (an `async fn`'s locals, this one included, drop on
-/// every exit path).
+/// Holds a URL's in-flight reservation until dropped, which releases it whether the reserving
+/// caller finishes normally, fails, or its future is cancelled (an `async fn`'s locals, this one
+/// included, drop on every exit path).
 struct DownloadGuard(String);
 
 impl DownloadGuard {
@@ -494,9 +494,17 @@ impl FhfaAdapter {
         format!("{}#discovery", self.master_url())
     }
 
+    /// Reserves the master file's download (see [`DownloadGuard`]). Callers reserve before
+    /// anything else, the read of stored validators included, so a contender fails with `Busy` at
+    /// once instead of after a database round trip that may outlast the download it waits on.
+    fn reserve(&self) -> Result<DownloadGuard, CrawlError> {
+        DownloadGuard::try_acquire(&self.master_url())
+    }
+
     /// Downloads and parses the whole master file.
     async fn master(&self, ctx: &CrawlCtx) -> Result<BTreeMap<String, HpiSeries>, CrawlError> {
-        let (master, _) = self.master_if_changed(ctx, None).await?;
+        let reservation = self.reserve()?;
+        let (master, _) = self.master_if_changed(ctx, &reservation, None).await?;
         master.ok_or_else(|| {
             // Unreachable: with no known validators the fetcher never reports `Unchanged`.
             CrawlError::Transient("FHFA: master file reported unchanged without validators".into())
@@ -504,14 +512,15 @@ impl FhfaAdapter {
     }
 
     /// Downloads and parses the master file, unless `known` shows it hasn't changed (see
-    /// [Re-crawls](self#re-crawls)): `None` then, without parsing.
+    /// [Re-crawls](self#re-crawls)): `None` then, without parsing. Takes the caller's
+    /// reservation (see [`reserve`](Self::reserve)) so none downloads without one.
     async fn master_if_changed(
         &self,
         ctx: &CrawlCtx,
+        _reservation: &DownloadGuard,
         known: Option<&Validators>,
     ) -> Result<(Option<BTreeMap<String, HpiSeries>>, Validators), CrawlError> {
         let url = self.master_url();
-        let _reservation = DownloadGuard::try_acquire(&url)?;
         let def = crate::reference::dataset(SourceId::Fhfa, DATASET)?;
         let known = known.filter(|k| k.version.as_deref() == Some(PARSE_VERSION));
         let (master, mut validators) = match ctx
@@ -649,6 +658,7 @@ impl SourceAdapter for FhfaAdapter {
     /// [`Discovery::Unchanged`] when the master file is the one the last discovery read (see
     /// [Re-crawls](self#re-crawls)).
     async fn discover_if_changed(&self, ctx: &CrawlCtx) -> Result<Discovery, CrawlError> {
+        let reservation = self.reserve()?;
         let key = self.discovery_key();
         let known = persist::url_validators(&ctx.pool, SourceId::Fhfa, &key)
             .await
@@ -656,7 +666,10 @@ impl SourceAdapter for FhfaAdapter {
                 tracing::warn!(%error, "FHFA: reading stored validators failed; full download");
                 None
             });
-        match self.master_if_changed(ctx, known.as_ref()).await? {
+        match self
+            .master_if_changed(ctx, &reservation, known.as_ref())
+            .await?
+        {
             (None, _) => Ok(Discovery::Unchanged),
             (Some(master), validators) => Ok(Discovery::Changed {
                 found: self.discovered(master),
@@ -696,6 +709,7 @@ impl SourceAdapter for FhfaAdapter {
         external_ids: &[String],
         _since: Option<NaiveDate>,
     ) -> Result<BatchFetch, CrawlError> {
+        let reservation = self.reserve()?;
         let stored = persist::stored_fetch_state(&ctx.pool, SourceId::Fhfa, external_ids)
             .await
             .unwrap_or_else(|error| {
@@ -703,7 +717,9 @@ impl SourceAdapter for FhfaAdapter {
                 HashMap::new()
             });
         let known = shared_validators(external_ids, &stored);
-        let (master, validators) = self.master_if_changed(ctx, known.as_ref()).await?;
+        let (master, validators) = self
+            .master_if_changed(ctx, &reservation, known.as_ref())
+            .await?;
         let Some(master) = master else {
             // `known` is only set when every id has a stored state, and the fetcher reports
             // `Unchanged` only for a request that sent `known`.
@@ -1156,8 +1172,15 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
 
+        // With no reachable database, so the reservation must come before the read of stored
+        // validators: that read retries for the pool's whole connection timeout, longer than the
+        // first download takes.
+        let no_db = CrawlCtx {
+            pool: crate::testkit::unreachable_pool(),
+            ..test_ctx()
+        };
         let busy = adapter
-            .fetch_series(&test_ctx(), US_PO_MONTHLY_SA, None)
+            .fetch_series(&no_db, US_PO_MONTHLY_SA, None)
             .await
             .unwrap_err();
         assert_eq!(busy.kind(), "busy");

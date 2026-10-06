@@ -352,7 +352,17 @@ pub fn test_http_config() -> HttpConfig {
 /// unexpectedly touches the database fails fast with a connection error instead of hanging).
 /// Built with bb8's `build_unchecked` and no reaper, so it needs no database and no runtime.
 pub fn lazy_pool() -> DatabasePool {
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| NO_DATABASE_URL.to_string());
+    lazy_pool_at(std::env::var("DATABASE_URL").unwrap_or_else(|_| NO_DATABASE_URL.to_string()))
+}
+
+/// A [`lazy_pool`] at an address where nothing listens, whatever `DATABASE_URL` says: every
+/// checkout fails, after retrying for the pool's connection timeout. For tests that must hold
+/// whether or not a database is reachable.
+pub fn unreachable_pool() -> DatabasePool {
+    lazy_pool_at(NO_DATABASE_URL.to_string())
+}
+
+fn lazy_pool_at(url: String) -> DatabasePool {
     let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(url);
     Pool::builder()
         .max_size(2)

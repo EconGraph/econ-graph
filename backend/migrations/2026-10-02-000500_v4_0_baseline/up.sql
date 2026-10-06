@@ -4,9 +4,11 @@
 -- deployed from them, so a new database is created in one step instead of replaying in-place
 -- upgrades. Migrations after v4.0.0 are incremental again. See docs/development/MIGRATIONS.md.
 --
--- This migration has the version of the last migration it replaces (2026-10-01-000100), so a
+-- This migration has the version of the last migration it replaces (2026-10-02-000500), so a
 -- database that had already run that whole chain treats it as applied and only runs what comes
--- after. A database part way through the old chain stops at the guard below.
+-- after. A database part way through the old chain stops at the guard below. The chain it
+-- replaces is every migration on release/v4.0 before v4.0.0 was tagged, including the first
+-- baseline (2026-10-01-000100) and the six migrations merged after it.
 --
 -- scripts/compare_migrations.sh checks that this file builds the same schema and seed rows as the
 -- chain it replaces.
@@ -19,7 +21,7 @@ BEGIN
     IF to_regclass('public.data_sources') IS NOT NULL THEN
         RAISE EXCEPTION 'This database was built by migrations from before the v4.0.0 baseline and has not run all of them'
             USING HINT = 'Recreate the database, or run the old chain to its end first (git checkout '
-                'the commit before the baseline, then start the backend once) and switch back.';
+                'the commit before the baseline was last squashed, then start the backend once) and switch back.';
     END IF;
 END $$;
 
@@ -76,6 +78,94 @@ LANGUAGE sql IMMUTABLE AS $$
                 ELSE TRUE
             END
     ) ELSE FALSE END
+$$;
+
+-- Seeds a source's reference codes into a new database, from a file recorded with the validators
+-- it was downloaded with (ETag, Last-Modified, body SHA-256). Called by the generated `*_seed_{source}_reference_codes` migrations (see
+-- backend/crates/econ-graph-crawler/src/reference_file.rs), one call per file.
+--
+-- Does nothing when `reference_file_cache` already has a row for the file: this database has
+-- crawled it (or been seeded with it) and the crawl keeps it current. Otherwise the codes are
+-- merged into the dataset's dimension (codes it already has keep their labels; a dimension with a
+-- shared `codelist` is left alone and nothing is stored), creating the
+-- dataset row or the dimension if needed, and the file's validators are stored so the first crawl
+-- answers the file as unchanged unless the source changed it, even for a source that sends no
+-- ETag (If-Modified-Since, or the same body hash). `sync_datasets` later fills in the rest of
+-- the dataset from its toml file and keeps these codes.
+CREATE FUNCTION seed_reference_codes(
+    p_source TEXT,
+    p_dataset TEXT,
+    p_dimension JSONB,
+    p_url TEXT,
+    p_etag TEXT,
+    p_last_modified TEXT,
+    p_content_sha256 TEXT,
+    p_codes JSONB
+) RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_source_id UUID;
+    v_codes JSONB := (
+        SELECT COALESCE(jsonb_agg(c ORDER BY c ->> 'code'), '[]'::jsonb)
+        FROM (
+            SELECT DISTINCT ON (c ->> 'code') c
+            FROM jsonb_array_elements(p_codes) AS c
+            ORDER BY c ->> 'code'
+        ) AS u(c)
+    );
+    v_dimension JSONB := (p_dimension - 'codes' - 'codelist') || jsonb_build_object('codes', v_codes);
+BEGIN
+    SELECT id INTO v_source_id FROM data_sources WHERE name = p_source;
+    IF v_source_id IS NULL THEN
+        RAISE EXCEPTION 'seed_reference_codes: no data source named %', p_source;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM reference_file_cache WHERE source_id = v_source_id AND url = p_url
+    ) THEN
+        RETURN;
+    END IF;
+    -- A dimension labelled by a shared code list takes no inline codes (it may not have both),
+    -- and the crawl's merge skips it the same way, so nothing is stored for the file.
+    IF EXISTS (
+        SELECT 1
+        FROM datasets AS ds, jsonb_array_elements(ds.dimensions) AS d
+        WHERE ds.source_id = v_source_id AND ds.code = p_dataset
+            AND d ->> 'name' = p_dimension ->> 'name' AND d ? 'codelist'
+    ) THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO datasets (source_id, code, name, dimensions)
+    VALUES (v_source_id, p_dataset, p_dataset, jsonb_build_array(v_dimension))
+    ON CONFLICT (source_id, code) DO UPDATE SET dimensions = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM jsonb_array_elements(datasets.dimensions) AS d
+            WHERE d ->> 'name' = p_dimension ->> 'name'
+        ) THEN (
+            SELECT jsonb_agg(
+                CASE
+                    WHEN d ->> 'name' = p_dimension ->> 'name' THEN
+                        d || jsonb_build_object('codes', COALESCE(d -> 'codes', '[]'::jsonb) || (
+                            SELECT COALESCE(jsonb_agg(c ORDER BY c ->> 'code'), '[]'::jsonb)
+                            FROM jsonb_array_elements(v_codes) AS c
+                            WHERE NOT EXISTS (
+                                SELECT 1
+                                FROM jsonb_array_elements(COALESCE(d -> 'codes', '[]'::jsonb)) AS e
+                                WHERE e ->> 'code' = c ->> 'code'
+                            )
+                        ))
+                    ELSE d
+                END
+                ORDER BY ord
+            )
+            FROM jsonb_array_elements(datasets.dimensions) WITH ORDINALITY AS t(d, ord)
+        )
+        ELSE datasets.dimensions || jsonb_build_array(v_dimension)
+    END;
+
+    INSERT INTO reference_file_cache (source_id, url, etag, last_modified, content_sha256)
+    VALUES (v_source_id, p_url, p_etag, p_last_modified, p_content_sha256);
+END
 $$;
 
 -- ============================================================================
@@ -443,6 +533,39 @@ CREATE TRIGGER trigger_update_series_metadata_updated_at
     BEFORE UPDATE ON series_metadata
     FOR EACH ROW
     EXECUTE FUNCTION update_series_metadata_updated_at();
+
+-- The validators of a file or catalog resource an adapter fetches from its source (reference code
+-- lists such as BLS's cu.item, and catalog resources discovery checks before re-listing every
+-- series), so a scheduled refresh can send a conditional GET or compare a hash or version and
+-- skip unchanged data (see HttpFetcher::get_text_if_changed). Not source-specific.
+-- payload: what an adapter kept from the last copy it fetched, so a 304 can still be used without
+-- re-downloading the file. BLS keeps the title, frequency and index base of each curated series
+-- from its survey `.series` files here. NULL for files whose contents are merged elsewhere (e.g.
+-- dataset dimension codes).
+CREATE TABLE reference_file_cache (
+    source_id UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    etag TEXT,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    payload JSONB,
+    last_modified TEXT,
+    content_sha256 TEXT,
+    version TEXT,
+
+    PRIMARY KEY (source_id, url),
+    CONSTRAINT reference_file_cache_url_not_blank CHECK (btrim(url) <> '')
+);
+
+-- Per-series validators, written in the same transaction as the series' points, so a validator
+-- never outlives a failed write of the data it describes. No row means the next fetch is a full one.
+CREATE TABLE series_fetch_validators (
+    series_id UUID PRIMARY KEY REFERENCES economic_series(id) ON DELETE CASCADE,
+    etag TEXT,
+    last_modified TEXT,
+    content_sha256 TEXT,
+    version TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ============================================================================
 -- GLOBAL ANALYSIS
@@ -1509,9 +1632,9 @@ INSERT INTO data_sources (name, description, base_url, api_key_required, rate_li
     ('Federal Reserve Economic Data (FRED)', 'Economic data from the Federal Reserve Bank of St. Louis', 'https://api.stlouisfed.org/fred', true, 120, NULL, NULL, true, true, false, 6, 'active'),
     ('Bureau of Labor Statistics (BLS)', 'Labor statistics and economic indicators from the U.S. Bureau of Labor Statistics', 'https://api.bls.gov/publicAPI/v2', true, 500, NULL, NULL, true, true, false, 12, 'active'),
     ('U.S. Census Bureau', 'Demographic and economic data from the U.S. Census Bureau', 'https://api.census.gov/data', true, 500, 'CENSUS_API_KEY', NULL, true, true, false, 24, 'disabled'),
-    ('World Bank Open Data', 'Global economic and development indicators from the World Bank', 'https://api.worldbank.org/v2', false, 1000, NULL, NULL, false, false, true, 24, 'disabled'),
+    ('World Bank Open Data', 'Global economic and development indicators from the World Bank', 'https://api.worldbank.org/v2', false, 1000, NULL, NULL, true, true, false, 24, 'pending'),
     ('International Monetary Fund (IMF)', 'Global economic and financial data from the IMF', 'http://dataservices.imf.org', false, 60, NULL, 'https://data.imf.org/en/Resource-Pages/IMF-API', false, false, true, 24, 'disabled'),
-    ('Bureau of Economic Analysis (BEA)', 'National economic accounts and GDP data from BEA', 'https://apps.bea.gov', false, 60, NULL, 'https://apps.bea.gov/api/bea_web_service_api_user_guide.htm', false, false, true, 24, 'disabled'),
+    ('Bureau of Economic Analysis (BEA)', 'National economic accounts and GDP data from BEA', 'https://apps.bea.gov', false, 60, NULL, 'https://apps.bea.gov/api/bea_web_service_api_user_guide.htm', true, true, false, 24, 'pending'),
     ('SEC EDGAR', 'SEC Electronic Data Gathering, Analysis, and Retrieval system for XBRL financial filings', 'https://www.sec.gov/edgar', false, 10, NULL, NULL, true, true, false, 24, 'pending');
 
 -- Discovery catalog seeds, on their stable ids. The crawler test `seeded_series_metadata_has_stable_ids`
