@@ -157,6 +157,7 @@ impl SourceAdapter for EchoAdapter {
             }),
             points,
             dataset: self.dataset_for(external_id),
+            validators: None,
         })
     }
 }
