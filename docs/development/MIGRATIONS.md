@@ -53,7 +53,8 @@ Two limits, both only affecting development databases:
   unmerged branches during the release, recreate your database after the squash.
 - A database that ran the old chain keeps the replaced versions in `__diesel_schema_migrations`.
   `run_pending_migrations` ignores them, but `diesel migration revert` / `redo` stop with
-  `UnknownMigrationVersion` when they reach one. Recreate the database to use them again.
+  `UnknownMigrationVersion` when they reach one, or with the squash's own error when they reach
+  the squash. Migrations after the squash can be reverted and redone as usual.
 
 Steps:
 
@@ -69,8 +70,10 @@ Steps:
    branch is cut, check `main` as well as the release branch.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
    constraints and indexes, final seed rows. Keep column order the same as the chain produced.
-   Name the directory with the last replaced version, e.g. `2026-10-01-000100_v4_0_baseline`,
-   and give it a `down.sql`.
+   Name the directory with the last replaced version, e.g. `2026-10-01-000100_v4_0_baseline`.
+   Its `down.sql` only raises an error: on an upgraded database that version belongs to the last
+   replaced migration, so `diesel migration revert` there would otherwise drop the whole schema
+   while looking like a revert of one small change. Recreate the database to start over.
 3. Delete the replaced directories and anything that only existed to upgrade data the release
    never had (backfills, dedupes, compatibility shims). Tests that loaded a replaced migration
    file with `include_str!` move to the squashed one or to the statement they need.

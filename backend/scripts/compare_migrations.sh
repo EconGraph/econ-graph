@@ -24,19 +24,21 @@ admin_url=${ADMIN_URL:-postgres://postgres@127.0.0.1:5432/postgres}
 work=$(mktemp -d)
 old_db="migcmp_old_$$"
 new_db="migcmp_new_$$"
+# Drops the scratch databases and the work directory, on any exit.
 cleanup() {
     psql "$admin_url" -q -c "DROP DATABASE IF EXISTS $old_db" -c "DROP DATABASE IF EXISTS $new_db" >/dev/null 2>&1 || true
     rm -rf "$work"
 }
 trap cleanup EXIT
 
+# Prints ADMIN_URL with its database name replaced by $1, keeping any query string.
 db_url() {
-    # Swap the database name at the end of ADMIN_URL, keeping any query string.
     python3 -c 'import sys, urllib.parse as u; p = u.urlsplit(sys.argv[1]); print(u.urlunsplit(p._replace(path="/" + sys.argv[2])))' "$admin_url" "$1"
 }
 
-# Version as Diesel computes it (migrations_internals::version_from_string): the directory name up
-# to the first "_", without dashes.
+# Applies every up.sql in directory $1 to database URL $2, in the order Diesel would. The version
+# is computed as Diesel does (migrations_internals::version_from_string): the directory name up to
+# the first "_", without dashes.
 apply_chain() {
     local dir=$1 url=$2 name
     for name in $(cd "$dir" && for d in */; do d=${d%/}; [ -f "$d/up.sql" ] && printf '%s %s\n' "$(echo "${d%%_*}" | tr -d -)" "$d"; done | sort | cut -d' ' -f2); do
@@ -48,6 +50,7 @@ apply_chain() {
     done
 }
 
+# Writes the schema of database URL $1 to $2.schema and its rows, masked, to $2.rows.
 snapshot() {
     local url=$1 out=$2
     psql "$url" -X -q -v ON_ERROR_STOP=1 -f "$script_dir/schema_snapshot.sql" >"$out.schema"

@@ -615,10 +615,11 @@ mod tests {
         (pool, chart, admin, target)
     }
 
+    /// Adds the baseline's one-grant-per-user constraint to the fixture's schema, which
+    /// `sharing_fixture` creates without it.
     async fn migrate_sharing(pool: &DatabasePool) {
         use diesel_async::SimpleAsyncConnection;
         let mut conn = pool.get().await.unwrap();
-        // The one-grant-per-user constraint from the baseline migration.
         conn.batch_execute(
             "ALTER TABLE chart_collaborators
             ADD CONSTRAINT chart_collaborators_chart_user_unique UNIQUE (chart_id, user_id);",
