@@ -81,9 +81,12 @@ use econ_graph_core::{AppError, AppResult};
 use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::adapter::{AdapterRegistry, CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::adapter::{
+    AdapterRegistry, CrawlCtx, DiscoveredSeries, Discovery, FetchedSeries, SourceAdapter,
+};
 use crate::dataset::DatasetCatalog;
 use crate::error::CrawlError;
+use crate::http::Validators;
 use crate::persist::{self, AttemptRecord};
 use crate::source::SourceId;
 
@@ -277,7 +280,11 @@ enum JobWrite {
         found: Vec<DiscoveredSeries>,
         complete: bool,
         scope_prefix: Option<String>,
+        /// `(url, validators)` to store with the discovered series.
+        validator: Option<(String, Validators)>,
     },
+    /// The adapter found its catalog unchanged: nothing to write.
+    DiscoveryUnchanged,
     Handler(JobStats),
 }
 
@@ -751,7 +758,14 @@ impl Worker {
                 );
             }
         }
-        let found = guarded(async move { adapter.discover(&ctx).await }).await?;
+        let (found, validator) =
+            match guarded(async move { adapter.discover_if_changed(&ctx).await }).await? {
+                Discovery::Unchanged => {
+                    tracing::info!(%source, "catalog unchanged since last discovery");
+                    return Ok(JobWrite::DiscoveryUnchanged);
+                }
+                Discovery::Changed { found, validator } => (found, validator),
+            };
         self.datasets.check_all(
             source,
             found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),
@@ -760,6 +774,7 @@ impl Worker {
             found,
             complete,
             scope_prefix,
+            validator,
         })
     }
 
@@ -859,7 +874,11 @@ impl Worker {
                         found,
                         complete,
                         scope_prefix,
+                        validator,
                     }) => {
+                        if let Some((url, validators)) = &validator {
+                            persist::set_url_validators_conn(conn, source, url, validators).await?;
+                        }
                         let metadata_written =
                             persist::persist_discovered_conn(conn, source, &found).await?;
                         if complete {
@@ -876,6 +895,7 @@ impl Worker {
                             ..JobStats::default()
                         })
                     }
+                    Ok(JobWrite::DiscoveryUnchanged) => Ok(JobStats::default()),
                     Ok(JobWrite::Handler(stats)) => Ok(stats),
                     Err(error) => Err(error),
                 };
