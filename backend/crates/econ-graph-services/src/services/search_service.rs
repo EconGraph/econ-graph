@@ -46,7 +46,15 @@ impl SearchService {
         let limit = params.get_limit();
         let offset = params.get_offset();
         let source_filter = params.source_id;
-        let frequency_filter = params.frequency.clone();
+        // Sources don't agree on how they spell a frequency in the stored `frequency` column
+        // (FRED: "Weekly, Ending Friday"; BLS: "Semi-Annual"; others: a bare "Monthly"), so an
+        // exact-match filter silently misses rows. Match on the same prefixes that classify a
+        // raw frequency string, via `ILIKE ANY(...)`, instead.
+        let (frequency_patterns, exact_frequency) = params
+            .frequency
+            .as_deref()
+            .map(super::frequency_filter)
+            .unwrap_or((None, None));
         let include_inactive = params.should_include_inactive();
 
         let mut conn = self.pool.get().await.map_err(|e| {
@@ -91,20 +99,22 @@ impl SearchService {
                               OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
                          AND es.end_date IS NOT NULL
                          AND ($2::uuid IS NULL OR es.source_id = $2)
-                         AND ($3::text IS NULL OR es.frequency = $3)
+                         AND (($3::text[] IS NULL AND $8::text IS NULL)
+                              OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
                          ORDER BY rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
                     )
                     .bind::<diesel::sql_types::Text, _>(&search_query)
                     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Uuid>, _>(source_filter)
-                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
-                        frequency_filter.as_deref(),
+                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Array<diesel::sql_types::Text>>, _>(
+                        frequency_patterns,
                     )
                     .bind::<diesel::sql_types::Bool, _>(include_inactive)
                     .bind::<diesel::sql_types::Integer, _>(limit)
                     .bind::<diesel::sql_types::Integer, _>(offset)
                     .bind::<diesel::sql_types::Text, _>(&fulltext_query)
+                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(exact_frequency)
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
@@ -457,6 +467,70 @@ mod db_tests {
                 "{query} should match nothing, got {vacuous:?}"
             );
         }
+
+        remove_fixtures(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// A frequency filter must match a source's own spelling of the frequency it stores, not just
+    /// the bare enum label (e.g. FRED's "Weekly, Ending Friday", not just "Weekly").
+    async fn search_filters_by_frequency_across_source_spellings() {
+        let Some(pool) = pool().await else { return };
+        let service = SearchService::new(Arc::new(pool.clone()));
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "INSERT INTO economic_series
+                     (source_id, external_id, title, description, frequency, end_date, dataset_id)
+                 SELECT ds.id, v.e, v.t, NULL, v.f, '2020-01-01'::date, d.id
+                 FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test',
+                 (VALUES ('srch_FREDW', 'Weekly Unemployment Claims', 'Weekly, Ending Friday'),
+                         ('srch_FREDD', 'Daily Treasury Yield', 'Daily, Close')) v(e, t, f)
+                 WHERE ds.name = 'search-test'",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+
+        let weekly = service
+            .search_series(&SearchParams {
+                frequency: Some("Weekly".to_string()),
+                ..SearchParams::simple("Weekly Unemployment Claims")
+            })
+            .await
+            .unwrap();
+        assert!(
+            titles(&weekly).contains(&"Weekly Unemployment Claims"),
+            "WEEKLY filter should match FRED's \"Weekly, Ending Friday\", got {weekly:?}"
+        );
+
+        let daily = service
+            .search_series(&SearchParams {
+                frequency: Some("Daily".to_string()),
+                ..SearchParams::simple("Daily Treasury Yield")
+            })
+            .await
+            .unwrap();
+        assert!(
+            titles(&daily).contains(&"Daily Treasury Yield"),
+            "DAILY filter should match FRED's \"Daily, Close\", got {daily:?}"
+        );
+
+        // A mismatched frequency filter must still exclude it.
+        let mismatched = service
+            .search_series(&SearchParams {
+                frequency: Some("Monthly".to_string()),
+                ..SearchParams::simple("Weekly Unemployment Claims")
+            })
+            .await
+            .unwrap();
+        assert!(
+            !titles(&mismatched).contains(&"Weekly Unemployment Claims"),
+            "MONTHLY filter should not match a weekly series, got {mismatched:?}"
+        );
 
         remove_fixtures(&pool).await;
     }
