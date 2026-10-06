@@ -182,7 +182,7 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
     test_connection(pool).await
 }
 
-/// The migration version (diesel's zero-padded timestamp, e.g. `"20261001000100"`) of the
+/// The migration version (diesel's zero-padded timestamp, e.g. `"20261002000500"`) of the
 /// newest migration embedded in this binary: the schema version it requires at minimum to run
 /// correctly.
 fn minimum_schema_version() -> AppResult<String> {

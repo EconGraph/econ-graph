@@ -2,8 +2,8 @@
 # Builds one database from the migrations at a git ref and one from the migrations in the working
 # tree, then diffs their schemas (scripts/schema_snapshot.sql) and their seed rows.
 #
-# Used when squashing migrations into a baseline (docs/development/RELEASE_PROCESS.md,
-# "Fold migrations into the release baseline"): the squash is right when this prints no diff.
+# Used when squashing migrations into a baseline (docs/development/MIGRATIONS.md, "Squashing at a
+# release"): the squash is right when this prints no diff.
 #
 # Usage: scripts/compare_migrations.sh <old-ref> [new-migrations-dir]
 #   ADMIN_URL  a PostgreSQL 18 superuser connection to an existing database, used to create and
