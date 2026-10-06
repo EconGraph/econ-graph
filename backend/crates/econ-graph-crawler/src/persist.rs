@@ -654,10 +654,12 @@ pub async fn merge_dataset_dimension_codes(
 /// (but still returns `true`) when the merged codes equal what's already stored, so
 /// `updated_at` doesn't move on every refresh of a source whose files carry no `ETag` of their
 /// own for [`reference_file::refresh`](crate::reference_file::refresh) to short-circuit on.
+/// On a dimension that uses a shared `codelist`, the entries are the dataset's own labels for
+/// some of that list's codes (e.g. the World Bank's names for its aggregates), which readers
+/// prefer to the list's.
 /// Returns whether anything was merged: `false` (nothing written) when the dataset or dimension
-/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one) or the dimension
-/// uses a shared `codelist`. The caller should then not treat the fetch that produced `entries`
-/// as consumed, e.g. by caching its `ETag`.
+/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one). The caller should
+/// then not treat the fetch that produced `entries` as consumed, e.g. by caching its `ETag`.
 pub async fn merge_dataset_dimension_code_entries(
     pool: &DatabasePool,
     source: SourceId,
@@ -686,11 +688,6 @@ pub async fn merge_dataset_dimension_code_entries(
         let Some(dim) = dims.0.iter_mut().find(|d| d.name == dimension_name) else {
             return Ok(false);
         };
-        // A dimension labelled by a shared code list takes no inline codes (it may not have
-        // both); like `seed_reference_codes`, store nothing, so the ETag isn't cached either.
-        if dim.codelist.is_some() {
-            return Ok(false);
-        }
         let mut before = dim.codes.clone().unwrap_or_default();
         before.sort_unstable_by(|a, b| a.code.cmp(&b.code));
         let mut codes = before.clone();
@@ -712,7 +709,7 @@ pub async fn merge_dataset_dimension_code_entries(
         if codes == before {
             // Nothing changed: skip the write so `updated_at` doesn't move on every refresh of a
             // source (like FHFA's) with no conditional GET to short-circuit on first. The
-            // dataset and dimension were still found (and not codelist-backed), so this is
+            // dataset and dimension were still found, so this is
             // `true`, not the "nothing to merge into" `false` above.
             return Ok(true);
         }

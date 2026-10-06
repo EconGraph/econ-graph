@@ -633,9 +633,10 @@ fn validate_components_catches_what_the_database_cannot() {
     no_measures.measures.0.clear();
     assert_invalid(&no_measures, "declares no measures");
 
-    let mut both = wdi_dataset(source_id);
-    both.dimensions.0[1].codes = Some(vec![Code::new("USA", "United States")]);
-    assert_invalid(&both, "both codes and codelist");
+    // A code list dimension may carry the dataset's own labels for some of its codes.
+    let mut labelled = wdi_dataset(source_id);
+    labelled.dimensions.0[1].codes = Some(vec![Code::new("EMU", "Euro area")]);
+    labelled.validate_components().unwrap();
 
     let mut repeated_code = bds_dataset(source_id);
     repeated_code.dimensions.0[1]
@@ -722,4 +723,24 @@ fn components_serialize_to_the_documented_json_shape() {
     // Hand-written definitions (optional keys left out) parse back to the same value.
     let parsed: DatasetComponents = serde_json::from_value(expected).unwrap();
     assert_eq!(parsed, wdi_dataset(Uuid::nil()).dimensions);
+}
+
+/// A dataset's own label for an area wins over the shared list's name; an aggregate the dataset
+/// doesn't label falls back to its key.
+#[test]
+fn area_label_prefers_the_dataset_label() {
+    let areas = crate::reference::areas().unwrap();
+    let mut area = DatasetComponent::new("area", "Area", ComponentType::String);
+    area.codelist = Some(COUNTRIES_CODELIST.to_string());
+    let (usa, emu, wld) = (
+        areas.by_key("USA").unwrap(),
+        areas.by_key("EMU").unwrap(),
+        areas.by_key("WLD").unwrap(),
+    );
+    assert_eq!(area.area_label(usa), "United States");
+    assert_eq!(area.area_label(emu), "EMU");
+    area.codes = Some(vec![Code::new("EMU", "Euro area")]);
+    assert_eq!(area.area_label(emu), "Euro area");
+    assert_eq!(area.area_label(wld), "WLD");
+    assert_eq!(area.area_label(usa), "United States");
 }

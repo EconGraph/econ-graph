@@ -1011,10 +1011,10 @@ async fn refresh_reference_data_stops_on_auth_and_aggregates_other_failures() {
     ctx.pool = db.pool.clone();
     let adapter = WorldBankAdapter::new(mock.base_url());
     let e = adapter.refresh_reference_data(&ctx).await.unwrap_err();
-    // The first indicator's URL succeeds, the second 403s (`Auth`): the refresh stops there
-    // rather than requesting any other indicator, but the first merge is still reflected in the
-    // in-process cache afterwards.
-    assert_eq!(mock.received_requests().await.len(), 2);
+    // `/country` (not mounted: 404) is skipped, the first indicator's URL succeeds, the second
+    // 403s (`Auth`): the refresh stops there rather than requesting any other indicator, but the
+    // first merge is still reflected in the in-process cache afterwards.
+    assert_eq!(mock.received_requests().await.len(), 3);
     assert_eq!(e.kind(), "auth");
     assert_eq!(
         adapter
@@ -1038,13 +1038,277 @@ async fn refresh_reference_data_stops_on_auth_and_aggregates_other_failures() {
     let mut ctx = test_ctx();
     ctx.pool = db.pool.clone();
     let adapter = WorldBankAdapter::new(mock.base_url());
-    // Every indicator answers "Invalid value" (NotFound, not Auth/RateLimited): all attempted,
-    // aggregated into one error.
+    // `/country` and every indicator answer "Invalid value" (NotFound, not Auth/RateLimited):
+    // all attempted, aggregated into one error.
     let e = adapter.refresh_reference_data(&ctx).await.unwrap_err();
     assert_eq!(e.kind(), "transient");
-    assert_eq!(mock.received_requests().await.len(), indicators.len());
+    assert_eq!(mock.received_requests().await.len(), indicators.len() + 1);
     assert!(adapter.indicator_meta.lock().unwrap().is_empty());
     db.drop().await;
+}
+
+/// A `/country` response in the API's shape: the economies and aggregates it lists, by `id`.
+fn country_list(pages: u64, entries: &[(&str, &str)]) -> String {
+    let items: Vec<Value> = entries
+        .iter()
+        .map(|(id, name)| {
+            serde_json::json!({
+                "id": id,
+                "iso2Code": "",
+                "name": name,
+                "region": {"id": "NA", "iso2code": "NA", "value": "Aggregates"},
+                "incomeLevel": {"id": "NA", "iso2code": "NA", "value": "Aggregates"},
+            })
+        })
+        .collect();
+    serde_json::json!([
+        {"page": 1, "pages": pages, "per_page": "1000", "total": entries.len()},
+        items
+    ])
+    .to_string()
+}
+
+/// `/country` names the aggregates the country table carries, keyed as the table keys them;
+/// economies, aggregates the table lacks and nameless entries are skipped. A list naming none of
+/// them, or one with more pages, is a parse error, as is an API error message.
+#[test]
+fn aggregate_names_come_from_the_country_list() {
+    let body = country_list(
+        1,
+        &[
+            ("EMU", "Euro area"),
+            ("WLD", " World "),
+            ("USA", "United States"),
+            ("EAS", "East Asia & Pacific"),
+            ("HIC", ""),
+            ("EMU", "Euro area again"),
+        ],
+    );
+    let codes = parse_aggregate_names(&body).unwrap();
+    let pairs: Vec<(&str, &str)> = codes
+        .iter()
+        .map(|c| (c.code.as_str(), c.label.as_str()))
+        .collect();
+    assert_eq!(pairs, [("EMU", "Euro area"), ("WLD", "World")]);
+
+    for (body, needle) in [
+        (country_list(1, &[("USA", "United States")]), "none of"),
+        (country_list(2, &[("WLD", "World")]), "2 pages"),
+        (INVALID.to_string(), ""),
+        ("{".to_string(), ""),
+    ] {
+        let e = parse_aggregate_names(&body).unwrap_err();
+        assert!(
+            matches!(e, CrawlError::Parse(_) | CrawlError::NotFound(_)),
+            "{e:?}"
+        );
+        assert!(e.to_string().contains(needle), "{e}");
+    }
+}
+
+/// The `/country` code list merges the World Bank's aggregate names into the `wdi` area
+/// dimension, which keeps its shared code list; they survive the next `sync_datasets`, and the
+/// next refresh of an unchanged list is a 304.
+#[tokio::test]
+async fn country_list_names_aggregates_on_the_area_dimension() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db =
+        crate::persist::stable_id_tests::FreshDb::create(&admin_url, "econgraph_wb_country_list")
+            .await;
+    let catalog = wdi_catalog();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/country")
+            .query("format", "json")
+            .query("per_page", COUNTRY_PER_PAGE),
+        Reply::text(country_list(
+            1,
+            &[
+                ("EMU", "Euro area"),
+                ("WLD", "World"),
+                ("USA", "United States"),
+            ],
+        ))
+        .header("ETag", "\"c1\""),
+    )
+    .await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let lists = adapter.code_lists(&ApiKeys::default());
+    let list = lists
+        .iter()
+        .find(|l| l.dimension == AREA_DIMENSION)
+        .unwrap();
+    assert!(
+        reference_file::refresh_code_list(&ctx, SourceId::WorldBank, list)
+            .await
+            .unwrap()
+    );
+
+    let area_dimension = || async {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::datasets::dsl;
+        let mut conn = db.pool.get().await.unwrap();
+        let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+            .filter(dsl::code.eq(DATASET))
+            .select(dsl::dimensions)
+            .first(&mut conn)
+            .await
+            .unwrap();
+        dims.0
+            .into_iter()
+            .find(|d| d.name == AREA_DIMENSION)
+            .unwrap()
+    };
+    let check = |area: econ_graph_core::models::DatasetComponent| {
+        assert_eq!(area.codelist.as_deref(), Some("countries"));
+        let labels: Vec<(String, String)> = area
+            .codes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| (c.code, c.label))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("EMU".to_string(), "Euro area".to_string()),
+                ("WLD".to_string(), "World".to_string())
+            ]
+        );
+    };
+    check(area_dimension().await);
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+    check(area_dimension().await);
+
+    mock.server().reset().await;
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/country"))
+                .and(wiremock::matchers::header("If-None-Match", "\"c1\""))
+                .respond_with(wiremock::ResponseTemplate::new(304)),
+        )
+        .await;
+    assert!(
+        !reference_file::refresh_code_list(&ctx, SourceId::WorldBank, list)
+            .await
+            .unwrap()
+    );
+    check(area_dimension().await);
+    db.drop().await;
+}
+
+/// A recorded seed of the `/country` list, applied to a new database before the catalog is
+/// synced, stores the aggregate names on the area dimension with its code list kept, and the
+/// first sync keeps both.
+#[tokio::test]
+async fn seeded_country_list_keeps_the_code_list() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db =
+        crate::persist::stable_id_tests::FreshDb::create(&admin_url, "econgraph_wb_country_seed")
+            .await;
+    let catalog = wdi_catalog();
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/country"),
+        Reply::text(country_list(1, &[("EMU", "Euro area")])).header("ETag", "\"c1\""),
+    )
+    .await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let lists: Vec<CodeList> = adapter
+        .code_lists(&ApiKeys::default())
+        .into_iter()
+        .filter(|l| l.dimension == AREA_DIMENSION)
+        .collect();
+    let download = reference_file::download_seed_entries(
+        &test_ctx().http,
+        SourceId::WorldBank,
+        &lists,
+        &catalog,
+    )
+    .await
+    .unwrap();
+    assert!(download.failures.is_empty());
+    let (up, _down) = reference_file::seed_migration_sql(
+        SourceId::WorldBank,
+        chrono::Utc::now(),
+        &download.entries,
+    )
+    .unwrap();
+    {
+        use diesel_async::SimpleAsyncConnection;
+        db.pool
+            .get()
+            .await
+            .unwrap()
+            .batch_execute(&format!("BEGIN;\n{up}\nCOMMIT;"))
+            .await
+            .unwrap();
+    }
+    let area_dimension = || async {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::datasets::dsl;
+        let mut conn = db.pool.get().await.unwrap();
+        let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+            .filter(dsl::code.eq(DATASET))
+            .select(dsl::dimensions)
+            .first(&mut conn)
+            .await
+            .unwrap();
+        dims.0
+            .into_iter()
+            .find(|d| d.name == AREA_DIMENSION)
+            .unwrap()
+    };
+    let check = |area: econ_graph_core::models::DatasetComponent| {
+        assert_eq!(area.codelist.as_deref(), Some("countries"));
+        assert_eq!(area.code("EMU").unwrap().label, "Euro area");
+    };
+    // The seed created the dataset row: the dimension already has its code list.
+    check(area_dimension().await);
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+    check(area_dimension().await);
+    let row = crate::persist::url_validators(&db.pool, SourceId::WorldBank, &lists[0].url)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.etag.as_deref(), Some("\"c1\""));
+    db.drop().await;
+}
+
+/// The `wdi` dataset catalog from the shipped dataset file.
+fn wdi_catalog() -> crate::dataset::DatasetCatalog {
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    catalog
 }
 
 mod contract {
