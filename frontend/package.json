@@ -132,6 +132,7 @@
     "start-private-chart-api": "node src/server/privateChartServer.js",
     "eslint-check": "eslint src --config eslint.config.js",
     "test:e2e": "playwright test",
+    "test:layout": "playwright test --config=playwright.layout.config.ts",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "test-storybook": "@storybook/test-runner --config-dir=.storybook",
