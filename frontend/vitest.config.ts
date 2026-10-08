@@ -41,6 +41,8 @@ export default defineConfig({
     // Force process exit after tests complete to prevent hanging
     forceExit: true,
     exclude: [
+      // Run with the dedicated real-UI accessibility setup.
+      '**/__tests__/accessibility/**',
       '**/node_modules/**',
       '**/dist/**',
       '**/cypress/**',

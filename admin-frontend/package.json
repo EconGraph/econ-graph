@@ -18,7 +18,9 @@
     "prettier:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "prettier:fix": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "lint:accessibility": "eslint src --config eslint.accessibility.config.js --no-inline-config --max-warnings 0",
+    "test:accessibility": "vitest run --config vitest.accessibility.config.ts"
   },
   "dependencies": {
     "@apollo/client": "^4.3.1",
@@ -52,7 +54,7 @@
     "web-vitals": "3.5.2"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
@@ -60,8 +62,10 @@
     "@types/jest": "30.0.0",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^5.0.2",
+    "axe-core": "^4.13.0",
     "cookie": "^2.0.1",
-    "eslint": "^10.11.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",

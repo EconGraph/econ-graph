@@ -360,31 +360,32 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                 <CardContent>
                   <div className='space-y-3'>
                     {statements.slice(0, 3).map(statement => (
-                      <div
+                      <button
+                        type='button'
                         key={statement.id}
-                        className='flex items-center justify-between p-3 border rounded-lg'
+                        className='w-full text-left focus-visible:outline focus-visible:outline-2 flex items-center justify-between p-3 border rounded-lg'
                         onClick={() => setSelectedStatement(statement.id)}
                       >
-                        <div className='flex items-center space-x-3'>
-                          <div className='p-2 bg-blue-100 rounded'>
+                        <span className='flex items-center space-x-3'>
+                          <span className='p-2 bg-blue-100 rounded'>
                             <FileText className='h-4 w-4 text-blue-600' />
-                          </div>
-                          <div>
-                            <p className='font-medium'>{statement.formType}</p>
-                            <p className='text-sm text-gray-500'>
+                          </span>
+                          <span>
+                            <span className='block font-medium'>{statement.formType}</span>
+                            <span className='block text-sm text-gray-500'>
                               FY {statement.fiscalYear} Q{statement.fiscalQuarter}
-                            </p>
-                          </div>
-                        </div>
-                        <div className='flex items-center space-x-2'>
+                            </span>
+                          </span>
+                        </span>
+                        <span className='flex items-center space-x-2'>
                           {statement.xbrlProcessingStatus === 'completed' ? (
                             <CheckCircle className='h-4 w-4 text-green-600' />
                           ) : (
                             <Clock className='h-4 w-4 text-yellow-600' />
                           )}
                           <ChevronRight className='h-4 w-4 text-gray-400' />
-                        </div>
-                      </div>
+                        </span>
+                      </button>
                     ))}
                   </div>
                 </CardContent>
