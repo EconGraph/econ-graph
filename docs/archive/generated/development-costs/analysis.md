@@ -10,21 +10,21 @@ amounts, not a measured counterfactual.
 
 ## Inputs and line-based estimate
 
-Selected Git-tracked categories contain 213,141 lines. Physical lines
+Selected Git-tracked categories contain 233,797 lines. Physical lines
 do not measure delivered functionality, quality, or manual effort.
 
 | Category | Counted lines | Assumed USD per line | Modeled amount |
 | --- | --- | --- | --- |
-| Production | 94,119 | $2.50 | $235,297.50 |
-| Tests | 19,815 | $1.25 | $24,768.75 |
-| Configuration and shell scripts | 47,246 | $1.00 | $47,246.00 |
-| Documentation | 51,961 | $0.75 | $38,970.75 |
+| Production | 107,398 | $2.50 | $268,495.00 |
+| Tests | 24,514 | $1.25 | $30,642.50 |
+| Configuration and shell scripts | 50,964 | $1.00 | $50,964.00 |
+| Documentation | 50,921 | $0.75 | $38,190.75 |
 
 | Component | Modeled amount |
 | --- | --- |
-| Base amount | $346,283.00 |
-| Overhead assumption (75% of base) | $259,712.25 |
-| Line-based total | $605,995.25 |
+| Base amount | $388,292.25 |
+| Overhead assumption (75% of base) | $291,219.19 |
+| Line-based total | $679,511.44 |
 
 ## Fixed historical baseline
 
