@@ -99,6 +99,65 @@ fn role_grants_admin(role: Option<Option<String>>) -> bool {
     matches!(role, Some(Some(role)) if PermissionLevel::from_string(&role).can_admin())
 }
 
+/// Longest annotation title accepted, in characters. The column is varchar(255); this is
+/// lower so a title fits on a line and the error is ours, not the database's. The frontend
+/// mirrors these limits in `frontend/src/components/annotations/annotationLimits.ts`.
+pub const ANNOTATION_TITLE_MAX_CHARS: usize = 200;
+/// Longest annotation note accepted, in characters.
+pub const ANNOTATION_NOTE_MAX_CHARS: usize = 5_000;
+/// Longest comment accepted, in characters.
+pub const COMMENT_MAX_CHARS: usize = 2_000;
+/// Longest annotation type accepted (the column is varchar(20)).
+const ANNOTATION_TYPE_MAX_CHARS: usize = 20;
+/// Longest color accepted (the column is varchar(7), e.g. `#2196f3`).
+const ANNOTATION_COLOR_MAX_CHARS: usize = 7;
+
+/// Refuses `text` when it is longer than `max` characters, or blank and `required`.
+fn check_text(field: &str, text: &str, max: usize, required: bool) -> AppResult<()> {
+    if required && text.trim().is_empty() {
+        return Err(AppError::ValidationError(format!("{field} can't be empty")));
+    }
+    let chars = text.chars().count();
+    if chars > max {
+        return Err(AppError::ValidationError(format!(
+            "{field} is {chars} characters; the limit is {max}"
+        )));
+    }
+    Ok(())
+}
+
+/// Checks an annotation's user-written fields; `None` means the field isn't being set.
+pub fn validate_annotation_fields(
+    title: Option<&str>,
+    note: Option<&str>,
+    annotation_type: Option<&str>,
+    color: Option<&str>,
+) -> AppResult<()> {
+    if let Some(title) = title {
+        check_text("Title", title, ANNOTATION_TITLE_MAX_CHARS, true)?;
+    }
+    if let Some(note) = note {
+        check_text("Note", note, ANNOTATION_NOTE_MAX_CHARS, false)?;
+    }
+    if let Some(annotation_type) = annotation_type {
+        check_text(
+            "Annotation type",
+            annotation_type,
+            ANNOTATION_TYPE_MAX_CHARS,
+            true,
+        )?;
+    }
+    if let Some(color) = color {
+        check_text("Color", color, ANNOTATION_COLOR_MAX_CHARS, true)?;
+    }
+    Ok(())
+}
+
+/// Checks a comment's text.
+pub fn validate_comment(content: &str) -> AppResult<()> {
+    check_text("Comment", content, COMMENT_MAX_CHARS, true)
+}
+
 /// Collaboration service for managing annotations and sharing
 pub struct CollaborationService {
     pool: DatabasePool,
@@ -122,6 +181,12 @@ impl CollaborationService {
         color: Option<String>,
         is_public: bool,
     ) -> AppResult<ChartAnnotation> {
+        validate_annotation_fields(
+            Some(&title),
+            Some(&content),
+            Some(&annotation_type),
+            color.as_deref(),
+        )?;
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
@@ -204,6 +269,7 @@ impl CollaborationService {
         annotation_id: Uuid,
         content: String,
     ) -> AppResult<AnnotationComment> {
+        validate_comment(&content)?;
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
@@ -443,6 +509,12 @@ impl CollaborationService {
         annotation_type: Option<String>,
         is_public: Option<bool>,
     ) -> AppResult<ChartAnnotation> {
+        validate_annotation_fields(
+            title.as_deref(),
+            content.as_deref(),
+            annotation_type.as_deref(),
+            color.as_deref(),
+        )?;
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
@@ -559,6 +631,69 @@ impl CollaborationService {
             AppError::Database(e) => AppError::DatabaseError(e.to_string()),
             e => e,
         })
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn refused(result: AppResult<()>) -> String {
+        match result {
+            Err(AppError::ValidationError(msg)) => msg,
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn annotation_text_up_to_the_limits_is_accepted() {
+        let title = "t".repeat(ANNOTATION_TITLE_MAX_CHARS);
+        let note = "n".repeat(ANNOTATION_NOTE_MAX_CHARS);
+        validate_annotation_fields(Some(&title), Some(&note), Some("line"), Some("#2196f3"))
+            .unwrap();
+        // Limits count characters, not bytes.
+        let title = "é".repeat(ANNOTATION_TITLE_MAX_CHARS);
+        validate_annotation_fields(Some(&title), Some(""), None, None).unwrap();
+        // Fields left out of an update aren't checked.
+        validate_annotation_fields(None, None, None, None).unwrap();
+    }
+
+    #[test]
+    fn annotation_text_over_the_limits_is_refused() {
+        let title = "t".repeat(ANNOTATION_TITLE_MAX_CHARS + 1);
+        assert_eq!(
+            refused(validate_annotation_fields(Some(&title), None, None, None)),
+            "Title is 201 characters; the limit is 200"
+        );
+        let note = "n".repeat(1_000_000);
+        assert!(
+            refused(validate_annotation_fields(None, Some(&note), None, None))
+                .starts_with("Note is 1000000 characters")
+        );
+        let kind = "x".repeat(21);
+        refused(validate_annotation_fields(None, None, Some(&kind), None));
+    }
+
+    #[test]
+    fn blank_titles_and_oversized_colors_are_refused() {
+        assert_eq!(
+            refused(validate_annotation_fields(Some("   "), None, None, None)),
+            "Title can't be empty"
+        );
+        validate_annotation_fields(None, None, None, Some("red")).unwrap();
+        refused(validate_annotation_fields(
+            None,
+            None,
+            None,
+            Some("#12345678"),
+        ));
+    }
+
+    #[test]
+    fn comments_must_be_non_blank_and_within_the_limit() {
+        validate_comment(&"c".repeat(COMMENT_MAX_CHARS)).unwrap();
+        assert_eq!(refused(validate_comment(" \n ")), "Comment can't be empty");
+        refused(validate_comment(&"c".repeat(COMMENT_MAX_CHARS + 1)));
     }
 }
 
@@ -753,6 +888,95 @@ mod tests {
         assert!(admin.can_comment());
         assert!(admin.can_edit());
         assert!(admin.can_admin());
+    }
+
+    /// Each write path runs the length checks before touching the database, so an over-long
+    /// value is refused with a validation error and nothing is written.
+    #[tokio::test]
+    #[serial]
+    async fn writes_over_the_length_limits_are_refused() {
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let service = CollaborationService::new(container.pool().clone());
+        let mut conn = container.pool().get().await.unwrap();
+        let owner = Uuid::new_v4();
+        let annotation_id = Uuid::new_v4();
+        diesel::sql_query(
+            "INSERT INTO users (id, email, name) VALUES ($1, 'limits-test@example.com', 'Owner')",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(owner)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        diesel::sql_query("INSERT INTO chart_annotations (id, user_id, annotation_date, title, visibility) VALUES ($1, $2, CURRENT_DATE, 'Limits test', 'public')")
+            .bind::<diesel::sql_types::Uuid, _>(annotation_id)
+            .bind::<diesel::sql_types::Uuid, _>(owner)
+            .execute(&mut conn).await.unwrap();
+
+        let created = service
+            .create_annotation(
+                owner,
+                Uuid::new_v4(),
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                None,
+                "Huge note".into(),
+                "x".repeat(1_000_000),
+                "note".into(),
+                None,
+                true,
+            )
+            .await;
+        assert!(
+            matches!(&created, Err(AppError::ValidationError(m)) if m.contains("Note")),
+            "{created:?}"
+        );
+        assert_eq!(
+            chart_annotations::table
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let updated = service
+            .update_annotation(
+                annotation_id,
+                owner,
+                Some("t".repeat(ANNOTATION_TITLE_MAX_CHARS + 1)),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        assert!(
+            matches!(&updated, Err(AppError::ValidationError(m)) if m.contains("Title")),
+            "{updated:?}"
+        );
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .select(chart_annotations::title)
+                .get_result::<String>(&mut conn)
+                .await
+                .unwrap(),
+            "Limits test"
+        );
+
+        let commented = service.add_comment(owner, annotation_id, "  ".into()).await;
+        assert!(
+            matches!(&commented, Err(AppError::ValidationError(_))),
+            "{commented:?}"
+        );
+        assert_eq!(
+            annotation_comments::table
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
