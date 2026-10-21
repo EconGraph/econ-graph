@@ -653,10 +653,17 @@ async fn main() -> AppResult<()> {
         eprintln!("❌ {}", e);
         error
     })?;
+    let abbreviations = econ_graph_core::reference::search_abbreviations().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup reference data");
+        eprintln!("❌ {}", e);
+        error
+    })?;
     info!(
-        "🌍 Reference data loaded from {}: {} areas",
+        "🌍 Reference data loaded from {}: {} areas, {} search abbreviations",
         econ_graph_core::reference::data_dir().display(),
-        areas.all().len()
+        areas.all().len(),
+        abbreviations.len()
     );
 
     // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
