@@ -2,7 +2,7 @@
 // PURPOSE: Provide realistic test data that matches the GraphQL schema
 // This ensures components receive properly structured data during testing
 
-import { SeriesSearchResult } from '../../hooks/useSeriesData';
+import type { DataSource, SeriesSearchResult } from '../../hooks/useSeriesData';
 
 /**
  * Mock economic series data for testing
@@ -66,7 +66,7 @@ export const mockSeriesData = [
  * Mock data sources for testing
  * REQUIREMENT: Data source information for dropdown and filtering components.
  */
-export const mockDataSources = [
+export const mockDataSources: DataSource[] = [
   {
     id: 'fred',
     name: 'Federal Reserve Economic Data',
@@ -74,6 +74,7 @@ export const mockDataSources = [
     baseUrl: 'https://api.stlouisfed.org/fred',
     apiKeyRequired: true,
     rateLimitPerMinute: 120,
+    seriesCount: 3,
     createdAt: '2023-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
   },
@@ -84,6 +85,7 @@ export const mockDataSources = [
     baseUrl: 'https://api.bls.gov/publicAPI/v2',
     apiKeyRequired: false,
     rateLimitPerMinute: 500,
+    seriesCount: 1,
     createdAt: '2023-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
   },

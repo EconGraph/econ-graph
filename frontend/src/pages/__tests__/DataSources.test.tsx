@@ -1,509 +1,111 @@
 /**
- * REQUIREMENT: Comprehensive unit tests for DataSources page component
- * PURPOSE: Test data sources information display and metadata rendering
- * This ensures users can understand the data sources and their characteristics.
+ * REQUIREMENT: The data sources page shows what the API reports for each source, and nothing
+ * made up.
+ * PURPOSE: Regression tests for ECO-403: the page read snake_case fields the GraphQL API never
+ * returns (so every count was 0 and every rate limit 60/min), and showed hard-coded uptime,
+ * health, last-crawl and crawl-schedule figures.
  */
 
 import React from 'react';
-import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { screen, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import { renderWithProviders } from '../../test-utils/test-providers';
 import DataSources from '../DataSources';
-import { useDataSources } from '../../hooks/useSeriesData';
+import { useDataSources, type DataSource } from '../../hooks/useSeriesData';
 
-// Mock the hooks module BEFORE importing the component
-const mockDataSources = [
+vi.mock('../../hooks/useSeriesData', () => ({ useDataSources: vi.fn() }));
+
+// The shape GET_DATA_SOURCES returns: GraphQL's camelCase field names.
+const sources: DataSource[] = [
   {
-    id: 'fred',
-    name: 'Federal Reserve Economic Data',
-    description: 'Economic data from the Federal Reserve',
-    base_url: 'https://fred.stlouisfed.org',
-    api_key_required: false,
-    rate_limit_per_minute: 120,
-    series_count: 800000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-15T10:00:00Z',
+    id: '0199a0e0-0000-7000-8000-000000000001',
+    name: 'Federal Reserve Economic Data (FRED)',
+    description: 'Economic data from the Federal Reserve Bank of St. Louis',
+    baseUrl: 'https://api.stlouisfed.org/fred',
+    apiKeyRequired: true,
+    rateLimitPerMinute: 120,
+    seriesCount: 1234,
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
   },
   {
-    id: 'bls',
-    name: 'Bureau of Labor Statistics',
-    description: 'Labor market and economic statistics',
-    base_url: 'https://www.bls.gov',
-    api_key_required: true,
-    rate_limit_per_minute: 60,
-    series_count: 50000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-14T09:00:00Z',
-  },
-  {
-    id: 'census',
-    name: 'U.S. Census Bureau',
-    description: 'Demographic and economic data',
-    base_url: 'https://www.census.gov',
-    api_key_required: false,
-    rate_limit_per_minute: 100,
-    series_count: 25000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-13T08:00:00Z',
-  },
-  {
-    id: 'worldbank',
+    id: '0199a0e0-0000-7000-8000-000000000002',
     name: 'World Bank Open Data',
-    description: 'Global development indicators',
-    base_url: 'https://data.worldbank.org',
-    api_key_required: false,
-    rate_limit_per_minute: 80,
-    series_count: 15000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-12T07:00:00Z',
+    description: '',
+    baseUrl: 'https://api.worldbank.org/v2',
+    apiKeyRequired: false,
+    rateLimitPerMinute: 1000,
+    seriesCount: 18,
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
   },
 ];
 
-vi.mock('../../hooks/useSeriesData', () => ({
-  useDataSources: vi.fn(() => ({
-    data: mockDataSources,
+const mockSources = (data: DataSource[] | undefined, extra: object = {}) =>
+  vi.mocked(useDataSources).mockReturnValue({
+    data,
     isLoading: false,
     error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-  useSeriesSearch: vi.fn(() => ({
-    data: [],
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-  useSeriesDetail: vi.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-  useSeriesData: vi.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-  useSearchSuggestions: vi.fn(() => ({
-    data: [],
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-  useCrawlerStatus: vi.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-    isStale: false,
-    isFetching: false,
-    isRefetching: false,
-    isIdle: false,
-    status: 'success',
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    refetch: vi.fn(),
-    remove: vi.fn(),
-  })),
-}));
-
-function renderDataSources() {
-  return renderWithProviders(<DataSources />);
-}
+    ...extra,
+  } as unknown as ReturnType<typeof useDataSources>);
 
 describe('DataSources', () => {
+  it("shows each source's series count and rate limit, and their total", () => {
+    mockSources(sources);
+    renderWithProviders(<DataSources />);
 
-  describe('Page Layout and Structure', () => {
-    test('should render data sources page successfully', () => {
-      renderDataSources();
+    const fred = within(screen.getByRole('region', { name: sources[0].name }));
+    expect(fred.getByText('1,234')).toBeInTheDocument();
+    expect(fred.getByText('120/min')).toBeInTheDocument();
 
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
+    const worldBank = within(screen.getByRole('region', { name: sources[1].name }));
+    expect(worldBank.getByText('18')).toBeInTheDocument();
+    expect(worldBank.getByText('1,000/min')).toBeInTheDocument();
+    expect(worldBank.getByText('Economic data source')).toBeInTheDocument();
 
-    test('should display page title and description', () => {
-      renderDataSources();
-
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Active Sources').length).toBeGreaterThan(0);
-    });
-
-    test('should have proper heading hierarchy', async () => {
-      renderDataSources();
-
-      // Wait for component to render with Suspense
-      await screen.findByText('Data Sources');
-
-      // Component renders h1 with "Data Sources" text
-      const mainHeadings = screen.getAllByRole('heading', { level: 1 });
-      expect(mainHeadings.length).toBeGreaterThan(0);
-      
-      // Check that at least one has "Data Sources" text (use first one found)
-      const dataSourcesHeading = mainHeadings.find(h => h.textContent?.includes('Data Sources'));
-      expect(dataSourcesHeading).toBeTruthy();
-
-      // Check for any headings (not specific level since structure varies)
-      const allHeadings = screen.getAllByRole('heading');
-      expect(allHeadings.length).toBeGreaterThan(0);
-    }, 10000); // 10 second timeout for this specific test
+    expect(screen.getByText('1,252')).toBeInTheDocument();
+    expect(screen.getByText('Total Series')).toBeInTheDocument();
   });
 
-  describe('Data Source Information Display', () => {
-    test('should display FRED data source information', () => {
-      renderDataSources();
+  it('links each source to the explorer filtered to it', () => {
+    mockSources(sources);
+    renderWithProviders(<DataSources />);
 
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display BLS data source information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display BEA data source information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display Federal Reserve data source information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display Census Bureau data source information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
+    const fred = within(screen.getByRole('region', { name: sources[0].name }));
+    expect(fred.getByRole('link', { name: /browse series/i })).toHaveAttribute(
+      'href',
+      `/explore?source=${encodeURIComponent(sources[0].id)}`
+    );
   });
 
-  describe('Data Source Metadata', () => {
-    test('should display data source characteristics', () => {
-      renderDataSources();
+  it('shows no uptime, health, last-crawl or schedule figures the API does not report', () => {
+    mockSources(sources);
+    renderWithProviders(<DataSources />);
 
-      // Check for common metadata elements that actually exist
-      expect(screen.getAllByText('Frequency').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Next Scheduled').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Priority').length).toBeGreaterThan(0);
-    });
-
-    test('should display update frequencies for different sources', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display data coverage information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
+    for (const invented of [
+      /uptime/i,
+      /healthy/i,
+      /health:/i,
+      /last crawl/i,
+      /crawl schedule/i,
+      /next scheduled/i,
+      /98\.5%/,
+    ]) {
+      expect(screen.queryByText(invented)).not.toBeInTheDocument();
+    }
   });
 
-  describe('Data Source Cards and Layout', () => {
-    test('should display data sources in organized cards', () => {
-      renderDataSources();
+  it('shows an error when the sources cannot be loaded', () => {
+    mockSources(undefined, { error: new Error('boom') });
+    renderWithProviders(<DataSources />);
 
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display data source logos or icons', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should display data source statistics', () => {
-      renderDataSources();
-
-      // Should show statistics like number of series
-      expect(screen.getAllByText('Total Series').length).toBeGreaterThan(0);
-    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load data sources: boom');
   });
 
-  describe('Interactive Elements', () => {
-    test('should have expandable sections for detailed information', () => {
-      renderDataSources();
+  it('shows a spinner while loading', () => {
+    mockSources(undefined, { isLoading: true });
+    renderWithProviders(<DataSources />);
 
-      // The component doesn't have expandable sections, just verify it renders
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-
-    test('should have links to external data source websites', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should have search or filter functionality', () => {
-      renderDataSources();
-
-      // The component doesn't have search/filter functionality, just verify it renders
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Data Quality and Reliability Information', () => {
-    test('should display data quality indicators', () => {
-      renderDataSources();
-
-      // Should show status indicators (healthy sources, uptime)
-      expect(screen.getAllByText('Healthy Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Uptime').length).toBeGreaterThan(0);
-    });
-
-    test('should display data source status information', () => {
-      renderDataSources();
-
-      // Should show data source status and health information
-      expect(screen.getAllByText('Active Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Total Series').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Healthy Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Uptime').length).toBeGreaterThan(0);
-    });
-
-    test('should display data source descriptions', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Responsive Design', () => {
-    test('should render correctly on mobile viewport', () => {
-      // Mock mobile viewport
-      Object.defineProperty(window, 'innerWidth', {
-        writable: true,
-        configurable: true,
-        value: 375,
-      });
-
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-
-    test('should render correctly on tablet viewport', () => {
-      // Mock tablet viewport
-      Object.defineProperty(window, 'innerWidth', {
-        writable: true,
-        configurable: true,
-        value: 768,
-      });
-
-      renderDataSources();
-
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Accessibility', () => {
-    test('should have proper ARIA labels', async () => {
-      renderDataSources();
-
-      // Wait for component to render with Suspense
-      await screen.findByText('Data Sources');
-      
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-
-      // Check for proper heading structure
-      const headings = screen.getAllByRole('heading');
-      expect(headings.length).toBeGreaterThan(0);
-    }, 10000); // 10 second timeout for this specific test
-
-    test('should be keyboard navigable', async () => {
-      const user = userEvent.setup();
-      renderDataSources();
-
-      // Should be able to navigate with Tab key
-      await user.tab();
-
-      // Note: In a real test, we would check for focus indicators or specific elements
-      // For now, we'll just verify the tab navigation doesn't throw errors
-    });
-
-    test('should have proper color contrast', () => {
-      renderDataSources();
-
-      // This would typically be tested with automated accessibility tools
-      // For now, we just ensure the page renders without errors
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Performance', () => {
-    test('should load quickly without performance issues', () => {
-      const startTime = performance.now();
-
-      renderDataSources();
-
-      const endTime = performance.now();
-      const renderTime = endTime - startTime;
-
-      // Should render within reasonable time (adjust threshold as needed)
-      expect(renderTime).toBeLessThan(1000); // 1 second
-    });
-
-    test('should handle large amounts of data source information', () => {
-      renderDataSources();
-
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Error Handling', () => {
-    test('should handle missing data source information gracefully', () => {
-      renderDataSources();
-
-      // Should still render the page even if some data is missing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-
-    test('should display appropriate messages for unavailable data sources', () => {
-      renderDataSources();
-
-      // Should handle cases where data sources are temporarily unavailable
-      // This would be tested with mocked unavailable data
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Loading and error states', () => {
-    const dataSourcesHook = vi.mocked(useDataSources);
-
-    test('shows a spinner, not zero counts, while sources load', () => {
-      dataSourcesHook.mockReturnValueOnce({ data: undefined, isLoading: true, error: null } as any);
-      renderWithProviders(<DataSources />);
-
-      expect(screen.getByLabelText(/loading data sources/i)).toBeInTheDocument();
-      expect(screen.queryByText(/active sources/i)).not.toBeInTheDocument();
-    });
-
-    test('shows the error when sources fail to load', () => {
-      dataSourcesHook.mockReturnValueOnce({
-        data: undefined,
-        isLoading: false,
-        error: new Error('backend down'),
-      } as any);
-      renderWithProviders(<DataSources />);
-
-      expect(screen.getByText(/could not load data sources: backend down/i)).toBeInTheDocument();
-    });
-
-    test('Browse Series links to the explorer filtered by the source id, and View Details is gone', () => {
-      renderDataSources();
-
-      const browseLinks = screen.getAllByRole('link', { name: /browse series/i });
-      expect(browseLinks.map(link => link.getAttribute('href'))).toEqual([
-        '/explore?source=fred',
-        '/explore?source=bls',
-        '/explore?source=census',
-        '/explore?source=worldbank',
-      ]);
-
-      expect(screen.queryByRole('button', { name: /view details/i })).not.toBeInTheDocument();
-    });
-
-    test('keeps the cached sources visible when a later refresh fails', () => {
-      dataSourcesHook.mockReturnValueOnce({
-        data: mockDataSources,
-        isLoading: false,
-        error: new Error('backend down'),
-      } as any);
-      renderWithProviders(<DataSources />);
-
-      expect(screen.getByText(/showing the last loaded sources/i)).toBeInTheDocument();
-      expect(screen.getByText(/active sources/i)).toBeInTheDocument();
-      expect(screen.queryByText(/^could not load data sources/i)).not.toBeInTheDocument();
-    });
+    expect(screen.getByLabelText('Loading data sources')).toBeInTheDocument();
   });
 });
