@@ -85,6 +85,7 @@ export const QUERIES = {
           id
           title
           description
+          sourceId
           source {
             name
           }
@@ -93,7 +94,6 @@ export const QUERIES = {
           startDate
           endDate
           lastUpdated
-          dataPointCount
         }
         totalCount
         pageInfo {
@@ -420,6 +420,7 @@ export interface SeriesListNode {
   id: string;
   title: string;
   description: string;
+  sourceId: string;
   source: {
     name: string;
   };
@@ -428,7 +429,6 @@ export interface SeriesListNode {
   startDate: string;
   endDate: string;
   lastUpdated: string;
-  dataPointCount: number;
 }
 
 export interface SeriesListResponse {

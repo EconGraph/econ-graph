@@ -42,6 +42,12 @@ impl SearchService {
 
         let search_query = params.query.clone();
         let fulltext_query = fulltext_query(&search_query);
+        // Checked at backend startup, so a failure here means the file vanished since.
+        let abbreviations = econ_graph_core::reference::search_abbreviations()
+            .map_err(|e| AppError::ConfigError(e.to_string()))?;
+        // None when nothing was expanded, so the common query isn't parsed and matched twice.
+        let expanded_query = Some(expand_abbreviations(&fulltext_query, abbreviations))
+            .filter(|expanded| *expanded != fulltext_query);
         let similarity_threshold = params.get_similarity_threshold();
         let limit = params.get_limit();
         let offset = params.get_offset();
@@ -70,6 +76,9 @@ impl SearchService {
         // URL-like phrase (`"x.com/a!b"`), which merely turns the typo fallback off.
         // A query that an empty document already satisfies (`-rate`, `-a -b`, `a OR -b`) carries
         // no positive requirement, so it's rejected rather than matching unrelated series.
+        // The query is also searched with its abbreviations spelled out ($9, NULL when it has
+        // none), so "gdp" finds a title that only says "gross domestic product". A series whose
+        // external id is the whole query (FRED's GDP for "gdp") ranks first.
         let results = conn
             .transaction::<Vec<SeriesSearchResultRow>, diesel::result::Error, _>(
                 async move |conn| {
@@ -85,7 +94,11 @@ impl SearchService {
                         // is parsed with both `english` (titles, descriptions) and `simple`.
                         "WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
                                  SELECT websearch_to_tsquery('english', $7)
-                                     || websearch_to_tsquery('simple', $7) AS tsq
+                                     || websearch_to_tsquery('simple', $7)
+                                     -- With no expansion, repeat a disjunct already
+                                     -- present (an empty tsquery would log a NOTICE).
+                                     || coalesce(websearch_to_tsquery('english', $9),
+                                                 websearch_to_tsquery('simple', $7)) AS tsq
                              ) parsed)
                          SELECT es.id, es.title, es.description, es.external_id, es.source_id,
                                 es.frequency, es.units, es.start_date, es.end_date,
@@ -102,7 +115,8 @@ impl SearchService {
                          AND (($3::text[] IS NULL AND $8::text IS NULL)
                               OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
-                         ORDER BY rank DESC, es.title ASC, es.id ASC
+                         ORDER BY lower(es.external_id) = lower(btrim($1)) DESC,
+                                  rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
                     )
                     .bind::<diesel::sql_types::Text, _>(&search_query)
@@ -115,6 +129,9 @@ impl SearchService {
                     .bind::<diesel::sql_types::Integer, _>(offset)
                     .bind::<diesel::sql_types::Text, _>(&fulltext_query)
                     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(exact_frequency)
+                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
+                        expanded_query,
+                    )
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
@@ -215,6 +232,33 @@ fn fulltext_query(query: &str) -> String {
     query
         .split_whitespace()
         .filter(|word| !word.chars().all(|c| c == '-'))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `query` with each listed abbreviation spelled out as a quoted phrase (`gdp per capita` becomes
+/// `"gross domestic product" per capita`), to search alongside the query as typed. Words inside
+/// quotes, excluded words (`-gdp`) and words with any character but a letter or digit are kept
+/// as they are.
+fn expand_abbreviations(
+    query: &str,
+    abbreviations: &econ_graph_core::reference::SearchAbbreviations,
+) -> String {
+    let mut in_quotes = false;
+    query
+        .split_whitespace()
+        .map(|word| {
+            let quoted = in_quotes || word.contains('"');
+            if word.matches('"').count() % 2 == 1 {
+                in_quotes = !in_quotes;
+            }
+            match abbreviations.expansion(word) {
+                Some(expansion) if !quoted && word.chars().all(|c| c.is_ascii_alphanumeric()) => {
+                    format!("\"{expansion}\"")
+                }
+                _ => word.to_string(),
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -342,7 +386,16 @@ mod db_tests {
                      ('srch_ESTAB', 'Number of establishments - United States', NULL),
                      ('srch_CPI', 'Consumer Price Index for All Urban Consumers',
                       'Measure of inflation in prices paid by urban consumers'),
-                     ('srch_HOUSES', 'New Dwellings Begun', NULL)) v(e, t, d)
+                     ('srch_HOUSES', 'New Dwellings Begun', NULL),
+                     -- ECO-406: FRED's GDP (its id is the abbreviation), BEA's (spelled out
+                     -- only) and a World Bank-style title that says GDP.
+                     ('GDP', 'Gross Domestic Product', NULL),
+                     ('srch_A191RC', 'Gross domestic product srch', NULL),
+                     ('srch_GDPPC', 'GDP per capita (current US$)', NULL),
+                     -- Outranks FRED's GDP on text alone, so only the exact-id rule puts
+                     -- FRED's first.
+                     ('srch_GDPMANY', 'GDP: gross domestic product (GDP), GDP growth',
+                      'GDP and gross domestic product, GDP by quarter')) v(e, t, d)
              WHERE ds.name = 'search-test'",
             // A discovered series with no data yet (e.g. its source adapter was removed before
             // ever crawling it): must never appear in search results.
@@ -568,6 +621,72 @@ mod db_tests {
             .all(|s| matches!(s.suggestion_type, SuggestionType::Correction)));
 
         remove_fixtures(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// An abbreviation finds titles that spell it out, and a series whose id is the query ranks
+    /// first (ECO-406: "gdp" missed BEA's GDP and listed FRED's sixth).
+    async fn search_expands_abbreviations_and_ranks_an_exact_id_first() {
+        let Some(pool) = pool().await else { return };
+        let service = SearchService::new(Arc::new(pool.clone()));
+
+        let gdp = service
+            .search_series(&SearchParams::simple("gdp"))
+            .await
+            .unwrap();
+        assert!(
+            gdp[0].external_id.eq_ignore_ascii_case("gdp"),
+            "{:?}",
+            titles(&gdp)
+        );
+        assert!(titles(&gdp).contains(&"Gross domestic product srch"));
+        assert!(titles(&gdp).contains(&"GDP per capita (current US$)"));
+        assert!(
+            titles(&gdp).contains(&"GDP: gross domestic product (GDP), GDP growth"),
+            "{:?}",
+            titles(&gdp)
+        );
+
+        // A spelled-out query still finds the spelled-out title first (nothing is expanded
+        // the other way), and "-gdp" still excludes: the expansion leaves an excluded word alone.
+        let spelled = service
+            .search_series(&SearchParams::simple("gross domestic product srch"))
+            .await
+            .unwrap();
+        assert_eq!(
+            titles(&spelled).into_iter().next(),
+            Some("Gross domestic product srch")
+        );
+        let excluded = service
+            .search_series(&SearchParams::simple("per capita -gdp"))
+            .await
+            .unwrap();
+        assert!(!titles(&excluded).contains(&"GDP per capita (current US$)"));
+
+        remove_fixtures(&pool).await;
+    }
+
+    #[test]
+    /// Abbreviations are spelled out as phrases; quoted, excluded and punctuated words are not.
+    fn expand_abbreviations_spells_out_bare_words_only() {
+        let list = econ_graph_core::reference::search_abbreviations().unwrap();
+        assert_eq!(
+            expand_abbreviations("GDP per capita", list),
+            "\"gross domestic product\" per capita"
+        );
+        assert_eq!(
+            expand_abbreviations("cpi OR ppi", list),
+            "\"consumer price index\" OR \"producer price index\""
+        );
+        assert_eq!(expand_abbreviations("-gdp growth", list), "-gdp growth");
+        assert_eq!(
+            expand_abbreviations("\"real gdp\" gdp", list),
+            "\"real gdp\" \"gross domestic product\""
+        );
+        assert_eq!(expand_abbreviations("\"a gdp b\"", list), "\"a gdp b\"");
+        assert_eq!(expand_abbreviations("gdp.", list), "gdp.");
+        assert_eq!(expand_abbreviations("unemployment", list), "unemployment");
     }
 
     #[test]

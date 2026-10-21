@@ -6,7 +6,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { executeGraphQL, QUERIES } from '../utils/graphql';
+import { executeGraphQL, QUERIES, type SeriesListNode } from '../utils/graphql';
 import type { DataTransformation } from '../utils/transformations';
 
 // Types for series data
@@ -260,6 +260,45 @@ export const useSeriesSearch = (
     },
     {
       enabled: enabled && trimmedQuery.length >= 2,
+      staleTime: 2 * 60 * 1000, // 2 minutes
+    }
+  );
+};
+
+/** One page of a source's (or a frequency's) series, and how many there are in all. */
+export interface SeriesBrowsePage {
+  series: SeriesListNode[];
+  totalCount: number;
+}
+
+/**
+ * Lists series by source and/or frequency without a search query, in title order, so a
+ * researcher can see what a source has without guessing a word to search for (ECO-405).
+ * Runs only when a source or frequency is given.
+ * @param filters - The source id and/or backend frequency to list, and how many to fetch.
+ * @param enabled - False to hold the request (e.g. while the source list loads).
+ * @returns The query; `data` is the first page and the total count.
+ */
+export const useSeriesBrowse = (
+  filters: { sourceId?: string; frequency?: string; limit?: number },
+  enabled = true
+) => {
+  const { sourceId, frequency, limit } = filters;
+  return useQuery<SeriesBrowsePage>(
+    ['seriesBrowse', sourceId, frequency, limit],
+    async () => {
+      const result = await executeGraphQL({
+        query: QUERIES.GET_SERIES_LIST,
+        variables: {
+          filter: { sourceId, frequency },
+          pagination: { first: limit },
+        },
+      });
+      const list = result.data?.seriesList;
+      return { series: list?.nodes ?? [], totalCount: list?.totalCount ?? 0 };
+    },
+    {
+      enabled: enabled && Boolean(sourceId || frequency),
       staleTime: 2 * 60 * 1000, // 2 minutes
     }
   );

@@ -139,8 +139,8 @@ pub enum Command {
 }
 
 /// Version of the migration that creates `seed_reference_codes` (the v4.0.0 baseline,
-/// `2026-10-02-000500_v4_0_baseline`); every seed migration's version must be later.
-const SEED_FUNCTION_VERSION: &str = "2026-10-02-000500";
+/// `2026-10-21-000100_v4_0_baseline`); every seed migration's version must be later.
+const SEED_FUNCTION_VERSION: &str = "2026-10-21-000100";
 
 /// `backend/migrations` of the checkout this binary was built from.
 const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");

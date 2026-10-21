@@ -25,8 +25,9 @@ export const SEEDED = {
      */
     liveMaxAgeDays: 300,
     /**
-     * Every transformation the series page offers, in the order the journey applies them, with the newest value it shows for it. Null:
-     * the page says there aren't enough observations (a quarterly series has no monthly change).
+     * Every transformation the series page offers this quarterly series (no month-over-month),
+     * in the order the journey applies them, with the newest value it shows for it. Null would
+     * mean the page says there aren't enough observations.
      * The fixture has five quarters, 2025-04-01 to 2026-04-01, with 2025-10-01 missing. Its first
      * point is exactly a year before the last, so year-over-year and change since the first
      * observation show the same value; the column header tells them apart.
@@ -42,7 +43,6 @@ export const SEEDED = {
         description: 'Quarter-over-Quarter % Change',
         latestShown: { date: 'Apr 1, 2026', value: '1.20' },
       },
-      { label: 'Month-over-Month', description: 'Month-over-Month % Change', latestShown: null },
       {
         label: 'Change since first available value',
         description: '% Change since First Available Value',
@@ -172,15 +172,11 @@ export interface SweptSeries {
   /** Data rows in its CSV at the chart's default range: every point, missing ones included. */
   csvRows: number;
   /**
-   * Every transformation the page offers but None, by its label, with the newest value it shows
-   * in fixture mode; null where the page says there aren't enough observations to compute it.
+   * Every transformation the page offers but None (only those the series' frequency supports),
+   * by its label, with the newest value it shows in fixture mode; null where the page says there
+   * aren't enough observations to compute it.
    */
   transformations: Record<string, { date: string; value: string } | null>;
-  /**
-   * Deployed mode: transformations the series' frequency can never have (month-over-month on a
-   * quarterly series). Every other one must compute on a live series' full history.
-   */
-  liveNotEnough: readonly string[];
   /**
    * Deployed mode: the most days its newest observation may lag today, from the source's
    * publication cadence (REL-QA check 3). Observations are dated at the period's start.
@@ -196,12 +192,10 @@ export interface SweptSeries {
  */
 const shown = (date: string, value: string) => ({ date, value });
 
-/** Neither quarter-over-quarter nor month-over-month exists for an annual series. */
-const ANNUAL_NOT_ENOUGH = ['Quarter-over-Quarter', 'Month-over-Month'] as const;
-
 /**
  * One series per train 1 source, for the six-source sweep. Values are what the series page shows
- * for the seeded fixtures, rounded to 2 decimal places; the comments say where each comes from.
+ * for the seeded fixtures, rounded to 2 decimal places (log differences to 4 significant
+ * digits); the comments say where each comes from.
  */
 export const SWEPT_SOURCES: readonly SweptSeries[] = [
   {
@@ -211,12 +205,10 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
     transformations: {
       'Year-over-Year': shown('Apr 1, 2026', '5.30'),
       'Quarter-over-Quarter': shown('Apr 1, 2026', '1.20'),
-      'Month-over-Month': null,
       'Change since first available value': shown('Apr 1, 2026', '5.30'),
-      // ln(32101.6 / 31722.514)
-      'Log difference': shown('Apr 1, 2026', '0.01'),
+      // ln(32101.6 / 31722.514), to four significant digits
+      'Log difference': shown('Apr 1, 2026', '0.01188'),
     },
-    liveNotEnough: ['Month-over-Month'],
   },
   {
     ...SEEDED.blsCpi,
@@ -232,9 +224,9 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       // The first observation (2023-11) is missing, so the base is the next usable value,
       // December's 306.746: 312.332 / 306.746, the same comparison as QoQ here.
       'Change since first available value': shown('Mar 1, 2024', '1.82'),
-      'Log difference': shown('Mar 1, 2024', '0.01'),
+      // ln(312.332 / 310.326)
+      'Log difference': shown('Mar 1, 2024', '0.006443'),
     },
-    liveNotEnough: [],
     // Monthly, released about two weeks after the month ends; slack for a shutdown delay.
     liveMaxAgeDays: 120,
   },
@@ -246,13 +238,10 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
     transformations: {
       // 2022's year-ago point (2021) is missing, so the newest is 2020 over 2019.
       'Year-over-Year': shown('Jan 1, 2020', '1.03'),
-      'Quarter-over-Quarter': null,
-      'Month-over-Month': null,
       // 7324017 / 7106316 (2019)
       'Change since first available value': shown('Jan 1, 2022', '3.06'),
-      'Log difference': shown('Jan 1, 2020', '0.01'),
+      'Log difference': shown('Jan 1, 2020', '0.01023'),
     },
-    liveNotEnough: ANNUAL_NOT_ENOUGH,
     // Annual, released about 21 months after the year ends (BDS 2022 came out in September
     // 2024), so just before a release the newest point is about three years and eight months old.
     liveMaxAgeDays: 1460,
@@ -267,11 +256,10 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       // Four quarters: no year-ago point.
       'Year-over-Year': null,
       'Quarter-over-Quarter': shown('Oct 1, 2024', '0.00'),
-      'Month-over-Month': null,
       'Change since first available value': shown('Oct 1, 2024', '0.00'),
-      'Log difference': shown('Oct 1, 2024', '0.00'),
+      // Four significant digits make the tiny log change readable where percents round to 0.00.
+      'Log difference': shown('Oct 1, 2024', '0.000007371'),
     },
-    liveNotEnough: ['Month-over-Month'],
     // Quarterly GDP, the same cadence as FRED's copy (SEEDED.fredGdp.liveMaxAgeDays).
     liveMaxAgeDays: SEEDED.fredGdp.liveMaxAgeDays,
   },
@@ -289,9 +277,9 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       'Month-over-Month': shown('Mar 1, 2025', '0.59'),
       // 209.93 / 203.78 (October)
       'Change since first available value': shown('Mar 1, 2025', '3.02'),
-      'Log difference': shown('Mar 1, 2025', '0.01'),
+      // ln(209.93 / 208.70)
+      'Log difference': shown('Mar 1, 2025', '0.005876'),
     },
-    liveNotEnough: [],
     // Monthly, released about two months after the month ends.
     liveMaxAgeDays: 150,
   },
@@ -303,14 +291,11 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
     transformations: {
       // 82769.4 / 77860.9
       'Year-over-Year': shown('Jan 1, 2023', '6.30'),
-      'Quarter-over-Quarter': null,
-      'Month-over-Month': null,
       // 82769.4 / 71055.9 (2021)
       'Change since first available value': shown('Jan 1, 2023', '16.48'),
       // ln(82769.4 / 77860.9)
-      'Log difference': shown('Jan 1, 2023', '0.06'),
+      'Log difference': shown('Jan 1, 2023', '0.06113'),
     },
-    liveNotEnough: ANNUAL_NOT_ENOUGH,
     // Annual, published around July of the next year, so just before that the newest point is
     // two and a half years old.
     liveMaxAgeDays: 1000,

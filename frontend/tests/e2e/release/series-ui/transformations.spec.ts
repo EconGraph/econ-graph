@@ -64,7 +64,7 @@ async function latestShown(page: Page): Promise<{ date: string; value: string }>
 // stands in for it.
 test.describe('series transformations', () => {
   // GDP is quarterly, so year-over-year (a year back), quarter-over-quarter and change-since-
-  // first-observation all have data; month-over-month never will for a quarterly series (see
+  // first-observation all have data; month-over-month isn't offered for a quarterly series (see
   // the CPI test below).
   test('quarterly transformations update the value column and the chip', async ({
     page,
@@ -88,7 +88,7 @@ test.describe('series transformations', () => {
       {
         option: 'Change since first available value',
         columnHeader: '% Change since First Available Value',
-        expected: SEEDED.fredGdp.transformations[3].latestShown,
+        expected: SEEDED.fredGdp.transformations[2].latestShown,
       },
     ];
 
@@ -106,7 +106,7 @@ test.describe('series transformations', () => {
     if (!DEPLOYED) {
       await expect
         .poll(() => latestShown(page))
-        .toEqual(SEEDED.fredGdp.transformations[4].latestShown);
+        .toEqual(SEEDED.fredGdp.transformations[3].latestShown);
     }
     for (const { columnHeader } of cases) {
       await expect(page.getByRole('columnheader', { name: columnHeader, exact: true })).toHaveCount(
@@ -137,8 +137,8 @@ test.describe('series transformations', () => {
   // Log difference is offered by the frontend (src/utils/transformations.ts) and computed by the
   // backend. GDP's newest two non-missing points are Jan 2026 (31,722.514) and Apr 2026
   // (32,101.6), so the Apr 2026 value is ln(32101.6 / 31722.514) = 0.01188, which the table shows
-  // as 0.01 (the ln itself is pinned by series_data_tests.rs; this checks the option and that the
-  // newest value is not percent-scaled).
+  // to four significant digits (the ln itself is pinned by series_data_tests.rs; this checks the
+  // option, the precision and that the newest value is not percent-scaled).
   test('log difference is offered and shows the newest change unscaled', async ({ page, request }) => {
     const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
     await page.goto(`/series/${seriesId}`);

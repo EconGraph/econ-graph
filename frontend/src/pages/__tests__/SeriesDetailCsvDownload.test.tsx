@@ -58,9 +58,18 @@ vi.mock('../../hooks/useSeriesData', () => ({
 // The real chart needs a canvas; this stand-in lets the test narrow the range like a user.
 vi.mock('../../components/charts/SeriesChart', () => ({
   default: ({ onDateRangeChange }: SeriesChartProps) => (
-    <button onClick={() => onDateRangeChange?.({ start: new Date(2024, 1, 1), end: null })}>
-      Narrow range
-    </button>
+    <>
+      <button onClick={() => onDateRangeChange?.({ start: new Date(2024, 1, 1), end: null })}>
+        Narrow range
+      </button>
+      <button
+        onClick={() =>
+          onDateRangeChange?.({ start: new Date(2024, 1, 1), end: new Date(2024, 1, 1) })
+        }
+      >
+        Range without values
+      </button>
+    </>
   ),
 }));
 
@@ -138,6 +147,13 @@ describe('SeriesDetail CSV download', () => {
 
     const rows = (await readBlob(blobs[0])).split('\r\n').slice(6);
     expect(rows).toEqual(['2024-02-01,', '2024-03-01,3.5', '']);
+  });
+
+  it('is disabled when the chart range holds no values, since the file would be empty', () => {
+    renderPage();
+    expect(screen.getByRole('button', { name: /download csv/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Range without values' }));
+    expect(screen.getByRole('button', { name: /download csv/i })).toBeDisabled();
   });
 
   it('exports log difference with dimensionless units, not the series percent unit', async () => {

@@ -339,6 +339,151 @@ fn check_code(
     }
 }
 
+/// File name of the search abbreviation list in the data directory.
+pub const SEARCH_ABBREVIATIONS_FILE: &str = "search_abbreviations.csv";
+
+/// Abbreviations a series search expands (`gdp` for `gross domestic product`), from
+/// `search_abbreviations.csv`. Sources spell a measure out in some titles and abbreviate it in
+/// others, so a search for the abbreviation should find both. Only that direction is expanded: a
+/// search for the spelled-out words doesn't find a title that only abbreviates them.
+#[derive(Debug, Default)]
+pub struct SearchAbbreviations {
+    by_abbreviation: HashMap<String, String>,
+}
+
+impl SearchAbbreviations {
+    /// What `word` stands for, if it is a listed abbreviation (any case).
+    pub fn expansion(&self, word: &str) -> Option<&str> {
+        self.by_abbreviation
+            .get(&word.to_lowercase())
+            .map(String::as_str)
+    }
+
+    /// How many abbreviations are listed.
+    pub fn len(&self) -> usize {
+        self.by_abbreviation.len()
+    }
+
+    /// Whether the list is empty.
+    pub fn is_empty(&self) -> bool {
+        self.by_abbreviation.is_empty()
+    }
+}
+
+/// The list from `search_abbreviations.csv` in [`data_dir`], read on first use and cached.
+///
+/// A missing or malformed file is an error naming the path.
+pub fn search_abbreviations() -> Result<&'static SearchAbbreviations, ReferenceError> {
+    static ABBREVIATIONS: OnceLock<Result<SearchAbbreviations, ReferenceError>> = OnceLock::new();
+    ABBREVIATIONS
+        .get_or_init(|| load_search_abbreviations(&data_dir().join(SEARCH_ABBREVIATIONS_FILE)))
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// Reads and checks a search abbreviation list.
+pub fn load_search_abbreviations(path: &Path) -> Result<SearchAbbreviations, ReferenceError> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        ReferenceError(format!(
+            "reading {}: {e} (set {DATA_DIR_ENV} to the reference data directory)",
+            path.display()
+        ))
+    })?;
+    parse_search_abbreviations(&text)
+        .map_err(|e| ReferenceError(format!("{}: {e}", path.display())))
+}
+
+/// Parses the CSV text (header `abbreviation,expansion`; `#` comment lines skipped). An
+/// abbreviation is one lower-case word of letters and digits; an expansion is lower-case words
+/// of letters and digits separated by single spaces, so it can be quoted as a search phrase.
+fn parse_search_abbreviations(text: &str) -> Result<SearchAbbreviations, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .from_reader(text.as_bytes());
+    let header = reader.headers().map_err(|e| e.to_string())?.clone();
+    if header.iter().ne(["abbreviation", "expansion"]) {
+        return Err(format!(
+            "expected header abbreviation,expansion, got {}",
+            header.iter().collect::<Vec<_>>().join(",")
+        ));
+    }
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
+    let mut list = SearchAbbreviations::default();
+    for record in reader.deserialize::<(String, String)>() {
+        let (abbreviation, expansion) = record.map_err(|e| e.to_string())?;
+        if !word(&abbreviation) {
+            return Err(format!("invalid abbreviation {abbreviation:?}"));
+        }
+        if !expansion.split(' ').all(word) || !expansion.contains(' ') {
+            return Err(format!(
+                "invalid expansion {expansion:?} for {abbreviation:?}: two or more lower-case words"
+            ));
+        }
+        if list
+            .by_abbreviation
+            .insert(abbreviation.clone(), expansion)
+            .is_some()
+        {
+            return Err(format!("duplicate abbreviation {abbreviation:?}"));
+        }
+    }
+    if list.is_empty() {
+        return Err("no abbreviations".into());
+    }
+    Ok(list)
+}
+
+#[cfg(test)]
+mod search_abbreviation_tests {
+    use super::*;
+
+    /// The shipped list loads and expands the abbreviations ECO-406 was about.
+    #[test]
+    fn shipped_list_is_valid() {
+        let list = load_search_abbreviations(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("data")
+                .join(SEARCH_ABBREVIATIONS_FILE),
+        )
+        .unwrap();
+        assert_eq!(list.expansion("GDP"), Some("gross domestic product"));
+        assert_eq!(list.expansion("cpi"), Some("consumer price index"));
+        assert_eq!(list.expansion("gross"), None);
+    }
+
+    /// Malformed rows are refused with the reason.
+    #[test]
+    fn malformed_lists_are_refused() {
+        let parse =
+            |rows: &str| parse_search_abbreviations(&format!("abbreviation,expansion\n{rows}"));
+        assert!(parse("gdp,gross domestic product\n").is_ok());
+        for (rows, reason) in [
+            ("GDP,gross domestic product\n", "invalid abbreviation"),
+            ("gdp,product\n", "invalid expansion"),
+            (
+                "gdp,\"gross \"\"domestic\"\" product\"\n",
+                "invalid expansion",
+            ),
+            ("gdp,gross  product\n", "invalid expansion"),
+            (
+                "gdp,gross product\ngdp,gross domestic product\n",
+                "duplicate",
+            ),
+            ("", "no abbreviations"),
+        ] {
+            let e = parse(rows).unwrap_err();
+            assert!(e.contains(reason), "{rows:?}: {e}");
+        }
+        assert!(parse_search_abbreviations("abbr,exp\n")
+            .unwrap_err()
+            .contains("header"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

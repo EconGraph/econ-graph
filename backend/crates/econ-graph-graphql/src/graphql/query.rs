@@ -79,45 +79,31 @@ impl Query {
     ) -> Result<SeriesConnection> {
         let pool = ctx.data::<DatabasePool>()?;
 
-        // Convert GraphQL inputs to service parameters
-        let search_params = convert_series_filter_to_params(filter);
-        let series = series_service::list_series(&pool, search_params).await?;
-
-        // Apply pagination (simplified implementation)
+        // The page is fetched with LIMIT/OFFSET, and the total counted separately, so a
+        // source's whole catalog can be paged through and its size reported.
         let pagination = pagination.unwrap_or_default();
-        let first = pagination.first.unwrap_or(50).min(100) as usize;
-        let after_index = pagination
+        let first = pagination.first.unwrap_or(50).clamp(1, 100);
+        let offset = pagination
             .after
-            .and_then(|cursor| cursor.parse::<usize>().ok())
-            .unwrap_or(0);
+            .and_then(|cursor| cursor.parse::<i32>().ok())
+            .unwrap_or(0)
+            .max(0);
 
-        let total_count = series.len();
-        let end_index = (after_index + first).min(total_count);
-        let page_series = if after_index < total_count {
-            series[after_index..end_index].to_vec()
-        } else {
-            Vec::new()
-        };
+        let mut search_params = convert_series_filter_to_params(filter);
+        search_params.limit = Some(i64::from(first));
+        search_params.offset = Some(i64::from(offset));
+        let total_count = series_service::count_series(pool, &search_params).await?;
+        let series = series_service::list_series(pool, search_params).await?;
 
+        let end_index = i64::from(offset) + series.len() as i64;
         Ok(SeriesConnection {
-            nodes: page_series
-                .into_iter()
-                .map(EconomicSeriesType::from)
-                .collect(),
-            total_count: total_count as i32,
+            nodes: series.into_iter().map(EconomicSeriesType::from).collect(),
+            total_count: i32::try_from(total_count).unwrap_or(i32::MAX),
             page_info: PageInfo {
                 has_next_page: end_index < total_count,
-                has_previous_page: after_index > 0,
-                start_cursor: if after_index > 0 {
-                    Some(after_index.to_string())
-                } else {
-                    None
-                },
-                end_cursor: if end_index < total_count {
-                    Some(end_index.to_string())
-                } else {
-                    None
-                },
+                has_previous_page: offset > 0,
+                start_cursor: (offset > 0).then(|| offset.to_string()),
+                end_cursor: (end_index < total_count).then(|| end_index.to_string()),
             },
         })
     }
@@ -1289,6 +1275,103 @@ mod empty_series_tests {
 
         assert!(ids.contains(&with_data.id.to_string()));
         assert!(!ids.contains(&without_data.id.to_string()));
+    }
+
+    /// A source's catalog can be paged through in title order, and `totalCount` is the whole
+    /// catalog, not the size of one page (the explorer's "Browse series" relies on both).
+    #[tokio::test]
+    #[serial]
+    async fn series_list_pages_a_source_and_counts_all_of_it() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        let (source, with_data, _without_data) = seed(&pool, "Pagequintile").await;
+        let dataset_id =
+            test_dataset_id(&mut pool.get().await.expect("connection"), source.id).await;
+        // Two more series with data, titled to sort before and after the seeded one, and 55
+        // more after those: more than the 50 rows the resolver used to fetch for any page.
+        let titles: Vec<String> = ["Aardvark index", "Zebra index"]
+            .into_iter()
+            .map(String::from)
+            .chain((0..55).map(|i| format!("Zz filler {i:02}")))
+            .collect();
+        for title in &titles {
+            EconomicSeries::create(
+                &pool,
+                &NewEconomicSeries {
+                    source_id: source.id,
+                    external_id: format!("{title}_{}", source.id),
+                    title: title.clone(),
+                    description: None,
+                    units: None,
+                    frequency: "Monthly".to_string(),
+                    seasonal_adjustment: None,
+                    start_date: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
+                    end_date: chrono::NaiveDate::from_ymd_opt(2020, 12, 1),
+                    is_active: true,
+                    first_discovered_at: None,
+                    last_crawled_at: None,
+                    first_missing_date: None,
+                    crawl_status: None,
+                    crawl_error_message: None,
+                    dataset_id,
+                    dimensions: Default::default(),
+                    default_measure: None,
+                },
+            )
+            .await
+            .expect("create series");
+        }
+
+        let page = |after: Option<&str>| {
+            let after = after
+                .map(|a| format!(r#", after: "{a}""#))
+                .unwrap_or_default();
+            format!(
+                r#"{{ seriesList(filter: {{ sourceId: "{}" }}, pagination: {{ first: 2{after} }}) {{
+                    nodes {{ title }} totalCount pageInfo {{ hasNextPage endCursor }} }} }}"#,
+                source.id
+            )
+        };
+
+        let resp = schema.execute(Request::new(page(None))).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let first = resp.data.into_json().unwrap()["seriesList"].clone();
+        let titles: Vec<&str> = first["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, vec!["Aardvark index", with_data.title.as_str()]);
+        assert_eq!(
+            first["totalCount"], 58,
+            "the whole catalog, without the series that has no data"
+        );
+        assert_eq!(first["pageInfo"]["hasNextPage"], true);
+
+        let cursor = first["pageInfo"]["endCursor"].as_str().unwrap().to_string();
+        let resp = schema.execute(Request::new(page(Some(&cursor)))).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let second = resp.data.into_json().unwrap()["seriesList"].clone();
+        assert_eq!(second["nodes"][0]["title"], "Zebra index");
+        assert_eq!(second["nodes"][1]["title"], "Zz filler 00");
+        assert_eq!(second["totalCount"], 58);
+        assert_eq!(second["pageInfo"]["hasNextPage"], true);
+
+        // The last page, past the old 50-row cap.
+        let resp = schema.execute(Request::new(page(Some("56")))).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let last = resp.data.into_json().unwrap()["seriesList"].clone();
+        let titles: Vec<&str> = last["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, vec!["Zz filler 53", "Zz filler 54"]);
+        assert_eq!(last["pageInfo"]["hasNextPage"], false);
     }
 
     #[tokio::test]

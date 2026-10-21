@@ -134,6 +134,22 @@ vi.mock('../../hooks/useSeriesData', () => ({
     refetch: vi.fn(),
     remove: vi.fn(),
   })),
+  // Behaves like the backend's seriesList: the chosen source's series, by title
+  useSeriesBrowse: vi.fn((filters: { sourceId?: string }, enabled = true) => {
+    const series =
+      enabled && filters.sourceId
+        ? mockSearchResults
+            .filter(series => series.sourceId === filters.sourceId)
+            .sort((a, b) => a.title.localeCompare(b.title))
+        : undefined;
+    return {
+      data: series && { series, totalCount: series.length },
+      isInitialLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+  }),
   useSeriesDetail: vi.fn(() => ({
     data: null,
     isLoading: false,
@@ -1196,6 +1212,40 @@ describe('the explorer resolves a `source` URL param that names a source', () =>
       const [params] = calls[calls.length - 1];
       expect((params as URLSearchParams).get('source')).toBe('Federal Reserve Economic Data');
     });
+  });
+
+  // ECO-405: "Browse series" on /sources and the sidebar's FRED Data used to land on an empty
+  // page asking for a query. With a source and no query, the source's series are listed.
+  test('a source with no query lists that source\'s series by title', async () => {
+    routerTestState.searchParams = new URLSearchParams({ source: 'Federal Reserve Economic Data' });
+    renderSeriesExplorer();
+
+    expect(await screen.findByText('2 series, by title')).toBeInTheDocument();
+    const gdp = screen.getByText('Gross Domestic Product');
+    const unemployment = screen.getByText('Unemployment Rate');
+    // Title order: GDP's card comes first
+    expect(gdp.compareDocumentPosition(unemployment) & document.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/Type at least 2 characters/)).not.toBeInTheDocument();
+  });
+
+  test('an unknown source with no query still asks for a search', async () => {
+    routerTestState.searchParams = new URLSearchParams({ source: 'Not A Real Source' });
+    renderSeriesExplorer();
+
+    expect(await screen.findByText(/Type at least 2 characters/)).toBeInTheDocument();
+    expect(screen.queryByText('No series found')).not.toBeInTheDocument();
+  });
+
+  test('browsing with a frequency the backend does not know says how many of the loaded series match', async () => {
+    routerTestState.searchParams = new URLSearchParams({
+      source: 'Federal Reserve Economic Data',
+      frequency: 'Quarterly, End of Period',
+    });
+    renderSeriesExplorer();
+
+    expect(
+      await screen.findByText('0 matching series of 2, by title')
+    ).toBeInTheDocument();
   });
 
   test('a source param matching no known source searches all sources instead of matching nothing', async () => {

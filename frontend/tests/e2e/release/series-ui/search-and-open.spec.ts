@@ -31,3 +31,37 @@ test.describe('search and open a series', () => {
     await expect(page.getByRole('heading', { name: SEEDED.fredGdp.title })).toBeVisible();
   });
 });
+
+// ECO-406: "gdp" listed FRED's GDP sixth, behind World Bank "GDP per capita" series, and missed
+// BEA's GDP, whose title only spells it out.
+test.describe('search by abbreviation', () => {
+  test('"gdp" lists the series whose id is GDP first and finds the spelled-out title', async ({
+    page,
+  }) => {
+    await page.goto('/explore');
+    await page
+      .getByPlaceholder('Search economic series (e.g., GDP, unemployment, inflation)')
+      .fill('gdp');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+
+    const cards = page.locator('.MuiCard-root');
+    // Exact: FRED's title is a substring of BEA's ("Gross domestic product (Gross Domestic
+    // Product, quarterly)"), so a substring match would pass with BEA's first.
+    await expect(cards.first().getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
+  });
+});
+
+// ECO-405: the sidebar's FRED Data (and Browse series on /sources) used to open an empty
+// explorer asking for a query. It lists the source's series instead.
+test.describe('browse a source', () => {
+  test("FRED Data lists FRED's series without a query", async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+
+    await expect(page).toHaveURL(/\/explore\?source=/);
+    await expect(page.getByText(/series, by title/)).toBeVisible();
+    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
+  });
+});
