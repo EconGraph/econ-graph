@@ -28,7 +28,7 @@ are below.
 
 | Release | Migration | Replaces |
 |---------|-----------|----------|
-| v4.0.0 | `2026-10-02-000500_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in before tagging. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
+| v4.0.0 | `2026-10-21-000100_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in as `2026-10-02-000500_v4_0_baseline`, then `2026-10-21-000100_economic_series_source_title_index` (ECO-405) was folded in before tagging. A database migrated from release/v4.0 or v4.0.0-rc.1 before that last fold has `20261002000500` but not `20261021000100`, so the baseline's guard stops it; recreate it. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
 
 ## Squashing at a release
 
@@ -45,7 +45,7 @@ recorded versions it no longer has, so:
   the head of the old chain first (check out the commit before the squash and start the backend
   once).
 
-Three limits, all only affecting databases that were never deployed from a tag:
+Three limits, all only affecting databases that were never deployed from a release tag (a release candidate's tag doesn't count):
 
 - "Has the last version" means "ran the last migration", not "ran all of them". A database that
   ran the last replaced migration before an earlier-numbered one existed skips the squash and
@@ -101,7 +101,7 @@ Steps:
    migration that `main` still lacks before forward-porting the squash.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
    constraints and indexes, final seed rows. Keep column order the same as the chain produced.
-   Name the directory with the last replaced version, e.g. `2026-10-02-000500_v4_0_baseline`.
+   Name the directory with the last replaced version, e.g. `2026-10-21-000100_v4_0_baseline`.
    Folding more migrations into an unreleased squash works the same way: the squash is renamed
    to the version of the last migration folded in.
    Its `down.sql` only raises an error: on an upgraded database that version belongs to the last

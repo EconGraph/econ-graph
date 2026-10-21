@@ -1,14 +1,15 @@
 -- EconGraph v4.0.0 baseline schema.
 --
 -- Everything the migrations before v4.0.0 built, written as one schema. No database was ever
--- deployed from them, so a new database is created in one step instead of replaying in-place
+-- deployed from them in a release (only release candidates were), so a new database is created in one step instead of replaying in-place
 -- upgrades. Migrations after v4.0.0 are incremental again. See docs/development/MIGRATIONS.md.
 --
--- This migration has the version of the last migration it replaces (2026-10-02-000500), so a
+-- This migration has the version of the last migration it replaces (2026-10-21-000100), so a
 -- database that had already run that whole chain treats it as applied and only runs what comes
 -- after. A database part way through the old chain stops at the guard below. The chain it
 -- replaces is every migration on release/v4.0 before v4.0.0 was tagged, including the first
--- baseline (2026-10-01-000100) and the six migrations merged after it.
+-- baseline (2026-10-01-000100), the six migrations merged after it (folded in as
+-- 2026-10-02-000500), and 2026-10-21-000100_economic_series_source_title_index.
 --
 -- scripts/compare_migrations.sh checks that this file builds the same schema and seed rows as the
 -- chain it replaces.
@@ -20,8 +21,8 @@ BEGIN
     END IF;
     IF to_regclass('public.data_sources') IS NOT NULL THEN
         RAISE EXCEPTION 'This database was built by migrations from before the v4.0.0 baseline and has not run all of them'
-            USING HINT = 'Recreate the database, or run the old chain to its end first (git checkout '
-                'the commit before the baseline was last squashed, then start the backend once) and switch back.';
+            USING HINT = 'Recreate the database. One migrated from release/v4.0 or v4.0.0-rc.1 before the '
+                'baseline was last squashed (2026-10-21) cannot be brought forward; see docs/development/MIGRATIONS.md.';
     END IF;
 END $$;
 
@@ -381,6 +382,10 @@ CREATE INDEX idx_economic_series_title_trgm ON economic_series USING GIN (title 
 -- Cross-section filters such as dimensions @> '{"indicator": "NY.GDP.PCAP.CD"}'.
 CREATE INDEX idx_economic_series_dimensions ON economic_series USING GIN (dimensions jsonb_path_ops);
 CREATE INDEX idx_economic_series_dataset_id ON economic_series (dataset_id);
+-- seriesList's browse of one source (ECO-405): a source's rows in title order, and its count.
+-- is_active and end_date are included so both queries' filters are read from the index.
+CREATE INDEX idx_economic_series_source_title
+    ON economic_series (source_id, title, id) INCLUDE (is_active, end_date);
 -- A dimension key names at most one series per dataset. Dimensionless datasets (e.g. FRED,
 -- where the series id alone identifies a series) hold many series with '{}', so they are exempt.
 CREATE UNIQUE INDEX uq_economic_series_dataset_dimensions ON economic_series (dataset_id, dimensions)
