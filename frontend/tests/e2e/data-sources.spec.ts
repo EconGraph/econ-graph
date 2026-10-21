@@ -56,13 +56,7 @@ test.describe('Data Sources', () => {
 
   test('should display data source statistics or metadata', async ({ page }) => {
     // Look for statistics like number of series, last updated, etc.
-    const statsElement = page.getByText(/series count/i).or(
-      page.getByText(/rate limit/i).or(
-        page.getByText(/last crawl/i).or(
-          page.getByText(/active sources/i)
-        )
-      )
-    );
+    const statsElement = page.getByText(/total series/i).or(page.getByText(/rate limit/i));
 
     await expect(statsElement.first()).toBeVisible();
   });
@@ -83,16 +77,11 @@ test.describe('Data Sources', () => {
     }
   });
 
-  test('should show data source status or availability', async ({ page }) => {
-    // Look for status indicators - check for status chips
-    const statusIndicator = page.locator('.MuiChip-root').or(
-      page.getByText(/active|available|online/i).or(
-        page.getByText(/offline|unavailable/i)
-      )
-    );
-
-    // Should show some form of status
-    await expect(statusIndicator.first()).toBeVisible();
+  test('shows no invented status, health or uptime figures', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
+    for (const invented of [/uptime/i, /healthy/i, /last crawl/i, /crawl schedule/i]) {
+      await expect(page.getByText(invented)).toHaveCount(0);
+    }
   });
 
   test('should be responsive on mobile devices', async ({ page }) => {
