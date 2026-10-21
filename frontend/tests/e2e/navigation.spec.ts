@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+import packageJson from '../../package.json' with { type: 'json' };
+
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -105,7 +107,7 @@ test.describe('Navigation', () => {
     // Verify the hero section is displayed (use more specific selector to avoid sidebar conflict)
     await expect(page.locator('h1').filter({ hasText: 'EconGraph' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Modern Economic Data Visualization Platform' })).toBeVisible();
-    await expect(page.getByText('Version 3.7.2')).toBeVisible();
+    await expect(page.getByText(`Version ${packageJson.version}`)).toBeVisible();
 
     // Verify hero section navigation links are present
     await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();

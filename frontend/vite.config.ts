@@ -6,6 +6,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+import { appVersionDefine } from './appVersion.config.ts';
 import { flagDefines, flagsGuard, resolveFlagProfile } from './flags.config.ts';
 
 // Where the dev server and `vite preview` proxy /api and /graphql. The release e2e stack
@@ -98,6 +99,7 @@ export default defineConfig(({ command }) => ({
     // Define global constants
     __DEV__: JSON.stringify(process.env.NODE_ENV === 'development'),
     ...flagDefines(resolveFlagProfile(command)),
+    ...appVersionDefine(),
   },
 
   // Optimize dependencies
