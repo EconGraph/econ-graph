@@ -77,6 +77,13 @@ export const useSeriesSearch = vi.fn(() => ({
   isSuccess: true,
 }));
 
+export const useSeriesBrowse = vi.fn(() => ({
+  data: undefined,
+  isInitialLoading: false,
+  isFetching: false,
+  error: null,
+}));
+
 export const useSeriesDetail = vi.fn(() => ({
   data: {
     id: mockSearchResults[0].id,

@@ -33,7 +33,7 @@ import {
   Clear as ClearIcon,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSeriesSearch, useDataSources } from '../hooks/useSeriesData';
+import { useSeriesSearch, useSeriesBrowse, useDataSources } from '../hooks/useSeriesData';
 
 interface EconomicSeries {
   id: string;
@@ -133,6 +133,25 @@ const toBackendFrequency = (frequency: string): string | undefined =>
   BACKEND_FREQUENCIES.has(frequency) ? frequency.toUpperCase() : undefined;
 
 /**
+ * What the result count says while browsing a source without a query.
+ * @param shown - Series left after the page's own frequency filter.
+ * @param loaded - Series the backend returned (the first page, by title).
+ * @param total - Series the source has under the backend's filters.
+ * @returns The message.
+ */
+const browseMessage = (shown: number, loaded: number, total: number): string => {
+  const n = (x: number) => x.toLocaleString();
+  if (shown < loaded) {
+    return total > loaded
+      ? `${n(shown)} matching series among the first ${n(loaded)} of ${n(total)}, by title. Search to narrow them.`
+      : `${n(shown)} matching series of ${n(total)}, by title`;
+  }
+  return total > loaded
+    ? `Showing the first ${n(loaded)} of ${n(total)} series, by title. Search to narrow them.`
+    : `${n(total)} series, by title`;
+};
+
+/**
  * REQUIREMENT: Browse and search functionality similar to FRED but more modern
  * PURPOSE: Provide comprehensive search and filtering for economic time series
  * This improves on FRED's search with better filters and modern UI patterns.
@@ -185,23 +204,37 @@ const SeriesExplorer: React.FC = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  const backendFrequency = selectedFrequency ? toBackendFrequency(selectedFrequency) : undefined;
+
   // Search runs on the backend; the source filter is applied there too
   const searchResult = useSeriesSearch(
     debouncedQuery,
     {
       sourceId: activeSource || undefined,
-      frequency: selectedFrequency ? toBackendFrequency(selectedFrequency) : undefined,
+      frequency: backendFrequency,
       limit: SEARCH_LIMIT,
     },
     !waitingForSources
   );
-  const {
-    data: searchResults,
-    isInitialLoading: isSearchLoading,
-    isFetching: isSearchFetching,
-    error: searchError,
-  } = searchResult || {};
-  const showLoading = isSearchLoading || (waitingForSources && debouncedQuery.length >= 2);
+  // With no query but a source picked (the data sources page's Browse series, the sidebar's
+  // FRED Data), list what that source has instead of an empty page. Only a source the backend
+  // listed counts, so an unknown name in the URL still asks for a search; a frequency alone
+  // isn't browsed, as it would sort the whole catalog.
+  const browsing = debouncedQuery.length < 2 && Boolean(activeSource) && !waitingForSources;
+  const browseResult = useSeriesBrowse(
+    { sourceId: activeSource || undefined, frequency: backendFrequency, limit: SEARCH_LIMIT },
+    browsing
+  );
+  const activeResult = browsing ? browseResult : searchResult;
+  const searchResults = browsing ? browseResult?.data?.series : searchResult?.data;
+  const browseTotal = browseResult?.data?.totalCount ?? 0;
+  const { isInitialLoading: isSearchLoading, error: searchError } = activeResult || {};
+  // The Search button reflects the search request only, not a browse in the background
+  const isSearchFetching = !browsing && Boolean(searchResult?.isFetching);
+  const hasQuery = debouncedQuery.length >= 2 || browsing;
+  const showLoading =
+    isSearchLoading ||
+    (waitingForSources && (debouncedQuery.length >= 2 || Boolean(selectedSource)));
 
   // Transform search results to the card format. Missing fields stay missing.
   const allSeries: EconomicSeries[] = React.useMemo(() => {
@@ -228,8 +261,18 @@ const SeriesExplorer: React.FC = () => {
   const filteredSeries = React.useMemo(() => {
     let filtered = allSeries;
 
+    // A frequency the backend knows was already applied there by prefix ("Weekly" matches
+    // "Weekly, Ending Friday"), so match the same way; any other value is matched exactly here.
     if (selectedFrequency) {
-      filtered = filtered.filter(series => series.frequency === selectedFrequency);
+      // The backend's prefixes for each frequency (SeriesFrequency::raw_prefixes)
+      const prefixes =
+        selectedFrequency === 'Annual' ? ['annual', 'yearly'] : [selectedFrequency.toLowerCase()];
+      filtered = filtered.filter(series => {
+        const raw = series.frequency.trim().toLowerCase();
+        return backendFrequency
+          ? prefixes.some(prefix => raw.startsWith(prefix))
+          : series.frequency === selectedFrequency;
+      });
     }
 
     // Relevance keeps the backend's order
@@ -243,7 +286,7 @@ const SeriesExplorer: React.FC = () => {
     }
 
     return filtered;
-  }, [selectedFrequency, sortBy, allSeries]);
+  }, [selectedFrequency, backendFrequency, sortBy, allSeries]);
 
   // Pagination
   const itemsPerPage = 20;
@@ -591,18 +634,21 @@ const SeriesExplorer: React.FC = () => {
       {/* Search error */}
       {searchError && (
         <Alert severity='error' sx={{ mb: 3 }}>
-          Search failed: {searchError instanceof Error ? searchError.message : 'unknown error'}
+          {browsing ? 'Could not list series' : 'Search failed'}:{' '}
+          {searchError instanceof Error ? searchError.message : 'unknown error'}
         </Alert>
       )}
 
       {/* Result count */}
-      {searchResults && debouncedQuery.length >= 2 && !showLoading && !searchError && (
+      {searchResults && hasQuery && !showLoading && !searchError && (
         <Alert severity='info' sx={{ mb: 3 }}>
-          {searchResults.length >= SEARCH_LIMIT
-            ? `Showing matches among the first ${SEARCH_LIMIT} results. Refine the search to narrow them.`
-            : `Found ${filteredSeries.length.toLocaleString()} ${
-                filteredSeries.length === 1 ? 'result' : 'results'
-              }`}
+          {browsing
+            ? browseMessage(filteredSeries.length, searchResults.length, browseTotal)
+            : searchResults.length >= SEARCH_LIMIT
+              ? `Showing matches among the first ${SEARCH_LIMIT} results. Refine the search to narrow them.`
+              : `Found ${filteredSeries.length.toLocaleString()} ${
+                  filteredSeries.length === 1 ? 'result' : 'results'
+                }`}
         </Alert>
       )}
 
@@ -615,13 +661,14 @@ const SeriesExplorer: React.FC = () => {
             </Grid>
           ))}
         </Grid>
-      ) : searchError ? null : debouncedQuery.length < 2 ? (
+      ) : searchError ? null : !hasQuery ? (
         <Paper sx={{ p: 6, textAlign: 'center' }}>
           <Typography variant='h6' gutterBottom>
             Search for a series
           </Typography>
           <Typography variant='body2' color='text.secondary'>
-            Type at least 2 characters, such as GDP, unemployment or inflation
+            Type at least 2 characters, such as GDP, unemployment or inflation, or pick a source to
+            list its series
           </Typography>
         </Paper>
       ) : filteredSeries.length === 0 ? (

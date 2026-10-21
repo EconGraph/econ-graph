@@ -245,6 +245,12 @@ vi.mock('./hooks/useSeriesData', () => ({
     isError: false,
     isSuccess: true,
   })),
+  useSeriesBrowse: vi.fn(() => ({
+    data: undefined,
+    isInitialLoading: false,
+    isFetching: false,
+    error: null,
+  })),
   useSeriesDetail: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
