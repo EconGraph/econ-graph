@@ -96,12 +96,12 @@ export interface DataSource {
   id: string;
   name: string;
   description: string;
-  base_url: string;
-  api_key_required: boolean;
-  rate_limit_per_minute: number;
-  series_count: number;
-  created_at: string;
-  updated_at: string;
+  baseUrl: string;
+  apiKeyRequired: boolean;
+  rateLimitPerMinute: number;
+  seriesCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CrawlerStatus {
@@ -289,7 +289,7 @@ export const useSearchSuggestions = (partialQuery: string, enabled = true) => {
 export const useDataSources = () => {
   return useQuery({
     queryKey: ['dataSources'],
-    queryFn: async () => {
+    queryFn: async (): Promise<DataSource[]> => {
       const result = await executeGraphQL({
         query: QUERIES.GET_DATA_SOURCES,
       });
