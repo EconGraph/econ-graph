@@ -41,6 +41,7 @@ import { useSeriesAnnotationEditor } from '../components/annotations/useSeriesAn
 import {
   DataTransformation,
   describeTransformation,
+  formatTransformedValue,
   transformedUnits,
 } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
@@ -75,10 +76,8 @@ const PageSkeleton: React.FC = () => (
   </Box>
 );
 
-const formatValue = (value: number | null): string =>
-  value === null
-    ? 'N/A'
-    : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatValue = (value: number | null, transformation: DataTransformation): string =>
+  value === null ? 'N/A' : formatTransformedValue(value, transformation);
 
 const hasValues = (points: SeriesDataPoint[] | undefined): points is SeriesDataPoint[] =>
   !!points && points.some(p => p.value !== null);
@@ -204,7 +203,12 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         Could not load observations for this series. {(data.error as Error | null)?.message}
       </Alert>
     );
-  } else if (hasValues(points)) {
+  } else if (hasValues(points) || shownTransformation !== 'NONE') {
+    // A transformation the series is too short for leaves no values; the chart then says so in
+    // place of the plot, keeping its controls to pick another.
+    const shownPoints = points ?? [];
+    // What the CSV holds: the chart's points within the date range.
+    const exportedPoints = selectShownPoints(shownPoints, dateRange);
     const downloadShownPoints = () => {
       const csv = buildSeriesCsv({
         title: series.title,
@@ -212,7 +216,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         units: transformedUnits(shownTransformation, units),
         transformation: transformationLabel,
         retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
-        points: selectShownPoints(points, dateRange),
+        points: exportedPoints,
       });
       downloadCsv(seriesCsvFileName(series.externalId, shownTransformation), csv);
     };
@@ -224,13 +228,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
             size='small'
             startIcon={<DownloadIcon />}
             onClick={downloadShownPoints}
-            disabled={data.isPreviousData}
+            disabled={data.isPreviousData || !exportedPoints.some(p => p.value !== null)}
           >
             Download CSV
           </Button>
         </Box>
         <SeriesChart
-          data={points}
+          data={shownPoints}
           title={series.title}
           units={units}
           frequency={series.frequency}
@@ -242,21 +246,17 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           annotations={chartAnnotations}
           onAnnotationClick={setSelectedAnnotationId}
           onPointClick={editor.onPointClick}
+          emptyMessage={
+            <>
+              Not enough observations to compute {transformationLabel.toLowerCase()} for this
+              series.{' '}
+              <Button color='inherit' size='small' onClick={() => setTransformation('NONE')}>
+                Show levels
+              </Button>
+            </>
+          }
         />
       </Box>
-    );
-  } else if (shownTransformation !== 'NONE') {
-    chart = (
-      <Alert
-        severity='info'
-        action={
-          <Button color='inherit' size='small' onClick={() => setTransformation('NONE')}>
-            Show levels
-          </Button>
-        }
-      >
-        Not enough observations to compute {transformationLabel.toLowerCase()} for this series.
-      </Alert>
     );
   } else {
     chart = (
@@ -417,7 +417,9 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
                       {recentPoints.map(point => (
                         <TableRow key={point.date}>
                           <TableCell>{formatIsoDate(point.date)}</TableCell>
-                          <TableCell align='right'>{formatValue(point.value)}</TableCell>
+                          <TableCell align='right'>
+                            {formatValue(point.value, shownTransformation)}
+                          </TableCell>
                           <TableCell align='center'>
                             <Chip
                               label={point.isOriginalRelease ? 'Original' : 'Revised'}

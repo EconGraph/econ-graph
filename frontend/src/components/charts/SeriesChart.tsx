@@ -16,6 +16,7 @@ import annotationPlugin from 'chartjs-plugin-annotation';
 import { Line } from 'react-chartjs-2';
 import 'chartjs-adapter-date-fns';
 import {
+  Alert,
   Box,
   Paper,
   Typography,
@@ -32,7 +33,8 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import {
   DataTransformation,
-  TRANSFORMATION_OPTIONS,
+  formatTransformedValue,
+  transformationsFor,
   describeTransformation,
   transformedAxisTitle,
   transformedUnits,
@@ -117,6 +119,11 @@ export interface SeriesChartProps {
    * example to annotate it. Pass a stable function (`useCallback`).
    */
   onPointClick?: (point: SeriesChartPoint) => void;
+  /**
+   * Shown in place of the plot when `data` has no values (e.g. a transformation the series is
+   * too short for), so the controls stay to pick something else.
+   */
+  emptyMessage?: React.ReactNode;
 }
 
 /**
@@ -135,6 +142,8 @@ export interface SeriesChartProps {
  * @param props.annotations - Notes to draw on the chart.
  * @param props.onAnnotationClick - Called with a clicked annotation's id.
  * @param props.onPointClick - Called with the observation nearest a click on the plot.
+ * @param props.emptyMessage - Shown instead of the plot when the series has no values; a date
+ *   range that leaves out all of them gets its own message instead.
  * @returns The chart with its controls.
  */
 const SeriesChart: React.FC<SeriesChartProps> = ({
@@ -150,6 +159,7 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
   annotations = NO_ANNOTATIONS,
   onAnnotationClick,
   onPointClick,
+  emptyMessage,
 }) => {
   const theme = useTheme();
 
@@ -255,7 +265,8 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
             label: (item: TooltipItem<'line'>) => {
               const point = item.raw as { date: string; revisionDate?: string };
               const value = item.parsed.y;
-              const formattedValue = value === null ? 'n/a' : value.toFixed(2);
+              const formattedValue =
+                value === null ? 'n/a' : formatTransformedValue(value, transformation);
               const lines = [`${item.dataset.label}: ${formattedValue} ${valueUnit}`.trimEnd()];
               if (point.revisionDate && point.revisionDate !== point.date) {
                 lines.push(`Revised: ${formatIsoDate(point.revisionDate)}`);
@@ -377,7 +388,7 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
                 label='Transformation'
                 disabled={!onTransformationChange}
               >
-                {TRANSFORMATION_OPTIONS.map(option => (
+                {transformationsFor(frequency).map(option => (
                   <MenuItem key={option.value} value={option.value}>
                     {option.label}
                   </MenuItem>
@@ -415,14 +426,22 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         </Box>
       </Box>
 
-      <Box
-        sx={{ height: 400 }}
-        data-testid='series-chart'
-        role='img'
-        aria-label={`Line chart of ${title}`}
-      >
-        <Line data={chartData} options={chartOptions} />
-      </Box>
+      {shownData.some(d => d.value !== null) ? (
+        <Box
+          sx={{ height: 400 }}
+          data-testid='series-chart'
+          role='img'
+          aria-label={`Line chart of ${title}`}
+        >
+          <Line data={chartData} options={chartOptions} />
+        </Box>
+      ) : (
+        <Alert severity='info'>
+          {data.some(d => d.value !== null)
+            ? 'No observations in the chosen date range. Widen or clear the dates to see them.'
+            : (emptyMessage ?? 'No observations to show.')}
+        </Alert>
+      )}
 
       <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant='caption' color='text.secondary'>
