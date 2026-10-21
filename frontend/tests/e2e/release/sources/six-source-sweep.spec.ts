@@ -77,13 +77,13 @@ test.describe('six-source sweep', () => {
 
         for (const label of labels) {
           const expected = series.transformations[label];
-          const notEnoughExpected = DEPLOYED
-            ? series.liveNotEnough.includes(label)
-            : expected === null;
+          // Deployed: a live series' full history computes every transformation the page offers
+          // (it only offers those the frequency supports).
+          const notEnoughExpected = !DEPLOYED && expected === null;
           await applyTransformation(page, label);
           const notEnough = page.getByText(/^Not enough observations to compute /);
           if (notEnoughExpected) {
-            // Too few observations, e.g. month-over-month on an annual series.
+            // Too few observations in the fixture, e.g. no year-ago point.
             await expect(notEnough).toBeVisible();
             await page.getByRole('button', { name: 'Show levels' }).click();
             await expect(notEnough).toHaveCount(0);
