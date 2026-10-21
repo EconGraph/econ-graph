@@ -48,4 +48,18 @@ describe('SeriesAnnotationsPanel', () => {
     expect(screen.getByTestId('annotations-loading')).toBeInTheDocument();
     expect(screen.queryByText(/No annotations/)).not.toBeInTheDocument();
   });
+
+  test('lets a long word in a title or note wrap instead of widening the panel', () => {
+    const word = `https://example.test/${'x'.repeat(300)}`;
+    render(
+      <SeriesAnnotationsPanel
+        annotations={[{ ...ANNOTATIONS[0], title: word, description: `See ${word}` }]}
+      />
+    );
+
+    expect(screen.getByText(word)).toHaveStyle({ overflowWrap: 'anywhere' });
+    expect(screen.getByText(`See ${word}`, { exact: false })).toHaveStyle({
+      overflowWrap: 'anywhere',
+    });
+  });
 });

@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 /// <reference types="vitest/globals" />
 
+/** The app version, package.json's `version`, defined at build time (appVersion.config.ts). */
+declare const __APP_VERSION__: string;
+
 interface ImportMetaEnv {
   readonly VITE_API_URL: string;
   readonly VITE_GRAPHQL_URL: string;

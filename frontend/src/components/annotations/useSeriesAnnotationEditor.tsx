@@ -31,6 +31,7 @@ import type { SeriesAnnotation } from '../../hooks/useSeriesAnnotations';
 import type { SeriesChartPoint } from '../charts/SeriesChart';
 import AnnotationComments from './AnnotationComments';
 import AnnotationFormDialog, { AnnotationFormValues } from './AnnotationFormDialog';
+import { wrapAnywhere } from './annotationLimits';
 
 export interface SeriesAnnotationEditorOptions {
   seriesId: string;
@@ -285,7 +286,7 @@ export function useSeriesAnnotationEditor({
               {errorText(remove.error)}
             </Alert>
           )}
-          <DialogContentText>
+          <DialogContentText sx={wrapAnywhere}>
             &ldquo;{deleting?.title}&rdquo; and its comments will be deleted for everyone.
           </DialogContentText>
         </DialogContent>

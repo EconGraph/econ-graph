@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+import packageJson from '../../package.json' with { type: 'json' };
+
 test.describe('About Page', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/about');
@@ -56,7 +58,7 @@ test.describe('About Page', () => {
 
   test('should display version information', async ({ page }) => {
     // Look for version information
-    const versionInfo = page.getByText('Version 3.7.2');
+    const versionInfo = page.getByText(`Version ${packageJson.version}`);
 
     await expect(versionInfo).toBeVisible();
   });

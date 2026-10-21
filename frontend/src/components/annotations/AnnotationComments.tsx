@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useAddComment, useAnnotationComments } from '../../hooks/useAnnotationEditing';
+import { charCount, COMMENT_MAX_CHARS, wrapAnywhere } from './annotationLimits';
 
 export interface AnnotationCommentsProps {
   /** Element id, for the toggle's `aria-controls`. */
@@ -56,11 +57,15 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
   const comments = useAnnotationComments(annotationId);
   const addComment = useAddComment(annotationId);
   const [draft, setDraft] = React.useState('');
+  // Counted in code points, as the backend counts them; an input `maxLength` would count UTF-16
+  // units, so an emoji would use up two and pasted text would be cut without a word.
+  const draftChars = charCount(draft.trim());
+  const draftTooLong = draftChars > COMMENT_MAX_CHARS;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || addComment.isLoading) return;
+    if (!content || draftTooLong || addComment.isLoading) return;
     addComment.mutate(content, { onSuccess: () => setDraft('') });
   };
 
@@ -93,7 +98,7 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
           <ListItem key={comment.id} disableGutters>
             <ListItemText
               primary={comment.content}
-              primaryTypographyProps={{ sx: { whiteSpace: 'pre-wrap' } }}
+              primaryTypographyProps={{ sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } }}
               secondary={`${comment.userId === viewerId ? 'You' : 'Another user'} · ${formatTimestamp(comment.createdAt)}`}
             />
           </ListItem>
@@ -113,9 +118,16 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
             </Alert>
           )}
           <TextField
+            id={`comment-draft-${annotationId}`}
             label='Add a comment'
             inputProps={{ 'aria-label': `Add a comment on ${title}` }}
             value={draft}
+            error={draftTooLong}
+            helperText={
+              draftTooLong
+                ? `${draftChars.toLocaleString()} / ${COMMENT_MAX_CHARS.toLocaleString()}: shorten the comment to post`
+                : undefined
+            }
             onChange={e => setDraft(e.target.value)}
             size='small'
             fullWidth
@@ -127,7 +139,7 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
               type='submit'
               size='small'
               variant='contained'
-              disabled={!draft.trim() || addComment.isLoading}
+              disabled={!draft.trim() || draftTooLong || addComment.isLoading}
               aria-label={`${addComment.isLoading ? 'Posting' : 'Post comment'} on ${title}`}
             >
               {addComment.isLoading ? 'Posting…' : 'Post comment'}
