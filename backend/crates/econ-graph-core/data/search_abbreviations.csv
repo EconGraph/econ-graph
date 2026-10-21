@@ -1,0 +1,15 @@
+# Abbreviations a series search expands, read at runtime by the search service (econ-graph-core's
+# reference::search_abbreviations). A query word equal to `abbreviation` also matches series whose
+# title or description spells out `expansion`, so "gdp" finds BEA's "Gross domestic product".
+# Columns: abbreviation (one lower-case word), expansion (the words it stands for, lower case).
+# Lines starting with # are comments.
+abbreviation,expansion
+gdp,gross domestic product
+gdi,gross domestic income
+gnp,gross national product
+gni,gross national income
+cpi,consumer price index
+ppi,producer price index
+pce,personal consumption expenditures
+hpi,house price index
+fdi,foreign direct investment
