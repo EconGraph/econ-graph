@@ -563,7 +563,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("econgraph-seed-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let at = "2026-10-07T03:00:00Z".parse().unwrap();
+        let at = "2026-10-22T03:00:00Z".parse().unwrap();
         let out = crate::cli::record_reference_seeds(
             &adapter,
             &ApiKeys::default(),
@@ -578,7 +578,7 @@ mod tests {
         assert!(out.contains("bds.state: 51 codes"), "{out}");
         // Recording again replaces the earlier migration rather than adding a second one,
         // whose seed would never load behind the first.
-        let later = "2026-10-07T04:00:00Z".parse().unwrap();
+        let later = "2026-10-22T04:00:00Z".parse().unwrap();
         let out = crate::cli::record_reference_seeds(
             &adapter,
             &ApiKeys::default(),
@@ -595,7 +595,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert_eq!(dirs, ["2026-10-07-040000_seed_census_reference_codes"]);
+        assert_eq!(dirs, ["2026-10-22-040000_seed_census_reference_codes"]);
         // A second recording in the same second would reuse the version Diesel already ran;
         // it is refused, and the existing recording stays.
         let e = crate::cli::record_reference_seeds(
@@ -611,7 +611,7 @@ mod tests {
         .unwrap_err();
         assert!(e.to_string().contains("already taken"), "{e}");
         assert!(dir
-            .join("2026-10-07-040000_seed_census_reference_codes/up.sql")
+            .join("2026-10-22-040000_seed_census_reference_codes/up.sql")
             .is_file());
         let migration = dir.join(&dirs[0]);
         let up = std::fs::read_to_string(migration.join("up.sql")).unwrap();

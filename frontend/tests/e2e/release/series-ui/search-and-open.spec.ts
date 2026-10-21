@@ -51,3 +51,17 @@ test.describe('search by abbreviation', () => {
     await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
   });
 });
+
+// ECO-405: the sidebar's FRED Data (and Browse series on /sources) used to open an empty
+// explorer asking for a query. It lists the source's series instead.
+test.describe('browse a source', () => {
+  test("FRED Data lists FRED's series without a query", async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+
+    await expect(page).toHaveURL(/\/explore\?source=/);
+    await expect(page.getByText(/series, by title/)).toBeVisible();
+    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
+  });
+});
