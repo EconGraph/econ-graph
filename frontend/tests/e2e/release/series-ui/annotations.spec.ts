@@ -16,6 +16,9 @@ test.describe('public annotations for an anonymous viewer', () => {
   test.describe.configure({ mode: 'serial' });
 
   const title = uniqueTitle('Public series-ui annotation');
+  // One unbroken 300-character URL: before ECO-402 a note like this widened the series page
+  // for every viewer (the panel grew to fit the word and the chart stretched with it).
+  const note = `Written by the release e2e suite. See https://example.test/${'x'.repeat(300)}`;
   let seriesPath: string;
 
   test.beforeAll(async ({ request }) => {
@@ -35,7 +38,7 @@ test.describe('public annotations for an anonymous viewer', () => {
     await page.getByRole('button', { name: 'Add annotation' }).click();
     const dialog = page.getByRole('dialog', { name: 'Add annotation' });
     await dialog.getByRole('textbox', { name: 'Title' }).fill(title);
-    await dialog.getByRole('textbox', { name: 'Note' }).fill('Written by the release e2e suite.');
+    await dialog.getByRole('textbox', { name: 'Note' }).fill(note);
     await dialog.getByRole('checkbox', { name: 'Public' }).check();
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
@@ -61,6 +64,21 @@ test.describe('public annotations for an anonymous viewer', () => {
     await expect(row.locator('[aria-current="true"]')).toHaveCount(0);
     await row.getByText(title, { exact: true }).click();
     await expect(row.locator('[aria-current="true"]')).toHaveCount(1);
+  });
+
+  test("a long word in its note doesn't widen the page", async ({ page }) => {
+    await page.goto(seriesPath);
+    await expect(annotationsList(page).getByText(title, { exact: true })).toBeVisible();
+    // Scoped to this run's row: the note text is the same every run, so a row left behind by an
+    // interrupted run would otherwise match too.
+    await expect(
+      annotationsList(page).getByRole('listitem').filter({ hasText: title }).getByText(note)
+    ).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 
   test('carol deletes the annotation', async ({ page }) => {
