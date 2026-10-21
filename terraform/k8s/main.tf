@@ -62,6 +62,10 @@ resource "null_resource" "kind_cluster" {
   depends_on = [local_file.kind_config]
 
   provisioner "local-exec" {
+    # Without this, local-exec runs the command through /bin/sh, which is dash (not bash)
+    # on Debian/Ubuntu; dash doesn't understand this script's `[[ ]]` or `&>`, and silently
+    # misparses the `command -v` checks, always falling into "Unsupported OS: $OSTYPE".
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       # Check if kind is installed
       if ! command -v kind &> /dev/null; then
