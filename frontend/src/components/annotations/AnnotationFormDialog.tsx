@@ -12,6 +12,11 @@ import {
   Switch,
   TextField,
 } from '@mui/material';
+import {
+  ANNOTATION_NOTE_MAX_CHARS,
+  ANNOTATION_TITLE_MAX_CHARS,
+  charCount,
+} from './annotationLimits';
 
 /** What the form edits. */
 export interface AnnotationFormValues {
@@ -61,7 +66,16 @@ const AnnotationFormDialog: React.FC<AnnotationFormDialogProps> = ({
 }) => {
   const [values, setValues] = React.useState(initialValues);
 
-  const valid = ISO_DATE.test(values.date) && values.title.trim() !== '';
+  // Counted in characters, as the server counts them (an emoji is one, not two). An annotation
+  // saved before the limits existed can be over them; say so rather than fail on save. No input
+  // `maxLength`: it counts UTF-16 units, so it would stop at half as many emoji and cut pasted
+  // text without a word.
+  const titleChars = charCount(values.title.trim());
+  const noteChars = charCount(values.description.trim());
+  const titleTooLong = titleChars > ANNOTATION_TITLE_MAX_CHARS;
+  const noteTooLong = noteChars > ANNOTATION_NOTE_MAX_CHARS;
+  const valid =
+    ISO_DATE.test(values.date) && values.title.trim() !== '' && !titleTooLong && !noteTooLong;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -91,18 +105,29 @@ const AnnotationFormDialog: React.FC<AnnotationFormDialogProps> = ({
               InputLabelProps={{ shrink: true }}
             />
             <TextField
+              id={`annotation-form-${mode}-title-field`}
               label='Title'
               value={values.title}
               onChange={e => setValues({ ...values, title: e.target.value })}
               required
-              inputProps={{ maxLength: 255 }}
+              error={titleTooLong}
+              helperText={
+                titleTooLong
+                  ? `${titleChars.toLocaleString()} / ${ANNOTATION_TITLE_MAX_CHARS.toLocaleString()}: shorten the title to save`
+                  : undefined
+              }
             />
             <TextField
+              id={`annotation-form-${mode}-note-field`}
               label='Note'
               value={values.description}
               onChange={e => setValues({ ...values, description: e.target.value })}
               multiline
               minRows={3}
+              error={noteTooLong}
+              helperText={`${noteChars.toLocaleString()} / ${ANNOTATION_NOTE_MAX_CHARS.toLocaleString()}${
+                noteTooLong ? ': shorten the note to save' : ''
+              }`}
             />
             <div>
               <FormControlLabel

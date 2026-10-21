@@ -73,6 +73,17 @@ describe('annotationInRange', () => {
 });
 
 describe('buildAnnotationOptions', () => {
+  test('cuts a long title to a short label on the chart', () => {
+    const title = 'A very long annotation title that would run across the whole chart';
+    const options = buildAnnotationOptions(
+      [{ kind: 'point', id: 'p', label: title, date: '2024-01-01' }],
+      range(null, null),
+      '#ed6c02'
+    );
+    const content = (options.p as { label: { content: string } }).label.content;
+    expect(content).toBe(`${title.slice(0, 39)}…`);
+  });
+
   test('uses the default colour and a translucent fill for ranges', () => {
     const options = buildAnnotationOptions(
       [{ kind: 'range', id: 'r', label: 'R', startDate: '2024-01-01', endDate: '2024-02-01' }],
