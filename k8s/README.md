@@ -111,13 +111,14 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 
 After deployment, the application will be available at:
 
-- **Frontend**: <http://admin.econ-graph.local> (add `127.0.0.1 admin.econ-graph.local` to `/etc/hosts`)
-- **Admin UI**: <http://admin.econ-graph.local/admin>
-- **Backend API**: <http://admin.econ-graph.local/api>
-- **GraphQL**: <http://admin.econ-graph.local/graphql>
-- **Health Check**: <http://admin.econ-graph.local/health>
+- **Frontend**: <http://localhost>
+- **Backend API**: <http://localhost/api>
+- **GraphQL**: <http://localhost/graphql>
+- **Health Check**: <http://localhost/health>
 
-**Note**: All services use the `admin.econ-graph.local` hostname to avoid nginx ingress controller conflicts with internal endpoints.
+**Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
+`host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
+`deploy.sh` (re-enabled by ECO-242, train 2); `/admin` has no backend until then.
 
 ## 📊 Monitoring
 

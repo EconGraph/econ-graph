@@ -15,10 +15,18 @@ cd "$PROJECT_ROOT"
 echo "🔍 Running linter checks before deployment..."
 echo ""
 
-# Run Grafana dashboard linter
+# Run Grafana dashboard linter. Only the dashboard-file checks, not the full suite
+# (which also ends with a --step=k8s-deployment check of the live cluster): this
+# runs before anything is applied, so on a cluster that has never been deployed to
+# before, Grafana/Loki/Prometheus etc. can never exist yet, and the full suite
+# would always abort here before deploying anything.
 if [ -f "scripts/test-grafana-dashboards.sh" ]; then
     echo "📊 Running Grafana dashboard linter..."
-    if ./scripts/test-grafana-dashboards.sh; then
+    linter_failed=false
+    for step in json-syntax dashboard-structure datasource-consistency promql-queries logql-queries configmap-structure; do
+        ./scripts/test-grafana-dashboards.sh --step="$step" || linter_failed=true
+    done
+    if [ "$linter_failed" = false ]; then
         echo "✅ Grafana dashboard linter passed"
     else
         echo "❌ Grafana dashboard linter failed - aborting deployment"
@@ -311,10 +319,11 @@ kubectl get pods -n econ-graph
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
-echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
+# k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
+echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (re-enabled by ECO-242, train 2).
-echo "  Backend:  http://admin.econ-graph.local/api"
-echo "  GraphQL:  http://admin.econ-graph.local/graphql"
+echo "  Backend:  http://localhost/api"
+echo "  GraphQL:  http://localhost/graphql"
 echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "  Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
