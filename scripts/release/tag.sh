@@ -4,7 +4,9 @@
 # one (a pushed tag is effectively permanent, see docs/development/RELEASE_PROCESS.md).
 #
 # - Working tree must be clean, and HEAD must already be pushed to origin.
-# - backend/Cargo.toml's workspace version must match the version given.
+# - backend/Cargo.toml's workspace version, frontend/package.json's version and
+#   frontend/package-lock.json's version must all match the version given (the
+#   frontend shows its package.json version on the About page).
 # - CHANGELOG.md must have a non-empty section headed exactly
 #   "## [X.Y.Z] - YYYY-MM-DD" for that version (not "Unreleased", and an
 #   actual date, not any other trailing text).
@@ -57,6 +59,14 @@ if [ "$cargo_version" != "$version" ]; then
   echo "tag.sh: backend/Cargo.toml's workspace version is ${cargo_version}, not ${version}. Bump it (and frontend/package.json) first." >&2
   exit 1
 fi
+
+for manifest in frontend/package.json frontend/package-lock.json; do
+  manifest_version="$(node -p "require('./${manifest}').version")"
+  if [ "$manifest_version" != "$version" ]; then
+    echo "tag.sh: ${manifest}'s version is ${manifest_version}, not ${version}. Bump it with \`npm version --no-git-tag-version ${version}\` in frontend/ first." >&2
+    exit 1
+  fi
+done
 
 echo "tag.sh: checking CHANGELOG.md has a dated section for ${version}..."
 version_re="${version//./\\.}"

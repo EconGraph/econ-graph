@@ -43,7 +43,7 @@ const About: React.FC = () => {
     {
       icon: <SecurityIcon color='primary' />,
       title: 'Data Integrity',
-      description: 'Track original releases vs. revisions to understand data evolution',
+      description: 'Each observation is marked as an original release or a revision',
     },
     {
       icon: <CloudIcon color='primary' />,
@@ -99,7 +99,7 @@ const About: React.FC = () => {
             of FRED with modern web technologies and intuitive user experience.
           </Typography>
           <Typography variant='body2' sx={{ mt: 2, opacity: 0.8 }}>
-            Version 3.7.2
+            Version {__APP_VERSION__}
           </Typography>
           <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Link
@@ -169,7 +169,7 @@ const About: React.FC = () => {
                 </ListItemIcon>
                 <ListItemText
                   primary='Revision Tracking'
-                  secondary='Compare original releases with later revisions for better analysis'
+                  secondary='See whether each observation is the original release or a later revision'
                 />
               </ListItem>
               <ListItem>
