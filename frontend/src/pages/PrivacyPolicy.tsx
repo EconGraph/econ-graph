@@ -49,7 +49,7 @@ const PrivacyPolicy: React.FC = () => {
             We store information about you only when you sign in.
           </Typography>
 
-          <Typography variant='h6' gutterBottom>
+          <Typography variant='h6' component='h3' gutterBottom>
             Your account
           </Typography>
           <Typography variant='body2' color='text.secondary' paragraph>
@@ -87,7 +87,7 @@ const PrivacyPolicy: React.FC = () => {
             your basic profile.
           </Typography>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             What you write
           </Typography>
           <List dense>
@@ -105,7 +105,7 @@ const PrivacyPolicy: React.FC = () => {
             </ListItem>
           </List>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             In your browser
           </Typography>
           <List dense>
@@ -123,7 +123,7 @@ const PrivacyPolicy: React.FC = () => {
             </ListItem>
           </List>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             Server logs
           </Typography>
           <Typography variant='body2' color='text.secondary' paragraph>
@@ -277,7 +277,7 @@ const PrivacyPolicy: React.FC = () => {
       </Paper>
 
       <Paper elevation={1} sx={{ p: 3, mb: 4 }}>
-        <Typography variant='h5' gutterBottom>
+        <Typography variant='h5' component='h2' gutterBottom>
           In short
         </Typography>
         <Typography variant='body1' paragraph>
@@ -303,7 +303,7 @@ const PrivacyPolicy: React.FC = () => {
       ))}
 
       <Paper elevation={1} sx={{ p: 3, mb: 4 }}>
-        <Typography variant='h5' gutterBottom>
+        <Typography variant='h5' component='h2' gutterBottom>
           Questions and requests
         </Typography>
         <Typography variant='body2' color='text.secondary' paragraph>

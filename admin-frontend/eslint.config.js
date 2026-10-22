@@ -1,3 +1,4 @@
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -14,10 +15,12 @@ export default tseslint.config(
       globals: globals.browser,
     },
     plugins: {
+      "jsx-a11y": jsxA11y,
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
     },
     rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       // eslint-plugin-react-hooks 7 adds the React Compiler rules to `recommended` as errors.
       // Keep the classic hook rules as errors; report the compiler rules as warnings until the

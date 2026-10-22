@@ -140,8 +140,8 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         alignItems="center"
         minHeight="400px"
       >
-        <CircularProgress size={60} />
-        <Typography variant="h6" sx={{ ml: 2 }}>
+        <CircularProgress aria-label="Loading crawler data" size={60} />
+        <Typography variant="h6" component="p" sx={{ ml: 2 }}>
           Loading crawler data...
         </Typography>
       </Box>
@@ -158,7 +158,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
           mb: 3,
         }}
       >
-        <Typography variant="h4" component="h1" data-testid="dashboard-title">
+        <Typography variant="h4" component="h2" data-testid="dashboard-title">
           🕷️ Crawler Administration
         </Typography>
         <Box sx={{ display: "flex", gap: 1 }}>
@@ -209,7 +209,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
               <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                 <Typography
                   variant="h6"
-                  component="h2"
+                  component="h3"
                   data-testid="crawler-status-title"
                 >
                   Crawler Status
@@ -227,7 +227,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Active Workers
                   </Typography>
-                  <Typography variant="h4">
+                  <Typography variant="h4" component="p">
                     {status.status?.active_workers || 0}
                   </Typography>
                 </Grid>
@@ -272,7 +272,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
             <CardContent>
               <Typography
                 variant="h6"
-                component="h2"
+                component="h3"
                 sx={{ mb: 2 }}
                 data-testid="queue-statistics-title"
               >
@@ -284,7 +284,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Total Items
                   </Typography>
-                  <Typography variant="h4">
+                  <Typography variant="h4" component="p">
                     {queueStats.statistics?.total_items || 0}
                   </Typography>
                 </Grid>
@@ -292,7 +292,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Pending
                   </Typography>
-                  <Typography variant="h4" color="warning.main">
+                  <Typography variant="h4" component="p" color="warning.main">
                     {queueStats.statistics?.pending_items || 0}
                   </Typography>
                 </Grid>
@@ -300,7 +300,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Processing
                   </Typography>
-                  <Typography variant="h4" color="info.main">
+                  <Typography variant="h4" component="p" color="info.main">
                     {queueStats.statistics?.processing_items || 0}
                   </Typography>
                 </Grid>
@@ -308,7 +308,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Completed
                   </Typography>
-                  <Typography variant="h4" color="success.main">
+                  <Typography variant="h4" component="p" color="success.main">
                     {queueStats.statistics?.completed_items || 0}
                   </Typography>
                 </Grid>
@@ -316,7 +316,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Failed
                   </Typography>
-                  <Typography variant="h4" color="error.main">
+                  <Typography variant="h4" component="p" color="error.main">
                     {queueStats.statistics?.failed_items || 0}
                   </Typography>
                 </Grid>
@@ -324,7 +324,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   <Typography variant="body2" color="text.secondary">
                     Retrying
                   </Typography>
-                  <Typography variant="h4" color="warning.main">
+                  <Typography variant="h4" component="p" color="warning.main">
                     {queueStats.statistics?.retrying_items || 0}
                   </Typography>
                 </Grid>
@@ -348,7 +348,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         <Grid item xs={12}>
           <Card>
             <CardContent>
-              <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
+              <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
                 Queue Progress
               </Typography>
 
@@ -377,6 +377,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     </Typography>
                   </Box>
                   <LinearProgress
+                    aria-label="Completed queue items"
                     variant="determinate"
                     value={
                       queueStats.statistics?.total_items
@@ -397,7 +398,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         <Grid item xs={12}>
           <Card>
             <CardContent>
-              <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
+              <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
                 Recent Activity
               </Typography>
 

@@ -58,7 +58,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApolloProvider client={apolloClient}>
-        <Container maxWidth="xl" sx={{ py: 2 }}>
+        <Container component="main" maxWidth="xl" sx={{ py: 2 }}>
           <Paper elevation={3} sx={{ p: 2 }}>
             <Typography variant="h3" component="h1" gutterBottom align="center">
               🕷️ EconGraph Crawler Administration
@@ -66,6 +66,7 @@ function App() {
 
             <Typography
               variant="subtitle1"
+              component="p"
               align="center"
               color="text.secondary"
               sx={{ mb: 3 }}
@@ -75,7 +76,9 @@ function App() {
             </Typography>
 
             <Box sx={{ p: 2, bgcolor: "info.light", borderRadius: 1, mb: 2 }}>
-              <Typography variant="h6">📊 Available Services</Typography>
+              <Typography variant="h6" component="h2">
+                📊 Available Services
+              </Typography>
               <Typography variant="body2">
                 • Main Frontend:{" "}
                 <a
@@ -112,7 +115,11 @@ function App() {
               </Typography>
             </Box>
 
-            <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+            <Box
+              component="nav"
+              aria-label="Administration sections"
+              sx={{ borderBottom: 1, borderColor: "divider" }}
+            >
               <Tabs
                 value={currentTab}
                 onChange={handleTabChange}
