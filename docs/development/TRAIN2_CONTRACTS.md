@@ -181,17 +181,52 @@ The default in a branch namespace (DP-8):
 - MCP data tools fail with the same message.
 - `createAnnotation`'s series check (DP-7) asks `DATA_GRAPHQL_URL`; with neither a data pool nor
   `DATA_GRAPHQL_URL` the check is skipped and the backend logs that once at startup.
-- `/data/graphql` on this backend is not served; the route sends it to the data plane
-  (section 9).
+- The admin operations that read crawl state (`GetCrawlerStatus`, `TriggerCrawl`) are app
+  operations (section 10) but need data, so on this backend they fail with the same error.
+- No backend serves a `/data/graphql` path: the route sends `/data/graphql` to a backend that
+  has a data pool, rewritten to `/graphql` (sections 9 and 10).
 
 ## 9. Routing (placeholder: platform/infra PO)
 
 > TODO (infra PO, DP-8 / DP-11): the `/data/graphql` path, which backend answers it in each
 > mode (primary, branch app-only, branch `--local-data`), whether `Authorization` is stripped
-> at the route, the HTTPRoute and Service names, and which path the backend must serve it on
-> (`/data/graphql` itself, or `/graphql` behind a rewrite).
+> at the route, and the HTTPRoute, Service and ReferenceGrant names. Section 10 assumes the
+> route rewrites `/data/graphql` to `/graphql`, so the backend needs no new path.
 
-## 10. Frontend data operations (placeholder: product/UX PO)
+## 10. Frontend: data vs app GraphQL (DP-6, ECO-427)
 
-> TODO (UX PO, DP-6): the list of operations sent to the data URL, the Vite variable that sets
-> that URL and its default, and how a data operation is told apart from an app one.
+Owner: product/UX PO.
+
+All frontend GraphQL goes through `executeGraphQL` (`frontend/src/utils/graphql.ts`), which routes each operation by name using a classification table exported from that file. A test (`frontend/src/__tests__/graphql-operations.test.ts`) fails if any operation in `src/` is unclassified.
+
+### Data operations: sent to the data URL, never with a token
+
+Shipped: GetSeriesDetail, GetSeriesData, SearchSeries, GetSeriesList, GetDataSources, GetSeriesLatestObservation, GetMapDatasets, GetMapCrossSection, GetMapSeriesMeta.
+Defined, not sent by any page: GetSearchSuggestions, SearchSeriesFulltext.
+Compiled out (financial_components=false): GetFinancialDashboard, GetFinancialStatement, GetFinancialStatements, GetFinancialLineItems, GetCompanyInfo, GetTrendAnalysis, GetPeerComparison, GetPeerCompanies, GetBenchmarkComparison, GetFinancialAlerts, GetFinancialRatios, GetRatioBenchmarks, GetRatioExplanation, GetFinancialExport.
+
+### App operations: sent to the GraphQL URL with `Authorization: Bearer <token>` when signed in
+
+GetAnnotationsForSeries, GetCommentsForAnnotation, CreateAnnotation, UpdateAnnotation, DeleteAnnotation, AddComment; unused: GetChartCollaborators, GetUser, ShareChart; compiled out: GetFinancialAnnotations, Create/Update/DeleteFinancialAnnotation, FinancialAnnotationSubscription.
+Admin (app endpoint, token required): GetCrawlerStatus (AdminSystemRead), TriggerCrawl (AdminCrawlersManage). These read crawl state, so on a backend with no data pool they fail with `DATA_SERVED_REMOTELY` (section 8).
+Unnamed or unclassified operations, and every mutation/subscription, are app operations.
+
+### No-token rule
+
+Data operations never carry `Authorization`, signed in or not, whatever the data URL is. The backend answers an unverifiable token with 401 (not anonymous), and the primary data plane does not trust branch Keycloak realms. Data resolvers do not read the caller, so results are identical to today's.
+
+### Endpoint configuration
+
+| Where | `VITE_GRAPHQL_URL` (app) | `VITE_DATA_GRAPHQL_URL` (data) | What serves `/data/graphql` |
+|---|---|---|---|
+| Unset (default, release builds today) | `/graphql` | unset → same as app URL | not used |
+| Vite dev / `vite preview` | `/graphql` → proxy to `BACKEND_URL` (default `http://localhost:8080`) | optional `/data/graphql` | proxy to `DATA_BACKEND_URL` (default `BACKEND_URL`), path rewritten to `/graphql` |
+| kind, primary namespace `econ-graph` | `/graphql` | unset until DP-11 lands `/data/graphql`; then `/data/graphql` (open question) | HTTPRoute → `econ-graph-backend` in `econ-graph`, path rewritten to `/graphql` |
+| Branch namespace, app-only (DP-8 default) | `/graphql` → branch backend | `/data/graphql` (build arg) | HTTPRoute → primary `econ-graph-backend` in `econ-graph` (cross-namespace; ReferenceGrant), rewritten to `/graphql` |
+| Branch namespace, `--local-data` | `/graphql` → branch backend | `/data/graphql` or unset | HTTPRoute → the branch's own backend |
+
+The value is a Vite build-time variable: `frontend/Dockerfile` build arg `VITE_DATA_GRAPHQL_URL`, set by `scripts/deploy/build-images.sh` (empty by default). Same-origin path only; no CORS/CSP change.
+
+### Schema skew
+
+The primary data plane runs a tagged release image. App-only branches validate data operations against `backend/crates/econ-graph-graphql/schema.graphql` at that tag (`DATA_SCHEMA_REF=<tag>`); a branch that changes the data schema must deploy with `--local-data`.
