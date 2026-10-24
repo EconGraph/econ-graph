@@ -254,20 +254,32 @@ jobs:
         # set SET, then expects the check to fail. Same set: a duplicate within one directory.
         # Different sets: a version repeated across app/ and data/, which share one
         # __diesel_schema_migrations table when one database holds both.
+        # The rejection must be the duplicate diagnostic, not some unrelated failure.
         plant() {
-          local set="$1" other="$2" latest dup
+          local set="$1" other="$2" latest dup expected out
           latest=$(ls -d "migrations/$set"/[0-9]*_*/ | sort | tail -1 | xargs basename)
           dup="migrations/$other/${latest%%_*}_duplicate_migration_test"
+          if [ "$set" = "$other" ]; then
+            expected="Duplicate timestamp found"
+          else
+            expected="is used in more than one migration set"
+          fi
           mkdir -p "$dup"
           echo "-- Test migration" > "$dup/up.sql"
           echo "-- Test migration down" > "$dup/down.sql"
-          if python3 scripts/check_migration_order.py; then
+          if out=$(python3 scripts/check_migration_order.py 2>&1); then
+            echo "$out"
             echo "❌ Migration validation should have failed for $dup but didn't"
             rm -rf "$dup"
             exit 1
           fi
-          echo "✅ Migration validation correctly detected $dup"
           rm -rf "$dup"
+          if ! grep -qF "$expected" <<<"$out"; then
+            echo "$out"
+            echo "❌ Migration validation failed for $dup, but without \"$expected\""
+            exit 1
+          fi
+          echo "✅ Migration validation correctly detected $dup"
         }
         plant data data
         plant app app
