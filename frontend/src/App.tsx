@@ -6,6 +6,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
+import SuspendedAccountBanner from './components/layout/SuspendedAccountBanner';
 import Dashboard from './pages/Dashboard';
 import SeriesExplorer from './pages/SeriesExplorer';
 import SeriesDetail from './pages/SeriesDetail';
@@ -76,6 +77,7 @@ function App() {
             }}
           >
             <Container maxWidth='xl' sx={{ py: 3 }}>
+              <SuspendedAccountBanner />
               <Routes>
                 {/* REQUIREMENT: Function similarly to FRED but with modern UX */}
                 <Route path='/' element={<Dashboard />} />
