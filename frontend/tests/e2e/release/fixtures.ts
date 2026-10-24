@@ -16,7 +16,7 @@ export const SEEDED = {
     title: 'Gross Domestic Product',
     units: 'Billions of Dollars',
     /** Its newest observation as the series page's Recent Data table shows it. */
-    latestShown: { date: 'Apr 1, 2026', value: '32,101.60' },
+    latestShown: { date: '2026 Q2', value: '32,101.60' },
     /**
      * Deployed mode: the most days its newest observation may lag today. GDP is quarterly and
      * dated at the quarter's start; BEA's advance estimate comes about a month after the quarter
@@ -36,20 +36,20 @@ export const SEEDED = {
       {
         label: 'Year-over-Year',
         description: 'Year-over-Year % Change',
-        latestShown: { date: 'Apr 1, 2026', value: '5.30' },
+        latestShown: { date: '2026 Q2', value: '5.30' },
       },
       {
         label: 'Quarter-over-Quarter',
         description: 'Quarter-over-Quarter % Change',
-        latestShown: { date: 'Apr 1, 2026', value: '1.20' },
+        latestShown: { date: '2026 Q2', value: '1.20' },
       },
       {
         label: 'Change since first available value',
         description: '% Change since First Available Value',
-        latestShown: { date: 'Apr 1, 2026', value: '5.30' },
+        latestShown: { date: '2026 Q2', value: '5.30' },
       },
       // Last, back to levels.
-      { label: 'None', description: '', latestShown: { date: 'Apr 1, 2026', value: '32,101.60' } },
+      { label: 'None', description: '', latestShown: { date: '2026 Q2', value: '32,101.60' } },
     ],
   },
   blsCpi: {
@@ -80,7 +80,7 @@ export const SEEDED = {
     sourceName: 'Bureau of Economic Analysis (BEA)',
     // BEA's own ids: NIPA table T10105, line 1 (GDP), quarterly.
     externalId: 'bea_nipa/T10105.1.Q',
-    title: 'Gross domestic product (Gross Domestic Product, quarterly)',
+    title: 'Gross domestic product (quarterly)',
     // UNIT_MULT 6 is applied, so values are in dollars, not millions.
     units: 'Current Dollars',
   },
@@ -194,8 +194,10 @@ const shown = (date: string, value: string) => ({ date, value });
 
 /**
  * One series per train 1 source, for the six-source sweep. Values are what the series page shows
- * for the seeded fixtures, rounded to 2 decimal places (log differences to 4 significant
- * digits); the comments say where each comes from.
+ * for the seeded fixtures: levels with the decimals the series carries, up to 2 (none for counts
+ * and whole dollars), changes to 2 decimal places and log differences to 4 significant digits.
+ * Quarterly and annual dates read as their period ("2024 Q4", "2022"). The comments say where
+ * each value comes from.
  */
 export const SWEPT_SOURCES: readonly SweptSeries[] = [
   {
@@ -203,11 +205,11 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
     // fred/observations_gdp_e2e.json: 2025-04-01 to 2026-04-01 quarterly, 2025-10-01 missing.
     csvRows: 5,
     transformations: {
-      'Year-over-Year': shown('Apr 1, 2026', '5.30'),
-      'Quarter-over-Quarter': shown('Apr 1, 2026', '1.20'),
-      'Change since first available value': shown('Apr 1, 2026', '5.30'),
+      'Year-over-Year': shown('2026 Q2', '5.30'),
+      'Quarter-over-Quarter': shown('2026 Q2', '1.20'),
+      'Change since first available value': shown('2026 Q2', '5.30'),
       // ln(32101.6 / 31722.514), to four significant digits
-      'Log difference': shown('Apr 1, 2026', '0.01188'),
+      'Log difference': shown('2026 Q2', '0.01188'),
     },
   },
   {
@@ -233,14 +235,14 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
   {
     ...SEEDED.censusEstablishments,
     // census/bds_estab_us.json: 2019 to 2022, annual, 2021 missing.
-    latestShown: { date: 'Jan 1, 2022', value: '7,324,017.00' },
+    latestShown: { date: '2022', value: '7,324,017' },
     csvRows: 4,
     transformations: {
       // 2022's year-ago point (2021) is missing, so the newest is 2020 over 2019.
-      'Year-over-Year': shown('Jan 1, 2020', '1.03'),
+      'Year-over-Year': shown('2020', '1.03'),
       // 7324017 / 7106316 (2019)
-      'Change since first available value': shown('Jan 1, 2022', '3.06'),
-      'Log difference': shown('Jan 1, 2020', '0.01023'),
+      'Change since first available value': shown('2022', '3.06'),
+      'Log difference': shown('2020', '0.01023'),
     },
     // Annual, released about 21 months after the year ends (BDS 2022 came out in September
     // 2024), so just before a release the newest point is about three years and eight months old.
@@ -250,15 +252,15 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
     ...SEEDED.beaGdp,
     // bea/nipa_t10105_q.json: 2024Q1 to 2024Q4, in millions (UNIT_MULT 6). The recorded values
     // barely move, so every change rounds to 0.00.
-    latestShown: { date: 'Oct 1, 2024', value: '28,624,702,000,000.00' },
+    latestShown: { date: '2024 Q4', value: '28,624,702,000,000' },
     csvRows: 4,
     transformations: {
       // Four quarters: no year-ago point.
       'Year-over-Year': null,
-      'Quarter-over-Quarter': shown('Oct 1, 2024', '0.00'),
-      'Change since first available value': shown('Oct 1, 2024', '0.00'),
+      'Quarter-over-Quarter': shown('2024 Q4', '0.00'),
+      'Change since first available value': shown('2024 Q4', '0.00'),
       // Four significant digits make the tiny log change readable where percents round to 0.00.
-      'Log difference': shown('Oct 1, 2024', '0.000007371'),
+      'Log difference': shown('2024 Q4', '0.000007371'),
     },
     // Quarterly GDP, the same cadence as FRED's copy (SEEDED.fredGdp.liveMaxAgeDays).
     liveMaxAgeDays: SEEDED.fredGdp.liveMaxAgeDays,
@@ -286,15 +288,15 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
   {
     ...SEEDED.wdiGdpPerCapitaUsa,
     // world_bank/gdp_per_capita.json's United States rows: 2021 to 2023, annual.
-    latestShown: { date: 'Jan 1, 2023', value: '82,769.40' },
+    latestShown: { date: '2023', value: '82,769.4' },
     csvRows: 3,
     transformations: {
       // 82769.4 / 77860.9
-      'Year-over-Year': shown('Jan 1, 2023', '6.30'),
+      'Year-over-Year': shown('2023', '6.30'),
       // 82769.4 / 71055.9 (2021)
-      'Change since first available value': shown('Jan 1, 2023', '16.48'),
+      'Change since first available value': shown('2023', '16.48'),
       // ln(82769.4 / 77860.9)
-      'Log difference': shown('Jan 1, 2023', '0.06113'),
+      'Log difference': shown('2023', '0.06113'),
     },
     // Annual, published around July of the next year, so just before that the newest point is
     // two and a half years old.
