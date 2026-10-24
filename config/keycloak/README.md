@@ -62,7 +62,7 @@ roles compose them:
 | `user` | `annotation:create`, `annotation:comment`, `chart:share`, `api:mcp`. In `default-roles-econ-graph`, so every account has it |
 | `support` | `user` plus `admin.users:read`, `admin.sessions:read`, `admin.system:read` |
 | `admin` | `support` plus every other `admin.*` role |
-| `super_admin` | `admin` (nothing extra yet) |
+| `super_admin` | `admin` (nothing extra) |
 
 A protocol mapper on `econ-graph-web` puts the flattened `econ-graph-api` roles in the
 access token's top-level `roles` claim; `dev-token.sh` prints it. Staff get their

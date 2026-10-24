@@ -12,7 +12,7 @@ The admin frontend implements a complete crawler logs monitoring interface, but 
 
 ## Current State
 
-### ✅ Frontend Implementation (Complete)
+### Frontend Implementation
 - `CrawlerLogs.tsx` component with full UI
 - `useCrawlerLogs.ts` hook with GraphQL integration
 - GraphQL queries defined in `src/services/graphql/queries.ts`:

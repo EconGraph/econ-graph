@@ -89,17 +89,16 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 
 ## 🔐 Secrets Management
 
-> **Warning:** the setup below is planned, not in place. The `k8s/secrets` submodule is
-> not initialized, and the current Kubernetes manifests still contain plaintext
-> credentials. See [Security](./roadmap/README.md#security) in the roadmap index.
+Kubernetes credentials are Secrets created by `scripts/deploy/create-secrets.sh`, which
+`scripts/deploy/deploy.sh` runs on every deploy. No credential is committed to the repository.
 
-The planned secrets management approach:
+The Sealed Secrets design below is not in use; the `k8s/secrets` submodule is registered in
+`.gitmodules` but not initialized:
 
-- **Secrets Repository**: Private repository at `https://github.com/jmalicki/econ-graph-secrets`
+- **Secrets Repository**: A private repository, registered as the `k8s/secrets` submodule
 - **Encryption Method**: Bitnami Sealed Secrets for Kubernetes
 - **Access Control**: Private repository with team-based permissions
 - **Integration**: Git submodule in `k8s/secrets/` directory
-- **Deployment**: To be integrated with the deployment scripts in `scripts/deploy/`
 
 For more details, see the [Security Implementation Plan](./projects/SECURITY_IMPLEMENTATION_PLAN.md).
 

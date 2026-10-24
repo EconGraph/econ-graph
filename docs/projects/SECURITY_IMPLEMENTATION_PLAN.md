@@ -25,7 +25,7 @@ This implementation plan addresses **4 critical vulnerabilities** and **1 high s
 **Files Affected**: `backend/src/auth/services.rs`
 
 #### Implementation Approach: Sealed Secrets + Git Submodule
-- **Secrets Repository**: `https://github.com/jmalicki/econ-graph-secrets` (private)
+- **Secrets Repository**: a private repository, registered as the `k8s/secrets` submodule in `.gitmodules`
 - **Submodule Location**: `k8s/secrets/` in main repository
 - **Encryption Method**: Bitnami Sealed Secrets
 - **Access Control**: Private repository with team-based access
