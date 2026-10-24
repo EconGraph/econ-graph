@@ -1,7 +1,7 @@
 # Build-time feature flags
 
 Build-time flags compile code out of the frontend bundle. They implement phase 1
-of [the feature flags roadmap](../../docs/roadmap/feature-flags.md): unfinished
+of [the feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2): unfinished
 or unscheduled screens are absent from a release build, not hidden at runtime.
 
 ## Where the values come from
