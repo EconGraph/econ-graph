@@ -11,8 +11,8 @@
 //! `discover`, see `worker.rs`'s `discover`; a source with nothing mounted for it, or no
 //! `code_lists` at all, just keeps whatever it already has) — skipped entirely when any of the
 //! adapter's `code_lists` points outside this entry's mock, since an adapter that hardcodes a
-//! reference-data URL rather than deriving it from its own base URL (BLS, Census) would otherwise
-//! have this reach the real internet — calls `fetch_series` and writes the
+//! reference-data URL rather than deriving it from its own base URL (BLS) would otherwise have this
+//! reach the real internet — calls `fetch_series` and writes the
 //! result with [`persist::persist_series`], the worker's own persistence. An entry with
 //! `discovery` fixtures first runs the adapter's catalog discovery against them and writes the
 //! series' catalog row with [`persist::persist_discovered`], as the worker does before fetching;
@@ -176,9 +176,8 @@ async fn run(args: Args) -> anyhow::Result<()> {
         // Best-effort, same as the worker's own `discover` (worker.rs): a source with no
         // reference-data route mounted for this entry just keeps whatever it already has rather
         // than failing the seed. Only when every one of its code lists actually points at this
-        // entry's mock, though: some adapters (BLS, Census) hardcode their reference-data URLs
-        // rather than deriving them from the adapter's own base URL, so `registry_at` can't
-        // redirect those — calling `refresh_reference_data` on them here would reach the real
+        // entry's mock, though: BLS hardcodes its reference-data URLs rather than deriving them
+        // from the adapter's own base URL, so `registry_at` can't redirect those — calling `refresh_reference_data` on them here would reach the real
         // internet instead of staying within this "no network access" tool.
         let lists: Vec<CodeList> = adapter.code_lists(&ctx.keys);
         if lists
