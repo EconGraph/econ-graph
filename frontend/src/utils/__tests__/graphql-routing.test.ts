@@ -120,6 +120,10 @@ const TRICKY_DATA_REQUESTS: Array<[string, GraphQLRequest]> = [
 /** Documents a broken block-string scan would read as one data query; each holds a mutation. */
 const HIDDEN_OPERATION_REQUESTS: Array<[string, GraphQLRequest]> = [
   [
+    'a comment ended by a lone \\r, followed by a mutation',
+    { query: 'query GetSeriesData { x }\n# c\rmutation CreateAnnotation { y }' },
+  ],
+  [
     'an escaped \\""" in a block string, followed by a mutation',
     {
       query:
