@@ -30,6 +30,7 @@ async fn mcp_access(
         }
         Err(BearerError::Inactive(id)) => {
             tracing::info!("refused an MCP request from suspended account {id}");
+            super::record_suspended_refusal(pool, id, "/mcp").await;
             Err(McpRejection::Suspended)
         }
         Err(BearerError::Unavailable(why)) => {

@@ -352,6 +352,7 @@ async fn graphql_caller(
         }
         Err(BearerError::Inactive(id)) => {
             tracing::info!("refused a request from suspended account {id}");
+            record_suspended_refusal(pool, id, "/graphql").await;
             Err(GraphqlRefusal::Suspended)
         }
         Err(BearerError::Database(why)) => {
@@ -359,6 +360,23 @@ async fn graphql_caller(
             Err(GraphqlRefusal::AccountUnavailable)
         }
     }
+}
+
+/// Record a request refused because account `id` is suspended as a security event.
+async fn record_suspended_refusal(pool: &DatabasePool, id: uuid::Uuid, route: &str) {
+    use econ_graph_core::models::admin::{security_event_type, NewSecurityEvent};
+    NewSecurityEvent {
+        event_type: security_event_type::SUSPENDED_ACCOUNT.into(),
+        user_id: Some(id),
+        user_email: None,
+        severity: "medium".into(),
+        ip_address: None,
+        user_agent: None,
+        description: format!("refused a {route} request from a suspended account"),
+        metadata: Some(json!({ "route": route })),
+    }
+    .record(pool)
+    .await;
 }
 
 /// Stands in for `/mcp` when the `mcp` build flag is off: nothing answers there, so it
@@ -1128,6 +1146,19 @@ mod request_auth_tests {
             .expect_err("suspended");
         assert_eq!(reply, GraphqlRefusal::Suspended);
         assert_eq!(reply.into_response().status(), StatusCode::FORBIDDEN);
+
+        // The refusal is recorded as a security event for the admin console.
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::security_events;
+        let mut conn = pool.get().await.unwrap();
+        let events: Vec<String> = security_events::table
+            .filter(security_events::user_id.eq(sub))
+            .select(security_events::event_type)
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(events, ["suspended_account"]);
     }
 
     async fn set_active(pool: &DatabasePool, id: Uuid, active: bool) {

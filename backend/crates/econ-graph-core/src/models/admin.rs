@@ -124,12 +124,10 @@ impl AuditLog {
         Ok(log)
     }
 
-    /// Get audit logs with filtering and pagination
+    /// Get audit logs matching `filter`, newest first
     pub async fn get_logs(
         pool: &DatabasePool,
-        user_id: Option<Uuid>,
-        action: Option<String>,
-        resource_type: Option<String>,
+        filter: &AuditLogFilter,
         limit: i64,
         offset: i64,
     ) -> AppResult<Vec<AuditLog>> {
@@ -137,22 +135,9 @@ impl AuditLog {
             AppError::DatabaseError(format!("Failed to get database connection: {}", e))
         })?;
 
-        let mut query = audit_logs::table.into_boxed();
-
-        if let Some(user_id) = user_id {
-            query = query.filter(audit_logs::user_id.eq(user_id));
-        }
-
-        if let Some(action) = action {
-            query = query.filter(audit_logs::action.eq(action));
-        }
-
-        if let Some(resource_type) = resource_type {
-            query = query.filter(audit_logs::resource_type.eq(resource_type));
-        }
-
-        let logs = query
-            .order(audit_logs::created_at.desc())
+        let logs = filter
+            .apply(audit_logs::table.into_boxed())
+            .order((audit_logs::created_at.desc(), audit_logs::id.desc()))
             .limit(limit)
             .offset(offset)
             .get_results::<AuditLog>(&mut conn)
@@ -162,38 +147,77 @@ impl AuditLog {
         Ok(logs)
     }
 
-    /// Get total count of audit logs matching filters
-    pub async fn get_count(
-        pool: &DatabasePool,
-        user_id: Option<Uuid>,
-        action: Option<String>,
-        resource_type: Option<String>,
-    ) -> AppResult<i64> {
+    /// Get total count of audit logs matching `filter`
+    pub async fn get_count(pool: &DatabasePool, filter: &AuditLogFilter) -> AppResult<i64> {
         let mut conn = pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {}", e))
         })?;
 
-        let mut query = audit_logs::table.into_boxed();
-
-        if let Some(user_id) = user_id {
-            query = query.filter(audit_logs::user_id.eq(user_id));
-        }
-
-        if let Some(action) = action {
-            query = query.filter(audit_logs::action.eq(action));
-        }
-
-        if let Some(resource_type) = resource_type {
-            query = query.filter(audit_logs::resource_type.eq(resource_type));
-        }
-
-        let count = query
+        let count = filter
+            .apply(audit_logs::table.into_boxed())
             .count()
             .get_result::<i64>(&mut conn)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(count)
+    }
+}
+
+/// Which audit log entries to read; `None` leaves that column unfiltered.
+#[derive(Debug, Clone, Default)]
+pub struct AuditLogFilter {
+    pub user_id: Option<Uuid>,
+    pub action: Option<String>,
+    pub resource_type: Option<String>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+}
+
+impl AuditLogFilter {
+    fn apply<'a>(
+        &self,
+        mut query: audit_logs::BoxedQuery<'a, diesel::pg::Pg>,
+    ) -> audit_logs::BoxedQuery<'a, diesel::pg::Pg> {
+        if let Some(user_id) = self.user_id {
+            query = query.filter(audit_logs::user_id.eq(user_id));
+        }
+        if let Some(action) = &self.action {
+            query = query.filter(audit_logs::action.eq(action.clone()));
+        }
+        if let Some(resource_type) = &self.resource_type {
+            query = query.filter(audit_logs::resource_type.eq(resource_type.clone()));
+        }
+        if let Some(after) = self.created_after {
+            query = query.filter(audit_logs::created_at.gt(after));
+        }
+        if let Some(before) = self.created_before {
+            query = query.filter(audit_logs::created_at.lt(before));
+        }
+        query
+    }
+}
+
+impl NewAuditLog {
+    /// Insert the entry, logging rather than returning a failure: the action it records has
+    /// already happened, so a failed write must not turn it into an error for the caller.
+    pub async fn record(self, pool: &DatabasePool) {
+        let written = async {
+            let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+            diesel::insert_into(audit_logs::table)
+                .values(&self)
+                .execute(&mut conn)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+        if let Err(why) = written {
+            tracing::error!(
+                "could not write the audit log entry for {} by {}: {why}",
+                self.action,
+                self.user_id
+            );
+        }
     }
 }
 
@@ -309,6 +333,36 @@ impl SecurityEvent {
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(count)
+    }
+}
+
+/// `security_events.event_type` values the server writes.
+pub mod security_event_type {
+    /// A signed-in caller was refused for lacking a role (or the full staff set).
+    pub const PERMISSION_DENIED: &str = "permission_denied";
+    /// A request carried a valid token for a suspended account.
+    pub const SUSPENDED_ACCOUNT: &str = "suspended_account";
+}
+
+impl NewSecurityEvent {
+    /// Insert the event, logging rather than returning a failure: recording it must not
+    /// change the reply to the request that raised it.
+    pub async fn record(self, pool: &DatabasePool) {
+        let written = async {
+            let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+            diesel::insert_into(security_events::table)
+                .values(&self)
+                .execute(&mut conn)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+        if let Err(why) = written {
+            tracing::error!(
+                "could not write a {} security event: {why}",
+                self.event_type
+            );
+        }
     }
 }
 

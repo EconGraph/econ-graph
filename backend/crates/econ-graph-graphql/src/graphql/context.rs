@@ -127,10 +127,19 @@ pub fn current_user_id_opt(ctx: &Context<'_>) -> Result<Option<uuid::Uuid>> {
     Ok(context.user.as_ref().map(|user| user.id))
 }
 
-/// Helper function to require a fine-grained role from GraphQL context
+/// Helper function to require a fine-grained role from GraphQL context.
+///
+/// A signed-in caller who lacks `role` is also recorded as a `permission_denied` security event.
 pub fn require_role<'a>(ctx: &'a Context<'a>, role: Role) -> Result<&'a Principal> {
     let context = ctx.data::<Arc<GraphQLContext>>()?;
-    context.require_role(role)
+    let principal = context.principal()?;
+    context.require_role(role).inspect_err(|_| {
+        crate::graphql::audit::record_permission_denied(
+            ctx,
+            principal.user_id,
+            format!("missing role {role}"),
+        )
+    })
 }
 
 #[cfg(test)]

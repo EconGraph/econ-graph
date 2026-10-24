@@ -17,6 +17,7 @@
 //! - Database transactions must be atomic and consistent
 //! - All mutations must have comprehensive documentation
 
+use crate::graphql::audit;
 use crate::imports::*;
 use crate::types::*;
 
@@ -56,6 +57,21 @@ impl Mutation {
             enqueued,
             "triggerCrawl enqueued jobs"
         );
+        audit::record_admin_action(
+            ctx,
+            "trigger_crawl",
+            "crawl_queue",
+            None,
+            serde_json::json!({
+                "source": input.source,
+                "sources": input.sources,
+                "series_ids": input.series_ids,
+                "priority": input.priority,
+                "requested": jobs.len(),
+                "enqueued": enqueued,
+            }),
+        )
+        .await;
 
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         let mut status = CrawlerStatusType::from_snapshot(snapshot);
@@ -228,6 +244,7 @@ impl Mutation {
         if changes.is_empty() {
             return Err(GraphQLError::new("No fields to update"));
         }
+        let changed_fields = changes.field_names();
         require_manageable(ctx, caller, user_id)?;
         let mut conn = pool.get().await?;
         let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -245,6 +262,14 @@ impl Mutation {
                 }
                 other => other.into(),
             })?;
+        audit::record_admin_action(
+            ctx,
+            "update_user",
+            "user",
+            Some(user_id.to_string()),
+            serde_json::json!({ "fields": changed_fields }),
+        )
+        .await;
 
         Ok(UserType::from(final_user))
     }
@@ -269,6 +294,14 @@ impl Mutation {
         if deleted == 0 {
             return Err(GraphQLError::new("User not found"));
         }
+        audit::record_admin_action(
+            ctx,
+            "delete_user",
+            "user",
+            Some(user_id.to_string()),
+            serde_json::json!({}),
+        )
+        .await;
         Ok(true)
     }
 
@@ -293,6 +326,14 @@ impl Mutation {
         if updated == 0 {
             return Err(GraphQLError::new("User not found"));
         }
+        audit::record_admin_action(
+            ctx,
+            "suspend_user",
+            "user",
+            Some(user_id.to_string()),
+            serde_json::json!({}),
+        )
+        .await;
         Ok(true)
     }
 
@@ -317,6 +358,14 @@ impl Mutation {
         if updated == 0 {
             return Err(GraphQLError::new("User not found"));
         }
+        audit::record_admin_action(
+            ctx,
+            "activate_user",
+            "user",
+            Some(user_id.to_string()),
+            serde_json::json!({}),
+        )
+        .await;
         Ok(true)
     }
 }
@@ -447,6 +496,25 @@ impl AdminUserChangeset {
             && self.email_verified.is_none()
             && self.is_active.is_none()
     }
+
+    /// The GraphQL names of the fields this changes, for the audit log (not their values).
+    fn field_names(&self) -> Vec<&'static str> {
+        [
+            ("email", self.email.is_some()),
+            ("name", self.name.is_some()),
+            ("avatarUrl", self.avatar_url.is_some()),
+            ("organization", self.organization.is_some()),
+            ("theme", self.theme.is_some()),
+            ("defaultChartType", self.default_chart_type.is_some()),
+            ("notificationsEnabled", self.notifications_enabled.is_some()),
+            ("collaborationEnabled", self.collaboration_enabled.is_some()),
+            ("emailVerified", self.email_verified.is_some()),
+            ("isActive", self.is_active.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, set)| set.then_some(name))
+        .collect()
+    }
 }
 
 /// Refuse with "Insufficient permissions", logging the denial like `require_role` does.
@@ -460,6 +528,7 @@ fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLE
         "User {} denied: {why}",
         caller.user_id
     );
+    audit::record_permission_denied(ctx, caller.user_id, why.to_string());
     GraphQLError::new("Insufficient permissions")
 }
 
