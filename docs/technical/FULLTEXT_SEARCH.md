@@ -19,7 +19,7 @@ Results can be filtered by source, frequency and active status, and are paged wi
 
 ## Schema
 
-Schema (in the v4.0.0 baseline migration, `backend/migrations/2026-10-21-000100_v4_0_baseline`):
+Schema (in the v4.0.0 baseline migration, `backend/migrations/data/2026-10-21-000100_v4_0_baseline`):
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -96,7 +96,7 @@ An earlier version of this document described a larger design. These parts of it
 implemented:
 
 - **Synonyms** ("GDP" finding "Gross Domestic Product", "jobless" finding "unemployment"). A
-  synonym list exists at `backend/migrations/economic_synonyms.syn`, but no text search
+  synonym list exists at `backend/migrations/data/economic_synonyms.syn`, but no text search
   configuration uses it. Wiring it in needs the file installed into the server's
   `tsearch_data` directory, which managed Postgres services generally don't allow; a synonym
   table expanded in the query is the more portable route.

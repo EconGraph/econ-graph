@@ -137,9 +137,11 @@ setup_backend() {
     # Run migrations
     print_status "Running database migrations..."
     if command -v diesel > /dev/null 2>&1; then
-        diesel migration run
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
     elif [ -f ~/.cargo/bin/diesel ]; then
-        ~/.cargo/bin/diesel migration run
+        ~/.cargo/bin/diesel migration run --migration-dir migrations/data
+        ~/.cargo/bin/diesel migration run --migration-dir migrations/app
     else
         print_warning "Diesel CLI not found, skipping migrations"
     fi

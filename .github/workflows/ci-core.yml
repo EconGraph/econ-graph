@@ -250,23 +250,29 @@ jobs:
     - name: Test migration validation with duplicate timestamps
       run: |
         cd backend
-        # Create a temporary migration that reuses the newest migration's timestamp
-        latest=$(ls -d migrations/[0-9]*_*/ | sort | tail -1 | xargs basename)
-        dup="migrations/${latest%%_*}_duplicate_migration_test"
-        mkdir -p "$dup"
-        echo "-- Test migration" > "$dup/up.sql"
-        echo "-- Test migration down" > "$dup/down.sql"
-
-        # This should fail because the timestamp duplicates an existing migration
-        if python3 scripts/check_migration_order.py; then
-          echo "❌ Migration validation should have failed but didn't"
-          exit 1
-        else
-          echo "✅ Migration validation correctly detected duplicate timestamps"
-        fi
-
-        # Clean up test migration
-        rm -rf "$dup"
+        # plant SET OTHER: a temporary migration in set OTHER that reuses the newest version of
+        # set SET, then expects the check to fail. Same set: a duplicate within one directory.
+        # Different sets: a version repeated across app/ and data/, which share one
+        # __diesel_schema_migrations table when one database holds both.
+        plant() {
+          local set="$1" other="$2" latest dup
+          latest=$(ls -d "migrations/$set"/[0-9]*_*/ | sort | tail -1 | xargs basename)
+          dup="migrations/$other/${latest%%_*}_duplicate_migration_test"
+          mkdir -p "$dup"
+          echo "-- Test migration" > "$dup/up.sql"
+          echo "-- Test migration down" > "$dup/down.sql"
+          if python3 scripts/check_migration_order.py; then
+            echo "❌ Migration validation should have failed for $dup but didn't"
+            rm -rf "$dup"
+            exit 1
+          fi
+          echo "✅ Migration validation correctly detected $dup"
+          rm -rf "$dup"
+        }
+        plant data data
+        plant app app
+        plant data app
+        plant app data
 
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
@@ -469,8 +475,9 @@ jobs:
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
+        diesel setup --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
       env:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
@@ -592,8 +599,9 @@ jobs:
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
+        diesel setup --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     # Fail closed: only the focused user-admin regressions become required, while
@@ -778,7 +786,9 @@ jobs:
           local name="$1"; shift
           local url="postgresql://postgres:password@localhost:5432/econ_graph_test_${name}"
           echo "::group::${name}"
-          if ! (DATABASE_URL="$url" diesel setup && DATABASE_URL="$url" diesel migration run \
+          if ! (DATABASE_URL="$url" diesel setup --migration-dir migrations/data \
+                && DATABASE_URL="$url" diesel migration run --migration-dir migrations/data \
+                && DATABASE_URL="$url" diesel migration run --migration-dir migrations/app \
                 && DATABASE_URL="$url" cargo test --lib -- --test-threads=2 --nocapture "$@"); then
             failed+=("$name")
           fi
@@ -1231,8 +1241,9 @@ jobs:
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
+        diesel setup --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     - name: Run backend integration tests
@@ -1403,7 +1414,8 @@ jobs:
     - name: Run database migrations
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel migration run
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     - name: Download optimized E2E containers
@@ -1508,8 +1520,9 @@ jobs:
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
+        diesel setup --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     - name: Wait for PostgreSQL to be ready
@@ -1712,8 +1725,9 @@ jobs:
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
+        diesel setup --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     - name: Wait for PostgreSQL to be ready

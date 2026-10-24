@@ -121,7 +121,7 @@ whether jobs are actually being enqueued and completed on this cadence.
 
 Labels a source publishes itself (Census state names, BLS code labels) are crawled, never shipped as data files: the worker refreshes each adapter's code lists at startup and before each catalog discovery, with a conditional GET on the validators stored in `reference_file_cache` (`If-None-Match` from the `ETag`, `If-Modified-Since` from the `Last-Modified`). A file whose body hashes the same as the stored copy also counts as unchanged, for sources that honour neither header.
 
-A new database can get those labels before the first crawl from a seed migration, `backend/migrations/<timestamp>_seed_<source>_reference_codes/`, which loads them with the validators they were downloaded with (`ETag`, `Last-Modified` and body SHA-256), and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
+A new database can get those labels before the first crawl from a seed migration, `backend/migrations/data/<timestamp>_seed_<source>_reference_codes/`, which loads them with the validators they were downloaded with (`ETag`, `Last-Modified` and body SHA-256), and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
 
 ```bash
 cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS

@@ -116,7 +116,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # Set up database
 print_status "Setting up database..."
 export DATABASE_URL="postgresql://postgres:password@localhost:5441/econ_graph_test"
-diesel migration run
+diesel migration run --migration-dir migrations/data
+diesel migration run --migration-dir migrations/app
 
 # Build the backend
 print_status "Building backend..."
