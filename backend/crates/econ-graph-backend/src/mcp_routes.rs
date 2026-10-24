@@ -12,13 +12,15 @@ use serde_json::json;
 use std::sync::Arc;
 use warp::{Filter, Reply as _};
 
-use super::authorization_header;
+use super::{authorization_header, client_info, PeerAddr};
+use econ_graph_core::models::admin::ClientInfo;
 
 /// Check that a request may use `/mcp`: an active, signed-in caller holding `api:mcp`.
 async fn mcp_access(
     pool: &DatabasePool,
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
+    client: &ClientInfo,
 ) -> Result<(), McpRejection> {
     match authenticate(pool, verifier, authorization).await {
         Ok(Some(caller)) if caller.principal.has_role(Role::ApiMcp) => Ok(()),
@@ -30,7 +32,7 @@ async fn mcp_access(
         }
         Err(BearerError::Inactive(id)) => {
             tracing::info!("refused an MCP request from suspended account {id}");
-            econ_graph_core::models::admin::NewSecurityEvent::suspended_account(id, "/mcp")
+            econ_graph_core::models::admin::NewSecurityEvent::suspended_account(id, "/mcp", client)
                 .record(pool)
                 .await;
             Err(McpRejection::Suspended)
@@ -135,17 +137,21 @@ fn mcp_route(
     server: Arc<EconGraphMcpServer>,
 ) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
     let authenticate = warp::header::headers_cloned()
-        .and_then(move |headers: warp::http::HeaderMap| {
-            let pool = pool.clone();
-            let verifier = verifier.clone();
-            async move {
-                // A header that is not UTF-8 counts as missing, so it still gets the 401.
-                let authorization = authorization_header(&headers);
-                mcp_access(&pool, verifier.as_deref(), authorization)
-                    .await
-                    .map_err(warp::reject::custom)
-            }
-        })
+        .and(warp::ext::optional::<PeerAddr>())
+        .and_then(
+            move |headers: warp::http::HeaderMap, peer: Option<PeerAddr>| {
+                let pool = pool.clone();
+                let verifier = verifier.clone();
+                async move {
+                    // A header that is not UTF-8 counts as missing, so it still gets the 401.
+                    let authorization = authorization_header(&headers);
+                    let client = client_info(peer, &headers);
+                    mcp_access(&pool, verifier.as_deref(), authorization, &client)
+                        .await
+                        .map_err(warp::reject::custom)
+                }
+            },
+        )
         .untuple_one();
 
     warp::path("mcp")
@@ -384,7 +390,15 @@ mod tests {
         let access = |verifier, header: &str| {
             let pool = pool.clone();
             let header = header.to_string();
-            async move { mcp_access(&pool, verifier, Some(&header)).await }
+            async move {
+                mcp_access(
+                    &pool,
+                    verifier,
+                    Some(&header),
+                    &econ_graph_core::models::admin::ClientInfo::default(),
+                )
+                .await
+            }
         };
         assert_eq!(access(Some(&verifier), &with_role).await, Ok(()));
         assert_eq!(

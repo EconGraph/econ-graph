@@ -11,7 +11,52 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
+
+/// Who sent a request, as recorded on audit log entries and security events.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientInfo {
+    /// The client's address (the backend decides which address that is: the peer, or the
+    /// `X-Forwarded-For` entry its trusted proxies vouch for).
+    pub ip_address: Option<String>,
+    /// The `User-Agent` header, cut to [`ClientInfo::USER_AGENT_MAX_CHARS`] characters.
+    pub user_agent: Option<String>,
+}
+
+impl ClientInfo {
+    /// Longest `User-Agent` kept, in characters; the rest is dropped.
+    pub const USER_AGENT_MAX_CHARS: usize = 512;
+
+    /// Client info with `user_agent` trimmed and cut to [`Self::USER_AGENT_MAX_CHARS`]
+    /// characters; a blank one counts as missing.
+    pub fn new(ip_address: Option<String>, user_agent: Option<&str>) -> Self {
+        let user_agent = user_agent
+            .map(str::trim)
+            .filter(|ua| !ua.is_empty())
+            .map(|ua| ua.chars().take(Self::USER_AGENT_MAX_CHARS).collect());
+        Self {
+            ip_address,
+            user_agent,
+        }
+    }
+}
+
+/// Audit log entries that could not be written since the process started.
+static AUDIT_LOG_WRITE_FAILURES: AtomicU64 = AtomicU64::new(0);
+/// Security events that could not be written since the process started.
+static SECURITY_EVENT_WRITE_FAILURES: AtomicU64 = AtomicU64::new(0);
+
+/// How many audit log entries could not be written since the process started. The backend
+/// exports it as a Prometheus counter so a broken audit trail can be alerted on.
+pub fn audit_log_write_failures() -> u64 {
+    AtomicU64::load(&AUDIT_LOG_WRITE_FAILURES, Ordering::Relaxed)
+}
+
+/// How many security events could not be written since the process started.
+pub fn security_event_write_failures() -> u64 {
+    AtomicU64::load(&SECURITY_EVENT_WRITE_FAILURES, Ordering::Relaxed)
+}
 
 /// Audit log entry model for tracking admin actions
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
@@ -201,6 +246,12 @@ impl AuditLogFilter {
 impl NewAuditLog {
     /// Insert the entry, logging rather than returning a failure: the action it records has
     /// already happened, so a failed write must not turn it into an error for the caller.
+    ///
+    /// The trade-off: the write is best-effort and runs after the action's own statement,
+    /// not in one transaction with it (none of the admin mutations runs in a transaction), so
+    /// a database failure in between can leave a committed action with no audit row. Each
+    /// such failure is logged at error level and counted in [`audit_log_write_failures`],
+    /// which the backend exports for alerting.
     pub async fn record(self, pool: &DatabasePool) {
         let written = async {
             let mut conn = pool.get().await.map_err(|e| e.to_string())?;
@@ -212,6 +263,7 @@ impl NewAuditLog {
         }
         .await;
         if let Err(why) = written {
+            AUDIT_LOG_WRITE_FAILURES.fetch_add(1, Ordering::Relaxed);
             tracing::error!(
                 "could not write the audit log entry for {} by {}: {why}",
                 self.action,
@@ -345,15 +397,15 @@ pub mod security_event_type {
 }
 
 impl NewSecurityEvent {
-    /// A request to `route` refused because account `user_id` is suspended.
-    pub fn suspended_account(user_id: Uuid, route: &str) -> Self {
+    /// A request to `route` from `client` refused because account `user_id` is suspended.
+    pub fn suspended_account(user_id: Uuid, route: &str, client: &ClientInfo) -> Self {
         Self {
             event_type: security_event_type::SUSPENDED_ACCOUNT.into(),
             user_id: Some(user_id),
             user_email: None,
             severity: "medium".into(),
-            ip_address: None,
-            user_agent: None,
+            ip_address: client.ip_address.clone(),
+            user_agent: client.user_agent.clone(),
             description: format!("refused a {route} request from a suspended account"),
             metadata: Some(serde_json::json!({ "route": route })),
         }
@@ -372,6 +424,7 @@ impl NewSecurityEvent {
         }
         .await;
         if let Err(why) = written {
+            SECURITY_EVENT_WRITE_FAILURES.fetch_add(1, Ordering::Relaxed);
             tracing::error!(
                 "could not write a {} security event: {why}",
                 self.event_type
