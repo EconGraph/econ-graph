@@ -39,6 +39,18 @@ touches `@home` or its snapshots. Because the pool is a different filesystem
 from `/home`, snapshots reach it only by `btrfs send`/`receive` (btrbk, as
 root), never by copying files.
 
+### File ownership
+
+The Postgres data directories (`data-plane/pg/`, `app-prod/keycloak-pg/`)
+are owned by host UID **100998**, mode 0700. That is the container's
+`postgres` user (UID 999) mapped through rootless Docker
+(`/etc/subuid`: `jmalicki:100000:65536`). jmalicki cannot read them
+directly. Any copy has to preserve that ownership and mode, or Postgres
+refuses to start on it. btrfs snapshots and `btrfs send`/`receive` preserve
+it. A file-level copy has to be made as root with ownership kept
+(`cp -a`, `rsync -aHAX --numeric-ids`), or from inside a rootless container,
+where UID 999 maps back to 100998.
+
 ### Why snapshots are safe for a running Postgres
 
 Each Postgres data directory, WAL included, lives entirely inside one
@@ -255,10 +267,14 @@ is set aside, not deleted.
    unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
-4. Restart the kind node so it sees the new subvolume:
-   `docker restart econ-graph-control-plane`. The node bind-mounted the old
-   subvolume when it started and keeps that one until it restarts; skipping
-   this starts Postgres on the old data.
+4. With Postgres still stopped, restart the kind node that holds the
+   storage, so it sees the new subvolume: `docker restart econ-graph-worker`.
+   Postgres runs on `econ-graph-worker` (labelled
+   `econgraph.io/host-storage=true`), which bind-mounts
+   `/srv/econgraph/data-plane` and `/srv/econgraph/app-prod`. That bind mount
+   keeps pointing at the old subvolume until the node container restarts;
+   skipping this starts Postgres on the old data. Wait for the node to be
+   `Ready` (`k get nodes`) before the next step.
 5. Scale Postgres back to 1, check the data, then the backend and crawler.
 6. Once satisfied, delete the set-aside subvolume:
    `sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`.

@@ -17,9 +17,11 @@
 # be undone; delete it later with scripts/host/delete-snapshots.sh); create
 # a writable snapshot of <snapshot> under the original name; mount it.
 #
-# The kind node bind-mounted the OLD subvolume when it started and keeps
-# seeing it until it restarts, so the script ends by telling you to restart
-# the kind node before scaling Postgres back up.
+# Postgres runs on the kind node econ-graph-worker (labelled
+# econgraph.io/host-storage=true), which bind-mounts /srv/econgraph/data-plane
+# and /srv/econgraph/app-prod. That bind mount keeps pointing at the OLD
+# subvolume until the node container restarts, so the script ends by telling
+# you to restart econ-graph-worker before scaling Postgres back up.
 #
 # Nothing is deleted. Safe to re-run with a different snapshot.
 
@@ -28,7 +30,8 @@ set -euo pipefail
 FS_UUID="03ee0fcb-5f19-4f44-8596-e227f1fb647c"
 SNAPSHOT_DIR="/srv/econgraph/snapshots"
 SRV_ROOT="/srv/econgraph"
-KIND_NODE="econ-graph-control-plane"
+KIND_NODE="econ-graph-control-plane"      # where kubectl runs
+STORAGE_NODE="econ-graph-worker"          # the node that bind-mounts /srv/econgraph/*
 NAMESPACE="econ-graph"
 
 DRY_RUN="false"
@@ -135,8 +138,10 @@ fi
 cat <<EOF
 
 Restored $target from $snap. The previous data is kept as $subvol.replaced-$stamp.
-Before Postgres starts again the kind node must pick up the new mount
-(it still holds the old subvolume). As $OWNER, no sudo:
-  docker restart $KIND_NODE
-then scale Postgres (and the backend/crawler) back up and check the data.
+Keep Postgres stopped. Its kind node, $STORAGE_NODE, still bind-mounts the
+old subvolume and only picks up the new one when its container restarts.
+As $OWNER, no sudo:
+  docker restart $STORAGE_NODE
+wait for the node to be Ready, then scale Postgres (and the backend/crawler)
+back up and check the data.
 EOF
