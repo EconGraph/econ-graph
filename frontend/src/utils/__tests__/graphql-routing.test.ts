@@ -75,6 +75,60 @@ const NOT_DATA_REQUESTS: Array<[string, GraphQLRequest]> = [
   ],
 ];
 
+/**
+ * Data queries whose syntax a naive scan gets wrong. Each is still exactly one data query, so it
+ * goes to the data URL; each would be miscounted (and sent as an app operation) if the scanner
+ * stopped handling comments, strings, fragments or object values in a header.
+ */
+const TRICKY_DATA_REQUESTS: Array<[string, GraphQLRequest]> = [
+  [
+    'a comment that reads like a mutation',
+    { query: '# mutation Evil { x }\nquery GetDataSources { dataSources { id } }' },
+  ],
+  [
+    'a string argument holding braces and an operation',
+    { query: 'query SearchSeries { searchSeries(query: "} query Foo { }") { id } }' },
+  ],
+  [
+    'a block string argument holding braces and an operation',
+    // Spans lines: a plain string can't, so only block-string handling reads this right.
+    { query: 'query SearchSeries { searchSeries(query: """\n} query Foo {\n""") { id } }' },
+  ],
+  [
+    'a fragment',
+    {
+      query:
+        'query GetSeriesDetail { series(id: "1") { ...Fields } }\n' +
+        'fragment Fields on EconomicSeriesType { id title }',
+      operationName: 'GetSeriesDetail',
+    },
+  ],
+  [
+    'an object default value for a variable',
+    {
+      query:
+        'query GetSeriesList($filter: SeriesFilter = {sourceId: "x"}) ' +
+        '{ seriesList(filter: $filter) { totalCount } }',
+    },
+  ],
+  [
+    'an object value in a directive argument on the operation',
+    { query: 'query GetDataSources @d(a: {b: 1}) { dataSources { id } }' },
+  ],
+];
+
+/** Documents a broken block-string scan would read as one data query; each holds a mutation. */
+const HIDDEN_OPERATION_REQUESTS: Array<[string, GraphQLRequest]> = [
+  [
+    'an escaped \\""" in a block string, followed by a mutation',
+    {
+      query:
+        'query GetDataSources { dataSources(x: """ \\""" """) { id } }\n' +
+        'mutation CreateAnnotation { createAnnotation { id } }',
+    },
+  ],
+];
+
 const TOKEN = 'token-alice';
 
 let fetchSpy: MockInstance<typeof fetch>;
@@ -147,6 +201,24 @@ describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
     await executeGraphQL(request);
     expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
   });
+
+  it.each(TRICKY_DATA_REQUESTS)(
+    'a data query with %s goes to /data/graphql with no Authorization header',
+    async (_name, request) => {
+      const executeGraphQL = await loadWith('/data/graphql');
+      await executeGraphQL(request);
+      expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
+    }
+  );
+
+  it.each(HIDDEN_OPERATION_REQUESTS)(
+    'a document with %s goes to /graphql with the bearer token',
+    async (_name, request) => {
+      const executeGraphQL = await loadWith('/data/graphql');
+      await executeGraphQL(request);
+      expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
+    }
+  );
 
   it('does not ask for a token for a data operation', async () => {
     const executeGraphQL = await loadWith('/data/graphql');
