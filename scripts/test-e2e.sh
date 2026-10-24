@@ -100,7 +100,9 @@ run_backend_tests() {
 
     # Run database migrations
     print_step "Running database migrations..."
-    diesel migration run --database-url="$DATABASE_URL" || {
+    # Both sets in one database: data, then app.
+    { diesel migration run --database-url="$DATABASE_URL" --migration-dir migrations/data \
+        && diesel migration run --database-url="$DATABASE_URL" --migration-dir migrations/app; } || {
         print_error "Database migrations failed"
         return 1
     }

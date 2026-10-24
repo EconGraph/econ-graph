@@ -62,7 +62,8 @@ jobs:
       working-directory: backend
       run: |
         cargo install diesel_cli --no-default-features --features postgres
-        diesel migration run
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
 
     - name: Build with RAM disk cache
       working-directory: backend

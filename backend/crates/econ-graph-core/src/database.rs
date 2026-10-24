@@ -2,6 +2,7 @@ use diesel_async::pooled_connection::{
     bb8::Pool, bb8::PooledConnection, AsyncDieselConnectionManager,
 };
 use diesel_async::AsyncPgConnection;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 // use diesel::prelude::*; // Not needed for async operations
 use std::time::Duration;
 use tracing::info;
@@ -81,14 +82,63 @@ pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
 /// Arbitrary but fixed: any i64 works as long as every replica uses the same one.
 const MIGRATION_LOCK_KEY: i64 = 0x6567_5f6d_6967_7261; // "eg_migra" as bytes
 
-/// Run database migrations
+/// The app migration set: users and everything they create (docs/development/TRAIN2_CONTRACTS.md,
+/// sections 4 and 5).
+pub const APP_MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/app");
+
+/// The data migration set: sources, series, observations, crawl state, SEC data.
+pub const DATA_MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/data");
+
+/// One of the two migration sets. When one database holds both they share Diesel's
+/// `__diesel_schema_migrations` table, so their versions never overlap (except
+/// `00000000000000_diesel_initial_setup`, identical in both; `check_migration_order.py`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MigrationSet {
+    App,
+    Data,
+}
+
+impl MigrationSet {
+    /// The migrations embedded for this set.
+    fn migrations(self) -> EmbeddedMigrations {
+        match self {
+            MigrationSet::App => APP_MIGRATIONS,
+            MigrationSet::Data => DATA_MIGRATIONS,
+        }
+    }
+
+    /// The set's directory name under `backend/migrations`, for logs and errors.
+    fn name(self) -> &'static str {
+        match self {
+            MigrationSet::App => "app",
+            MigrationSet::Data => "data",
+        }
+    }
+}
+
+/// The data baseline's version: the single v4.0.0 baseline's, which the data half kept.
+const DATA_BASELINE_VERSION: &str = "20261021000100";
+
+/// The app baseline's version (`migrations/app/2026-10-21-000200_v4_0_app_baseline`).
+const APP_BASELINE_VERSION: &str = "20261021000200";
+
+/// Run both migration sets against one database: the data set, then the app set.
+///
+/// Until DP-2 gives the backend separate app and data URLs, every caller has one database holding
+/// both sets (TRAIN2_CONTRACTS.md, section 4). A database built by the single v4.0.0 baseline,
+/// before the split, already has the app tables; the app baseline is recorded there without
+/// running (see [`record_app_baseline_on_a_single_baseline_database`]).
+///
 /// Note: Migrations require a synchronous connection
 pub async fn run_migrations(database_url: &str) -> AppResult<()> {
+    run_migration_sets(database_url, &[MigrationSet::Data, MigrationSet::App]).await
+}
+
+/// Runs `sets` in order against `database_url`, holding [`MIGRATION_LOCK_KEY`] for the whole run.
+pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]) -> AppResult<()> {
     use diesel::{Connection, RunQueryDsl};
-    use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
-    const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-
+    let sets = sets.to_vec();
     // Run migrations in a blocking task since migrations are sync
     let database_url = database_url.to_string();
     tokio::task::spawn_blocking(move || -> AppResult<()> {
@@ -128,10 +178,9 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
 
         info!("Migration lock acquired, running migrations...");
 
-        let migration_result = conn
-            .run_pending_migrations(MIGRATIONS)
-            .map(|_| ())
-            .map_err(|e| AppError::InternalError(format!("Failed to run migrations: {}", e)));
+        let migration_result = sets
+            .iter()
+            .try_for_each(|&set| run_migration_set_locked(&mut conn, set));
 
         if let Err(e) =
             diesel::sql_query(format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
@@ -150,6 +199,80 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
     .map_err(|e| AppError::InternalError(format!("Migration task failed: {}", e)))??;
 
     info!("Database migrations completed successfully");
+    Ok(())
+}
+
+/// Applies one set's pending migrations on `conn`, which already holds [`MIGRATION_LOCK_KEY`].
+fn run_migration_set_locked(conn: &mut diesel::PgConnection, set: MigrationSet) -> AppResult<()> {
+    use diesel_migrations::MigrationHarness;
+
+    if set == MigrationSet::App {
+        record_app_baseline_on_a_single_baseline_database(conn)?;
+    }
+    info!("Running the {} migrations...", set.name());
+    conn.run_pending_migrations(set.migrations())
+        .map(|_| ())
+        .map_err(|e| {
+            AppError::InternalError(format!(
+                "Failed to run the {} migrations: {}",
+                set.name(),
+                e
+            ))
+        })
+}
+
+/// On a database built by the single v4.0.0 baseline, before it was split into `migrations/data`
+/// and `migrations/app`, records the app baseline as applied without running it: that database
+/// already has the app tables (and their three foreign keys to data tables, which stay; nothing
+/// depends on them being gone), so running it would stop at its guard. Recognised by having the
+/// `users` table and the data baseline's version but not the app baseline's. Does nothing
+/// anywhere else, including a database that has only the app set.
+fn record_app_baseline_on_a_single_baseline_database(
+    conn: &mut diesel::PgConnection,
+) -> AppResult<()> {
+    use diesel::RunQueryDsl;
+
+    // The table does not exist yet on an empty database, and Postgres resolves the INSERT's target
+    // before evaluating its WHERE, so look for it first.
+    #[derive(diesel::QueryableByName)]
+    struct Exists {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        exists: bool,
+    }
+    let table = diesel::sql_query(
+        "SELECT to_regclass('public.__diesel_schema_migrations') IS NOT NULL AS exists",
+    )
+    .get_result::<Exists>(conn)
+    .map_err(|e| {
+        AppError::InternalError(format!("Failed to look for the migrations table: {}", e))
+    })?;
+    if !table.exists {
+        return Ok(());
+    }
+
+    let inserted = diesel::sql_query(
+        "INSERT INTO __diesel_schema_migrations (version)
+         SELECT $2
+         WHERE to_regclass('public.users') IS NOT NULL
+             AND EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $1)
+             AND NOT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $2)",
+    )
+    .bind::<diesel::sql_types::Text, _>(DATA_BASELINE_VERSION)
+    .bind::<diesel::sql_types::Text, _>(APP_BASELINE_VERSION)
+    .execute(conn)
+    .map_err(|e| {
+        AppError::InternalError(format!(
+            "Failed to record the app baseline migration: {}",
+            e
+        ))
+    })?;
+    if inserted > 0 {
+        tracing::warn!(
+            "This database was built by the single v4.0.0 baseline migration and already has the app \
+             tables; recorded the app baseline {} as applied without running it (ECO-422)",
+            APP_BASELINE_VERSION
+        );
+    }
     Ok(())
 }
 
@@ -183,62 +306,76 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
 }
 
 /// The migration version (diesel's zero-padded timestamp, e.g. `"20261021000100"`) of the
-/// newest migration embedded in this binary: the schema version it requires at minimum to run
-/// correctly.
-fn minimum_schema_version() -> AppResult<String> {
+/// newest migration embedded in this binary for `set`: the schema version of that set it requires
+/// at minimum to run correctly.
+fn minimum_schema_version(set: MigrationSet) -> AppResult<String> {
     use diesel::migration::{Migration, MigrationSource};
-    use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 
-    const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-
-    let migrations = MigrationSource::<diesel::pg::Pg>::migrations(&MIGRATIONS).map_err(|e| {
-        AppError::InternalError(format!("Failed to read embedded migrations: {}", e))
-    })?;
+    let migrations =
+        MigrationSource::<diesel::pg::Pg>::migrations(&set.migrations()).map_err(|e| {
+            AppError::InternalError(format!(
+                "Failed to read the embedded {} migrations: {}",
+                set.name(),
+                e
+            ))
+        })?;
     migrations
         .iter()
         .map(|m| m.name().version().to_string())
         .max()
-        .ok_or_else(|| AppError::InternalError("No embedded migrations found".to_string()))
+        .ok_or_else(|| {
+            AppError::InternalError(format!("No embedded {} migrations found", set.name()))
+        })
 }
 
 #[derive(diesel::QueryableByName)]
-struct SchemaVersionRow {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    version: String,
+struct RecordedRow {
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    recorded: bool,
 }
 
 /// The schema-version half of [`readiness_check`], run directly on `conn` rather than a pool so
-/// a caller can run it inside its own transaction: the database's latest applied migration must
-/// be at least as new as this binary's own minimum (`>=`, not `==`): a pod still running the
-/// previous binary, while a newer one is mid-rollout migrating the database further ahead, stays
-/// ready rather than flipping to not-ready on a schema it can still work with.
-async fn check_schema_version(conn: &mut AsyncPgConnection) -> AppResult<()> {
-    let row: SchemaVersionRow = diesel_async::RunQueryDsl::get_result(
-        diesel::sql_query(
-            "SELECT version FROM __diesel_schema_migrations ORDER BY version DESC LIMIT 1",
-        ),
-        conn,
-    )
-    .await
-    .map_err(|e| AppError::DatabaseError(format!("Failed to read schema version: {}", e)))?;
+/// a caller can run it inside its own transaction: for each set in `sets`, the newest migration
+/// this binary embeds must be recorded in `__diesel_schema_migrations`. Not "the table's newest
+/// version", which mixes the sets when one database holds both (TRAIN2_CONTRACTS.md, section 4).
+/// Presence rather than equality: a pod still running the previous binary, while a newer one is
+/// mid-rollout migrating the database further ahead, stays ready, since its own newest versions
+/// are still recorded.
+async fn check_schema_version(
+    conn: &mut AsyncPgConnection,
+    sets: &[MigrationSet],
+) -> AppResult<()> {
+    for &set in sets {
+        let minimum = minimum_schema_version(set)?;
+        let row: RecordedRow = diesel_async::RunQueryDsl::get_result(
+            diesel::sql_query(
+                "SELECT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $1) \
+                 AS recorded",
+            )
+            .bind::<diesel::sql_types::Text, _>(&minimum),
+            conn,
+        )
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to read schema version: {}", e)))?;
 
-    let minimum = minimum_schema_version()?;
-    if row.version < minimum {
-        return Err(AppError::DatabaseError(format!(
-            "database schema version {} is older than this binary's minimum {}",
-            row.version, minimum
-        )));
+        if !row.recorded {
+            return Err(AppError::DatabaseError(format!(
+                "database has not applied this binary's newest {} migration {}",
+                set.name(),
+                minimum
+            )));
+        }
     }
     Ok(())
 }
 
-/// Readiness check for Kubernetes' `/readyz`: the database must be reachable and its schema
-/// current enough; see [`check_schema_version`].
+/// Readiness check for Kubernetes' `/readyz`: the database must be reachable and both migration
+/// sets current; see [`check_schema_version`]. Until DP-2 there is one database holding both sets.
 pub async fn readiness_check(pool: &DatabasePool) -> AppResult<()> {
     let mut conn = pool.get().await.map_err(|e| {
         AppError::InternalError(format!("Failed to get database connection: {}", e))
     })?;
-    check_schema_version(&mut conn).await
+    check_schema_version(&mut conn, &[MigrationSet::Data, MigrationSet::App]).await
 }
 
 #[cfg(test)]
@@ -403,42 +540,378 @@ mod tests {
             .await
             .expect("a freshly migrated schema should be ready");
 
-        let minimum = minimum_schema_version().expect("should read embedded migrations");
+        // Each set on its own: with both sets in one database, a set behind is caught even
+        // though the other set's newer version is recorded.
+        for set in [MigrationSet::Data, MigrationSet::App] {
+            let minimum = minimum_schema_version(set).expect("should read embedded migrations");
 
-        // Delete the newest migration row inside an uncommitted transaction, never committed
-        // or restored by hand: even a cancelled test run (its pooled connection dropped
-        // mid-transaction) leaves this database, which other tests and local dev setups
-        // share, completely unchanged, since Postgres rolls back an open transaction when its
-        // connection closes. Nothing between BEGIN and ROLLBACK unwraps or asserts: a pooled
-        // connection goes back to the pool on drop without closing it, so a panic while the
-        // transaction is still open would hand a later pool user a connection sitting inside
-        // it, with the row still deleted.
-        let mut conn = pool.get().await.expect("Should get a connection");
-        diesel::sql_query("BEGIN")
-            .execute(&mut conn)
-            .await
-            .expect("should start a transaction");
-
-        let delete_result =
-            diesel::sql_query("DELETE FROM __diesel_schema_migrations WHERE version = $1")
-                .bind::<diesel::sql_types::Text, _>(minimum)
+            // Delete the set's newest migration row inside an uncommitted transaction, never
+            // committed or restored by hand: even a cancelled test run (its pooled connection
+            // dropped mid-transaction) leaves this database, which other tests and local dev
+            // setups share, completely unchanged, since Postgres rolls back an open transaction
+            // when its connection closes. Nothing between BEGIN and ROLLBACK unwraps or asserts: a
+            // pooled connection goes back to the pool on drop without closing it, so a panic while
+            // the transaction is still open would hand a later pool user a connection sitting
+            // inside it, with the row still deleted.
+            let mut conn = pool.get().await.expect("Should get a connection");
+            diesel::sql_query("BEGIN")
                 .execute(&mut conn)
-                .await;
-        let check_result = check_schema_version(&mut conn).await;
+                .await
+                .expect("should start a transaction");
 
-        diesel::sql_query("ROLLBACK")
-            .execute(&mut conn)
-            .await
-            .expect("should roll back, undoing the delete regardless of what happened above");
+            let delete_result =
+                diesel::sql_query("DELETE FROM __diesel_schema_migrations WHERE version = $1")
+                    .bind::<diesel::sql_types::Text, _>(minimum)
+                    .execute(&mut conn)
+                    .await;
+            let check_result =
+                check_schema_version(&mut conn, &[MigrationSet::Data, MigrationSet::App]).await;
 
-        delete_result.expect("should delete the latest migration row");
-        let err = check_result
-            .expect_err("a schema missing this binary's newest migration should not be ready");
-        assert!(matches!(err, AppError::DatabaseError(_)), "{err:?}");
+            diesel::sql_query("ROLLBACK")
+                .execute(&mut conn)
+                .await
+                .expect("should roll back, undoing the delete regardless of what happened above");
+
+            assert_eq!(
+                delete_result.expect("should delete the latest migration row"),
+                1,
+                "the {set:?} set's newest migration should have been recorded"
+            );
+            let err = check_result.expect_err(
+                "a schema missing this binary's newest migration of either set should not be ready",
+            );
+            assert!(matches!(err, AppError::DatabaseError(_)), "{err:?}");
+        }
 
         readiness_check(&pool)
             .await
             .expect("the untouched schema should still be ready after the rollback");
+    }
+
+    /// A database created for one test from `DATABASE_URL`'s server and dropped when the test
+    /// ends, so tests that need an empty database don't touch the shared one.
+    struct ScratchDatabase {
+        admin_url: String,
+        name: String,
+        url: String,
+    }
+
+    impl ScratchDatabase {
+        fn create(tag: &str) -> Self {
+            use diesel::{Connection, RunQueryDsl};
+
+            let admin_url = std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+            let name = format!("eg_scratch_{tag}_{}", uuid::Uuid::new_v4().simple());
+            let mut conn = diesel::PgConnection::establish(&admin_url)
+                .expect("Should connect to DATABASE_URL");
+            diesel::sql_query(format!("CREATE DATABASE {name}"))
+                .execute(&mut conn)
+                .expect("Should create a scratch database");
+            let mut url = url::Url::parse(&admin_url).expect("DATABASE_URL should be a URL");
+            url.set_path(&format!("/{name}"));
+            Self {
+                admin_url,
+                name,
+                url: url.to_string(),
+            }
+        }
+
+        fn connect(&self) -> diesel::PgConnection {
+            use diesel::Connection;
+            diesel::PgConnection::establish(&self.url)
+                .expect("Should connect to the scratch database")
+        }
+    }
+
+    impl Drop for ScratchDatabase {
+        fn drop(&mut self) {
+            use diesel::{Connection, RunQueryDsl};
+            if let Ok(mut conn) = diesel::PgConnection::establish(&self.admin_url) {
+                let _ = diesel::sql_query(format!(
+                    "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                    self.name
+                ))
+                .execute(&mut conn);
+            }
+        }
+    }
+
+    #[derive(diesel::QueryableByName)]
+    struct TextRow {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        value: String,
+    }
+
+    /// Runs `query`, which selects one text column named `value`, and returns its rows.
+    fn text_rows(conn: &mut diesel::PgConnection, query: &str) -> Vec<String> {
+        use diesel::RunQueryDsl;
+        diesel::sql_query(query)
+            .load::<TextRow>(conn)
+            .expect("query should run")
+            .into_iter()
+            .map(|r| r.value)
+            .collect()
+    }
+
+    fn recorded_versions(conn: &mut diesel::PgConnection) -> Vec<String> {
+        text_rows(
+            conn,
+            "SELECT version AS value FROM __diesel_schema_migrations ORDER BY version",
+        )
+    }
+
+    fn public_tables(conn: &mut diesel::PgConnection) -> Vec<String> {
+        text_rows(
+            conn,
+            "SELECT tablename::text AS value FROM pg_tables
+             WHERE schemaname = 'public' AND tablename <> '__diesel_schema_migrations'
+             ORDER BY tablename",
+        )
+    }
+
+    /// The tables of each set, from docs/development/TRAIN2_CONTRACTS.md section 5.
+    const DATA_TABLES: [&str; 26] = [
+        "data_sources",
+        "datasets",
+        "economic_series",
+        "data_points",
+        "crawl_queue",
+        "crawl_attempts",
+        "series_metadata",
+        "reference_file_cache",
+        "series_fetch_validators",
+        "countries",
+        "global_economic_indicators",
+        "global_indicator_data",
+        "country_correlations",
+        "trade_relationships",
+        "global_economic_events",
+        "event_country_impacts",
+        "leading_indicators",
+        "companies",
+        "financial_statements",
+        "financial_line_items",
+        "financial_ratios",
+        "xbrl_taxonomy_schemas",
+        "xbrl_taxonomy_linkbases",
+        "xbrl_dts_dependencies",
+        "xbrl_instance_dts_references",
+        "xbrl_taxonomy_concepts",
+    ];
+    const APP_TABLES: [&str; 12] = [
+        "users",
+        "user_sessions",
+        "chart_annotations",
+        "annotation_comments",
+        "chart_collaborators",
+        "user_data_source_preferences",
+        "audit_logs",
+        "security_events",
+        "financial_annotations",
+        "annotation_assignments",
+        "annotation_replies",
+        "annotation_templates",
+    ];
+
+    fn sorted(tables: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = tables.iter().map(|t| t.to_string()).collect();
+        v.sort();
+        v
+    }
+
+    /// A new database gets both sets, data then app, and exactly their three versions.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_migrations_applies_both_sets_to_a_new_database() {
+        let db = ScratchDatabase::create("both");
+        run_migrations(&db.url)
+            .await
+            .expect("migrations should apply to a new database");
+
+        let mut conn = db.connect();
+        assert_eq!(
+            recorded_versions(&mut conn),
+            [
+                "00000000000000",
+                DATA_BASELINE_VERSION,
+                APP_BASELINE_VERSION
+            ]
+        );
+        let mut all = DATA_TABLES.to_vec();
+        all.extend(APP_TABLES);
+        assert_eq!(public_tables(&mut conn), sorted(&all));
+    }
+
+    /// Each set builds on an empty database by itself and creates only its own tables, so the
+    /// app and data sets can live in separate databases.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn each_migration_set_builds_only_its_own_tables_in_its_own_database() {
+        let data_db = ScratchDatabase::create("data_only");
+        let app_db = ScratchDatabase::create("app_only");
+
+        run_migration_sets(&data_db.url, &[MigrationSet::Data])
+            .await
+            .expect("the data set should apply to an empty database");
+        run_migration_sets(&app_db.url, &[MigrationSet::App])
+            .await
+            .expect("the app set should apply to an empty database");
+
+        let mut data_conn = data_db.connect();
+        assert_eq!(public_tables(&mut data_conn), sorted(&DATA_TABLES));
+        assert_eq!(
+            recorded_versions(&mut data_conn),
+            ["00000000000000", DATA_BASELINE_VERSION]
+        );
+
+        let mut app_conn = app_db.connect();
+        assert_eq!(public_tables(&mut app_conn), sorted(&APP_TABLES));
+        assert_eq!(
+            recorded_versions(&mut app_conn),
+            ["00000000000000", APP_BASELINE_VERSION]
+        );
+
+        // Each database is current for its own set and not for the other one.
+        let data_pool = create_pool(&data_db.url).await.expect("pool");
+        let mut c = data_pool.get().await.expect("connection");
+        check_schema_version(&mut c, &[MigrationSet::Data])
+            .await
+            .expect("the data database should be current for the data set");
+        assert!(check_schema_version(&mut c, &[MigrationSet::App])
+            .await
+            .is_err());
+        drop(c);
+        let app_pool = create_pool(&app_db.url).await.expect("pool");
+        let mut c = app_pool.get().await.expect("connection");
+        check_schema_version(&mut c, &[MigrationSet::App])
+            .await
+            .expect("the app database should be current for the app set");
+        assert!(check_schema_version(&mut c, &[MigrationSet::Data])
+            .await
+            .is_err());
+    }
+
+    /// Every column, constraint, index and trigger in `public`, one line each, sorted.
+    fn schema_signature(conn: &mut diesel::PgConnection) -> Vec<String> {
+        text_rows(
+            conn,
+            "SELECT line AS value FROM (
+                 SELECT format('column %s.%s %s %s %s', c.relname, a.attname,
+                               format_type(a.atttypid, a.atttypmod), a.attnotnull,
+                               pg_get_expr(d.adbin, d.adrelid)) AS line
+                 FROM pg_attribute a
+                 JOIN pg_class c ON c.oid = a.attrelid
+                 LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                 WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0
+                     AND NOT a.attisdropped AND c.relname <> '__diesel_schema_migrations'
+                 UNION ALL
+                 SELECT format('constraint %s.%s %s', conrelid::regclass, conname,
+                               pg_get_constraintdef(oid))
+                 FROM pg_constraint
+                 WHERE connamespace = 'public'::regnamespace
+                     AND conrelid <> '__diesel_schema_migrations'::regclass
+                 UNION ALL
+                 SELECT format('index %s', indexdef) FROM pg_indexes
+                 WHERE schemaname = 'public' AND tablename <> '__diesel_schema_migrations'
+                 UNION ALL
+                 SELECT format('trigger %s', pg_get_triggerdef(oid)) FROM pg_trigger
+                 WHERE NOT tgisinternal
+                 UNION ALL
+                 SELECT format('type %s', typname) FROM pg_type
+                 WHERE typnamespace = 'public'::regnamespace
+             ) t
+             ORDER BY line",
+        )
+    }
+
+    /// A database built by the single v4.0.0 baseline, before the split, is brought forward
+    /// without any schema change: the app baseline is recorded, not run.
+    ///
+    /// The single baseline is rebuilt here from its two halves (the data baseline through
+    /// Diesel, the app baseline's SQL run directly so its version is not recorded) plus the three
+    /// foreign keys the split dropped, under their original names. scripts/compare_migrations.sh
+    /// checks that the halves are the single baseline less those keys.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_migrations_records_the_app_baseline_on_a_single_baseline_database() {
+        use diesel::connection::SimpleConnection;
+
+        let db = ScratchDatabase::create("single_baseline");
+        run_migration_sets(&db.url, &[MigrationSet::Data])
+            .await
+            .expect("the data set should apply");
+        let mut conn = db.connect();
+        conn.batch_execute(include_str!(
+            "../../../migrations/app/2026-10-21-000200_v4_0_app_baseline/up.sql"
+        ))
+        .expect("the app baseline's SQL should run");
+        conn.batch_execute(
+            "ALTER TABLE user_data_source_preferences
+                 ADD CONSTRAINT user_data_source_preferences_data_source_id_fkey
+                 FOREIGN KEY (data_source_id) REFERENCES data_sources(id) ON DELETE CASCADE;
+             ALTER TABLE financial_annotations
+                 ADD CONSTRAINT financial_annotations_statement_id_fkey
+                 FOREIGN KEY (statement_id) REFERENCES financial_statements(id) ON DELETE CASCADE,
+                 ADD CONSTRAINT financial_annotations_line_item_id_fkey
+                 FOREIGN KEY (line_item_id) REFERENCES financial_line_items(id) ON DELETE CASCADE;",
+        )
+        .expect("the single baseline's cross-plane foreign keys should be added");
+        assert_eq!(
+            recorded_versions(&mut conn),
+            ["00000000000000", DATA_BASELINE_VERSION],
+            "a single-baseline database has only the data baseline's version"
+        );
+        let before = schema_signature(&mut conn);
+        assert!(before
+            .iter()
+            .any(|l| l.contains("financial_annotations_statement_id_fkey")));
+
+        run_migrations(&db.url)
+            .await
+            .expect("migrations should succeed on a single-baseline database");
+
+        assert_eq!(
+            recorded_versions(&mut conn),
+            [
+                "00000000000000",
+                DATA_BASELINE_VERSION,
+                APP_BASELINE_VERSION
+            ]
+        );
+        assert_eq!(
+            schema_signature(&mut conn),
+            before,
+            "recording the app baseline should not change the schema"
+        );
+
+        // And it is idempotent: a second run changes nothing either.
+        run_migrations(&db.url)
+            .await
+            .expect("a second run should succeed");
+        assert_eq!(schema_signature(&mut conn), before);
+    }
+
+    /// The app baseline's guard stops it on a database that already has the app tables but not
+    /// the app baseline recorded, when it is run some way other than `run_migrations`.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_app_baseline_guard_stops_on_existing_app_tables() {
+        use diesel::connection::SimpleConnection;
+
+        let db = ScratchDatabase::create("app_guard");
+        let mut conn = db.connect();
+        conn.batch_execute("CREATE TABLE users (id UUID PRIMARY KEY)")
+            .expect("should create a users table");
+        let err = conn
+            .batch_execute(include_str!(
+                "../../../migrations/app/2026-10-21-000200_v4_0_app_baseline/up.sql"
+            ))
+            .expect_err("the guard should stop the app baseline");
+        assert!(
+            err.to_string().contains("already has the app tables"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

@@ -22,7 +22,7 @@
 //! # Seed
 //!
 //! A new database gets usable labels before the first crawl from a seed migration,
-//! `backend/migrations/*_seed_{source}_reference_codes/up.sql`, written by
+//! `backend/migrations/data/*_seed_{source}_reference_codes/up.sql`, written by
 //! `crawler record-reference-seeds --source SOURCE` ([`seed_migration_sql`]) from a real download
 //! parsed by the same [`CodeList::parse`]. It calls the SQL function `seed_reference_codes` once
 //! per file, which does nothing when `reference_file_cache` already has a row for that URL (this
