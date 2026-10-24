@@ -45,9 +45,15 @@ impl SearchService {
         // Checked at backend startup, so a failure here means the file vanished since.
         let abbreviations = econ_graph_core::reference::search_abbreviations()
             .map_err(|e| AppError::ConfigError(e.to_string()))?;
+        // A one-word query is expanded and compared with external ids without the quotes or
+        // trailing punctuation around it, so `"gdp"`, `GDP.` and `gdp*` rank as `gdp` does.
+        let term = single_term(&search_query)
+            .unwrap_or(search_query.trim())
+            .to_string();
+        let expansion_input = single_term(&fulltext_query).unwrap_or(&fulltext_query);
         // None when nothing was expanded, so the common query isn't parsed and matched twice.
-        let expanded_query = Some(expand_abbreviations(&fulltext_query, abbreviations))
-            .filter(|expanded| *expanded != fulltext_query);
+        let expanded_query = Some(expand_abbreviations(expansion_input, abbreviations))
+            .filter(|expanded| expanded != expansion_input);
         let similarity_threshold = params.get_similarity_threshold();
         let limit = params.get_limit();
         let offset = params.get_offset();
@@ -78,7 +84,8 @@ impl SearchService {
         // no positive requirement, so it's rejected rather than matching unrelated series.
         // The query is also searched with its abbreviations spelled out ($9, NULL when it has
         // none), so "gdp" finds a title that only says "gross domestic product". A series whose
-        // external id is the whole query (FRED's GDP for "gdp") ranks first.
+        // external id is the whole query, or its one word ($10), ranks first (FRED's GDP for
+        // "gdp" or "GDP.").
         let results = conn
             .transaction::<Vec<SeriesSearchResultRow>, diesel::result::Error, _>(
                 async move |conn| {
@@ -115,7 +122,7 @@ impl SearchService {
                          AND (($3::text[] IS NULL AND $8::text IS NULL)
                               OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
-                         ORDER BY lower(es.external_id) = lower(btrim($1)) DESC,
+                         ORDER BY lower(es.external_id) IN (lower(btrim($1)), lower($10)) DESC,
                                   rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
                     )
@@ -132,6 +139,7 @@ impl SearchService {
                     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
                         expanded_query,
                     )
+                    .bind::<diesel::sql_types::Text, _>(&term)
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
@@ -234,6 +242,17 @@ fn fulltext_query(query: &str) -> String {
         .filter(|word| !word.chars().all(|c| c == '-'))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The word of a one-word query without surrounding quotes or trailing punctuation (`"gdp"`,
+/// `GDP.` and `gdp*` give `gdp`; `NY.GDP.PCAP.CD.` gives `NY.GDP.PCAP.CD`), or None for a query
+/// of several words or one with nothing left. A leading `-` is kept, so `-gdp` still excludes.
+fn single_term(query: &str) -> Option<&str> {
+    let mut words = query.split_whitespace();
+    let word = words.next().filter(|_| words.next().is_none())?;
+    let term = word.trim_end_matches(|c: char| !c.is_alphanumeric());
+    let term = term.strip_prefix('"').unwrap_or(term);
+    Some(term).filter(|term| !term.is_empty())
 }
 
 /// `query` with each listed abbreviation spelled out as a quoted phrase (`gdp per capita` becomes
@@ -665,6 +684,49 @@ mod db_tests {
         assert!(!titles(&excluded).contains(&"GDP per capita (current US$)"));
 
         remove_fixtures(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// Quotes or trailing punctuation around a one-word query keep the exact-id rule and the
+    /// expansion (ECO-419: `"gdp"`, `GDP.` and `gdp*` listed FRED's GDP sixth and missed BEA's).
+    async fn search_ignores_quotes_and_punctuation_around_one_word() {
+        let Some(pool) = pool().await else { return };
+        let service = SearchService::new(Arc::new(pool.clone()));
+
+        for query in ["\"gdp\"", "GDP.", "gdp*", " \"GDP\". "] {
+            let found = service
+                .search_series(&SearchParams::simple(query))
+                .await
+                .unwrap();
+            assert!(
+                found[0].external_id.eq_ignore_ascii_case("gdp"),
+                "{query:?}: {:?}",
+                titles(&found)
+            );
+            assert!(
+                titles(&found).contains(&"Gross domestic product srch"),
+                "{query:?}: {:?}",
+                titles(&found)
+            );
+        }
+
+        remove_fixtures(&pool).await;
+    }
+
+    #[test]
+    /// Only a one-word query is normalised, and an excluding dash is kept.
+    fn single_term_strips_quotes_and_trailing_punctuation() {
+        assert_eq!(single_term("\"gdp\""), Some("gdp"));
+        assert_eq!(single_term(" GDP. "), Some("GDP"));
+        assert_eq!(single_term("gdp*"), Some("gdp"));
+        assert_eq!(single_term("\"gdp\"."), Some("gdp"));
+        assert_eq!(single_term("NY.GDP.PCAP.CD."), Some("NY.GDP.PCAP.CD"));
+        assert_eq!(single_term("-gdp"), Some("-gdp"));
+        assert_eq!(single_term("gdp"), Some("gdp"));
+        assert_eq!(single_term("gdp per capita"), None);
+        assert_eq!(single_term("\"\""), None);
+        assert_eq!(single_term(""), None);
     }
 
     #[test]

@@ -47,7 +47,8 @@ CREATE INDEX idx_economic_series_title_trgm ON economic_series USING GIN (title 
 
 ```sql
 WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
-    SELECT websearch_to_tsquery('english', $1) || websearch_to_tsquery('simple', $1) AS tsq
+    SELECT websearch_to_tsquery('english', $1) || websearch_to_tsquery('simple', $1)
+        || websearch_to_tsquery('english', <query with abbreviations spelled out>) AS tsq
 ) parsed)
 SELECT ...,
        (ts_rank_cd(es.search_vector, q.tsq, 32) + similarity(es.title, $1))::float4 AS rank,
@@ -57,7 +58,8 @@ WHERE NOT q.vacuous
   AND (es.search_vector @@ q.tsq
        OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
   AND <source, frequency and active filters>
-ORDER BY rank DESC, es.title ASC, es.id ASC
+ORDER BY lower(es.external_id) IN (lower(btrim($1)), lower(<one-word term>)) DESC,
+         rank DESC, es.title ASC, es.id ASC
 LIMIT $5 OFFSET $6
 ```
 
@@ -68,6 +70,12 @@ LIMIT $5 OFFSET $6
   `"phrase"-rate`), so a near-miss title can't bring back what the exclusion removed. The check
   looks for `!` in the parsed query's text. Apart from the NOT operator, `!` survives only inside a
   quoted URL-like phrase (`"x.com/a!b"`), where it just turns typo matching off.
+- Abbreviations listed in `econ-graph-core/data/search_abbreviations.csv` are also searched
+  spelled out as quoted phrases, so `gdp` finds a title that only says "gross domestic product".
+  Quoted, excluded (`-gdp`) and punctuated words in a longer query are left as typed.
+- A series whose external id is the whole query ranks first (FRED's `GDP` for `gdp`).
+- A one-word query is expanded and compared with external ids without surrounding quotes or
+  trailing punctuation, so `"gdp"`, `GDP.` and `gdp*` rank as `gdp` does. A leading `-` is kept.
 - `es.id` breaks ties, so `limit`/`offset` paging never repeats or skips a row.
 - A query with no positive requirement (`-rate`, `-a -b`, `a OR -b`) is satisfied by an empty
   document, so it's rejected outright (`vacuous`) instead of matching every series that happens to
