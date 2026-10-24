@@ -8,10 +8,83 @@ import { getAccessToken } from '../auth/accessToken';
 
 const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_URL || '/graphql';
 
-// Debug: Log the GraphQL endpoint being used
+/**
+ * Where data operations go. Unset, it is the normal GraphQL URL, so a build without
+ * `VITE_DATA_GRAPHQL_URL` sends every request where it went before. Branch deployments set it
+ * to the same-origin `/data/graphql`, which reads the shared primary data plane (ECO-427).
+ */
+const DATA_GRAPHQL_ENDPOINT = import.meta.env.VITE_DATA_GRAPHQL_URL || GRAPHQL_ENDPOINT;
+
+// Debug: Log the GraphQL endpoints being used
 console.log('🔧 Frontend GraphQL Configuration:');
 console.log('  - VITE_GRAPHQL_URL:', import.meta.env.VITE_GRAPHQL_URL);
-console.log('  - Final GRAPHQL_ENDPOINT:', GRAPHQL_ENDPOINT);
+console.log('  - VITE_DATA_GRAPHQL_URL:', import.meta.env.VITE_DATA_GRAPHQL_URL);
+console.log('  - Final GRAPHQL_ENDPOINT (app operations):', GRAPHQL_ENDPOINT);
+console.log('  - Final DATA_GRAPHQL_ENDPOINT (data operations):', DATA_GRAPHQL_ENDPOINT);
+
+/**
+ * Data operations: queries that read only data-plane tables, and whose resolvers never read
+ * the caller. They go to the data URL without an `Authorization` header. The audit behind
+ * this list is in ECO-427. `graphql-operations.test.ts` fails if an operation in `src/` is in
+ * neither this set nor `APP_OPERATIONS`, or in both.
+ */
+export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
+  // Shipped in the release build.
+  'GetSeriesDetail',
+  'GetSeriesData',
+  'SearchSeries',
+  'GetSeriesList',
+  'GetDataSources',
+  'GetSeriesLatestObservation',
+  'GetMapDatasets',
+  'GetMapCrossSection',
+  'GetMapSeriesMeta',
+  // Defined but not sent by any page.
+  'GetSearchSuggestions',
+  'SearchSeriesFulltext',
+  // Compiled out (`financial_components`); classified so turning the flag on routes them right.
+  'GetFinancialStatements',
+  'GetFinancialLineItems',
+  'GetFinancialRatios',
+  'GetCompanyInfo',
+  'GetFinancialDashboard',
+  'GetFinancialStatement',
+  'GetTrendAnalysis',
+  'GetPeerComparison',
+  'GetPeerCompanies',
+  'GetBenchmarkComparison',
+  'GetFinancialAlerts',
+  'GetRatioBenchmarks',
+  'GetRatioExplanation',
+  'GetFinancialExport',
+]);
+
+/**
+ * App operations: they use the app database or the caller, so they go to the GraphQL URL with
+ * the user's token. Unknown and unnamed operations are sent the same way.
+ */
+export const APP_OPERATIONS: ReadonlySet<string> = new Set([
+  'GetAnnotationsForSeries',
+  'GetCommentsForAnnotation',
+  'CreateAnnotation',
+  'UpdateAnnotation',
+  'DeleteAnnotation',
+  'AddComment',
+  // Unused.
+  'GetChartCollaborators',
+  'GetUser',
+  'ShareChart',
+  // Compiled out (`financial_components`).
+  'GetFinancialAnnotations',
+  'CreateFinancialAnnotation',
+  'UpdateFinancialAnnotation',
+  'DeleteFinancialAnnotation',
+  'FinancialAnnotationSubscription',
+  // Admin: they read crawl tables but need an admin role (`AdminSystemRead`,
+  // `AdminCrawlersManage`), so without a token they would always fail.
+  'GetCrawlerStatus',
+  'TriggerCrawl',
+]);
 
 export interface GraphQLResponse<T = any> {
   data?: T;
@@ -28,8 +101,119 @@ export interface GraphQLRequest {
   operationName?: string;
 }
 
+/** A top-level definition in a GraphQL document: its keyword (or `{`) and its name, if any. */
+interface TopLevelDefinition {
+  keyword: string;
+  name: string | null;
+}
+
+const NAME_START = /[A-Za-z_]/;
+const NAME_CONTINUE = /\w/;
+
 /**
- * Execute a GraphQL query against the backend.
+ * Lists a GraphQL document's top-level definitions without a full parse (`graphql` is only a
+ * dev dependency, so the bundle doesn't carry its parser). Comments and string values are
+ * skipped, and only words at brace depth 0 count, so a field called `query` inside a selection
+ * set is not taken for an operation. Object values in a header's arguments (`$f: F = {a: 1}`,
+ * `@d(a: {b: 1})`) are nested values, not the selection set.
+ * @param document - The GraphQL document text.
+ * @returns Its top-level definitions in order; `{` stands for an anonymous shorthand query.
+ */
+function topLevelDefinitions(document: string): TopLevelDefinition[] {
+  const definitions: TopLevelDefinition[] = [];
+  let depth = 0;
+  // Open parentheses at brace depth 0: variable definitions or directive arguments.
+  let parens = 0;
+  let i = 0;
+  // The definition whose header (keyword, name, variables, type condition, directives) is
+  // being read, until its selection set opens.
+  let header: TopLevelDefinition | null = null;
+  // Whether the next word in the header is the definition's name.
+  let nameNext = false;
+  while (i < document.length) {
+    const ch = document[i];
+    if (ch === '#') {
+      // A comment ends at a line terminator: `\n` or `\r` (GraphQL accepts a lone `\r`).
+      while (i < document.length && document[i] !== '\n' && document[i] !== '\r') i++;
+      continue;
+    }
+    if (document.startsWith('"""', i)) {
+      // A block string ends at the first `"""` that is not escaped as `\"""`.
+      i += 3;
+      while (i < document.length && !document.startsWith('"""', i)) {
+        i += document.startsWith('\\"""', i) ? 4 : 1;
+      }
+      i += 3;
+      continue;
+    }
+    if (ch === '"') {
+      i++;
+      while (i < document.length && document[i] !== '"' && document[i] !== '\n') {
+        i += document[i] === '\\' ? 2 : 1;
+      }
+      i++;
+      continue;
+    }
+    if (NAME_START.test(ch)) {
+      const start = i;
+      while (i < document.length && NAME_CONTINUE.test(document[i])) i++;
+      const word = document.slice(start, i);
+      if (depth === 0) {
+        if (header === null) {
+          header = { keyword: word, name: null };
+          definitions.push(header);
+          nameNext = true;
+        } else if (nameNext) {
+          header.name = word;
+          nameNext = false;
+        }
+      }
+      continue;
+    }
+    if (ch === '{') {
+      // At the top level, outside parentheses, `{` opens a selection set: the header's, or with
+      // no header an anonymous `{ ... }` query. Inside parentheses it opens an object value.
+      if (depth === 0 && parens === 0) {
+        if (header === null) definitions.push({ keyword: '{', name: null });
+        header = null;
+      }
+      depth++;
+    } else if (ch === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && ch === '(') {
+      parens++;
+      nameNext = false;
+    } else if (depth === 0 && ch === ')') {
+      parens = Math.max(0, parens - 1);
+    } else if (depth === 0 && !/[\s,]/.test(ch)) {
+      // Variables, directives or punctuation: a name can no longer follow.
+      nameNext = false;
+    }
+    i++;
+  }
+  return definitions;
+}
+
+/**
+ * Whether a request is a data operation, to be sent to the data URL without a token. Only a
+ * document holding exactly one operation, a named query listed in `DATA_OPERATIONS`, counts,
+ * and an explicit `operationName` must name that query. Everything else (mutations,
+ * subscriptions, unnamed, unknown or several operations) is an app operation.
+ * @param request - The GraphQL request.
+ * @returns True when the request is a data operation.
+ */
+export function isDataOperation(request: GraphQLRequest): boolean {
+  const operations = topLevelDefinitions(request.query).filter(def => def.keyword !== 'fragment');
+  if (operations.length !== 1) return false;
+  const [operation] = operations;
+  if (operation.keyword !== 'query' || !operation.name) return false;
+  if (request.operationName != null && request.operationName !== operation.name) return false;
+  return DATA_OPERATIONS.has(operation.name);
+}
+
+/**
+ * Execute a GraphQL query against the backend. Data operations (`isDataOperation`) go to the
+ * data URL without a token; everything else goes to the GraphQL URL with the user's token.
  * @param request - The GraphQL request object containing query, variables, and operation name.
  * @param signal - Optional AbortSignal passed to fetch; aborting it rejects with an AbortError.
  * @returns Promise that resolves to the GraphQL response.
@@ -46,12 +230,17 @@ export async function executeGraphQL<T = any>(
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
-  // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
-  const token = await getAccessToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  // Data operations never carry a token: the data plane may not know this deployment's
+  // Keycloak realm, and the backend answers a token it can't verify with a 401.
+  const isData = isDataOperation(request);
+  if (!isData) {
+    // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
+    const token = await getAccessToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
   }
-  const response = await fetch(GRAPHQL_ENDPOINT, {
+  const response = await fetch(isData ? DATA_GRAPHQL_ENDPOINT : GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers,
     body: JSON.stringify(request),

@@ -4,6 +4,16 @@ All notable changes to EconGraph are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases are tagged `vX.Y.Z`; see
 [the release process](docs/development/RELEASE_PROCESS.md) for how a train reaches a tag.
 
+## [Unreleased]
+
+### Added
+
+- The frontend can send data operations (series, search, data sources, the dashboard cards and
+  the world map) to a separate GraphQL URL, `VITE_DATA_GRAPHQL_URL`, and never sends them a
+  sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
+  token. Unset, every request goes where it went before. The dev server and `vite preview`
+  proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
+
 ## [4.0.0] - 2026-10-08
 
 Train 1: broad real data behind pages that work. See

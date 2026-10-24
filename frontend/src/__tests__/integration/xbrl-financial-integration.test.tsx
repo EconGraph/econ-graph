@@ -27,7 +27,8 @@ import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChar
 
 // Create a dedicated MSW server for integration tests
 const integrationServer = setupServer(
-  http.post('/graphql', async ({ request }) => {
+  // Both the app path and the data path (VITE_DATA_GRAPHQL_URL=/data/graphql).
+  http.post(/\/(data\/)?graphql$/, async ({ request }) => {
     console.log('🔧 MSW GraphQL handler called');
     const body = await request.json() as {
       query: string;

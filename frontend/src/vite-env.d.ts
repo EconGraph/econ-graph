@@ -7,6 +7,8 @@ declare const __APP_VERSION__: string;
 interface ImportMetaEnv {
   readonly VITE_API_URL: string;
   readonly VITE_GRAPHQL_URL: string;
+  /** Where data operations go, with no token (e.g. `/data/graphql`). Unset: the GraphQL URL. */
+  readonly VITE_DATA_GRAPHQL_URL?: string;
   readonly VITE_WS_URL: string;
   /** Keycloak realm issuer URL (`<keycloak>/realms/econ-graph`). Unset: the dev server uses the docker-compose dev realm; a build disables sign-in. */
   readonly VITE_OIDC_ISSUER?: string;
