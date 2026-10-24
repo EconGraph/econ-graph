@@ -11,6 +11,7 @@
 #   2. stop the writers (backend, crawler-worker, keycloak)        [downtime]
 #   3. pg_dump both databases + row counts + Secrets to ~/econgraph-backups/<ts>/
 #   4. delete and recreate the kind cluster with the host mounts   [DESTRUCTIVE]
+#      and load the same locally built images (checked by ID) into it
 #   5. recreate the Secrets, the static PVs and both Postgres StatefulSets
 #   6. restore both dumps, check row counts
 #   7. run deploy.sh for everything else
@@ -95,6 +96,47 @@ host_dir_empty() {
     [ ! -e "$dir" ] && return 0
     [ "$(stat -c %u "$dir")" = "$(id -u)" ] || return 1
     [ -z "$(ls -A "$dir")" ]
+}
+
+# Locally built images (econ-graph-*, no registry) exist only in the old
+# cluster's nodes and the host's Docker; a new cluster has none of them, and
+# rebuilding from this checkout would change what runs. So record exactly the
+# images running now, check the host holds the same ones by ID, and load those
+# into the new cluster.
+LOCAL_IMAGES=()
+
+check_local_images() {
+    local image host_id node_id
+    mapfile -t LOCAL_IMAGES < <(k get deploy,sts -o jsonpath='{range .items[*]}{range .spec.template.spec.containers[*]}{.image}{"\n"}{end}{end}' |
+        grep -E '^econ-graph-' | sort -u)
+    [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "found no locally built econ-graph-* images in namespace ${NAMESPACE}"
+    for image in "${LOCAL_IMAGES[@]}"; do
+        host_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null)" ||
+            die "$image runs in the cluster but is not in the host's Docker; nothing was changed"
+        node_id="$(docker exec "${KIND_CLUSTER}-worker" crictl inspecti "docker.io/library/$image" 2>/dev/null |
+            sed -n 's/.*"id": "\(sha256:[0-9a-f]*\)".*/\1/p' | head -1)"
+        [ "$node_id" = "$host_id" ] ||
+            die "$image in the host's Docker (${host_id}) is not the one running in the cluster (${node_id:-not found}); nothing was changed"
+        echo "  image: $image ${host_id:7:12}"
+    done
+}
+
+save_local_images() {
+    if [ "${DRY_RUN}" != "true" ]; then
+        printf '%s\n' "${LOCAL_IMAGES[@]}" >"${BACKUP_DIR}/local-images.txt"
+    fi
+}
+
+load_local_images() {
+    local image
+    if [ "${#LOCAL_IMAGES[@]}" -eq 0 ] && [ -s "${BACKUP_DIR}/local-images.txt" ]; then
+        mapfile -t LOCAL_IMAGES <"${BACKUP_DIR}/local-images.txt"
+    fi
+    [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "${BACKUP_DIR}/local-images.txt missing; can't tell which images to load"
+    log "Loading the images that ran before into the new cluster"
+    for image in "${LOCAL_IMAGES[@]}"; do
+        run kind load docker-image "$image" --name "${KIND_CLUSTER}"
+    done
 }
 
 db_has_data() {
@@ -243,10 +285,12 @@ forward() {
         db_has_data || die "postgresql-0 is not running or econ_graph is empty; refusing to back up and delete"
         echo "  live data: economic_series=$(count_rows econ_graph 'select count(*) from economic_series')" \
             "data_points=$(count_rows econ_graph 'select count(*) from data_points')"
+        check_local_images
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
         stop_writers
         remember_backup "$(new_backup_dir)"
         backup_databases "${BACKUP_DIR}"
+        save_local_images
         recreate_cluster --yes --no-backup "${common_flags[@]}"
     else
         BACKUP_DIR="$(recalled_backup)"
@@ -259,6 +303,7 @@ forward() {
     fi
 
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
+    load_local_images
     bootstrap_databases "${PROJECT_ROOT}"
     restore_and_deploy "${PROJECT_ROOT}"
     verify
@@ -282,10 +327,12 @@ rollback() {
     if [ -n "${RESUME_FROM}" ]; then
         BACKUP_DIR="${RESUME_FROM}"
     elif kind_cluster_exists && db_has_data; then
+        check_local_images
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
         stop_writers
         remember_backup "$(new_backup_dir)"
         backup_databases "${BACKUP_DIR}"
+        save_local_images
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no running database to back up; pass --resume-from ~/econgraph-backups/<ts>"
@@ -311,6 +358,7 @@ rollback() {
     fi
     recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
+    load_local_images
     bootstrap_databases "$src"
     restore_and_deploy "$src"
     verify
