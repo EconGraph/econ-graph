@@ -14,7 +14,7 @@ PO (section 9), product/UX PO (section 10).
 | `APP_DATABASE_URL` | The app database: users and everything they create. | `econ-graph-backend` (required) |
 | `DATA_DATABASE_URL` | The data database: sources, series, observations, crawl state, SEC data. | `crawler-worker`, `crawler`, `seed-fixtures`, `sec-crawler`, `sec-company-crawler` (required); `econ-graph-backend` (optional, see section 8) |
 | `DATA_GRAPHQL_URL` | In-cluster URL of the data plane's GraphQL endpoint, for server-side data checks when the backend has no `DATA_DATABASE_URL` (DP-7). | `econ-graph-backend` (optional) |
-| `DATA_GRAPHQL_HOST` | `Host` header sent with `DATA_GRAPHQL_URL` requests, when the URL is the gateway's in-cluster Service (section 9 notes). | `econ-graph-backend` (optional) |
+| `DATA_GRAPHQL_HOST` | `Host` header sent with `DATA_GRAPHQL_URL` requests: the backend's own route hostname (`<slug>.localhost` on a branch, `localhost` in production; section 9). | `econ-graph-backend` (optional) |
 
 - `DATABASE_URL` is no longer read by any binary. A binary that finds `DATABASE_URL` set and
   its own variable unset exits at startup with
@@ -203,6 +203,17 @@ The default in a branch namespace (DP-8):
 - Gateway `econ-graph-gateway` in its own namespace `econ-graph-gateway`, so deleting an app or branch namespace never removes it.
   - Listener `http`: port 80, HTTP, no hostname. allowedRoutes: namespaces with label `econgraph.io/gateway-access: "true"`.
   - Listener `https`: port 443, HTTPS, hostname = the production public hostname (pending Joe). TLS terminates with Secret `econ-graph-tls` in `econ-graph-gateway`, issued by cert-manager via a `cert-manager.io/cluster-issuer` annotation. allowedRoutes: only namespaces labelled `econgraph.io/env: production`. Branches never attach here.
+- EnvoyProxy `econ-graph-proxy` pins the proxy Service: `spec.provider.kubernetes.envoyService.name: econ-graph-gateway-proxy`, type `ClusterIP`. External traffic arrives through the hostPorts, not through this Service. Its in-cluster address is `econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local`, port 80, listener `http`.
+- A backend calls `/data/graphql` server-side with:
+  - `DATA_GRAPHQL_URL=http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql`
+  - `DATA_GRAPHQL_HOST=<its own route hostname>`: `<slug>.localhost` on a branch, `localhost` in production.
+
+  That way it goes through the same `econ-graph-data-graphql` route as the browser does: to the primary for app-only branches, to its own backend for `--local-data`, with the same header stripping and rate limit. DP-8's `deploy-branch.sh` sets both values.
+- NetworkPolicy, in the branch overlay (DP-8):
+  - Egress from pods labelled `app: econ-graph-backend` is allowed to namespace `envoy-gateway-system`, pods with `app.kubernetes.io/name: envoy` and `gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway`, on TCP at the proxy's container port for listener `http`. NetworkPolicy matches the pod port after DNAT, not the Service port 80. Envoy Gateway's default is 10080; DP-11 confirms the number and records it here.
+  - Egress to DNS (kube-system, UDP and TCP 53) is also allowed.
+  - Nothing else leaves the namespace. In particular, nothing goes to `econ-graph` pods or to `data-postgres-service`.
+  - `econ-graph`'s own policy admits ingress to `econ-graph-backend` only from its own namespace and from the Envoy proxy pods, so the primary sees branch traffic only through the gateway.
 
 ### HTTPRoutes (same names in every app namespace; production = `econ-graph`)
 Hostnames: production `localhost` (plus the public hostname on `https`); branch `<slug>.localhost`.
@@ -229,7 +240,7 @@ Admin frontend `/admin`: not routed (ECO-243), as today.
 ### Postgres Services
 | Database | Namespace | StatefulSet | Service (5432) | Secret | Storage |
 |---|---|---|---|---|---|
-| Data (primary) | `econ-graph` | `postgresql` (unchanged) | `data-postgres-service`; `postgres-service` kept as alias until DP-2, then removed | `econ-graph-postgres` | PV `econgraph-data-plane-pg` → `/srv/econgraph/data-plane/pg` |
+| Data (primary) | `econ-graph` | `postgresql` (unchanged) | `data-postgres-service`; `postgres-service` kept as an alias until DP-2 and DP-4 have both merged and nothing references it; removed in a follow-up PR | `econ-graph-postgres` | PV `econgraph-data-plane-pg` → `/srv/econgraph/data-plane/pg` |
 | App (production) | `econ-graph` | `app-postgres` | `app-postgres-service` | `econ-graph-app-postgres` | PV `econgraph-app-prod-app-pg` → `/srv/econgraph/app-prod/app-pg` |
 | Keycloak (production) | `econ-graph` | `keycloak-postgres` | `keycloak-postgres-service` | `econ-graph-keycloak` | PV `econgraph-app-prod-keycloak-pg` → `/srv/econgraph/app-prod/keycloak-pg` |
 | App / Keycloak (branch) | `econ-graph-br-<slug>` | same names | same names | same names | dynamic local-path, disposable |
@@ -239,16 +250,12 @@ FQDN form: `<service>.<namespace>.svc.cluster.local:5432`. Env var names and dat
 
 ### Reconciliation notes (data plane PO)
 
-These link section 9 to sections 1 to 8. The items marked **conflict** are open until the infra PO and the orchestrator agree.
+These link section 9 to sections 1 to 8.
 
 - **Database names and URLs** (section 1): data `econ_graph` (unchanged, the live database), app `econ_graph_app`. The URLs are `postgres://…@data-postgres-service.<ns>.svc.cluster.local:5432/econ_graph` and `postgres://…@app-postgres-service.<ns>.svc.cluster.local:5432/econ_graph_app`. They reach binaries as Secret `econ-graph-secrets` keys `data-database-url` and `app-database-url`, written by `scripts/deploy/create-secrets.sh`, replacing today's `database-url`. The per-Postgres Secrets in the table above hold each server's own credentials.
 - **App-only branches have no data URL and no route to the primary's Postgres.** No read-only role, no NetworkPolicy exception. Every data read in an app-only branch goes through `/data/graphql`: the frontend directly (section 10), and the backend's series check (DP-7) through `DATA_GRAPHQL_URL`.
-- **Conflict: `DATA_GRAPHQL_URL` needs a gateway address reachable from inside the cluster.** Branch pods may not call `econ-graph` pods directly, and `<slug>.localhost` resolves to the pod itself, so the backend must call the Envoy proxy's Service with `Host: <slug>.localhost`. Needed from the infra PO:
-  - a stable name for that Service (for example, set through `EnvoyProxy.spec.provider.kubernetes.envoyService.name`);
-  - a branch-backend egress rule to it.
-
-  Until then, DP-7 has `DATA_GRAPHQL_URL` (the proxy Service URL) and `DATA_GRAPHQL_HOST` (the Host header). If neither is set, the check is skipped (section 8).
-- **Conflict: when `postgres-service` goes away.** The table says "until DP-2", but DP-2 and DP-4 have no fixed order. If DP-2 lands first, it points both URLs at the one database through `postgres-service`. Proposed: remove the alias only once DP-2 and DP-4 have both merged and nothing references it.
+- **Resolved (infra PO, PR #423 comment): the gateway address for `DATA_GRAPHQL_URL`.** The backend calls `econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local` with `DATA_GRAPHQL_HOST`, through the same `econ-graph-data-graphql` route as the browser. The branch egress rule is in "Controller, class, gateway" above.
+- **Resolved: the `postgres-service` alias.** It is removed only after both DP-2 and DP-4 have merged, in a follow-up PR owned by the infra PO.
 
 ## 10. Frontend: data vs app GraphQL (DP-6, ECO-427)
 
