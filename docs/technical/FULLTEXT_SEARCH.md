@@ -74,8 +74,12 @@ LIMIT $5 OFFSET $6
   spelled out as quoted phrases, so `gdp` finds a title that only says "gross domestic product".
   Quoted, excluded (`-gdp`) and punctuated words in a longer query are left as typed.
 - A series whose external id is the whole query ranks first (FRED's `GDP` for `gdp`).
-- A one-word query is expanded and compared with external ids without surrounding quotes or
-  trailing punctuation, so `"gdp"`, `GDP.` and `gdp*` rank as `gdp` does. A leading `-` is kept.
+- A one-word query is expanded and compared with external ids without the quotes (ASCII or
+  typographic, double or single) and brackets around it, matched or not, or the sentence
+  punctuation after it (`. , ; : ! ? *`). So `"gdp"`, `“gdp”`, `'gdp'`, `(gdp)`, `GDP.` and
+  `gdp*` rank as `gdp` does. Other symbols are part of the word (`C++` stays `C++`), a leading
+  `-` is kept, and a word that would shrink to one character or nothing (`A.`, `...`) is used
+  as typed.
 - `es.id` breaks ties, so `limit`/`offset` paging never repeats or skips a row.
 - A query with no positive requirement (`-rate`, `-a -b`, `a OR -b`) is satisfied by an empty
   document, so it's rejected outright (`vacuous`) instead of matching every series that happens to

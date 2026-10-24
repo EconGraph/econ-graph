@@ -45,8 +45,9 @@ impl SearchService {
         // Checked at backend startup, so a failure here means the file vanished since.
         let abbreviations = econ_graph_core::reference::search_abbreviations()
             .map_err(|e| AppError::ConfigError(e.to_string()))?;
-        // A one-word query is expanded and compared with external ids without the quotes or
-        // trailing punctuation around it, so `"gdp"`, `GDP.` and `gdp*` rank as `gdp` does.
+        // A one-word query is expanded and compared with external ids without the quotes,
+        // brackets or trailing punctuation around it, so `"gdp"`, `(gdp)`, `GDP.` and `gdp*`
+        // rank as `gdp` does.
         let term = single_term(&search_query)
             .unwrap_or(search_query.trim())
             .to_string();
@@ -244,15 +245,38 @@ fn fulltext_query(query: &str) -> String {
         .join(" ")
 }
 
-/// The word of a one-word query without surrounding quotes or trailing punctuation (`"gdp"`,
-/// `GDP.` and `gdp*` give `gdp`; `NY.GDP.PCAP.CD.` gives `NY.GDP.PCAP.CD`), or None for a query
-/// of several words or one with nothing left. A leading `-` is kept, so `-gdp` still excludes.
+/// Quotes and brackets that can wrap a one-word query, matched or not: ASCII and typographic
+/// double and single quotes, and `()[]{}`.
+const TERM_WRAPPERS: &[char] = &[
+    '"', '\'', '\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}', '(', ')', '[', ']', '{', '}',
+];
+
+/// Sentence punctuation that can follow a one-word query. Other symbols (`+`, `#`, `&`) are
+/// part of the term, so `C++` stays `C++`.
+const TERM_TRAILING_PUNCTUATION: &[char] = &['.', ',', ';', ':', '!', '?', '*'];
+
+/// The word of a one-word query without the quotes and brackets around it or the sentence
+/// punctuation after it (`"gdp"`, `“gdp”`, `'gdp'`, `(gdp)`, `GDP.` and `gdp*` give `gdp`;
+/// `NY.GDP.PCAP.CD.` gives `NY.GDP.PCAP.CD`), or None for a query of several words, or when
+/// stripping would leave nothing or a single character of a longer word (`""`, `...`, `A.`),
+/// so the caller uses the query as typed. A leading `-` is kept, so `-gdp` still excludes.
 fn single_term(query: &str) -> Option<&str> {
     let mut words = query.split_whitespace();
     let word = words.next().filter(|_| words.next().is_none())?;
-    let term = word.trim_end_matches(|c: char| !c.is_alphanumeric());
-    let term = term.strip_prefix('"').unwrap_or(term);
-    Some(term).filter(|term| !term.is_empty())
+    let mut term = word;
+    loop {
+        let stripped = term
+            .trim_start_matches(TERM_WRAPPERS)
+            .trim_end_matches(|c: char| {
+                TERM_WRAPPERS.contains(&c) || TERM_TRAILING_PUNCTUATION.contains(&c)
+            });
+        if stripped == term {
+            break;
+        }
+        term = stripped;
+    }
+    let length = term.chars().count();
+    (length > 1 || (length == 1 && term == word)).then_some(term)
 }
 
 /// `query` with each listed abbreviation spelled out as a quoted phrase (`gdp per capita` becomes
@@ -688,13 +712,22 @@ mod db_tests {
 
     #[tokio::test]
     #[serial]
-    /// Quotes or trailing punctuation around a one-word query keep the exact-id rule and the
+    /// Quotes, brackets or trailing punctuation around a one-word query keep the exact-id rule and the
     /// expansion (ECO-419: `"gdp"`, `GDP.` and `gdp*` listed FRED's GDP sixth and missed BEA's).
     async fn search_ignores_quotes_and_punctuation_around_one_word() {
         let Some(pool) = pool().await else { return };
         let service = SearchService::new(Arc::new(pool.clone()));
 
-        for query in ["\"gdp\"", "GDP.", "gdp*", " \"GDP\". "] {
+        for query in [
+            "\"gdp\"",
+            "GDP.",
+            "gdp*",
+            " \"GDP\". ",
+            "\u{201C}gdp\u{201D}",
+            "'gdp'",
+            "(gdp)",
+            "\"GDP.\"",
+        ] {
             let found = service
                 .search_series(&SearchParams::simple(query))
                 .await
@@ -718,14 +751,28 @@ mod db_tests {
     /// Only a one-word query is normalised, and an excluding dash is kept.
     fn single_term_strips_quotes_and_trailing_punctuation() {
         assert_eq!(single_term("\"gdp\""), Some("gdp"));
+        assert_eq!(single_term("\u{201C}gdp\u{201D}"), Some("gdp"));
+        assert_eq!(single_term("\u{2018}gdp\u{2019}"), Some("gdp"));
+        assert_eq!(single_term("'gdp'"), Some("gdp"));
+        assert_eq!(single_term("(gdp)"), Some("gdp"));
+        assert_eq!(single_term("[gdp]"), Some("gdp"));
+        assert_eq!(single_term("(\"gdp\")."), Some("gdp"));
+        assert_eq!(single_term("\"gdp"), Some("gdp"));
+        assert_eq!(single_term("\"GDP.\""), Some("GDP"));
         assert_eq!(single_term(" GDP. "), Some("GDP"));
         assert_eq!(single_term("gdp*"), Some("gdp"));
         assert_eq!(single_term("\"gdp\"."), Some("gdp"));
         assert_eq!(single_term("NY.GDP.PCAP.CD."), Some("NY.GDP.PCAP.CD"));
+        assert_eq!(single_term("C++"), Some("C++"));
+        assert_eq!(single_term("AT&T"), Some("AT&T"));
+        assert_eq!(single_term("C#."), Some("C#"));
         assert_eq!(single_term("-gdp"), Some("-gdp"));
         assert_eq!(single_term("gdp"), Some("gdp"));
+        assert_eq!(single_term("A"), Some("A"));
+        assert_eq!(single_term("A."), None);
         assert_eq!(single_term("gdp per capita"), None);
         assert_eq!(single_term("\"\""), None);
+        assert_eq!(single_term("..."), None);
         assert_eq!(single_term(""), None);
     }
 

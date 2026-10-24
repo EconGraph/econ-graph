@@ -69,4 +69,12 @@ describe('search results export', () => {
       id: 'x',
     });
   });
+
+  test('a series without a known source exports it as empty, not a made-up name', () => {
+    const bare = { externalId: 'GDP', title: 'Gross Domestic Product', id: 'x' };
+    expect(buildSearchResultsCsv([bare]).split('\r\n')[1]).toBe(
+      ',GDP,Gross Domestic Product,,,,,,,x'
+    );
+    expect(JSON.parse(buildSearchResultsJson([bare]))[0].source).toBeNull();
+  });
 });

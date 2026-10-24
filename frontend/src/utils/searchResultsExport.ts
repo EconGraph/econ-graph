@@ -10,8 +10,8 @@ import { csvTextField } from './seriesCsv';
 
 /** One listed series as it goes into an export. */
 export interface SearchResultsExportRow {
-  /** Source name, such as "World Bank". */
-  source: string;
+  /** Source name, such as "World Bank"; missing when the source isn't known. */
+  source?: string;
   /** The source's own series id. */
   externalId?: string;
   title: string;

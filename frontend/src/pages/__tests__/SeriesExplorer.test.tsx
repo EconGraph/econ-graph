@@ -1180,6 +1180,63 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       }
     }
   );
+
+  test.each(['csv', 'json'])(
+    'exports missing description, units and source as empty in %s, never made up',
+    async format => {
+      const originalCreateObjectURL = URL.createObjectURL;
+      const originalRevokeObjectURL = URL.revokeObjectURL;
+      let blobText = '';
+      URL.createObjectURL = vi.fn((blob: Blob) => {
+        void blob.text().then(text => {
+          blobText = text;
+        });
+        return 'blob:mock';
+      });
+      URL.revokeObjectURL = vi.fn();
+      try {
+        searchHook.mockImplementation(() =>
+          searchReturning([
+            {
+              id: 'bare-uuid',
+              externalId: 'BARE',
+              title: 'Bare series',
+              description: '',
+              sourceId: 'not-a-listed-source',
+              frequency: 'Monthly',
+            },
+          ])
+        );
+        const user = userEvent.setup();
+        renderSeriesExplorer();
+        await user.type(screen.getByPlaceholderText(/search economic series/i), 'bare');
+        await screen.findByText('Bare series');
+        expect(screen.queryByText('Unknown Source')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /export results/i }));
+        await user.click(
+          await screen.findByRole('menuitem', { name: new RegExp(`export as ${format}`, 'i') })
+        );
+
+        await waitFor(() => expect(blobText).not.toBe(''));
+        if (format === 'csv') {
+          const [, row] = blobText.split('\r\n');
+          expect(row).toBe(',BARE,Bare series,,Monthly,,,,,bare-uuid');
+        } else {
+          expect(JSON.parse(blobText)[0]).toMatchObject({
+            source: null,
+            externalId: 'BARE',
+            description: null,
+            units: null,
+            id: 'bare-uuid',
+          });
+        }
+      } finally {
+        URL.createObjectURL = originalCreateObjectURL;
+        URL.revokeObjectURL = originalRevokeObjectURL;
+      }
+    }
+  );
 });
 
 describe('resolveSourceId', () => {

@@ -426,7 +426,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     if (!session.signOutReturn) {
       session.signOutReturn = manager.signoutRedirectCallback().then(
         response => safeReturnTo((response.userState as SignInState | undefined)?.returnTo),
-        // Not a sign-out this tab started (an old or hand-made link): stay on the home page.
+        // No state stored for it in this browser's localStorage (an old, already-used or
+        // hand-made link): stay on the home page.
         () => SIGNED_OUT_PATH
       );
     }

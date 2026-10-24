@@ -41,11 +41,12 @@ interface EconomicSeries {
   /** The source's own series id, such as `GDP`. */
   externalId?: string;
   title: string;
-  description: string;
+  description?: string;
   sourceId: string;
-  source: string;
+  /** Source name; missing when neither the result nor the source list names it. */
+  source?: string;
   frequency: string;
-  units: string;
+  units?: string;
   lastUpdated?: string;
   startDate?: string;
   endDate?: string;
@@ -234,14 +235,12 @@ const SeriesExplorer: React.FC = () => {
       id: result.id,
       externalId: result.externalId || undefined,
       title: result.title,
-      description: result.description || '',
+      description: result.description || undefined,
       sourceId: result.sourceId,
       source:
-        result.source?.name ||
-        dataSources.find(ds => ds.id === result.sourceId)?.name ||
-        'Unknown Source',
+        result.source?.name || dataSources.find(ds => ds.id === result.sourceId)?.name || undefined,
       frequency: result.frequency,
-      units: result.units || '',
+      units: result.units || undefined,
       lastUpdated: toTimestamp(result.lastUpdated),
       startDate: toDateOnly(result.startDate),
       endDate: toDateOnly(result.endDate),
@@ -416,13 +415,15 @@ const SeriesExplorer: React.FC = () => {
         </Box>
 
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          <Chip
-            label={series.source}
-            size='small'
-            color='primary'
-            variant='outlined'
-            title={`Data Source: ${series.source}`}
-          />
+          {series.source && (
+            <Chip
+              label={series.source}
+              size='small'
+              color='primary'
+              variant='outlined'
+              title={`Data Source: ${series.source}`}
+            />
+          )}
           <Chip label={series.frequency} size='small' variant='outlined' />
           {series.units && <Chip label={series.units} size='small' variant='outlined' />}
         </Box>
