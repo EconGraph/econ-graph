@@ -158,8 +158,12 @@ pub fn validate_annotation_fields(
 pub const ANNOTATION_MIN_YEAR: i32 = 1000;
 /// How many years past today an annotation may be dated, for projections and scheduled events.
 pub const ANNOTATION_MAX_YEARS_AHEAD: i32 = 10;
-/// `annotation_value` is DECIMAL(20, 6), so its magnitude must stay below 10^14.
+/// `annotation_value` is DECIMAL(20, 6), so its magnitude must stay below 10^14 once Postgres
+/// has rounded it to 6 decimal places.
 const ANNOTATION_VALUE_MAX_DIGITS: u32 = 14;
+/// Postgres rounds a numeric half away from zero, so any magnitude at or above this rounds up to
+/// 10^14 and overflows the column.
+const ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW: &str = "99999999999999.9999995";
 
 /// Checks an annotation's date (against `today`) and optional chart value.
 pub fn validate_annotation_point(
@@ -176,10 +180,15 @@ pub fn validate_annotation_point(
         )));
     }
     if let Some(value) = value {
-        let limit = BigDecimal::from(10i64.pow(ANNOTATION_VALUE_MAX_DIGITS));
+        // Compare against the rounding threshold rather than rounding the value itself, which
+        // would be costly for a value written with a huge number of decimal places.
+        let limit: BigDecimal = ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW
+            .parse()
+            .expect("valid decimal");
         if value.abs() >= limit {
             return Err(AppError::ValidationError(format!(
-                "Value {value} is too large; it must be below 1e{ANNOTATION_VALUE_MAX_DIGITS}"
+                "Value {value} is too large; rounded to 6 decimal places it must be below \
+                 1e{ANNOTATION_VALUE_MAX_DIGITS}"
             )));
         }
     }
@@ -774,6 +783,19 @@ mod validation_tests {
         let fits: BigDecimal = "99999999999999.999999".parse().unwrap();
         validate_annotation_point(day, Some(&fits), today).unwrap();
         validate_annotation_point(day, Some(&-fits), today).unwrap();
+        // Postgres would round these up to 10^14, which overflows DECIMAL(20, 6).
+        for rounds_up in ["99999999999999.9999995", "99999999999999.9999999"] {
+            let rounds_up: BigDecimal = rounds_up.parse().unwrap();
+            assert!(
+                refused(validate_annotation_point(day, Some(&rounds_up), today))
+                    .contains("too large")
+            );
+            refused(validate_annotation_point(day, Some(&-rounds_up), today));
+        }
+        // ...while this rounds down to the largest value the column holds.
+        let rounds_down: BigDecimal = "99999999999999.9999994999".parse().unwrap();
+        validate_annotation_point(day, Some(&rounds_down), today).unwrap();
+        validate_annotation_point(day, Some(&-rounds_down), today).unwrap();
         let too_big: BigDecimal = "100000000000000".parse().unwrap();
         assert!(
             refused(validate_annotation_point(day, Some(&too_big), today)).contains("too large")

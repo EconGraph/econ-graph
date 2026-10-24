@@ -432,6 +432,11 @@ async fn annotations_on_unknown_series_or_absurd_dates_are_refused() {
             create(&series_id, "2024-01-01", "1e20"),
             "is too large".to_string(),
         ),
+        (
+            // Below 1e14, but Postgres would round it up to 1e14 and overflow DECIMAL(20, 6).
+            create(&series_id, "2024-01-01", "99999999999999.9999999"),
+            "is too large".to_string(),
+        ),
     ] {
         let resp = run_as(&pool, Some(alice.clone()), &query).await;
         assert_eq!(resp.errors.len(), 1, "{query}: {:?}", resp.errors);

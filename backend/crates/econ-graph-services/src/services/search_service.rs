@@ -65,7 +65,7 @@ impl SearchService {
 
         let mut conn = self.pool.get().await.map_err(|e| {
             error!("Failed to get database connection: {}", e);
-            AppError::ExternalApiError(format!("Connection error: {}", e))
+            AppError::DatabasePool(e.to_string())
         })?;
 
         // Matches on the weighted full-text vector (title and external id rank above description)
@@ -139,7 +139,7 @@ impl SearchService {
             .await
             .map_err(|e| {
                 error!("Search query execution failed: {}", e);
-                AppError::ExternalApiError(format!("Query execution error: {}", e))
+                AppError::Database(e)
             })?;
 
         let execution_time = start_time.elapsed();
@@ -173,7 +173,7 @@ impl SearchService {
 
         let mut conn = self.pool.get().await.map_err(|e| {
             error!("Failed to get database connection: {}", e);
-            AppError::ExternalApiError(format!("Connection error: {}", e))
+            AppError::DatabasePool(e.to_string())
         })?;
 
         let query = partial_query.to_lowercase().trim().to_string();
@@ -201,7 +201,7 @@ impl SearchService {
         .await
         .map_err(|e| {
             error!("Suggestions query execution failed: {}", e);
-            AppError::ExternalApiError(format!("Query execution error: {}", e))
+            AppError::Database(e)
         })?;
 
         let search_suggestions: Vec<SearchSuggestion> = suggestions

@@ -5,7 +5,14 @@
 //! raw driver message ("value too long for type character varying(255)", "numeric field
 //! overflow"), which says nothing useful to the client and shows it our schema (ECO-410).
 //! [`SanitizeErrors`] replaces those messages with a generic one at the schema boundary and
-//! logs the detail; client errors (validation, not found, unauthorized, ...) keep their message.
+//! logs the detail.
+//!
+//! The check is deny-by-default: an error keeps its message only when it's known to be meant
+//! for the client (see [`is_client_facing`]). Anything else carrying a typed source (a Diesel or
+//! pool error, an I/O or HTTP failure, an [`AppError`] variant outside the allowlist) is hidden.
+//! Hand-written messages (`Error::new("...")`, `Err("...".into())`) are client-facing, so a
+//! resolver must not format a server-side error into one: pass the error itself (with `?` or
+//! `Error::new_with_source`) and let this extension decide.
 
 use std::sync::Arc;
 
@@ -43,27 +50,51 @@ impl Extension for SanitizeErrorsExtension {
     }
 }
 
-/// Whether `error` is a server-side failure whose detail must not reach the client.
-fn is_internal(error: &ServerError) -> bool {
-    if error.source::<diesel::result::Error>().is_some() {
+/// Whether `error`'s message is meant for the client. Everything else is a server-side failure
+/// whose detail must not reach it.
+fn is_client_facing(error: &ServerError) -> bool {
+    // No source: a message the resolver (or async-graphql itself) wrote for the client.
+    if error.source.is_none() {
+        return true;
+    }
+    // `Err("...".into())` and `Err(format!(...).into())` keep the text as the source.
+    if error.source::<&'static str>().is_some() || error.source::<String>().is_some() {
+        return true;
+    }
+    // A malformed argument (`Uuid::parse_str(&id)?`, a bad date or number) is the client's to fix.
+    if error.source::<uuid::Error>().is_some()
+        || error.source::<chrono::ParseError>().is_some()
+        || error.source::<std::num::ParseIntError>().is_some()
+        || error.source::<std::num::ParseFloatError>().is_some()
+    {
         return true;
     }
     matches!(
         error.source::<AppError>(),
         Some(
-            AppError::Database(_)
-                | AppError::DatabasePool(_)
-                | AppError::DatabaseError(_)
-                | AppError::ConnectionPool(_)
-                | AppError::MigrationError(_)
-                | AppError::InternalError(_)
+            AppError::Validation(_)
+                | AppError::ValidationErrors(_)
+                | AppError::ValidationError(_)
+                | AppError::AuthenticationError(_)
+                | AppError::SeriesNotFound(_)
+                | AppError::DataSourceNotFound(_)
+                | AppError::InvalidDateFormat(_)
+                | AppError::InvalidTransformation(_)
+                | AppError::RateLimitExceeded
+                | AppError::PermissionDenied(_)
+                | AppError::NotFound(_)
+                | AppError::BadRequest(_)
+                | AppError::Unauthorized(_)
+                | AppError::Forbidden(_)
+                | AppError::Conflict(_)
+                | AppError::UnprocessableEntity(_)
         )
     )
 }
 
 /// Logs a server-side error with its detail and replaces its message with a generic one.
 fn sanitize(error: &mut ServerError, operation_name: Option<&str>) {
-    if !is_internal(error) {
+    if is_client_facing(error) {
         return;
     }
     let path = error
@@ -86,6 +117,37 @@ fn sanitize(error: &mut ServerError, operation_name: Option<&str>) {
         .extensions
         .get_or_insert_with(Default::default)
         .set("code", "INTERNAL_SERVER_ERROR");
+}
+
+/// Collects log output for tests: everything logged on this thread while the returned guard
+/// is alive lands in the returned buffer.
+#[cfg(test)]
+pub(crate) fn capture_logs() -> (
+    tracing::subscriber::DefaultGuard,
+    Arc<std::sync::Mutex<Vec<u8>>>,
+) {
+    let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(move || LogWriter(writer.clone()))
+        .finish();
+    (tracing::subscriber::set_default(subscriber), buffer)
+}
+
+#[cfg(test)]
+struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+#[cfg(test)]
+impl std::io::Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +177,44 @@ mod tests {
 
         async fn not_found(&self) -> Result<i32> {
             Err(AppError::NotFound("Series not found".to_string()))?
+        }
+
+        /// An `AppError` variant that isn't on the client-facing list.
+        async fn unlisted_failure(&self, variant: String) -> Result<i32> {
+            let detail = "relation \"secret_table\" does not exist".to_string();
+            Err(match variant.as_str() {
+                "ExternalApiError" => AppError::ExternalApiError(detail),
+                "SearchError" => AppError::SearchError(detail),
+                "CrawlerError" => AppError::CrawlerError(detail),
+                "ConfigError" => AppError::ConfigError(detail),
+                "Io" => AppError::Io(std::io::Error::other(detail)),
+                "ServiceUnavailable" => AppError::ServiceUnavailable(detail),
+                other => panic!("unknown variant {other}"),
+            })?
+        }
+
+        /// A typed error that isn't an `AppError` at all.
+        async fn io_failure(&self) -> Result<i32> {
+            Err(std::io::Error::other("/srv/secret/path: permission denied"))?
+        }
+
+        /// A server-side error passed with `new_with_source` keeps its source, so it's hidden.
+        async fn with_source(&self) -> Result<i32> {
+            Err(AppError::DatabaseError("pg detail".to_string()))
+                .map_err(async_graphql::Error::new_with_source)
+        }
+
+        async fn hand_written(&self) -> Result<i32> {
+            Err(async_graphql::Error::new("Authentication required"))
+        }
+
+        async fn string_into(&self) -> Result<i32> {
+            Err("seriesIds need a source".into())
+        }
+
+        async fn bad_uuid(&self) -> Result<i32> {
+            let id = uuid::Uuid::parse_str("not-a-uuid")?;
+            Ok(id.as_bytes()[0].into())
         }
     }
 
@@ -158,5 +258,55 @@ mod tests {
         assert_eq!(error.message, "Validation error: Title can't be empty");
         let error = first_error("{ notFound }").await;
         assert_eq!(error.message, "Not found: Series not found");
+    }
+
+    /// Server-side `AppError` variants outside the allowlist are hidden too, not just the
+    /// database ones: the sanitizer is deny-by-default.
+    #[tokio::test]
+    async fn unlisted_app_errors_are_generic() {
+        for variant in [
+            "ExternalApiError",
+            "SearchError",
+            "CrawlerError",
+            "ConfigError",
+            "Io",
+            "ServiceUnavailable",
+        ] {
+            let query = format!(r#"{{ unlistedFailure(variant: "{variant}") }}"#);
+            let error = first_error(&query).await;
+            assert_eq!(error.message, INTERNAL_ERROR_MESSAGE, "{variant}");
+        }
+        let error = first_error("{ ioFailure }").await;
+        assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
+        let error = first_error("{ withSource }").await;
+        assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
+    }
+
+    /// Hand-written messages and malformed-argument errors still reach the client.
+    #[tokio::test]
+    async fn hand_written_and_argument_errors_keep_their_message() {
+        assert_eq!(
+            first_error("{ handWritten }").await.message,
+            "Authentication required"
+        );
+        assert_eq!(
+            first_error("{ stringInto }").await.message,
+            "seriesIds need a source"
+        );
+        assert!(first_error("{ badUuid }")
+            .await
+            .message
+            .contains("invalid character"));
+    }
+
+    /// The detail a client doesn't see is logged, with where it happened.
+    #[tokio::test]
+    async fn hidden_detail_is_logged() {
+        let (_guard, logs) = capture_logs();
+        let error = first_error(r#"{ unlistedFailure(variant: "SearchError") }"#).await;
+        assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
+        let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("secret_table"), "{logs}");
+        assert!(logs.contains("unlistedFailure"), "{logs}");
     }
 }

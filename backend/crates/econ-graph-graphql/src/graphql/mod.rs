@@ -23,6 +23,8 @@ mod annotation_visibility_tests;
 #[cfg(test)]
 mod authorization_tests;
 #[cfg(test)]
+mod error_sanitizing_db_tests;
+#[cfg(test)]
 mod latest_observation_tests;
 #[cfg(test)]
 pub mod n_plus_one_tests;
