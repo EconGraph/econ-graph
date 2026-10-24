@@ -4,7 +4,7 @@
  * This enables efficient data fetching with the Rust backend GraphQL API.
  */
 
-import { getAccessToken } from '../auth/accessToken';
+import { getAccessToken, isAccountSuspended, setAccountSuspended } from '../auth/accessToken';
 
 const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_URL || '/graphql';
 
@@ -28,6 +28,56 @@ export interface GraphQLRequest {
   operationName?: string;
 }
 
+/** Shown, and thrown by mutations, once the backend reports the account suspended. */
+export const ACCOUNT_SUSPENDED_MESSAGE = 'This account is suspended';
+
+/**
+ * POST one GraphQL request, with the access token when there is one.
+ * @param request - The GraphQL request.
+ * @param token - The access token, or null for an anonymous request.
+ * @param signal - Optional AbortSignal passed to fetch.
+ * @returns The fetch response.
+ */
+async function postGraphQL(
+  request: GraphQLRequest,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return fetch(GRAPHQL_ENDPOINT, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+/**
+ * Whether the backend refused the request because the caller's account is suspended.
+ * @param response - The fetch response; its body is read only when the status is 403.
+ * @returns True for a 403 whose error code is ACCOUNT_SUSPENDED.
+ */
+async function isSuspendedRefusal(response: Response): Promise<boolean> {
+  if (response.status !== 403) {
+    return false;
+  }
+  try {
+    const body: { errors?: Array<{ extensions?: { code?: string } }> } = await response
+      .clone()
+      .json();
+    return body.errors?.some(error => error.extensions?.code === 'ACCOUNT_SUSPENDED') ?? false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Execute a GraphQL query against the backend.
  * @param request - The GraphQL request object containing query, variables, and operation name.
@@ -42,21 +92,22 @@ export async function executeGraphQL<T = any>(
   // if (MSW_DEBUG) {
   //   console.log('🔧 executeGraphQL called with:', { endpoint: GRAPHQL_ENDPOINT, request });
   // }
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-  // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
-  const token = await getAccessToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  // A suspended account's token is refused on every request, public reads included, so those
+  // go anonymously instead; a mutation would only fail as "Authentication required" that way.
+  const isMutation = /^\s*mutation\b/.test(request.query);
+  if (isAccountSuspended() && isMutation) {
+    throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
   }
-  const response = await fetch(GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(request),
-    signal,
-  });
+  const token = isAccountSuspended() ? null : await getAccessToken();
+  let response = await postGraphQL(request, token, signal);
+
+  if (token && (await isSuspendedRefusal(response))) {
+    setAccountSuspended(true);
+    if (isMutation) {
+      throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
+    }
+    response = await postGraphQL(request, null, signal);
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
