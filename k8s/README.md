@@ -82,8 +82,8 @@ terraform apply
 `scripts/deploy/deploy.sh` deploys Keycloak from `k8s/manifests/keycloak/` (its own
 Postgres, then Keycloak with the `econ-graph` realm from `config/keycloak/`). Its
 credentials are never committed: they live in the Secret `econ-graph-keycloak`,
-written by `scripts/deploy/create-secrets.sh`, which `deploy.sh` runs. That script generates the admin and database passwords on its
-first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
+written by `scripts/deploy/create-secrets.sh`, which `deploy.sh` runs. That script generates the
+admin and database passwords on its first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
 does not exist.
 
 ```bash

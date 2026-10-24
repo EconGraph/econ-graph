@@ -70,7 +70,7 @@ diesel migration generate --migration-dir migrations/data add_something
 
 Give it a version later than every existing version in both sets. The version must be unique
 (rule 4, which CI checks); sorting after the rest is a separate rule that CI does not check. It
-matters because a new database runs migrations in version order, and because the squash listing
+matters because a new database runs each set's migrations in version order, and because the squash listing
 in "Squashing at a release" assumes unshipped app migrations sort after shipped ones. Run
 `python3 scripts/check_migration_order.py` before pushing.
 
@@ -153,7 +153,8 @@ diesel CLI stops there at the app baseline's guard.
 
 Before the split, `backend/migrations` held one baseline, `2026-10-21-000100_v4_0_baseline`,
 that builds both sets' tables. That is the baseline on `release/v4.0` and in `v4.0.0-rc.2`, and
-every database built from them has run it. It is split into two:
+every database built from `v4.0.0-rc.2`, or from `release/v4.0` after its last fold, has run it.
+It is split into two:
 
 - `migrations/data/2026-10-21-000100_v4_0_baseline` keeps the version and directory name, and
   builds only the data tables.
@@ -284,7 +285,8 @@ Steps:
    forward-ported to `main` under the same directory name) is left out of the list; renumber it
    after the newest shipped version first, so that it is squashed with the rest. A database
    that already ran it under the old version runs the renumbered copy again, so the renumbered
-   copy must be safe to re-run, or such databases are recreated. After a release branch is cut, check `main` as well as the release branch, and
+   copy must be safe to re-run, or such databases are recreated. After a release branch is cut,
+   check `main` as well as the release branch, and
    forward-port any release migration that `main` still lacks before forward-porting the squash.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
    constraints and indexes, final seed rows. Keep column order the same as the chain produced.
