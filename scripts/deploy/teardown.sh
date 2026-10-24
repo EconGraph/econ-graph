@@ -9,11 +9,16 @@
 # default this script asks for confirmation before that step; pass --yes to
 # skip that prompt (e.g. for CI).
 #
-# --yes does NOT also delete the kind cluster: on kind, the cluster's nodes
-# are the storage backing every PV, Retain policy included, so deleting the
-# cluster destroys the database and its backups regardless. That needs its
-# own --delete-cluster flag (or the interactive prompt), never implied by
-# --yes.
+# The PostgreSQL and Keycloak PostgreSQL data live on host btrfs subvolumes
+# (static PVs in k8s/manifests/host-storage.yaml, docs/deployment/HOST_STORAGE.md).
+# This script never deletes those PVs or their directories; deleting the
+# namespace only leaves them Released, and the next deploy.sh re-binds them.
+# Before removing anything it pg_dumps both databases to
+# ~/econgraph-backups/<UTC timestamp>/ (backup-kind-databases.sh).
+#
+# --yes does NOT also delete the kind cluster: the cluster's nodes still hold
+# the in-cluster backup volume and Grafana's data. That needs its own
+# --delete-cluster flag (or the interactive prompt), never implied by --yes.
 
 set -e
 
@@ -38,8 +43,18 @@ if ! kind get clusters | grep -q "econ-graph"; then
     exit 1
 fi
 
-# Set kubectl context
+# Use the kind cluster's own kubectl (on this host `kubectl` is microk8s').
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
+
+# Off-cluster copy of both databases first, while they are still running.
+if pod_running postgresql-0; then
+    backup_databases "$(new_backup_dir)"
+else
+    echo "ℹ️  postgresql-0 is not running; no pre-teardown backup taken."
+fi
 
 # Preserve both data and backup PVs before any resource or namespace deletion.
 # A failed patch stops teardown before it can remove the namespace.
@@ -73,12 +88,12 @@ echo "✅ Application resources removed successfully!"
 
 # Deleting the namespace deletes the PostgreSQL and backup PVC objects.
 # Their bound PVs have been set to Retain above, so their contents survive.
-# Still confirm because reattaching Released volumes requires manual work.
+# Still confirm: the in-cluster backup PV must be re-attached by hand.
 DELETE_NAMESPACE="${ASSUME_YES}"
 if [ "${ASSUME_YES}" != "true" ]; then
     echo ""
     echo "⚠️  Deleting the 'econ-graph' namespace deletes its PostgreSQL PVCs."
-    echo "   Their retained PVs must be manually reattached after deletion."
+    echo "   Their PVs are kept (Retain); the next deploy.sh re-binds the host-storage ones."
     read -p "Delete the namespace (and its PVCs)? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -94,16 +109,15 @@ else
     echo "   Delete it later with: kubectl delete -f k8s/manifests/namespace.yaml"
 fi
 
-# Ask if user wants to delete the cluster. This is separate from --yes: on
-# kind, the cluster's node holds every PV's actual data (Retain policy
-# included), so this step destroys the database and its backups no matter
-# what happened above.
+# Ask if user wants to delete the cluster. This is separate from --yes: the
+# databases survive it (host storage, plus the backup taken above), but the
+# in-cluster backup volume and Grafana's data do not.
 DELETE_CLUSTER="${DELETE_CLUSTER_FLAG}"
 if [ "${DELETE_CLUSTER_FLAG}" != "true" ]; then
     echo ""
-    echo "⚠️  Deleting the kind cluster destroys ALL its data, including the"
-    echo "   PostgreSQL volume and its backups (Retain policy doesn't help here:"
-    echo "   the cluster's node is what actually stores the data)."
+    echo "⚠️  Deleting the kind cluster destroys everything stored in its nodes:"
+    echo "   the in-cluster nightly backups and Grafana's data. The databases on"
+    echo "   /srv/econgraph are kept, and so is the backup taken above."
     read -p "Do you want to delete the entire kind cluster? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
