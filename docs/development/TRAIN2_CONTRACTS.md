@@ -114,6 +114,12 @@ pub async fn readiness_check(pool: &DatabasePool, set: MigrationSet) -> AppResul
   exactly this for both sets (DP-1).
 - The app baseline's guard stops on an existing `users` table; the data baseline's guard is
   unchanged (`data_sources`).
+- **Permanent versions.** `20261021000100` (data baseline) and `20261021000200` (app baseline,
+  `APP_BASELINE_VERSION` in `database.rs`) are never squashed, renumbered or removed: the
+  record-without-running step depends on them. Neither is any app migration that shipped in a
+  tag, such as `2026-10-24-000100_audit_logs_keep_on_user_delete` (v4.0.0). A release's app
+  squash replaces only the app migrations with versions after the newest shipped app version
+  that have not shipped (MIGRATIONS.md, DP-9).
 - `diesel.toml` `migrations_directory` is `migrations/app`. The diesel CLI and CI pass
   `--migration-dir migrations/data` for the data set. `schema.rs` stays one file covering both
   sets, printed from a database with both applied.
