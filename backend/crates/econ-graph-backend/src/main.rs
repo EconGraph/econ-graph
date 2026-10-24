@@ -15,7 +15,8 @@ use warp::{Filter, Reply as _};
 // Import from our new crates
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
-    create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool,
+    create_pool, models::admin::NewSecurityEvent, redact_database_url, AppError, AppResult, Config,
+    DatabasePool,
 };
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
@@ -352,7 +353,9 @@ async fn graphql_caller(
         }
         Err(BearerError::Inactive(id)) => {
             tracing::info!("refused a request from suspended account {id}");
-            record_suspended_refusal(pool, id, "/graphql").await;
+            NewSecurityEvent::suspended_account(id, "/graphql")
+                .record(pool)
+                .await;
             Err(GraphqlRefusal::Suspended)
         }
         Err(BearerError::Database(why)) => {
@@ -360,23 +363,6 @@ async fn graphql_caller(
             Err(GraphqlRefusal::AccountUnavailable)
         }
     }
-}
-
-/// Record a request refused because account `id` is suspended as a security event.
-async fn record_suspended_refusal(pool: &DatabasePool, id: uuid::Uuid, route: &str) {
-    use econ_graph_core::models::admin::{security_event_type, NewSecurityEvent};
-    NewSecurityEvent {
-        event_type: security_event_type::SUSPENDED_ACCOUNT.into(),
-        user_id: Some(id),
-        user_email: None,
-        severity: "medium".into(),
-        ip_address: None,
-        user_agent: None,
-        description: format!("refused a {route} request from a suspended account"),
-        metadata: Some(json!({ "route": route })),
-    }
-    .record(pool)
-    .await;
 }
 
 /// Stands in for `/mcp` when the `mcp` build flag is off: nothing answers there, so it

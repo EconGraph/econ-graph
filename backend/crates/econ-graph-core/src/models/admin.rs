@@ -345,6 +345,20 @@ pub mod security_event_type {
 }
 
 impl NewSecurityEvent {
+    /// A request to `route` refused because account `user_id` is suspended.
+    pub fn suspended_account(user_id: Uuid, route: &str) -> Self {
+        Self {
+            event_type: security_event_type::SUSPENDED_ACCOUNT.into(),
+            user_id: Some(user_id),
+            user_email: None,
+            severity: "medium".into(),
+            ip_address: None,
+            user_agent: None,
+            description: format!("refused a {route} request from a suspended account"),
+            metadata: Some(serde_json::json!({ "route": route })),
+        }
+    }
+
     /// Insert the event, logging rather than returning a failure: recording it must not
     /// change the reply to the request that raised it.
     pub async fn record(self, pool: &DatabasePool) {
