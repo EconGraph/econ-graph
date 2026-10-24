@@ -588,6 +588,28 @@ mod tests {
             .expect("the untouched schema should still be ready after the rollback");
     }
 
+    /// The two baselines are permanent versions (TRAIN2_CONTRACTS.md, section 4): databases have
+    /// them recorded, and `run_migrations` relies on both to recognise a single-baseline
+    /// database. A squash, renumbering or removal of either must fail here.
+    #[test]
+    fn each_set_embeds_its_permanent_baseline_version() {
+        use diesel::migration::{Migration, MigrationSource};
+
+        let versions = |set: MigrationSet| -> Vec<String> {
+            MigrationSource::<diesel::pg::Pg>::migrations(&set.migrations())
+                .expect("should read embedded migrations")
+                .iter()
+                .map(|m| m.name().version().to_string())
+                .collect()
+        };
+        let app = versions(MigrationSet::App);
+        let data = versions(MigrationSet::Data);
+        assert!(app.iter().any(|v| v == APP_BASELINE_VERSION), "{app:?}");
+        assert!(data.iter().any(|v| v == DATA_BASELINE_VERSION), "{data:?}");
+        assert_eq!(APP_BASELINE_VERSION, "20261021000200");
+        assert_eq!(DATA_BASELINE_VERSION, "20261021000100");
+    }
+
     /// A database created for one test from `DATABASE_URL`'s server and dropped when the test
     /// ends, so tests that need an empty database don't touch the shared one.
     struct ScratchDatabase {

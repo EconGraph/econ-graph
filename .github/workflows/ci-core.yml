@@ -859,6 +859,10 @@ jobs:
         run_group remaining_service \
           services::search_service \
           services::series_service
+        # The app and data migration sets (ECO-422): permanent baseline versions, each set on
+        # its own database, and the upgrade of a single-baseline database.
+        run_group migration_sets \
+          database::tests
 
         if [ ${#failed[@]} -gt 0 ]; then
           echo "::error::Failed test groups: ${failed[*]}"
