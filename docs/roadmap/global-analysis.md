@@ -220,7 +220,7 @@ Each numbered item is one small PR, stacked where it depends on the one before.
 4. **World Bank fetch.** Implement `fetch_series` for the curated WDI set, writing one
    dataset `wdi` with dimensions `indicator` (inline codes with a unit each) and `area`
    (the `countries` codelist, keyed by the reference file's `key`); measure `value`;
-   attributes `obs_status`, `decimal`. Vintages wait for train 3.
+   attributes `obs_status`, `decimal`. Vintages wait for train 4.
 5. **`crossSection` query** with `latest`, and tests on a seeded dataset. The filter pins
    every dimension other than `across`. `asOf` follows once the SQL `asOf` work (#184) merges.
    Indicator names and units come from the datasets GraphQL API (`DatasetDimension.codes`).
@@ -278,7 +278,7 @@ through MAP-2's loader, so its `key` column stays stable.
 ## Open questions
 
 1. Keep global events at all (decision 5, option B), or drop them (option C)? Not needed
-   before train 3.
+   before train 4.
 
 Settled for release 1 (2026-09-26): PR #154 is closed once MAP-6 ports its tests; the
 `datasets` metadata lands in train 1; the data area picks the curated WDI indicators.
