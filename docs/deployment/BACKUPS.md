@@ -23,7 +23,7 @@ root.
 | `/srv/econgraph/data-plane`  | `@econgraph-data-plane` | `pg/`: main Postgres (`econ_graph`, pod `postgresql-0`); `objects/`: future Parquet/Iceberg |
 | `/srv/econgraph/app-prod`    | `@econgraph-app-prod`   | `keycloak-pg/` (pod `keycloak-postgres-0`, db `keycloak`); later the app DB |
 | `/srv/econgraph/snapshots`   | `@econgraph-snapshots`  | read-only snapshots of the two above                            |
-| `/srv/econgraph-backups`     | `@econgraph-backups` on the 870 pool | `btrbk/` (root, 0700): btrbk send/receive target; `dumps/`: nightly logical dumps. Created by `scripts/host/setup-backup-pool.sh` |
+| `/srv/econgraph-backups`     | `@econgraph-backups` on the 870 pool | `snapshots/` (root, 0700): copies of every snapshot, by send/receive; `dumps/`: nightly logical dumps. Created by `scripts/host/setup-backup-pool.sh` |
 | `~/econgraph-backups/`       | (inside `@home`)        | nightly logical dumps until `/srv/econgraph-backups/dumps` exists |
 | `~/econgraph-branches/`      | (inside `@home`)        | writable clones of a snapshot for a branch's data plane         |
 
@@ -36,8 +36,8 @@ copy of `/home` (about 1.57 TiB) that Joe decides about separately; about
 2.59 TiB is free. The backup target is a new top-level subvolume
 `@econgraph-backups` beside it. Nothing here ever wipes, reformats or
 touches `@home` or its snapshots. Because the pool is a different filesystem
-from `/home`, snapshots reach it only by `btrfs send`/`receive` (btrbk, as
-root), never by copying files.
+from `/home`, snapshots reach it only by `btrfs send`/`receive`
+(`scripts/host/backup-snapshots.sh`, as root), never by copying files.
 
 ### File ownership
 
@@ -71,47 +71,106 @@ That only holds while these rules do:
   consistent with each other, which is fine because nothing joins across
   them.
 
-## What each piece does
+## Nothing is deleted automatically
 
-| Piece | Runs as | When | What |
+No timer, service or script that runs on a schedule deletes a snapshot, a
+dump or a backup copy. Everything only accumulates:
+
+- snapshots in `/srv/econgraph/snapshots` (hourly and pre-change),
+- their copies on the backup pool in `/srv/econgraph-backups/snapshots`,
+- dump directories (a failed dump run is kept too, as `<stamp>.failed`),
+- the off-site restic repository (the wrapper never runs `forget` or
+  `prune`, and refuses to pass them through).
+
+Space is watched instead: see [Space alerts](#space-alerts). Deleting is a
+manual step Joe takes, described in [Deleting by hand](#deleting-by-hand).
+
+(The old in-cluster CronJob, which is not part of this setup, still prunes its own dumps
+after 14 days; see
+[below](#the-in-cluster-postgres-backup-cronjob).)
+
+## What runs when
+
+| When | What | Runs as | Unit |
 |---|---|---|---|
-| btrbk (`scripts/backup/btrbk/btrbk.conf`, installed by `scripts/host/install-btrbk.sh`) | root, system timer | hourly | read-only snapshots of `data-plane` and `app-prod` into `snapshots/`, and send/receive of them to the 870 pool once that is set up |
-| `scripts/backup/snapshot-now.sh <reason>` | jmalicki | before any risky change | extra read-only snapshot that btrbk never prunes |
-| `scripts/backup/dump-databases.sh` | jmalicki, `econgraph-dump.timer` | nightly 10:00 UTC | `pg_dump -Fc` of `econ_graph` and `keycloak`, verified, pruned after 14 days |
-| `scripts/backup/restore-drill.sh` | jmalicki, `econgraph-restore-drill.timer` | Sundays 11:00 UTC | restores the newest dump into a throwaway Postgres 18 container and checks it |
-| `scripts/backup/check-freshness.sh` | jmalicki, `econgraph-backup-freshness.timer` | hourly | fails if the newest snapshot, verified dump or passing drill is too old |
-| `scripts/backup/offsite-restic.sh` | jmalicki, `econgraph-offsite.timer` | daily 10:45 UTC | restic copy of the verified dumps off the machine (**not configured yet**) |
-| `scripts/backup/branch-clone.sh` | jmalicki | by hand | writable clone of a snapshot for a branch |
-| `scripts/backup/restore-dump.sh` | jmalicki | by hand | restore a dump into the live cluster |
-| `scripts/host/restore-snapshot.sh` | root | by hand | swap a live subvolume for a snapshot |
-| `scripts/host/delete-snapshots.sh` | root | by hand | delete pre-change snapshots and set-aside subvolumes |
+| hourly, on the hour | `scripts/host/backup-snapshots.sh`: read-only snapshots of `data-plane` and `app-prod` into `/srv/econgraph/snapshots/<name>.<UTC stamp>`, then incremental `btrfs send`/`receive` of every snapshot not yet on the backup pool into `/srv/econgraph-backups/snapshots` (skipped with a message while the pool is not mounted) | root | `econgraph-backup-snapshots.timer` (system; installed by `scripts/host/install-backup-timer.sh`) |
+| hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | jmalicki | `econgraph-backup-freshness.timer` (user) |
+| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph` and `keycloak` | jmalicki | `econgraph-dump.timer` (user) |
+| daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (**not configured yet**; the unit does nothing until `restic.env` exists) | jmalicki | `econgraph-offsite.timer` (user) |
+| Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | jmalicki | `econgraph-restore-drill.timer` (user) |
+| before a risky change | `scripts/backup/snapshot-now.sh <reason>` | jmalicki | by hand |
+| when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | jmalicki | by hand |
+| when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
 re-run. They are listed in order in [Needs sudo (Joe)](#needs-sudo-joe).
+The root timer runs a root-owned copy at
+`/usr/local/sbin/econgraph-backup-snapshots`, never the checkout, so root
+never executes a file the jmalicki account can edit.
 
 The user scripts read optional overrides from
-`~/.config/econgraph/backup.env` (plain `KEY=value`): `BACKUP_ROOT`,
-`BACKUP_RETENTION_DAYS`, the freshness limits, `FRESHNESS_SKIP_SNAPSHOTS=1`
-(until btrbk is running), and so on; see `scripts/backup/lib.sh` for the
-full list.
-
-## Retention
-
-| What | Kept |
-|---|---|
-| btrbk snapshots on the NVMe array | every hourly one for 48h, then one a day for 30 days, then one a month for 12 months (`snapshot_preserve 48h 30d 12m`) |
-| pre-change snapshots (`<name>.pre-<stamp>-<reason>`) | until deleted with `scripts/host/delete-snapshots.sh`; btrbk ignores them |
-| btrbk copies on the 870 pool (once enabled) | 14 daily, 8 weekly, 24 monthly |
-| logical dumps | 14 days (`BACKUP_RETENTION_DAYS`); the newest verified dump is never pruned |
-| off-site restic (once configured) | 14 daily, 8 weekly, 12 monthly |
+`~/.config/econgraph/backup.env` (plain `KEY=value`): `BACKUP_ROOT`, the
+freshness and space limits, `FRESHNESS_SKIP_SNAPSHOTS=1` (until the hourly
+timer is installed), and so on; see `scripts/backup/lib.sh` and the header
+of `check-freshness.sh` for the full list.
 
 Snapshots on the NVMe array share its disks: they protect against bad
 migrations, mistaken recrawls and deleted rows, not against losing the
 array. Until `setup-backup-pool.sh` has run, the dumps also sit on the same
-array (in `/home`). The 870 pool (btrbk send/receive plus the dumps) and the
+array (in `/home`). The 870 pool (snapshot copies plus the dumps) and the
 off-site copy are what cover losing the NVMe array; the 870 pool is in the
 same machine, so only the off-site copy covers losing the machine.
+
+## Space alerts
+
+Because nothing is pruned, `check-freshness.sh` also fails (exit 1, a
+`LOWSPACE` line, a failed `econgraph-backup-freshness.service`) when free
+space drops below a threshold, and reports how big the backups are:
+
+| Check | Default | Variable |
+|---|---|---|
+| free space on the `/home` filesystem (live data and local snapshots) | at least 15% | `HOME_MIN_FREE_PCT` |
+| free space on the backup pool (when mounted) | at least 15% | `POOL_MIN_FREE_PCT` |
+| size of `/srv/econgraph/snapshots`, of the dumps directory and of `/srv/econgraph-backups/snapshots` | reported (`SIZE` lines and metrics), no threshold | |
+
+Free space comes from `df` (an estimate on btrfs, fine for a threshold). The
+snapshot directories' contents are not readable by jmalicki, so their sizes
+come from `/var/lib/econgraph/backup-sizes.env`, which the root hourly job
+rewrites at most once a day with `btrfs filesystem du -s` (shared extents
+counted once, so the number is the space really used). The dumps directory
+is measured directly with `du`.
+
+The local snapshots grow slowly while the data changes little (a snapshot
+costs only the blocks changed since the previous one), but a recrawl or a
+big migration rewrites a lot, and every hourly snapshot taken during it
+keeps its own copy of the old blocks.
+
+## Deleting by hand
+
+Only Joe deletes, only by hand, with
+`scripts/host/delete-snapshots.sh` (never from a timer: it refuses to run
+without a terminal):
+
+```sh
+sudo scripts/host/delete-snapshots.sh --list                     # local snapshots
+sudo scripts/host/delete-snapshots.sh --list --pool              # copies on the backup pool
+sudo scripts/host/delete-snapshots.sh --dry-run data-plane.20261101T030000Z ...
+sudo scripts/host/delete-snapshots.sh data-plane.20261101T030000Z ...
+sudo scripts/host/delete-snapshots.sh --pool data-plane.20261101T030000Z ...
+sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-20261102T101500Z
+```
+
+It prints every subvolume it would delete, warns when one is the newest of
+its series (the next hourly copy to the pool then uses an older common
+parent, or does a full send if none is left), and deletes only after you
+type `delete <count>`. Keep at least one snapshot of each series on both
+sides so the hourly copy stays incremental. `*.incomplete-*` leftovers on the
+pool (from a receive that failed and was set aside) can be deleted the same
+way with `--pool`.
+
+Dumps are plain directories owned by jmalicki: remove old ones with `rm -r`
+if ever needed. Never remove the newest `VERIFIED` one.
 
 ## Timers and installation
 
@@ -129,12 +188,14 @@ freshness timers; the off-site timer only once `restic.env` exists. User
 timers need lingering to run while jmalicki is logged out; on threadripper
 `loginctl show-user jmalicki -p Linger` already reports `Linger=yes`.
 
-Until btrbk is running, put `FRESHNESS_SKIP_SNAPSHOTS=1` in
-`~/.config/econgraph/backup.env`, or the hourly freshness check fails on the
-missing snapshots (which is accurate, but noisy).
+Until the root hourly timer is installed, put `FRESHNESS_SKIP_SNAPSHOTS=1`
+in `~/.config/econgraph/backup.env`, or the hourly freshness check fails on
+the missing snapshots (which is accurate, but noisy).
 
 Check on them with `systemctl --user list-timers 'econgraph-*'`,
-`systemctl --user --failed` and `journalctl --user -u econgraph-dump`.
+`systemctl --user --failed` and `journalctl --user -u econgraph-dump`; the
+root job with `systemctl list-timers econgraph-backup-snapshots.timer` and
+`journalctl -u econgraph-backup-snapshots`.
 
 ## Pre-change snapshot
 
@@ -149,8 +210,8 @@ scripts/backup/dump-databases.sh
 `snapshot-now.sh` snapshots both `data-plane` and `app-prod` (or one, with
 `--only data-plane`) as `<name>.pre-<UTC stamp>-<reason>`, logs it to
 `~/.local/state/econgraph/snapshots.log`, and needs no sudo. Postgres keeps
-running. When the change has been accepted, delete the snapshot:
-`sudo scripts/host/delete-snapshots.sh data-plane.pre-...`.
+running. The next hourly run copies it to the backup pool with the others.
+Like every snapshot it is kept until Joe deletes it by hand.
 
 ## Nightly dumps
 
@@ -170,12 +231,13 @@ host's `kubectl` is a microk8s wrapper) and writes:
 Each archive is checked with `pg_restore --list` and a full read-through
 (`pg_restore --file=/dev/null`), using the `postgres:18` image because the
 host's `pg_restore` is older than the server. The directory is built as
-`<stamp>.partial` and renamed only when everything passed; any failure
-removes it and exits non-zero. `--target-dir` (or `BACKUP_ROOT`) moves the
-output. By default the dumps go to `/srv/econgraph-backups/dumps` as soon as
-that directory exists and is writable, and to `~/econgraph-backups`
-before that; older dumps left in `~/econgraph-backups` are not pruned
-automatically after the switch.
+`<stamp>.partial` and renamed to `<stamp>` only when everything passed; a
+failure renames it to `<stamp>.failed` (kept for inspection, never mistaken
+for a good dump) and exits non-zero. No dump is ever deleted or pruned.
+`--target-dir` (or `BACKUP_ROOT`) moves the output. By default the dumps go
+to `/srv/econgraph-backups/dumps` as soon as that directory exists and is
+writable, and to `~/econgraph-backups` before that; the dumps already in
+`~/econgraph-backups` stay there.
 
 ## Restore drill
 
@@ -207,23 +269,27 @@ RESTORE DRILL PASS: series=10528 data_points=503001 sources=8 keycloak: realms=2
 ## Freshness check
 
 `check-freshness.sh` prints one line per check and exits 1 if any is
-missing or stale:
+missing or stale, or if space is low ([Space alerts](#space-alerts)):
 
 | Check | Default limit | Variable |
 |---|---|---|
-| newest `data-plane` and `app-prod` snapshot (btrbk or pre-change) | 3h | `SNAPSHOT_MAX_AGE_HOURS` |
+| newest local `data-plane` and `app-prod` snapshot (hourly or pre-change) | 3h | `SNAPSHOT_MAX_AGE_HOURS` |
+| newest snapshot copied to the backup pool (when mounted), and the last copy didn't fail | 3h | `POOL_COPY_MAX_AGE_HOURS` |
 | newest `VERIFIED` dump | 26h | `DUMP_MAX_AGE_HOURS` |
 | newest passing drill | 192h (8 days) | `DRILL_MAX_AGE_HOURS` |
 
 Snapshot ages come from the snapshot names, since reading btrfs creation
-times needs root. `--textfile FILE` also writes
-`econgraph_backup_last_success_timestamp_seconds{kind=...}` and
-`econgraph_backup_fresh{kind=...}` in node_exporter textfile format (the
-timer writes `~/.local/state/econgraph/backup-freshness.prom`). Nothing
-scrapes it yet: `k8s/monitoring` has Prometheus but no node_exporter or
-Pushgateway, and the in-cluster Prometheus can't see host files. Wiring it
-up means adding a node_exporter with `--collector.textfile.directory`
-pointed there, which is separate work.
+times needs root. The backup pool's snapshot directory is root-only, so its
+state comes from `/var/lib/econgraph/backup-snapshots.status`, written by
+the root hourly job. `--textfile FILE` also writes
+`econgraph_backup_last_success_timestamp_seconds`, `econgraph_backup_fresh`,
+`econgraph_backup_free_bytes`, `econgraph_backup_free_ratio` and
+`econgraph_backup_size_bytes` in node_exporter textfile format (the timer
+writes `~/.local/state/econgraph/backup-freshness.prom`). Nothing scrapes it
+yet: `k8s/monitoring` has Prometheus but no node_exporter or Pushgateway,
+and the in-cluster Prometheus can't see host files. Wiring it up means
+adding a node_exporter with `--collector.textfile.directory` pointed there,
+which is separate work.
 
 ## Off-site
 
@@ -244,17 +310,24 @@ Backblaze B2, S3-compatible storage, a restic REST server):
    `... check`.
 4. Re-run `scripts/backup/install-user-units.sh` to enable the daily timer.
 
-Only verified dump directories are uploaded. Snapshots are not sent off-site:
-the dumps are a fraction of their size and restore anywhere.
+Only verified dump directories are uploaded, and nothing is ever forgotten
+or pruned from the repository: `offsite-restic.sh` has no `forget` or
+`prune`, and `offsite-restic.sh restic forget|prune ...` is refused.
+Snapshots are not sent off-site: the dumps are a fraction of their size and
+restore anywhere.
 
 ## Restore from a snapshot
 
-Use this to roll production back to a point in time (hourly granularity
-for two days, daily for a month, monthly for a year), e.g. after a bad
+Use this to roll production back to a point in time (any hour since the
+hourly timer was installed, or any pre-change snapshot), e.g. after a bad
 migration. Everything written since the snapshot is lost; the current data
 is set aside, not deleted.
 
-1. Pick the snapshot: `ls /srv/econgraph/snapshots/`.
+1. Pick the snapshot: `ls /srv/econgraph/snapshots/`. If the local one is
+   gone (or the NVMe array was lost and rebuilt), use the copy on the backup
+   pool: `sudo scripts/host/delete-snapshots.sh --list --pool` lists them,
+   and step 3 takes `--from-pool`, which first receives that snapshot back
+   into `/srv/econgraph/snapshots`.
 2. Stop everything that writes, then Postgres (no sudo):
    ```sh
    k() { docker exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
@@ -262,8 +335,8 @@ is set aside, not deleted.
    k scale statefulset/postgresql --replicas=0      # data-plane
    # app-prod: k scale deployment/keycloak statefulset/keycloak-postgres --replicas=0
    ```
-3. `sudo scripts/host/restore-snapshot.sh --dry-run <snapshot>`, then
-   without `--dry-run`. It refuses while the Postgres pod still exists,
+3. `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
+   then without `--dry-run`. It refuses while the Postgres pod still exists,
    unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
@@ -276,9 +349,9 @@ is set aside, not deleted.
    skipping this starts Postgres on the old data. Wait for the node to be
    `Ready` (`k get nodes`) before the next step.
 5. Scale Postgres back to 1, check the data, then the backend and crawler.
-6. Once satisfied, delete the set-aside subvolume:
-   `sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`.
-   To undo the restore instead, the set-aside subvolume is the old data.
+6. The set-aside subvolume stays until Joe deletes it by hand
+   (`sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`).
+   To undo the restore instead, it is the old data.
 
 ## Restore from a dump
 
@@ -313,7 +386,7 @@ takes no space until written to and never touches production:
 
 ```sh
 scripts/backup/branch-clone.sh create my-branch                  # newest data-plane snapshot
-scripts/backup/branch-clone.sh create my-branch data-plane.20261024T040000+0000
+scripts/backup/branch-clone.sh create my-branch data-plane.20261024T040000Z
 scripts/backup/branch-clone.sh list
 scripts/backup/branch-clone.sh delete my-branch
 ```
@@ -329,10 +402,12 @@ from inside a container and then `rmdir`s the empty subvolume.
 
 `k8s/manifests/postgres-backup-cronjob.yaml` (with
 `postgres-backup-configmap.yaml` and `postgres-backup-pvc.yaml`) dumps
-`econ_graph` nightly at 08:00 UTC to the `postgres-backup-data` PVC, and
-verifies and prunes like `dump-databases.sh` does. It is **kept for now**,
-unchanged, as an independent second copy while the host-side dumps prove
-themselves. It is not pointed at the new layout because:
+`econ_graph` nightly at 08:00 UTC to the `postgres-backup-data` PVC and
+verifies each dump. Unlike everything in this runbook it **prunes its own
+dumps after 14 days** (`BACKUP_RETENTION_DAYS` in the CronJob). It is kept
+for now, unchanged, as an
+independent second copy while the host-side dumps prove themselves. It is
+not pointed at the new layout because:
 
 - its PVC is kind local-path storage inside the kind node container: deleting
   or recreating the kind cluster destroys it together with the database,
@@ -345,7 +420,8 @@ themselves. It is not pointed at the new layout because:
   freshness check.
 
 Retire it (remove the three manifests and their references in
-`scripts/deploy/`) once the host timers have run cleanly for two weeks.
+`scripts/deploy/`) once the host timers have run cleanly for two weeks; or,
+if it stays, set its `BACKUP_RETENTION_DAYS` to `0` so it stops pruning too.
 
 ## Unprivileged btrfs: what works without root
 
@@ -368,7 +444,7 @@ into `/srv/econgraph/snapshots`; `/home` is not mounted with
 | `rmdir` of an empty subvolume you own | works, and deletes the subvolume |
 | `rm -rf` of a subvolume holding Postgres files (owned by the rootless-Docker mapped UID 100998) | fails: `Permission denied`; emptying it from inside a rootless container works |
 | `btrfs subvolume show`, `btrfs subvolume list` | fail: `Operation not permitted` (tree search needs root) |
-| `btrfs send` | fails: `Operation not permitted` (so `btrfs receive` and btrbk's targets are root-only too) |
+| `btrfs send` | fails: `Operation not permitted` (so copying to the backup pool is root-only) |
 
 Not tested, from the kernel source: snapshotting a subvolume someone else
 owns fails with `EPERM` (snapshots are limited to the caller's own
@@ -380,20 +456,21 @@ empty from a rootless container, `rmdir`); none were left behind.
 
 Consequences:
 
-- `snapshot-now.sh` and `branch-clone.sh` need no sudo; btrbk does (it uses
-  `subvolume show`/`list` and `send`), so it runs as a root system timer.
+- `snapshot-now.sh` and `branch-clone.sh` need no sudo. The hourly job
+  could take its snapshots as jmalicki, but the copy to the backup pool
+  needs `btrfs send`/`receive`, so it runs as a root system timer.
 - **`user_subvol_rm_allowed` is not needed and should stay off.** Nothing
-  run as jmalicki needs `btrfs subvolume delete`: btrbk prunes as root,
-  branch clones are removed with `rmdir`, and the rest goes through
-  `scripts/host/delete-snapshots.sh`. Turning it on would let any process
+  run as jmalicki needs `btrfs subvolume delete`: nothing is deleted
+  automatically, branch clones are removed with `rmdir`, and manual
+  deletion goes through `scripts/host/delete-snapshots.sh`. Turning it on would let any process
   running as jmalicki delete a whole subvolume, including a live one, with
   one command.
 - Local snapshots are not protected from jmalicki: anything running as
   jmalicki can flip a snapshot writable and empty it through a container.
   They guard against bad changes, not against a hostile or runaway process
-  in this account. The 870 pool target (`/srv/econgraph-backups/btrbk`,
-  root-only, mode 0700) and the off-site copy are the copies that account
-  can't reach.
+  in this account. The copies on the 870 pool
+  (`/srv/econgraph-backups/snapshots`, root-only, mode 0700) and the
+  off-site copy are the ones that account can't reach.
 
 ## Needs sudo (Joe)
 
@@ -404,30 +481,32 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    `@econgraph-data-plane`, `@econgraph-app-prod` and
    `@econgraph-snapshots`, adds their `/etc/fstab` lines, mounts them and
    chowns each subvolume root to jmalicki (required for `snapshot-now.sh`).
-2. **Install btrbk and run it hourly**: `sudo scripts/host/install-btrbk.sh`.
-   Runs `apt-get install btrbk`, installs `scripts/backup/btrbk/btrbk.conf`
-   as `/etc/btrbk/btrbk.conf` (keeping any different existing file), adds
-   `/etc/systemd/system/btrbk.timer.d/econgraph-hourly.conf` (the package's
-   timer is daily), validates with `btrbk dryrun`, enables `btrbk.timer`
-   and takes the first snapshots. Needs step 1 done.
+2. **Install the hourly snapshot and copy job**:
+   `sudo scripts/host/install-backup-timer.sh --dry-run`, then
+   `sudo scripts/host/install-backup-timer.sh --run-now`. Installs a
+   root-owned copy of `scripts/host/backup-snapshots.sh` as
+   `/usr/local/sbin/econgraph-backup-snapshots`, writes
+   `/etc/systemd/system/econgraph-backup-snapshots.service` and `.timer`
+   (`ON_CALENDAR="hourly"` at the top of the installer), enables the timer,
+   and with `--run-now` takes the first snapshots immediately. No packages
+   are installed. Running the installer is Joe's approval of the timer.
+   Re-run it after merging changes to `backup-snapshots.sh`. Needs step 1.
 3. **Set up the backup subvolume on the 870 pool**:
-   `sudo scripts/host/setup-backup-pool.sh`. Creates the new top-level
-   subvolume `@econgraph-backups` (never touching `@home` or its
-   snapshots; it lists them so you can see they are left alone), adds its
-   `/etc/fstab` line
+   `sudo scripts/host/setup-backup-pool.sh --dry-run`, then without
+   `--dry-run`. Creates the new top-level subvolume `@econgraph-backups`
+   (never touching `@home` or its snapshots; it lists them so you can see
+   they are left alone), adds its `/etc/fstab` line
    (`UUID=a1e61098-... /srv/econgraph-backups btrfs subvol=/@econgraph-backups,compress=zstd:3,ssd,discard=async,space_cache=v2,noatime,nofail,x-systemd.device-timeout=30s 0 0`;
    `nofail` so a missing disk never blocks boot), mounts it, chowns the
-   subvolume root to jmalicki, and creates `btrbk/` (root, 0700) and
+   subvolume root to jmalicki, and creates `snapshots/` (root, 0700) and
    `dumps/` (jmalicki). `scripts/host/inspect-sata-pool.sh` (same branch as
-   step 1) shows the pool read-only beforehand.
-4. **Turn on send/receive to the pool**: re-run
-   `sudo scripts/host/install-btrbk.sh`. It enables the target whenever
-   `/srv/econgraph-backups/btrbk` is mounted (`--no-backup-pool` keeps it
-   off), so steps 2 and 4 can also be one run after step 3. The nightly
-   dumps move to `/srv/econgraph-backups/dumps` by themselves.
-5. **By hand, when needed**: `sudo scripts/host/restore-snapshot.sh` (restore
-   from a snapshot) and `sudo scripts/host/delete-snapshots.sh` (remove
-   pre-change snapshots and set-aside subvolumes).
+   step 1) shows the pool read-only beforehand. From the next hourly run on,
+   every snapshot is copied there, and the nightly dumps go to
+   `/srv/econgraph-backups/dumps`, with nothing else to change.
+4. **By hand, when needed**: `sudo scripts/host/restore-snapshot.sh` (restore
+   from a snapshot, local or `--from-pool`) and
+   `sudo scripts/host/delete-snapshots.sh` (the only thing that deletes;
+   see [Deleting by hand](#deleting-by-hand)).
 
 Not needed:
 
@@ -435,5 +514,6 @@ Not needed:
 - `user_subvol_rm_allowed`: see above; leave it off.
 - Anything for the dumps, drill, freshness check, off-site copy or branch
   clones: they run as jmalicki.
-- Anything for pre-change snapshots: `snapshot-now.sh` runs as jmalicki
-  (only deleting them later goes through `delete-snapshots.sh`).
+- Anything for pre-change snapshots: `snapshot-now.sh` runs as jmalicki.
+- Any package: everything uses `btrfs-progs`, Docker and restic, which are
+  already installed.
