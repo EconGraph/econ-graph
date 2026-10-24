@@ -6,4 +6,6 @@ file = "src/schema.rs"
 custom_type_derives = ["diesel::query_builder::QueryId"]
 
 [migrations_directory]
-dir = "migrations"
+# The app set. The data set is migrations/data: pass `--migration-dir migrations/data`, and run it
+# before this one on a database that holds both (docs/development/MIGRATIONS.md).
+dir = "migrations/app"

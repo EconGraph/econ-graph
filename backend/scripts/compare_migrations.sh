@@ -9,6 +9,12 @@
 #   ADMIN_URL  a PostgreSQL 18 superuser connection to an existing database, used to create and
 #              drop the two scratch databases (default postgres://postgres@127.0.0.1:5432/postgres)
 #
+# A migrations directory that holds data/ and app/ is applied as
+# the backend applies it to one database: the data set, then the app set, skipping a version the
+# data set already applied (00000000000000_diesel_initial_setup is in both), as Diesel does with
+# one shared __diesel_schema_migrations table. A directory without them (a ref before the split) is
+# applied as one set. Either layout works on either side.
+#
 # Each up.sql runs in its own transaction, in version order, as Diesel runs them. In seed rows,
 # random ids (UUID v4/v7) are replaced by the table and name of the row they identify, and
 # timestamps within the last day are masked; fixed ids such as the UUIDv5 series ids are compared
@@ -39,15 +45,34 @@ db_url() {
 # Applies every up.sql in directory $1 to database URL $2, in the order Diesel would. The version
 # is computed as Diesel does (migrations_internals::version_from_string): the directory name up to
 # the first "_", without dashes.
+# Versions already applied to the database are listed in file $3, one per line, and skipped; the
+# versions this applies are appended to it.
 apply_chain() {
-    local dir=$1 url=$2 name
-    for name in $(cd "$dir" && for d in */; do d=${d%/}; [ -f "$d/up.sql" ] && printf '%s %s\n' "$(echo "${d%%_*}" | tr -d -)" "$d"; done | sort | cut -d' ' -f2); do
+    local dir=$1 url=$2 applied=$3 version name
+    while read -r version name; do
+        if grep -qx "$version" "$applied"; then
+            continue
+        fi
         psql "$url" -q -X -1 -v ON_ERROR_STOP=1 -f "$dir/$name/up.sql" >"$work/apply.log" 2>&1 || {
             echo "Applying $name from $dir failed:" >&2
             cat "$work/apply.log" >&2
             exit 1
         }
-    done
+        echo "$version" >>"$applied"
+    done < <(cd "$dir" && for d in */; do d=${d%/}; [ -f "$d/up.sql" ] && printf '%s %s\n' "$(echo "${d%%_*}" | tr -d -)" "$d"; done | sort)
+}
+
+# Applies migrations directory $1 to database URL $2: data/ then app/ when it has them (see the
+# header), otherwise the directory itself.
+apply_migrations() {
+    local dir=$1 url=$2 applied
+    applied=$(mktemp "$work/applied.XXXXXX")
+    if [ -d "$dir/data" ] && [ -d "$dir/app" ]; then
+        apply_chain "$dir/data" "$url" "$applied"
+        apply_chain "$dir/app" "$url" "$applied"
+    else
+        apply_chain "$dir" "$url" "$applied"
+    fi
 }
 
 # Writes the schema of database URL $1 to $2.schema and its rows, masked, to $2.rows.
@@ -116,8 +141,8 @@ psql "$admin_url" -q -c "CREATE DATABASE $old_db" -c "CREATE DATABASE $new_db" >
 
 mkdir -p "$work/old"
 git -C "$backend_dir" archive "$old_ref" migrations | tar -x -C "$work/old"
-apply_chain "$work/old/migrations" "$(db_url "$old_db")"
-apply_chain "$new_dir" "$(db_url "$new_db")"
+apply_migrations "$work/old/migrations" "$(db_url "$old_db")"
+apply_migrations "$new_dir" "$(db_url "$new_db")"
 
 snapshot "$(db_url "$old_db")" "$work/old"
 snapshot "$(db_url "$new_db")" "$work/new"

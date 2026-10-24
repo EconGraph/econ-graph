@@ -138,12 +138,14 @@ pub enum Command {
     },
 }
 
-/// Version of the migration that creates `seed_reference_codes` (the v4.0.0 baseline,
-/// `2026-10-21-000100_v4_0_baseline`); every seed migration's version must be later.
+/// Version of the migration that creates `seed_reference_codes` (the v4.0.0 data baseline,
+/// `migrations/data/2026-10-21-000100_v4_0_baseline`); every seed migration's version must be
+/// later.
 const SEED_FUNCTION_VERSION: &str = "2026-10-21-000100";
 
-/// `backend/migrations` of the checkout this binary was built from.
-const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
+/// `backend/migrations/data` of the checkout this binary was built from: seed migrations belong to
+/// the data set (docs/development/MIGRATIONS.md).
+const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations/data");
 
 /// Parses a percentage in `[0, 100]`.
 fn parse_percent(s: &str) -> Result<f64, String> {
@@ -343,6 +345,20 @@ pub async fn record_reference_seeds(
     skip_failed: bool,
     recorded_at: DateTime<Utc>,
 ) -> anyhow::Result<String> {
+    // Seed migrations belong to the data set, and their versions must not collide with the app
+    // set's (a database holding both shares one migrations table), so require the set layout
+    // (`.../data` next to `.../app`) before downloading anything.
+    let app_dir = match (
+        migrations_dir.file_name().and_then(|n| n.to_str()),
+        migrations_dir.parent(),
+    ) {
+        (Some("data"), Some(root)) if root.join("app").is_dir() => root.join("app"),
+        _ => bail!(
+            "{} is not a data migration set: --migrations-dir must be the data/ directory next to \
+             an app/ directory (backend/migrations/data)",
+            migrations_dir.display()
+        ),
+    };
     let source = adapter.id();
     let lists = adapter.code_lists(keys);
     if lists.is_empty() {
@@ -384,10 +400,22 @@ pub async fn record_reference_seeds(
         }
     }
     // Diesel identifies a migration by its version alone, so a second migration with this
-    // version would be skipped on any database that already ran the first.
-    if let Some((taken, _)) = names
+    // version would be skipped on any database that already ran the first. That includes the app
+    // set next to the data set: a database holding both shares one migrations table.
+    let mut taken_names: Vec<String> = names.iter().map(|(n, _)| n.clone()).collect();
+    for entry in
+        std::fs::read_dir(&app_dir).with_context(|| format!("reading {}", app_dir.display()))?
+    {
+        let path = entry?.path();
+        if let (true, Some(n)) = (path.is_dir(), path.file_name().and_then(|n| n.to_str())) {
+            taken_names.push(n.to_string());
+        }
+    }
+    // Compared as Diesel compares them: the name up to the first "_", without dashes.
+    let diesel_version = |n: &str| n.split('_').next().unwrap_or("").replace('-', "");
+    if let Some(taken) = taken_names
         .iter()
-        .find(|(n, _)| n.split('_').next() == Some(version.as_str()))
+        .find(|n| diesel_version(n) == diesel_version(&version))
     {
         bail!("migration version {version} is already taken by {taken}; record again");
     }
@@ -665,7 +693,7 @@ mod tests {
                 skip_failed: false,
             }
         );
-        // The default is this checkout's migrations directory.
+        // The default is this checkout's data migrations directory.
         assert!(Path::new(DEFAULT_MIGRATIONS_DIR)
             .join("00000000000000_diesel_initial_setup")
             .is_dir());

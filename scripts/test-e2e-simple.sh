@@ -121,7 +121,8 @@ fi
 
 # Test database migration
 print_status "Testing database migration..."
-if diesel migration run; then
+if diesel migration run --migration-dir migrations/data \
+    && diesel migration run --migration-dir migrations/app; then
     print_success "Database migration successful!"
 else
     print_error "Database migration failed!"

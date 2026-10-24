@@ -37,15 +37,17 @@ async fn create_test_database_pool() -> econ_graph_core::database::DatabasePool 
     // Wait for PostgreSQL to be ready
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-    // Run migrations
-    use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-    const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/");
+    // Run migrations: both sets in one database, data then app, as `run_migrations` does.
+    use diesel_migrations::MigrationHarness;
+    use econ_graph_core::database::{APP_MIGRATIONS, DATA_MIGRATIONS};
 
     let mut conn =
         diesel::PgConnection::establish(&database_url).expect("Failed to connect to test database");
 
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
+    conn.run_pending_migrations(DATA_MIGRATIONS)
+        .expect("Failed to run the data migrations");
+    conn.run_pending_migrations(APP_MIGRATIONS)
+        .expect("Failed to run the app migrations");
 
     // Use the core crate's database pool creation function
     econ_graph_core::database::create_pool(&database_url)

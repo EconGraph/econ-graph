@@ -3,7 +3,8 @@
 // See LICENSE file for complete terms and conditions.
 
 use diesel::prelude::*;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_migrations::MigrationHarness;
+use econ_graph_core::database::{APP_MIGRATIONS, DATA_MIGRATIONS};
 use econ_graph_core::redact_database_url;
 use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
@@ -12,8 +13,15 @@ use std::process::Command;
 use testcontainers::core::WaitFor;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt};
 
-// Embed migrations at compile time
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/");
+/// Applies both migration sets to one database, data then app, as `run_migrations` does.
+/// `schema.rs` is one file covering both sets, printed from a database with both applied.
+fn run_both_migration_sets(
+    conn: &mut PgConnection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    conn.run_pending_migrations(DATA_MIGRATIONS)?;
+    conn.run_pending_migrations(APP_MIGRATIONS)?;
+    Ok(())
+}
 
 /// Test that validates schema compatibility between migrations and schema.rs
 ///
@@ -56,8 +64,7 @@ async fn test_schema_compatibility() {
         PgConnection::establish(&database_url).expect("Failed to connect to test database");
 
     // Apply all migrations
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
+    run_both_migration_sets(&mut conn).expect("Failed to run migrations");
 
     // Generate schema using diesel print-schema
     let generated_schema =
@@ -213,8 +220,7 @@ async fn test_schema_generation_process() {
     // Apply migrations first
     let mut conn =
         PgConnection::establish(&database_url).expect("Failed to connect to test database");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
+    run_both_migration_sets(&mut conn).expect("Failed to run migrations");
 
     // Test that we can connect and generate schema
     let generated_schema = generate_schema_with_diesel(&database_url);
@@ -275,7 +281,7 @@ async fn test_migration_application() {
         PgConnection::establish(&database_url).expect("Failed to connect to test database");
 
     // Apply migrations
-    let result = conn.run_pending_migrations(MIGRATIONS);
+    let result = run_both_migration_sets(&mut conn);
 
     match result {
         Ok(_) => {
@@ -319,8 +325,7 @@ async fn test_schema_compatibility_comparison() {
     // Apply migrations first
     let mut conn =
         PgConnection::establish(&database_url).expect("Failed to connect to test database");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
+    run_both_migration_sets(&mut conn).expect("Failed to run migrations");
 
     // Generate schema from the migrated database
     let generated_schema =

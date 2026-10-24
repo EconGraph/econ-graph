@@ -89,7 +89,9 @@ jobs:
       working-directory: backend
 
     - name: Run migrations
-      run: diesel migration run
+      run: |
+        diesel migration run --migration-dir migrations/data
+        diesel migration run --migration-dir migrations/app
       working-directory: backend
 
     - name: Build crawler CLI and worker
