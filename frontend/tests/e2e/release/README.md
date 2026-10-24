@@ -136,6 +136,26 @@ In this mode (`env.ts`):
   behavior, and the outline's load-without-a-network-request and failure/Reload
   cases, all against mocked GraphQL responses (`page.route`) rather than this
   suite's seeded backend (ECO-282).
+- `world-map/world-map-every-country.spec.ts` (fixture mode only, ECO-262): every
+  seeded WDI country on every seeded indicator, compared with the recorded World
+  Bank responses and `e2e-seed.json` themselves rather than `fixtures.ts`: its
+  outline is colored, its tooltip and table row show the newest value, unit and
+  year, and the recorded response's unseeded countries show as no data. Repeated
+  after each indicator switch.
+- `failures/` (ECO-264): sampled failure and recovery checks against the seeded
+  backend, with chosen requests failed in the browser by `failures/faults.ts`.
+  A failed search, series, observations read or transformation shows an error
+  (never stand-in values or levels labelled as transformed) and recovers through
+  Retry or Search; an empty search is "No series found", not an error; a failed
+  annotation save or delete reports it, keeps the panel accurate, and succeeds
+  once on retry; an unreachable sign-in service, a failed callback and a session
+  ended at Keycloak leave the page signed out with a way to sign in again; a map
+  whose values fail to load says so and Retry recovers. The detailed permutations
+  are the component tests'. The signed-in specs use `erin` and `frank`. Two
+  known gaps are `test.fixme`: a failed source listing has no Retry, and saving
+  an annotation again after a lost response stores a duplicate.
+  The backend side of ECO-264 is mapped in
+  `docs/testing/failure-behavior-matrix.md`.
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
   pages load with the phone nav drawer closed, the menu opens it and picking a
   page closes it, and the map's zoom controls leave the map uncovered (ECO-335).

@@ -70,6 +70,40 @@
       ]
     },
     {
+      "id": "0199a0e0-0000-7000-8000-0000000000e1",
+      "username": "erin",
+      "email": "erin@example.com",
+      "firstName": "Erin",
+      "lastName": "Tester",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "erin-dev-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "0199a0e0-0000-7000-8000-0000000000f1",
+      "username": "frank",
+      "email": "frank@example.com",
+      "firstName": "Frank",
+      "lastName": "Tester",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "frank-dev-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
       "id": "0199a0e0-0000-7000-8000-0000000005af",
       "username": "staff-admin",
       "email": "staff-admin@example.com",
