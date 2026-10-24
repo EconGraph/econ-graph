@@ -200,8 +200,9 @@ mod tests {
 
         /// A server-side error passed with `new_with_source` keeps its source, so it's hidden.
         async fn with_source(&self) -> Result<i32> {
-            Err(AppError::DatabaseError("pg detail".to_string()))
-                .map_err(async_graphql::Error::new_with_source)
+            Err(async_graphql::Error::new_with_source(
+                AppError::DatabaseError("pg detail".to_string()),
+            ))
         }
 
         async fn hand_written(&self) -> Result<i32> {
