@@ -134,6 +134,12 @@ In this mode (`env.ts`):
   behavior, and the outline's load-without-a-network-request and failure/Reload
   cases, all against mocked GraphQL responses (`page.route`) rather than this
   suite's seeded backend (ECO-282).
+- `world-map/world-map-every-country.spec.ts` (fixture mode only, ECO-262): every
+  seeded WDI country on every seeded indicator, compared with the recorded World
+  Bank responses and `e2e-seed.json` themselves rather than `fixtures.ts`: its
+  outline is colored, its tooltip and table row show the newest value, unit and
+  year, and the recorded response's unseeded countries show as no data. Repeated
+  after each indicator switch.
 - `failures/` (ECO-264): sampled failure and recovery checks against the seeded
   backend, with chosen requests failed in the browser by `failures/faults.ts`.
   A failed search, series, observations read or transformation shows an error
