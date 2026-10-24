@@ -33,6 +33,8 @@ pub(crate) enum Outcome {
     Conflict,
     /// The caller holds the mutation's role but may not make this change.
     Denied,
+    /// Refused because it would suspend or delete the caller's own account.
+    SelfLockout,
     /// The database failed.
     Error,
 }
@@ -45,6 +47,7 @@ impl Outcome {
             Self::NotFound => "not_found",
             Self::Conflict => "conflict",
             Self::Denied => "denied",
+            Self::SelfLockout => "self_lockout",
             Self::Error => "error",
         }
     }
@@ -471,6 +474,13 @@ mod tests {
                 r#"mutation {{ updateUser(id: "{other_id}", input: {{ theme: "{}" }}) {{ id }} }}"#,
                 "x".repeat(64)
             ),
+            // Self-lockout: suspending or deleting the caller's own account.
+            format!(r#"mutation {{ suspendUser(id: "{}") }}"#, admin.id),
+            format!(r#"mutation {{ deleteUser(id: "{}") }}"#, admin.id),
+            format!(
+                r#"mutation {{ updateUser(id: "{}", input: {{ isActive: false }}) {{ id }} }}"#,
+                admin.id
+            ),
         ];
         for query in &attempts {
             let response = schema_for(&pool, &admin, staff())
@@ -506,6 +516,9 @@ mod tests {
                 ("trigger_crawl".into(), "invalid".into(), Value::Null),
                 ("update_user".into(), "conflict".into(), id(admin.id)),
                 ("update_user".into(), "error".into(), id(other_id)),
+                ("suspend_user".into(), "self_lockout".into(), id(admin.id)),
+                ("delete_user".into(), "self_lockout".into(), id(admin.id)),
+                ("update_user".into(), "self_lockout".into(), id(admin.id)),
                 ("suspend_user".into(), "denied".into(), id(other_id)),
             ]
         );
@@ -513,7 +526,8 @@ mod tests {
             let text = row["details"].as_str().unwrap();
             assert!(!text.contains(&taken) && !text.contains("xxxx"), "{text}");
         }
-        assert_eq!(details(&rows[1])["fields"], json!(["theme"]));
+        assert_eq!(details(&rows[1])["fields"], json!(["isActive"]));
+        assert_eq!(details(&rows[4])["fields"], json!(["theme"]));
     }
 
     /// A query that aliases an admin field many times writes one denial row, and it is written
@@ -611,6 +625,7 @@ mod tests {
         };
         let admin = insert_user(&pool, "audit client admin").await;
         let viewer = insert_user(&pool, "audit client viewer").await;
+        let target = insert_user(&pool, "audit client target").await;
         let client = ClientInfo::new(Some("203.0.113.7".into()), Some("AuditTest/1.0"));
         let schema = |user: &User, roles| {
             create_schema_with_data(
@@ -622,7 +637,10 @@ mod tests {
         };
 
         let response = schema(&admin, staff())
-            .execute(format!(r#"mutation {{ suspendUser(id: "{}") }}"#, admin.id))
+            .execute(format!(
+                r#"mutation {{ suspendUser(id: "{}") }}"#,
+                target.id
+            ))
             .await;
         assert!(response.errors.is_empty(), "{:?}", response.errors);
         let response = schema(&viewer, vec![])

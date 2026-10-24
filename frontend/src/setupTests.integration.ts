@@ -46,6 +46,7 @@ vi.mock('@/hooks/useAuth', () => ({
       name: 'Test User',
     },
     isAuthenticated: true,
+    isSuspended: false,
     isLoading: false,
     isConfigured: true,
     accountUrl: null,
