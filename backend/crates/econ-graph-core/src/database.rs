@@ -82,8 +82,8 @@ pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
 /// Arbitrary but fixed: any i64 works as long as every replica uses the same one.
 const MIGRATION_LOCK_KEY: i64 = 0x6567_5f6d_6967_7261; // "eg_migra" as bytes
 
-/// The app migration set: users and everything they create (docs/development/TRAIN2_CONTRACTS.md,
-/// sections 4 and 5).
+/// The app migration set: users and everything they create. docs/development/MIGRATIONS.md lists
+/// both sets and their tables.
 pub const APP_MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/app");
 
 /// The data migration set: sources, series, observations, crawl state, SEC data.
@@ -124,8 +124,8 @@ const APP_BASELINE_VERSION: &str = "20261021000200";
 
 /// Run both migration sets against one database: the data set, then the app set.
 ///
-/// Until DP-2 gives the backend separate app and data URLs, every caller has one database holding
-/// both sets (TRAIN2_CONTRACTS.md, section 4). A database built by the single v4.0.0 baseline,
+/// Every caller has one database holding both sets, which share one `__diesel_schema_migrations`
+/// table, so versions are unique across the two sets. A database built by the single v4.0.0 baseline,
 /// before the split, already has the app tables; the app baseline is recorded there without
 /// running (see [`is_single_baseline_database`]).
 ///
@@ -233,7 +233,7 @@ fn run_migration_set_locked(
         })
 }
 
-/// The tables the app baseline creates (TRAIN2_CONTRACTS.md, section 5).
+/// The tables the app baseline creates.
 const APP_BASELINE_TABLES: [&str; 12] = [
     "users",
     "user_sessions",
@@ -317,7 +317,7 @@ fn record_app_baseline_without_running_it(conn: &mut diesel::PgConnection) -> Ap
     if inserted > 0 {
         tracing::warn!(
             "This database was built by the single v4.0.0 baseline migration and already has the app \
-             tables; recorded the app baseline {} as applied without running it (ECO-422)",
+             tables; recorded the app baseline {} as applied without running it",
             APP_BASELINE_VERSION
         );
     }
@@ -385,7 +385,7 @@ struct RecordedRow {
 /// The schema-version half of [`readiness_check`], run directly on `conn` rather than a pool so
 /// a caller can run it inside its own transaction: for each set in `sets`, the newest migration
 /// this binary embeds must be recorded in `__diesel_schema_migrations`. Not "the table's newest
-/// version", which mixes the sets when one database holds both (TRAIN2_CONTRACTS.md, section 4).
+/// version", which mixes the sets when one database holds both.
 /// Presence rather than equality: a pod still running the previous binary, while a newer one is
 /// mid-rollout migrating the database further ahead, stays ready, since its own newest versions
 /// are still recorded.
@@ -418,7 +418,7 @@ async fn check_schema_version(
 }
 
 /// Readiness check for Kubernetes' `/readyz`: the database must be reachable and both migration
-/// sets current; see [`check_schema_version`]. Until DP-2 there is one database holding both sets.
+/// sets current; see [`check_schema_version`]. One database holds both sets.
 pub async fn readiness_check(pool: &DatabasePool) -> AppResult<()> {
     let mut conn = pool.get().await.map_err(|e| {
         AppError::InternalError(format!("Failed to get database connection: {}", e))
@@ -636,7 +636,7 @@ mod tests {
             .expect("the untouched schema should still be ready after the rollback");
     }
 
-    /// The two baselines are permanent versions (TRAIN2_CONTRACTS.md, section 4): databases have
+    /// The two baselines are permanent versions (docs/development/MIGRATIONS.md): databases have
     /// them recorded, and `run_migrations` relies on both to recognise a single-baseline
     /// database. A squash, renumbering or removal of either must fail here.
     #[test]
@@ -740,7 +740,7 @@ mod tests {
         )
     }
 
-    /// The tables of each set, from docs/development/TRAIN2_CONTRACTS.md section 5.
+    /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
     const DATA_TABLES: [&str; 26] = [
         "data_sources",
         "datasets",

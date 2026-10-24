@@ -14,7 +14,7 @@ use testcontainers::core::WaitFor;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt};
 
 /// Applies both migration sets to one database, data then app, as `run_migrations` does.
-/// `schema.rs` covers both sets (docs/development/TRAIN2_CONTRACTS.md, section 4).
+/// `schema.rs` is one file covering both sets, printed from a database with both applied.
 fn run_both_migration_sets(
     conn: &mut PgConnection,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

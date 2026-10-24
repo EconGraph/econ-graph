@@ -1,11 +1,11 @@
 -- EconGraph v4.0.0 baseline schema: the data plane half.
 --
--- Since v4.1 (ECO-422) the v4.0.0 baseline is split in two. This file holds the data tables
+-- The v4.0.0 baseline is split in two. This file holds the data tables
 -- (sources, datasets, series, observations, crawl state, global analysis, SEC/XBRL) and their seed
 -- rows; the app tables (users and everything they create) are in
 -- migrations/app/2026-10-21-000200_v4_0_app_baseline. The three foreign keys from app tables to
 -- data tables were dropped in the split, so the two halves can live in separate databases
--- (docs/development/TRAIN2_CONTRACTS.md, sections 4 and 5). A database built from this file
+-- (docs/development/MIGRATIONS.md). A database built from this file
 -- before the split already holds both halves; econ_graph_core::database::run_migrations records
 -- the app baseline there without running it.
 --

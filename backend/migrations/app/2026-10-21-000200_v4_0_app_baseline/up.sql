@@ -2,9 +2,9 @@
 --
 -- The app tables (users and everything they create: sessions, chart annotations and comments,
 -- collaborators, data source preferences, audit and security logs, financial annotations) and
--- their seed rows. They were part of 2026-10-21-000100_v4_0_baseline until v4.1 (ECO-422) split
--- that baseline into migrations/data and migrations/app so the two can live in separate databases
--- (docs/development/TRAIN2_CONTRACTS.md, sections 4 and 5). The split dropped the three foreign
+-- their seed rows. They were part of 2026-10-21-000100_v4_0_baseline until that baseline was split
+-- into migrations/data and migrations/app so the two can live in separate databases
+-- (docs/development/MIGRATIONS.md). The split dropped the three foreign
 -- keys from app tables to data tables; the columns and their indexes stay.
 --
 -- On a database that ran the single v4.0.0 baseline these tables already exist.
@@ -163,7 +163,7 @@ CREATE TABLE user_data_source_preferences (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     -- A data_sources id in the data database. Not a foreign key: the app and data tables can be
-    -- in separate databases (docs/development/TRAIN2_CONTRACTS.md, section 5).
+    -- in separate databases.
     data_source_id UUID NOT NULL,
     is_visible BOOLEAN NOT NULL DEFAULT true,
     is_favorite BOOLEAN NOT NULL DEFAULT false,
@@ -249,7 +249,7 @@ CREATE INDEX idx_security_events_created_at ON security_events(created_at);
 CREATE TABLE financial_annotations (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     -- financial_statements and financial_line_items ids in the data database. Not foreign keys:
-    -- the app and data tables can be in separate databases (TRAIN2_CONTRACTS.md, section 5).
+    -- the app and data tables can be in separate databases.
     statement_id UUID NOT NULL,
     line_item_id UUID,
 

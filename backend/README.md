@@ -147,7 +147,7 @@ diesel migration run --migration-dir migrations/data
 diesel migration run --migration-dir migrations/app
 ```
 
-On a database built before the v4.1 split (the single v4.0.0 baseline), start the backend instead
+On a database built by the single v4.0.0 baseline, start the backend instead
 of using the diesel CLI: the backend records the app baseline there, while the CLI stops at its
 guard.
 

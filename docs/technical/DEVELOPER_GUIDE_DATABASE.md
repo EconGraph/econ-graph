@@ -69,7 +69,7 @@ diesel migration generate migration_name
 ### Running Migrations
 
 The backend applies both sets at startup. With the diesel CLI, run the data set first. On a
-database built before the v4.1 split (the single v4.0.0 baseline), start the backend instead: the
+database built by the single v4.0.0 baseline, start the backend instead: the
 CLI stops at the app baseline's guard there.
 
 ```bash

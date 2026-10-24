@@ -5,8 +5,8 @@ Database Migration Order Validation Script
 This script validates that database migrations are in chronological order
 and that new migrations don't have dates that precede existing migrations.
 
-backend/migrations holds two migration sets, app/ and data/ (docs/development/
-TRAIN2_CONTRACTS.md, section 4). Each set is checked on its own, and then across
+backend/migrations holds two migration sets, app/ and data/ (see
+docs/development/MIGRATIONS.md). Each set is checked on its own, and then across
 both: when one database holds both sets they share one __diesel_schema_migrations
 table, so a version may appear in only one set. The exception is
 00000000000000_diesel_initial_setup, which both sets carry and which must be

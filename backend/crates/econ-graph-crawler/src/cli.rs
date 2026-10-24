@@ -144,7 +144,7 @@ pub enum Command {
 const SEED_FUNCTION_VERSION: &str = "2026-10-21-000100";
 
 /// `backend/migrations/data` of the checkout this binary was built from: seed migrations belong to
-/// the data set (docs/development/TRAIN2_CONTRACTS.md, section 4).
+/// the data set (docs/development/MIGRATIONS.md).
 const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations/data");
 
 /// Parses a percentage in `[0, 100]`.

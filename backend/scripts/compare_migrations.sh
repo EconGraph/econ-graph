@@ -9,10 +9,10 @@
 #   ADMIN_URL  a PostgreSQL 18 superuser connection to an existing database, used to create and
 #              drop the two scratch databases (default postgres://postgres@127.0.0.1:5432/postgres)
 #
-# A migrations directory that holds data/ and app/ (the layout since v4.1, ECO-422) is applied as
+# A migrations directory that holds data/ and app/ is applied as
 # the backend applies it to one database: the data set, then the app set, skipping a version the
 # data set already applied (00000000000000_diesel_initial_setup is in both), as Diesel does with
-# one shared __diesel_schema_migrations table. A directory without them (a ref before v4.1) is
+# one shared __diesel_schema_migrations table. A directory without them (a ref before the split) is
 # applied as one set. Either layout works on either side.
 #
 # Each up.sql runs in its own transaction, in version order, as Diesel runs them. In seed rows,
