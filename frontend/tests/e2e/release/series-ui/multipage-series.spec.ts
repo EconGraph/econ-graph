@@ -406,6 +406,8 @@ test.describe('multi-page series (ECO-261)', () => {
         timeout: 30_000,
       });
       await expect(observationsError(page)).toHaveCount(0);
+      // The watcher does see the series once it is shown, so its `false` above means something.
+      expect(await seriesWasShown(page), 'watcher saw the series after Retry').toBe(true);
       expectSameSeries((await downloadCsv(page)).rows, levels, 'levels after Retry');
     });
   }
