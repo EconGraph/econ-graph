@@ -1,6 +1,7 @@
 //! Each protected resolver asks for exactly one fine-grained role. Four of them (updateUser,
 //! deleteUser, suspendUser, activateUser) also gate on `require_manageable`, which runs before
 //! the pool is touched and passes without a database when the caller acts on their own account.
+//! Suspending or deleting that own account is refused outright (ECO-411), also before the pool.
 //!
 //! For every resolver, a caller holding only that role gets past the check, and a caller
 //! holding every other role is refused. None of these cases needs a database: the pool never
@@ -72,7 +73,8 @@ fn is_auth_error(message: &str) -> bool {
 ///
 /// `self_id` is the id the four `require_manageable`-gated mutations target: passing the
 /// caller's own id lets the self-action path clear that gate so the resolver reaches the
-/// (unreachable) pool, the same as every other entry here.
+/// (unreachable) pool, the same as every other entry here. deleteUser and suspendUser stop
+/// short of the pool on their own id (the self-lockout refusal), still past the role check.
 fn protected(self_id: Uuid) -> Vec<(&'static str, Role, String)> {
     let id = Uuid::new_v4();
     vec![
@@ -300,10 +302,11 @@ async fn changing_is_active_needs_the_suspend_role() {
     assert!(errs[0].contains("Insufficient permissions"), "{errs:?}");
 
     // A narrow two-role caller only clears `require_manageable` on their own account, so
-    // target the caller's own id here to reach the (unreachable) pool, as above.
+    // target the caller's own id here to reach the (unreachable) pool, as above. Reactivating
+    // is the change allowed on one's own account; deactivating it is refused (ECO-411).
     let me = user();
     let self_query = format!(
-        r#"mutation {{ updateUser(id: "{}", input: {{ isActive: false }}) {{ __typename }} }}"#,
+        r#"mutation {{ updateUser(id: "{}", input: {{ isActive: true }}) {{ __typename }} }}"#,
         me.id
     );
     let errs = errors(
@@ -312,6 +315,41 @@ async fn changing_is_active_needs_the_suspend_role() {
     )
     .await;
     assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
+}
+
+/// Regression for ECO-411: suspending, deactivating or deleting one's own account would lock
+/// the caller out for good (a suspended account cannot even call `activateUser`). It is refused
+/// with a validation error before the pool is touched, even for the full staff set.
+#[tokio::test]
+async fn own_account_cannot_be_suspended_or_deleted() {
+    let me = user();
+    let id = me.id;
+    let staff: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
+    for (query, expected) in [
+        (
+            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+            "You cannot suspend your own account",
+        ),
+        (
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ isActive: false }}) {{ __typename }} }}"#
+            ),
+            "You cannot suspend your own account",
+        ),
+        (
+            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+            "You cannot delete your own account",
+        ),
+    ] {
+        for roles in [staff.clone(), Role::all().to_vec()] {
+            let errs = errors(caller_with(me.clone(), roles), &query).await;
+            assert_eq!(errs, [expected], "{query}: {errs:?}");
+        }
+    }
 }
 
 /// Security regressions must execute against PostgreSQL, never silently pass without it.
@@ -470,8 +508,8 @@ async fn full_staff_set_can_act_on_another_user() {
     assert!(read_user(&pool, id).await.is_none());
 }
 
-/// A narrow role still works on the caller's own account (unaffected by the gate). Each
-/// mutation needs its own account: delete removes the row, so it runs last.
+/// A narrow role still works on the caller's own account (unaffected by the gate). Suspending
+/// or deleting it is refused instead; see `own_account_is_left_intact_by_suspend_and_delete`.
 #[tokio::test]
 async fn narrow_role_can_act_on_self() {
     let url = required_database_url();
@@ -484,9 +522,7 @@ async fn narrow_role_can_act_on_self() {
         .expect("pool");
 
     let update_target = insert_user(&pool).await;
-    let suspend_target = insert_user(&pool).await;
     let activate_target = insert_user(&pool).await;
-    let delete_target = insert_user(&pool).await;
 
     for (me, roles, query) in [
         (
@@ -498,22 +534,12 @@ async fn narrow_role_can_act_on_self() {
             ),
         ),
         (
-            suspend_target.clone(),
-            vec![Role::AdminUsersSuspend],
-            format!(r#"mutation {{ suspendUser(id: "{}") }}"#, suspend_target.id),
-        ),
-        (
             activate_target.clone(),
             vec![Role::AdminUsersSuspend],
             format!(
                 r#"mutation {{ activateUser(id: "{}") }}"#,
                 activate_target.id
             ),
-        ),
-        (
-            delete_target.clone(),
-            vec![Role::AdminUsersDelete],
-            format!(r#"mutation {{ deleteUser(id: "{}") }}"#, delete_target.id),
         ),
     ] {
         let schema = create_schema_with_data(pool.clone(), Arc::new(caller_with(me, roles)));
@@ -526,7 +552,52 @@ async fn narrow_role_can_act_on_self() {
             .collect();
         assert!(errs.is_empty(), "{query}: {errs:?}");
     }
-    assert!(read_user(&pool, delete_target.id).await.is_none());
+}
+
+/// Regression for ECO-411 against PostgreSQL: a staff admin's attempts to suspend, deactivate
+/// or delete their own account leave the row in place and active, so they can still sign in.
+#[tokio::test]
+async fn own_account_is_left_intact_by_suspend_and_delete() {
+    let url = required_database_url();
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+    let me = insert_user(&pool).await;
+    let id = me.id;
+    let staff: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
+    for query in [
+        format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+        format!(
+            r#"mutation {{ updateUser(id: "{id}", input: {{ isActive: false }}) {{ __typename }} }}"#
+        ),
+        format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+    ] {
+        let schema = create_schema_with_data(
+            pool.clone(),
+            Arc::new(caller_with(me.clone(), staff.clone())),
+        );
+        let errs: Vec<String> = schema
+            .execute(query.as_str())
+            .await
+            .errors
+            .into_iter()
+            .map(|e| e.message)
+            .collect();
+        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
+        assert!(errs[0].contains("your own account"), "{query}: {errs:?}");
+    }
+    let unchanged = read_user(&pool, id)
+        .await
+        .expect("own account still exists");
+    assert!(unchanged.is_active);
 }
 
 /// A narrow role denied on another user gets refused before the mutation can tell whether
