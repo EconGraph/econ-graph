@@ -104,7 +104,8 @@ impl<'a> CodeSource<'a> {
         match (&component.codes, &component.codelist) {
             (_, Some(name)) if name == COUNTRIES_CODELIST => {
                 let areas = reference::areas().map_err(|e| {
-                    async_graphql::Error::new(format!("code list {name:?} unavailable: {e}"))
+                    tracing::error!("code list {name:?} unavailable: {e}");
+                    async_graphql::Error::new(format!("code list {name:?} unavailable"))
                 })?;
                 Ok(Self::Areas(areas, component))
             }
