@@ -119,4 +119,4 @@ spec:
 
 # Grafana is not exposed on this ingress; use `kubectl port-forward
 # service/grafana-service 3000:3000 -n econ-graph` for staff access.
-# OAuth-behind-Keycloak access is tracked in ECO-294 (train 2).
+# OAuth-behind-Keycloak access is tracked in ECO-294 (train 3).

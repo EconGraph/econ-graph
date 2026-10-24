@@ -148,14 +148,14 @@ These are backend fixes in resolvers the admin UI calls. They belong with the au
 
 ## Release placement
 
-The release-train plan (`docs/roadmap/releases.md`, PR #190) schedules these phases. As of 2026-09-26:
+The release-train plan (`docs/roadmap/releases.md`, PR #190) schedules these phases. As of 2026-09-26, with the train numbers renumbered on 2026-10-23:
 
 | Phase                                                           | Train                                                                                       |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Phase 1's schema check, applied to the main frontend            | Train 1. The rest of the admin app is out of train 1; staff use the Keycloak admin console. |
-| Phases 0 to 2 (cleanup, one client, Keycloak login and routing) | Train 2, deployed for staff                                                                 |
+| Phases 0 to 2 (cleanup, one client, Keycloak login and routing) | Train 3, deployed for staff                                                                 |
 | Phase 3 (user management and staff tooling)                     | Unscheduled, with auth phases 3, 4 and 7                                                    |
-| Phase 4 (crawler admin)                                         | Train 6, with the data plane split                                                          |
+| Phase 4 (crawler admin)                                         | Train 7, with the data plane split                                                          |
 
 If the two docs disagree, the release-train plan decides the order.
 

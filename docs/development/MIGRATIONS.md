@@ -4,6 +4,13 @@ The backend applies Diesel migrations from `backend/migrations` when it starts
 (`econ_graph_core::database::run_migrations`). This page covers how migrations are written
 between releases and how they are squashed when a release is tagged (Joe, 2026-10-02).
 
+> **Coming in train 2 (`v4.1.0`): two databases.** Train 2 splits the app and data databases,
+> each with its own migration set (`backend/migrations/app` and `backend/migrations/data`).
+> App migrations keep being squashed per release; data migrations become incremental and
+> forward-only, run by a `crawler migrate` job rather than at service startup. This page is
+> rewritten when that lands ([ECO-430](https://linear.app/econgraph/issue/ECO-430),
+> [release trains](../roadmap/releases.md)). Until then the rules below apply.
+
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited or removed.** Databases built

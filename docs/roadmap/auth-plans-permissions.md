@@ -123,7 +123,7 @@ Starting set. All of these are Keycloak configuration, kept as code in a realm e
 
 Later levels (a second support tier, billing, data operations, security) are new composites built from the same catalog. In train 1, `admin` and `super_admin` hold the same roles, because the catalog has no role yet that only owners should hold.
 
-**Preview access** (train 2, with the first runtime flag; train 1 has only build-time flags): the fine-grained role `preview:access`, granted by the staff composites and a `beta-tester` composite, is what feature flags target for previews (see the [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), #195). A flag never grants access by itself, and anything that differs by plan is a role, never a flag.
+**Preview access** (train 3, with the first runtime flag; train 1 has only build-time flags): the fine-grained role `preview:access`, granted by the staff composites and a `beta-tester` composite, is what feature flags target for previews (see the [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), #195). A flag never grants access by itself, and anything that differs by plan is a role, never a flag.
 
 **Organization roles**: `org-owner`, `org-admin`, `org-member`, `org-viewer`.
 
@@ -197,7 +197,7 @@ Each phase is a small PR or a short stack, in order. Later phases depend on earl
 ### Phase 2: Keycloak as the identity provider
 
 - Deploy Keycloak, starting from #149's Kubernetes manifests; realm configuration kept as code in the repo.
-- Fine-grained roles defined as client roles on `econ-graph-api`, with a CI check against the Rust enum (`scripts/check-keycloak-roles`). Staff composites seeded as realm roles: `support` (the `user` roles plus read-only `admin.users`, `admin.sessions` and `admin.system`), `admin` and `super_admin` (every role). `user` is a realm default role. A client-role mapper puts the flattened roles in the access token's `roles` claim, and the backend checks that `aud` contains `econ-graph-api` (Keycloak also adds `account`). `preview:access` and the `beta-tester` composite are added with the first runtime flag (train 2), since train 1 has only build-time flags.
+- Fine-grained roles defined as client roles on `econ-graph-api`, with a CI check against the Rust enum (`scripts/check-keycloak-roles`). Staff composites seeded as realm roles: `support` (the `user` roles plus read-only `admin.users`, `admin.sessions` and `admin.system`), `admin` and `super_admin` (every role). `user` is a realm default role. A client-role mapper puts the flattened roles in the access token's `roles` claim, and the backend checks that `aud` contains `econ-graph-api` (Keycloak also adds `account`). `preview:access` and the `beta-tester` composite are added with the first runtime flag (train 3), since train 1 has only build-time flags.
 - Backend verifies Keycloak tokens via JWKS and reads `roles` from the token; the temporary mapping and `users.role` are removed.
 - Audience mappers for each service, and the `dev-readonly` client for split development (see Multiple services and split development).
 - Google becomes a Keycloak identity provider (Facebook and password login are not configured; see Release trains). Nothing is imported: `users.id` is Keycloak's `sub`. In-house login and JWT issuance are retired.
