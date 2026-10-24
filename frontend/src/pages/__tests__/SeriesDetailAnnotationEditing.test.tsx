@@ -110,6 +110,7 @@ function viewAs(viewer: Viewer) {
     signIn,
     signOut: vi.fn(),
     completeSignIn: vi.fn(),
+    completeSignOut: vi.fn(async () => null),
     clearError: vi.fn(),
   });
   return signIn;
