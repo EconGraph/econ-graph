@@ -60,6 +60,12 @@ set +a
 [[ -n "${RESTIC_REPOSITORY:-}" ]] || die "RESTIC_REPOSITORY is not set in ${RESTIC_ENV}"
 [[ -n "${RESTIC_PASSWORD_FILE:-}${RESTIC_PASSWORD:-}${RESTIC_PASSWORD_COMMAND:-}" ]] \
     || die "set RESTIC_PASSWORD_FILE (preferred) in ${RESTIC_ENV}"
+if [[ -n "${RESTIC_PASSWORD_FILE:-}" ]]; then
+    [[ -f "${RESTIC_PASSWORD_FILE}" ]] || die "RESTIC_PASSWORD_FILE ${RESTIC_PASSWORD_FILE} does not exist"
+    perms="$(stat -L -c %a "${RESTIC_PASSWORD_FILE}")"
+    [[ "${perms}" =~ ^[0-7]00$ ]] \
+        || die "${RESTIC_PASSWORD_FILE} is mode ${perms} (group- or world-accessible); chmod 600 it"
+fi
 command -v restic >/dev/null || die "restic is not installed"
 
 cmd="${1:-}"
