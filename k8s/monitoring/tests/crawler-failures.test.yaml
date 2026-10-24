@@ -1,0 +1,161 @@
+# promtool unit tests for the failure alerts of prometheus-rules-crawler.yaml (ECO-264): the
+# worker being down or unscraped, jobs not completing, a source's jobs failing, and its upstream
+# errors. Run through ../check-prometheus-rules.sh, like crawler-coverage.test.yaml.
+rule_files:
+  - crawler.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # No available crawler-worker replica for 10 minutes is critical; a shorter gap is not.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x4 0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CrawlerWorkerDown
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CrawlerWorkerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: econ-graph
+              deployment: crawler-worker
+            exp_annotations:
+              summary: crawler-worker has no available pod
+              description: The crawler-worker Deployment has had no available replica for 10 minutes; crawl_queue is not being drained.
+
+  # The worker runs but its queue gauge is never scraped: after an hour, the other alerts are
+  # blind and this says so.
+  - interval: 5m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x24'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: CrawlerMetricsMissing
+        exp_alerts: []
+      - eval_time: 1h10m
+        alertname: CrawlerMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: info
+            exp_annotations:
+              summary: crawler-worker metrics are not being scraped
+              description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
+
+  # Scraped and running: no CrawlerMetricsMissing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x24'
+      - series: 'crawler_queue_items{status="pending", pod="crawler-worker-1"}'
+        values: '0x24'
+    alert_rule_test:
+      - eval_time: 1h50m
+        alertname: CrawlerMetricsMissing
+        exp_alerts: []
+
+  # Work queued while every job fails or retries: no completion fires once that lasts 15m, even
+  # though crawler_jobs_total only ever counted failures. Completions keep it quiet.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_queue_items{status="retrying", pod="crawler-worker-1"}'
+        values: '40x30'
+      - series: 'crawler_jobs_total{outcome="failed", pod="crawler-worker-1"}'
+        values: '0+5x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CrawlerNoCompletions
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CrawlerNoCompletions
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawl_queue has work but no job completed in the last hour
+              description: crawl_queue holds 40 active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
+  - interval: 5m
+    input_series:
+      - series: 'crawler_queue_items{status="pending", pod="crawler-worker-1"}'
+        values: '40x30'
+      - series: 'crawler_jobs_total{outcome="completed", pod="crawler-worker-1"}'
+        values: '0+5x30'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: CrawlerNoCompletions
+        exp_alerts: []
+
+  # More than 50 failed jobs in 24h for one source fires for that source only.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_queue_failed_24h{source="BLS", pod="crawler-worker-1"}'
+        values: '10x2 60x10'
+      - series: 'crawler_queue_failed_24h{source="FRED", pod="crawler-worker-1"}'
+        values: '50x12'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CrawlerSourceFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CrawlerSourceFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: BLS
+            exp_annotations:
+              summary: Source BLS has 60 failed jobs in 24h
+              description: More than 50 crawl_queue items for BLS became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
+
+  # One source's upstream errors above 5% of its requests for 10 minutes fire for it; another
+  # source's 1% doesn't, and the overall rate (about 5.5%) fires the global alert too.
+  - interval: 1m
+    input_series:
+      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+        values: '0+100x30'
+      - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
+        values: '0+10x30'
+      - series: 'econgraph_crawler_requests_total{crawler_type="fred"}'
+        values: '0+100x30'
+      - series: 'econgraph_crawler_errors_total{crawler_type="fred"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CrawlerHighErrorRateBySource
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CrawlerHighErrorRateBySource
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              crawler_type: bls
+            exp_annotations:
+              summary: High crawler error rate (>5%) for source bls
+              description: Error rate is above 5% for 10 minutes for source bls.
+      - eval_time: 20m
+        alertname: CrawlerHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: High crawler error rate (>5%)
+              description: Crawler error rate is above 5% for 10 minutes.
+
+  # No requests at all: the ratio has no result, so neither error-rate alert fires on an idle
+  # crawler (CrawlerNoTraffic is for that).
+  - interval: 1m
+    input_series:
+      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+        values: '5x30'
+      - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
+        values: '5x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: CrawlerHighErrorRateBySource
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: CrawlerHighErrorRate
+        exp_alerts: []

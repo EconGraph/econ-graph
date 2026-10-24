@@ -68,7 +68,14 @@ export async function failGraphQL(
   let healed = false;
   await page.route('**/graphql', async route => {
     const request = route.request();
-    const variables = (request.postDataJSON()?.variables ?? {}) as Record<string, unknown>;
+    let variables: Record<string, unknown> = {};
+    try {
+      variables = (request.postDataJSON()?.variables ?? {}) as Record<string, unknown>;
+    } catch {
+      // Not a JSON body (e.g. a multipart upload): not a GraphQL operation this fault matches.
+      await route.fallback();
+      return;
+    }
     if (healed || graphqlOperation(request) !== operation || !when(variables)) {
       await route.fallback();
       return;
@@ -85,22 +92,6 @@ export async function failGraphQL(
     }
   });
   return { failed: () => failed, heal: () => (healed = true) };
-}
-
-/**
- * Counts the page's GraphQL requests for `operation` that reached the backend and succeeded.
- * @param page - The test's page.
- * @param operation - The operation name.
- * @returns A function reading the count.
- */
-export function countGraphQL(page: Page, operation: string): () => number {
-  let count = 0;
-  page.on('requestfinished', async request => {
-    if (graphqlOperation(request) !== operation) return;
-    const response = await request.response();
-    if (response?.ok()) count += 1;
-  });
-  return () => count;
 }
 
 /**
