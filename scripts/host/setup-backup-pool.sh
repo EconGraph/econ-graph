@@ -13,14 +13,15 @@
 #   - mounts it at /srv/econgraph-backups via an /etc/fstab line (nofail, so
 #     a missing disk never blocks boot)
 #   - chowns the subvolume root to the sudo user
-#   - creates btrbk/ (root:root 0700: the btrbk send/receive target, out of
-#     reach of the jmalicki account) and dumps/ (sudo user: the nightly
-#     logical dumps)
+#   - creates snapshots/ (root:root 0700: where backup-snapshots.sh receives
+#     the snapshots, out of reach of the jmalicki account) and dumps/ (sudo
+#     user: the nightly logical dumps)
 #
 # It is a different filesystem from /home, so snapshots reach it only via
-# btrfs send/receive (btrbk, as root), never cp. Safe to re-run.
+# btrfs send/receive (scripts/host/backup-snapshots.sh, as root), never cp.
+# Nothing here deletes anything. Safe to re-run.
 #
-# Afterwards: sudo scripts/host/install-btrbk.sh   (enables the target)
+# The next hourly backup-snapshots.sh run starts copying to it by itself.
 #
 # Usage: sudo scripts/host/setup-backup-pool.sh [--dry-run]
 
@@ -111,10 +112,10 @@ fi
 
 # Only the subvolume root and the two directories below change hands.
 run chown "$OWNER:$OWNER" "$TARGET"
-if [ -d "$TARGET/btrbk" ]; then
-    echo "= $TARGET/btrbk exists"
+if [ -d "$TARGET/snapshots" ]; then
+    echo "= $TARGET/snapshots exists"
 else
-    run install -d -m 0700 -o root -g root "$TARGET/btrbk"
+    run install -d -m 0700 -o root -g root "$TARGET/snapshots"
 fi
 if [ -d "$TARGET/dumps" ]; then
     echo "= $TARGET/dumps exists"
@@ -124,5 +125,5 @@ fi
 
 if [ "$DRY_RUN" = "false" ]; then
     findmnt "$TARGET"
-    echo "next: sudo scripts/host/install-btrbk.sh   (turns on send/receive to $TARGET/btrbk)"
+    echo "the next backup-snapshots run copies the snapshots to $TARGET/snapshots"
 fi

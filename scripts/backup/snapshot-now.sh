@@ -7,10 +7,10 @@
 # Usage: snapshot-now.sh [--only data-plane|app-prod] <reason>
 #
 # Creates SNAPSHOT_DIR/<name>.pre-<UTC stamp>-<reason> for each of
-# data-plane and app-prod (default: both). The name deliberately does not
-# match btrbk's <name>.<timestamp> pattern, so btrbk's retention never
-# prunes these; delete them by hand when the change has been accepted
-# (see docs/deployment/BACKUPS.md).
+# data-plane and app-prod (default: both). Like every snapshot here it is
+# never deleted automatically; scripts/host/backup-snapshots.sh copies it to
+# the backup pool with the hourly ones. Delete by hand, if ever, with
+# scripts/host/delete-snapshots.sh (see docs/deployment/BACKUPS.md).
 #
 # Runs as jmalicki without sudo, provided jmalicki owns the subvolume roots
 # (the kernel only lets a non-root user snapshot subvolumes it owns) and can

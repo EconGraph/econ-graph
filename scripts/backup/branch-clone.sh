@@ -31,7 +31,7 @@ slug() { printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//'; 
 
 newest_data_plane_snapshot() {
     # Names sort chronologically within each naming scheme; compare the
-    # embedded timestamps across both (btrbk and snapshot-now).
+    # embedded timestamps across both (hourly and snapshot-now).
     find "${SNAPSHOT_DIR}" -mindepth 1 -maxdepth 1 -name 'data-plane.*' -printf '%f\n' 2>/dev/null \
         | sed -E 's/^data-plane\.(pre-)?([0-9]{8}T[0-9]{4,6}).*/\2 &/' | sort | tail -n 1 | cut -d' ' -f2
 }
