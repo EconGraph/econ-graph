@@ -45,8 +45,8 @@ test.describe('search by abbreviation', () => {
     await page.getByRole('button', { name: 'Search', exact: true }).click();
 
     const cards = page.locator('.MuiCard-root');
-    // Exact: FRED's title is a substring of BEA's ("Gross domestic product (Gross Domestic
-    // Product, quarterly)"), so a substring match would pass with BEA's first.
+    // Exact: FRED's title is a case-insensitive substring of BEA's ("Gross domestic product
+    // (quarterly)"), so a substring match would pass with BEA's first.
     await expect(cards.first().getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
     await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
   });
