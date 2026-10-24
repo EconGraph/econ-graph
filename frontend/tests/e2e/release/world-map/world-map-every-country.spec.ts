@@ -15,8 +15,12 @@ import { SEEDED_WDI } from '../fixtures';
 // non-missing value with the indicator's unit and year, and every other outline (countries the
 // recorded responses hold but the seed skipped, and countries with no response at all) is "no
 // data". Repeated after each indicator switch, so a stale value or a mapping left over from the
-// previous indicator fails. world-map.spec.ts keeps the core release checks (MAP-7); aggregate
-// exclusion on the map is world-map-mocked.spec.ts's, since the seed loads no aggregate.
+// previous indicator fails. world-map.spec.ts keeps the core release checks (MAP-7).
+// Aggregates: the recorded responses hold World Bank aggregates (AGGREGATES below), and this spec
+// asserts they are there and that none is rendered (no colored outline, no table row). The seed
+// loads no aggregate series, though, so the backend never hands one to the map here and the
+// frontend's own aggregate filter is not exercised; world-map-mocked.spec.ts covers that with
+// mocked data.
 // Fixture mode only: a deployed catalog has every country, with values this can't predict.
 
 const FIXTURES = '../backend/crates/econ-graph-crawler/tests/fixtures';
@@ -49,6 +53,23 @@ const ISO_NUMERIC: Record<string, number> = {
   FRA: 250,
   GBR: 826,
 };
+
+/**
+ * World Bank aggregates in the recorded responses (iso3 -> the World Bank's name). Asserted
+ * present in the input, unseeded, and absent from the rendered map and table.
+ */
+const AGGREGATES: Record<string, string> = {
+  WLD: 'World',
+  EMU: 'Euro area',
+  AFE: 'Africa Eastern and Southern',
+};
+
+/**
+ * Real countries in the recorded responses that the seed skips and this spec doesn't look up an
+ * outline for: American Samoa and the Channel Islands (the latter has no ISO numeric code).
+ * Listed so that any other unknown code in a recorded response fails rather than being dropped.
+ */
+const UNCHECKED_COUNTRIES = new Set(['ASM', 'CHI']);
 
 /** A country's expected map entry, from the recorded response. */
 interface Expected {
@@ -96,14 +117,23 @@ function expectedFromFixtures() {
       const [row] = withValue;
       return { iso3: country, name: row.country.value, value: row.value as number, year: row.date };
     };
-    const unseeded = [...new Set(ofIndicator.map(r => r.countryiso3code))].filter(
-      c => !iso3.has(c) && c in ISO_NUMERIC
-    );
+    const recorded = new Set(ofIndicator.map(r => r.countryiso3code));
+    const aggregates = Object.keys(AGGREGATES).filter(c => recorded.has(c));
+    const unseeded: string[] = [];
+    for (const c of recorded) {
+      if (iso3.has(c) || c in AGGREGATES || UNCHECKED_COUNTRIES.has(c)) continue;
+      if (!(c in ISO_NUMERIC)) {
+        throw new Error(`${code}: recorded response has ${c}; add it to ISO_NUMERIC or a list`);
+      }
+      unseeded.push(c);
+    }
     return {
       code,
       name: ofIndicator[0].indicator.value,
       countries: [...iso3].sort().map(newest),
       unseeded,
+      aggregates,
+      aggregatesSeeded: [...iso3].filter(c => c in AGGREGATES),
     };
   });
 }
@@ -148,6 +178,12 @@ test.describe('World map, every seeded country', () => {
       await expect(page.getByRole('combobox', { name: 'Indicator' })).toHaveText(indicator.name);
       await expect(legend).toContainText(`Unit: ${unit}`);
       await expect(legend).toContainText(`${indicator.countries.length} countries with data.`);
+
+      // The aggregates are in the input (the recorded response) and not seeded.
+      expect(indicator.aggregates, `${indicator.code} recorded aggregates`).toEqual(
+        Object.keys(AGGREGATES)
+      );
+      expect(indicator.aggregatesSeeded, `${indicator.code} seeded aggregates`).toEqual([]);
 
       // Exactly the seeded countries are colored, each on its own outline.
       const colored = page.locator('svg path.country[data-has-data="true"]');
@@ -198,6 +234,10 @@ test.describe('World map, every seeded country', () => {
         await expect(row).toHaveCount(1);
         await expect(row.getByRole('cell').nth(1)).toHaveText(formatValue(country.value));
         await expect(row.getByRole('cell').nth(2)).toHaveText(country.year);
+      }
+      // No aggregate is rendered as a country.
+      for (const [iso3, name] of Object.entries(AGGREGATES)) {
+        await expect(rows.filter({ hasText: name }), `${indicator.code} ${iso3}`).toHaveCount(0);
       }
       await toggle.click();
     }

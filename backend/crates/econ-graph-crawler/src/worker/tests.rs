@@ -3767,7 +3767,7 @@ async fn shutdown_mid_request_finishes_the_job_and_claims_no_more() {
     let mock = MockSource::start().await;
     mock.mount(
         &Route::get("/series/t5_shutdown_a"),
-        series_json("A", &[("2024-01-01", Some("1"))]).delay(Duration::from_millis(800)),
+        series_json("A", &[("2024-01-01", Some("1"))]).delay(Duration::from_millis(1500)),
     )
     .await;
     mock.mount(
@@ -3793,12 +3793,24 @@ async fn shutdown_mid_request_finishes_the_job_and_claims_no_more() {
     )
     .await;
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        w.run(tokio::time::sleep(Duration::from_millis(200))),
-    )
-    .await
-    .expect("worker did not stop");
+    // Signal shutdown once the mock has received the request for A, so A is
+    // in flight (its reply is delayed) rather than assuming a claim deadline.
+    let a_in_flight = async {
+        loop {
+            let seen = mock
+                .received_requests()
+                .await
+                .iter()
+                .any(|r| r.url.path() == "/series/t5_shutdown_a");
+            if seen {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), w.run(a_in_flight))
+        .await
+        .expect("worker did not stop");
 
     let a = item(&db.pool, first).await;
     assert_eq!(a.status, "completed");

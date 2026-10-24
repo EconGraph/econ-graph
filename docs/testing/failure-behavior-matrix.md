@@ -10,7 +10,7 @@ with wiremock (`econ-graph-crawler/src/testkit`), Keycloak with `econ-graph-auth
 nothing calls a live API.
 
 Status: **covered** (a test exercises it), **n/a** (with the reason), **gap** (known, ticketed or
-`test.fixme`).
+`test.fixme`), **covered by its own PR** (a separate PR implements and tests it).
 
 ## 1. Source HTTP client (`econ-graph-crawler/src/http.rs`)
 
@@ -135,4 +135,5 @@ Component tests hold the detailed permutations (`src/pages/__tests__/SeriesDetai
 | Sign-in, callback and session failure: signed out with a recovery path | covered | `sign-in-failures.spec.ts` (unreachable sign-in service, failed callback, session ended at Keycloak) |
 | Map loading failure, Retry recovers (sampled once) | covered | `map-failures.spec.ts`; the outline's own failure is `world-map/world-atlas.spec.ts` |
 | Failed source listing (browse, no query) has a Retry | **gap** | `series-failures.spec.ts`, `test.fixme`: the explore page's error has no Retry and the Search button needs a query, so only a reload recovers |
-| Saving an annotation again after a lost response | **gap** | `annotation-failures.spec.ts`, `test.fixme`: the backend stored the first request, the page reported a failure, and the second Save stores a duplicate (`createAnnotation` has no idempotency key, and the page doesn't refetch after a failed save) |
+| Saving an annotation again after a lost response | **gap** | `annotation-failures.spec.ts`, `test.fixme`: the backend stored the first request, the page reported a failure, and the second Save stores a duplicate (`createAnnotation` has no idempotency key, and the page doesn't refetch after a failed save); fixed by #426 (ECO-439), which adds its own E2E, and the fixme is enabled once it merges |
+| Complete multi-page series and CSV E2E (ECO-261) | covered by its own PR | ECO-261 is implemented and tested in a separate PR, not this one |

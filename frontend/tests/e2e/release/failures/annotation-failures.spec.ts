@@ -67,6 +67,45 @@ test.describe('annotation save and delete failures', () => {
     return dialog;
   }
 
+  /**
+   * Deletes every stored annotation titled `title`, after a reload so the panel shows what the
+   * backend stores.
+   * @param page - The signed-in series page.
+   * @param title - The annotation title.
+   * @returns How many were stored before deleting.
+   */
+  async function deleteAllTitled(page: Page, title: string): Promise<number> {
+    await reloadAnnotations(page);
+    const stored = await rowsTitled(page, title).count();
+    for (let i = stored; i > 0; i--) {
+      await annotationsList(page).getByRole('button', { name: `Delete ${title}` }).first().click();
+      await page
+        .getByRole('dialog', { name: 'Delete annotation?' })
+        .getByRole('button', { name: 'Delete' })
+        .click();
+      await expect(rowsTitled(page, title)).toHaveCount(i - 1);
+    }
+    return stored;
+  }
+
+  /**
+   * Best-effort cleanup for a `finally`: removes injected faults and any copies of `title` left
+   * behind by a test that failed part way, without masking the test's own failure.
+   * @param page - The signed-in series page.
+   * @param title - The annotation title.
+   */
+  async function cleanUp(page: Page, title: string) {
+    try {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await deleteAllTitled(page, title);
+    } catch (error) {
+      test.info().annotations.push({
+        type: 'cleanup failed',
+        description: `annotation "${title}": ${String(error)}`,
+      });
+    }
+  }
+
   test('a failed save keeps the form open with the error, and saving again adds one', async ({
     page,
   }) => {
@@ -94,6 +133,7 @@ test.describe('annotation save and delete failures', () => {
     await expect(rowsTitled(page, title)).toHaveCount(0);
   });
 
+  // enable after #426 (ECO-439) merges
   // The request reaches the backend, which stores the annotation, but the response is lost (a
   // dropped connection, a proxy timeout). The page reports a failure and keeps the form open, so
   // the user saves again, and the backend stores a second copy: CreateAnnotation has no
@@ -119,17 +159,8 @@ test.describe('annotation save and delete failures', () => {
       await dialog.getByRole('button', { name: 'Save' }).click();
       await expect(dialog).toBeHidden();
 
-      await reloadAnnotations(page);
-      const stored = await rowsTitled(page, title).count();
       // Clean up every copy before failing on the count.
-      for (let i = stored; i > 0; i--) {
-        await annotationsList(page).getByRole('button', { name: `Delete ${title}` }).first().click();
-        await page
-          .getByRole('dialog', { name: 'Delete annotation?' })
-          .getByRole('button', { name: 'Delete' })
-          .click();
-        await expect(rowsTitled(page, title)).toHaveCount(i - 1);
-      }
+      const stored = await deleteAllTitled(page, title);
       expect(stored).toBe(1);
     }
   );
@@ -139,26 +170,31 @@ test.describe('annotation save and delete failures', () => {
   }) => {
     await signIn(page);
     const title = uniqueTitle('Failed-delete annotation');
-    const created = await fillAndSave(page, title);
-    await expect(created).toBeHidden();
-    await expect(rowsTitled(page, title)).toHaveCount(1);
+    try {
+      const created = await fillAndSave(page, title);
+      await expect(created).toBeHidden();
+      await expect(rowsTitled(page, title)).toHaveCount(1);
 
-    const fault = await failGraphQL(page, 'DeleteAnnotation', 'graphql-error');
-    const dialog = await deleteRow(page, title);
-    await expect(dialog.getByRole('alert')).toBeVisible();
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
-    await expect(dialog).toBeHidden();
-    // Still listed, as it is still stored.
-    await expect(rowsTitled(page, title)).toHaveCount(1);
-    await reloadAnnotations(page);
-    await expect(rowsTitled(page, title)).toHaveCount(1);
+      const fault = await failGraphQL(page, 'DeleteAnnotation', 'graphql-error');
+      const dialog = await deleteRow(page, title);
+      await expect(dialog.getByRole('alert')).toBeVisible();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(dialog).toBeHidden();
+      // Still listed, as it is still stored.
+      await expect(rowsTitled(page, title)).toHaveCount(1);
+      await reloadAnnotations(page);
+      await expect(rowsTitled(page, title)).toHaveCount(1);
 
-    fault.heal();
-    const retry = await deleteRow(page, title);
-    await expect(retry).toBeHidden();
-    await expect(rowsTitled(page, title)).toHaveCount(0);
-    await reloadAnnotations(page);
-    await expect(rowsTitled(page, title)).toHaveCount(0);
+      fault.heal();
+      const retry = await deleteRow(page, title);
+      await expect(retry).toBeHidden();
+      await expect(rowsTitled(page, title)).toHaveCount(0);
+      await reloadAnnotations(page);
+      await expect(rowsTitled(page, title)).toHaveCount(0);
+    } finally {
+      // erin's annotation must not outlive a failure part way through.
+      await cleanUp(page, title);
+    }
   });
 });

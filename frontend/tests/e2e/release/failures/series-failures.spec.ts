@@ -135,18 +135,26 @@ test.describe('series page failures', () => {
     await page.getByRole('combobox', { name: 'Transformation' }).click();
     await page.getByRole('option', { name: 'Year-over-Year', exact: true }).click();
 
+    // Wait until the switch has happened: Year-over-Year is selected and its request has failed
+    // at least once. The app then retries for about 7 seconds (1, 2 and 4 s backoff) before
+    // giving up, keeping the previous data behind a "Loading transformation" bar.
+    await expect(page.getByRole('combobox', { name: 'Transformation' })).toHaveText(
+      'Year-over-Year'
+    );
+    await expect.poll(() => fault.failed()).toBeGreaterThan(0);
+
     // While it is retried, the levels stay on screen labelled as levels.
     const alert = page
       .getByRole('alert')
       .filter({ hasText: 'Could not load observations for this series' });
-    await expect(alert.or(levelsHeader)).toBeVisible();
+    await expect(page.getByRole('progressbar', { name: 'Loading transformation' })).toBeVisible();
+    await expect(levelsHeader).toBeVisible();
     await expect(yoyHeader).toHaveCount(0);
 
     // Once it fails, no values are shown at all, under either label.
     await expect(alert).toBeVisible({ timeout: QUERY_ERROR_TIMEOUT });
     await expect(page.getByRole('table', { name: 'Recent observations' })).toHaveCount(0);
     await expect(yoyHeader).toHaveCount(0);
-    expect(fault.failed()).toBeGreaterThan(0);
 
     // "Show levels" goes back to the levels, still failing nothing else.
     await alert.getByRole('button', { name: 'Show levels' }).click();
