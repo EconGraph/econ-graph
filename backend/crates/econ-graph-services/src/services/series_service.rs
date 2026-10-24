@@ -81,21 +81,59 @@ pub async fn list_series(
         ))
     })?;
 
+    let limit = params.limit.unwrap_or(50).min(1000);
+    let offset = params.offset.unwrap_or(0);
+
+    // Ordered by title (id breaks ties) so pages are stable and a source's catalog reads
+    // alphabetically; `last_updated` is our crawl time, which says nothing to a reader.
+    let query = filtered_series(&params)
+        .order_by(economic_series::title.asc())
+        .then_order_by(economic_series::id.asc())
+        .limit(limit)
+        .offset(offset);
+
+    let series = query
+        .select(EconomicSeries::as_select())
+        .load::<EconomicSeries>(&mut *conn)
+        .await?;
+
+    Ok(series)
+}
+
+/// Counts the series [`list_series`] would return for `params` without its limit and offset,
+/// so a caller can say how many there are in all.
+pub async fn count_series(pool: &DatabasePool, params: &SeriesSearchParams) -> AppResult<i64> {
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
+
+    Ok(filtered_series(params)
+        .count()
+        .get_result::<i64>(&mut *conn)
+        .await?)
+}
+
+/// The filters [`list_series`] and [`count_series`] share.
+fn filtered_series(
+    params: &SeriesSearchParams,
+) -> economic_series::BoxedQuery<'static, diesel::pg::Pg> {
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
         .filter(economic_series::end_date.is_not_null())
         .into_boxed();
 
-    // Apply filters
     if let Some(source_id) = params.source_id {
         query = query.filter(economic_series::source_id.eq(source_id));
     }
 
-    if let Some(frequency) = params.frequency {
+    if let Some(frequency) = &params.frequency {
         // Sources store their own frequency text verbatim (FRED: "Weekly, Ending Friday", BLS:
         // "Semi-Annual", ...), so an exact match misses most rows; match the same prefixes
         // `SeriesFrequency` classifies raw text by instead.
-        let (patterns, exact_frequency) = super::frequency_filter(&frequency);
+        let (patterns, exact_frequency) = super::frequency_filter(frequency);
         if let Some(patterns) = patterns {
             query = query.filter(
                 sql::<Bool>("frequency ILIKE ANY(")
@@ -107,8 +145,7 @@ pub async fn list_series(
         }
     }
 
-    if let Some(search_query) = params.query {
-        // Use PostgreSQL full-text search
+    if let Some(search_query) = &params.query {
         let search_term = format!("%{}%", search_query);
         query = query.filter(
             economic_series::title
@@ -117,23 +154,7 @@ pub async fn list_series(
         );
     }
 
-    // Apply pagination
-    let limit = params.limit.unwrap_or(50).min(1000);
-    let offset = params.offset.unwrap_or(0);
-
-    query = query.limit(limit).offset(offset);
-
-    // Order by last_updated desc, then by title
-    query = query
-        .order_by(economic_series::last_updated.desc())
-        .then_order_by(economic_series::title.asc());
-
-    let series = query
-        .select(EconomicSeries::as_select())
-        .load::<EconomicSeries>(&mut *conn)
-        .await?;
-
-    Ok(series)
+    query
 }
 
 /// **Get Economic Series by ID**

@@ -114,6 +114,25 @@ describe('SeriesChart', () => {
     });
   });
 
+  test('a range that leaves out every value says so instead of drawing an empty plot', () => {
+    renderChart({
+      dateRange: { start: parseIsoDate('2025-01-01'), end: null },
+      emptyMessage: 'Too few points for this transformation',
+    });
+    expect(screen.queryByTestId('series-chart')).toBeNull();
+    expect(screen.getByText(/No observations in the chosen date range/)).toBeInTheDocument();
+    expect(screen.queryByText('Too few points for this transformation')).toBeNull();
+  });
+
+  test('a series with no values shows the empty message', () => {
+    renderChart({
+      data: [{ date: '2024-01-01', value: null, revisionDate: '2024-02-15' }],
+      emptyMessage: 'Too few points for this transformation',
+    });
+    expect(screen.queryByTestId('series-chart')).toBeNull();
+    expect(screen.getByText('Too few points for this transformation')).toBeInTheDocument();
+  });
+
   test('a controlled range without a handler is read-only', () => {
     renderChart({ dateRange: { start: parseIsoDate('2024-02-01'), end: parseIsoDate('2024-03-01') } });
     const { options } = lastLineProps();
@@ -243,10 +262,21 @@ describe('SeriesChart', () => {
 
     const { label } = lastLineProps().options.plugins.tooltip.callbacks;
     const raw = lastLineProps().data.datasets[0].data[1];
-    expect(label({ raw, parsed: { y: 0.0526 }, dataset: { label: 'Test Series' } })).toEqual([
-      'Test Series: 0.05',
+    // Four significant digits: at two decimals a 1.2% rise would read 0.01 (ECO-407)
+    expect(label({ raw, parsed: { y: 0.011879 }, dataset: { label: 'Test Series' } })).toEqual([
+      'Test Series: 0.01188',
       'Revised: Mar 15, 2024',
     ]);
+  });
+
+  test('offers only transformations that fit a quarterly series', async () => {
+    renderChart({ frequency: 'Quarterly', onTransformationChange: vi.fn() });
+
+    await userEvent.setup().click(screen.getByRole('combobox', { name: 'Transformation' }));
+    const options = screen.getAllByRole('option').map(o => o.textContent);
+    expect(options).toContain('Quarter-over-Quarter');
+    expect(options).toContain('Year-over-Year');
+    expect(options).not.toContain('Month-over-Month');
   });
 
   describe('onPointClick', () => {

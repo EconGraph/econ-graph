@@ -14,6 +14,7 @@ import {
 import { Comment as CommentIcon } from '@mui/icons-material';
 import type { SeriesAnnotation } from '../../hooks/useSeriesAnnotations';
 import { formatIsoDate } from '../../utils/dates';
+import { wrapAnywhere } from '../annotations/annotationLimits';
 
 export interface SeriesAnnotationsPanelProps {
   annotations: readonly SeriesAnnotation[];
@@ -120,6 +121,9 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
               }}
             >
               <ListItemText
+                sx={{ minWidth: 0 }}
+                primaryTypographyProps={{ sx: wrapAnywhere }}
+                secondaryTypographyProps={{ sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } }}
                 primary={annotation.title}
                 secondary={
                   <>

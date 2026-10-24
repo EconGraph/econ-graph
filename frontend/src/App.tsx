@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { Container, Box } from '@mui/material';
+import { Container, Box, useMediaQuery, useTheme } from '@mui/material';
 
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -40,7 +40,16 @@ const SIDEBAR_WIDTH = 240;
  * @returns The main application component with routing and layout.
  */
 function App() {
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+  // Must match Sidebar.tsx's isMobile. App sits outside the app's ThemeProvider, so this is MUI's
+  // default theme; the app theme keeps the default breakpoints, so `sm` is 600px in both.
+  const isMobile = useMediaQuery(useTheme().breakpoints.down('sm'));
+  // Separate state per layout. On a phone the sidebar is a modal drawer that covers the page and
+  // marks the rest of the app aria-hidden, so it starts closed there (ECO-335); on desktop it is
+  // a fixed panel beside the content and starts open.
+  const [desktopOpen, setDesktopOpen] = React.useState(true);
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+  const sidebarOpen = isMobile ? mobileOpen : desktopOpen;
+  const setSidebarOpen = isMobile ? setMobileOpen : setDesktopOpen;
 
   const handleSidebarToggle = () => {
     setSidebarOpen(!sidebarOpen);

@@ -1,7 +1,7 @@
 # Backend Scripts
 
 - `check_migration_order.py` - checks that migration directories are in chronological order (used by CI).
-- `create_consolidated_migration.py` - builds a consolidated migration from a schema dump.
+- `compare_migrations.sh` - builds a database from the migrations at a git ref and one from the working tree and diffs their schemas (`schema_snapshot.sql`) and seed rows. Used when squashing migrations at a release; see `docs/development/MIGRATIONS.md`.
 - `run-tests-optimized.sh` - local test runner with several execution strategies.
 
 ## Populating series catalogs

@@ -7,6 +7,7 @@
 import { color as parseColor } from 'chart.js/helpers';
 import type { AnnotationOptions } from 'chartjs-plugin-annotation';
 import { parseIsoDate } from '../../utils/dates';
+import { truncateLabel } from '../annotations/annotationLimits';
 
 /** One observation to plot, already transformed by the backend. */
 export interface SeriesChartPoint {
@@ -187,7 +188,11 @@ export function buildAnnotationOptions(
     const shared = {
       adjustScaleRange: false,
       borderColor: color,
-      label: { display: true, content: annotation.label, position: 'start' as const },
+      label: {
+        display: true,
+        content: truncateLabel(annotation.label),
+        position: 'start' as const,
+      },
       click: onClick
         ? (_context: unknown, event: unknown) => onClick(annotation.id, event)
         : undefined,

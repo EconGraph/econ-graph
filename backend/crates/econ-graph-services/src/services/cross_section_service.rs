@@ -63,7 +63,9 @@ pub struct CrossSectionRow {
     /// The series' value of the `across` dimension, e.g. `USA`.
     pub key: String,
     /// The reference area for `key` when `across` uses the countries code list and the key is
-    /// in it; otherwise `None`.
+    /// in it, with the name the dataset gives it
+    /// ([`DatasetComponent::area_label`](econ_graph_core::models::DatasetComponent::area_label));
+    /// otherwise `None`.
     pub area: Option<Area>,
     pub series_id: Uuid,
     /// The observation's date: the requested date for [`CrossSectionDate::On`]; for
@@ -156,12 +158,23 @@ pub async fn cross_section(
     .load(conn)
     .await?;
 
+    // The across dimension when it uses the countries code list, for each key's area, named as
+    // the dataset names it (the World Bank's own names for its aggregates).
+    let across = dataset
+        .dimensions
+        .0
+        .iter()
+        .find(|d| d.name == request.across)
+        .filter(|_| uses_countries);
     Ok(rows
         .into_iter()
         .map(|row| CrossSectionRow {
-            area: uses_countries
-                .then(|| areas.by_key(&row.key).cloned())
-                .flatten(),
+            area: across.and_then(|dim| {
+                areas.by_key(&row.key).map(|area| Area {
+                    name: dim.area_label(area).to_string(),
+                    ..area.clone()
+                })
+            }),
             key: row.key,
             series_id: row.series_id,
             date: on_date.or(row.date),

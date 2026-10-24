@@ -100,3 +100,66 @@ export function transformedAxisTitle(
 ): string {
   return TRANSFORMATION_OPTIONS.find(o => o.value === transformation)?.axisTitle ?? seriesUnits;
 }
+
+/** Rough length in days of a series' period, by the prefix of its source's frequency text. */
+const FREQUENCY_DAYS: readonly (readonly [string, number])[] = [
+  ['daily', 1],
+  ['weekly', 7],
+  ['biweekly', 14],
+  ['semi-annual', 182],
+  ['semiannual', 182],
+  ['semi annual', 182],
+  ['monthly', 30],
+  ['quarterly', 91],
+  ['annual', 365],
+  ['yearly', 365],
+];
+
+/** How far back each period-over-period transformation compares, in days. */
+const COMPARISON_DAYS: Partial<Record<DataTransformation, number>> = {
+  MONTH_OVER_MONTH: 30,
+  QUARTER_OVER_QUARTER: 91,
+  YEAR_OVER_YEAR: 365,
+};
+
+/**
+ * Comparisons a frequency can't make although its period is short enough: a biweekly series'
+ * points fall 84 or 98 days back, both outside the backend's 85 to 95 day quarter-over-quarter
+ * window (QOQ_WINDOW in the GraphQL crate's query.rs).
+ */
+const UNSUPPORTED: Readonly<Record<string, readonly DataTransformation[]>> = {
+  biweekly: ['QUARTER_OVER_QUARTER'],
+};
+
+/**
+ * The transformations that make sense for a series observed at `frequency`. A
+ * period-over-period change shorter than the series' own period has nothing to compare (a
+ * quarterly series has no value a month earlier), so it isn't offered. The prefixes match the
+ * backend's `SeriesFrequency::classify_raw`; an unrecognised frequency gets every option.
+ * @param frequency - The series' frequency as its source states it, e.g. `Weekly, Ending Friday`.
+ * @returns The options to offer, in display order.
+ */
+export function transformationsFor(frequency: string): readonly TransformationOption[] {
+  const lower = frequency.trim().toLowerCase();
+  const match = FREQUENCY_DAYS.find(([prefix]) => lower.startsWith(prefix));
+  if (match === undefined) return TRANSFORMATION_OPTIONS;
+  const [prefix, periodDays] = match;
+  const unsupported = UNSUPPORTED[prefix] ?? [];
+  return TRANSFORMATION_OPTIONS.filter(
+    o => (COMPARISON_DAYS[o.value] ?? Infinity) >= periodDays && !unsupported.includes(o.value)
+  );
+}
+
+/**
+ * Format an observation for display after a transformation. Log differences are small
+ * (0.01188 for a 1.2% rise), so they show four significant digits; everything else shows two
+ * decimals with grouped thousands.
+ * @param value - The value to format.
+ * @param transformation - The transformation the value carries.
+ * @returns E.g. `0.01188`, `5.30` or `31,702.10`.
+ */
+export function formatTransformedValue(value: number, transformation: DataTransformation): string {
+  return transformation === 'LOG_DIFFERENCE'
+    ? value.toLocaleString('en-US', { minimumSignificantDigits: 4, maximumSignificantDigits: 4 })
+    : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}

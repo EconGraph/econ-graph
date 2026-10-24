@@ -259,6 +259,8 @@ describe('SeriesDetail', () => {
     expect(
       await screen.findByText(/Not enough observations to compute month-over-month % change/)
     ).toBeInTheDocument();
+    // The controls stay, so another transformation is one click away (ECO-407)
+    expect(screen.getByRole('combobox', { name: 'Transformation' })).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Show levels' }));
     await screen.findByTestId('line-chart');
   });

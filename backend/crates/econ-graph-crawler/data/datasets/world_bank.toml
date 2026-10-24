@@ -17,7 +17,9 @@ name = "indicator"
 label = "Indicator"
 
 # The `key` of econ-graph-core's countries.csv: ISO 3166-1 alpha-3 for countries, the World Bank
-# code for aggregates (WLD, EMU, EUU, income groups).
+# code for aggregates (WLD, EMU, EUU, income groups). countries.csv does not name the aggregates:
+# their names come from the World Bank's /country list, merged into this dimension's codes by
+# WorldBankAdapter::refresh_reference_data, and the API prefers them to the shared list's.
 [[dataset.dimensions]]
 name = "area"
 label = "Country or area"

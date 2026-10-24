@@ -4,7 +4,7 @@ All notable changes to EconGraph are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases are tagged `vX.Y.Z`; see
 [the release process](docs/development/RELEASE_PROCESS.md) for how a train reaches a tag.
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2026-10-08
 
 Train 1: broad real data behind pages that work. See
 [the train 1 roadmap](docs/roadmap/releases.md) for the full scope and what was deliberately
@@ -23,12 +23,22 @@ left for later trains.
 - A real dashboard and data-sources page, replacing hard-coded sample values.
 - Datasets metadata (country, indicator and table dimensions) for the new multi-dimensional
   sources.
+- Labels and code lists that a source publishes (BLS, BEA, Census, FHFA and World Bank) are
+  fetched by the crawl and stored in the database. Refreshes are conditional (ETag,
+  Last-Modified or an unchanged body), and a recorded copy can be seeded into a new database.
+- Pages fit a phone screen: the navigation drawer starts closed and the world map's controls sit
+  below the map.
 
 ### Changed
 
 - The ten static development-only catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN Stats,
   WTO) and IMF discovery are excluded from release and production builds; search in those
   builds never returns a series that can't have data.
+- Copyright-restricted FRED series are left out of discovery and refused when fetched, including
+  through an admin-triggered crawl.
+- The database schema is one v4.0.0 baseline migration. Databases created from earlier tags
+  can't be upgraded in place and are rebuilt (see
+  [database migrations](docs/development/MIGRATIONS.md)).
 
 ### Removed
 

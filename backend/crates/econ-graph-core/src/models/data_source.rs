@@ -601,8 +601,7 @@ mod _inline_tests {
     }
 
     /// ECO-392: BEA and World Bank must come up enabled and visible, same as every other source
-    /// the release build registers (Census already did; see the `enable_r1_data_sources`
-    /// migration for the existing-database side of this fix).
+    /// the release build registers (the v4.0.0 baseline migration seeds their rows the same way).
     #[test]
     fn release_sources_are_enabled_and_visible() {
         for source in [

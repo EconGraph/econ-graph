@@ -74,22 +74,27 @@ impl From<&Code> for DimensionCodeType {
     }
 }
 
-impl From<&Area> for DimensionCodeType {
-    fn from(area: &Area) -> Self {
+impl DimensionCodeType {
+    /// `area` as a code of `component` (a countries code list dimension): labelled, described
+    /// and given a unit by the dataset's own code for it where it stores one
+    /// ([`DatasetComponent::area_label`]), otherwise by the shared list.
+    fn area(component: &DatasetComponent, area: &Area) -> Self {
+        let own = component.code(&area.key);
         Self {
             code: area.key.clone(),
-            label: area.name.clone(),
-            unit: None,
-            description: None,
+            label: component.area_label(area).to_string(),
+            unit: own.and_then(|c| c.unit.clone()),
+            description: own.and_then(|c| c.description.clone()),
         }
     }
 }
 
-/// Where a component's codes come from: its inline list or a shared code list.
+/// Where a component's codes come from: its inline list or a shared code list (with the
+/// component's own labels for some of its codes).
 enum CodeSource<'a> {
     Uncoded,
     Inline(&'a [Code]),
-    Areas(&'static Areas),
+    Areas(&'static Areas, &'a DatasetComponent),
 }
 
 impl<'a> CodeSource<'a> {
@@ -97,14 +102,15 @@ impl<'a> CodeSource<'a> {
     /// reference file.
     fn of(component: &'a DatasetComponent) -> Result<Self> {
         match (&component.codes, &component.codelist) {
-            (Some(codes), _) => Ok(Self::Inline(codes)),
-            (None, Some(name)) if name == COUNTRIES_CODELIST => {
+            (_, Some(name)) if name == COUNTRIES_CODELIST => {
                 let areas = reference::areas().map_err(|e| {
                     async_graphql::Error::new(format!("code list {name:?} unavailable: {e}"))
                 })?;
-                Ok(Self::Areas(areas))
+                Ok(Self::Areas(areas, component))
             }
-            (None, Some(name)) => Err(async_graphql::Error::new(format!(
+            // An unknown code list with codes of its own still shows those labels.
+            (Some(codes), _) => Ok(Self::Inline(codes)),
+            (_, Some(name)) => Err(async_graphql::Error::new(format!(
                 "dataset component {:?} uses unknown code list {name:?}",
                 component.name
             ))),
@@ -134,7 +140,11 @@ impl<'a> CodeSource<'a> {
         match self {
             Self::Uncoded => Vec::new(),
             Self::Inline(codes) => codes.iter().map(Into::into).collect(),
-            Self::Areas(areas) => areas.all().iter().map(Into::into).collect(),
+            Self::Areas(areas, component) => areas
+                .all()
+                .iter()
+                .map(|area| DimensionCodeType::area(component, area))
+                .collect(),
         }
     }
 
@@ -143,10 +153,10 @@ impl<'a> CodeSource<'a> {
         match self {
             Self::Uncoded => None,
             Self::Inline(codes) => codes.iter().find(|c| c.code == value).map(Into::into),
-            Self::Areas(areas) => areas
+            Self::Areas(areas, component) => areas
                 .by_key(value)
                 .filter(|area| area.key == value)
-                .map(Into::into),
+                .map(|area| DimensionCodeType::area(component, area)),
         }
     }
 }
@@ -637,6 +647,34 @@ mod tests {
         let germany = codes.iter().find(|c| c.code == "DEU").expect("DEU listed");
         assert_eq!(germany.label, "Germany");
         assert!(codes.iter().any(|c| c.code == "WLD"), "aggregates listed");
+    }
+
+    /// The dataset's own codes on a code list dimension label those codes (the World Bank's
+    /// names for its aggregates); the rest keep the shared list's names.
+    #[test]
+    fn countries_code_list_takes_the_dataset_labels() {
+        let mut wdi = wdi();
+        let mut emu = Code::new("EMU", "Euro area");
+        emu.description = Some("Euro area members".into());
+        wdi.dimensions.0[1].codes = Some(vec![emu]);
+        let area = &wdi.dimensions.0[1];
+        let codes = CodeSource::of(area).unwrap().all();
+        let label = |code: &str| {
+            let c = codes.iter().find(|c| c.code == code).unwrap();
+            (c.label.as_str(), c.description.as_deref())
+        };
+        assert_eq!(label("EMU"), ("Euro area", Some("Euro area members")));
+        assert_eq!(
+            label("WLD"),
+            ("WLD", None),
+            "an unlabelled aggregate shows its key"
+        );
+        assert_eq!(label("DEU"), ("Germany", None));
+        assert_eq!(codes.len(), reference::areas().unwrap().all().len());
+
+        let series = dims(&[("area", "EMU")]);
+        let labelled = label_dimensions(&series, Some(&wdi));
+        assert_eq!(labelled[0].value_label.as_deref(), Some("Euro area"));
     }
 
     #[test]

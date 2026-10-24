@@ -139,8 +139,11 @@ jobs:
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
             - 'frontend/.license-checker.json'
+            - 'frontend/scripts/check-npm-audit.mjs'
+            - 'frontend/scripts/npm-audit-allowlist.json'
             - 'admin-frontend/package.json'
             - 'admin-frontend/package-lock.json'
+            - 'admin-frontend/scripts/npm-audit-allowlist.json'
           # Docker Build Test builds the whole backend and frontend inside the
           # image, so a dependency or toolchain bump can break it with no
           # Dockerfile touched (a new -sys crate needing a system library, an
@@ -247,10 +250,12 @@ jobs:
     - name: Test migration validation with duplicate timestamps
       run: |
         cd backend
-        # Create a temporary migration with duplicate timestamp for testing
-        mkdir -p migrations/2025-02-01-000001_duplicate_migration_test
-        echo "-- Test migration" > migrations/2025-02-01-000001_duplicate_migration_test/up.sql
-        echo "-- Test migration down" > migrations/2025-02-01-000001_duplicate_migration_test/down.sql
+        # Create a temporary migration that reuses the newest migration's timestamp
+        latest=$(ls -d migrations/[0-9]*_*/ | sort | tail -1 | xargs basename)
+        dup="migrations/${latest%%_*}_duplicate_migration_test"
+        mkdir -p "$dup"
+        echo "-- Test migration" > "$dup/up.sql"
+        echo "-- Test migration down" > "$dup/down.sql"
 
         # This should fail because the timestamp duplicates an existing migration
         if python3 scripts/check_migration_order.py; then
@@ -261,7 +266,7 @@ jobs:
         fi
 
         # Clean up test migration
-        rm -rf migrations/2025-02-01-000001_duplicate_migration_test
+        rm -rf "$dup"
 
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
@@ -1060,7 +1065,10 @@ jobs:
       run: npm ci
 
     - name: Run npm security audit
-      run: npm audit --audit-level moderate
+      # Gates every production and dev dependency, with narrow, documented
+      # exceptions for advisories with no upstream fix (see
+      # scripts/npm-audit-allowlist.json) instead of a blanket --omit=dev.
+      run: node scripts/check-npm-audit.mjs .
       working-directory: frontend
 
     - name: Install admin-frontend dependencies
@@ -1068,7 +1076,11 @@ jobs:
       run: npm ci
 
     - name: Run admin-frontend npm security audit
-      run: npm audit --audit-level moderate
+      # Gates every production and dev dependency, with narrow, documented
+      # exceptions for advisories with no upstream fix (see
+      # scripts/npm-audit-allowlist.json), via the same script frontend uses
+      # (ECO-394/ECO-395) — kept as one copy since they'd otherwise drift.
+      run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
       working-directory: admin-frontend
 
   license-compliance:

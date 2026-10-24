@@ -28,7 +28,9 @@ type = "string"              # string (default), integer, decimal, date or boole
 name = "area"
 label = "Country or area"
 codelist = "countries"       # a shared reference list (today only countries),
-                             # resolved by the API, not the crawler
+                             # resolved by the API, not the crawler; the source's
+                             # own labels for some of its codes (World Bank
+                             # aggregate names) come from the crawl, never this file
 
 # Or list the codes inline (not a closed list), instead of codelist:
 # codes = [{ code = "national", label = "United States" }, { code = "state", label = "State" }]

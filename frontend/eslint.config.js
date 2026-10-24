@@ -70,6 +70,7 @@ export default [
         // Vite globals
         import: 'readonly',
         __FLAGS__: 'readonly', // build-time flags, see src/flags.ts
+        __APP_VERSION__: 'readonly', // package.json's version, see appVersion.config.ts
         importMeta: 'readonly',
 
         // Vitest globals

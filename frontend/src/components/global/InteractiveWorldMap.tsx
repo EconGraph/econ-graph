@@ -320,16 +320,21 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
           aspectRatio: `${width} / ${height}`,
         }}
       />
+      {/* Overlaid on the map's top-right corner, except on a phone, where an overlay that size
+          would cover Europe and East Asia; there the controls sit in a bar under the map. */}
       <Box
+        data-testid='map-zoom-controls'
         sx={{
-          position: 'absolute',
+          position: { xs: 'static', sm: 'absolute' },
           top: 8,
           right: 8,
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'flex-end',
           gap: 0.5,
           bgcolor: 'rgba(255,255,255,0.85)',
-          borderRadius: 1,
+          borderRadius: { xs: 0, sm: 1 },
+          borderTop: { xs: '1px solid #e0e0e0', sm: 'none' },
           px: 0.5,
         }}
       >

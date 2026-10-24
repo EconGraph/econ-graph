@@ -68,10 +68,10 @@
     "@eslint/plugin-kit": "^0.4.1",
     "@graphql-tools/mock": "^9.1.14",
     "@playwright/test": "^1.63.0",
-    "@storybook/addon-links": "^10.6.0",
-    "@storybook/addon-onboarding": "^10.6.0",
-    "@storybook/react": "^10.6.0",
-    "@storybook/react-vite": "^10.6.0",
+    "@storybook/addon-links": "^10.6.3",
+    "@storybook/addon-onboarding": "^10.6.3",
+    "@storybook/react": "^10.6.3",
+    "@storybook/react-vite": "^10.6.3",
     "@storybook/test-runner": "^0.24.5",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -84,9 +84,9 @@
     "@typescript-eslint/typescript-estree": "^8.70.1",
     "@typescript-eslint/visitor-keys": "^8.70.1",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/browser": "^5.0.2",
-    "@vitest/coverage-v8": "^5.0.2",
-    "@vitest/ui": "^5.0.2",
+    "@vitest/browser": "^5.0.5",
+    "@vitest/coverage-v8": "^5.0.5",
+    "@vitest/ui": "^5.0.5",
     "eslint": "^9.39.5",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-import": "^2.32.0",
@@ -102,11 +102,11 @@
     "prettier": "3.9.9",
     "react-test-renderer": "18.3.1",
     "resize-observer-polyfill": "1.5.1",
-    "storybook": "^10.6.0",
+    "storybook": "^10.6.3",
     "supertest": "^7.3.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.5"
   },
   "scripts": {
     "dev": "vite",
@@ -162,7 +162,8 @@
     "@types/d3-dispatch": "3.0.4",
     "webpack-dev-server": "^5.1.0",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "source-map-js": "^1.2.2"
   },
   "resolutions": {
     "@types/d3-dispatch": "3.0.4"

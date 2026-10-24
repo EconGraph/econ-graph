@@ -70,6 +70,8 @@ async fn seed(pool: &DatabasePool) -> Uuid {
 
     let mut area = DatasetComponent::new("area", "Area", ComponentType::String);
     area.codelist = Some(COUNTRIES_CODELIST.to_string());
+    // The dataset's own name for the aggregate, as the World Bank crawl stores it.
+    area.codes = Some(vec![econ_graph_core::models::Code::new("WLD", "World")]);
     let dataset = Dataset::create(
         pool,
         &NewDataset::long(

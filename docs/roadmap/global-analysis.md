@@ -93,10 +93,11 @@ The map needs ISO 3166 alpha-2, alpha-3 and numeric codes (the world outline is 
 numeric code), a name, a region and an income group. Today it is 20 rows in a migration.
 
 Recommendation: a shared reference data file (`countries.csv` in `econ-graph-core`'s data
-directory, added by MAP-2, #205) loaded at runtime, like the state list from PR #175. It is built from ISO 3166,
-with the World Bank country API (`/v2/country?format=json&per_page=400`) filling regions and
-income groups. That API also marks the aggregates ("World", "Euro area", "High income" and so on) with the region
-`Aggregates` (from public docs; the cloud environment can't reach the API to confirm).
+directory, added by MAP-2, #205) loaded at runtime, like the state list from PR #175. It is built from ISO 3166
+and carries codes and ISO names only, plus the keys of the World Bank aggregates we crawl ("World", "Euro area",
+"High income" and so on). The aggregates' names are the World Bank's: the World Bank crawl fetches its country
+list (`/v2/country`) and stores them as the `wdi` dataset's own labels for its `area` dimension (ECO-398).
+World Bank regions and income groups are in that same list but not stored yet (ECO-399).
 Aggregates are valid series but never map cells.
 
 The file is the one place any source's area code is resolved, so it is shared with the
@@ -212,7 +213,7 @@ Each numbered item is one small PR, stacked where it depends on the one before.
 1. **Stop showing fake numbers.** Delete `calculate_pairwise_correlation` and
    `calculateCountryCorrelations`, and the test that relies on the mock. No dependencies.
 2. **Country reference data.** The countries file and its loader in `econ-graph-core`,
-   built from ISO 3166 with the World Bank country list filling regions and income groups.
+   built from ISO 3166; aggregate names come from the World Bank crawl (ECO-398).
 3. **Datasets metadata, early.** The `datasets` table and the `economic_series` dataset
    and dimension columns from federation phase 3 (Postgres only, no storage change). Owned
    by the federation roadmap; this roadmap needs it early.

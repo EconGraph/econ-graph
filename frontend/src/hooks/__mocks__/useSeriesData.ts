@@ -5,27 +5,31 @@
 
 import { vi } from 'vitest';
 
+import type { DataSource } from '../useSeriesData';
+
 // Mock data for testing
-export const mockDataSources = [
+export const mockDataSources: DataSource[] = [
   {
     id: 'fred',
     name: 'Federal Reserve Economic Data',
     description: 'Economic data from the Federal Reserve',
-    status: 'active',
-    lastUpdated: '2024-12-15T10:00:00Z',
+    baseUrl: 'https://fred.stlouisfed.org',
+    apiKeyRequired: true,
+    rateLimitPerMinute: 120,
     seriesCount: 800000,
-    category: 'Government',
-    website: 'https://fred.stlouisfed.org',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-12-15T10:00:00Z',
   },
   {
     id: 'bls',
     name: 'Bureau of Labor Statistics',
     description: 'Labor market and economic statistics',
-    status: 'active',
-    lastUpdated: '2024-12-14T09:00:00Z',
+    baseUrl: 'https://www.bls.gov',
+    apiKeyRequired: false,
+    rateLimitPerMinute: 500,
     seriesCount: 50000,
-    category: 'Government',
-    website: 'https://www.bls.gov',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-12-14T09:00:00Z',
   },
 ];
 
@@ -71,6 +75,13 @@ export const useSeriesSearch = vi.fn(() => ({
   error: null,
   isError: false,
   isSuccess: true,
+}));
+
+export const useSeriesBrowse = vi.fn(() => ({
+  data: undefined,
+  isInitialLoading: false,
+  isFetching: false,
+  error: null,
 }));
 
 export const useSeriesDetail = vi.fn(() => ({
