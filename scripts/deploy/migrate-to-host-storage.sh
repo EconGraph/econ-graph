@@ -113,8 +113,11 @@ stop_writers() {
     done
     if [ "${DRY_RUN}" != "true" ]; then
         # No writer pods left means nothing can change the data after the dump.
-        k wait --for=delete pod -l 'app in (econ-graph-backend,crawler-worker,keycloak)' --timeout=300s ||
-            die "writer pods are still running; not taking the backup"
+        local selector='app in (econ-graph-backend,crawler-worker,keycloak)'
+        if [ -n "$(k get pod -l "$selector" -o name)" ]; then
+            k wait --for=delete pod -l "$selector" --timeout=300s ||
+                die "writer pods are still running; not taking the backup"
+        fi
     fi
 }
 
@@ -152,7 +155,16 @@ bootstrap_databases() {
 
 restore_and_deploy() {
     local src="$1"
-    run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" "${common_flags[@]}"
+    # Once restored, a resumed run must not restore again: deploy.sh may have
+    # started the crawler, which adds rows the backup doesn't have.
+    if [ -f "${STATE_FILE}" ] && grep -qx "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
+        log "Databases already restored from ${BACKUP_DIR} by an earlier run"
+    else
+        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" "${common_flags[@]}"
+        if [ "${DRY_RUN}" != "true" ]; then
+            echo "RESTORED=${BACKUP_DIR}" >>"${STATE_FILE}"
+        fi
+    fi
     log "Deploying the rest of the stack with $src/scripts/deploy/deploy.sh"
     if [ "${DRY_RUN}" = "true" ]; then
         echo "+ (cd $src && scripts/deploy/deploy.sh)"
@@ -303,7 +315,7 @@ rollback() {
     restore_and_deploy "$src"
     verify
     if [ "${DRY_RUN}" != "true" ]; then rm -f "${STATE_FILE}"; fi
-    log "Rollback complete. Host subvolume contents were not touched."
+    if [ "${DRY_RUN}" = "true" ]; then log "Dry run complete; nothing was changed"; else log "Rollback complete. Host subvolume contents were not touched."; fi
 }
 
 if [ "${DRY_RUN}" = "true" ]; then

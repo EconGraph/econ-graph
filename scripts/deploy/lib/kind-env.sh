@@ -192,7 +192,7 @@ check_host_storage_in_node() {
 # --- backups -----------------------------------------------------------------
 
 new_backup_dir() {
-    echo "${BACKUP_ROOT}/$(date -u +%Y%m%dT%H%MZ)"
+    echo "${BACKUP_ROOT}/$(date -u +%Y%m%dT%H%M%SZ)"
 }
 
 # pg_dump both databases, verify the archives, record row counts and save the
