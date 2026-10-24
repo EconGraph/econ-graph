@@ -6,7 +6,8 @@
 #   2. Keycloak, with the dev realm from config/keycloak/, always via docker-compose.release-e2e.yml
 #      (CI has no equivalent service container for it: the realm and users files must be mounted
 #      from the checkout under test).
-#   3. Builds the backend and the seed tool in one cargo invocation.
+#   3. Builds the backend and the seed tool in one cargo invocation, with the release flag
+#      profile (config/flags/README.md), so the suite tests the backend that ships.
 #   4. Seeds the database from recorded fixtures through the crawler adapters, with any request
 #      outside its local mock upstreams refused.
 #   5. Runs Playwright, which starts the backend and a release build of the frontend.
@@ -28,7 +29,9 @@ fi
 target="$(cd "$repo/backend" && realpath -m "${CARGO_TARGET_DIR:-target}")"
 (
   cd "$repo/backend"
-  cargo build -p econ-graph-backend --bin econ-graph-backend \
+  # backend/.cargo/config.toml defaults local builds to the dev flag profile, which compiles in
+  # /mcp and the static catalogs; an exported FLAGS_PROFILE wins over it.
+  FLAGS_PROFILE=release cargo build -p econ-graph-backend --bin econ-graph-backend \
     -p econ-graph-crawler --features econ-graph-crawler/testkit --bin seed-fixtures
 )
 # The seed talks only to its own mock upstreams on 127.0.0.1. Every other request goes through
