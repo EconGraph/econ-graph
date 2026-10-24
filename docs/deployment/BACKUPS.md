@@ -1,7 +1,7 @@
 # Production data: snapshots, dumps and restores
 
 Production, UAT and integration testing all run on one host (threadripper),
-on a kind cluster under rootless Docker. This runbook covers how the
+on a kind cluster on the rootful Docker daemon. This runbook covers how the
 production data is protected on that host, and how to get it back.
 
 The older in-cluster dump job is covered in
@@ -39,17 +39,43 @@ touches `@home` or its snapshots. Because the pool is a different filesystem
 from `/home`, snapshots reach it only by `btrfs send`/`receive`
 (`scripts/host/backup-snapshots.sh`, as root), never by copying files.
 
+### Which Docker daemon
+
+The kind cluster runs on the **rootful** Docker daemon at
+`unix:///var/run/docker.sock`: kind can't start under rootless Docker on this
+host, whose rootless data root is on btrfs (see
+`docs/deployment/HOST_STORAGE.md`). Joe's login shell exports `DOCKER_HOST`
+for the rootless daemon, so the backup scripts don't use that variable:
+`scripts/backup/lib.sh` sets `DOCKER_HOST=unix:///var/run/docker.sock` for
+itself and everything it runs, like `scripts/deploy/lib/kind-env.sh`.
+Override it with `ECONGRAPH_DOCKER_HOST` (in the environment or in
+`~/.config/econgraph/backup.env`). jmalicki is in the `docker` group, so the
+user timers reach that socket without sudo. The scripts log the daemon they
+use and warn if it is a rootless one.
+
+The `docker` commands in this runbook are meant for that daemon too. From
+Joe's shell, run them with `DOCKER_HOST=unix:///var/run/docker.sock` (or
+`docker -H unix:///var/run/docker.sock ...`); a plain `docker` there talks
+to the rootless daemon, which has no kind nodes.
+
 ### File ownership
 
 The Postgres data directories (`data-plane/pg/`, `app-prod/keycloak-pg/`)
-are owned by host UID **100998**, mode 0700. That is the container's
-`postgres` user (UID 999) mapped through rootless Docker
-(`/etc/subuid`: `jmalicki:100000:65536`). jmalicki cannot read them
+are owned by host UID **999**, mode 0700: the `postgres` user of the
+`postgres:18` image (`uid=999(postgres) gid=999(postgres)`), which the
+manifests run as (`runAsUser: 999`). Rootful Docker uses no user namespace,
+so UID 999 in the pod is UID 999 on the host. jmalicki cannot read them
 directly. Any copy has to preserve that ownership and mode, or Postgres
 refuses to start on it. btrfs snapshots and `btrfs send`/`receive` preserve
 it. A file-level copy has to be made as root with ownership kept
-(`cp -a`, `rsync -aHAX --numeric-ids`), or from inside a rootless container,
-where UID 999 maps back to 100998.
+(`cp -a`, `rsync -aHAX --numeric-ids`), or from inside a container on the
+rootful daemon (root there is host root).
+
+Data written while the cluster still ran under rootless Docker is owned by
+host UID 100998 (999 mapped through `/etc/subuid`). The Postgres init
+containers on the host-storage layout (PR #421) re-own a data directory to
+999:999 when they find anything else, so a snapshot taken before the switch
+still starts.
 
 ### Why snapshots are safe for a running Postgres
 
@@ -216,8 +242,8 @@ Like every snapshot it is kept until Joe deletes it by hand.
 ## Nightly dumps
 
 `dump-databases.sh` runs `pg_dump --format=custom` inside each Postgres pod
-(through `docker exec econ-graph-control-plane kubectl ...`, since the
-host's `kubectl` is a microk8s wrapper) and writes:
+(through `docker exec econ-graph-control-plane kubectl ...` on the rootful
+daemon, since the host's `kubectl` is a microk8s wrapper) and writes:
 
 ```
 ~/econgraph-backups/<YYYYMMDDTHHMMZ>/
@@ -330,7 +356,7 @@ is set aside, not deleted.
    into `/srv/econgraph/snapshots`.
 2. Stop everything that writes, then Postgres (no sudo):
    ```sh
-   k() { docker exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
+   k() { docker -H unix:///var/run/docker.sock exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
    k scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0
    k scale statefulset/postgresql --replicas=0      # data-plane
    # app-prod: k scale deployment/keycloak statefulset/keycloak-postgres --replicas=0
@@ -341,7 +367,8 @@ is set aside, not deleted.
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
 4. With Postgres still stopped, restart the kind node that holds the
-   storage, so it sees the new subvolume: `docker restart econ-graph-worker`.
+   storage, so it sees the new subvolume:
+   `docker -H unix:///var/run/docker.sock restart econ-graph-worker`.
    Postgres runs on `econ-graph-worker` (labelled
    `econgraph.io/host-storage=true`), which bind-mounts
    `/srv/econgraph/data-plane` and `/srv/econgraph/app-prod`. That bind mount
@@ -394,9 +421,10 @@ scripts/backup/branch-clone.sh delete my-branch
 The clone is `btrfs subvolume snapshot <read-only snapshot>
 ~/econgraph-branches/<branch>`, i.e. a new writable subvolume, made without
 sudo. Point the branch's Postgres 18 at `<clone>/pg` (the files are owned by
-the rootless-Docker mapping of the container's postgres user, so run it as a
-container, not on the host). Delete also needs no sudo: it empties the clone
-from inside a container and then `rmdir`s the empty subvolume.
+UID 999, the image's postgres user, so run it as a container, not on the
+host). Delete also needs no sudo: it empties the clone from inside a
+container on the rootful daemon (root there is host root) and then `rmdir`s
+the empty subvolume.
 
 ## The in-cluster `postgres-backup` CronJob
 
@@ -429,6 +457,7 @@ Tested on threadripper (kernel 7.0, btrfs-progs 6.17.1) as jmalicki, first
 in a scratch directory on `/home`, then on the real layout
 (`snapshot-now.sh` from `/srv/econgraph/data-plane` and `app-prod`, both
 owned by jmalicki and holding only a test directory owned by UID 100998,
+the rootless-Docker mapping of UID 999 in use at the time,
 into `/srv/econgraph/snapshots`; `/home` is not mounted with
 `user_subvol_rm_allowed`):
 
@@ -442,7 +471,7 @@ into `/srv/econgraph/snapshots`; `/home` is not mounted with
 | `btrfs property set <snap> ro false` on a snapshot you own | **works**: the owner can make a snapshot writable again |
 | `btrfs subvolume delete` | fails: `Operation not permitted` (needs `user_subvol_rm_allowed`) |
 | `rmdir` of an empty subvolume you own | works, and deletes the subvolume |
-| `rm -rf` of a subvolume holding Postgres files (owned by the rootless-Docker mapped UID 100998) | fails: `Permission denied`; emptying it from inside a rootless container works |
+| `rm -rf` of a subvolume holding Postgres files (owned by another UID: 999 now, 100998 under the old rootless Docker) | fails: `Permission denied`; emptying it from inside a container works (tested rootless with 100998; rootful containers run as host root) |
 | `btrfs subvolume show`, `btrfs subvolume list` | fail: `Operation not permitted` (tree search needs root) |
 | `btrfs send` | fails: `Operation not permitted` (so copying to the backup pool is root-only) |
 
@@ -452,7 +481,7 @@ subvolumes), which is why `setup-subvolumes.sh` chowns the subvolume roots
 to jmalicki.
 
 The test snapshots on the real layout were removed without root (clear `ro`,
-empty from a rootless container, `rmdir`); none were left behind.
+empty from a container, `rmdir`); none were left behind.
 
 Consequences:
 
