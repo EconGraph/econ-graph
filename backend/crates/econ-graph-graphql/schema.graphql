@@ -709,11 +709,11 @@ type Mutation {
 	"""
 	updateUser(id: ID!, input: UpdateUserInput!): UserType!
 	"""
-	Delete a user (requires `admin.users:delete`)
+	Delete a user (requires `admin.users:delete`); never the caller's own account
 	"""
 	deleteUser(id: ID!): Boolean!
 	"""
-	Suspend a user account (requires `admin.users:suspend`)
+	Suspend a user account (requires `admin.users:suspend`); never the caller's own
 	"""
 	suspendUser(id: ID!): Boolean!
 	"""

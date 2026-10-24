@@ -103,6 +103,7 @@ function viewAs(viewer: Viewer) {
   mockUseAuth.mockReturnValue({
     user,
     isAuthenticated: user !== null,
+    isSuspended: false,
     isLoading: false,
     isConfigured: true,
     accountUrl: null,
