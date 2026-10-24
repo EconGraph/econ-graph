@@ -1,11 +1,13 @@
 # EconGraph Roadmap
 
 > **Moved to Linear on 2026-09-27.** Roadmaps and release plans now live in
-> [Linear](https://linear.app/econgraph). Releases are issues ECO-5 (train 1, `v4.0.0`)
-> through ECO-11 (train 7), and each topic is a Linear project. This index is frozen as
-> of that date: its State column, the "What is built today" snapshot and the open-work
-> lists are no longer updated, and where they differ from Linear, Linear is current. The
-> stale-PR recommendations and the doc inventory below are kept only here.
+> [Linear](https://linear.app/econgraph). Releases are issues ECO-5 (train 1, `v4.0.0`),
+> ECO-420 (train 2, `v4.1.0`) and ECO-6 to ECO-11 (trains 3 to 8), and each topic is a
+> Linear project. This index is frozen as of 2026-09-27: its State column, the "What is
+> built today" snapshot and the open-work lists are no longer updated, and where they
+> differ from Linear, Linear is current. The stale-PR recommendations and the doc
+> inventory below are kept only here. Train numbers follow the 2026-10-23 renumbering,
+> which inserted train 2 (separate data plane) and moved the old trains 2 to 7 to 3 to 8.
 
 Linear projects:
 
@@ -46,7 +48,7 @@ open the Linear design records instead.
 | Admin UI | [admin-ui.md](./admin-ui.md) | Accepted ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
 | Postgres metadata federated with Arrow Flight / Parquet time series | [Linear design record](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) | Moved to Linear; [#178](https://github.com/EconGraph/econ-graph/pull/178) closed without merging. Tracked under ECO-5 |
 | Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Accepted ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
-| Release trains: what ships in which release | [releases.md](./releases.md) | Accepted for train 1 ([#190](https://github.com/EconGraph/econ-graph/pull/190)); fork 4 still open |
+| Release trains: what ships in which release | [releases.md](./releases.md) | Accepted for train 1 ([#190](https://github.com/EconGraph/econ-graph/pull/190)); fork 4 decided and train 2 added (2026-10-23) |
 | Data sources: which sources, in what order | [Linear design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) | Moved to Linear; [#192](https://github.com/EconGraph/econ-graph/pull/192) closed without merging. Tracked under ECO-5, plus ECO-202, ECO-203, ECO-204 |
 | Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Accepted ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
 | SEC EDGAR / XBRL financial data | [Linear design record](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) | Moved to Linear; [#193](https://github.com/EconGraph/econ-graph/pull/193) closed without merging. Tracked as ECO-39, ECO-82, ECO-86, ECO-116, ECO-117, ECO-118, ECO-126, ECO-144 |
@@ -89,7 +91,7 @@ open the Linear design records instead.
   WDI; the series page on `series`/`seriesData` with CSV download; the world map on
   `crossSection`; Keycloak sign-in with private and public annotations. `/analysis`,
   `ProfessionalChart` and `ChartCollaboration` are deleted as known bad. MCP, the admin
-  app, saved charts and sharing wait for train 2. One chart component serves
+  app, saved charts and sharing wait for train 3. One chart component serves
   `/series/:id` now and `/chart` later.
 
 ## What is built today
