@@ -134,17 +134,10 @@ setup_backend() {
 
     cd backend
 
-    # Run migrations
-    print_status "Running database migrations..."
-    if command -v diesel > /dev/null 2>&1; then
-        diesel migration run --migration-dir migrations/data
-        diesel migration run --migration-dir migrations/app
-    elif [ -f ~/.cargo/bin/diesel ]; then
-        ~/.cargo/bin/diesel migration run --migration-dir migrations/data
-        ~/.cargo/bin/diesel migration run --migration-dir migrations/app
-    else
-        print_warning "Diesel CLI not found, skipping migrations"
-    fi
+    # The backend applies both migration sets at startup (run_migrations). That also brings forward
+    # a demo database built by the single v4.0.0 baseline, which the diesel CLI would stop on at the
+    # app baseline's guard.
+    print_status "Backend will run database migrations on startup."
 
     # Start backend server
     print_status "Starting backend server on port $BACKEND_PORT..."
