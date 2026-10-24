@@ -185,7 +185,8 @@ function topLevelDefinitions(document: string): TopLevelDefinition[] {
   while (i < document.length) {
     const ch = document[i];
     if (ch === '#') {
-      while (i < document.length && document[i] !== '\n') i++;
+      // A comment ends at a line terminator: `\n` or `\r` (GraphQL accepts a lone `\r`).
+      while (i < document.length && document[i] !== '\n' && document[i] !== '\r') i++;
       continue;
     }
     if (document.startsWith('"""', i)) {
