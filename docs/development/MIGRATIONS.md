@@ -91,17 +91,27 @@ need the same three things whether or not they are a migration.
 
 ### Series ids never change
 
-A series' id is UUIDv5 of `"{SOURCE}:{external_id}"` (for example `FRED:GDP`) in a fixed
-namespace (`backend/crates/econ-graph-crawler/src/series_id.rs`), so every database gives a
-series the same id. App rows refer to series by that id: `chart_annotations.series_id` holds
-`economic_series.id` with no foreign key, because the two tables are in different databases.
-Nothing in the app database notices if a series' id changes; its annotations just stop
-appearing.
+The crawler creates each series with the id UUIDv5 of `"{SOURCE}:{external_id}"` (for example
+`FRED:GDP`) in a fixed namespace (`backend/crates/econ-graph-crawler/src/series_id.rs`), so a
+series created by any database's crawl gets the same id. Rows created before stable ids keep
+their generated ids (see that file's module doc). The primary data database has none: on
+2026-10-24 all 10,528 of its `economic_series` ids equalled their stable ids.
 
-So no data migration and no recrawl, critical or not, may change an existing series' id.
-Changing how the id is derived (the namespace, the name format, a source's `SOURCE` string or
-its `external_id`) is itself a critical change, and its PR must also ship a mapping from old ids
-to new ones for the app rows that hold them.
+App rows refer to series by that id: `chart_annotations.series_id` is a `VARCHAR(255)` holding
+the id's text form, with no foreign key, because the two tables are in different databases.
+Nothing in the app database notices if a series' id changes; its annotations just stop
+appearing. So:
+
+- **No data migration and no recrawl, critical or not, may change an existing series' id.**
+- **A recrawl updates series rows in place.** It never deletes and re-inserts a series.
+- **The primary data database is never recreated.** It is only moved forward. The advice in
+  `series_id.rs` to recreate a database to get stable ids does not apply to it: recreating it
+  would orphan app rows.
+- **Regenerating any existing series id is a critical change,** and its PR must also ship a
+  mapping from old ids to new ones for the app rows that hold them. That includes moving a row
+  from before stable ids onto its stable id, and changing how ids are derived (the namespace,
+  the name format, a source's `SOURCE` string or a series' `external_id`). The mapping updates
+  `chart_annotations.series_id` as text.
 
 ### The v4.0 split exception
 
@@ -287,15 +297,32 @@ Three limits, all only affecting databases that were never deployed from a relea
 
 Steps:
 
-1. List the app migrations added since the previous tag, where the previous tag is the latest
-   tag of the previous release line, patch releases included
-   (`git diff --name-only <prev-tag> -- backend/migrations/app`). Migrations that stay incremental
-   may sort between them only if they have shipped already (a hotfix migration released in a
-   patch and forward-ported to `main` under the same directory name): a new database then runs
-   the previous squash, the hotfix, then the new squash, and an upgraded database has the first
-   two recorded and runs only the new squash. An unshipped migration that is not being squashed
-   and sorts before the last squashed version would run before the squash on a new database;
-   renumber it after the squashed version in the same PR (rule 2 allows it). After a release
+1. List the app migrations to squash. Some versions are permanent and never squashed,
+   renumbered or removed: the data baseline `20261021000100`, the app baseline `20261021000200`
+   (`APP_BASELINE_VERSION`, which the record-without-running step needs), and every app
+   migration that shipped in a release tag, today
+   `2026-10-24-000100_audit_logs_keep_on_user_delete` (#429, ships in `v4.0.0`). A migration
+   has shipped when it is present in any release tag (a release candidate's tag doesn't count)
+   under `backend/migrations` or `backend/migrations/app`. The squash replaces the app
+   migrations with a version later than the newest shipped app version that have not shipped
+   themselves. A `git diff` against the previous tag can't find them, because
+   `migrations/app` did not exist before train 2. From `backend/`:
+
+   ```sh
+   shipped=$(for t in $(git tag -l 'v*' | grep -v -- -); do
+     git ls-tree --name-only "$t" migrations/ migrations/app/
+   done | sed 's|.*/||' | grep '^2' | sort -u)
+   app=$(ls migrations/app | grep '^2' | sort)
+   newest=$(comm -12 <(echo "$shipped") <(echo "$app") | tail -n 1)
+   comm -23 <(echo "$app") <(echo "$shipped") | awk -v n="$newest" '$0 > n'
+   ```
+
+   It prints the directories to squash. The squash takes the version of the last one, so it
+   sorts after every permanent version. An unshipped app migration that sorts before the newest
+   shipped version (for example one that merged before a hotfix migration was released in a
+   patch and forward-ported to `main` under the same directory name) is left out of the list;
+   renumber it after the newest shipped version first (rule 2 allows it), so that it is
+   squashed with the rest. After a release
    branch is cut, check `main` as well as the release branch, and forward-port any release
    migration that `main` still lacks before forward-porting the squash.
 2. Write the squashed `up.sql` as the schema those migrations build: final column lists, final
