@@ -3,10 +3,13 @@
 # Put production data back to a btrfs snapshot (docs/deployment/BACKUPS.md,
 # "Restore from a snapshot").
 #
-#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] <snapshot>
+#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] [--from-pool] <snapshot>
 #
 # <snapshot> is a name (or path) in /srv/econgraph/snapshots, e.g.
-# data-plane.20261024T040000+0000 or app-prod.pre-20261024T044210Z-recrawl.
+# data-plane.20261024T040000Z or app-prod.pre-20261024T044210Z-recrawl.
+# With --from-pool it is a name in /srv/econgraph-backups/snapshots (the
+# copy on the SATA backup pool): it is first copied back into
+# /srv/econgraph/snapshots with btrfs send/receive, then restored as usual.
 # Its prefix says which subvolume it replaces:
 #   data-plane.*  -> @econgraph-data-plane at /srv/econgraph/data-plane (pod postgresql-0)
 #   app-prod.*    -> @econgraph-app-prod   at /srv/econgraph/app-prod   (pod keycloak-postgres-0)
@@ -36,16 +39,19 @@ NAMESPACE="econ-graph"
 
 DRY_RUN="false"
 YES="false"
+FROM_POOL="false"
+POOL_SNAPSHOT_DIR="/srv/econgraph-backups/snapshots"
 snap=""
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN="true" ;;
         --yes|-y) YES="true" ;;
-        -*) echo "usage: $0 [--dry-run] [--yes] <snapshot>" >&2; exit 2 ;;
+        --from-pool) FROM_POOL="true" ;;
+        -*) echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2 ;;
         *) snap="$arg" ;;
     esac
 done
-[ -n "$snap" ] || { echo "usage: $0 [--dry-run] [--yes] <snapshot>" >&2; exit 2; }
+[ -n "$snap" ] || { echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2; }
 
 run() {
     echo "+ $*"
@@ -72,6 +78,27 @@ case "$snap" in
 esac
 target="$SRV_ROOT/$name"
 subvol="@econgraph-$name"
+
+if [ "$FROM_POOL" = "true" ]; then
+    if ! mountpoint -q /srv/econgraph-backups; then
+        echo "error: the backup pool is not mounted at /srv/econgraph-backups" >&2
+        exit 1
+    fi
+    if [ "$(btrfs property get "$POOL_SNAPSHOT_DIR/$snap" ro 2>/dev/null)" != "ro=true" ]; then
+        echo "error: $POOL_SNAPSHOT_DIR/$snap is not a complete read-only snapshot" >&2
+        exit 1
+    fi
+    if [ -e "$SNAPSHOT_DIR/$snap" ]; then
+        echo "= $SNAPSHOT_DIR/$snap already exists locally; using it"
+    else
+        echo "+ btrfs send $POOL_SNAPSHOT_DIR/$snap | btrfs receive $SNAPSHOT_DIR"
+        if [ "$DRY_RUN" = "true" ]; then
+            echo "(dry run: stopping here, the remaining checks need the local copy)"
+            exit 0
+        fi
+        btrfs send -q "$POOL_SNAPSHOT_DIR/$snap" | btrfs receive "$SNAPSHOT_DIR"
+    fi
+fi
 
 if ! btrfs subvolume show "$SNAPSHOT_DIR/$snap" >/dev/null 2>&1; then
     echo "error: $SNAPSHOT_DIR/$snap is not a subvolume" >&2
