@@ -1,11 +1,20 @@
 # Database migrations
 
-EconGraph has two databases, each with its own set of Diesel migrations (train 2, `v4.1.0`):
+From train 2 (`v4.1.0`), EconGraph has two databases, each with its own set of Diesel
+migrations:
 
 | Set | Directory | Holds | Applied by |
 |-----|-----------|-------|------------|
-| app | `backend/migrations/app` | Users and everything they create: sessions, annotations, comments, collaborators, preferences, audit logs. | The backend, when it starts (`run_migrations(url, MigrationSet::App)`). |
-| data | `backend/migrations/data` | Sources, series, observations, crawl state, SEC data. | `crawler migrate` only, run by `deploy.sh` as the Kubernetes Job `crawler-migrate`; also `seed-fixtures` and tests. |
+| app | `backend/migrations/app` | Users and everything they create: sessions, annotations, comments, collaborators, preferences, audit logs. | The backend, when it starts (`run_migrations(url, MigrationSet::App)`, DP-2, ECO-423). |
+| data | `backend/migrations/data` | Sources, series, observations, crawl state, SEC data. | `crawler migrate` only, run by `deploy.sh` as the Kubernetes Job `crawler-migrate` (DP-3, ECO-424); also `seed-fixtures` and tests. |
+
+**Status.** Train 2 is in progress. On `main` today `backend/migrations` is still one directory
+with one baseline, every binary reads one `DATABASE_URL`, and the backend applies every
+migration when it starts. The two directories arrive with DP-1 (ECO-422), the two URLs and
+per-set `run_migrations` with DP-2 (ECO-423), `crawler migrate` with DP-3 (ECO-424), the second
+Postgres in k8s with DP-4 (ECO-425), and branch namespaces with DP-8 (ECO-429). Below, anything
+that depends on one of them names it. The rules themselves apply to every migration written
+from now on.
 
 The exact table lists, and the names used below, are in `docs/development/TRAIN2_CONTRACTS.md`
 (sections 4 and 5). This page covers how migrations are written between releases, how app
@@ -32,8 +41,9 @@ migrations, which are never squashed after `v4.0.0` (see "Two databases").
    `00000000000000`, whose two copies are identical. `backend/scripts/check_migration_order.py`
    (CI) rejects duplicates.
 
-Rules 2 and 3 apply to `migrations/app`. `migrations/data` follows rules 1 and 4 and the
-additional rules in "Two databases" below.
+Rule 3 applies only to `migrations/app`. `migrations/data` follows rules 1, 2 and 4: until a
+data migration ships in a release tag it may still change (rule 2), and once it has shipped it
+is never edited, and the additional rules in "Two databases" below apply.
 
 Other frameworks do the same thing: Django's `squashmigrations` (with `replaces`), Rails loading
 `schema.rb` for new databases, and Flyway baselines. Diesel has no built-in squash, so the steps
@@ -43,14 +53,15 @@ are below.
 
 **App migrations** (`migrations/app`) follow the rules above: incremental between releases,
 squashed into one baseline when a release is tagged. A branch namespace's app database is
-disposable and is recreated whenever the branch is redeployed. Production's app database
-holds users' work and is upgraded like any release database, never recreated.
+disposable and may be recreated at any deploy (disposable storage, DP-8, ECO-429). Production's
+app database holds users' work and is upgraded like any release database, never recreated.
 
 **Data migrations** (`migrations/data`) are never squashed after `v4.0.0`. The data database
 holds the crawl, which is rebuilt only by crawling again, so it is only ever moved forward:
 
-- Every change is a new incremental migration. A data migration that shipped is never edited,
-  renumbered or folded into another (rule 1).
+- Every change is a new incremental migration. A data migration that shipped in a tag is never
+  edited, renumbered or folded into another (rule 1); one that hasn't shipped yet may still
+  change (rule 2).
 - Data migrations are forward-only: a mistake is fixed by a new migration, never by reverting
   one on a data database.
 - A data migration preserves existing rows. A new column gets a default or a backfill in the
@@ -58,11 +69,12 @@ holds the crawl, which is rebuilt only by crawling again, so it is only ever mov
   drops or truncates a table that holds crawled data.
 - Data migrations are applied by `crawler migrate` (with `--dry-run` to list the pending
   versions), which `deploy.sh` runs as the Job `crawler-migrate` before the crawler-worker rolls
-  out, and only in a namespace that owns a data database. No service applies them at startup,
-  so deploying an app change never changes the data database. `seed-fixtures` (a deliberate
-  tool, not a service) and tests apply the data set themselves.
-- The backend never migrates the data database. If the data database is behind the backend's
-  binary, `/readyz` keeps failing until `crawler migrate` runs.
+  out, and only in a namespace that owns a data database (DP-3, ECO-424). From then on no
+  service applies them at startup, so deploying an app change never changes the data database.
+  `seed-fixtures` (a deliberate tool, not a service) and tests apply the data set themselves.
+  Until DP-2 and DP-3 merge, the backend still applies every migration when it starts.
+- After DP-3, the backend never migrates the data database. If the data database is behind the
+  backend's binary, `/readyz` keeps failing until `crawler migrate` runs.
 
 ### Critical changes
 
@@ -93,20 +105,21 @@ to new ones for the app rows that hold them.
 
 ### The v4.0 split exception
 
-`v4.0.0` shipped one baseline, `2026-10-21-000100_v4_0_baseline`, that built both halves in one
-database. Train 2 (DP-1) split it, which is the one time a shipped migration was edited:
+`v4.0.0` ships one baseline, `2026-10-21-000100_v4_0_baseline`, that builds both halves in one
+database. On `main`, DP-1 (ECO-422) splits it, which is the one time a shipped migration is
+edited:
 
 - `migrations/data/2026-10-21-000100_v4_0_baseline` keeps the version and directory name, and
-  lost the 12 app tables and 5 app enums.
-- Those became the app baseline, `migrations/app/2026-10-21-000200_v4_0_app_baseline`, a new
+  loses the 12 app tables and 5 app enums.
+- Those become the app baseline, `migrations/app/2026-10-21-000200_v4_0_app_baseline`, a new
   version. Its guard stops on an existing `users` table.
-- The three cross-plane foreign keys were dropped
+- The three cross-plane foreign keys are dropped
   (`user_data_source_preferences.data_source_id`, `financial_annotations.statement_id`,
   `financial_annotations.line_item_id`). The columns stay, as plain UUIDs with their indexes.
 
 It is safe because applying the data baseline and then the app baseline to one database builds
 the same schema as the old baseline, except for those three foreign keys (checked with
-`compare_migrations.sh` in the DP-1 PR), and because every database that ran the old baseline
+`compare_migrations.sh` in the DP-1 PR, #428), and because every database that ran the old baseline
 already has `20261021000100` recorded:
 
 - A new data database runs the data baseline and gets no app tables. A new app database runs
@@ -121,8 +134,8 @@ already has `20261021000100` recorded:
 One migration was added to `release/v4.0` after the baseline, with Joe's sign-off:
 `2026-10-24-000100_audit_logs_keep_on_user_delete` (#429, ECO-412), which makes
 `audit_logs.user_id` nullable with `ON DELETE SET NULL`. It ships in `v4.0.0` under
-`backend/migrations`, and is forward-ported to `main` into `migrations/app` with its directory
-name and version unchanged, because `audit_logs` is an app table and databases built from
+`backend/migrations`. On `main` it lives in `migrations/app` (DP-1, ECO-422, places it there
+on forward-port) with its directory name and version unchanged, because `audit_logs` is an app table and databases built from
 `v4.0.0` will have that version recorded. Its version, `20261024000100`, must sort after the
 app baseline's, `20261021000200`, and does:
 
@@ -148,15 +161,18 @@ WHERE version = '20261021000100'
   );
 ```
 
-Once the app set has been applied, it still holds both halves; this returns a row while it
-does (that is, until DP-5 has dropped the app tables):
+A database that holds both halves is not necessarily an old one: tests and local databases
+apply both sets to one database too. What only an old single database has is the cross-plane
+foreign keys, which the split dropped. This query returns a row on a database built from the
+single v4.0 baseline, whether or not the app set has been applied since, until DP-5 (ECO-426)
+drops its app tables:
 
 ```sql
-SELECT version
-FROM __diesel_schema_migrations
-WHERE version = '20261021000100'
-  AND to_regclass('public.users') IS NOT NULL
-  AND to_regclass('public.data_sources') IS NOT NULL;
+SELECT conname
+FROM pg_constraint
+WHERE contype = 'f'
+  AND conrelid = to_regclass('public.user_data_source_preferences')
+  AND confrelid = to_regclass('public.data_sources');
 ```
 
 No later migration may rely on this exception. From `v4.0.0` on, a shipped data migration is
@@ -164,7 +180,7 @@ never edited again.
 
 ### One database with both sets
 
-Tests, local development, CI, and `main` until DP-4 gives k8s a second Postgres use one
+Tests, local development, CI, and k8s until DP-4 (ECO-425) adds a second Postgres use one
 database for both sets (`APP_DATABASE_URL` and `DATA_DATABASE_URL` may name the same database;
 nothing may depend on them being the same or different). Then:
 
@@ -177,7 +193,12 @@ nothing may depend on them being the same or different). Then:
   database take turns, and runs against separate databases never wait for each other.
 
 With the diesel CLI, from `backend/`: `diesel migration run --migration-dir migrations/data`,
-then `diesel migration run` (`diesel.toml` points at `migrations/app`).
+then `diesel migration run` (`diesel.toml` points at `migrations/app`; DP-1, ECO-422). This
+works on a new database only. On a database built from the single v4.0 baseline, the diesel
+CLI runs the app baseline, whose guard stops because `users` exists; only the app's own
+migration runner (`run_migrations`, which the backend calls at startup) records
+`20261021000200` without running it. Start the backend once against such a database, or
+recreate it.
 
 ### The data plane runs tagged releases only
 
@@ -193,7 +214,8 @@ built from a release tag, never an in-between `main` commit:
   (see "Squashing at a release" below); one that only runs release tags always can.
 
 A branch that changes the data schema deploys with its own data database
-(`deploy-branch.sh --local-data`) and never runs its data migrations against the primary.
+(`deploy-branch.sh --local-data`, DP-8, ECO-429) and never runs its data migrations against
+the primary.
 
 ## Baselines so far
 
