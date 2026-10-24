@@ -560,10 +560,44 @@ mod tests {
         )
         .await;
 
-        let dir = std::env::temp_dir().join(format!("econgraph-seed-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        // The migrations root, with its two sets; seeds go into data/.
+        let root = std::env::temp_dir().join(format!("econgraph-seed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("data");
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(root.join("app")).unwrap();
         let at = "2026-10-22T03:00:00Z".parse().unwrap();
+
+        // A directory that is not the data set (here the root itself, the layout before the
+        // split) is refused, so the app set's versions are always checked.
+        let e = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &root,
+            false,
+            at,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("not a data migration set"), "{e}");
+        // A version the app set already uses is refused too, in either spelling.
+        std::fs::create_dir_all(root.join("app/20261022030000_app_migration")).unwrap();
+        let e = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &dir,
+            false,
+            at,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("already taken"), "{e}");
+        std::fs::remove_dir_all(root.join("app/20261022030000_app_migration")).unwrap();
+
         let out = crate::cli::record_reference_seeds(
             &adapter,
             &ApiKeys::default(),
@@ -616,7 +650,7 @@ mod tests {
         let migration = dir.join(&dirs[0]);
         let up = std::fs::read_to_string(migration.join("up.sql")).unwrap();
         let down = std::fs::read_to_string(migration.join("down.sql")).unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
 
         // DB init: no dataset row yet. The seed creates it with the state labels.
         assert_eq!(state_codes(&db.pool).await, None);

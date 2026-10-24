@@ -73,32 +73,54 @@ def parse_migration_filename(filename: str) -> Optional[Tuple[datetime, str]]:
         timestamp = datetime(1970, 1, 1, 0, 0, 0)
         return timestamp, name
 
+    # Pattern 4: YYYYMMDDHHMMSS_migration_name (no dashes; Diesel reads the same version)
+    pattern4 = r'^(\d{14})_(.+)$'
+    match4 = re.match(pattern4, filename)
+
+    if match4:
+        timestamp_str, name = match4.groups()
+        try:
+            timestamp = datetime.strptime(timestamp_str, '%Y%m%d%H%M%S')
+            return timestamp, name
+        except ValueError:
+            pass
+
     return None
 
 
-def get_migration_files(migrations_dir: str) -> List[Tuple[datetime, str, str]]:
+def get_migration_files(migrations_dir: str) -> Tuple[List[Tuple[datetime, str, str]], bool]:
     """
     Get all migration files sorted by timestamp.
 
-    Returns: List of (timestamp, name, full_path) tuples
+    Every directory counts: Diesel runs any directory with an up.sql, whatever its name, so a
+    directory this script cannot parse, or one without an up.sql, is an error rather than
+    something to skip (a skipped one would escape the duplicate-version checks).
+
+    Returns: (list of (timestamp, name, full_path) tuples, whether every directory parsed)
     """
     migrations_path = Path(migrations_dir)
     if not migrations_path.exists():
         print(f"❌ Migrations directory not found: {migrations_dir}")
-        return []
+        return [], False
 
     migrations = []
+    ok = True
 
-    for item in migrations_path.iterdir():
+    for item in sorted(migrations_path.iterdir()):
         if item.is_dir() and not item.name.startswith('.'):
             parsed = parse_migration_filename(item.name)
-            if parsed:
+            if not (item / "up.sql").is_file():
+                print(f"❌ Migration directory without an up.sql: {item}")
+                ok = False
+            elif parsed is None or not re.fullmatch(r'\d{14,}', diesel_version(item.name)):
+                print(f"❌ Cannot read a migration version from: {item}")
+                print("   Name it YYYY-MM-DD-HHMMSS_name (or YYYYMMDDHHMMSS_name).")
+                ok = False
+            else:
                 timestamp, name = parsed
                 migrations.append((timestamp, name, str(item)))
-            else:
-                print(f"⚠️  Skipping invalid migration directory: {item.name}")
 
-    return sorted(migrations, key=lambda x: x[0])
+    return sorted(migrations, key=lambda x: x[0]), ok
 
 
 def check_migration_order(migrations: List[Tuple[datetime, str, str]]) -> bool:
@@ -266,7 +288,9 @@ def main():
         if not migrations_dir.is_dir():
             continue
         print(f"📦 Migration set {set_name}/")
-        migrations = get_migration_files(str(migrations_dir))
+        migrations, parsed_all = get_migration_files(str(migrations_dir))
+        if not parsed_all:
+            all_checks_passed = False
         if not migrations:
             print(f"❌ No valid migrations found in {migrations_dir}")
             all_checks_passed = False
