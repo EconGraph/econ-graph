@@ -34,12 +34,15 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import {
   DataTransformation,
   formatTransformedValue,
+  levelFractionDigits,
+  scaledTickLabel,
   transformationsFor,
   describeTransformation,
   transformedAxisTitle,
   transformedUnits,
 } from '../../utils/transformations';
-import { formatIsoDate, parseIsoDate } from '../../utils/dates';
+import { formatIsoDate, formatObservationDate, parseIsoDate } from '../../utils/dates';
+import { classifyFrequency } from '../../utils/frequency';
 import {
   EMPTY_DATE_RANGE,
   SeriesChartAnnotation,
@@ -76,6 +79,24 @@ const isValidDate = (date: Date | null): date is Date =>
 
 const formatDate = (date: Date): string =>
   date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+/** The longest a quarterly series' axis can span and still tick every quarter. */
+const QUARTER_TICKS_MAX_MS = 6 * 365.25 * 86_400_000;
+
+/**
+ * Time-axis units that keep ticks on a series' own periods: a quarterly series ticks quarters
+ * ("2025 Q2") over a short span and years over a long one, a semi-annual or annual series
+ * years, never months or days ("Apr 2025"). Other frequencies are left to Chart.js.
+ * @param frequency - The series' frequency.
+ * @param spanMs - How long the axis spans.
+ * @returns Chart.js `time` options.
+ */
+const timeUnits = (frequency: string, spanMs: number) => {
+  const periodDays = classifyFrequency(frequency)?.periodDays ?? 0;
+  if (periodDays === 91 && spanMs <= QUARTER_TICKS_MAX_MS) return { unit: 'quarter' as const };
+  if (periodDays >= 91) return { minUnit: 'year' as const };
+  return {};
+};
 
 const NO_ANNOTATIONS: readonly SeriesChartAnnotation[] = [];
 
@@ -186,16 +207,25 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
   // Transformations are computed by the backend over the whole series, so filtering here
   // keeps the first year of a year-over-year view.
   const shownData = React.useMemo(() => selectShownPoints(data, range), [data, range]);
+  // The pickers flag a start after the end, but the chart would plot an empty, backwards axis.
+  const rangeInverted =
+    isValidDate(range.start) && isValidDate(range.end) && range.start > range.end;
+  const axisRange = React.useMemo(() => visibleRange(range, shownData), [range, shownData]);
+  // From every point, so a level keeps its decimals whatever the date range.
+  const levelDigits = React.useMemo(() => levelFractionDigits(data.map(d => d.value)), [data]);
+  const largeValues = shownData.some(d => d.value !== null && Math.abs(d.value) >= 1e6);
+  const timeSpan =
+    axisRange.start && axisRange.end ? axisRange.end.getTime() - axisRange.start.getTime() : 0;
 
   const annotationOptions = React.useMemo(
     () =>
       buildAnnotationOptions(
         annotations,
-        visibleRange(range, shownData),
+        axisRange,
         theme.palette.warning.main,
         handleAnnotationClick
       ),
-    [annotations, range, shownData, theme.palette.warning.main, handleAnnotationClick]
+    [annotations, axisRange, theme.palette.warning.main, handleAnnotationClick]
   );
 
   const chartData = React.useMemo(
@@ -259,14 +289,18 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
             title: (items: TooltipItem<'line'>[]) => {
               const point = items[0]?.raw as { date?: string } | undefined;
               return point?.date
-                ? formatIsoDate(point.date, { year: 'numeric', month: 'long', day: 'numeric' })
+                ? formatObservationDate(point.date, frequency, {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })
                 : '';
             },
             label: (item: TooltipItem<'line'>) => {
               const point = item.raw as { date: string; revisionDate?: string };
               const value = item.parsed.y;
               const formattedValue =
-                value === null ? 'n/a' : formatTransformedValue(value, transformation);
+                value === null ? 'n/a' : formatTransformedValue(value, transformation, levelDigits);
               const lines = [`${item.dataset.label}: ${formattedValue} ${valueUnit}`.trimEnd()];
               if (point.revisionDate && point.revisionDate !== point.date) {
                 lines.push(`Revised: ${formatIsoDate(point.revisionDate)}`);
@@ -294,11 +328,12 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
           min: boundTime(range.start),
           max: boundTime(range.end),
           time: {
+            ...timeUnits(frequency, timeSpan),
             displayFormats: {
               day: 'MMM dd',
               week: 'MMM dd',
               month: 'MMM yyyy',
-              quarter: 'MMM yyyy',
+              quarter: "yyyy 'Q'q",
               year: 'yyyy',
             },
           },
@@ -315,10 +350,25 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
           grid: {
             color: theme.palette.divider,
           },
+          // Dollar levels such as BEA's GDP run to 14 digits; scale them ("28.6T"). Smaller
+          // values keep Chart.js' own labels.
+          ticks: largeValues
+            ? {
+                callback: (value: number | string, _index: number, ticks: { value: number }[]) =>
+                  scaledTickLabel(
+                    Number(value),
+                    ticks.map(t => t.value)
+                  ) ?? Number(value).toLocaleString('en-US'),
+              }
+            : {},
         },
       },
     };
   }, [
+    frequency,
+    timeSpan,
+    levelDigits,
+    largeValues,
     transformed,
     transformation,
     units,
@@ -426,7 +476,12 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         </Box>
       </Box>
 
-      {shownData.some(d => d.value !== null) ? (
+      {rangeInverted ? (
+        <Alert severity='warning'>
+          The start date ({formatDate(range.start as Date)}) is after the end date (
+          {formatDate(range.end as Date)}). Pick a start date on or before the end date.
+        </Alert>
+      ) : shownData.some(d => d.value !== null) ? (
         <Box
           sx={{ height: 400 }}
           data-testid='series-chart'
