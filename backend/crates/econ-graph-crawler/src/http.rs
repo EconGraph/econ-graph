@@ -1233,6 +1233,86 @@ mod tests {
         assert!(matches!(err, CrawlError::Permanent(_)), "{err:?}");
     }
 
+    /// A refused key or account is not retried in-process: the same request would be refused
+    /// again, and hammering the source with it only risks a longer lock-out.
+    #[tokio::test]
+    async fn auth_statuses_are_not_retried() {
+        for code in [401, 403] {
+            let server = MockServer::start().await;
+            Mock::given(path("/denied"))
+                .respond_with(ResponseTemplate::new(code))
+                .mount(&server)
+                .await;
+            let err = fetcher()
+                .get_json::<Obs>(SourceId::Fred, &format!("{}/denied", server.uri()), &[])
+                .await
+                .unwrap_err();
+            assert!(matches!(err, CrawlError::Auth(_)), "{code}: {err:?}");
+            assert!(!err.is_retryable(), "{code}");
+            assert_eq!(hits(&server).await, 1, "{code}");
+        }
+    }
+
+    /// An empty 200 body and a JSON body missing a required field are parse errors, not an
+    /// empty or defaulted result.
+    #[tokio::test]
+    async fn empty_and_incomplete_bodies_are_parse_errors() {
+        for body in ["", "{}", r#"{"value": null}"#] {
+            let server = MockServer::start().await;
+            Mock::given(path("/thin"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .mount(&server)
+                .await;
+            let err = fetcher()
+                .get_json::<Obs>(SourceId::Fred, &format!("{}/thin", server.uri()), &[])
+                .await
+                .unwrap_err();
+            assert!(matches!(err, CrawlError::Parse(_)), "{body:?}: {err:?}");
+            assert!(!err.is_retryable(), "{body:?}");
+            assert_eq!(hits(&server).await, 1, "{body:?}");
+        }
+    }
+
+    /// Dropping a request mid-flight (a caller's timeout, a cancelled task) gives its
+    /// concurrency slot back, so the source's next request isn't starved.
+    #[tokio::test]
+    async fn a_cancelled_request_frees_its_concurrency_slot() {
+        let server = MockServer::start().await;
+        Mock::given(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("late")
+                    .set_delay(Duration::from_secs(10)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/fast"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+        let f = fetcher_with(Duration::from_secs(30), 1);
+        let slow = format!("{}/slow", server.uri());
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(200),
+            f.get_text(SourceId::Fred, &slow, &[]),
+        )
+        .await;
+        assert!(
+            cancelled.is_err(),
+            "the slow request should still be in flight"
+        );
+
+        let fast = format!("{}/fast", server.uri());
+        let got = tokio::time::timeout(
+            Duration::from_secs(2),
+            f.get_text(SourceId::Fred, &fast, &[]),
+        )
+        .await
+        .expect("the only slot was not given back")
+        .unwrap();
+        assert_eq!(got, "ok");
+    }
+
     #[tokio::test]
     async fn concurrency_is_limited_per_source() {
         let server = MockServer::start().await;
