@@ -13,6 +13,33 @@ import { flagDefines, flagsGuard, resolveFlagProfile } from './flags.config.ts';
 // (playwright.release.config.ts) points it at its own backend.
 const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8080';
 
+// Where they proxy /data/graphql, the data operations sent when VITE_DATA_GRAPHQL_URL is
+// /data/graphql. Defaults to the same backend; set it to read a different data plane.
+const dataBackendUrl = process.env.DATA_BACKEND_URL ?? backendUrl;
+
+// Shared by the dev server and `vite preview`.
+const proxy = {
+  // Proxy API requests to backend
+  '/api': {
+    target: backendUrl,
+    changeOrigin: true,
+    secure: false,
+  },
+  // Proxy GraphQL requests. '/graphql' does not prefix-match '/data/graphql'.
+  '/graphql': {
+    target: backendUrl,
+    changeOrigin: true,
+    secure: false,
+  },
+  // Data operations, to the data backend's /graphql.
+  '/data/graphql': {
+    target: dataBackendUrl,
+    changeOrigin: true,
+    secure: false,
+    rewrite: (path: string) => path.replace(/^\/data\/graphql/, '/graphql'),
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -29,20 +56,12 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 3000,
     host: true, // Allow external connections
-    proxy: {
-      // Proxy API requests to backend
-      '/api': {
-        target: backendUrl,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Proxy GraphQL requests
-      '/graphql': {
-        target: backendUrl,
-        changeOrigin: true,
-        secure: false,
-      },
-    },
+    proxy,
+  },
+
+  // `vite preview` (the release e2e stack) proxies the same paths.
+  preview: {
+    proxy,
   },
 
   // Build configuration

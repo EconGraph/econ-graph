@@ -15,6 +15,9 @@ import { graphql, http, HttpResponse } from 'msw';
 // GraphQL endpoint
 // Removed unused GRAPHQL_ENDPOINT
 
+/** The app GraphQL path and the data path, `/graphql` and `/data/graphql`, on any origin. */
+const GRAPHQL_PATHS = /\/(data\/)?graphql$/;
+
 // Create handlers function
 function createHandlers() {
   return [
@@ -272,7 +275,8 @@ function createHandlers() {
     // REST API fallback handlers (intentionally minimal; no health endpoint mocking)
 
     // Handle GraphQL POST requests
-    http.post('/graphql', async ({ request }: { request: any }) => {
+    // Both the app path and the data path (VITE_DATA_GRAPHQL_URL=/data/graphql).
+    http.post(GRAPHQL_PATHS, async ({ request }: { request: any }) => {
       const body = await request.json();
       const { query, variables, operationName } = body;
 
