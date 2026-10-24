@@ -7,7 +7,7 @@ between releases and how they are squashed when a release is tagged (Joe, 2026-1
 Since v4.1 (ECO-422) there are two migration sets: `backend/migrations/data` (sources, series,
 observations, crawl state, SEC data) and `backend/migrations/app` (users and everything they
 create), so the two can live in separate databases. Their layout, tables and versioning rules are in
-[TRAIN2_CONTRACTS.md](./TRAIN2_CONTRACTS.md), sections 4 and 5. In short: put a new migration in
+`docs/development/TRAIN2_CONTRACTS.md` (#423), sections 4 and 5. In short: put a new migration in
 the set that owns its tables, never reuse a version from the other set (one database holding both
 shares one `__diesel_schema_migrations` table), and with the diesel CLI run
 `--migration-dir migrations/data` before `--migration-dir migrations/app`. Until the backend has
