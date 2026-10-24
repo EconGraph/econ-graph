@@ -1,7 +1,6 @@
 # Release process
 
-How a release train goes from `main` to a tag. The trains
-and what each contains are in [release trains](../roadmap/releases.md).
+How a release train goes from `main` to a tag.
 
 ## Branches
 
@@ -13,10 +12,9 @@ and what each contains are in [release trains](../roadmap/releases.md).
 
 ## Cutting the branch
 
-Cut when all of the train's items are merged on `main`, CI is green, and the release image
-workflow (version bump, changelog, image builds; release plan item 19, REL-5, not started as of
-2026-09-27) is merged. For train 1 these are the "Before QA starts"
-conditions in the [v4.0.0 QA plan](../release/v4.0.0-qa.md).
+Cut when all of the train's items are merged on `main` and CI is green. A release's QA plan
+lists any further conditions under "Before QA starts" (for example the
+[v4.0.0 QA plan](../release/v4.0.0-qa.md)).
 
 ```sh
 git fetch origin main
@@ -31,9 +29,8 @@ changes the release must not ship.
 - Release candidate images are built from the release branch by running the release image
   workflow by hand (`workflow_dispatch`) or by pushing a `vX.Y.0-rc.N` tag, tagged with the
   commit SHA. QA deploys those images.
-- Core CI and the `Release E2E` workflow must run on pull requests into `release/**` as well as
-  `main`. This is a precondition in the QA plan: it holds once PR #242 (Core CI without a
-  branch filter) and PR #218 (the `Release E2E` workflow) have merged.
+- Core CI and the `Release E2E` workflow run on pull requests whatever their base, so fixes
+  into `release/**` get the same checks as changes into `main`.
 - Only fixes for QA findings go into the release branch. No new features go in. A source that fails QA is
   turned off rather than fixed on the branch (see the QA plan's exit rules).
 
@@ -67,8 +64,3 @@ When QA passes and the maintainer agrees, tag the tested commit on the release b
 train tag (`train-N`, which the feature flag `remove_by` check reads). Before pushing `train-N`
 the flags `remove_by` check runs with that tag, so a flag that is due for removal blocks the tag.
 The tag workflow reuses the tested image digests instead of rebuilding.
-
-## Next train
-
-Once a release branch is cut, the area threads start scoping the next release cut on `main`, and
-a separate Fable review agent reviews each scope until it converges.

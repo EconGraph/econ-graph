@@ -82,8 +82,7 @@ terraform apply
 `scripts/deploy/deploy.sh` deploys Keycloak from `k8s/manifests/keycloak/` (its own
 Postgres, then Keycloak with the `econ-graph` realm from `config/keycloak/`). Its
 credentials are never committed: they live in the Secret `econ-graph-keycloak`,
-written by `scripts/deploy/create-secrets.sh` (from the secrets PR, which also makes
-`deploy.sh` run it). That script generates the admin and database passwords on its
+written by `scripts/deploy/create-secrets.sh`, which `deploy.sh` runs. That script generates the admin and database passwords on its
 first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
 does not exist.
 
@@ -118,7 +117,8 @@ After deployment, the application will be available at:
 
 **Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
 `host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
-`deploy.sh`, and `/admin` has no backend.
+`deploy.sh`: `ingress.yaml` routes `/admin` to `econ-graph-admin-frontend-service`, which
+`deploy.sh` doesn't create, so it removes that route before applying the ingress.
 
 ## 📊 Monitoring
 
@@ -164,7 +164,7 @@ kubectl scale deployment econ-graph-frontend --replicas=2 -n econ-graph
 The application is configured via ConfigMap and Secrets:
 
 - **ConfigMap**: Contains non-sensitive configuration
-- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed before #227 remain in Git history and must be rotated. See [Secrets](#secrets)
+- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. See [Secrets](#secrets)
 
 ### Database Connection
 
@@ -176,7 +176,7 @@ backend applies them when it starts, the data set first
 
 ### Secrets
 
-Current manifests contain no credentials. Google and Facebook credentials committed before #227 remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
+Current manifests contain no credentials. Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
 `econ-graph` namespace from environment variables; `deploy.sh` runs it on every deploy. It is
 idempotent: internal passwords are generated with `openssl rand` on the first run and kept on
 later runs, optional keys that are unset keep their current value (or are omitted), and obvious
