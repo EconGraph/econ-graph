@@ -6,6 +6,13 @@
 #
 # Usage (run it yourself, in your own terminal):
 #   scripts/deploy/set-crawler-keys.sh [--google] [--no-start-crawler] [--dry-run]
+#   scripts/deploy/set-crawler-keys.sh --tunnel [--dry-run]
+#
+# --tunnel asks only for the Cloudflare Tunnel token (Secret cloudflare-tunnel,
+# key token; ECO-457), the one the dashboard shows for the tunnel's connector:
+# paste the bare token, not the `cloudflared ... --token` command. Then
+# cloudflared is started (or restarted) with it; deploy.sh does the same on
+# its next run.
 #
 # Each key is read with hidden input. Press Enter to keep the value already in
 # the cluster. The values go to scripts/deploy/create-secrets.sh through its
@@ -27,14 +34,16 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 
 DRY_RUN=false
 GOOGLE=false
+TUNNEL=false
 START_CRAWLER=true
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
         --google) GOOGLE=true ;;
+        --tunnel) TUNNEL=true ;;
         --no-start-crawler) START_CRAWLER=false ;;
         -h | --help)
-            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -49,13 +58,24 @@ source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
 ensure_kind_kubectl
 
+if [ "$TUNNEL" = true ] && [ "$GOOGLE" = true ]; then
+    die "--tunnel and --google are separate runs; run the script once for each"
+fi
+if [ "$TUNNEL" = true ] &&
+    ! grep -q 'CLOUDFLARE_TUNNEL_TOKEN' "$PROJECT_ROOT/scripts/deploy/create-secrets.sh"; then
+    die "this checkout's create-secrets.sh does not know CLOUDFLARE_TUNNEL_TOKEN yet" \
+        "(ECO-457); update the checkout first"
+fi
+
 CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY)
 GOOGLE_KEYS=(KEYCLOAK_GOOGLE_CLIENT_ID KEYCLOAK_GOOGLE_CLIENT_SECRET)
+TUNNEL_KEYS=(CLOUDFLARE_TUNNEL_TOKEN)
 
 # Secret and key each variable lands in (see create-secrets.sh).
 secret_of() {
     case "$1" in
         KEYCLOAK_*) echo econ-graph-keycloak ;;
+        CLOUDFLARE_TUNNEL_TOKEN) echo cloudflare-tunnel ;;
         *) echo crawler-api-keys ;;
     esac
 }
@@ -67,6 +87,7 @@ key_of() {
         CENSUS_API_KEY) echo census-api-key ;;
         KEYCLOAK_GOOGLE_CLIENT_ID) echo google-idp-client-id ;;
         KEYCLOAK_GOOGLE_CLIENT_SECRET) echo google-idp-client-secret ;;
+        CLOUDFLARE_TUNNEL_TOKEN) echo token ;;
     esac
 }
 
@@ -83,7 +104,13 @@ key_state() {
     fi
 }
 
-vars=("${CRAWLER_KEYS[@]}")
+if [ "$TUNNEL" = true ]; then
+    # Only the token: the crawler is not touched.
+    vars=("${TUNNEL_KEYS[@]}")
+    START_CRAWLER=false
+else
+    vars=("${CRAWLER_KEYS[@]}")
+fi
 if [ "$GOOGLE" = true ]; then
     vars+=("${GOOGLE_KEYS[@]}")
 fi
@@ -97,6 +124,7 @@ if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
     [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak"
+    [ "$TUNNEL" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/cloudflared --replicas=1 and restart it"
     exit 0
 fi
 
@@ -139,6 +167,16 @@ if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
     kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
     echo "==> Restarting Keycloak for the new Google client"
     kubectl -n "$NAMESPACE" rollout restart deployment/keycloak
+fi
+if [ "$TUNNEL" = true ] && [ "$entered" -gt 0 ]; then
+    if kubectl -n "$NAMESPACE" get deployment cloudflared >/dev/null 2>&1; then
+        # deploy.sh leaves it at 0 replicas while the token is missing.
+        echo "==> Starting cloudflared with the new token"
+        kubectl -n "$NAMESPACE" scale deployment/cloudflared --replicas=1
+        kubectl -n "$NAMESPACE" rollout restart deployment/cloudflared
+    else
+        echo "==> cloudflared is not deployed yet; scripts/deploy/deploy.sh starts it"
+    fi
 fi
 
 echo "==> Keys now"

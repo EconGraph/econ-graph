@@ -24,6 +24,12 @@ KIND_CONTROL_PLANE="${KIND_CLUSTER}-control-plane"
 KIND_STORAGE_NODE="${KIND_CLUSTER}-worker"
 NAMESPACE="${NAMESPACE:-econ-graph}"
 
+# The public host this cluster serves (ECO-457): deploy.sh adds it to the
+# ingress, Keycloak, the realm and the backend (scripts/deploy/render-public-host.py),
+# and the cloudflared tunnel carries https://econgraph.com to it. Set
+# PUBLIC_HOST= (empty) to deploy for http://localhost only.
+PUBLIC_HOST="${PUBLIC_HOST-econgraph.com}"
+
 HOST_DATA_PLANE="/srv/econgraph/data-plane"
 HOST_APP_PROD="/srv/econgraph/app-prod"
 HOST_PG_DIR="${HOST_DATA_PLANE}/pg"
@@ -42,7 +48,7 @@ ECONGRAPH_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
 # whatever is there). They're saved next to each dump: the databases were
 # initialised with these passwords, and API keys can't be regenerated.
 APP_SECRETS=(econ-graph-secrets econ-graph-postgres crawler-api-keys
-    econ-graph-keycloak grafana-admin monitoring-auth)
+    econ-graph-keycloak grafana-admin monitoring-auth cloudflare-tunnel)
 
 # A kubectl go-template ($k/$v are template variables, not shell ones).
 # shellcheck disable=SC2016
