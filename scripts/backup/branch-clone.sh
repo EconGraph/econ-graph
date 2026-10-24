@@ -15,10 +15,11 @@
 # -v <clone>/pg:/var/lib/postgresql/data, PGDATA set to match) at <clone>/pg.
 #
 # No root needed: creating works because jmalicki owns the snapshot roots;
-# deleting empties the clone from inside a rootless container (the Postgres
-# files belong to the container's mapped UID, which jmalicki cannot remove
-# directly) and then removes the empty subvolume with rmdir, which the
-# kernel allows for an empty subvolume's owner.
+# deleting empties the clone from inside a container on the rootful daemon
+# (the Postgres files belong to UID 999, which jmalicki cannot remove
+# directly; root in that container is host root) and then removes the empty
+# subvolume with rmdir, which the kernel allows for an empty subvolume's
+# owner. lib.sh points docker at that daemon.
 
 set -euo pipefail
 

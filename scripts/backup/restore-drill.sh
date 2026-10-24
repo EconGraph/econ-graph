@@ -10,12 +10,14 @@
 # Never touches the cluster or the live databases.
 #
 # Usage:
-#   restore-drill.sh [--expect-series N] [--expect-data-points N] [DUMP_FILE]
+#   restore-drill.sh [--dry-run] [--expect-series N] [--expect-data-points N] [DUMP_FILE]
 #
 # DUMP_FILE defaults to econ_graph.dump in the newest verified dump
 # directory under BACKUP_ROOT (or, failing that, the newest directory that
 # has an econ_graph.dump at all). Without --expect-*, the counts recorded in
 # that directory's MANIFEST at dump time are compared, as a warning only.
+# --dry-run checks the Docker daemon, picks the dump and prints the plan,
+# without starting a container or writing state.
 
 set -euo pipefail
 
@@ -25,11 +27,13 @@ source "$(dirname "$(readlink -f "$0")")/lib.sh"
 expect_series=""
 expect_points=""
 dump=""
+DRY_RUN="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --dry-run|-n) DRY_RUN="true"; shift ;;
         --expect-series) expect_series="$2"; shift 2 ;;
         --expect-data-points) expect_points="$2"; shift 2 ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         -*) die "unknown option: $1" ;;
         *) dump="$1"; shift ;;
     esac
@@ -48,6 +52,14 @@ fi
 dump="$(readlink -f "${dump}")"
 [[ -f "${dump}" ]] || die "dump not found: ${dump}"
 dump_dir="$(dirname "${dump}")"
+
+check_docker_daemon
+if [[ "${DRY_RUN}" == "true" ]]; then
+    log "dry run: would restore ${dump} into a throwaway ${PG_IMAGE} container on ${DOCKER_HOST}"
+    [[ -f "${dump_dir}/keycloak.dump" ]] && log "dry run: and ${dump_dir}/keycloak.dump"
+    log "dry run: then record a PASS in ${ECONGRAPH_STATE_DIR}/restore-drill.last"
+    exit 0
+fi
 manifest="${dump_dir}/MANIFEST"
 
 manifest_value() {

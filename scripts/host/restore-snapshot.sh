@@ -36,6 +36,9 @@ SRV_ROOT="/srv/econgraph"
 KIND_NODE="econ-graph-control-plane"      # where kubectl runs
 STORAGE_NODE="econ-graph-worker"          # the node that bind-mounts /srv/econgraph/*
 NAMESPACE="econ-graph"
+# The rootful daemon the kind cluster runs on (as scripts/deploy/lib/kind-env.sh;
+# pass ECONGRAPH_DOCKER_HOST through sudo to override).
+DOCKER_SOCK="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
 
 DRY_RUN="false"
 YES="false"
@@ -109,16 +112,15 @@ if [ "$(btrfs property get "$SNAPSHOT_DIR/$snap" ro)" != "ro=true" ]; then
     exit 1
 fi
 
-# Postgres must be stopped: ask the cluster (rootless Docker belongs to OWNER).
-owner_uid="$(id -u "$OWNER")"
-pod_state="$(sudo -u "$OWNER" env DOCKER_HOST="unix:///run/user/$owner_uid/docker.sock" \
+# Postgres must be stopped: ask the cluster, on the rootful daemon.
+pod_state="$(env -u DOCKER_CONTEXT DOCKER_HOST="$DOCKER_SOCK" \
     docker exec "$KIND_NODE" kubectl -n "$NAMESPACE" get pod "$pod" --ignore-not-found -o name 2>&1)" || {
-    echo "error: could not ask the cluster whether $pod is running: $pod_state" >&2
+    echo "error: could not ask the cluster ($KIND_NODE on $DOCKER_SOCK) whether $pod is running: $pod_state" >&2
     exit 1
 }
 if [ -n "$pod_state" ]; then
     echo "error: $pod still exists. Stop it first, e.g.:" >&2
-    echo "  docker exec $KIND_NODE kubectl -n $NAMESPACE scale statefulset/${pod%-0} --replicas=0" >&2
+    echo "  docker -H $DOCKER_SOCK exec $KIND_NODE kubectl -n $NAMESPACE scale statefulset/${pod%-0} --replicas=0" >&2
     echo "  (scale the backend and crawler to 0 too, so nothing reconnects mid-restore)" >&2
     exit 1
 fi
@@ -167,8 +169,8 @@ cat <<EOF
 Restored $target from $snap. The previous data is kept as $subvol.replaced-$stamp.
 Keep Postgres stopped. Its kind node, $STORAGE_NODE, still bind-mounts the
 old subvolume and only picks up the new one when its container restarts.
-As $OWNER, no sudo:
-  docker restart $STORAGE_NODE
+As $OWNER, no sudo (the rootful daemon, through the docker group):
+  docker -H $DOCKER_SOCK restart $STORAGE_NODE
 wait for the node to be Ready, then scale Postgres (and the backend/crawler)
 back up and check the data.
 EOF

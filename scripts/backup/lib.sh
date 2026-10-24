@@ -13,8 +13,9 @@ if [[ -f "${ECONGRAPH_CONFIG_DIR}/backup.env" ]]; then
     source "${ECONGRAPH_CONFIG_DIR}/backup.env"
 fi
 
-# Where the cluster lives: kind under rootless Docker. The host's kubectl is
-# a microk8s wrapper, so every cluster call goes through the kind node.
+# Where the cluster lives: kind on the rootful Docker daemon (see DOCKER_HOST
+# below). The host's kubectl is a microk8s wrapper, so every cluster call goes
+# through the kind node.
 KIND_NODE="${KIND_NODE:-econ-graph-control-plane}"
 K8S_NAMESPACE="${K8S_NAMESPACE:-econ-graph}"
 
@@ -44,17 +45,35 @@ PG_MAJOR="${PG_MAJOR:-18}"
 # State written by the restore drill and read by the freshness check.
 ECONGRAPH_STATE_DIR="${ECONGRAPH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/econgraph}"
 
-# systemd --user units don't inherit the login shell's DOCKER_HOST, and this
-# host runs Docker rootless.
-if [[ -z "${DOCKER_HOST:-}" && -S "/run/user/$(id -u)/docker.sock" ]]; then
-    DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
-    export DOCKER_HOST
-fi
+# The Docker daemon the kind cluster runs on: the rootful system daemon. kind
+# can't start under rootless Docker on this host (its data root is on btrfs),
+# so the cluster moved to the rootful one (as in scripts/deploy/lib/kind-env.sh).
+# Joe's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
+# that variable is deliberately not the override; ECONGRAPH_DOCKER_HOST is
+# (environment or backup.env). jmalicki is in the docker group, so the
+# systemd --user units reach /var/run/docker.sock without sudo. Exported, so
+# docker and everything run from here use the same daemon.
+ECONGRAPH_DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
+export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST}"
+unset DOCKER_CONTEXT
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 utc_stamp() { date -u +%Y%m%dT%H%MZ; }
+
+# Check that the Docker daemon answers and say which one it is. Exits if it
+# doesn't: "no kind node" must never be concluded from "no daemon".
+check_docker_daemon() {
+    local info mode=rootful
+    info="$(docker info --format '{{.ServerVersion}} {{.SecurityOptions}}' 2>/dev/null)" \
+        || die "cannot reach the Docker daemon at ${DOCKER_HOST} (is it running, and is $(id -un) in the docker group?)"
+    case "${info}" in *rootless*) mode=rootless ;; esac
+    log "docker: ${DOCKER_HOST} (${mode}, server ${info%% *})"
+    if [[ "${mode}" == rootless ]]; then
+        log "WARNING: ${DOCKER_HOST} is a rootless daemon; the kind cluster runs on the rootful one. Unset ECONGRAPH_DOCKER_HOST to use it."
+    fi
+}
 
 # Run kubectl inside the kind node.
 kube() { docker exec -i "${KIND_NODE}" kubectl -n "${K8S_NAMESPACE}" "$@"; }
