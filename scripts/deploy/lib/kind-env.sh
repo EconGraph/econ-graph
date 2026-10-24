@@ -390,14 +390,19 @@ bootstrap_databases() {
 
 # --- cluster add-ons -------------------------------------------------------------
 
-# ingress-nginx for kind (it binds hostPorts 80/443 on the node labelled
-# ingress-ready=true, the control plane). Pinned, so a recreate installs what
-# was tested. Idempotent (kubectl apply).
+# ingress-nginx for kind. It binds hostPorts 80/443 on whatever node it runs
+# on, and only the control plane (labelled ingress-ready=true) has those ports
+# mapped to the host. The v1.13 kind manifest no longer selects that node, so
+# the controller can land on the worker and every request to localhost is
+# reset; pin it with a nodeSelector. Pinned version, so a recreate installs
+# what was tested. Idempotent (kubectl apply, merge patch).
 INGRESS_NGINX_MANIFEST="${INGRESS_NGINX_MANIFEST:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.3/deploy/static/provider/kind/deploy.yaml}"
 
 install_ingress_nginx() {
     log "Installing ingress-nginx (${INGRESS_NGINX_MANIFEST##*/ingress-nginx/})"
     run kubectl apply -f "${INGRESS_NGINX_MANIFEST}"
+    run kubectl -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
     if [ "${DRY_RUN}" != "true" ]; then
         kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
     fi
