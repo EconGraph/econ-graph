@@ -282,7 +282,7 @@ cat >> /tmp/grafana-dashboards.yaml << 'EOF'
 EOF
 
 # Extract and append the JSON content from the YAML file
-yq eval '.data.dashboard' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
 
 # Apply the ConfigMap
 kubectl apply -f /tmp/grafana-dashboards.yaml
