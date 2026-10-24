@@ -51,7 +51,25 @@ resource "local_file" "kind_config" {
         ]
       },
       {
+        # Production Postgres data lives on host btrfs subvolumes, bind-mounted
+        # into this node at the same paths (docs/deployment/HOST_STORAGE.md).
+        # The static PVs in k8s/manifests/host-storage.yaml point at these
+        # paths and are pinned to this node by the label below, so deleting
+        # the cluster no longer deletes the database.
         role = "worker"
+        labels = {
+          "econgraph.io/host-storage" = "true"
+        }
+        extraMounts = [
+          {
+            hostPath      = "/srv/econgraph/data-plane"
+            containerPath = "/srv/econgraph/data-plane"
+          },
+          {
+            hostPath      = "/srv/econgraph/app-prod"
+            containerPath = "/srv/econgraph/app-prod"
+          }
+        ]
       }
     ]
   })
