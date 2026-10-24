@@ -101,6 +101,24 @@ export const SEEDED = {
 } as const;
 
 /**
+ * The synthetic daily FRED series behind series-ui/multipage-series.spec.ts (ECO-261), long enough
+ * that the series page reads it in three `seriesData` pages. Fixture mode only, so it is kept out
+ * of `SEEDED`, which the smoke spec also looks up on deployed builds. Its observations are
+ * fred/observations_multipage_e2e.json (made by fred/make_observations_multipage.py); the spec
+ * derives its expected values from that file, not from here.
+ */
+export const SEEDED_MULTIPAGE = {
+  source: 'FRED',
+  sourceName: 'Federal Reserve Economic Data (FRED)',
+  externalId: 'EGE2EMULTIPAGE',
+  title: 'Multi-Page Daily Test Series',
+  units: 'Index',
+  /** The raw upstream response the seed loads, relative to frontend/. */
+  observationsFixture:
+    '../backend/crates/econ-graph-crawler/tests/fixtures/fred/observations_multipage_e2e.json',
+} as const;
+
+/**
  * World Development Indicators seeded for the world map (MAP-7) and REL-4: three indicators for
  * the countries below, from backend/crates/econ-graph-crawler/tests/fixtures/world_bank/. Series
  * ids are `wdi/{indicator}.{area}` and titles `{indicator name}: {country name}`. `latest`

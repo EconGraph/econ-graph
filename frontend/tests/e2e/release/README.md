@@ -128,6 +128,18 @@ In this mode (`env.ts`):
   observations), and download the CSV (header and row count). The expected
   values are `SWEPT_SOURCES` in `fixtures.ts`. The world map's three WDI
   indicators are the world-map area's spec.
+- `series-ui/multipage-series.spec.ts` (fixture mode only, ECO-261): a synthetic
+  daily FRED series of 22,000 points (`SEEDED_MULTIPAGE`), which the series page
+  reads in three `seriesData` pages. It loads the page, picks a date range and
+  the change-since-first-value transformation, and compares the CSV each time,
+  row by row, with an expected series the spec derives from the raw upstream
+  response the seed loads (latest vintage per date, `.` as missing), never from
+  app code: truncation, a skipped or repeated page, reordering, a dropped
+  missing value or a stale revision fails it. A third page that fails (HTTP 503,
+  GraphQL error, dropped connection), or a second page while transforming,
+  must show the observations error with no chart, recent data or CSV at any
+  point, and Retry must then load the whole series. Its fault injection is
+  `failures/faults.ts` (ECO-264).
 - `auth/`: sign-in and annotation privacy (the auth area's spec).
 - `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`: the
   map's zoom, projection, click-through, table, tooltip and indicator-refetch
