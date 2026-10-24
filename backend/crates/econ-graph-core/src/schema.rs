@@ -902,8 +902,6 @@ diesel::joinable!(economic_series -> data_sources (source_id));
 diesel::joinable!(economic_series -> datasets (dataset_id));
 diesel::joinable!(event_country_impacts -> countries (country_id));
 diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
-diesel::joinable!(financial_annotations -> financial_line_items (line_item_id));
-diesel::joinable!(financial_annotations -> financial_statements (statement_id));
 diesel::joinable!(financial_line_items -> financial_statements (statement_id));
 diesel::joinable!(financial_ratios -> financial_statements (statement_id));
 diesel::joinable!(financial_statements -> companies (company_id));
@@ -912,7 +910,6 @@ diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
 diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(series_metadata -> datasets (dataset_id));
-diesel::joinable!(user_data_source_preferences -> data_sources (data_source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
 diesel::joinable!(xbrl_processing_logs -> financial_statements (statement_id));
 

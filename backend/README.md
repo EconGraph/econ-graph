@@ -142,9 +142,14 @@ docker run -d --name econ-graph-db -p 5432:5432 -e POSTGRES_PASSWORD=password po
 cd backend
 cargo run --bin econ-graph-backend -- --migrate
 
-# Or use diesel CLI
-diesel migration run
+# Or use diesel CLI on a new database: the data set, then the app set
+diesel migration run --migration-dir migrations/data
+diesel migration run --migration-dir migrations/app
 ```
+
+On a database built before the v4.1 split (the single v4.0.0 baseline), start the backend instead
+of using the diesel CLI: the backend records the app baseline there, while the CLI stops at its
+guard.
 
 ### **Environment Configuration**
 
