@@ -304,6 +304,7 @@ describe('SeriesDetail annotation editing', () => {
         content: 'Stimulus.',
         annotationType: 'note',
         isPublic: false,
+        idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
       },
     });
     expect(MUTATIONS.CREATE_ANNOTATION).toMatch(/\bvisibility\b/);
@@ -370,6 +371,75 @@ describe('SeriesDetail annotation editing', () => {
 
     expect(await within(dialog).findByText('Insufficient permissions')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'Add annotation' })).toBeInTheDocument();
+  });
+
+  // ECO-439: a failed save may have been stored, so saving the same annotation again resends
+  // its idempotency key; a changed annotation, or the next one after a success, gets a new key.
+  test('retrying a failed save resends its idempotency key', async () => {
+    viewAs('alice');
+    serve('alice');
+    const answer = mockExecute.getMockImplementation()!;
+    let failNext = true;
+    mockExecute.mockImplementation(async request => {
+      if (request.query === MUTATIONS.CREATE_ANNOTATION && failNext) {
+        failNext = false;
+        throw new Error('Network error');
+      }
+      return answer(request);
+    });
+    renderPage();
+    await loaded();
+    const user = userEvent.setup();
+    const keys = () =>
+      requestsFor(MUTATIONS.CREATE_ANNOTATION).map(r => r.variables?.input.idempotencyKey);
+
+    await user.click(screen.getByRole('button', { name: 'Add annotation' }));
+    let dialog = screen.getByRole('dialog', { name: 'Add annotation' });
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Retried');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await within(dialog).findByText('Network error')).toBeInTheDocument();
+
+    // Closed and reopened, the same annotation still counts as a retry.
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Add annotation' }));
+    dialog = screen.getByRole('dialog', { name: 'Add annotation' });
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Retried');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    const [first, retry] = keys();
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retry).toBe(first);
+
+    // After a success, the next annotation, even an identical one, gets a new key.
+    await user.click(screen.getByRole('button', { name: 'Add annotation' }));
+    dialog = screen.getByRole('dialog', { name: 'Add annotation' });
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Retried');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(keys()).toHaveLength(3));
+    expect(keys()[2]).not.toBe(first);
+  });
+
+  test('a changed annotation after a failed save gets a new idempotency key', async () => {
+    viewAs('alice');
+    serve('alice', { [MUTATIONS.CREATE_ANNOTATION]: new Error('Network error') });
+    renderPage();
+    await loaded();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add annotation' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add annotation' });
+    await user.type(within(dialog).getByLabelText(/^Title/), 'First');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await within(dialog).findByText('Network error')).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/^Title/), ' edited');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(requestsFor(MUTATIONS.CREATE_ANNOTATION)).toHaveLength(2));
+    const [a, b] = requestsFor(MUTATIONS.CREATE_ANNOTATION).map(r => r.variables?.input);
+    expect(b.title).toBe('First edited');
+    expect(b.idempotencyKey).not.toBe(a.idempotencyKey);
   });
 
   test('edits an annotation, making it public', async () => {
