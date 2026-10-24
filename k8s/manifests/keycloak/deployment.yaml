@@ -1,8 +1,13 @@
 # keycloak: OIDC identity provider for EconGraph (realm `econ-graph`).
 #
 # Public URL: http://localhost/idp on the kind ingress (ingress.yaml), so the issuer
-# is http://localhost/idp/realms/econ-graph. For a real domain, change KC_HOSTNAME,
-# KC_WEB_BASE_URL and the ingress host together.
+# is http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
+# KC_HOSTNAME and KC_WEB_BASE_URL below to https://<PUBLIC_HOST>, the backend's
+# OIDC_ISSUER and the ingress hosts with them (scripts/deploy/render-public-host.py),
+# so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Behind
+# Cloudflare -> cloudflared -> ingress-nginx, Keycloak learns the https scheme and the
+# visitor's address from X-Forwarded-* (KC_PROXY_HEADERS below; deploy.sh makes
+# ingress-nginx pass them on); its own URLs come from KC_HOSTNAME either way.
 #
 # Credentials come only from the Secret `econ-graph-keycloak`, written by
 # scripts/deploy/create-secrets.sh (never committed):

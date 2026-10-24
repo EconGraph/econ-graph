@@ -88,14 +88,15 @@ first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
 does not exist.
 
 ```bash
-# Optional, for Google sign-in
-# (redirect URI http://localhost/idp/realms/econ-graph/broker/google/endpoint):
+# Optional, for Google sign-in (redirect URI https://<PUBLIC_HOST>/idp/realms/econ-graph/broker/google/endpoint,
+# or http://localhost/idp/... without a PUBLIC_HOST):
 export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 ./scripts/deploy/create-secrets.sh
 ./scripts/deploy/deploy.sh
 ```
 
-- Issuer: `http://localhost/idp/realms/econ-graph`. Only `/idp/realms/econ-graph`
+- Issuer: `http://localhost/idp/realms/econ-graph`, or `https://<PUBLIC_HOST>/idp/realms/econ-graph`
+  with a public host (see [Public site](#-public-site-cloudflare-tunnel)). Only `/idp/realms/econ-graph`
   and `/idp/resources` are routed by the ingress; the master realm is not reachable
   from outside the cluster.
 - Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
@@ -119,6 +120,75 @@ After deployment, the application will be available at:
 **Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
 `host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
 `deploy.sh` (re-enabled by ECO-242, train 2); `/admin` has no backend until then.
+
+## 🌍 Public site (Cloudflare Tunnel)
+
+Production is served at <https://econgraph.com> (no hyphen) through a Cloudflare Tunnel:
+
+```text
+browser --https--> Cloudflare edge --tunnel--> cloudflared (pod) --http--> ingress-nginx --> app, Keycloak
+```
+
+TLS ends at Cloudflare. The `cloudflared` Deployment (`k8s/manifests/cloudflared.yaml`)
+dials out to Cloudflare, so no port is opened on the host, and it runs in the cluster, so it
+comes back with the cluster after a reboot or a recreate.
+
+**The host name is one setting, `PUBLIC_HOST`.** `deploy.sh` applies it through
+`scripts/deploy/render-public-host.py`, which adds to the committed localhost-only manifests
+(`http://localhost` keeps working on the host):
+
+| What | Value for `PUBLIC_HOST=econgraph.com` |
+| --- | --- |
+| Ingress hosts (app, `/graphql`, Keycloak) | `econgraph.com`, as well as `localhost` |
+| `www.econgraph.com` | permanent redirect to `https://econgraph.com`, same path (ingress-nginx `from-to-www-redirect`) |
+| Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
+| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` and `http://localhost` |
+| Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
+| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
+| ingress-nginx | client address from `CF-Connecting-IP` (trusted only from pod addresses) and scheme from `X-Forwarded-Proto`, so per-client rate limits and Keycloak see the visitor and https |
+
+The frontend image needs no rebuild per host: `build-images.sh` builds it with the issuer
+`/idp/realms/econ-graph`, which the app resolves against the page's origin at runtime.
+Images built before ECO-457 have an absolute issuer baked in; rebuild them once.
+
+www is redirected rather than served because sign-in uses one Keycloak issuer that the
+backend checks exactly; a second origin would need its own redirect URIs, web origins and
+CORS entry, and would split sessions between hosts.
+
+**Tunnel token.** The token is the Secret `cloudflare-tunnel` (key `token`). Enter it
+yourself with hidden input; it is never committed, printed, or given to an agent:
+
+```bash
+scripts/deploy/set-crawler-keys.sh --tunnel
+```
+
+(or `CLOUDFLARE_TUNNEL_TOKEN=... scripts/deploy/create-secrets.sh`). Without the Secret,
+`deploy.sh` applies `cloudflared` with 0 replicas and says so.
+
+**Cloudflare dashboard** (Zero Trust > Networks > Tunnels > the tunnel > Public hostnames),
+one entry per host name:
+
+| Subdomain | Domain | Path | Service type | URL |
+| --- | --- | --- | --- | --- |
+| (empty) | `econgraph.com` | (empty) | `HTTP` | `ingress-nginx-controller.ingress-nginx.svc.cluster.local:80` |
+| `www` | `econgraph.com` | (empty) | `HTTP` | `ingress-nginx-controller.ingress-nginx.svc.cluster.local:80` |
+
+Leave *Additional application settings > HTTP Settings > HTTP Host Header* empty: cloudflared
+then sends the visitor's host (`econgraph.com` or `www.econgraph.com`), which is what the
+ingress rules match on. Leave *No TLS Verify* and *Origin Server Name* alone (the origin is
+plain HTTP). When ingress-nginx gives way to the Gateway API (ECO-433), the service URL
+changes to the Gateway's Service.
+
+**Checks.** `scripts/deploy/check-public-site.sh --host econgraph.com` checks the frontend, a
+`/graphql` search, the Keycloak discovery document (issuer
+`https://econgraph.com/idp/realms/econ-graph`), the sign-in page, CORS and the www redirect
+against the local ingress, without DNS or the tunnel. Add `--via-cloudflare` to go through
+Cloudflare the way a visitor does. Prometheus alerts `CloudflareTunnelDown` and
+`CloudflareTunnelNoConnections` (`k8s/monitoring/prometheus-rules-tunnel.yaml`) cover the
+connector.
+
+**Google sign-in** needs `https://econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
+as an authorized redirect URI of the Google OAuth client (ECO-13).
 
 ## 📊 Monitoring
 
@@ -194,6 +264,7 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak (manifests arrive with the Keycloak deploy PR) |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
+| `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
 
 Read a value back with, for example:
 

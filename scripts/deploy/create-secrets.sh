@@ -25,6 +25,12 @@
 #   monitoring-auth                auth                      MONITORING_BASIC_AUTH (optional,
 #                                                            one htpasswd line, e.g. from
 #                                                            `htpasswd -nB admin`, which prompts)
+#   cloudflare-tunnel              token                     CLOUDFLARE_TUNNEL_TOKEN (optional;
+#                                                            the Cloudflare Tunnel connector
+#                                                            token, read by
+#                                                            k8s/manifests/cloudflared.yaml.
+#                                                            Enter it with
+#                                                            set-crawler-keys.sh --tunnel)
 #
 # Rules:
 #   - A variable set to the empty string counts as unset, for every key.
@@ -312,9 +318,18 @@ apply_secret() {
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
-    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH; do
+    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
+    CLOUDFLARE_TUNNEL_TOKEN; do
     [[ -z "${!var-}" ]] || check_input "$var" "${!var}"
 done
+# A tunnel token is one base64 string (the dashboard shows it after
+# `cloudflared tunnel run --token`); catch a pasted command line or a stray
+# space without echoing the value.
+if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN-}" ]]; then
+    [[ "$CLOUDFLARE_TUNNEL_TOKEN" =~ ^[A-Za-z0-9+/_=-]{40,}$ ]] ||
+        die "CLOUDFLARE_TUNNEL_TOKEN must be the bare tunnel token (one base64 string," \
+            "no spaces, not the whole 'cloudflared ... --token' command)"
+fi
 if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     [[ "$MONITORING_BASIC_AUTH" =~ ^[^:[:space:]]+:[^[:space:]]+$ ]] ||
         die "MONITORING_BASIC_AUTH must be one htpasswd line (user:hash)"
@@ -427,6 +442,12 @@ add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
+apply_secret
+
+# --- cloudflare-tunnel (token for the cloudflared connector) -----------------
+# Optional: without it, deploy.sh runs cloudflared with no replicas.
+begin_secret cloudflare-tunnel
+add_optional CLOUDFLARE_TUNNEL_TOKEN token
 apply_secret
 
 # --- grafana-admin ---------------------------------------------------------

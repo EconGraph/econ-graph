@@ -4,6 +4,10 @@
  * The issuer and client id are build-time config (`VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`).
  * The dev server falls back to the Keycloak dev realm from docker-compose. A production build
  * without an issuer disables sign-in rather than pointing at a guessed default.
+ *
+ * An issuer that is a path (`/idp/realms/econ-graph`, what scripts/deploy/build-images.sh
+ * sets) is resolved against the page's origin at runtime, so one image serves whatever host
+ * Keycloak shares with the app (https://econgraph.com, http://localhost) without a rebuild.
  */
 
 import {
@@ -43,10 +47,23 @@ export interface OidcConfig {
 /**
  * Reads the OIDC issuer and client id from build config.
  * @param env - The Vite env to read, `import.meta.env` by default.
- * @returns The config, or null when no issuer is configured.
+ * @param origin - The page's origin, which a path-only issuer is resolved against;
+ *   `window.location.origin` by default.
+ * @returns The config, or null when no issuer is configured (or a path-only issuer has no
+ *   origin to resolve against).
  */
-export function readOidcConfig(env: OidcEnv = import.meta.env): OidcConfig | null {
-  const issuer = (env.VITE_OIDC_ISSUER?.trim() || (env.DEV ? DEV_ISSUER : '')).replace(/\/+$/, '');
+export function readOidcConfig(
+  env: OidcEnv = import.meta.env,
+  origin: string | null = globalThis.location?.origin ?? null
+): OidcConfig | null {
+  let issuer = (env.VITE_OIDC_ISSUER?.trim() || (env.DEV ? DEV_ISSUER : '')).replace(/\/+$/, '');
+  if (issuer.startsWith('/')) {
+    // Same-origin Keycloak (served under /idp by the ingress): resolve at runtime.
+    if (!origin || origin === 'null') {
+      return null;
+    }
+    issuer = `${origin.replace(/\/+$/, '')}${issuer}`;
+  }
   if (!issuer) {
     return null;
   }

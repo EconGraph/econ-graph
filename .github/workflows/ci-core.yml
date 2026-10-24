@@ -222,6 +222,22 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+  deploy-manifests:
+    name: Deploy Manifest Rendering
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
+    # manifests through render-public-host.py; check the result against the manifests.
+    - name: Check the public-host rendering
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-render-public-host.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

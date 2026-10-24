@@ -75,7 +75,7 @@ docker build \
   --build-arg VITE_API_URL="http://localhost" \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
-  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   -t econ-graph-frontend:v4.0.0 frontend
 docker build -t econ-graph-chart-api:v1.0.0 chart-api-service
@@ -88,8 +88,11 @@ for image in econ-graph-backend:v4.0.0 econ-graph-crawler-worker:v4.0.0 \
 done
 ```
 
-Set `VITE_OIDC_ISSUER` before building to enable frontend sign-in. Configure
-the issuer and client for the intended environment; an unset issuer hides sign-in.
+`VITE_OIDC_ISSUER` defaults to the path `/idp/realms/econ-graph`, which the app
+resolves against its own origin at runtime, so one image serves `http://localhost`
+and the public host (`PUBLIC_HOST`, see the Public site section of `k8s/README.md`)
+alike. Set a full URL only for a Keycloak on another origin; an empty value hides
+sign-in.
 Admin images are not built above. Review the admin manifests before applying the
 whole directory.
 

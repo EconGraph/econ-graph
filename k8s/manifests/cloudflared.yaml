@@ -1,0 +1,125 @@
+# cloudflared: the Cloudflare Tunnel connector that serves the public site
+# (PUBLIC_HOST in scripts/deploy/deploy.sh, https://econgraph.com) from this cluster.
+#
+# Traffic: browser -> Cloudflare edge (TLS) -> this tunnel (outbound-only from
+# the cluster, no inbound port is opened on the host) -> ingress-nginx -> the app.
+# The tunnel is remotely managed: its public hostnames and their origin service
+# are set in the Cloudflare dashboard (Zero Trust > Networks > Tunnels), not here.
+# Each public hostname (econgraph.com, www.econgraph.com) points at
+#   http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+# with no HTTP Host header override: cloudflared passes the visitor's Host
+# through, which is what the ingress rules match on. See "Public site" in
+# k8s/README.md.
+# When ingress-nginx is replaced by the Gateway API (ECO-433, train 2), that
+# origin service changes to the Gateway's Service; update the dashboard then.
+#
+# The tunnel token comes only from the Secret cloudflare-tunnel (key token),
+# written by scripts/deploy/create-secrets.sh from CLOUDFLARE_TUNNEL_TOKEN; it is
+# never committed. deploy.sh applies this Deployment with replicas: 0 while that
+# Secret is missing, so a cluster without a tunnel does not crash-loop.
+#
+# Metrics: GET /metrics on :2000, scraped by the annotation-based kubernetes-pods
+# job in k8s/monitoring/prometheus-config.yaml; alerts are in
+# k8s/monitoring/prometheus-rules-tunnel.yaml. GET /ready on the same port
+# answers 200 once the connector holds at least one connection to the edge.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: econ-graph
+  labels:
+    app: cloudflared
+    component: tunnel
+spec:
+  # One replica while the cluster has one worker node. Once it is multi-node
+  # (train 4, ECO-434), go to 2+ replicas with the pod anti-affinity below
+  # uncommented: every replica registers its own connections for the same
+  # tunnel, so losing a node does not take the site down.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Start the new connector before stopping the old one, so a rollout
+      # never leaves the tunnel without a connection.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+        component: tunnel
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2000"
+        prometheus.io/path: "/metrics"
+    spec:
+      automountServiceAccountToken: false
+      # affinity:
+      #   podAntiAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #     - labelSelector:
+      #         matchLabels:
+      #           app: cloudflared
+      #       topologyKey: kubernetes.io/hostname
+      containers:
+      - name: cloudflared
+        # Pin an exact release; bump it deliberately (release notes:
+        # https://github.com/cloudflare/cloudflared/releases).
+        image: cloudflare/cloudflared:2026.10.0
+        args:
+        - tunnel
+        - --no-autoupdate
+        - --metrics
+        - 0.0.0.0:2000
+        - run
+        env:
+        - name: TUNNEL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cloudflare-tunnel
+              key: token
+        ports:
+        - containerPort: 2000
+          name: metrics
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: metrics
+          # Generous: a short edge outage should not restart the connector,
+          # which reconnects on its own; a wedged one is restarted after ~2 min.
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 12
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: metrics
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        securityContext:
+          runAsNonRoot: true
+          # The image's nonroot user; a numeric id lets the kubelet verify runAsNonRoot.
+          runAsUser: 65532
+          runAsGroup: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

@@ -17,6 +17,11 @@
 # a seriesData page can still return thousands of points; this caps how often
 # one client can ask.
 #
+# Behind the Cloudflare Tunnel (PUBLIC_HOST in deploy.sh) every public request
+# arrives from the cloudflared pod; deploy.sh sets ingress-nginx to take the
+# visitor's address from CF-Connecting-IP, trusted only from pod addresses, so
+# these limits stay per visitor.
+#
 # Per-IP only holds if the controller sees the real client address. Behind a
 # NodePort Service with externalTrafficPolicy: Cluster (the Service default)
 # every request is SNAT'd to the node IP and all clients share one bucket; use
