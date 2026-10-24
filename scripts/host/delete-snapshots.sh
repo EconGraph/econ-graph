@@ -88,7 +88,11 @@ for n in "${names[@]}"; do
         @econgraph-*)
             if [ -z "$top" ]; then
                 top="$(mktemp -d /mnt/econgraph-top.XXXXXX)"
-                mount -o subvolid=5 "UUID=$FS_UUID" "$top"
+                if [ "$DRY_RUN" = "true" ]; then
+                    mount -o ro,subvolid=5 "UUID=$FS_UUID" "$top"
+                else
+                    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
+                fi
             fi
             path="$top/$n"
             ;;
