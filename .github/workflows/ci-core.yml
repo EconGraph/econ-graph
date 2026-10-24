@@ -255,10 +255,14 @@ jobs:
         # Different sets: a version repeated across app/ and data/, which share one
         # __diesel_schema_migrations table when one database holds both.
         # The rejection must be the duplicate diagnostic, not some unrelated failure.
+        # A third argument "compact" names the copy without dashes (20261021000100_...), which
+        # Diesel reads as the same version.
         plant() {
-          local set="$1" other="$2" latest dup expected out
+          local set="$1" other="$2" form="${3:-}" latest version dup expected out
           latest=$(ls -d "migrations/$set"/[0-9]*_*/ | sort | tail -1 | xargs basename)
-          dup="migrations/$other/${latest%%_*}_duplicate_migration_test"
+          version="${latest%%_*}"
+          [ "$form" = compact ] && version="${version//-/}"
+          dup="migrations/$other/${version}_duplicate_migration_test"
           if [ "$set" = "$other" ]; then
             expected="Duplicate timestamp found"
           else
@@ -285,6 +289,23 @@ jobs:
         plant app app
         plant data app
         plant app data
+        plant data app compact
+        plant app data compact
+
+        # A directory whose version can't be read is an error, not skipped: Diesel would still
+        # run it, outside every duplicate check.
+        bad="migrations/app/not_a_version_migration_test"
+        mkdir -p "$bad"
+        echo "-- Test migration" > "$bad/up.sql"
+        if out=$(python3 scripts/check_migration_order.py 2>&1) \
+            || ! grep -qF "Cannot read a migration version" <<<"$out"; then
+          echo "$out"
+          echo "❌ Migration validation should have rejected $bad"
+          rm -rf "$bad"
+          exit 1
+        fi
+        rm -rf "$bad"
+        echo "✅ Migration validation correctly rejected $bad"
 
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)

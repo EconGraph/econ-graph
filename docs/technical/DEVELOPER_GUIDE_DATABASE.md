@@ -28,11 +28,13 @@ This guide covers database setup, migration management, and testing for the econ
 
 3. **Run all migrations:**
    ```bash
-   # Check migration status
-   diesel migration list
+   # Check migration status (each set)
+   diesel migration list --migration-dir migrations/data
+   diesel migration list --migration-dir migrations/app
    
-   # Run all pending migrations
-   diesel migration run
+   # Run all pending migrations: the data set, then the app set
+   diesel migration run --migration-dir migrations/data
+   diesel migration run --migration-dir migrations/app
    
    # Verify schema
    diesel print-schema | grep api_key_name
@@ -51,23 +53,33 @@ This guide covers database setup, migration management, and testing for the econ
 
 ### Creating Migrations
 
+Migrations are in two sets: `migrations/data` (sources, series, crawl state, SEC data) and
+`migrations/app` (users and everything they create). A new migration goes in the set that owns
+its tables (see `docs/development/MIGRATIONS.md`).
+
 ```bash
-# Generate new migration
+# Generate new migration (app set; for the data set add --migration-dir migrations/data)
 diesel migration generate migration_name
 
 # This creates:
-# - migrations/TIMESTAMP_migration_name/up.sql
-# - migrations/TIMESTAMP_migration_name/down.sql
+# - migrations/app/TIMESTAMP_migration_name/up.sql
+# - migrations/app/TIMESTAMP_migration_name/down.sql
 ```
 
 ### Running Migrations
 
+The backend applies both sets at startup. With the diesel CLI, run the data set first. On a
+database built before the v4.1 split (the single v4.0.0 baseline), start the backend instead: the
+CLI stops at the app baseline's guard there.
+
 ```bash
-# Run all pending migrations
-diesel migration run
+# Run all pending migrations: the data set, then the app set
+diesel migration run --migration-dir migrations/data
+diesel migration run --migration-dir migrations/app
 
 # Check migration status
-diesel migration list
+diesel migration list --migration-dir migrations/data
+diesel migration list --migration-dir migrations/app
 
 # Revert last migration
 diesel migration revert
@@ -80,7 +92,7 @@ diesel migration redo
 
 1. **Always test migrations both ways:**
    ```bash
-   # Test up migration
+   # Test up migration (add --migration-dir migrations/data for a data migration)
    diesel migration run
    
    # Test down migration

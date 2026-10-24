@@ -127,7 +127,7 @@ const APP_BASELINE_VERSION: &str = "20261021000200";
 /// Until DP-2 gives the backend separate app and data URLs, every caller has one database holding
 /// both sets (TRAIN2_CONTRACTS.md, section 4). A database built by the single v4.0.0 baseline,
 /// before the split, already has the app tables; the app baseline is recorded there without
-/// running (see [`record_app_baseline_on_a_single_baseline_database`]).
+/// running (see [`is_single_baseline_database`]).
 ///
 /// Note: Migrations require a synchronous connection
 pub async fn run_migrations(database_url: &str) -> AppResult<()> {
@@ -178,9 +178,16 @@ pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]
 
         info!("Migration lock acquired, running migrations...");
 
-        let migration_result = sets
-            .iter()
-            .try_for_each(|&set| run_migration_set_locked(&mut conn, set));
+        // Read before any set runs: see `is_single_baseline_database`.
+        let migration_result = (if sets.contains(&MigrationSet::App) {
+            is_single_baseline_database(&mut conn)
+        } else {
+            Ok(false)
+        })
+        .and_then(|single_baseline| {
+            sets.iter()
+                .try_for_each(|&set| run_migration_set_locked(&mut conn, set, single_baseline))
+        });
 
         if let Err(e) =
             diesel::sql_query(format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
@@ -203,11 +210,16 @@ pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]
 }
 
 /// Applies one set's pending migrations on `conn`, which already holds [`MIGRATION_LOCK_KEY`].
-fn run_migration_set_locked(conn: &mut diesel::PgConnection, set: MigrationSet) -> AppResult<()> {
+/// `single_baseline` is [`is_single_baseline_database`], read before any set ran.
+fn run_migration_set_locked(
+    conn: &mut diesel::PgConnection,
+    set: MigrationSet,
+    single_baseline: bool,
+) -> AppResult<()> {
     use diesel_migrations::MigrationHarness;
 
-    if set == MigrationSet::App {
-        record_app_baseline_on_a_single_baseline_database(conn)?;
+    if set == MigrationSet::App && single_baseline {
+        record_app_baseline_without_running_it(conn)?;
     }
     info!("Running the {} migrations...", set.name());
     conn.run_pending_migrations(set.migrations())
@@ -221,43 +233,79 @@ fn run_migration_set_locked(conn: &mut diesel::PgConnection, set: MigrationSet) 
         })
 }
 
-/// On a database built by the single v4.0.0 baseline, before it was split into `migrations/data`
-/// and `migrations/app`, records the app baseline as applied without running it: that database
-/// already has the app tables (and their three foreign keys to data tables, which stay; nothing
-/// depends on them being gone), so running it would stop at its guard. Recognised by having the
-/// `users` table and the data baseline's version but not the app baseline's. Does nothing
-/// anywhere else, including a database that has only the app set.
-fn record_app_baseline_on_a_single_baseline_database(
-    conn: &mut diesel::PgConnection,
-) -> AppResult<()> {
+/// The tables the app baseline creates (TRAIN2_CONTRACTS.md, section 5).
+const APP_BASELINE_TABLES: [&str; 12] = [
+    "users",
+    "user_sessions",
+    "chart_annotations",
+    "annotation_comments",
+    "chart_collaborators",
+    "user_data_source_preferences",
+    "audit_logs",
+    "security_events",
+    "financial_annotations",
+    "annotation_assignments",
+    "annotation_replies",
+    "annotation_templates",
+];
+
+/// Whether this database was built by the single v4.0.0 baseline, before it was split into
+/// `migrations/data` and `migrations/app`: the data baseline's version is recorded, the app
+/// baseline's is not, and every app baseline table exists. Must be read before any set runs, so
+/// a data baseline applied by this same run cannot satisfy it. Anything less (a stray `users`
+/// table, say) is not recognised, and the app baseline's guard stops on it.
+fn is_single_baseline_database(conn: &mut diesel::PgConnection) -> AppResult<bool> {
     use diesel::RunQueryDsl;
 
-    // The table does not exist yet on an empty database, and Postgres resolves the INSERT's target
-    // before evaluating its WHERE, so look for it first.
     #[derive(diesel::QueryableByName)]
-    struct Exists {
+    struct Answer {
         #[diesel(sql_type = diesel::sql_types::Bool)]
-        exists: bool,
+        answer: bool,
     }
-    let table = diesel::sql_query(
-        "SELECT to_regclass('public.__diesel_schema_migrations') IS NOT NULL AS exists",
+    let err = |e: diesel::result::Error| {
+        AppError::InternalError(format!(
+            "Failed to check for a single-baseline database: {}",
+            e
+        ))
+    };
+
+    // On an empty database the migrations table does not exist yet, and the query below would
+    // fail on it, so look for it first.
+    let has_table = diesel::sql_query(
+        "SELECT to_regclass('public.__diesel_schema_migrations') IS NOT NULL AS answer",
     )
-    .get_result::<Exists>(conn)
-    .map_err(|e| {
-        AppError::InternalError(format!("Failed to look for the migrations table: {}", e))
-    })?;
-    if !table.exists {
-        return Ok(());
+    .get_result::<Answer>(conn)
+    .map_err(err)?;
+    if !has_table.answer {
+        return Ok(false);
     }
 
-    let inserted = diesel::sql_query(
-        "INSERT INTO __diesel_schema_migrations (version)
-         SELECT $2
-         WHERE to_regclass('public.users') IS NOT NULL
-             AND EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $1)
-             AND NOT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $2)",
+    let tables: Vec<String> = APP_BASELINE_TABLES.iter().map(|t| t.to_string()).collect();
+    let single = diesel::sql_query(
+        "SELECT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $1)
+             AND NOT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $2)
+             AND (SELECT bool_and(to_regclass(format('public.%I', t)) IS NOT NULL)
+                  FROM unnest($3::text[]) AS t)
+             AS answer",
     )
     .bind::<diesel::sql_types::Text, _>(DATA_BASELINE_VERSION)
+    .bind::<diesel::sql_types::Text, _>(APP_BASELINE_VERSION)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(tables)
+    .get_result::<Answer>(conn)
+    .map_err(err)?;
+    Ok(single.answer)
+}
+
+/// Records the app baseline as applied without running it, on a database that
+/// [`is_single_baseline_database`]: it already has the app tables (and their three foreign keys
+/// to data tables, which stay; nothing depends on them being gone), so running it would stop at
+/// its guard.
+fn record_app_baseline_without_running_it(conn: &mut diesel::PgConnection) -> AppResult<()> {
+    use diesel::RunQueryDsl;
+
+    let inserted = diesel::sql_query(
+        "INSERT INTO __diesel_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING",
+    )
     .bind::<diesel::sql_types::Text, _>(APP_BASELINE_VERSION)
     .execute(conn)
     .map_err(|e| {
@@ -912,6 +960,33 @@ mod tests {
             .await
             .expect("a second run should succeed");
         assert_eq!(schema_signature(&mut conn), before);
+    }
+
+    /// A database with a stray `users` table and no migrations is not a single-baseline database,
+    /// even though the data baseline this same run applies records `20261021000100`: the app
+    /// baseline is not recorded without running, so its guard stops the run, and the other 11 app
+    /// tables are never silently missing.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_migrations_does_not_take_a_stray_users_table_for_a_single_baseline_database() {
+        use diesel::connection::SimpleConnection;
+
+        let db = ScratchDatabase::create("stray_users");
+        let mut conn = db.connect();
+        conn.batch_execute("CREATE TABLE users (id UUID PRIMARY KEY)")
+            .expect("should create a stray users table");
+
+        let err = run_migrations(&db.url)
+            .await
+            .expect_err("the app baseline's guard should stop on the stray users table");
+        assert!(
+            err.to_string().contains("already has the app tables"),
+            "{err}"
+        );
+        assert!(
+            !recorded_versions(&mut conn).contains(&APP_BASELINE_VERSION.to_string()),
+            "the app baseline must not be recorded"
+        );
     }
 
     /// The app baseline's guard stops it on a database that already has the app tables but not
