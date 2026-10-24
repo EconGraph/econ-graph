@@ -88,6 +88,7 @@ impl Mutation {
                 input.annotation_type,
                 input.color,
                 is_public,
+                input.idempotency_key,
             )
             .await?;
 

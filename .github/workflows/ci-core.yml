@@ -619,6 +619,24 @@ jobs:
         done
       working-directory: backend
 
+    # ECO-439: a retried createAnnotation stores one annotation, across replicas.
+    - name: Run annotation idempotency regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for annotation idempotency regressions}"
+        for test in \
+          a_retried_create_stores_one_annotation \
+          concurrent_attempts_with_one_key_store_one_annotation \
+          keys_are_scoped_per_user_and_optional; do
+          name="graphql::annotation_idempotency_tests::$test"
+          log="$RUNNER_TEMP/$test.log"
+          cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
+          grep -Fq "test $name ... ok" "$log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+        done
+      working-directory: backend
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
