@@ -37,15 +37,17 @@ echo "🗑️  Tearing down EconGraph from local Kubernetes cluster..."
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found."
-    exit 1
-fi
-
-# Use the kind cluster's own kubectl (on this host `kubectl` is microk8s').
+# The kind cluster runs on the rootful Docker daemon; use its own kubectl (on
+# this host `kubectl` is microk8s'). Sourced first: it sets DOCKER_HOST.
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
+# Check if kind cluster exists
+if ! kind_cluster_exists; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
+    exit 1
+fi
 ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
 
@@ -127,7 +129,7 @@ fi
 
 if [ "${DELETE_CLUSTER}" = "true" ]; then
     echo "🗑️  Deleting kind cluster..."
-    kind delete cluster --name econ-graph
+    kind delete cluster --name econ-graph --kubeconfig "${KUBECONFIG}"
     echo "✅ Kind cluster deleted successfully!"
 else
     echo "ℹ️  Kind cluster kept running. You can delete it later with:"

@@ -35,9 +35,22 @@ for arg in "$@"; do
     esac
 done
 
+[ "${DRY_RUN}" = "true" ] && log "DRY RUN: checks run for real; nothing is changed"
 log "Checking host storage"
 check_host_storage_on_host || die "host subvolumes are not ready"
+echo "  ok: ${HOST_DATA_PLANE} and ${HOST_APP_PROD} are mounted btrfs subvolumes owned by $(id -un)"
 
+log "Docker daemon"
+check_docker_daemon
+if [ "${DRY_RUN}" = "true" ] && ! ensure_kind_kubectl_quietly; then
+    echo "  (dry run) kind cluster '${KIND_CLUSTER}' isn't reachable, so this is the plan, not checked against it:"
+    for dir in "${HOST_PG_DIR}" "${HOST_KEYCLOAK_PG_DIR}"; do
+        [ -d "$dir" ] || echo "+ mkdir $dir"
+    done
+    echo "+ kubectl apply -f k8s/manifests/host-storage.yaml; re-arm Released PVs"
+    log "Dry run complete; nothing was changed"
+    exit 0
+fi
 ensure_kind_kubectl
 
 if ! check_host_storage_in_node; then
@@ -53,8 +66,9 @@ for dir in "${HOST_PG_DIR}" "${HOST_KEYCLOAK_PG_DIR}"; do
 done
 
 # Ownership of these directories is set by each StatefulSet's init-data-dir
-# container; once Postgres has run they belong to host uid 100998 (pod uid 999)
-# and are not readable from the host as you, so look from inside the node.
+# container; once Postgres has run they belong to host uid ${HOST_POSTGRES_UID}
+# (pod uid 999), mode 0700, and are not readable from the host as you, so look
+# from inside the node.
 if docker exec "${KIND_STORAGE_NODE}" test -e "${NODE_PG_VERSION_FILE}" &&
     [ -z "$(k get secret econ-graph-postgres -o name --ignore-not-found)" ]; then
     die "${HOST_PG_DIR} already holds a database, but Secret econ-graph-postgres is missing.

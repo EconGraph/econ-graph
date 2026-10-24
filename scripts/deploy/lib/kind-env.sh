@@ -7,6 +7,17 @@
 # Callers set DRY_RUN=true|false and ASSUME_YES=true|false before using run()
 # or confirm().
 
+# The Docker daemon the kind cluster runs on: the rootful system daemon
+# (data on ext4). kind can't start under rootless Docker on this host, whose
+# data root is on btrfs (kind then bind-mounts /dev/mapper into the nodes).
+# Joe's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
+# that variable is deliberately not the override; ECONGRAPH_DOCKER_HOST is.
+# Exported, so kind, docker and every script run from here use the same daemon.
+CALLER_DOCKER_HOST="${DOCKER_HOST:-}"
+ECONGRAPH_DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
+export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST}"
+unset DOCKER_CONTEXT
+
 KIND_CLUSTER="${KIND_CLUSTER:-econ-graph}"
 KIND_CONTROL_PLANE="${KIND_CLUSTER}-control-plane"
 # The worker that bind-mounts the host subvolumes (terraform/k8s/kind-config.yaml).
@@ -16,6 +27,9 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 HOST_DATA_PLANE="/srv/econgraph/data-plane"
 HOST_APP_PROD="/srv/econgraph/app-prod"
 HOST_PG_DIR="${HOST_DATA_PLANE}/pg"
+# Host UID that owns pg/ and keycloak-pg/ once Postgres (pod UID 999) has run.
+# Rootful Docker has no user namespace, so it is 999 on the host too.
+HOST_POSTGRES_UID="${ECONGRAPH_HOST_POSTGRES_UID:-999}"
 HOST_KEYCLOAK_PG_DIR="${HOST_APP_PROD}/keycloak-pg"
 # PGDATA of each database, as seen inside the storage node.
 NODE_PG_VERSION_FILE="${HOST_PG_DIR}/pgdata/PG_VERSION"
@@ -86,8 +100,23 @@ confirm() {
     [ "$reply" = "yes" ] || die "aborted"
 }
 
+# Check that the Docker daemon answers and say which one it is. Exits if it
+# doesn't answer: "no cluster" must never be concluded from "no daemon".
+check_docker_daemon() {
+    local info mode=rootful
+    info="$(docker info --format '{{.ServerVersion}} {{.DockerRootDir}} {{.SecurityOptions}}' 2>/dev/null)" ||
+        die "cannot reach the Docker daemon at ${DOCKER_HOST} (is it running, and are you in the docker group?)"
+    case "$info" in *rootless*) mode=rootless ;; esac
+    echo "  docker: ${DOCKER_HOST} (${mode}, server $(cut -d' ' -f1 <<<"$info"), data $(cut -d' ' -f2 <<<"$info"))"
+    if [ "$mode" = rootless ]; then
+        warn "${DOCKER_HOST} is a rootless daemon; kind cannot start there on this host. Unset ECONGRAPH_DOCKER_HOST to use the rootful one."
+    fi
+}
+
 kind_cluster_exists() {
-    kind get clusters 2>/dev/null | grep -qx "${KIND_CLUSTER}"
+    local clusters
+    clusters="$(kind get clusters 2>/dev/null)" || die "kind get clusters failed against ${DOCKER_HOST}"
+    grep -qx "${KIND_CLUSTER}" <<<"$clusters"
 }
 
 # Put a kubectl that talks to the kind cluster first on PATH, for this script
@@ -97,27 +126,42 @@ kind_cluster_exists() {
 # matching version) and point KUBECONFIG at `kind get kubeconfig`. Nothing in
 # ~/.kube is changed. Call again after the cluster is recreated (new certs).
 use_kind_kubectl() {
-    kind_cluster_exists || die "kind cluster '${KIND_CLUSTER}' not found"
+    try_use_kind_kubectl || die "cannot reach the API server of kind cluster '${KIND_CLUSTER}' on ${DOCKER_HOST}"
+}
+
+# use_kind_kubectl, but return non-zero instead of exiting when the cluster is
+# missing or its API server doesn't answer (e.g. expired certificates).
+try_use_kind_kubectl() {
+    kind_cluster_exists || {
+        warn "kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}"
+        return 1
+    }
     mkdir -p "${ECONGRAPH_CACHE}/bin"
-    docker cp -q -L "${KIND_CONTROL_PLANE}:/usr/bin/kubectl" "${ECONGRAPH_CACHE}/bin/kubectl.new"
-    chmod 0755 "${ECONGRAPH_CACHE}/bin/kubectl.new"
-    mv -f "${ECONGRAPH_CACHE}/bin/kubectl.new" "${ECONGRAPH_CACHE}/bin/kubectl"
-    (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}")
+    docker cp -q -L "${KIND_CONTROL_PLANE}:/usr/bin/kubectl" "${ECONGRAPH_CACHE}/bin/kubectl.new" || return 1
+    chmod 0755 "${ECONGRAPH_CACHE}/bin/kubectl.new" || return 1
+    mv -f "${ECONGRAPH_CACHE}/bin/kubectl.new" "${ECONGRAPH_CACHE}/bin/kubectl" || return 1
+    (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}") || return 1
     export KUBECONFIG="${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}"
     case ":${PATH}:" in
         *":${ECONGRAPH_CACHE}/bin:"*) ;;
         *) export PATH="${ECONGRAPH_CACHE}/bin:${PATH}" ;;
     esac
-    kubectl version >/dev/null 2>&1 || die "cannot reach the kind API server with ${ECONGRAPH_CACHE}/bin/kubectl"
+    kubectl version --request-timeout=15s >/dev/null 2>&1
 }
 
 # use_kind_kubectl, unless a parent script already did.
 ensure_kind_kubectl() {
+    ensure_kind_kubectl_quietly ||
+        die "cannot reach the API server of kind cluster '${KIND_CLUSTER}' on ${DOCKER_HOST}"
+}
+
+# ensure_kind_kubectl, but return non-zero instead of exiting.
+ensure_kind_kubectl_quietly() {
     if [ "${KUBECONFIG:-}" = "${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}" ] &&
         [ "$(command -v kubectl)" = "${ECONGRAPH_CACHE}/bin/kubectl" ]; then
         return 0
     fi
-    use_kind_kubectl
+    try_use_kind_kubectl
 }
 
 k() { kubectl -n "${NAMESPACE}" "$@"; }
@@ -286,4 +330,98 @@ restore_secrets() {
     if [ "$found" != true ]; then
         warn "no saved Secrets in $1/secrets; create-secrets.sh will generate new passwords"
     fi
+}
+
+# Read the row counts of a backup (DIR/counts.env) into SERIES_COUNT,
+# DATA_POINTS_COUNT, KEYCLOAK_REALM_COUNT and KEYCLOAK_USER_COUNT. Parsed, not
+# sourced, and every value must be a number. Keys the file lacks stay empty.
+read_counts() {
+    local file="$1/counts.env" key value
+    SERIES_COUNT="" DATA_POINTS_COUNT="" KEYCLOAK_REALM_COUNT="" KEYCLOAK_USER_COUNT=""
+    [ -s "$file" ] || die "$file is missing or empty"
+    while IFS='=' read -r key value; do
+        case "$key" in
+            SERIES_COUNT | DATA_POINTS_COUNT | KEYCLOAK_REALM_COUNT | KEYCLOAK_USER_COUNT)
+                [[ "$value" =~ ^[0-9]+$ ]] || die "$file: $key='$value' is not a number"
+                printf -v "$key" '%s' "$value"
+                ;;
+        esac
+    done < <(grep -E '^[A-Z_]+=' "$file")
+}
+
+# bootstrap_databases SRC_ROOT BACKUP_DIR: namespace, the Secrets saved in
+# BACKUP_DIR (plus any create-secrets.sh still needs), the host-storage PVs and
+# both Postgres StatefulSets from SRC_ROOT's manifests, so a dump can be
+# restored before any app (backend migrations, Keycloak) starts against an
+# empty database. Idempotent: existing Secrets are kept, the rest is applied.
+bootstrap_databases() {
+    local src="$1" backup="$2"
+    log "Creating namespace, Secrets and databases from ${src}"
+    if [ "${DRY_RUN}" = "true" ]; then
+        echo "+ kubectl apply -f $src/k8s/manifests/namespace.yaml"
+        echo "+ create the Secrets saved in ${backup}/secrets/ that don't exist yet:"
+        local f
+        for f in "${backup}"/secrets/*.yaml; do
+            [ -e "$f" ] && echo "    $(basename "$f" .yaml)"
+        done
+        echo "+ scripts/deploy/create-secrets.sh (keeps existing Secrets, generates missing ones)"
+        [ -f "$src/k8s/manifests/host-storage.yaml" ] && echo "+ scripts/deploy/apply-host-storage.sh"
+        echo "+ kubectl apply postgres-init, postgres-deployment, postgres; wait for postgresql-0"
+        [ -s "${backup}/keycloak.dump" ] && echo "+ kubectl apply keycloak/postgres; wait for keycloak-postgres-0"
+        return 0
+    fi
+    kubectl apply -f "$src/k8s/manifests/namespace.yaml"
+    restore_secrets "${backup}"
+    "${PROJECT_ROOT}/scripts/deploy/create-secrets.sh"
+    if [ -f "$src/k8s/manifests/host-storage.yaml" ]; then
+        "${PROJECT_ROOT}/scripts/deploy/apply-host-storage.sh"
+    fi
+    kubectl apply -f "$src/k8s/manifests/postgres-init.yaml"
+    kubectl apply -f "$src/k8s/manifests/postgres-deployment.yaml"
+    kubectl apply -f "$src/k8s/manifests/postgres.yaml"
+    k rollout status statefulset/postgresql --timeout=600s
+    wait_postgres_settled postgresql-0 postgresql
+    if [ -s "${backup}/keycloak.dump" ]; then
+        kubectl apply -f "$src/k8s/manifests/keycloak/postgres.yaml"
+        k rollout status statefulset/keycloak-postgres --timeout=600s
+        wait_postgres_settled keycloak-postgres-0 postgres
+    fi
+}
+
+# --- cluster add-ons -------------------------------------------------------------
+
+# ingress-nginx for kind (it binds hostPorts 80/443 on the node labelled
+# ingress-ready=true, the control plane). Pinned, so a recreate installs what
+# was tested. Idempotent (kubectl apply).
+INGRESS_NGINX_MANIFEST="${INGRESS_NGINX_MANIFEST:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.3/deploy/static/provider/kind/deploy.yaml}"
+
+install_ingress_nginx() {
+    log "Installing ingress-nginx (${INGRESS_NGINX_MANIFEST##*/ingress-nginx/})"
+    run kubectl apply -f "${INGRESS_NGINX_MANIFEST}"
+    if [ "${DRY_RUN}" != "true" ]; then
+        kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
+    fi
+}
+
+# Will the cluster come back by itself after a host reboot? Needs the Docker
+# daemon enabled at boot and a restart policy on every node container (kind
+# sets on-failure:1, which dockerd honours when it starts). Read-only.
+check_restart_on_boot() {
+    local node policy ok=true
+    log "Checking that the cluster restarts after a host reboot"
+    for unit in docker.service docker.socket containerd.service; do
+        echo "  systemctl is-enabled $unit: $(systemctl is-enabled "$unit" 2>/dev/null || echo unknown)"
+    done
+    [ "$(systemctl is-enabled docker.service 2>/dev/null)" = "enabled" ] || {
+        warn "docker.service is not enabled at boot: sudo systemctl enable docker"
+        ok=false
+    }
+    for node in $(kind get nodes --name "${KIND_CLUSTER}" 2>/dev/null); do
+        policy="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}:{{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$node")"
+        echo "  $node restart policy: $policy"
+        case "$policy" in
+            no:* | "") ok=false ;;
+        esac
+    done
+    [ "$ok" = true ] || warn "the cluster will not come back by itself after a reboot"
 }

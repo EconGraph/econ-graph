@@ -64,17 +64,19 @@ else
     FRONTEND_NODEPORT=30000
 fi
 
-# Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found. Please run terraform first."
-    echo "   cd terraform/k8s && terraform init && terraform apply"
-    exit 1
-fi
-
-# Use the kind cluster's own kubectl and kubeconfig (on this host `kubectl` is
-# the microk8s snap wrapper); see scripts/deploy/lib/kind-env.sh.
+# The kind cluster runs on the rootful Docker daemon, and its own kubectl and
+# kubeconfig are used (on this host `kubectl` is the microk8s snap wrapper);
+# see scripts/deploy/lib/kind-env.sh. Sourced first: it sets DOCKER_HOST.
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
+# Check if kind cluster exists
+if ! kind_cluster_exists; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
+    echo "   Create it with scripts/deploy/recreate-kind-cluster.sh --if-missing"
+    exit 1
+fi
 ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
 

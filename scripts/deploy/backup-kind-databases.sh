@@ -8,6 +8,8 @@
 #     econ_graph.dump  keycloak.dump  counts.env  secrets/<name>.yaml   (owner-only)
 #
 # Read-only against the cluster. restore-kind-databases.sh restores from it.
+# Never deletes or rotates older backups. --dry-run prints the steps; it fails
+# (changing nothing) if the cluster's API server can't be reached.
 #
 # Usage: scripts/deploy/backup-kind-databases.sh [--dry-run] [--out DIR]
 
@@ -26,5 +28,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+log "Docker daemon"
+check_docker_daemon
 ensure_kind_kubectl
 backup_databases "${OUT:-$(new_backup_dir)}"
