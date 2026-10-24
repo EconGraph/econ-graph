@@ -1,0 +1,73 @@
+#!/bin/bash
+# Take a read-only btrfs snapshot of the production data before a risky
+# change: a data migration, a deliberate recrawl, a schema change, a restore.
+# Such changes are "critical" under the repo's rules and need Joe's sign-off
+# plus a dump first; run this together with dump-databases.sh.
+#
+# Usage: snapshot-now.sh [--only data-plane|app-prod] <reason>
+#
+# Creates SNAPSHOT_DIR/<name>.pre-<UTC stamp>-<reason> for each of
+# data-plane and app-prod (default: both). The name deliberately does not
+# match btrbk's <name>.<timestamp> pattern, so btrbk's retention never
+# prunes these; delete them by hand when the change has been accepted
+# (see docs/deployment/BACKUPS.md).
+#
+# Runs as jmalicki without sudo, provided jmalicki owns the subvolume roots
+# (the kernel only lets a non-root user snapshot subvolumes it owns) and can
+# write to SNAPSHOT_DIR. Postgres can keep running: each data directory,
+# WAL included, is inside one subvolume, so the snapshot is crash-consistent.
+
+set -euo pipefail
+
+# shellcheck source=scripts/backup/lib.sh
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+
+only=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --only) only="$2"; shift 2 ;;
+        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -*) die "unknown option: $1" ;;
+        *) break ;;
+    esac
+done
+[[ $# -ge 1 ]] || die "usage: $(basename "$0") [--only data-plane|app-prod] <reason>"
+
+reason="$*"
+slug="$(printf '%s' "${reason}" | tr -cs 'A-Za-z0-9' '-' | sed 's/^-*//; s/-*$//' | cut -c1-60)"
+[[ -n "${slug}" ]] || die "reason must contain letters or digits"
+
+declare -A sources=([data-plane]="${DATA_PLANE_DIR}" [app-prod]="${APP_PROD_DIR}")
+case "${only}" in
+    "") names=(data-plane app-prod) ;;
+    data-plane|app-prod) names=("${only}") ;;
+    *) die "--only takes data-plane or app-prod" ;;
+esac
+
+[[ -d "${SNAPSHOT_DIR}" ]] || die "${SNAPSHOT_DIR} does not exist (see 'Needs sudo' in BACKUPS.md)"
+[[ -w "${SNAPSHOT_DIR}" ]] || die "${SNAPSHOT_DIR} is not writable by $(id -un)"
+snap_fs="$(findmnt -n -o UUID -T "${SNAPSHOT_DIR}")"
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "${ECONGRAPH_STATE_DIR}"
+made=()
+for name in "${names[@]}"; do
+    src="${sources[${name}]}"
+    [[ -d "${src}" ]] || die "${src} does not exist"
+    # A btrfs subvolume root always has inode number 256; this works
+    # without root, unlike `btrfs subvolume show`.
+    [[ "$(stat -c %i "${src}")" == 256 ]] || die "${src} is not a btrfs subvolume root"
+    [[ "$(findmnt -n -o UUID -T "${src}")" == "${snap_fs}" ]] \
+        || die "${src} and ${SNAPSHOT_DIR} are on different filesystems"
+    dest="${SNAPSHOT_DIR}/${name}.pre-${stamp}-${slug}"
+    btrfs subvolume snapshot -r "${src}" "${dest}" >/dev/null \
+        || die "snapshot of ${src} failed (does $(id -un) own it?)"
+    made+=("${dest}")
+    printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(id -un)" "${dest}" "${reason}" \
+        >>"${ECONGRAPH_STATE_DIR}/snapshots.log"
+    log "snapshot: ${dest}"
+done
+
+echo "Pre-change snapshot(s) taken for: ${reason}"
+printf '  %s\n' "${made[@]}"
+echo "Also take a dump before the change: dump-databases.sh"
