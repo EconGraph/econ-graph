@@ -144,8 +144,8 @@ already has `20261021000100` recorded:
 One migration was added to `release/v4.0` after the baseline, with Joe's sign-off:
 `2026-10-24-000100_audit_logs_keep_on_user_delete` (#429, ECO-412), which makes
 `audit_logs.user_id` nullable with `ON DELETE SET NULL`. It ships in `v4.0.0` under
-`backend/migrations`. On `main` it lives in `migrations/app` (DP-1, ECO-422, places it there
-on forward-port) with its directory name and version unchanged, because `audit_logs` is an app table and databases built from
+`backend/migrations`. After #429's forward-port (DP-1, ECO-422) it lives on `main` in
+`migrations/app` with its directory name and version unchanged, because `audit_logs` is an app table and databases built from
 `v4.0.0` will have that version recorded. Its version, `20261024000100`, must sort after the
 app baseline's, `20261021000200`, and does:
 
@@ -312,12 +312,14 @@ Steps:
    shipped=$(for t in $(git tag -l 'v*' | grep -v -- -); do
      git ls-tree --name-only "$t" migrations/ migrations/app/
    done | sed 's|.*/||' | grep '^2' | sort -u)
-   app=$(ls migrations/app | grep '^2' | sort)
+   app=$(ls migrations/app | grep '^2' | sort |
+     grep -v -e '^2026-10-21-000100_' -e '^2026-10-21-000200_')
    newest=$(comm -12 <(echo "$shipped") <(echo "$app") | tail -n 1)
    comm -23 <(echo "$app") <(echo "$shipped") | awk -v n="$newest" '$0 > n'
    ```
 
-   It prints the directories to squash. The squash takes the version of the last one, so it
+   It prints the directories to squash. The two baselines are excluded by name, so they are
+   never listed even when no app migration has shipped yet. The squash takes the version of the last one, so it
    sorts after every permanent version. An unshipped app migration that sorts before the newest
    shipped version (for example one that merged before a hotfix migration was released in a
    patch and forward-ported to `main` under the same directory name) is left out of the list;
