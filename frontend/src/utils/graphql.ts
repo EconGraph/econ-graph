@@ -111,15 +111,19 @@ const NAME_START = /[A-Za-z_]/;
 const NAME_CONTINUE = /\w/;
 
 /**
- * Lists a GraphQL document's top-level definitions without a full parse. Comments and string
- * values are skipped, and only words at brace depth 0 count, so a field called `query` inside
- * a selection set is not taken for an operation.
+ * Lists a GraphQL document's top-level definitions without a full parse (`graphql` is only a
+ * dev dependency, so the bundle doesn't carry its parser). Comments and string values are
+ * skipped, and only words at brace depth 0 count, so a field called `query` inside a selection
+ * set is not taken for an operation. Object values in a header's arguments (`$f: F = {a: 1}`,
+ * `@d(a: {b: 1})`) are nested values, not the selection set.
  * @param document - The GraphQL document text.
  * @returns Its top-level definitions in order; `{` stands for an anonymous shorthand query.
  */
 function topLevelDefinitions(document: string): TopLevelDefinition[] {
   const definitions: TopLevelDefinition[] = [];
   let depth = 0;
+  // Open parentheses at brace depth 0: variable definitions or directive arguments.
+  let parens = 0;
   let i = 0;
   // The definition whose header (keyword, name, variables, type condition, directives) is
   // being read, until its selection set opens.
@@ -133,8 +137,12 @@ function topLevelDefinitions(document: string): TopLevelDefinition[] {
       continue;
     }
     if (document.startsWith('"""', i)) {
-      const end = document.indexOf('"""', i + 3);
-      i = end === -1 ? document.length : end + 3;
+      // A block string ends at the first `"""` that is not escaped as `\"""`.
+      i += 3;
+      while (i < document.length && !document.startsWith('"""', i)) {
+        i += document.startsWith('\\"""', i) ? 4 : 1;
+      }
+      i += 3;
       continue;
     }
     if (ch === '"') {
@@ -162,12 +170,20 @@ function topLevelDefinitions(document: string): TopLevelDefinition[] {
       continue;
     }
     if (ch === '{') {
-      // A selection set with no header at the top level is an anonymous `{ ... }` query.
-      if (depth === 0 && header === null) definitions.push({ keyword: '{', name: null });
-      if (depth === 0) header = null;
+      // At the top level, outside parentheses, `{` opens a selection set: the header's, or with
+      // no header an anonymous `{ ... }` query. Inside parentheses it opens an object value.
+      if (depth === 0 && parens === 0) {
+        if (header === null) definitions.push({ keyword: '{', name: null });
+        header = null;
+      }
       depth++;
     } else if (ch === '}') {
       depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && ch === '(') {
+      parens++;
+      nameNext = false;
+    } else if (depth === 0 && ch === ')') {
+      parens = Math.max(0, parens - 1);
     } else if (depth === 0 && !/[\s,]/.test(ch)) {
       // Variables, directives or punctuation: a name can no longer follow.
       nameNext = false;

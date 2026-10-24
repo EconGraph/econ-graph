@@ -14,8 +14,8 @@ import { flagDefines, flagsGuard, resolveFlagProfile } from './flags.config.ts';
 const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8080';
 
 // Where they proxy /data/graphql, the data operations sent when VITE_DATA_GRAPHQL_URL is
-// /data/graphql. Defaults to the same backend; set it to read a different data plane.
-const dataBackendUrl = process.env.DATA_BACKEND_URL ?? backendUrl;
+// /data/graphql. Unset or empty, the same backend; set it to read a different data plane.
+const dataBackendUrl = process.env.DATA_BACKEND_URL || backendUrl;
 
 // Shared by the dev server and `vite preview`.
 const proxy = {

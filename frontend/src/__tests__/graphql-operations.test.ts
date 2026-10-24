@@ -241,14 +241,19 @@ describe.skipIf(!DATA_SCHEMA_REF)(
     );
 
     /** The schema committed at DATA_SCHEMA_REF; throws if git can't read it. */
-    const refSchema = (): GraphQLSchema =>
-      buildSchema(
-        execFileSync('git', ['show', `${DATA_SCHEMA_REF}:${SCHEMA_REPO_PATH}`], {
+    const refSchema = (): GraphQLSchema => {
+      if (DATA_SCHEMA_REF?.startsWith('-')) {
+        throw new Error(`DATA_SCHEMA_REF must be a git ref, not an option: ${DATA_SCHEMA_REF}`);
+      }
+      return buildSchema(
+        // --end-of-options as well: nothing after it is read as a git option.
+        execFileSync('git', ['show', '--end-of-options', `${DATA_SCHEMA_REF}:${SCHEMA_REPO_PATH}`], {
           cwd: REPO_ROOT,
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
         })
       );
+    };
     let schemaAtRef: GraphQLSchema | undefined;
 
     it('reads schema.graphql at the ref', () => {
