@@ -5,6 +5,8 @@
  * and plots what comes back.
  */
 
+import { classifyFrequency } from './frequency';
+
 export type DataTransformation =
   | 'NONE'
   | 'YEAR_OVER_YEAR'
@@ -101,20 +103,6 @@ export function transformedAxisTitle(
   return TRANSFORMATION_OPTIONS.find(o => o.value === transformation)?.axisTitle ?? seriesUnits;
 }
 
-/** Rough length in days of a series' period, by the prefix of its source's frequency text. */
-const FREQUENCY_DAYS: readonly (readonly [string, number])[] = [
-  ['daily', 1],
-  ['weekly', 7],
-  ['biweekly', 14],
-  ['semi-annual', 182],
-  ['semiannual', 182],
-  ['semi annual', 182],
-  ['monthly', 30],
-  ['quarterly', 91],
-  ['annual', 365],
-  ['yearly', 365],
-];
-
 /** How far back each period-over-period transformation compares, in days. */
 const COMPARISON_DAYS: Partial<Record<DataTransformation, number>> = {
   MONTH_OVER_MONTH: 30,
@@ -140,26 +128,99 @@ const UNSUPPORTED: Readonly<Record<string, readonly DataTransformation[]>> = {
  * @returns The options to offer, in display order.
  */
 export function transformationsFor(frequency: string): readonly TransformationOption[] {
-  const lower = frequency.trim().toLowerCase();
-  const match = FREQUENCY_DAYS.find(([prefix]) => lower.startsWith(prefix));
+  const match = classifyFrequency(frequency);
   if (match === undefined) return TRANSFORMATION_OPTIONS;
-  const [prefix, periodDays] = match;
+  const { prefix, periodDays } = match;
   const unsupported = UNSUPPORTED[prefix] ?? [];
   return TRANSFORMATION_OPTIONS.filter(
     o => (COMPARISON_DAYS[o.value] ?? Infinity) >= periodDays && !unsupported.includes(o.value)
   );
 }
 
+/** Most decimals a level is shown with; a value given more finely is rounded to this. */
+const MAX_LEVEL_FRACTION_DIGITS = 2;
+
+/**
+ * The decimals a series' levels need: as many as its most precise value carries, up to two.
+ * Counts such as establishments or persons need none, so they don't show `.00`.
+ * @param values - The series' levels; nulls are skipped.
+ * @returns 0, 1 or 2.
+ */
+export function levelFractionDigits(values: readonly (number | null)[]): number {
+  let digits = 0;
+  for (const value of values) {
+    if (value === null || !Number.isFinite(value)) continue;
+    while (digits < MAX_LEVEL_FRACTION_DIGITS && Number(value.toFixed(digits)) !== value) {
+      digits++;
+    }
+    if (digits === MAX_LEVEL_FRACTION_DIGITS) break;
+  }
+  return digits;
+}
+
 /**
  * Format an observation for display after a transformation. Log differences are small
- * (0.01188 for a 1.2% rise), so they show four significant digits; everything else shows two
- * decimals with grouped thousands.
+ * (0.01188 for a 1.2% rise), so they show four significant digits; percent changes show two
+ * decimals, and levels the decimals their series carries (`levelFractionDigits`). All group
+ * thousands.
  * @param value - The value to format.
  * @param transformation - The transformation the value carries.
- * @returns E.g. `0.01188`, `5.30` or `31,702.10`.
+ * @param levelDigits - Decimals for a level (NONE); defaults to two.
+ * @returns E.g. `0.01188`, `5.30`, `31,702.10` or `7,324,017`.
  */
-export function formatTransformedValue(value: number, transformation: DataTransformation): string {
-  return transformation === 'LOG_DIFFERENCE'
-    ? value.toLocaleString('en-US', { minimumSignificantDigits: 4, maximumSignificantDigits: 4 })
-    : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export function formatTransformedValue(
+  value: number,
+  transformation: DataTransformation,
+  levelDigits = MAX_LEVEL_FRACTION_DIGITS
+): string {
+  if (transformation === 'LOG_DIFFERENCE') {
+    return value.toLocaleString('en-US', {
+      minimumSignificantDigits: 4,
+      maximumSignificantDigits: 4,
+    });
+  }
+  const digits = transformation === 'NONE' ? levelDigits : 2;
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+const TICK_SCALES: readonly (readonly [number, string])[] = [
+  [1e12, 'T'],
+  [1e9, 'B'],
+  [1e6, 'M'],
+];
+
+/**
+ * A y-axis tick for large values, scaled to the axis' largest tick: `28.6T` rather than
+ * `28,600,000,000,000`. It keeps as many decimals as the step between ticks needs, so
+ * neighbouring ticks don't read the same.
+ * @param value - The tick's value.
+ * @param ticks - Every tick value on the axis.
+ * @returns The label, or undefined when no tick reaches a million (Chart.js' own label reads
+ *   fine there).
+ */
+export function scaledTickLabel(value: number, ticks: readonly number[]): string | undefined {
+  const largest = Math.max(...ticks.map(Math.abs));
+  const scale = TICK_SCALES.find(([size]) => largest >= size);
+  if (scale === undefined) return undefined;
+  const [size, suffix] = scale;
+  const sorted = [...ticks].sort((a, b) => a - b);
+  let step = Infinity;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap > 0) step = Math.min(step, gap);
+  }
+  const scaledStep = step / size;
+  // 1e-9 keeps a step of exactly 0.1 at one decimal despite floating point.
+  const digits =
+    Number.isFinite(scaledStep) && scaledStep < 1
+      ? Math.min(20, Math.ceil(-Math.log10(scaledStep) - 1e-9))
+      : 0;
+  const label = (value / size).toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+  return `${label}${suffix}`;
 }

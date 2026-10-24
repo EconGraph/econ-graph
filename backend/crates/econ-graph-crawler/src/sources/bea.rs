@@ -1126,7 +1126,9 @@ fn geo_name(name: &str) -> &str {
 }
 
 /// `Gross domestic product (GDP, current dollars, quarterly)`; a description the table repeats
-/// gets its line: `Goods, line 17 (GDP, current dollars, quarterly)`.
+/// gets its line: `Goods, line 17 (GDP, current dollars, quarterly)`. A line that only restates
+/// its table's title leaves the title out: `Gross domestic product (quarterly)`, not
+/// `Gross domestic product (Gross Domestic Product, quarterly)`.
 fn nipa_title(
     title: &str,
     frequency: Frequency,
@@ -1139,11 +1141,13 @@ fn nipa_title(
     } else {
         String::new()
     };
-    format!(
-        "{}{line} ({title}, {})",
-        line_desc.trim(),
-        frequency.label().to_lowercase()
-    )
+    let line_desc = line_desc.trim();
+    let frequency = frequency.label().to_lowercase();
+    if line_desc.eq_ignore_ascii_case(title.trim()) {
+        format!("{line_desc}{line} ({frequency})")
+    } else {
+        format!("{line_desc}{line} ({title}, {frequency})")
+    }
 }
 
 /// Quarterly and monthly NIPA series are seasonally adjusted; dollar levels are also at annual
@@ -2851,6 +2855,42 @@ mod tests {
         );
 
         db.drop().await;
+    }
+
+    // ECO-415: T10105's line 1 restates the table's title, which read "Gross domestic product
+    // (Gross Domestic Product, quarterly)".
+    #[test]
+    fn nipa_title_leaves_out_a_table_title_the_line_repeats() {
+        assert_eq!(
+            nipa_title(
+                "Gross Domestic Product",
+                Frequency::Quarterly,
+                "Gross domestic product",
+                "1",
+                false
+            ),
+            "Gross domestic product (quarterly)"
+        );
+        assert_eq!(
+            nipa_title(
+                "Gross Domestic Product",
+                Frequency::Annual,
+                "Personal consumption expenditures",
+                "2",
+                false
+            ),
+            "Personal consumption expenditures (Gross Domestic Product, annual)"
+        );
+        assert_eq!(
+            nipa_title(
+                "GDP, current dollars",
+                Frequency::Quarterly,
+                "Goods",
+                "17",
+                true
+            ),
+            "Goods, line 17 (GDP, current dollars, quarterly)"
+        );
     }
 
     #[test]

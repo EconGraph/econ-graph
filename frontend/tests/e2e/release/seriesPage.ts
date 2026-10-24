@@ -39,25 +39,54 @@ export async function latestShown(page: Page) {
  */
 export const parseShown = (shown: string) => Number(shown.replace(/,/g, ''));
 
-/**
- * The series page's displayed date ("Apr 1, 2026") as the CSV's `YYYY-MM-DD`.
- * @param shown - The date as `formatIsoDate` renders it.
- * @returns The ISO calendar date.
- */
-export const toIsoDate = (shown: string) => {
-  const parsed = new Date(shown);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
-};
+// The series page shows a quarterly, semi-annual or annual observation as its period
+// (src/utils/dates.ts's formatObservationDate) and anything else as a calendar date.
+const QUARTER = /^(\d{4}) Q([1-4])$/;
+const HALF = /^(\d{4}) H([12])$/;
+const YEAR = /^(\d{4})$/;
 
 /**
- * Deployed mode: fails unless the shown date is at most `maxAgeDays` before today.
+ * A CSV's `YYYY-MM-DD` date written the way the series page wrote `like`: as its quarter
+ * ("2026 Q2"), half ("2024 H1"), year ("2022") or calendar date ("Apr 1, 2026").
+ * @param iso - The CSV's date.
+ * @param like - A date as the page shows it, for its style.
+ * @returns `iso` in that style.
+ */
+export function asShown(iso: string, like: string): string {
+  const [year, month, day] = iso.split('-').map(Number);
+  if (QUARTER.test(like)) return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
+  if (HALF.test(like)) return `${year} H${month <= 6 ? 1 : 2}`;
+  if (YEAR.test(like)) return String(year);
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * When a shown date's period starts: a quarter, half or year at its first day.
+ * @param shown - The date as the page shows it.
+ * @returns Local midnight on that day.
+ */
+function periodStart(shown: string): Date {
+  const quarter = QUARTER.exec(shown);
+  if (quarter) return new Date(Number(quarter[1]), (Number(quarter[2]) - 1) * 3, 1);
+  const half = HALF.exec(shown);
+  if (half) return new Date(Number(half[1]), (Number(half[2]) - 1) * 6, 1);
+  if (YEAR.test(shown)) return new Date(Number(shown), 0, 1);
+  return new Date(shown);
+}
+
+/**
+ * Deployed mode: fails unless the shown date (its period's start, for a quarter or year) is at
+ * most `maxAgeDays` before today.
  * @param shown - The date as the page shows it.
  * @param maxAgeDays - The series' `liveMaxAgeDays`.
  * @param what - Names the series in the failure message.
  */
 export function expectWithinCadence(shown: string, maxAgeDays: number, what: string) {
-  const ageDays = (Date.now() - new Date(shown).getTime()) / 86_400_000;
+  const ageDays = (Date.now() - periodStart(shown).getTime()) / 86_400_000;
   expect(ageDays, `latest ${what} point ${shown}`).toBeLessThanOrEqual(maxAgeDays);
 }
 

@@ -8,12 +8,12 @@ import { seededSeriesId, signInOnKeycloak, uniqueTitle } from './auth/helpers';
 import { DEPLOYED, SKIP_AUTH, USERS } from './env';
 import { SEEDED } from './fixtures';
 import {
+  asShown,
   downloadLevelsCsv,
   expectWithinCadence,
   latestShown,
   parseShown,
   searchAndOpen,
-  toIsoDate,
 } from './seriesPage';
 
 // Live QA: the same journey on the deployed build (REL-QA check 3), where the latest point is
@@ -83,7 +83,7 @@ test.describe('release journey', () => {
       const rows = await downloadLevelsCsv(page, series);
       const [date, value] = rows[rows.length - 1];
       const shown = await latestShown(page);
-      expect(date).toBe(toIsoDate(shown.date));
+      expect(asShown(date, shown.date)).toBe(shown.date);
       if (!DEPLOYED) {
         expect(Number(value)).toBe(parseShown(series.latestShown.value));
       } else {

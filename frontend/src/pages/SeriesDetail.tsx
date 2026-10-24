@@ -42,9 +42,10 @@ import {
   DataTransformation,
   describeTransformation,
   formatTransformedValue,
+  levelFractionDigits,
   transformedUnits,
 } from '../utils/transformations';
-import { formatIsoDate } from '../utils/dates';
+import { formatObservationDate } from '../utils/dates';
 import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
 
 /**
@@ -76,8 +77,11 @@ const PageSkeleton: React.FC = () => (
   </Box>
 );
 
-const formatValue = (value: number | null, transformation: DataTransformation): string =>
-  value === null ? 'N/A' : formatTransformedValue(value, transformation);
+const formatValue = (
+  value: number | null,
+  transformation: DataTransformation,
+  levelDigits: number
+): string => (value === null ? 'N/A' : formatTransformedValue(value, transformation, levelDigits));
 
 const hasValues = (points: SeriesDataPoint[] | undefined): points is SeriesDataPoint[] =>
   !!points && points.some(p => p.value !== null);
@@ -179,6 +183,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         .slice(-10)
         .reverse()
     : [];
+  // From every point, not just the ten listed, so the table matches the chart's tooltips.
+  const levelDigits = levelFractionDigits(points?.map(p => p.value) ?? []);
 
   let chart: React.ReactNode;
   if (data.isLoading) {
@@ -363,15 +369,25 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
                       <strong>Date Range</strong>
                     </TableCell>
                     <TableCell>
-                      {series.startDate ? formatIsoDate(series.startDate) : '—'} to{' '}
-                      {series.endDate ? formatIsoDate(series.endDate) : '—'}
+                      {series.startDate
+                        ? formatObservationDate(series.startDate, series.frequency)
+                        : '—'}{' '}
+                      to{' '}
+                      {series.endDate
+                        ? formatObservationDate(series.endDate, series.frequency)
+                        : '—'}
                     </TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>
-                      <strong>Last Updated</strong>
+                      {/* When EconGraph last fetched the series, not when the source revised it. */}
+                      <strong>Last Fetched</strong>
                     </TableCell>
-                    <TableCell>
+                    <TableCell
+                      title={`When EconGraph last fetched this series from ${
+                        series.source?.name ?? 'its source'
+                      }`}
+                    >
                       {series.lastUpdated
                         ? new Date(series.lastUpdated).toLocaleDateString('en-US', {
                             year: 'numeric',
@@ -416,15 +432,19 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
                     <TableBody>
                       {recentPoints.map(point => (
                         <TableRow key={point.date}>
-                          <TableCell>{formatIsoDate(point.date)}</TableCell>
+                          <TableCell>
+                            {formatObservationDate(point.date, series.frequency)}
+                          </TableCell>
                           <TableCell align='right'>
-                            {formatValue(point.value, shownTransformation)}
+                            {formatValue(point.value, shownTransformation, levelDigits)}
                           </TableCell>
                           <TableCell align='center'>
                             <Chip
                               label={point.isOriginalRelease ? 'Original' : 'Revised'}
                               size='small'
-                              color={point.isOriginalRelease ? 'secondary' : 'primary'}
+                              // Original is the usual case, so it stays neutral; the theme's
+                              // secondary colour is red and read as an error.
+                              color={point.isOriginalRelease ? 'default' : 'primary'}
                               variant='outlined'
                             />
                           </TableCell>
