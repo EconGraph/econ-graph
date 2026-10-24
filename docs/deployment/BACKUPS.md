@@ -233,8 +233,8 @@ scripts/backup/snapshot-now.sh "recrawl BLS series after the parser fix"
 scripts/backup/dump-databases.sh
 ```
 
-`snapshot-now.sh` snapshots both `data-plane` and `app-prod` (or one, with
-`--only data-plane`) as `<name>.pre-<UTC stamp>-<reason>`, logs it to
+`snapshot-now.sh` (`--dry-run` to preview) snapshots both `data-plane` and
+`app-prod` (or one, with `--only data-plane`) as `<name>.pre-<UTC stamp>-<reason>`, logs it to
 `~/.local/state/econgraph/snapshots.log`, and needs no sudo. Postgres keeps
 running. The next hourly run copies it to the backup pool with the others.
 Like every snapshot it is kept until Joe deletes it by hand.
@@ -368,7 +368,8 @@ is set aside, not deleted.
    ```
 3. `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
    then without `--dry-run`. It refuses while the Postgres pod still exists,
-   unmounts the subvolume, renames it to
+   asks you to type the subvolume name (`@econgraph-data-plane` or
+   `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
 4. With Postgres still stopped, restart the kind node that holds the
@@ -394,10 +395,12 @@ over; for a whole-database rollback, this):
 ```sh
 scripts/backup/snapshot-now.sh "before restoring econ_graph from 20261024T0442Z"
 k scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0
+scripts/backup/restore-dump.sh --dry-run econ_graph ~/econgraph-backups/<stamp>/econ_graph.dump
 scripts/backup/restore-dump.sh econ_graph ~/econgraph-backups/<stamp>/econ_graph.dump
 ```
 
-It asks for the database name as confirmation (`--yes` skips that), then
+`--dry-run` checks the archive and the pod and prints the plan. Without
+it, it asks for the database name as confirmation (`--yes` skips that), then
 runs `pg_restore --clean --if-exists --single-transaction --exit-on-error`
 in the pod, so a failure rolls back. As with the in-cluster restore,
 `--clean` only drops objects that are in the dump: tables added by later

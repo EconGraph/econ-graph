@@ -15,7 +15,8 @@
 #   app-prod.*    -> @econgraph-app-prod   at /srv/econgraph/app-prod   (pod keycloak-postgres-0)
 #
 # Steps: refuse unless the Postgres pod using that subvolume is gone (scale
-# its StatefulSet to 0 first); unmount the subvolume; rename it to
+# its StatefulSet to 0 first); ask you to type the subvolume name (e.g.
+# @econgraph-data-plane; refused without a terminal unless --yes); unmount the subvolume; rename it to
 # @econgraph-<name>.replaced-<UTC stamp> (kept, so the restore can itself
 # be undone; delete it later with scripts/host/delete-snapshots.sh); create
 # a writable snapshot of <snapshot> under the original name; mount it.
@@ -131,8 +132,15 @@ echo "Restore plan:"
 echo "  $subvol (mounted at $target) -> renamed $subvol.replaced-$stamp (kept)"
 echo "  new writable $subvol <- snapshot of $SNAPSHOT_DIR/$snap"
 if [ "$YES" = "false" ] && [ "$DRY_RUN" = "false" ]; then
-    read -r -p "Proceed? [y/N] " answer
-    case "$answer" in y|Y|yes) ;; *) echo "aborted"; exit 1 ;; esac
+    if [ ! -t 0 ]; then
+        echo "error: no terminal to confirm on; refusing (pass --yes only if you mean it)" >&2
+        exit 1
+    fi
+    read -r -p "Type '$subvol' to replace it: " answer
+    if [ "$answer" != "$subvol" ]; then
+        echo "aborted; nothing changed"
+        exit 1
+    fi
 fi
 
 top="$(mktemp -d /mnt/econgraph-top.XXXXXX)"
