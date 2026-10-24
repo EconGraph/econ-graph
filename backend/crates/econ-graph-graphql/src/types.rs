@@ -1332,6 +1332,39 @@ pub struct AuditLogType {
     pub created_at: DateTime<Utc>,
 }
 
+impl From<econ_graph_core::models::admin::SecurityEvent> for SecurityEventType {
+    fn from(event: econ_graph_core::models::admin::SecurityEvent) -> Self {
+        Self {
+            id: ID(event.id.to_string()),
+            event_type: event.event_type,
+            user_id: event.user_id.map(|id| ID(id.to_string())),
+            user_email: event.user_email,
+            ip_address: event.ip_address,
+            user_agent: event.user_agent,
+            description: event.description,
+            severity: event.severity,
+            created_at: event.created_at,
+        }
+    }
+}
+
+impl From<econ_graph_core::models::admin::AuditLog> for AuditLogType {
+    fn from(log: econ_graph_core::models::admin::AuditLog) -> Self {
+        Self {
+            id: ID(log.id.to_string()),
+            user_id: ID(log.user_id.to_string()),
+            user_name: log.user_name,
+            action: log.action,
+            resource_type: log.resource_type,
+            resource_id: log.resource_id,
+            ip_address: log.ip_address,
+            user_agent: log.user_agent,
+            details: log.details.map(|details| details.to_string()),
+            created_at: log.created_at,
+        }
+    }
+}
+
 /// GraphQL connection for audit logs
 #[derive(SimpleObject)]
 pub struct AuditLogConnection {
