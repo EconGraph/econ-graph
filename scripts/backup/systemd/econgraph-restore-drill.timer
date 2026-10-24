@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly econ-graph restore drill
+
+[Timer]
+# Sunday, an hour after that night's dump.
+OnCalendar=Sun *-*-* 11:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

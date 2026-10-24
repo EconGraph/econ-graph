@@ -1,0 +1,12 @@
+[Unit]
+Description=econ-graph off-site copy of the verified dumps (restic)
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+After=network-online.target
+# Only meaningful once ~/.config/econgraph/restic.env exists.
+ConditionPathExists=%h/.config/econgraph/restic.env
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/lib/econgraph-backup/offsite-restic.sh backup
+Nice=10
+IOSchedulingClass=idle

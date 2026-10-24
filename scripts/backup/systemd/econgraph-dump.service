@@ -1,0 +1,11 @@
+[Unit]
+Description=econ-graph nightly pg_dump of econ_graph and keycloak (verified)
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=DOCKER_HOST=unix://%t/docker.sock
+ExecStart=%h/.local/lib/econgraph-backup/dump-databases.sh
+Nice=10
+IOSchedulingClass=idle
