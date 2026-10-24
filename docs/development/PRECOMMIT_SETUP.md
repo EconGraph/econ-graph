@@ -45,7 +45,7 @@ You can run all hooks manually:
 ./scripts/pre-commit.sh run --all-files
 
 # Or directly with PATH setup
-export PATH="/Users/josephmalicki/Library/Python/3.9/bin:$PATH"
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
 pre-commit run --all-files
 ```
 
@@ -74,7 +74,7 @@ The configuration is in `.pre-commit-config.yaml`. Key features:
 
 ### Pre-commit Command Not Found
 ```bash
-export PATH="/Users/josephmalicki/Library/Python/3.9/bin:$PATH"
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
 ```
 
 ### Fixing Formatting Issues
