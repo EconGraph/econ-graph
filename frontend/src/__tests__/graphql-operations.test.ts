@@ -15,7 +15,15 @@
  * hold exactly one named operation. Anonymous `{ ... }` shorthand queries are
  * not detected; name every operation. Known failures live in
  * `graphqlOperationSkipList.ts`.
+ *
+ * Every operation must also be classified in `utils/graphql.ts`, as a data operation (sent to
+ * `VITE_DATA_GRAPHQL_URL` without a token) or an app operation, but not both.
+ *
+ * Run with `DATA_SCHEMA_REF=<git ref>`, the data operations are also validated against
+ * `schema.graphql` as committed at that ref: the data plane a branch reads may run an older
+ * release than the branch (ECO-427). Unset, that check is skipped.
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -30,13 +38,16 @@ import {
 } from 'graphql';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { APP_OPERATIONS, DATA_OPERATIONS } from '../utils/graphql';
 import { GRAPHQL_OPERATION_SKIP_LIST } from './graphqlOperationSkipList';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '..');
-const SCHEMA_PATH = path.resolve(
-  import.meta.dirname,
-  '../../../backend/crates/econ-graph-graphql/schema.graphql'
-);
+const REPO_ROOT = path.resolve(import.meta.dirname, '../../..');
+/** The schema snapshot, relative to the repository root. */
+const SCHEMA_REPO_PATH = 'backend/crates/econ-graph-graphql/schema.graphql';
+const SCHEMA_PATH = path.join(REPO_ROOT, SCHEMA_REPO_PATH);
+/** A git ref whose schema the data operations must also validate against, if set. */
+const DATA_SCHEMA_REF = process.env.DATA_SCHEMA_REF;
 
 /** Test-only files; they may hold made-up operations for mocks. */
 const TEST_FILE = /(^|\/)__tests__\/|(^|\/)__mocks__\/|\.(test|spec|stories)\.tsx?$|(^|\/)setupTests[^/]*$/;
@@ -60,6 +71,8 @@ interface FoundOperation {
   key: string;
   /** Validation or parse errors; empty when the operation is valid. */
   errors: string[];
+  /** The operation's name, type and parsed document, when the literal held one named operation. */
+  operation?: { name: string; type: OperationDefinitionNode['operation']; document: DocumentNode };
 }
 
 /** Non-test `.ts`/`.tsx` files under `src/`, as posix paths relative to it. */
@@ -144,7 +157,12 @@ function findOperations(schema: GraphQLSchema): FoundOperation[] {
         ...validate(schema, document).map(error => error.message),
         ...rootTypeErrors(schema, document),
       ];
-      found.push({ key: `${file}#${operations[0].name.value}`, errors });
+      const name = operations[0].name.value;
+      found.push({
+        key: `${file}#${name}`,
+        errors,
+        operation: { name, type: operations[0].operation, document },
+      });
     }
   }
   return found;
@@ -188,3 +206,71 @@ describe('frontend GraphQL operations', () => {
     expect([...skipped].filter(key => !keys.has(key))).toEqual([]);
   });
 });
+
+describe('frontend GraphQL operation routing', () => {
+  const named = operations.flatMap(op => (op.operation ? [op.operation] : []));
+  const names = new Set(named.map(op => op.name));
+
+  it.each([...names].sort().map(name => [name]))(
+    '%s is classified as exactly one of data or app (utils/graphql.ts)',
+    name => {
+      const classes = [DATA_OPERATIONS.has(name) && 'data', APP_OPERATIONS.has(name) && 'app'];
+      expect(classes.filter(Boolean)).toHaveLength(1);
+    }
+  );
+
+  it('classifies only operations that exist', () => {
+    const classified = [...DATA_OPERATIONS, ...APP_OPERATIONS];
+    expect(classified.filter(name => !names.has(name))).toEqual([]);
+  });
+
+  it('has only queries among the data operations', () => {
+    const notQueries = named.filter(op => DATA_OPERATIONS.has(op.name) && op.type !== 'query');
+    expect(notQueries.map(op => op.name)).toEqual([]);
+  });
+});
+
+describe.skipIf(!DATA_SCHEMA_REF)(
+  `data operations against schema.graphql at DATA_SCHEMA_REF${
+    DATA_SCHEMA_REF ? ` (${DATA_SCHEMA_REF})` : ' (skipped: DATA_SCHEMA_REF is unset)'
+  }`,
+  () => {
+    // Skip-listed operations already fail against today's schema; they are checked above.
+    const dataOperations = operations.filter(
+      op => op.operation && DATA_OPERATIONS.has(op.operation.name) && !skipped.has(op.key)
+    );
+
+    /** The schema committed at DATA_SCHEMA_REF; throws if git can't read it. */
+    const refSchema = (): GraphQLSchema =>
+      buildSchema(
+        execFileSync('git', ['show', `${DATA_SCHEMA_REF}:${SCHEMA_REPO_PATH}`], {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      );
+    let schemaAtRef: GraphQLSchema | undefined;
+
+    it('reads schema.graphql at the ref', () => {
+      schemaAtRef = refSchema();
+      expect(schemaAtRef.getQueryType()).toBeTruthy();
+    });
+
+    it.each(dataOperations.map(op => [op.key, op]))('%s validates at the ref', (_key, op) => {
+      schemaAtRef ??= refSchema();
+      const { document } = (op as FoundOperation).operation!;
+      const errors = [
+        ...validate(schemaAtRef, document).map(error => error.message),
+        ...rootTypeErrors(schemaAtRef, document),
+      ];
+      expect(errors).toEqual([]);
+    });
+  }
+);
+
+if (!DATA_SCHEMA_REF) {
+  console.info(
+    'graphql-operations: the data operations were not checked against an older schema; ' +
+      'set DATA_SCHEMA_REF=<git ref> to run that check.'
+  );
+}
