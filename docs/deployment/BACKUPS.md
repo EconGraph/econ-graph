@@ -111,9 +111,10 @@ dump or a backup copy. Everything only accumulates:
 Space is watched instead: see [Space alerts](#space-alerts). Deleting is a
 manual step Joe takes, described in [Deleting by hand](#deleting-by-hand).
 
-(The old in-cluster CronJob, which is not part of this setup, still prunes its own dumps
-after 14 days; see
-[below](#the-in-cluster-postgres-backup-cronjob).)
+The old in-cluster CronJob, which is not part of this setup, no longer
+deletes its dumps either: [#427](https://github.com/EconGraph/econ-graph/pull/427) removed its 14-day pruning (see
+[below](#the-in-cluster-postgres-backup-cronjob)). Nothing deletes backups
+automatically.
 
 ## What runs when
 
@@ -450,9 +451,10 @@ refusals are tested by `scripts/backup/test-branch-clone.sh` (in CI).
 `k8s/manifests/postgres-backup-cronjob.yaml` (with
 `postgres-backup-configmap.yaml` and `postgres-backup-pvc.yaml`) dumps
 `econ_graph` nightly at 08:00 UTC to the `postgres-backup-data` PVC and
-verifies each dump. Unlike everything in this runbook it **prunes its own
-dumps after 14 days** (`BACKUP_RETENTION_DAYS` in the CronJob). It is kept
-for now, unchanged, as an
+verifies each dump. Like everything in this runbook it deletes nothing:
+it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and
+[#427](https://github.com/EconGraph/econ-graph/pull/427) removed that, so its dumps stay until Joe removes them by hand
+(`POSTGRES_BACKUP_RESTORE.md` says how). It is kept for now as an
 independent second copy while the host-side dumps prove themselves. It is
 not pointed at the new layout because:
 
@@ -467,8 +469,9 @@ not pointed at the new layout because:
   freshness check.
 
 Retire it (remove the three manifests and their references in
-`scripts/deploy/`) once the host timers have run cleanly for two weeks; or,
-if it stays, set its `BACKUP_RETENTION_DAYS` to `0` so it stops pruning too.
+`scripts/deploy/`) once the host timers have run cleanly for two weeks.
+Removing the PVC deletes its dumps with it (reclaim policy `Delete`), so
+copy off anything worth keeping first, by hand.
 
 ## Unprivileged btrfs: what works without root
 
