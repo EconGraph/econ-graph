@@ -1,7 +1,8 @@
 # Production Postgres on host btrfs subvolumes
 
 Production, UAT and integration testing all run on one home server
-(threadripper), in the kind cluster `econ-graph` under rootless Docker. Until
+(threadripper), in the kind cluster `econ-graph` on the rootful Docker daemon
+(`unix:///var/run/docker.sock`, data root on ext4). Until
 this change both Postgres databases lived in local-path volumes inside the
 `econ-graph-worker` node container, so `kind delete cluster` deleted them. They
 now live on btrfs subvolumes on the host (the `/home` RAID10 NVMe filesystem),
@@ -10,7 +11,7 @@ data alone.
 
 Snapshots and backups of these subvolumes are covered in
 [BACKUPS.md](BACKUPS.md) (PR #420). This page covers the layout, ownership,
-and moving the live deployment onto it.
+moving the live deployment onto it, and recovering production.
 
 ## Layout
 
@@ -56,21 +57,41 @@ them to `/etc/fstab` and mounts them, with the subvolume roots owned by
   alone and takes a host-side dump first. `recreate-kind-cluster.sh` takes a
   dump and asks for a typed confirmation before deleting the cluster.
 
-## Ownership under rootless Docker
+## Which Docker daemon
 
-Rootless Docker runs every container in a user namespace. On this host
-(`/etc/subuid`: `jmalicki:100000:65536`) the mapping is:
+The cluster runs on the **rootful** Docker daemon. kind cannot start under
+rootless Docker on this host: rootless Docker keeps its data on btrfs, and kind
+then bind-mounts `/dev/mapper` into its nodes, which fails (ECO-432). Joe's
+login shell exports `DOCKER_HOST` for the rootless daemon, so the deploy
+scripts don't use that variable: `scripts/deploy/lib/kind-env.sh` sets
+`DOCKER_HOST=unix:///var/run/docker.sock` for themselves and everything they
+run (kind, docker, `deploy.sh`). Override it with `ECONGRAPH_DOCKER_HOST`.
+`jmalicki` is in the `docker` group, so none of this needs sudo. Every script
+prints the daemon it uses and warns if it is a rootless one.
+
+Images built before the switch exist only in the rootless daemon.
+`scripts/deploy/load-kind-images.sh --from-docker-host <socket>` exports them
+from there (`docker save`) and loads them into the cluster
+(`kind load image-archive`), checking each image ID on every node.
+`build-images.sh` now builds into the rootful daemon.
+
+## Ownership
+
+Rootful Docker runs containers without a user namespace (this daemon has no
+`userns-remap`: `docker info` shows only apparmor, seccomp and cgroupns), so a
+UID inside a kind node or pod is the same UID on the host. The `postgres` user
+in the `postgres:18` image is `uid=999(postgres) gid=999(postgres)` (checked
+with `docker run --rm --entrypoint id postgres:18 postgres` on 2026-10-24):
 
 | UID inside a container, kind node or pod | UID on the host |
 |---|---|
-| 0 (root) | 1000 (`jmalicki`) |
-| *n* for 1 ≤ *n* ≤ 65536 | 100000 + *n* − 1 |
-| 999 (`postgres` in `postgres:18`) | **100998** |
+| 0 (root) | 0 |
+| 999 (`postgres` in `postgres:18`) | **999** (named `systemd-coredump` in this host's `/etc/passwd`) |
+| 1000 | 1000 (`jmalicki`) |
 
-The kind nodes don't add another user namespace for pods, so pod UID 999 is
-node UID 999, which is host UID 100998. The live cluster's existing
-local-path data directories show the same thing: they are owned by
-100998:100998 on the host.
+Any data directory not owned by 999:999 (for example one written under the
+earlier rootless daemon, or copied without keeping ownership) is re-chowned by
+`init-data-dir` the first time it sees it.
 
 Postgres runs as UID 999 and must create and own its data directory, mode
 0700. `fsGroup` doesn't apply to `hostPath` volumes, so each StatefulSet has an
@@ -87,26 +108,31 @@ Postgres runs as UID 999 and must create and own its data directory, mode
 What this means in practice:
 
 - On the host, `pg/` and `keycloak-pg/` and everything in them belong to
-  **100998:100998**, mode 0700. `jmalicki` can't list or read them directly.
+  **999:999**, mode 0700. `jmalicki` can't list or read them directly.
   The subvolume roots stay `jmalicki`'s, so unprivileged
   `btrfs subvolume snapshot -r` still works.
-- To read or copy the files without sudo, go through a rootless container.
-  Its root is `jmalicki` with full capabilities inside the namespace. The
-  backup scripts do this, and so did the tests below.
-- Snapshots keep UID 100998, so restoring a snapshot needs no ownership
-  changes. A copy must keep ownership: make it from a rootless container
-  (`cp -a`) or as real root. If ownership is lost, `init-data-dir` repairs it on
-  the next pod start.
+- To read the files without sudo, go through the cluster (`kubectl exec` into
+  the Postgres pod) or `docker exec econ-graph-worker`; both run as root on
+  the rootful daemon. The backup scripts use `pg_dump` through `kubectl exec`.
+- Snapshots keep UID 999, so restoring a snapshot needs no ownership changes.
+  A copy must keep ownership (`cp -a` as root). If ownership is lost,
+  `init-data-dir` repairs it on the next pod start.
 - Postgres runs on **`econ-graph-worker`**, not on the control-plane node. A
   bind mount keeps pointing at the filesystem that was mounted when the node
   container started. So after a subvolume is swapped (snapshot restore,
   remount), stop Postgres and restart `econ-graph-worker`, not
   `econ-graph-control-plane`.
-- If `/etc/subuid` changes (a different range for `jmalicki`), the host UID
-  changes with it. Existing files then show up in the container as some
-  other UID, and `init-data-dir` re-chowns `PGDATA` on the next start.
+- If the cluster ever runs on a daemon with a user namespace again, the host
+  UID changes with it; set `ECONGRAPH_HOST_POSTGRES_UID` for the scripts'
+  ownership check, and `init-data-dir` re-chowns `PGDATA` on the next start.
 
 ### Verified on this host
+
+These checks ran under the earlier rootless daemon, so the host-side owner they
+saw was a user-namespace UID, not 999. The rootful setup has not run a
+database on these subvolumes yet; the first restore in "Recovering
+production" below is its first real test, and `migrate-to-host-storage.sh`'s
+verify step checks that `pg/` is owned by 999.
 
 - With a scratch directory under `~/.cache` and then throwaway
   subdirectories on the real `/srv/econgraph/data-plane` and
@@ -115,7 +141,7 @@ What this means in practice:
   capabilities and a read-only root filesystem. `postgres:18` then
   initialised and served as UID 999 in both layouts (`/data/pgdata`, and
   `/var/lib/postgresql/18/docker`), and restarted cleanly on the same data.
-  Host view: `100998:100998 drwx------`.
+  Host view: `drwx------`, owned by the namespace-mapped UID of 999.
 - Without the initContainer, Postgres fails on an empty `jmalicki`-owned
   directory: `mkdir: cannot create directory '/data/pgdata': Permission denied`.
 - A `PGDATA` copied without ownership (host UID 1000) was repaired by the
@@ -159,7 +185,7 @@ prompt). It then does the following:
    restore is a single transaction and the row counts must match `counts.env`.
 7. **Deploys** everything else with `deploy.sh`.
 8. **Verifies.** Row counts are at least the backup's; both PVs are `Bound` to
-   the host paths; `pg/` is owned by 100998; it lists the pods.
+   the host paths; `pg/` is owned by 999; it lists the pods.
 
 As of the 2026-10-24 dump, the expected counts are 10,528 rows in
 `economic_series` and 503,001 in `data_points`. The script compares against
@@ -193,13 +219,74 @@ The host subvolumes are not touched by a rollback. Their contents are stale
 from that point on. Move `pg/` and `keycloak-pg/` aside before migrating again
 (the forward preflight refuses non-empty directories).
 
+## Recovering production (ECO-432)
+
+On 2026-10-24 at 05:25 UTC the cluster on the rootless daemon was gone, and a
+new one could not start there. Production comes back on the rootful daemon
+from the backup taken just before:
+`~/econgraph-backups/20261024T052524Z/` (dumps, `counts.env`, `secrets/`,
+`local-images.txt`). The older `20261024T0442Z/` has dumps only, no
+`counts.env` and no Secrets, so the restore script refuses it.
+
+Run each step with `--dry-run` first. Every step can be re-run.
+
+1. Cluster (deletes an unreachable cluster of the same name only with
+   `--delete-unreachable`, after a typed `yes`; installs ingress-nginx):
+
+   ```bash
+   scripts/deploy/recreate-kind-cluster.sh --if-missing --delete-unreachable
+   ```
+
+2. Images, from the rootless daemon where they were built:
+
+   ```bash
+   scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/20261024T052524Z/local-images.txt
+   ```
+
+3. Databases: namespace, the saved Secrets, PVs and both Postgres
+   StatefulSets, then both restores. It stops with
+   `RESTORE VERIFICATION FAILED` unless `counts.env` says 10,528 series and
+   503,001 data points and the restored database has exactly the counts in
+   `counts.env`:
+
+   ```bash
+   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/20261024T052524Z --expect-series 10528 --expect-data-points 503001
+   ```
+
+4. Everything else:
+
+   ```bash
+   scripts/deploy/deploy.sh
+   ```
+
+The rootful daemon still had a kind cluster named `econ-graph` from
+2025-10-02, with its API server down (certificates expired 2026-10-02). It
+holds host ports 80, 443, 3000 and 8080, so step 1 has to delete it.
+`--delete-unreachable` is what allows that; nothing can be backed up from it
+first.
+
+### After a host reboot
+
+The cluster comes back by itself: `docker.service` is enabled at boot, and
+kind gives its node containers the restart policy `on-failure:1`, which
+dockerd honours when it starts. `recreate-kind-cluster.sh` prints both. The
+subvolumes' fstab entries use `nofail`, which doesn't make dockerd wait for
+them; `sudo scripts/host/order-docker-after-subvolumes.sh` adds a drop-in that
+orders dockerd after the two mounts.
+
+kubeadm's certificates in a kind cluster expire one year after it is created.
+That is what stopped the 2025 cluster. Renew them, or recreate the cluster,
+before then.
+
 ## Other notes
 
 - `kubectl` on this host is the microk8s snap wrapper, which ignores
   `~/.kube/config`. The deploy scripts (`scripts/deploy/lib/kind-env.sh`) copy
   the cluster's own `kubectl` out of `econ-graph-control-plane` into
   `~/.cache/econgraph/bin` and use `kind get kubeconfig`. They don't change
-  `~/.kube`.
+  `~/.kube`: `kind create/delete cluster` get `--kubeconfig` pointing at
+  `~/.cache/econgraph/kubeconfig-econ-graph`. A `--dry-run` refreshes those
+  two cached files too; it changes nothing else.
 - The in-cluster nightly `postgres-backup` CronJob and its
   `postgres-backup-data` PVC, and Grafana's data, are still node-local. They
   are lost when the cluster is deleted, which is one reason
