@@ -53,11 +53,16 @@ make sure no fix is lost on `main`.
 
 ## Tagging
 
-Before tagging, the database migrations added since the previous tag are squashed into one
-migration for the release, and checked against the chain they replace with
-`backend/scripts/compare_migrations.sh` (see [database migrations](./MIGRATIONS.md)). The squash
-is a PR into the release branch like any fix, forward-ported to `main`. No squash is needed when
-the release added no migrations, or exactly one.
+Before tagging, the app migrations (`backend/migrations/app`) that have not shipped in any
+release tag and sort after the newest one that has are squashed into one migration for the
+release, and checked against the chain they replace with
+`backend/scripts/compare_migrations.sh <commit-before-the-squash>`. The two baselines and every
+app migration that shipped in a tag are never squashed. [Database migrations](./MIGRATIONS.md),
+"Squashing at a release", has the command that lists what to squash. The squash is a PR into the release branch like any
+fix, forward-ported to `main`. No squash is needed when the release added no app migrations, or
+exactly one. Data migrations (`backend/migrations/data`) are never squashed: they ship as they
+are, and `crawler migrate` applies them to the data database when the tagged release is
+deployed.
 
 When QA passes and Joe agrees, tag the tested commit on the release branch, `vX.Y.0` plus the
 train tag (`train-N`, which the feature flag `remove_by` check reads). Before pushing `train-N`

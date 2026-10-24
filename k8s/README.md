@@ -170,7 +170,60 @@ The application is configured via ConfigMap and Secrets:
 
 PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
 `econgraph` user through `DATABASE_URL`, which `create-secrets.sh` builds and stores in the
-`econ-graph-secrets` Secret.
+`econ-graph-secrets` Secret. From train 2 (`v4.1.0`) there are two databases with their own
+URLs; see [Two databases](#two-databases) below.
+
+### Two databases
+
+**Today** there is one database. The `postgresql` StatefulSet (Service `postgres-service`)
+holds database `econ_graph` with users' work and crawled data together; the backend and the
+crawler-worker read it through `DATABASE_URL` (Secret key `database-url`), and the backend
+applies every migration when it starts.
+
+**After train 2 (`v4.1.0`, planned)** users' work and crawled data are in separate databases.
+Each item below names the ticket that brings it; until that ticket merges, today's behaviour
+above applies. Names are from `docs/development/TRAIN2_CONTRACTS.md` (sections 1, 3, 6 and 9);
+the migration rules are in [MIGRATIONS.md](../docs/development/MIGRATIONS.md#two-databases).
+
+| Database | Holds | Postgres (StatefulSet / Service) | Database name | URL (Secret `econ-graph-secrets` key, env var) | Migrations |
+| --- | --- | --- | --- | --- | --- |
+| Data | Sources, series, observations, crawl state, SEC data | `postgresql` / `data-postgres-service` (DP-4, ECO-425) | `econ_graph` (the existing database) | `data-database-url`, `DATA_DATABASE_URL` (DP-2 ECO-423, DP-4 ECO-425) | `migrations/data` (DP-1, ECO-422), applied only by the `crawler-migrate` Job (DP-3, ECO-424) |
+| App | Users, sessions, annotations, comments, preferences, audit logs | `app-postgres` / `app-postgres-service` (DP-4, ECO-425) | `econ_graph_app` | `app-database-url`, `APP_DATABASE_URL` (DP-2 ECO-423, DP-4 ECO-425) | `migrations/app` (DP-1, ECO-422), applied by the backend at startup |
+
+- **URLs** (DP-2, ECO-423; DP-4, ECO-425). `data-database-url` and `app-database-url` replace
+  `database-url`. No binary reads `DATABASE_URL` any more; one that finds it set and its own
+  variable unset exits at startup. The crawler-worker, `crawler`, `sec-crawler` and
+  `sec-company-crawler` read only the data URL. The backend reads the app URL and, where its
+  namespace owns a data database, the data URL.
+- **Which namespace owns which** (DP-4, ECO-425; DP-8, ECO-429). The production namespace
+  `econ-graph` owns the primary data database and production's app database, both on host
+  storage (`docs/deployment/HOST_STORAGE.md`, from #421 and DP-4). A branch namespace
+  `econ-graph-br-<slug>` owns only its own app database (and Keycloak), on disposable storage;
+  it has no data URL and no network path to `data-postgres-service`, and reads data through
+  `/data/graphql`, which the gateway routes to production's backend with credentials stripped.
+  A branch deployed with `scripts/deploy/deploy-branch.sh --local-data` also owns its own data
+  database, seeded from the latest verified primary dump, and never writes to the primary.
+- **`crawler migrate`** (DP-3, ECO-424). No service applies data migrations at startup.
+  `deploy.sh` runs the Job `crawler-migrate` (`/app/crawler migrate` from the
+  `econ-graph-crawler-worker` image) before the crawler-worker rolls out, and only in a
+  namespace that owns a data database. It applies pending data migrations and prints each
+  version. Its log, and the pending versions without changing anything:
+
+  ```bash
+  kubectl -n econ-graph logs job/crawler-migrate
+  kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler migrate --dry-run
+  ```
+
+  Until the Job has run, a backend with a data URL keeps failing `/readyz` if its binary
+  expects data migrations the database doesn't have yet.
+- **Teardown keeps the data database** (DP-4, ECO-425; not built yet). `teardown.sh` is to
+  remove only the app plane by default, and the data Postgres StatefulSet, its Service and its
+  Secret only with `--include-data-plane` plus a typed confirmation, never with `--yes` alone.
+  See "Cleanup" below for what it does today.
+
+Changes to the data plane that lose rows need Joe's sign-off, a dump first and a planned
+recrawl ([critical changes](../docs/development/MIGRATIONS.md#critical-changes)). Backups are
+never deleted automatically.
 
 ### Secrets
 
@@ -188,7 +241,7 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 
 | Secret | Keys (environment variable) | Used by |
 | --- | --- | --- |
-| `econ-graph-secrets` | `database-url` (built from `app-password`); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend, crawler-worker (`database-url`) |
+| `econ-graph-secrets` | `database-url` (built from `app-password`); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them. After DP-4 (ECO-425), `data-database-url` and `app-database-url` replace `database-url` ([Two databases](#two-databases)) | backend, crawler-worker (`database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak (manifests arrive with the Keycloak deploy PR) |
@@ -206,8 +259,10 @@ Changing `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` or `GRAFANA_ADMIN_PASSWORD` late
 Secret but not the running service; also change the password there (for example
 `ALTER ROLE econgraph PASSWORD ...` in psql). A Postgres volume created before these Secrets
 existed has tables owned by `postgres` and an `econgraph` password that no longer matches: for a
-local cluster, recreate it (`./scripts/deploy/teardown.sh`, then deploy again); to keep the data,
-dump it with `pg_dump --no-owner` and restore it as `econgraph` into a fresh volume.
+local cluster, recreate it (`./scripts/deploy/teardown.sh`, deleting the namespace when asked,
+then deploy again); to keep the data, dump it with `pg_dump --no-owner` and restore it as
+`econgraph` into a fresh volume. Never do this to the primary data database: it holds the crawl
+([critical changes](../docs/development/MIGRATIONS.md#critical-changes)).
 `create-secrets.sh` stops when it finds such a volume (a `postgresql-data-postgresql-*` PVC) but no
 `econ-graph-postgres` Secret; set `ALLOW_EXISTING_DB_VOLUME=1` to continue anyway. It also stops,
 without writing anything, when it cannot query the cluster.
@@ -244,7 +299,29 @@ Secret is missing.
 ./scripts/deploy/teardown.sh
 ```
 
+What it does today:
+
+- It sets the Postgres PVs' reclaim policy to `Retain` (`protect-postgres-pv.sh`), then deletes
+  every application resource, **including the `postgresql` StatefulSet** and the Secrets
+  `econ-graph-secrets` and `econ-graph-postgres`. There is no flag to keep the database
+  running.
+- It then asks before deleting the `econ-graph` namespace, which deletes the Postgres PVCs.
+  `--yes` skips that question and deletes them. The retained PVs keep the data, but reattaching
+  them is manual work.
+- It then asks whether to delete the whole kind cluster, which destroys every database and
+  backup on it, `Retain` or not. `--delete-cluster` skips that question and deletes it.
+  `--yes` alone never deletes the cluster.
+
+So take a backup first. `scripts/deploy/backup-postgres-now.sh` writes it to a volume inside
+the cluster, which survives deleting the namespace but not deleting the cluster; before that,
+also copy a `pg_dump` out of the cluster. Keeping the data database through a teardown, behind
+`--include-data-plane`, is DP-4 (ECO-425) work and not built yet.
+
 ### Remove Entire Cluster
+
+This destroys every database and backup in the cluster, and so does
+`scripts/deploy/recreate-kind-cluster.sh`, which runs the same command. Copy a `pg_dump` out of
+the cluster first.
 
 ```bash
 kind delete cluster --name econ-graph
