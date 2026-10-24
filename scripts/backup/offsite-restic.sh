@@ -3,13 +3,14 @@
 #
 # Usage: offsite-restic.sh backup|check|snapshots|init|restic <args...>
 #
-#   backup     restic backup BACKUP_ROOT (verified dump dirs only), then
-#              forget/prune by RESTIC_KEEP_* (default 14 daily, 8 weekly,
-#              12 monthly)
+#   backup     restic backup of the verified dump directories. Nothing is
+#              ever forgotten or pruned: the repository only grows.
 #   check      restic check --read-data-subset=5% (spot-reads pack files)
 #   snapshots  list restic snapshots
 #   init       create the repository (once)
-#   restic     run any restic command against the repository
+#   restic     run another restic command against the repository
+#              (ls, stats, diff, restore, mount, ...). forget and prune
+#              are refused: nothing here deletes backups.
 #
 # The repository location and password are NOT in the repo. They come from
 # ~/.config/econgraph/restic.env (mode 600), which must set
@@ -70,10 +71,6 @@ case "${cmd}" in
         (( ${#dirs[@]} > 0 )) || die "no verified dump directories under ${BACKUP_ROOT}"
         log "restic backup of ${#dirs[@]} verified dump dir(s) to ${RESTIC_REPOSITORY}"
         restic backup --tag econgraph-dumps --host "$(hostname)" "${dirs[@]}"
-        restic forget --tag econgraph-dumps --host "$(hostname)" --prune \
-            --keep-daily "${RESTIC_KEEP_DAILY:-14}" \
-            --keep-weekly "${RESTIC_KEEP_WEEKLY:-8}" \
-            --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}"
         ;;
     check)
         restic check --read-data-subset="${RESTIC_CHECK_SUBSET:-5%}"
@@ -82,6 +79,11 @@ case "${cmd}" in
         restic snapshots --tag econgraph-dumps "$@"
         ;;
     restic)
+        case "${1:-}" in
+            forget|prune|key|unlock|migrate|repair|rewrite|tag)
+                die "restic $1 is refused by this wrapper; run restic directly if Joe decides to"
+                ;;
+        esac
         restic "$@"
         ;;
     *)

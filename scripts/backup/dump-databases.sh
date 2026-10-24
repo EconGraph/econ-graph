@@ -5,13 +5,16 @@
 # (reached through the kind node, since the host's kubectl is microk8s),
 # writes the dumps to BACKUP_ROOT/<UTC stamp>/, verifies every archive with
 # `pg_restore --list` and a full read-through, and only then gives the
-# directory its final name and a VERIFIED marker. Dumps older than
-# BACKUP_RETENTION_DAYS are pruned; the newest verified one is always kept.
+# directory its final name and a VERIFIED marker.
+#
+# It only ever adds: no dump is ever deleted or pruned. A run that fails
+# keeps what it wrote as <stamp>.failed for inspection. Watch the space
+# with check-freshness.sh; remove old dumps by hand if ever needed.
 #
 # Exits non-zero if any database fails to dump or verify. Nothing in the
 # cluster is modified.
 #
-# Usage: dump-databases.sh [--target-dir DIR] [--keep-days N]
+# Usage: dump-databases.sh [--target-dir DIR]
 
 set -euo pipefail
 
@@ -21,13 +24,11 @@ source "$(dirname "$(readlink -f "$0")")/lib.sh"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --target-dir) BACKUP_ROOT="$2"; shift 2 ;;
-        --keep-days) BACKUP_RETENTION_DAYS="$2"; shift 2 ;;
-        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
 
-[[ "${BACKUP_RETENTION_DAYS}" =~ ^[0-9]+$ ]] || die "--keep-days must be a whole number"
 mkdir -p "${BACKUP_ROOT}"
 
 # One dump at a time (a manual run racing the timer would otherwise collide).
@@ -39,10 +40,11 @@ docker inspect "${KIND_NODE}" >/dev/null 2>&1 || die "kind node container ${KIND
 STAMP="$(utc_stamp)"
 FINAL="${BACKUP_ROOT}/${STAMP}"
 WORK="${FINAL}.partial"
-[[ -e "${FINAL}" ]] && die "${FINAL} already exists"
-rm -rf "${WORK}"
+[[ -e "${FINAL}" || -e "${WORK}" ]] && die "${FINAL} (or .partial) already exists"
 mkdir -p "${WORK}"
-trap 'rm -rf "${WORK}"' EXIT
+# On any failure, keep what was written under a name that can't be mistaken
+# for a good dump.
+trap 'mv "${WORK}" "${FINAL}.failed" 2>/dev/null || true' EXIT
 
 read -r -a RESTORE <<<"$(pg_restore_cmd "${WORK}")"
 log "pg_restore for verification: ${RESTORE[*]}"
@@ -102,7 +104,7 @@ for entry in ${BACKUP_DATABASES}; do
 done
 
 if (( failures > 0 )); then
-    die "${failures} database(s) failed to dump or verify; nothing kept from this run"
+    die "${failures} database(s) failed to dump or verify; this run's files are in ${FINAL}.failed"
 fi
 
 (cd "${WORK}" && sha256sum -- *.dump >SHA256SUMS)
@@ -112,15 +114,3 @@ mv "${WORK}" "${FINAL}"
 trap - EXIT
 log "dump OK: ${FINAL}"
 
-if (( BACKUP_RETENTION_DAYS > 0 )); then
-    find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d \
-        -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{4}Z' \
-        -not -path "${FINAL}" -mtime "+${BACKUP_RETENTION_DAYS}" -print0 \
-        | while IFS= read -r -d '' old; do
-            log "pruning ${old} (older than ${BACKUP_RETENTION_DAYS} days)"
-            rm -rf -- "${old}"
-        done
-    # Leftovers from runs that were killed before their trap could fire.
-    find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -name '*.partial' -mtime +1 \
-        -exec rm -rf -- {} +
-fi

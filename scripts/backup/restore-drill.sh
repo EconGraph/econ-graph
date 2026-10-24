@@ -39,7 +39,7 @@ if [[ -z "${dump}" ]]; then
     dir="$(latest_verified_dump_dir || true)"
     if [[ -z "${dir}" ]]; then
         dir="$(find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name econ_graph.dump -printf '%h\n' 2>/dev/null \
-            | sort | tail -n 1)"
+            | grep -E '/[0-9]{8}T[0-9]{4}Z$' | sort | tail -n 1 || true)"
         [[ -n "${dir}" ]] && log "no VERIFIED dump directory; using newest unverified ${dir}"
     fi
     [[ -n "${dir}" ]] || die "no econ_graph.dump found under ${BACKUP_ROOT}"

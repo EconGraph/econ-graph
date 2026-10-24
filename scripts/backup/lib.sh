@@ -31,7 +31,6 @@ if [[ -z "${BACKUP_ROOT:-}" ]]; then
         BACKUP_ROOT="${HOME}/econgraph-backups"
     fi
 fi
-BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 
 # Snapshot layout (decided; see BACKUPS.md).
 DATA_PLANE_DIR="${DATA_PLANE_DIR:-/srv/econgraph/data-plane}"
