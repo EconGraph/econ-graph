@@ -65,3 +65,36 @@ test.describe('browse a source', () => {
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
 });
+
+// ECO-414: at 1400px the result cards started flush at the sidebar edge, varied from 423 to
+// 477px wide, and the last of an odd count spanned the row.
+test.describe('results grid', () => {
+  test('cards line up in equal columns with a gutter at the sidebar', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.goto('/explore');
+    const searchBox = page.getByPlaceholder(
+      'Search economic series (e.g., GDP, unemployment, inflation)'
+    );
+    await searchBox.fill('gdp');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+
+    const cards = page.locator('.MuiCard-root');
+    await expect(cards.first().getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    const boxes = await cards.evaluateAll(els => els.map(el => el.getBoundingClientRect().toJSON()));
+    // FRED's and BEA's GDP at least, so there are widths to compare.
+    expect(boxes.length).toBeGreaterThanOrEqual(2);
+
+    const widths = boxes.map(box => Math.round(box.width));
+    expect(new Set(widths).size, `card widths ${widths.join(', ')}`).toBe(1);
+
+    // The cards' left edge lines up with the search panel above them, clear of the sidebar.
+    const sidebar = await page.getByTestId('sidebar-desktop').boundingBox();
+    const searchPanel = await searchBox
+      .locator('xpath=ancestor::*[contains(@class, "MuiPaper-root")][1]')
+      .boundingBox();
+    expect(sidebar).not.toBeNull();
+    expect(searchPanel).not.toBeNull();
+    expect(boxes[0].x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width + 16);
+    expect(Math.abs(boxes[0].x - searchPanel!.x)).toBeLessThanOrEqual(1);
+  });
+});
