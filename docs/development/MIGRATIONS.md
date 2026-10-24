@@ -118,6 +118,22 @@ already has `20261021000100` recorded:
   the three foreign keys until DP-5 copies the app rows into the app database and drops the app
   tables from it.
 
+One migration was added to `release/v4.0` after the baseline, with Joe's sign-off: it makes
+`audit_logs.user_id` nullable with `ON DELETE SET NULL` (#415, ECO-412). It shipped in
+`v4.0.0` under `backend/migrations`, and is forward-ported to `main` into `migrations/app`
+with its directory name and version unchanged, because `audit_logs` is an app table and
+databases built from `v4.0.0` have that version recorded. Its version must sort after the app
+baseline's, `20261021000200`:
+
+- A new app database then runs the app baseline and then this migration, as a `v4.0.0`
+  database did.
+- A database built from `v4.0.0` already has its version recorded. When the app set is applied,
+  the app baseline is recorded without running (above), and this migration is skipped.
+- If it sorted before `20261021000200`, a new app database would run it before `audit_logs`
+  exists and fail.
+
+`check_migration_order.py` keeps its version unique across both directories, like any other.
+
 This query returns a row on a database built from the single v4.0 baseline that the app set has
 not yet been applied to:
 
