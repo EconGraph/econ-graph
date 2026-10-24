@@ -1,36 +1,196 @@
 # Database migrations
 
-The backend applies Diesel migrations from `backend/migrations` when it starts
-(`econ_graph_core::database::run_migrations`). This page covers how migrations are written
-between releases and how they are squashed when a release is tagged (Joe, 2026-10-02).
+EconGraph has two databases, each with its own set of Diesel migrations (train 2, `v4.1.0`):
+
+| Set | Directory | Holds | Applied by |
+|-----|-----------|-------|------------|
+| app | `backend/migrations/app` | Users and everything they create: sessions, annotations, comments, collaborators, preferences, audit logs. | The backend, when it starts (`run_migrations(url, MigrationSet::App)`). |
+| data | `backend/migrations/data` | Sources, series, observations, crawl state, SEC data. | `crawler migrate` only, run by `deploy.sh` as the Kubernetes Job `crawler-migrate`; also `seed-fixtures` and tests. |
+
+The exact table lists, and the names used below, are in `docs/development/TRAIN2_CONTRACTS.md`
+(sections 4 and 5). This page covers how migrations are written between releases, how app
+migrations are squashed when a release is tagged (Joe, 2026-10-02), and the rules for data
+migrations, which are never squashed after `v4.0.0` (see "Two databases").
 
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited or removed.** Databases built
-   from that release have run it, and Diesel only remembers its version.
+   from that release have run it, and Diesel only remembers its version. The v4.0 split is the
+   one exception (see "The v4.0 split exception" below).
 2. **Migrations added since the last tag can change.** During development, add incremental
    migrations on `main` as usual. Editing one that has merged is still a new migration, because
    other developers' databases have run the old text.
-3. **Before a release is tagged, the migrations added since the previous tag are squashed into
-   one migration for that release** (see "Squashing at a release" below). A new database then
+3. **Before a release is tagged, the app migrations added since the previous tag are squashed
+   into one migration for that release** (see "Squashing at a release" below). A new database then
    runs one migration per release instead of every intermediate step, and the release's
    migration is written as the schema it builds rather than as a series of in-place fixes.
 4. **Every migration version is unique.** Diesel's version is the directory name up to the first
    `_`, without dashes (`2026-10-01-000100_x` is `20261001000100`). Two directories with the
-   same version are one migration to Diesel: one of them silently never runs.
-   `backend/scripts/check_migration_order.py` (CI) rejects duplicates.
+   same version are one migration to Diesel: one of them silently never runs. This holds across
+   `migrations/app` and `migrations/data` as well as within each, because a database that holds
+   both sets records them in one `__diesel_schema_migrations` table; the only version in both is
+   `00000000000000`, whose two copies are identical. `backend/scripts/check_migration_order.py`
+   (CI) rejects duplicates.
+
+Rules 2 and 3 apply to `migrations/app`. `migrations/data` follows rules 1 and 4 and the
+additional rules in "Two databases" below.
 
 Other frameworks do the same thing: Django's `squashmigrations` (with `replaces`), Rails loading
 `schema.rb` for new databases, and Flyway baselines. Diesel has no built-in squash, so the steps
 are below.
 
+## Two databases
+
+**App migrations** (`migrations/app`) follow the rules above: incremental between releases,
+squashed into one baseline when a release is tagged. A branch namespace's app database is
+disposable and is recreated whenever the branch is redeployed. Production's app database
+holds users' work and is upgraded like any release database, never recreated.
+
+**Data migrations** (`migrations/data`) are never squashed after `v4.0.0`. The data database
+holds the crawl, which is rebuilt only by crawling again, so it is only ever moved forward:
+
+- Every change is a new incremental migration. A data migration that shipped is never edited,
+  renumbered or folded into another (rule 1).
+- Data migrations are forward-only: a mistake is fixed by a new migration, never by reverting
+  one on a data database.
+- A data migration preserves existing rows. A new column gets a default or a backfill in the
+  same migration, a changed type or constraint converts the rows it covers, and no migration
+  drops or truncates a table that holds crawled data.
+- Data migrations are applied by `crawler migrate` (with `--dry-run` to list the pending
+  versions), which `deploy.sh` runs as the Job `crawler-migrate` before the crawler-worker rolls
+  out, and only in a namespace that owns a data database. No service applies them at startup,
+  so deploying an app change never changes the data database. `seed-fixtures` (a deliberate
+  tool, not a service) and tests apply the data set themselves.
+- The backend never migrates the data database. If the data database is behind the backend's
+  binary, `/readyz` keeps failing until `crawler migrate` runs.
+
+### Critical changes
+
+A data migration that cannot preserve rows is a **critical change**: one that drops or rewrites
+crawled rows, changes a primary key, or otherwise needs data to be fetched again. It needs all of:
+
+1. Joe's sign-off, written in the PR.
+2. A verified `pg_dump` of the data database, taken before the migration runs and kept. Dumps
+   and backups are never deleted automatically.
+3. A planned recrawl, written in the PR: which sources are crawled again, and when.
+
+Other critical changes to the data plane, such as a bulk delete or re-keying crawled rows,
+need the same three things whether or not they are a migration.
+
+### Series ids never change
+
+A series' id is UUIDv5 of `"{SOURCE}:{external_id}"` (for example `FRED:GDP`) in a fixed
+namespace (`backend/crates/econ-graph-crawler/src/series_id.rs`), so every database gives a
+series the same id. App rows refer to series by that id: `chart_annotations.series_id` holds
+`economic_series.id` with no foreign key, because the two tables are in different databases.
+Nothing in the app database notices if a series' id changes; its annotations just stop
+appearing.
+
+So no data migration and no recrawl, critical or not, may change an existing series' id.
+Changing how the id is derived (the namespace, the name format, a source's `SOURCE` string or
+its `external_id`) is itself a critical change, and its PR must also ship a mapping from old ids
+to new ones for the app rows that hold them.
+
+### The v4.0 split exception
+
+`v4.0.0` shipped one baseline, `2026-10-21-000100_v4_0_baseline`, that built both halves in one
+database. Train 2 (DP-1) split it, which is the one time a shipped migration was edited:
+
+- `migrations/data/2026-10-21-000100_v4_0_baseline` keeps the version and directory name, and
+  lost the 12 app tables and 5 app enums.
+- Those became the app baseline, `migrations/app/2026-10-21-000200_v4_0_app_baseline`, a new
+  version. Its guard stops on an existing `users` table.
+- The three cross-plane foreign keys were dropped
+  (`user_data_source_preferences.data_source_id`, `financial_annotations.statement_id`,
+  `financial_annotations.line_item_id`). The columns stay, as plain UUIDs with their indexes.
+
+It is safe because applying the data baseline and then the app baseline to one database builds
+the same schema as the old baseline, except for those three foreign keys (checked with
+`compare_migrations.sh` in the DP-1 PR), and because every database that ran the old baseline
+already has `20261021000100` recorded:
+
+- A new data database runs the data baseline and gets no app tables. A new app database runs
+  the app baseline and gets no data tables.
+- A database built from the single v4.0 baseline (the live database, and any test database from
+  before the split) skips the data baseline. When the app set is applied to it, the app run
+  sees `users` and `20261021000100` without `20261021000200`, records `20261021000200` without
+  running it, and logs that at `warn`. Its schema is unchanged, so it keeps the app tables and
+  the three foreign keys until DP-5 copies the app rows into the app database and drops the app
+  tables from it.
+
+This query returns a row on a database built from the single v4.0 baseline that the app set has
+not yet been applied to:
+
+```sql
+SELECT version
+FROM __diesel_schema_migrations
+WHERE version = '20261021000100'
+  AND to_regclass('public.users') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM __diesel_schema_migrations WHERE version = '20261021000200'
+  );
+```
+
+Once the app set has been applied, it still holds both halves; this returns a row while it
+does (that is, until DP-5 has dropped the app tables):
+
+```sql
+SELECT version
+FROM __diesel_schema_migrations
+WHERE version = '20261021000100'
+  AND to_regclass('public.users') IS NOT NULL
+  AND to_regclass('public.data_sources') IS NOT NULL;
+```
+
+No later migration may rely on this exception. From `v4.0.0` on, a shipped data migration is
+never edited again.
+
+### One database with both sets
+
+Tests, local development, CI, and `main` until DP-4 gives k8s a second Postgres use one
+database for both sets (`APP_DATABASE_URL` and `DATA_DATABASE_URL` may name the same database;
+nothing may depend on them being the same or different). Then:
+
+- The data set is applied first, then the app set.
+- Both sets share one `__diesel_schema_migrations` table, so versions are unique across both
+  directories (rule 4).
+- A set counts as current when the newest version embedded for that set is recorded, not when
+  the table's highest version is, since that mixes the two sets.
+- Both sets take the same advisory lock (`MIGRATION_LOCK_KEY`), so two runs against one
+  database take turns, and runs against separate databases never wait for each other.
+
+With the diesel CLI, from `backend/`: `diesel migration run --migration-dir migrations/data`,
+then `diesel migration run` (`diesel.toml` points at `migrations/app`).
+
+### The data plane runs tagged releases only
+
+The primary data database, and the backend and crawler in its namespace, only ever run images
+built from a release tag, never an in-between `main` commit:
+
+- Until its release is tagged, a data migration on `main` can still be renumbered (for example
+  to sort after a migration forward-ported from a release branch) or removed. A data database
+  that already ran it keeps the old version, so the data database takes only data migrations
+  that have shipped.
+- The production app database in the same namespace is squashed at each release. A database
+  that ran some of `main`'s unreleased app migrations can't always upgrade through the squash
+  (see "Squashing at a release" below); one that only runs release tags always can.
+
+A branch that changes the data schema deploys with its own data database
+(`deploy-branch.sh --local-data`) and never runs its data migrations against the primary.
+
 ## Baselines so far
+
+Each release's app migrations are squashed into one baseline. Data migrations are not; the
+v4.0.0 baseline is the last data squash.
 
 | Release | Migration | Replaces |
 |---------|-----------|----------|
-| v4.0.0 | `2026-10-21-000100_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in as `2026-10-02-000500_v4_0_baseline`, then `2026-10-21-000100_economic_series_source_title_index` (ECO-405) was folded in before tagging. A database migrated from release/v4.0 or v4.0.0-rc.1 before that last fold has `20261002000500` but not `20261021000100`, so the baseline's guard stops it; recreate it. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
+| v4.0.0 | `2026-10-21-000100_v4_0_baseline` (split in train 2 into `data/2026-10-21-000100_v4_0_baseline` and `app/2026-10-21-000200_v4_0_app_baseline`, see "The v4.0 split exception") | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in as `2026-10-02-000500_v4_0_baseline`, then `2026-10-21-000100_economic_series_source_title_index` (ECO-405) was folded in before tagging. A database migrated from release/v4.0 or v4.0.0-rc.1 before that last fold has `20261002000500` but not `20261021000100`, so the baseline's guard stops it; recreate it. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
 
 ## Squashing at a release
+
+Only `migrations/app` is squashed. Data migrations added since the previous tag ship as they
+are, one migration each.
 
 The squashed migration takes the **version of the last migration it replaces**. Diesel treats a
 migration as applied when its version is recorded in `__diesel_schema_migrations`, and ignores
@@ -88,9 +248,9 @@ Three limits, all only affecting databases that were never deployed from a relea
 
 Steps:
 
-1. List the migrations added since the previous tag, where the previous tag is the latest
+1. List the app migrations added since the previous tag, where the previous tag is the latest
    tag of the previous release line, patch releases included
-   (`git diff --name-only <prev-tag> -- backend/migrations`). Migrations that stay incremental
+   (`git diff --name-only <prev-tag> -- backend/migrations/app`). Migrations that stay incremental
    may sort between them only if they have shipped already (a hotfix migration released in a
    patch and forward-ported to `main` under the same directory name): a new database then runs
    the previous squash, the hotfix, then the new squash, and an upgraded database has the first
@@ -114,10 +274,13 @@ Steps:
 
    ```sh
    cd backend
-   ADMIN_URL=postgres://postgres@localhost:5432/postgres scripts/compare_migrations.sh <commit-before-the-squash>
+   ADMIN_URL=postgres://postgres@localhost:5432/postgres scripts/compare_migrations.sh <commit-before-the-squash> migrations/app
    ```
 
-   It builds one database from each set of migrations and diffs the full catalog (tables,
+   The second argument names the set: the script applies that directory at the given commit to
+   one database and the same directory in the working tree to another. With no second argument
+   it applies `migrations/data` then `migrations/app` to each, which is how the v4.0 split was
+   checked. It builds the two databases and diffs the full catalog (tables,
    columns and their order, constraints, indexes, triggers, views, functions, enums, comments,
    grants) and every seed row. The squash is right when it prints no diff.
 5. Regenerate nothing else: `schema.rs` and the GraphQL schema do not change when the schema is

@@ -170,7 +170,54 @@ The application is configured via ConfigMap and Secrets:
 
 PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
 `econgraph` user through `DATABASE_URL`, which `create-secrets.sh` builds and stores in the
-`econ-graph-secrets` Secret.
+`econ-graph-secrets` Secret. From train 2 (`v4.1.0`) there are two databases with their own
+URLs; see [Two databases](#two-databases) below.
+
+### Two databases
+
+From train 2 (`v4.1.0`), EconGraph keeps users' work and crawled data in separate databases.
+Names below are from `docs/development/TRAIN2_CONTRACTS.md` (sections 1, 3, 6 and 9); the
+migration rules are in [MIGRATIONS.md](../docs/development/MIGRATIONS.md#two-databases).
+
+| Database | Holds | Postgres (StatefulSet / Service) | Database name | URL (Secret `econ-graph-secrets` key, env var) | Migrations |
+| --- | --- | --- | --- | --- | --- |
+| Data | Sources, series, observations, crawl state, SEC data | `postgresql` / `data-postgres-service` | `econ_graph` (the existing database) | `data-database-url`, `DATA_DATABASE_URL` | `migrations/data`, applied only by the `crawler-migrate` Job |
+| App | Users, sessions, annotations, comments, preferences, audit logs | `app-postgres` / `app-postgres-service` | `econ_graph_app` | `app-database-url`, `APP_DATABASE_URL` | `migrations/app`, applied by the backend at startup |
+
+`data-database-url` and `app-database-url` replace `database-url`. No binary reads
+`DATABASE_URL` any more; one that finds it set and its own variable unset exits at startup.
+The crawler-worker, `crawler`, `sec-crawler` and `sec-company-crawler` read only the data URL.
+The backend reads the app URL and, where its namespace owns a data database, the data URL.
+
+**Which namespace owns which.** The production namespace `econ-graph` owns the primary data
+database and production's app database, both on host storage
+(`docs/deployment/HOST_STORAGE.md`). A branch namespace `econ-graph-br-<slug>` owns only its
+own app database (and Keycloak), on disposable storage; it has no data URL and no network path
+to `data-postgres-service`, and reads data through `/data/graphql`, which the gateway routes to
+production's backend with credentials stripped. A branch deployed with `--local-data` also owns
+its own data database, seeded from the latest verified primary dump, and never writes to the
+primary. Branch namespaces are created and removed by `scripts/deploy/deploy-branch.sh`; see
+its section of this README.
+
+**`crawler migrate`.** No service applies data migrations at startup. `deploy.sh` runs the Job
+`crawler-migrate` (`/app/crawler migrate` from the `econ-graph-crawler-worker` image) before the
+crawler-worker rolls out, and only in a namespace that owns a data database. It applies pending
+data migrations and prints each version. To see what is pending without changing anything:
+
+```bash
+kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler migrate --dry-run
+kubectl -n econ-graph logs job/crawler-migrate
+```
+
+Until the Job has run, a backend with a data URL keeps failing `/readyz` if its binary
+expects data migrations the database doesn't have yet.
+
+**Teardown keeps the data database.** `teardown.sh` removes the app plane (backend, frontend,
+app Postgres). The data Postgres StatefulSet, its Service and its Secret are removed only with
+`--include-data-plane` plus a typed confirmation, never by `--yes` alone. No script deletes a
+PersistentVolume or a host data directory, and backups are never deleted automatically.
+Changes to the data plane that lose rows need Joe's sign-off, a dump first and a planned
+recrawl ([critical changes](../docs/development/MIGRATIONS.md#critical-changes)).
 
 ### Secrets
 
@@ -243,6 +290,9 @@ Secret is missing.
 ```bash
 ./scripts/deploy/teardown.sh
 ```
+
+From train 2 this keeps the data database; see
+[Teardown keeps the data database](#two-databases).
 
 ### Remove Entire Cluster
 
