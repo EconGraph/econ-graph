@@ -43,4 +43,5 @@ echo "== top level"
 ls -la "$dir"
 echo
 echo "== largest directories (two levels)"
-du -xh --max-depth=2 "$dir" 2>/dev/null | sort -rh | head -20
+# No -x: every subvolume is its own device to du, so -x would stop at each one.
+du -h --max-depth=2 "$dir" 2>/dev/null | sort -rh | head -20
