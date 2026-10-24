@@ -1,5 +1,11 @@
 # PostgreSQL Backups and Restore
 
+> On threadripper (production), the primary protection is now host-side:
+> btrfs snapshots, verified nightly dumps of both databases, a weekly restore
+> drill and a freshness check. See [BACKUPS.md](BACKUPS.md). The in-cluster
+> CronJob described here is kept as a second copy for now; BACKUPS.md says
+> why and when to retire it.
+
 The `econ-graph` namespace's PostgreSQL StatefulSet had no backups and its
 data could be deleted in one step (teardown, or the wrong `kubectl delete`).
 This document covers what was added to fix that, and how to use it.
