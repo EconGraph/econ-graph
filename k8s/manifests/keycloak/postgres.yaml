@@ -40,6 +40,48 @@ spec:
         app: keycloak-postgres
         version: "18"
     spec:
+      # Pinned to the kind worker that bind-mounts the host subvolumes.
+      nodeSelector:
+        econgraph.io/host-storage: "true"
+      # The PV is a host directory (k8s/manifests/host-storage.yaml). fsGroup
+      # doesn't apply to hostPath volumes, so hand the volume root to the postgres
+      # user (999) here. The cluster runs on rootful Docker (no user namespace), so
+      # uid 999 in the pod is uid 999 on the host; see docs/deployment/HOST_STORAGE.md.
+      initContainers:
+      - name: init-data-dir
+        image: postgres:18
+        command:
+        - sh
+        - -ec
+        - |
+          root="$1"; pgdata="$2"
+          # The host directory starts out owned by jmalicki (uid 1000). Postgres runs
+          # as 999 and has to create PGDATA inside it, so hand the volume root over.
+          chown 999:999 "$root"
+          chmod 0700 "$root"
+          # A data directory restored by a copy that didn't keep ownership (anything
+          # but 999:999) would stop Postgres starting; fix it once.
+          if [ -e "$pgdata" ] && [ "$(stat -c %u:%g "$pgdata")" != "999:999" ]; then
+            echo "fixing ownership of $pgdata"
+            chown -R 999:999 "$pgdata"
+          fi
+          stat -c '%n %u:%g %a' "$root"
+        - init-data-dir
+        - /var/lib/postgresql
+        - /var/lib/postgresql/18/docker
+        volumeMounts:
+        - name: keycloak-postgres-data
+          mountPath: /var/lib/postgresql
+        securityContext:
+          runAsUser: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+            add: ["CHOWN", "FOWNER", "DAC_READ_SEARCH"]
+          seccompProfile:
+            type: RuntimeDefault
       containers:
       - name: postgres
         image: postgres:18
@@ -90,12 +132,16 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 3
       securityContext:
+        # Not applied to hostPath volumes; ownership is set by init-data-dir.
         fsGroup: 999
   volumeClaimTemplates:
   - metadata:
       name: keycloak-postgres-data
     spec:
       accessModes: ["ReadWriteOnce"]
+      # Static PV on the host subvolume (k8s/manifests/host-storage.yaml).
+      storageClassName: econgraph-host
+      volumeName: econgraph-app-prod-keycloak-pg
       resources:
         requests:
           storage: 5Gi

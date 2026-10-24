@@ -11,6 +11,14 @@ echo "Building EconGraph Docker images..."
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Build in, and load from, the Docker daemon the kind cluster runs on (the
+# rootful one; scripts/deploy/lib/kind-env.sh sets DOCKER_HOST, override with
+# ECONGRAPH_DOCKER_HOST): `kind load docker-image` reads the image from the
+# same daemon that runs the cluster.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
 # Version to tag images with, read from backend/Cargo.toml (the one place the
 # version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml
 # and crawler-worker.yaml hard-code this same tag, so it can't be overridden
@@ -28,13 +36,13 @@ fi
 # Build backend image
 echo "Building backend image..."
 cd backend
-docker build -t econ-graph-backend:${VERSION} -t econ-graph-backend:latest .
+docker build -t econ-graph-backend:"${VERSION}" -t econ-graph-backend:latest .
 echo "Backend image built successfully"
 
 # Build crawler-worker image (same Dockerfile, separate stage; reuses the builder stage)
 echo "Building crawler-worker image..."
 docker build --target crawler-worker \
-  -t econ-graph-crawler-worker:${VERSION} -t econ-graph-crawler-worker:latest .
+  -t econ-graph-crawler-worker:"${VERSION}" -t econ-graph-crawler-worker:latest .
 echo "Crawler-worker image built successfully"
 
 # Build frontend image
@@ -50,7 +58,7 @@ docker build \
   --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:${VERSION} -t econ-graph-frontend:latest .
+  -t econ-graph-frontend:"${VERSION}" -t econ-graph-frontend:latest .
 echo "Frontend image built successfully"
 
 # Build chart API service image
@@ -67,9 +75,9 @@ echo "Chart API service image built successfully"
 # a registry, and the manifests set imagePullPolicy: Never for these)
 echo "Loading images into kind cluster 'econ-graph'..."
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-econ-graph}"
-kind load docker-image econ-graph-backend:${VERSION} --name "${KIND_CLUSTER_NAME}"
-kind load docker-image econ-graph-crawler-worker:${VERSION} --name "${KIND_CLUSTER_NAME}"
-kind load docker-image econ-graph-frontend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-backend:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-crawler-worker:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-frontend:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image econ-graph-chart-api:v1.0.0 --name "${KIND_CLUSTER_NAME}"
 # econ-graph-admin-frontend: not loaded (re-enabled by ECO-242, train 2).
 
