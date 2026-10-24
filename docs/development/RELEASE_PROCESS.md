@@ -55,7 +55,7 @@ make sure no fix is lost on `main`.
 
 Before tagging, the app migrations (`backend/migrations/app`) added since the previous tag are
 squashed into one migration for the release, and checked against the chain they replace with
-`backend/scripts/compare_migrations.sh <commit-before-the-squash> migrations/app` (see
+`backend/scripts/compare_migrations.sh <commit-before-the-squash>` (see
 [database migrations](./MIGRATIONS.md)). The squash is a PR into the release branch like any
 fix, forward-ported to `main`. No squash is needed when the release added no app migrations, or
 exactly one. Data migrations (`backend/migrations/data`) are never squashed: they ship as they

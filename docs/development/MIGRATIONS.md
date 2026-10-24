@@ -118,12 +118,13 @@ already has `20261021000100` recorded:
   the three foreign keys until DP-5 copies the app rows into the app database and drops the app
   tables from it.
 
-One migration was added to `release/v4.0` after the baseline, with Joe's sign-off: it makes
-`audit_logs.user_id` nullable with `ON DELETE SET NULL` (#415, ECO-412). It shipped in
-`v4.0.0` under `backend/migrations`, and is forward-ported to `main` into `migrations/app`
-with its directory name and version unchanged, because `audit_logs` is an app table and
-databases built from `v4.0.0` have that version recorded. Its version must sort after the app
-baseline's, `20261021000200`:
+One migration was added to `release/v4.0` after the baseline, with Joe's sign-off:
+`2026-10-24-000100_audit_logs_keep_on_user_delete` (#429, ECO-412), which makes
+`audit_logs.user_id` nullable with `ON DELETE SET NULL`. It ships in `v4.0.0` under
+`backend/migrations`, and is forward-ported to `main` into `migrations/app` with its directory
+name and version unchanged, because `audit_logs` is an app table and databases built from
+`v4.0.0` will have that version recorded. Its version, `20261024000100`, must sort after the
+app baseline's, `20261021000200`, and does:
 
 - A new app database then runs the app baseline and then this migration, as a `v4.0.0`
   database did.
@@ -290,13 +291,12 @@ Steps:
 
    ```sh
    cd backend
-   ADMIN_URL=postgres://postgres@localhost:5432/postgres scripts/compare_migrations.sh <commit-before-the-squash> migrations/app
+   ADMIN_URL=postgres://postgres@localhost:5432/postgres scripts/compare_migrations.sh <commit-before-the-squash>
    ```
 
-   The second argument names the set: the script applies that directory at the given commit to
-   one database and the same directory in the working tree to another. With no second argument
-   it applies `migrations/data` then `migrations/app` to each, which is how the v4.0 split was
-   checked. It builds the two databases and diffs the full catalog (tables,
+   It builds one database from the migrations at that commit and one from the working tree,
+   applying `migrations/data` and then `migrations/app` to each. Data migrations are never
+   squashed, so any difference comes from the app squash. It diffs the full catalog (tables,
    columns and their order, constraints, indexes, triggers, views, functions, enums, comments,
    grants) and every seed row. The squash is right when it prints no diff.
 5. Regenerate nothing else: `schema.rs` and the GraphQL schema do not change when the schema is
