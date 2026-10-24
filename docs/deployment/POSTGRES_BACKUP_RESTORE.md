@@ -20,8 +20,7 @@ This document covers what was added to fix that, and how to use it.
 - **`postgres-backup-configmap.yaml`**: the `backup.sh` / `sync.sh` /
   `restore.sh` scripts the CronJob and restore job run. `backup.sh` also
   reads the entire dump with `pg_restore --file=/dev/null` before it's considered
-  successful, and prunes dumps older than `BACKUP_RETENTION_DAYS` (default
-  14).
+  successful. It never deletes dumps.
 - **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
   `PersistentVolume`s for both PostgreSQL data and backups to
   `persistentVolumeReclaimPolicy: Retain`. It runs after PostgreSQL comes
@@ -150,6 +149,11 @@ empty database instead of your old data. To bind back to the old volume:
 
 ## Retention
 
-`BACKUP_RETENTION_DAYS` on the `pg-dump` container (default 14) controls how
-many days of dumps are kept on the PVC. Raise the PVC size in
-`postgres-backup-pvc.yaml` if you raise retention.
+Nothing deletes backups automatically: every nightly dump stays on the PVC
+until an operator removes it. Watch the PVC's usage (20Gi by default, see
+`postgres-backup-pvc.yaml`), and when it fills, copy the dumps you want to keep
+elsewhere before deleting old ones by hand, for example:
+
+```bash
+kubectl -n econ-graph exec <pod-with-the-backup-pvc> -- ls -l /backups
+```

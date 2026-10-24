@@ -12,7 +12,6 @@ data:
     set -eu
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
-    RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
     STAMP="$(date -u +%Y%m%d-%H%M%S)"
     DEST="${BACKUP_DIR}/econ_graph-${STAMP}.dump"
     PARTIAL="${DEST}.partial"
@@ -24,17 +23,15 @@ data:
     echo "Verifying archive integrity"
     pg_restore --file=/dev/null "${PARTIAL}"
 
-    # Only give the dump its final name (picked up by sync.sh / restore.sh /
-    # the retention find below) once it's confirmed valid, so a failed or
+    # Only give the dump its final name (picked up by sync.sh / restore.sh)
+    # once it's confirmed valid, so a failed or
     # truncated dump never sits under a name that looks like a good backup.
     mv "${PARTIAL}" "${DEST}"
 
     echo "Backup OK: $(du -h "${DEST}" | cut -f1) written"
 
-    if [ "${RETENTION_DAYS}" -gt 0 ]; then
-      echo "Pruning backups older than ${RETENTION_DAYS} day(s) in ${BACKUP_DIR}"
-      find "${BACKUP_DIR}" -maxdepth 1 -name 'econ_graph-*.dump' -mtime "+${RETENTION_DAYS}" -print -delete
-    fi
+    # Backups are never deleted automatically. Old dumps are removed by hand
+    # (see docs/deployment/POSTGRES_BACKUP_RESTORE.md, "Retention").
 
     ln -sf "${DEST}" "${BACKUP_DIR}/latest.dump"
     echo "Done."
