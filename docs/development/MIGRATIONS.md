@@ -4,15 +4,6 @@ The backend applies Diesel migrations from `backend/migrations` when it starts
 (`econ_graph_core::database::run_migrations`). This page covers how migrations are written
 between releases and how they are squashed when a release is tagged (Joe, 2026-10-02).
 
-Since v4.1 (ECO-422) there are two migration sets: `backend/migrations/data` (sources, series,
-observations, crawl state, SEC data) and `backend/migrations/app` (users and everything they
-create), so the two can live in separate databases. Their layout, tables and versioning rules are in
-`docs/development/TRAIN2_CONTRACTS.md` (#423), sections 4 and 5. In short: put a new migration in
-the set that owns its tables, never reuse a version from the other set (one database holding both
-shares one `__diesel_schema_migrations` table), and with the diesel CLI run
-`--migration-dir migrations/data` before `--migration-dir migrations/app`. Until the backend has
-separate database URLs, `run_migrations` applies data then app to one database.
-
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited or removed.** Databases built
@@ -37,7 +28,7 @@ are below.
 
 | Release | Migration | Replaces |
 |---------|-----------|----------|
-| v4.0.0 | `2026-10-21-000100_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in as `2026-10-02-000500_v4_0_baseline`, then `2026-10-21-000100_economic_series_source_title_index` (ECO-405) was folded in before tagging. A database migrated from release/v4.0 or v4.0.0-rc.1 before that last fold has `20261002000500` but not `20261021000100`, so the baseline's guard stops it; recreate it. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. Since v4.1 this is the data half, in `migrations/data`. |
+| v4.0.0 | `2026-10-21-000100_v4_0_baseline` | Every migration before it except `00000000000000_diesel_initial_setup`. It was first squashed as `2026-10-01-000100_v4_0_baseline` while release/v4.0 was in QA, then the six migrations merged after that were folded in as `2026-10-02-000500_v4_0_baseline`, then `2026-10-21-000100_economic_series_source_title_index` (ECO-405) was folded in before tagging. A database migrated from release/v4.0 or v4.0.0-rc.1 before that last fold has `20261002000500` but not `20261021000100`, so the baseline's guard stops it; recreate it. No earlier release was deployed, and the chain had already been renumbered once after v3.7.3, so databases from earlier tags cannot upgrade and are rebuilt. |
 | v4.0.0, app half (v4.1) | `migrations/app/2026-10-21-000200_v4_0_app_baseline` | The app tables of the v4.0.0 baseline, split out by ECO-422 without the three foreign keys to data tables. A database built by the single v4.0.0 baseline already has these tables; `run_migrations` records this version there without running it (it logs a warning), and its guard stops it on any database that has `users` without the version recorded. |
 
 ## Squashing at a release
