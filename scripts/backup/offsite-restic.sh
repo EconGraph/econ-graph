@@ -25,6 +25,10 @@ set -euo pipefail
 # shellcheck source=scripts/backup/lib.sh
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 
+# Anything restic writes here (cache, `restic restore` of a dump) is
+# private: files 0600, directories 0700.
+umask 077
+
 RESTIC_ENV="${RESTIC_ENV:-${ECONGRAPH_CONFIG_DIR}/restic.env}"
 
 if [[ ! -f "${RESTIC_ENV}" ]]; then

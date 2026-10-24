@@ -260,6 +260,11 @@ host's `pg_restore` is older than the server. The directory is built as
 `<stamp>.partial` and renamed to `<stamp>` only when everything passed; a
 failure renames it to `<stamp>.failed` (kept for inspection, never mistaken
 for a good dump) and exits non-zero. No dump is ever deleted or pruned.
+It runs with `umask 077`, so every file is mode 0600 and every directory
+0700: the dumps hold all the data, Keycloak's secrets and password hashes
+included. (They are not encrypted; that is tracked separately.) Dumps
+written before this change keep their old modes; tighten them once with
+`chmod -R go= ~/econgraph-backups /srv/econgraph-backups/dumps`.
 `--target-dir` (or `BACKUP_ROOT`) moves the output. By default the dumps go
 to `/srv/econgraph-backups/dumps` as soon as that directory exists and is
 writable, and to `~/econgraph-backups` before that; the dumps already in

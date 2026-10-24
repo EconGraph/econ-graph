@@ -120,7 +120,7 @@ fi
 if [ -d "$TARGET/dumps" ]; then
     echo "= $TARGET/dumps exists"
 else
-    run install -d -m 0750 -o "$OWNER" -g "$OWNER" "$TARGET/dumps"
+    run install -d -m 0700 -o "$OWNER" -g "$OWNER" "$TARGET/dumps"
 fi
 
 if [ "$DRY_RUN" = "false" ]; then

@@ -24,6 +24,10 @@ set -euo pipefail
 # shellcheck source=scripts/backup/lib.sh
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 
+# The dumps hold every row, password hashes and Keycloak secrets included:
+# files 0600, directories 0700.
+umask 077
+
 DRY_RUN="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
