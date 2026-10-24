@@ -415,16 +415,27 @@ takes no space until written to and never touches production:
 scripts/backup/branch-clone.sh create my-branch                  # newest data-plane snapshot
 scripts/backup/branch-clone.sh create my-branch data-plane.20261024T040000Z
 scripts/backup/branch-clone.sh list
-scripts/backup/branch-clone.sh delete my-branch
+scripts/backup/branch-clone.sh --dry-run delete my-branch        # shows what would go
+scripts/backup/branch-clone.sh delete my-branch                  # asks you to type my-branch
 ```
 
 The clone is `btrfs subvolume snapshot <read-only snapshot>
 ~/econgraph-branches/<branch>`, i.e. a new writable subvolume, made without
-sudo. Point the branch's Postgres 18 at `<clone>/pg` (the files are owned by
+sudo, plus a `<branch>.source` file next to it naming the snapshot. Point
+the branch's Postgres 18 at `<clone>/pg` (the files are owned by
 UID 999, the image's postgres user, so run it as a container, not on the
 host). Delete also needs no sudo: it empties the clone from inside a
 container on the rootful daemon (root there is host root) and then `rmdir`s
 the empty subvolume.
+
+Because that container is host root, delete is fenced in. It refuses a
+name that is empty, starts with `.` or contains `/`; anything that is a
+symlink or does not resolve (with `realpath`) to a direct child of
+`BRANCH_CLONE_DIR`; anything without the `<branch>.source` marker that
+only `create` writes; and anything that is not a writable btrfs subvolume.
+It then asks you to type the clone's name, and refuses without a terminal
+unless given `--yes`. `--dry-run` works for `create` and `delete`. The
+refusals are tested by `scripts/backup/test-branch-clone.sh` (in CI).
 
 ## The in-cluster `postgres-backup` CronJob
 
