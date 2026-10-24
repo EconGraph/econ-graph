@@ -1,5 +1,5 @@
 use bigdecimal::BigDecimal;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 /**
  * REQUIREMENT: Collaboration service for chart annotations and sharing
  * PURPOSE: Provide business logic for collaborative features including permissions
@@ -19,7 +19,7 @@ use econ_graph_core::{
         AnnotationComment, ChartAnnotation, ChartCollaborator, NewAnnotationComment,
         NewChartAnnotation, NewChartCollaborator, User,
     },
-    schema::{annotation_comments, chart_annotations, chart_collaborators, users},
+    schema::{annotation_comments, chart_annotations, chart_collaborators, economic_series, users},
 };
 
 /// Permission levels for collaboration
@@ -153,6 +153,39 @@ pub fn validate_annotation_fields(
     Ok(())
 }
 
+/// Earliest year an annotation may be dated: early enough for long historical series, and
+/// well clear of the year-1 dates a broken client sends.
+pub const ANNOTATION_MIN_YEAR: i32 = 1000;
+/// How many years past today an annotation may be dated, for projections and scheduled events.
+pub const ANNOTATION_MAX_YEARS_AHEAD: i32 = 10;
+/// `annotation_value` is DECIMAL(20, 6), so its magnitude must stay below 10^14.
+const ANNOTATION_VALUE_MAX_DIGITS: u32 = 14;
+
+/// Checks an annotation's date (against `today`) and optional chart value.
+pub fn validate_annotation_point(
+    date: NaiveDate,
+    value: Option<&BigDecimal>,
+    today: NaiveDate,
+) -> AppResult<()> {
+    let earliest = NaiveDate::from_ymd_opt(ANNOTATION_MIN_YEAR, 1, 1).expect("valid date");
+    let latest = NaiveDate::from_ymd_opt(today.year() + ANNOTATION_MAX_YEARS_AHEAD, 12, 31)
+        .expect("valid date");
+    if date < earliest || date > latest {
+        return Err(AppError::ValidationError(format!(
+            "Date {date} is outside {earliest} to {latest}"
+        )));
+    }
+    if let Some(value) = value {
+        let limit = BigDecimal::from(10i64.pow(ANNOTATION_VALUE_MAX_DIGITS));
+        if value.abs() >= limit {
+            return Err(AppError::ValidationError(format!(
+                "Value {value} is too large; it must be below 1e{ANNOTATION_VALUE_MAX_DIGITS}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Checks a comment's text.
 pub fn validate_comment(content: &str) -> AppResult<()> {
     check_text("Comment", content, COMMENT_MAX_CHARS, true)
@@ -187,12 +220,31 @@ impl CollaborationService {
             Some(&annotation_type),
             color.as_deref(),
         )?;
+        validate_annotation_point(
+            annotation_date,
+            annotation_value.as_ref(),
+            chrono::Utc::now().date_naive(),
+        )?;
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
                 e
             ))
         })?;
+
+        // `chart_annotations.series_id` is varchar with no foreign key, so nothing else stops
+        // an annotation on a series that doesn't exist.
+        let series_exists = economic_series::table
+            .find(series_id)
+            .select(economic_series::id)
+            .first::<Uuid>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .is_some();
+        if !series_exists {
+            return Err(AppError::SeriesNotFound(series_id.to_string()));
+        }
 
         // Check if user has permission to annotate this series
         if !self.check_annotation_permission(user_id, series_id).await? {
@@ -694,6 +746,39 @@ mod validation_tests {
         validate_comment(&"c".repeat(COMMENT_MAX_CHARS)).unwrap();
         assert_eq!(refused(validate_comment(" \n ")), "Comment can't be empty");
         refused(validate_comment(&"c".repeat(COMMENT_MAX_CHARS + 1)));
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn annotation_dates_must_be_in_range() {
+        let today = date(2026, 10, 23);
+        for ok in [date(1000, 1, 1), date(2024, 1, 1), date(2036, 12, 31)] {
+            validate_annotation_point(ok, None, today).unwrap();
+        }
+        assert_eq!(
+            refused(validate_annotation_point(date(1, 1, 1), None, today)),
+            "Date 0001-01-01 is outside 1000-01-01 to 2036-12-31"
+        );
+        refused(validate_annotation_point(date(999, 12, 31), None, today));
+        refused(validate_annotation_point(date(2037, 1, 1), None, today));
+        refused(validate_annotation_point(date(2099, 12, 31), None, today));
+    }
+
+    #[test]
+    fn annotation_values_must_fit_the_column() {
+        let today = date(2026, 10, 23);
+        let day = date(2024, 1, 1);
+        let fits: BigDecimal = "99999999999999.999999".parse().unwrap();
+        validate_annotation_point(day, Some(&fits), today).unwrap();
+        validate_annotation_point(day, Some(&-fits), today).unwrap();
+        let too_big: BigDecimal = "100000000000000".parse().unwrap();
+        assert!(
+            refused(validate_annotation_point(day, Some(&too_big), today)).contains("too large")
+        );
+        refused(validate_annotation_point(day, Some(&-too_big), today));
     }
 }
 

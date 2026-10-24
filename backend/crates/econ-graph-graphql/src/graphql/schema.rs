@@ -7,6 +7,7 @@ use async_graphql::{EmptySubscription, Schema, SchemaBuilder};
 use std::sync::Arc;
 
 use crate::graphql::dataloaders::DataLoaders;
+use crate::graphql::errors::SanitizeErrors;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
@@ -37,7 +38,7 @@ pub const MAX_QUERY_COMPLEXITY: usize = 1000;
 /// this, so the committed `schema.graphql` snapshot describes the schema the
 /// server actually serves.
 fn schema_builder() -> SchemaBuilder<Query, Mutation, EmptySubscription> {
-    Schema::build(Query, Mutation, EmptySubscription)
+    Schema::build(Query, Mutation, EmptySubscription).extension(SanitizeErrors)
 }
 
 /// Print the schema as GraphQL SDL.

@@ -8,6 +8,7 @@ pub mod context;
 pub mod cross_section;
 pub mod dataloaders;
 pub mod datasets;
+pub mod errors;
 pub mod global_analysis;
 pub mod mutation;
 pub mod query;
