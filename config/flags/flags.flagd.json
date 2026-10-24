@@ -18,7 +18,7 @@
       "metadata": {
         "kind": "build",
         "owner": "ECO-123",
-        "remove_by": "train 2"
+        "remove_by": "train 3"
       }
     },
     "financial_components": {
@@ -28,7 +28,7 @@
       "metadata": {
         "kind": "build",
         "owner": "ECO-144",
-        "remove_by": "train 4"
+        "remove_by": "train 5"
       }
     },
     "global_analysis_tabs": {
@@ -38,7 +38,7 @@
       "metadata": {
         "kind": "build",
         "owner": "ECO-105",
-        "remove_by": "train 3"
+        "remove_by": "train 4"
       }
     },
     "technical_analysis": {

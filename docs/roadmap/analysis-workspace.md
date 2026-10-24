@@ -303,16 +303,16 @@ first thing a reader of a report asks about.
    `annotationsForSeries`. The panel's sharing tab is removed until phase 5. Train 1
    offers no hide toggle. The auth area replaces `is_visible` with a `visibility`
    enum in train 1, and phase 5 adds a separate hide flag.
-4. **Multi-series chart on the URL** (train 2). `/chart?s=...` with the rules in
+4. **Multi-series chart on the URL** (train 3). `/chart?s=...` with the rules in
    decision 2, "Add series" on the series page, recession shading from `USREC`. No
    account needed. Schema check (release item 18) covers the new operations.
-5. **Saved charts and sharing** (train 2). The `charts` table, whose `owner_id` column
+5. **Saved charts and sharing** (train 3). The `charts` table, whose `owner_id` column
    is the prerequisite for turning sharing back on, and the fixes to the two
    existing tables, `saveChart`, `chart`, `myCharts`, `sharedWithMe`, `shareChart` with
    invites, and the "My charts" page. Data point, range and chart anchors with
    threaded replies, mentions and resolved status, after settling whether they share
    one table with the SEC annotations. Chart CSV and PNG export.
-6. **Aligned data and formulas** (train 3, after federation phase 1). `chartData` with
+6. **Aligned data and formulas** (train 4, after federation phase 1). `chartData` with
    frequency conversion and formula series, the aligned chart CSV, and the correlation
    figure.
 7. **Later, on demand.** Live collaboration (presence and live updates through GraphQL
@@ -324,8 +324,8 @@ first thing a reader of a report asks about.
 | Train | Phases | Why there |
 |---|---|---|
 | 1 (`v4.0.0`) | 1, 2, 3 | Removing `/analysis` is already train 1 item 17. Phase 2 is a precondition of item 14: sign-in makes the collaboration API reachable, and today it trusts user ids from the request body |
-| 2 (`v0.3.0`) | 4, 5 | The release plan already lists saved charts in train 2. Both need Keycloak accounts (train 1) and nothing else |
-| 3 (`v0.4.0`) | 6 | Frequency conversion is a store-level read, so it lands on the `TimeSeriesStore` trait (federation phase 1), and it shares its correlation code with the global analysis comparison (also train 3) |
+| 3 (`v4.2.0`) | 4, 5 | The release plan already lists saved charts in train 3. Both need Keycloak accounts (train 1) and nothing else |
+| 4 (`v4.3.0`) | 6 | Frequency conversion is a store-level read, so it lands on the `TimeSeriesStore` trait (federation phase 1), and it shares its correlation code with the global analysis comparison (also train 4) |
 
 ## Where this challenged the release plan
 
@@ -335,7 +335,7 @@ The release plan has since taken the first two points in.
   user, and sharing granted itself. Phase 2 now lands first, as release item 3.
 - **Train 1 had nothing to share.** Sharing in today's schema is per chart id, and
   there is no chart table; the series page invents a string id the backend rejects.
-  Sharing moved to train 2 (release item 14).
+  Sharing moved to train 3 (release item 14).
 - **The original `/analysis` pitch was the wrong target.** "Bloomberg Terminal-level"
   technical analysis is for traders reading daily prices. The users this data serves
   compare macro series across frequencies, transform them and cite them. Correct
@@ -355,7 +355,7 @@ Joe asked on 2026-09-26 for release 1 to proceed autonomously on the recommended
 These were the open questions, and the option taken:
 
 1. **Sharing in train 1: no.** Train 1 ships private and public annotations only, and
-   sharing moves to train 2 with saved charts. The release plan's item 14 already says
+   sharing moves to train 3 with saved charts. The release plan's item 14 already says
    so. The other options were pulling a minimal `charts` table into train 1, or dropping
    annotations from train 1 too.
 2. **No separate analysis page** (decision 1, option B).
