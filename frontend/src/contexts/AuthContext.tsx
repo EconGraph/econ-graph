@@ -13,10 +13,16 @@ import React, {
   useLayoutEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { ErrorResponse, type User as OidcUser, type UserManager } from 'oidc-client-ts';
 
-import { setAccessTokenProvider } from '../auth/accessToken';
+import {
+  isAccountSuspended,
+  setAccessTokenProvider,
+  setAccountSuspended,
+  subscribeAccountSuspended,
+} from '../auth/accessToken';
 import { CALLBACK_PATH, getUserManager } from '../auth/oidcConfig';
 
 /** The signed-in user, taken from the ID token claims. */
@@ -38,6 +44,11 @@ export interface AuthState {
 interface AuthContextType extends AuthState {
   /** False when the build has no OIDC issuer configured; sign-in is then unavailable. */
   isConfigured: boolean;
+  /**
+   * True once the backend refused the signed-in user's token because the account is suspended.
+   * Public data is then read anonymously; signing out (or another user signing in) clears it.
+   */
+  isSuspended: boolean;
   /** Link to Keycloak's account console (`<issuer>/account`), when sign-in is configured. */
   accountUrl: string | null;
   /** Redirects to the identity provider, returning to `returnTo` (default: the current page). */
@@ -307,6 +318,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     };
     const onUserUnloaded = () => {
       writeSignedInHint(false);
+      setAccountSuspended(false);
       if (active) setUser(null);
     };
     const onTokenExpiring = () => {
@@ -438,9 +450,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     setAuthState(prev => ({ ...prev, error: null }));
   }, []);
 
+  const isSuspended = useSyncExternalStore(subscribeAccountSuspended, isAccountSuspended);
+
   const contextValue = useMemo<AuthContextType>(
     () => ({
       ...authState,
+      isSuspended,
       isConfigured: manager !== null,
       accountUrl: manager ? accountUrlFor(manager) : null,
       signIn,
@@ -449,7 +464,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
       completeSignOut,
       clearError,
     }),
-    [authState, manager, signIn, signOut, completeSignIn, completeSignOut, clearError]
+    [authState, isSuspended, manager, signIn, signOut, completeSignIn, completeSignOut, clearError]
   );
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;

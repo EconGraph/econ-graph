@@ -329,6 +329,7 @@ const mockUseAuth = vi.fn(() => ({
     name: 'Test User',
   },
   isAuthenticated: true,
+  isSuspended: false,
   isLoading: false,
   isConfigured: true,
   accountUrl: null,
