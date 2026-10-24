@@ -71,7 +71,11 @@ if ! kind get clusters | grep -q "econ-graph"; then
     exit 1
 fi
 
-# Set kubectl context
+# Use the kind cluster's own kubectl and kubeconfig (on this host `kubectl` is
+# the microk8s snap wrapper); see scripts/deploy/lib/kind-env.sh.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
 
 # Apply all manifests
@@ -79,6 +83,10 @@ echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
+# Static PVs on the host btrfs subvolumes for both Postgres databases. Runs
+# before create-secrets.sh: it refuses to continue if a host data directory
+# already holds a database whose password Secret is missing.
+./scripts/deploy/apply-host-storage.sh
 kubectl apply -f k8s/manifests/configmap.yaml
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
