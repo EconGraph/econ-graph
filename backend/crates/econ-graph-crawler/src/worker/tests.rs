@@ -3592,3 +3592,219 @@ async fn unchanged_fetch_marks_the_series_crawled_and_keeps_its_points() {
         .unwrap();
     assert_eq!(attempts, [true, true]);
 }
+
+/// The stored state of a series that a failed refresh must leave alone.
+async fn refresh_state(
+    pool: &DatabasePool,
+    series_id: Uuid,
+) -> (
+    Option<chrono::DateTime<Utc>>,
+    Option<NaiveDate>,
+    Vec<(NaiveDate, Option<BigDecimal>)>,
+) {
+    let mut conn = pool.get().await.unwrap();
+    let (crawled, end): (Option<chrono::DateTime<Utc>>, Option<NaiveDate>) = economic_series::table
+        .find(series_id)
+        .select((economic_series::last_crawled_at, economic_series::end_date))
+        .first(&mut conn)
+        .await
+        .unwrap();
+    let points = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .order((data_points::date.asc(), data_points::revision_date.asc()))
+        .select((data_points::date, data_points::value))
+        .load(&mut conn)
+        .await
+        .unwrap();
+    (crawled, end, points)
+}
+
+/// ECO-264: whatever a refresh of a series that already has data fails with (a 5xx, a refused
+/// key, a body that isn't JSON, a body missing its points), the stored points, end date and last
+/// successful crawl stay as they were, the attempt is recorded as that failure, the series is not
+/// reported `success`, and source coverage and freshness read exactly as before the attempt.
+#[tokio::test]
+async fn a_failed_refresh_keeps_the_stored_data_and_does_not_count_as_fresh() {
+    let Some(db) = db().await else { return };
+    let cases: [(&str, Reply, &str, &str); 4] = [
+        ("t5_fail_5xx", Reply::status(503), "transient", "retrying"),
+        ("t5_fail_auth", Reply::status(401), "auth", "failed"),
+        (
+            "t5_fail_html",
+            Reply::text("<html>maintenance</html>"),
+            "parse",
+            "failed",
+        ),
+        (
+            "t5_fail_partial",
+            Reply::json(serde_json::json!({"title": "Partial"})),
+            "parse",
+            "failed",
+        ),
+    ];
+    for (external_id, failure, kind, queue_status) in cases {
+        let mock = MockSource::start().await;
+        let path = format!("/series/{external_id}");
+        mock.mount(
+            &Route::get(&path),
+            series_json(
+                "Stored",
+                &[("2024-01-01", Some("1.5")), ("2024-02-01", Some("2.5"))],
+            ),
+        )
+        .await;
+        let w = worker(&db.pool, &mock);
+        enqueue(&db.pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
+        let Some(JobOutcome::Completed(stats)) = w.run_once().await else {
+            panic!("{external_id}: first fetch did not complete")
+        };
+        let series_id = stats.series_id.unwrap();
+        // A long-ago success, so the series is overdue and a falsely recorded success shows.
+        let mut conn = db.pool.get().await.unwrap();
+        diesel::update(economic_series::table.find(series_id))
+            .set(economic_series::last_crawled_at.eq(Utc::now() - chrono::Duration::days(90)))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        let before = refresh_state(&db.pool, series_id).await;
+        let coverage_before = crate::coverage::crawl_coverage(&db.pool, &[SRC])
+            .await
+            .unwrap();
+
+        mock.reset().await;
+        mock.mount(&Route::get(&path), failure).await;
+        let id = enqueue(&db.pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
+        let outcome = w.run_once().await.expect("claimed");
+        assert!(
+            !matches!(outcome, JobOutcome::Completed(_)),
+            "{external_id}: {outcome:?}"
+        );
+        assert_eq!(
+            item(&db.pool, id).await.status,
+            queue_status,
+            "{external_id}"
+        );
+
+        assert_eq!(
+            refresh_state(&db.pool, series_id).await,
+            before,
+            "{external_id}"
+        );
+        let (.., status) = series_row(&db.pool, external_id).await.unwrap();
+        assert_eq!(status.as_deref(), Some("failed"), "{external_id}");
+        assert_eq!(
+            attempts(&db.pool, series_id).await,
+            vec![(true, None, Some(2)), (false, Some(kind.into()), Some(0))],
+            "{external_id}"
+        );
+        assert_eq!(
+            crate::coverage::crawl_coverage(&db.pool, &[SRC])
+                .await
+                .unwrap(),
+            coverage_before,
+            "{external_id}"
+        );
+    }
+}
+
+/// ECO-264: an empty but well-formed response (no points this time) is a successful crawl that
+/// adds nothing; it never deletes the points already stored.
+#[tokio::test]
+async fn an_empty_refresh_keeps_the_stored_points() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/series/t5_empty_refresh"),
+        series_json(
+            "Stored",
+            &[("2024-01-01", Some("1")), ("2024-02-01", Some("2"))],
+        ),
+    )
+    .await;
+    let w = worker(&db.pool, &mock);
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_empty_refresh",
+        JobKind::FetchSeries,
+        5,
+    )
+    .await;
+    let Some(JobOutcome::Completed(stats)) = w.run_once().await else {
+        panic!("first fetch did not complete")
+    };
+    let series_id = stats.series_id.unwrap();
+    let (_, end, points) = refresh_state(&db.pool, series_id).await;
+
+    mock.reset().await;
+    mock.mount(
+        &Route::get("/series/t5_empty_refresh"),
+        series_json("Stored", &[]),
+    )
+    .await;
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_empty_refresh",
+        JobKind::FetchSeries,
+        5,
+    )
+    .await;
+    let Some(JobOutcome::Completed(stats)) = w.run_once().await else {
+        panic!("empty refresh did not complete")
+    };
+    assert_eq!((stats.points_written, stats.new_points), (0, 0));
+    let (_, end_after, points_after) = refresh_state(&db.pool, series_id).await;
+    assert_eq!((end_after, points_after), (end, points));
+}
+
+/// ECO-264: shutting the worker down while a job's upstream request is in flight lets that job
+/// finish and commit (no item is left `processing` under a dead lease), and claims nothing more.
+#[tokio::test]
+async fn shutdown_mid_request_finishes_the_job_and_claims_no_more() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/series/t5_shutdown_a"),
+        series_json("A", &[("2024-01-01", Some("1"))]).delay(Duration::from_millis(800)),
+    )
+    .await;
+    mock.mount(
+        &Route::get("/series/t5_shutdown_b"),
+        series_json("B", &[("2024-01-01", Some("1"))]),
+    )
+    .await;
+    let w = worker(&db.pool, &mock);
+    let first = enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_shutdown_a",
+        JobKind::FetchSeries,
+        9,
+    )
+    .await;
+    let second = enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_shutdown_b",
+        JobKind::FetchSeries,
+        1,
+    )
+    .await;
+
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        w.run(tokio::time::sleep(Duration::from_millis(200))),
+    )
+    .await
+    .expect("worker did not stop");
+
+    let a = item(&db.pool, first).await;
+    assert_eq!(a.status, "completed");
+    assert!(a.locked_by.is_none());
+    let (series_id, ..) = series_row(&db.pool, "t5_shutdown_a").await.unwrap();
+    assert_eq!(point_count(&db.pool, series_id).await, 1);
+    assert_eq!(item(&db.pool, second).await.status, "pending");
+    assert!(series_row(&db.pool, "t5_shutdown_b").await.is_none());
+}
