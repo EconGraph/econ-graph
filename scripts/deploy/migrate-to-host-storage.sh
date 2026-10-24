@@ -64,6 +64,8 @@ common_flags=()
 for tool in kind docker yq git mountpoint findmnt; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found"
 done
+log "Docker daemon"
+check_docker_daemon
 
 # recreate-kind-cluster.sh has its own --dry-run, so it runs (and checks the
 # kind config and host mounts) even in a dry run; common_flags passes it on.
@@ -90,7 +92,8 @@ recalled_backup() {
 }
 
 # True when the dir is absent or empty. Once Postgres has used it, it belongs
-# to host uid 100998 and can't be listed as you, which also means "not empty".
+# to host uid ${HOST_POSTGRES_UID} and can't be listed as you, which also means
+# "not empty".
 host_dir_empty() {
     local dir="$1"
     [ ! -e "$dir" ] && return 0
@@ -102,7 +105,10 @@ host_dir_empty() {
 # cluster's nodes and the host's Docker; a new cluster has none of them, and
 # rebuilding from this checkout would change what runs. So record exactly the
 # images running now, check the host holds the same ones by ID, and load those
-# into the new cluster.
+# into the new cluster (load-kind-images.sh). The images are looked up in
+# ECONGRAPH_IMAGE_DOCKER_HOST (default: the cluster's daemon); images built
+# before the move to rootful Docker are in the rootless daemon.
+IMAGE_DOCKER_HOST="${ECONGRAPH_IMAGE_DOCKER_HOST:-${DOCKER_HOST}}"
 LOCAL_IMAGES=()
 
 check_local_images() {
@@ -111,12 +117,12 @@ check_local_images() {
         grep -E '^econ-graph-' | sort -u)
     [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "found no locally built econ-graph-* images in namespace ${NAMESPACE}"
     for image in "${LOCAL_IMAGES[@]}"; do
-        host_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null)" ||
-            die "$image runs in the cluster but is not in the host's Docker; nothing was changed"
+        host_id="$(docker -H "${IMAGE_DOCKER_HOST}" image inspect --format '{{.Id}}' "$image" 2>/dev/null)" ||
+            die "$image runs in the cluster but is not in ${IMAGE_DOCKER_HOST}; nothing was changed"
         node_id="$(docker exec "${KIND_CLUSTER}-worker" crictl inspecti "docker.io/library/$image" 2>/dev/null |
             sed -n 's/.*"id": "\(sha256:[0-9a-f]*\)".*/\1/p' | head -1)"
         [ "$node_id" = "$host_id" ] ||
-            die "$image in the host's Docker (${host_id}) is not the one running in the cluster (${node_id:-not found}); nothing was changed"
+            die "$image in ${IMAGE_DOCKER_HOST} (${host_id}) is not the one running in the cluster (${node_id:-not found}); nothing was changed"
         echo "  image: $image ${host_id:7:12}"
     done
 }
@@ -134,9 +140,9 @@ load_local_images() {
     fi
     [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "${BACKUP_DIR}/local-images.txt missing; can't tell which images to load"
     log "Loading the images that ran before into the new cluster"
-    for image in "${LOCAL_IMAGES[@]}"; do
-        run kind load docker-image "$image" --name "${KIND_CLUSTER}"
-    done
+    "${PROJECT_ROOT}/scripts/deploy/load-kind-images.sh" --from-docker-host "${IMAGE_DOCKER_HOST}" \
+        "${common_flags[@]}" "${LOCAL_IMAGES[@]}" 2>&1 | sed 's/^/    /'
+    return "${PIPESTATUS[0]}"
 }
 
 db_has_data() {
@@ -163,38 +169,6 @@ stop_writers() {
     fi
 }
 
-# bootstrap SRC_ROOT: Secrets, storage and the two Postgres StatefulSets from
-# the manifests in SRC_ROOT, so the dumps are restored before any app
-# (backend migrations, Keycloak) starts against an empty database.
-bootstrap_databases() {
-    local src="$1"
-    log "Creating namespace, Secrets and databases from ${src}"
-    if [ "${DRY_RUN}" = "true" ]; then
-        echo "+ kubectl apply -f $src/k8s/manifests/namespace.yaml"
-        echo "+ create Secrets from ${BACKUP_DIR}/secrets/ that don't exist yet"
-        [ -f "$src/k8s/manifests/host-storage.yaml" ] && echo "+ scripts/deploy/apply-host-storage.sh"
-        echo "+ kubectl apply postgres-init, postgres-deployment, postgres; wait"
-        echo "+ kubectl apply keycloak/postgres; wait"
-        return 0
-    fi
-    kubectl apply -f "$src/k8s/manifests/namespace.yaml"
-    restore_secrets "${BACKUP_DIR}"
-    "${PROJECT_ROOT}/scripts/deploy/create-secrets.sh"
-    if [ -f "$src/k8s/manifests/host-storage.yaml" ]; then
-        "${PROJECT_ROOT}/scripts/deploy/apply-host-storage.sh"
-    fi
-    kubectl apply -f "$src/k8s/manifests/postgres-init.yaml"
-    kubectl apply -f "$src/k8s/manifests/postgres-deployment.yaml"
-    kubectl apply -f "$src/k8s/manifests/postgres.yaml"
-    k rollout status statefulset/postgresql --timeout=600s
-    wait_postgres_settled postgresql-0 postgresql
-    if [ -s "${BACKUP_DIR}/keycloak.dump" ]; then
-        kubectl apply -f "$src/k8s/manifests/keycloak/postgres.yaml"
-        k rollout status statefulset/keycloak-postgres --timeout=600s
-        wait_postgres_settled keycloak-postgres-0 postgres
-    fi
-}
-
 restore_and_deploy() {
     local src="$1"
     # Once restored, a resumed run must not restore again: deploy.sh may have
@@ -202,7 +176,7 @@ restore_and_deploy() {
     if [ -f "${STATE_FILE}" ] && grep -qx "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
         log "Databases already restored from ${BACKUP_DIR} by an earlier run"
     else
-        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" "${common_flags[@]}"
+        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" --no-bootstrap "${common_flags[@]}"
         if [ "${DRY_RUN}" != "true" ]; then
             echo "RESTORED=${BACKUP_DIR}" >>"${STATE_FILE}"
         fi
@@ -221,10 +195,10 @@ verify() {
         echo "+ compare row counts with ${BACKUP_DIR:-the backup}/counts.env; check PVs, pods, ownership"
         return 0
     fi
-    local SERIES_COUNT=0 DATA_POINTS_COUNT=0 series points ok=true
+    local series points ok=true
+    SERIES_COUNT=0 DATA_POINTS_COUNT=0
     if [ -n "${BACKUP_DIR:-}" ] && [ -f "${BACKUP_DIR}/counts.env" ]; then
-        # shellcheck source=/dev/null
-        source "${BACKUP_DIR}/counts.env"
+        read_counts "${BACKUP_DIR}"
     fi
     series="$(count_rows econ_graph 'select count(*) from economic_series')"
     points="$(count_rows econ_graph 'select count(*) from data_points')"
@@ -245,9 +219,9 @@ verify() {
                 ok=false
             }
         done
-        echo "  host ownership (expect 100998 = pod uid 999 under rootless Docker):"
+        echo "  host ownership (expect ${HOST_POSTGRES_UID} = pod uid 999 under rootful Docker):"
         stat -c '    %n %u:%g %A' "${HOST_PG_DIR}" "${HOST_KEYCLOAK_PG_DIR}"
-        [ "$(stat -c %u "${HOST_PG_DIR}")" = "100998" ] || ok=false
+        [ "$(stat -c %u "${HOST_PG_DIR}")" = "${HOST_POSTGRES_UID}" ] || ok=false
     fi
     k get pods -o wide | sed 's/^/  /'
     [ "$ok" = true ] || die "verification failed"
@@ -304,7 +278,7 @@ forward() {
 
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
     load_local_images
-    bootstrap_databases "${PROJECT_ROOT}"
+    bootstrap_databases "${PROJECT_ROOT}" "${BACKUP_DIR}"
     restore_and_deploy "${PROJECT_ROOT}"
     verify
     if [ "${DRY_RUN}" != "true" ]; then rm -f "${STATE_FILE}"; fi
@@ -359,7 +333,7 @@ rollback() {
     recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
     load_local_images
-    bootstrap_databases "$src"
+    bootstrap_databases "$src" "${BACKUP_DIR}"
     restore_and_deploy "$src"
     verify
     if [ "${DRY_RUN}" != "true" ]; then rm -f "${STATE_FILE}"; fi
