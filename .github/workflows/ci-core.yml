@@ -286,7 +286,7 @@ jobs:
         # Diesel reads as the same version.
         plant() {
           local set="$1" other="$2" form="${3:-}" latest version dup expected out
-          latest=$(ls -d "migrations/$set"/[0-9]*_*/ | sort | tail -1 | xargs basename)
+          latest=$(find "migrations/$set" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*_*' -printf '%f\n' | sort | tail -1)
           version="${latest%%_*}"
           [ "$form" = compact ] && version="${version//-/}"
           dup="migrations/$other/${version}_duplicate_migration_test"
@@ -1460,15 +1460,17 @@ jobs:
         echo "REACT_APP_BACKEND_PORT: $REACT_APP_BACKEND_PORT"
         echo "CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
         # Export variables for subsequent steps
-        echo "BACKEND_PORT=$BACKEND_PORT" >> $GITHUB_ENV
-        echo "FRONTEND_PORT=$FRONTEND_PORT" >> $GITHUB_ENV
-        echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
-        echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT" >> $GITHUB_ENV
-        echo "REACT_APP_API_URL=$REACT_APP_API_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL" >> $GITHUB_ENV
-        echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT" >> $GITHUB_ENV
-        echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
+        {
+          echo "BACKEND_PORT=$BACKEND_PORT"
+          echo "FRONTEND_PORT=$FRONTEND_PORT"
+          echo "BACKEND_URL=$BACKEND_URL"
+          echo "FRONTEND_URL=$FRONTEND_URL"
+          echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT"
+          echo "REACT_APP_API_URL=$REACT_APP_API_URL"
+          echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL"
+          echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT"
+          echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS"
+        } >> "$GITHUB_ENV"
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.98.1
@@ -1725,11 +1727,11 @@ jobs:
         for container in $(docker ps --format "{{.Names}}"); do
           echo "📋 Searching in container: $container"
           echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          docker exec "$container" find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
           echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          docker exec "$container" find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
           echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+          docker exec "$container" find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
         done
 
         # Copy artifacts to the root for upload
@@ -1934,11 +1936,11 @@ jobs:
         for container in $(docker ps --format "{{.Names}}"); do
           echo "📋 Searching in container: $container"
           echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          docker exec "$container" find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
           echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          docker exec "$container" find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
           echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+          docker exec "$container" find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
         done
 
         # Copy artifacts to the root for upload
@@ -2044,7 +2046,7 @@ jobs:
           -e JWT_SECRET=ci-only-jwt-secret \
           econ-graph-backend:test
         backend_ok=""
-        for i in $(seq 1 30); do
+        for _ in $(seq 1 30); do
           if ! docker ps --format '{{.Names}}' | grep -q '^backend-smoke-test$'; then
             echo "Backend container exited unexpectedly" >&2
             break
@@ -2067,7 +2069,7 @@ jobs:
         echo "Testing frontend Docker image..."
         docker run -d --name frontend-smoke-test -p 18080:3000 econ-graph-frontend:test
         frontend_ok=""
-        for i in $(seq 1 15); do
+        for _ in $(seq 1 15); do
           if ! docker ps --format '{{.Names}}' | grep -q '^frontend-smoke-test$'; then
             echo "Frontend container exited unexpectedly" >&2
             break

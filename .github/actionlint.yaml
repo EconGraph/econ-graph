@@ -1,0 +1,9 @@
+# actionlint configuration, read by the Actionlint workflow
+# (.github/workflows/actionlint.yml).
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # `queue` is a documented concurrency key (`single` or `max`):
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency
+      # actionlint 1.7.12 does not know it yet (rhysd/actionlint#657).
+      - 'unexpected key "queue" for "concurrency" section'
