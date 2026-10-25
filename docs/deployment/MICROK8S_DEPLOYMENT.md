@@ -128,12 +128,11 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 
 # Apply Let's Encrypt issuer
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
-
-# The gateway, with listener https for the public host name, and the routes
-# (see the "Gateway" section of k8s/README.md)
-GATEWAY_HTTPS_HOSTNAME=econgraph.com ./scripts/deploy/install-gateway.sh
-./scripts/deploy/apply-gateway-routes.sh
 ```
+
+The public site is served through the Cloudflare Tunnel: TLS for visitors ends at Cloudflare,
+and the tunnel reaches the gateway's https listener. `PUBLIC_HOST=econgraph.com
+./scripts/deploy/deploy.sh` sets it up; see "Public site" in `k8s/README.md`.
 
 ## Service URLs
 
@@ -282,9 +281,10 @@ kubectl get certificate -n econ-graph
 # Check cert-manager logs
 kubectl logs -f deployment/cert-manager -n cert-manager
 
-# Check the https listener and its certificate
+# Check the https listener, its certificate and the public routes
 kubectl -n econ-graph-gateway describe gateway econ-graph-gateway
 kubectl -n econ-graph-gateway get certificate econ-graph-tls
+kubectl -n econ-graph get httproute -l econgraph.io/public-host=true
 ```
 
 #### Memory Issues

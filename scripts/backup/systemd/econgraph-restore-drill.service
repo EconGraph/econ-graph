@@ -1,0 +1,12 @@
+[Unit]
+Description=econ-graph restore drill: restore the newest dump into a throwaway Postgres
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+
+[Service]
+Type=oneshot
+# The kind cluster runs on the rootful daemon at /var/run/docker.sock, which
+# The operator reaches through the docker group. lib.sh sets DOCKER_HOST to it
+# (override with ECONGRAPH_DOCKER_HOST in ~/.config/econgraph/backup.env).
+# No After=docker.service: a user unit can't order itself after a system one.
+ExecStart=%h/.local/lib/econgraph-backup/restore-drill.sh
+Nice=10

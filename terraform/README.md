@@ -206,7 +206,7 @@ The deployment automatically provisions SSL certificates using Let's Encrypt:
 
 1. **cert-manager** installs and configures certificate management
 2. **ClusterIssuer** handles Let's Encrypt ACME challenges
-3. **The gateway's https listener** requests its certificate (`GATEWAY_HTTPS_HOSTNAME`, `scripts/deploy/install-gateway.sh`)
+3. **The gateway's https listener** gets its certificate for the public host (`PUBLIC_HOST`, `scripts/deploy/apply-gateway-routes.sh`)
 4. **Automatic renewal** prevents certificate expiration
 
 To use custom certificates, disable cert-manager:

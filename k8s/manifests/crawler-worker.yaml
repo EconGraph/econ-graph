@@ -94,13 +94,13 @@ spec:
           name: metrics
           protocol: TCP
         env:
-        # Same source as the backend (Secret econ-graph-secrets, created by
-        # scripts/deploy/create-secrets.sh).
-        - name: DATABASE_URL
+        # The data database, from Secret econ-graph-secrets (created by
+        # scripts/deploy/create-secrets.sh). The worker reads no other database URL.
+        - name: DATA_DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
-              key: database-url
+              key: data-database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:

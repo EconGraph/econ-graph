@@ -3,8 +3,8 @@
 #
 # Listener http (port 80, any host name) accepts HTTPRoutes from namespaces
 # labelled econgraph.io/gateway-access: "true" (k8s/manifests/namespace.yaml).
-# Listener https is added by scripts/deploy/install-gateway.sh from
-# gateway-https.yaml when GATEWAY_HTTPS_HOSTNAME is set.
+# Listener https is added for a public host by
+# scripts/deploy/apply-gateway-routes.sh from gateway-https.yaml.
 apiVersion: v1
 kind: Namespace
 metadata:

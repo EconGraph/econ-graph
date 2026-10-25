@@ -26,7 +26,8 @@ import {
   Lock as LockIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
-import { useAnnotationMutations } from '../../hooks/useAnnotationEditing';
+import { type NewSeriesAnnotation, useAnnotationMutations } from '../../hooks/useAnnotationEditing';
+import { newIdempotencyKey } from '../../utils/idempotencyKey';
 import type { SeriesAnnotation } from '../../hooks/useSeriesAnnotations';
 import type { SeriesChartPoint } from '../charts/SeriesChart';
 import AnnotationComments from './AnnotationComments';
@@ -94,6 +95,12 @@ export function useSeriesAnnotationEditor({
   const [deleting, setDeleting] = React.useState<SeriesAnnotation | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [openThreads, setOpenThreads] = React.useState<ReadonlySet<string>>(new Set());
+  // The last create sent and not yet confirmed stored, with its idempotency key. Kept across
+  // closing and reopening the form, so re-entering the same annotation still reuses the key.
+  const unconfirmedCreate = React.useRef<{
+    input: Omit<NewSeriesAnnotation, 'idempotencyKey'>;
+    idempotencyKey: string;
+  } | null>(null);
 
   const { reset: resetCreate } = create;
   const openCreate = React.useCallback(
@@ -144,15 +151,26 @@ export function useSeriesAnnotationEditor({
   const submitForm = (values: AnnotationFormValues) => {
     if (!form) return;
     if (form.mode === 'create') {
+      const input = {
+        annotationDate: values.date,
+        title: values.title,
+        content: values.description,
+        isPublic: values.isPublic,
+      };
+      // A save that failed may still have been stored (a timeout, a lost response). Saving
+      // the same values again reuses its key, so the backend returns that annotation rather
+      // than storing a second; anything else is a new annotation with a new key (ECO-439).
+      const last = unconfirmedCreate.current;
+      const sameAsLast =
+        last !== null &&
+        (Object.keys(input) as (keyof typeof input)[]).every(k => last.input[k] === input[k]);
+      const idempotencyKey = sameAsLast ? last.idempotencyKey : newIdempotencyKey();
+      unconfirmedCreate.current = { input, idempotencyKey };
       create.mutate(
-        {
-          annotationDate: values.date,
-          title: values.title,
-          content: values.description,
-          isPublic: values.isPublic,
-        },
+        { ...input, idempotencyKey },
         {
           onSuccess: created => {
+            unconfirmedCreate.current = null;
             setFormOpen(false);
             if (created) onCreated?.(created.id);
           },

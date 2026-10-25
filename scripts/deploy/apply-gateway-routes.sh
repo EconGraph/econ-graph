@@ -1,27 +1,40 @@
 #!/bin/bash
 #
 # Apply namespace econ-graph's routes and rate limits on the gateway
-# (k8s/manifests/gateway/routes/). The routes match host name localhost; when
-# the Gateway has an https listener (scripts/deploy/install-gateway.sh,
-# GATEWAY_HTTPS_HOSTNAME), its host name is added to every route, so the
-# routes attach to that listener too. Every script that applies the routes
-# uses this one, after install-gateway.sh.
+# (k8s/manifests/gateway/routes/), and the public host's part of the gateway.
+# Every script that applies the routes uses this one, after install-gateway.sh
+# and, for a public host, after cert-manager is installed.
+#
+# With a public host (PUBLIC_HOST, see scripts/deploy/lib/public-host.sh):
+#   - listener https on the Gateway, its certificate (Secret econ-graph-tls,
+#     from ClusterIssuer GATEWAY_TLS_ISSUER) and its rate-limit bursts
+#     (k8s/manifests/gateway/gateway-https.yaml);
+#   - the public copies of the routes, the http-to-https and www redirects,
+#     and the rate limits on them (scripts/deploy/render-public-host.py).
+# Without one, all of that is removed. The localhost routes are applied either
+# way.
 #
 # Usage: scripts/deploy/apply-gateway-routes.sh [--dry-run] [--context NAME]
 #
-#   --dry-run       Print the routes' host names and what would be applied.
+#   --dry-run       Print what would be applied or removed; change nothing.
 #   --context NAME  kubectl context to use (default: the current context).
 #
 # Environment:
-#   GATEWAY_HTTPS_HOSTNAME  Unset or empty (the default): the host name of the
-#                           Gateway's https listener, if it has one. `none`: no
-#                           host name besides localhost. A host name: that one
-#                           (for a dry run before the listener exists).
+#   PUBLIC_HOST         A host name: serve it. `none` or empty: no public host;
+#                       one served before is removed. Unset: keep what the
+#                       cluster serves now (its public routes).
+#   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate
+#                       (default: the certificate's current one, else
+#                       econ-graph-selfsigned, k8s/manifests/gateway/selfsigned-issuer.yaml,
+#                       which the tunnel connector accepts unverified).
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ROUTES_DIR="${PROJECT_ROOT}/k8s/manifests/gateway/routes"
+GATEWAY_DIR="${PROJECT_ROOT}/k8s/manifests/gateway"
+ROUTES_DIR="${GATEWAY_DIR}/routes"
+HTTPS_FIELD_MANAGER="econ-graph-gateway-https"
+PUBLIC_LABEL="econgraph.io/public-host"
 
 DRY_RUN=false
 KUBE_CONTEXT=""
@@ -57,31 +70,81 @@ kc() {
         kubectl "$@"
     fi
 }
+# Run a changing kubectl command, or only print it under --dry-run.
+run_kc() {
+    echo "+ kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}} $*"
+    if [ "$DRY_RUN" != true ]; then
+        kc "$@"
+    fi
+}
 
-host="${GATEWAY_HTTPS_HOSTNAME:-}"
-if [ -z "$host" ]; then
-    host="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
-        -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null || true)"
+# What the cluster serves now; fails when it cannot be asked. Without the
+# Gateway API CRDs (a dry run before install-gateway.sh) there are no routes.
+current_host=""
+if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+    current_host="$(kc -n econ-graph get httproute -l "${PUBLIC_LABEL}=true" \
+        -o jsonpath='{range .items[*]}{.spec.hostnames[0]}{"\n"}{end}' 2>/dev/null |
+        sed -n '/./{s/^www\.//;p;q;}')" || die "could not read the public routes"
 fi
-[ "$host" = none ] && host=""
+if [ -z "${PUBLIC_HOST+x}" ]; then
+    host="$current_host"
+else
+    host="${PUBLIC_HOST}"
+    [ "$host" = none ] && host=""
+fi
+current_issuer="$(kc -n econ-graph-gateway get certificate econ-graph-tls \
+    -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
+issuer="${GATEWAY_TLS_ISSUER:-${current_issuer:-econ-graph-selfsigned}}"
 if [ -n "$host" ]; then
-    [[ "$host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
-        die "'${host}' is not a DNS host name"
+    # Validates the name, as the deploy scripts do.
+    "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$host" /dev/null >/dev/null ||
+        die "PUBLIC_HOST='${host}' is not a public DNS name"
+    [[ "$issuer" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
+        die "GATEWAY_TLS_ISSUER='${issuer}' is not a resource name"
 fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-# Each route's hostnames list is "  - localhost"; add the https host after it.
-awk -v host="$host" '{ print } host != "" && $0 == "  - localhost" { print "  - " host }' \
-    "$ROUTES_DIR/httproutes.yaml" >"$WORK/httproutes.yaml"
-[ "$(grep -c '^  - localhost$' "$WORK/httproutes.yaml")" -gt 0 ] ||
-    die "no 'localhost' host names in httproutes.yaml; its layout changed"
 
-echo "==> Routes in econ-graph for localhost${host:+ and ${host}}"
-if [ "$DRY_RUN" = true ]; then
-    echo "+ kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}} apply -f <httproutes.yaml with those host names>"
-    echo "+ kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}} apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml"
-    exit 0
+if [ -n "$host" ]; then
+    echo "==> Public host ${host}: listener https, certificate (ClusterIssuer ${issuer}), public routes"
+    kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
+        die "cert-manager is not installed; the https listener's certificate needs it"
+    if [ "$issuer" = econ-graph-selfsigned ]; then
+        run_kc apply -f "$GATEWAY_DIR/selfsigned-issuer.yaml"
+    fi
+    sed -e "s/__PUBLIC_HOST__/${host}/g" -e "s/__TLS_ISSUER__/${issuer}/g" \
+        "$GATEWAY_DIR/gateway-https.yaml" >"$WORK/gateway-https.yaml"
+    grep -q '__[A-Z_]*__' "$WORK/gateway-https.yaml" && die "unreplaced placeholder in gateway-https.yaml"
+    # Server-side apply under its own field manager: adds listener https to the
+    # Gateway without owning the rest (install-gateway.sh owns listener http).
+    run_kc apply --server-side --force-conflicts --field-manager="$HTTPS_FIELD_MANAGER" -f "$WORK/gateway-https.yaml"
+    "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$host" \
+        "$ROUTES_DIR/httproutes.yaml" "$ROUTES_DIR/ratelimit-policies.yaml" >"$WORK/routes.yaml"
+    run_kc apply -f "$WORK/routes.yaml"
+    # Public routes for another host name, from an earlier deploy, go.
+    if [ -n "$current_host" ] && [ "$current_host" != "$host" ]; then
+        echo "  (the public host was ${current_host}; its routes are replaced)"
+    fi
+else
+    echo "==> No public host: localhost routes only"
+    run_kc apply -f "$ROUTES_DIR/"
+    run_kc -n econ-graph delete httproute -l "${PUBLIC_LABEL}=true" --ignore-not-found
+    if kc -n econ-graph-gateway get gateway econ-graph-gateway \
+        -o jsonpath='{.spec.listeners[*].name}' 2>/dev/null | grep -qw https; then
+        # The manager's empty part removes the listener it applied.
+        cat >"$WORK/gateway-https-none.yaml" <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: econ-graph-gateway
+  namespace: econ-graph-gateway
+EOF
+        run_kc apply --server-side --force-conflicts --field-manager="$HTTPS_FIELD_MANAGER" -f "$WORK/gateway-https-none.yaml"
+    fi
+    run_kc -n econ-graph-gateway delete envoypatchpolicy econ-graph-ratelimit-burst-https --ignore-not-found
+    if kc get crd certificates.cert-manager.io >/dev/null 2>&1; then
+        run_kc -n econ-graph-gateway delete certificate econ-graph-tls --ignore-not-found
+    fi
+    run_kc -n econ-graph-gateway delete secret econ-graph-tls --ignore-not-found
 fi
-kc apply -f "$WORK/httproutes.yaml"
-kc apply -f "$ROUTES_DIR/ratelimit-policies.yaml"

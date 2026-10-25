@@ -7,8 +7,11 @@
 #
 # Usage: scripts/deploy/test-gateway-routes.sh [--rate-limit] [BASE_URL]
 #
-#   BASE_URL      Where the gateway answers (default http://localhost, the kind
-#                 host ports). For the proxy Service before it holds the host
+#   BASE_URL      Where the gateway answers, http or https (the certificate is
+#                 not verified, as the tunnel connector does not verify it;
+#                 default http://localhost, the kind host ports). For a public
+#                 host, pass https://localhost with ROUTE_HOST set to it.
+#                 For the proxy Service before it holds the host
 #                 ports, port-forward it first, e.g.
 #                   kubectl -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy 18080:80
 #                 and pass http://127.0.0.1:18080.
@@ -17,7 +20,8 @@
 #                 429s. This uses up this client's tokens for a few seconds.
 #
 # Environment:
-#   ROUTE_HOST       Host header sent (default localhost: the routes' host name).
+#   ROUTE_HOST       Host header sent (default localhost: the routes' host name;
+#                    the public host for its routes on the https listener).
 #   EXPECTED_ISSUER  Keycloak issuer expected in the discovery document
 #                    (default http://localhost/idp/realms/econ-graph).
 #   SKIP_KEYCLOAK    true: skip the /idp checks (Keycloak not deployed).
@@ -70,7 +74,7 @@ req() {
     : >"$WORK/$name.body"
     : >"$WORK/$name.headers"
     # On a connection failure curl still prints 000 as the code.
-    curl -sS -o "$WORK/$name.body" -D "$WORK/$name.headers" -w '%{http_code}' \
+    curl -sSk -o "$WORK/$name.body" -D "$WORK/$name.headers" -w '%{http_code}' \
         --max-time 20 -X "$method" -H "Host: ${ROUTE_HOST}" "$@" "${BASE_URL}${path}" 2>"$WORK/$name.err" || true
 }
 header() { grep -i "^$2:" "$WORK/$1.headers" | tail -1 | cut -d: -f2- | sed 's/^ *//; s/\r$//'; }
@@ -167,7 +171,7 @@ fi
 burst() {
     local path="$1" n="$2" args=()
     for _ in $(seq 1 "$n"); do
-        args+=(--next -s -o /dev/null -w '%{http_code}\n' -X POST -H "Host: ${ROUTE_HOST}" "${GQL[@]}" "${BASE_URL}${path}")
+        args+=(--next -sk -o /dev/null -w '%{http_code}\n' -X POST -H "Host: ${ROUTE_HOST}" "${GQL[@]}" "${BASE_URL}${path}")
     done
     curl --parallel --parallel-immediate --parallel-max 50 "${args[@]:1}" 2>/dev/null | sort | uniq -c | tr '\n' ' '
 }

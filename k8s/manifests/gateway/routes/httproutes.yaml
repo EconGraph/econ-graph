@@ -1,6 +1,9 @@
 # The app's routes on Gateway econ-graph-gateway (k8s/manifests/gateway/),
-# applied by scripts/deploy/deploy.sh. Production is namespace econ-graph,
-# host localhost on listener http. The namespace must carry the label
+# applied by scripts/deploy/apply-gateway-routes.sh. Production is namespace
+# econ-graph, host localhost on listener http. For a public host
+# (PUBLIC_HOST), scripts/deploy/render-public-host.py adds a copy of each,
+# named <name>-public, for that host on listener https. The namespace must
+# carry the label
 # econgraph.io/gateway-access: "true" (namespace.yaml), or the Gateway
 # refuses these routes.
 #
@@ -23,8 +26,10 @@
 # X-Content-Type-Options, X-Frame-Options and Strict-Transport-Security on
 # their responses, like the frontend route.
 #
-# scripts/deploy/apply-gateway-routes.sh applies this file, adding the https
-# listener's host name after each "- localhost".
+# Every rule sets X-Forwarded-For to the client address the gateway settled
+# on (the %DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% of Envoy; see
+# ../client-traffic-policy.yaml), so the services never see an entry a
+# client wrote.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -34,6 +39,7 @@ spec:
   parentRefs:
   - name: econ-graph-gateway
     namespace: econ-graph-gateway
+    sectionName: http
   hostnames:
   - localhost
   rules:
@@ -52,6 +58,11 @@ spec:
         type: Exact
         value: /auth/callback
     filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
     - type: ResponseHeaderModifier
       responseHeaderModifier:
         set:
@@ -79,6 +90,11 @@ spec:
         type: Exact
         value: /silent-callback.html
     filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
     - type: ResponseHeaderModifier
       responseHeaderModifier:
         set:
@@ -109,6 +125,7 @@ spec:
   parentRefs:
   - name: econ-graph-gateway
     namespace: econ-graph-gateway
+    sectionName: http
   hostnames:
   - localhost
   rules:
@@ -123,6 +140,11 @@ spec:
         type: PathPrefix
         value: /health
     filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
     - type: ResponseHeaderModifier
       responseHeaderModifier:
         set:
@@ -147,6 +169,7 @@ spec:
   parentRefs:
   - name: econ-graph-gateway
     namespace: econ-graph-gateway
+    sectionName: http
   hostnames:
   - localhost
   rules:
@@ -155,6 +178,11 @@ spec:
         type: PathPrefix
         value: /graphql
     filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
     - type: ResponseHeaderModifier
       responseHeaderModifier:
         set:
@@ -183,6 +211,7 @@ spec:
   parentRefs:
   - name: econ-graph-gateway
     namespace: econ-graph-gateway
+    sectionName: http
   hostnames:
   - localhost
   rules:
@@ -198,6 +227,9 @@ spec:
           replacePrefixMatch: /graphql
     - type: RequestHeaderModifier
       requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
         remove:
         - Authorization
         - Cookie
@@ -227,6 +259,7 @@ spec:
   parentRefs:
   - name: econ-graph-gateway
     namespace: econ-graph-gateway
+    sectionName: http
   hostnames:
   - localhost
   rules:
@@ -237,6 +270,12 @@ spec:
     - path:
         type: PathPrefix
         value: /idp/resources
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
     backendRefs:
     - name: keycloak-service
       port: 8080

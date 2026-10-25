@@ -20,16 +20,6 @@
 #                        --manifests-dir); touch no cluster.
 #
 # Environment:
-#   GATEWAY_HTTPS_HOSTNAME  A host name: listener `https` (port 443) for it,
-#                           with a cert-manager certificate in Secret
-#                           econ-graph-tls (k8s/manifests/gateway/gateway-https.yaml).
-#                           `none`: no https listener; one configured earlier
-#                           is removed. Unset or empty (the default): keep
-#                           whatever the Gateway has, host name and issuer
-#                           included.
-#   GATEWAY_TLS_ISSUER      ClusterIssuer for that certificate (default: the
-#                           Gateway's current one, else letsencrypt-staging,
-#                           k8s/manifests/letsencrypt-issuer.yaml).
 #   GATEWAY_HOST_PORTS      true: the proxy takes host ports 80/443. false: it
 #                           doesn't, and is reachable only through its Service
 #                           (cutover-to-gateway.sh uses this while ingress-nginx
@@ -38,8 +28,9 @@
 #                           ingress-nginx until cutover-to-gateway.sh removes it,
 #                           or MicroK8s's ingress add-on).
 #
-# The routes are applied separately, by scripts/deploy/apply-gateway-routes.sh,
-# which adds the https listener's host name to them.
+# The routes, and for a public host the https listener, its certificate and
+# the public routes, are applied separately, by
+# scripts/deploy/apply-gateway-routes.sh.
 #
 # Idempotent: everything is applied with server-side apply, so a re-run with
 # the same versions changes nothing. Versions are exact and the downloads are
@@ -61,7 +52,6 @@ EG_INSTALL_URL="https://github.com/envoyproxy/gateway/releases/download/${ENVOY_
 EG_INSTALL_SHA256="0639894d98328025b9626e5169fc11a19d107ed99bc1dd7054983978110369c9"
 
 FIELD_MANAGER="econ-graph-install-gateway"
-HTTPS_FIELD_MANAGER="econ-graph-gateway-https"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATEWAY_DIR="${PROJECT_ROOT}/k8s/manifests/gateway"
@@ -97,8 +87,6 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-GATEWAY_HTTPS_HOSTNAME="${GATEWAY_HTTPS_HOSTNAME:-}"
-GATEWAY_TLS_ISSUER="${GATEWAY_TLS_ISSUER:-}"
 if [ "$FETCH_ONLY" = true ] && [ -z "$MANIFESTS_DIR" ]; then
     echo "error: --fetch-only needs --manifests-dir" >&2
     exit 2
@@ -145,16 +133,6 @@ ssa() {
     fi
     kc apply --server-side --force-conflicts --field-manager="$manager" "$@" -f "$file"
 }
-
-if [ -n "$GATEWAY_HTTPS_HOSTNAME" ] && [ "$GATEWAY_HTTPS_HOSTNAME" != none ]; then
-    # One DNS name, lower case, at least one dot; no wildcards.
-    [[ "$GATEWAY_HTTPS_HOSTNAME" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
-        die "GATEWAY_HTTPS_HOSTNAME='${GATEWAY_HTTPS_HOSTNAME}' is not a DNS host name (or 'none')"
-fi
-if [ -n "$GATEWAY_TLS_ISSUER" ]; then
-    [[ "$GATEWAY_TLS_ISSUER" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
-        die "GATEWAY_TLS_ISSUER='${GATEWAY_TLS_ISSUER}' is not a resource name"
-fi
 
 command -v kubectl >/dev/null || die "kubectl not found on PATH"
 command -v curl >/dev/null || die "curl not found on PATH"
@@ -251,16 +229,6 @@ elif [ "$GATEWAY_HOST_PORTS" = true ] && [ -n "$port_holders" ]; then
     fi
 fi
 
-# The https listener: keep what the Gateway has unless told otherwise.
-current_https_host="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
-    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null || true)"
-current_issuer="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
-    -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}' 2>/dev/null || true)"
-if [ -z "$GATEWAY_HTTPS_HOSTNAME" ]; then
-    GATEWAY_HTTPS_HOSTNAME="${current_https_host:-none}"
-fi
-GATEWAY_TLS_ISSUER="${GATEWAY_TLS_ISSUER:-${current_issuer:-letsencrypt-staging}}"
-
 fetch_all
 
 # install.yaml bundles the Gateway API CRDs from the experimental channel, plus
@@ -356,41 +324,16 @@ else
 fi
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gatewayclass.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gateway.yaml"
-ssa "$FIELD_MANAGER" "$GATEWAY_DIR/client-traffic-policy.yaml"
+# The client-address policy, trusting X-Forwarded-For from the nodes' pod
+# CIDRs only.
+pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDR}' 2>/dev/null || true)"
+[ -n "$pod_cidrs" ] || die "could not read the nodes' pod CIDRs (spec.podCIDR) for client-traffic-policy.yaml"
+awk -v cidrs="$pod_cidrs" '
+    $0 == "      - __POD_CIDRS__" { n = split(cidrs, c, " "); for (i = 1; i <= n; i++) print "      - " c[i]; next }
+    { print }' "$GATEWAY_DIR/client-traffic-policy.yaml" >"$WORK/client-traffic-policy.yaml"
+grep -q '^ *- __POD_CIDRS__' "$WORK/client-traffic-policy.yaml" && die "unreplaced placeholder in client-traffic-policy.yaml"
+ssa "$FIELD_MANAGER" "$WORK/client-traffic-policy.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/ratelimit-burst.yaml"
-
-# The https listener is a second field manager's part of the same Gateway:
-# server-side apply merges listeners by name, so gateway.yaml never removes
-# it, and applying the manager's empty part removes it again.
-if [ "$GATEWAY_HTTPS_HOSTNAME" != none ]; then
-    log "Listener https for ${GATEWAY_HTTPS_HOSTNAME} (certificate from ClusterIssuer ${GATEWAY_TLS_ISSUER})"
-    sed -e "s/__GATEWAY_HTTPS_HOSTNAME__/${GATEWAY_HTTPS_HOSTNAME}/g" \
-        -e "s/__GATEWAY_TLS_ISSUER__/${GATEWAY_TLS_ISSUER}/g" \
-        "$GATEWAY_DIR/gateway-https.yaml" >"$WORK/gateway-https.yaml"
-    if grep -q '__GATEWAY_' "$WORK/gateway-https.yaml"; then
-        die "unreplaced placeholder in gateway-https.yaml"
-    fi
-    ssa "$HTTPS_FIELD_MANAGER" "$WORK/gateway-https.yaml"
-else
-    if [ -n "$current_https_host" ]; then
-        log "GATEWAY_HTTPS_HOSTNAME=none: removing listener https (${current_https_host})"
-    else
-        log "No listener https"
-    fi
-    cat >"$WORK/gateway-https-none.yaml" <<'EOF'
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: econ-graph-gateway
-  namespace: econ-graph-gateway
-EOF
-    ssa "$HTTPS_FIELD_MANAGER" "$WORK/gateway-https-none.yaml"
-    if [ "$DRY_RUN" = true ]; then
-        echo "+ kubectl${KUBE_CONTEXT:+ --context ${KUBE_CONTEXT}} -n econ-graph-gateway delete envoypatchpolicy econ-graph-ratelimit-burst-https --ignore-not-found"
-    else
-        kc -n econ-graph-gateway delete envoypatchpolicy econ-graph-ratelimit-burst-https --ignore-not-found
-    fi
-fi
 
 if [ "$DRY_RUN" != true ]; then
     kc -n econ-graph-gateway wait --for=condition=Programmed --timeout=300s gateway/econ-graph-gateway

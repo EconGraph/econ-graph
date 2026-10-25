@@ -21,13 +21,13 @@
 //! gets a 404), when it returns no observations, or when a listed fixture was never requested, so
 //! a stale fixture or a changed adapter shows up here instead of as an empty page.
 //!
-//! Runs the database migrations first, so it works on an empty database, then syncs every
-//! adapter's dataset declarations ([`DatasetCatalog::load`] and [`persist::sync_datasets`]) before
-//! persisting any series, the same order the crawler worker starts up in. Re-running it is safe:
-//! persistence upserts.
+//! Runs the data migrations first (never the app set), so it works on an empty data database,
+//! then syncs every adapter's dataset declarations ([`DatasetCatalog::load`] and
+//! [`persist::sync_datasets`]) before persisting any series, the same order the crawler worker
+//! starts up in. Re-running it is safe: persistence upserts.
 //!
 //! ```bash
-//! DATABASE_URL=postgres://... cargo run -p econ-graph-crawler --features testkit --bin seed-fixtures
+//! DATA_DATABASE_URL=postgres://... cargo run -p econ-graph-crawler --features testkit --bin seed-fixtures
 //! ```
 
 use std::collections::BTreeMap;
@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
+use econ_graph_core::{DataPool, MigrationSet};
 use econ_graph_crawler::persist;
 use econ_graph_crawler::reference_file::CodeList;
 use econ_graph_crawler::source::SourceId;
@@ -43,13 +44,13 @@ use econ_graph_crawler::testkit::{test_ctx, MockSource, Reply, Route};
 use econ_graph_crawler::DatasetCatalog;
 use serde::Deserialize;
 
-/// Loads recorded fixtures into `DATABASE_URL` through the source adapters.
+/// Loads recorded fixtures into `DATA_DATABASE_URL` through the source adapters.
 #[derive(Debug, Parser)]
 #[command(name = "seed-fixtures")]
 struct Args {
-    /// Postgres connection string.
-    #[arg(long, env = "DATABASE_URL")]
-    database_url: String,
+    /// The data database's Postgres connection string. `DATABASE_URL` is not read.
+    #[arg(long, env = "DATA_DATABASE_URL", hide_env_values = true)]
+    database_url: Option<String>,
 
     /// Seed manifest. Fixture paths in it are relative to the manifest's directory.
     #[arg(long, default_value_os_t = default_manifest())]
@@ -143,12 +144,20 @@ async fn run(args: Args) -> anyhow::Result<()> {
         .parent()
         .ok_or_else(|| anyhow!("manifest path has no directory"))?;
 
-    econ_graph_core::run_migrations(&args.database_url)
+    // A blank value (an empty `DATA_DATABASE_URL`) counts as unset, as in `data_database_url`.
+    let database_url = match args.database_url.filter(|u| !u.trim().is_empty()) {
+        Some(url) => url,
+        None => econ_graph_core::config::data_database_url()
+            .map_err(|e| anyhow!("{e} (or pass --database-url)"))?,
+    };
+    econ_graph_core::run_migration_set(&database_url, MigrationSet::Data)
         .await
-        .context("running migrations")?;
-    let pool = econ_graph_core::create_pool(&args.database_url)
-        .await
-        .context("connecting to the database")?;
+        .context("running the data migrations")?;
+    let pool = DataPool(
+        econ_graph_core::create_pool(&database_url)
+            .await
+            .context("connecting to the data database")?,
+    );
     // The base URL here is unused: dataset declarations don't depend on it, only on the
     // adapter's id and its `datasets()` list.
     let datasets = DatasetCatalog::load(&registry_at("http://unused"))
@@ -159,7 +168,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
     // Fake API keys, fast rate limits and short timeouts; nothing here reaches a real upstream.
     // The real pool, not `test_ctx`'s lazy one: `refresh_reference_data` reads and writes it.
     let mut ctx = test_ctx();
-    ctx.pool = pool.clone();
+    ctx.pool = pool.0.clone();
 
     for entry in &manifest.series {
         let label = format!("{} {}", entry.source, entry.external_id);

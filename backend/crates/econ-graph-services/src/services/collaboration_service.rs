@@ -1,5 +1,5 @@
 use bigdecimal::BigDecimal;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 /**
  * REQUIREMENT: Collaboration service for chart annotations and sharing
  * PURPOSE: Provide business logic for collaborative features including permissions
@@ -19,7 +19,7 @@ use econ_graph_core::{
         AnnotationComment, ChartAnnotation, ChartCollaborator, NewAnnotationComment,
         NewChartAnnotation, NewChartCollaborator, User,
     },
-    schema::{annotation_comments, chart_annotations, chart_collaborators, users},
+    schema::{annotation_comments, chart_annotations, chart_collaborators, economic_series, users},
 };
 
 /// Permission levels for collaboration
@@ -153,6 +153,76 @@ pub fn validate_annotation_fields(
     Ok(())
 }
 
+/// Longest idempotency key accepted on an annotation create, in characters. The frontend
+/// sends a UUID (36 characters); this leaves room for other clients' formats.
+pub const IDEMPOTENCY_KEY_MAX_CHARS: usize = 128;
+
+/// Namespace of [`idempotent_annotation_id`]'s UUIDv5 ids. Never change it: a retry that
+/// straddles a deploy with a different namespace would insert a second copy.
+const ANNOTATION_IDEMPOTENCY_NAMESPACE: Uuid =
+    Uuid::from_u128(0x5f1c_3a2e_8d4b_4e7a_9c61_0b2d_7e93_a4f8);
+
+/// The id of the annotation `user_id` creates with idempotency key `key` (ECO-439).
+///
+/// It is a UUIDv5 of the user and the key, so every retry of one create inserts the same
+/// primary key, and a retry's insert conflicts with the original row on the primary key,
+/// which Postgres enforces whichever backend replica serves each attempt. No schema change
+/// is needed. Including the user scopes keys per user: two users who send the same key get
+/// different ids, and nobody can reach another user's annotation through a key.
+pub fn idempotent_annotation_id(user_id: Uuid, key: &str) -> Uuid {
+    let mut name = Vec::with_capacity(16 + key.len());
+    name.extend_from_slice(user_id.as_bytes());
+    name.extend_from_slice(key.as_bytes());
+    Uuid::new_v5(&ANNOTATION_IDEMPOTENCY_NAMESPACE, &name)
+}
+
+/// Checks an annotation create's idempotency key.
+pub fn validate_idempotency_key(key: &str) -> AppResult<()> {
+    check_text("Idempotency key", key, IDEMPOTENCY_KEY_MAX_CHARS, true)
+}
+
+/// Earliest year an annotation may be dated: early enough for long historical series, and
+/// well clear of the year-1 dates a broken client sends.
+pub const ANNOTATION_MIN_YEAR: i32 = 1000;
+/// How many years past today an annotation may be dated, for projections and scheduled events.
+pub const ANNOTATION_MAX_YEARS_AHEAD: i32 = 10;
+/// `annotation_value` is DECIMAL(20, 6), so its magnitude must stay below 10^14 once Postgres
+/// has rounded it to 6 decimal places.
+const ANNOTATION_VALUE_MAX_DIGITS: u32 = 14;
+/// Postgres rounds a numeric half away from zero, so any magnitude at or above this rounds up to
+/// 10^14 and overflows the column.
+const ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW: &str = "99999999999999.9999995";
+
+/// Checks an annotation's date (against `today`) and optional chart value.
+pub fn validate_annotation_point(
+    date: NaiveDate,
+    value: Option<&BigDecimal>,
+    today: NaiveDate,
+) -> AppResult<()> {
+    let earliest = NaiveDate::from_ymd_opt(ANNOTATION_MIN_YEAR, 1, 1).expect("valid date");
+    let latest = NaiveDate::from_ymd_opt(today.year() + ANNOTATION_MAX_YEARS_AHEAD, 12, 31)
+        .expect("valid date");
+    if date < earliest || date > latest {
+        return Err(AppError::ValidationError(format!(
+            "Date {date} is outside {earliest} to {latest}"
+        )));
+    }
+    if let Some(value) = value {
+        // Compare against the rounding threshold rather than rounding the value itself, which
+        // would be costly for a value written with a huge number of decimal places.
+        let limit: BigDecimal = ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW
+            .parse()
+            .expect("valid decimal");
+        if value.abs() >= limit {
+            return Err(AppError::ValidationError(format!(
+                "Value {value} is too large; rounded to 6 decimal places it must be below \
+                 1e{ANNOTATION_VALUE_MAX_DIGITS}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Checks a comment's text.
 pub fn validate_comment(content: &str) -> AppResult<()> {
     check_text("Comment", content, COMMENT_MAX_CHARS, true)
@@ -168,7 +238,14 @@ impl CollaborationService {
         Self { pool }
     }
 
-    /// Create a new chart annotation
+    /// Create a new chart annotation.
+    ///
+    /// With an `idempotency_key`, a repeat of a create that `user_id` already made with that
+    /// key (a client retry after a timeout or a lost response) returns the original annotation
+    /// instead of inserting another; see [`idempotent_annotation_id`]. A repeat's other fields
+    /// are ignored, as with any idempotent request, so clients send a new key whenever what
+    /// they are creating changes.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_annotation(
         &self,
         user_id: Uuid,
@@ -180,12 +257,21 @@ impl CollaborationService {
         annotation_type: String,
         color: Option<String>,
         is_public: bool,
+        idempotency_key: Option<String>,
     ) -> AppResult<ChartAnnotation> {
+        if let Some(key) = &idempotency_key {
+            validate_idempotency_key(key)?;
+        }
         validate_annotation_fields(
             Some(&title),
             Some(&content),
             Some(&annotation_type),
             color.as_deref(),
+        )?;
+        validate_annotation_point(
+            annotation_date,
+            annotation_value.as_ref(),
+            chrono::Utc::now().date_naive(),
         )?;
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
@@ -193,6 +279,20 @@ impl CollaborationService {
                 e
             ))
         })?;
+
+        // `chart_annotations.series_id` is varchar with no foreign key, so nothing else stops
+        // an annotation on a series that doesn't exist.
+        let series_exists = economic_series::table
+            .find(series_id)
+            .select(economic_series::id)
+            .first::<Uuid>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .is_some();
+        if !series_exists {
+            return Err(AppError::SeriesNotFound(series_id.to_string()));
+        }
 
         // Check if user has permission to annotate this series
         if !self.check_annotation_permission(user_id, series_id).await? {
@@ -214,14 +314,47 @@ impl CollaborationService {
             tags: None,
         };
 
-        let annotation = diesel::insert_into(chart_annotations::table)
-            .values(&new_annotation)
+        let Some(key) = idempotency_key else {
+            return diesel::insert_into(chart_annotations::table)
+                .values(&new_annotation)
+                .returning(ChartAnnotation::as_select())
+                .get_result::<ChartAnnotation>(&mut conn)
+                .await
+                .map_err(|e| AppError::DatabaseError(e.to_string()));
+        };
+
+        // Every attempt with this key inserts the same primary key. An attempt racing an
+        // uncommitted one (on any replica) waits on the primary key index until that one
+        // commits or rolls back, then does nothing or inserts; the read below sees the
+        // committed row.
+        let id = idempotent_annotation_id(user_id, &key);
+        let inserted = diesel::insert_into(chart_annotations::table)
+            .values((chart_annotations::id.eq(id), &new_annotation))
+            .on_conflict(chart_annotations::id)
+            .do_nothing()
             .returning(ChartAnnotation::as_select())
             .get_result::<ChartAnnotation>(&mut conn)
             .await
+            .optional()
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        Ok(annotation)
+        if let Some(annotation) = inserted {
+            return Ok(annotation);
+        }
+        // The id is derived from this user's id, so the existing row is theirs; anything else
+        // would be a UUIDv5 collision, which is refused rather than shown.
+        chart_annotations::table
+            .find(id)
+            .filter(chart_annotations::user_id.eq(user_id))
+            .select(ChartAnnotation::as_select())
+            .first::<ChartAnnotation>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .ok_or_else(|| {
+                AppError::ValidationError(
+                    "Idempotency key conflicts with another annotation".into(),
+                )
+            })
     }
 
     /// Get annotations for a series
@@ -645,6 +778,28 @@ mod validation_tests {
         }
     }
 
+    /// ECO-439: the id is a pure function of (user, key), different per user and per key.
+    #[test]
+    fn idempotent_ids_are_stable_and_scoped_to_the_user() {
+        let (alice, bob) = (Uuid::new_v4(), Uuid::new_v4());
+        let id = idempotent_annotation_id(alice, "k1");
+        assert_eq!(id, idempotent_annotation_id(alice, "k1"));
+        assert_eq!(id.get_version_num(), 5);
+        assert_ne!(id, idempotent_annotation_id(bob, "k1"));
+        assert_ne!(id, idempotent_annotation_id(alice, "k2"));
+        // Pinned, so a change to the namespace or the name layout fails here, not in production.
+        assert_eq!(
+            idempotent_annotation_id(Uuid::nil(), "key").to_string(),
+            "d27b6d95-ad28-51d0-a957-644b5779758a"
+        );
+
+        validate_idempotency_key(&"k".repeat(IDEMPOTENCY_KEY_MAX_CHARS)).unwrap();
+        refused(validate_idempotency_key(
+            &"k".repeat(IDEMPOTENCY_KEY_MAX_CHARS + 1),
+        ));
+        refused(validate_idempotency_key(" "));
+    }
+
     #[test]
     fn annotation_text_up_to_the_limits_is_accepted() {
         let title = "t".repeat(ANNOTATION_TITLE_MAX_CHARS);
@@ -694,6 +849,52 @@ mod validation_tests {
         validate_comment(&"c".repeat(COMMENT_MAX_CHARS)).unwrap();
         assert_eq!(refused(validate_comment(" \n ")), "Comment can't be empty");
         refused(validate_comment(&"c".repeat(COMMENT_MAX_CHARS + 1)));
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn annotation_dates_must_be_in_range() {
+        let today = date(2026, 10, 23);
+        for ok in [date(1000, 1, 1), date(2024, 1, 1), date(2036, 12, 31)] {
+            validate_annotation_point(ok, None, today).unwrap();
+        }
+        assert_eq!(
+            refused(validate_annotation_point(date(1, 1, 1), None, today)),
+            "Date 0001-01-01 is outside 1000-01-01 to 2036-12-31"
+        );
+        refused(validate_annotation_point(date(999, 12, 31), None, today));
+        refused(validate_annotation_point(date(2037, 1, 1), None, today));
+        refused(validate_annotation_point(date(2099, 12, 31), None, today));
+    }
+
+    #[test]
+    fn annotation_values_must_fit_the_column() {
+        let today = date(2026, 10, 23);
+        let day = date(2024, 1, 1);
+        let fits: BigDecimal = "99999999999999.999999".parse().unwrap();
+        validate_annotation_point(day, Some(&fits), today).unwrap();
+        validate_annotation_point(day, Some(&-fits), today).unwrap();
+        // Postgres would round these up to 10^14, which overflows DECIMAL(20, 6).
+        for rounds_up in ["99999999999999.9999995", "99999999999999.9999999"] {
+            let rounds_up: BigDecimal = rounds_up.parse().unwrap();
+            assert!(
+                refused(validate_annotation_point(day, Some(&rounds_up), today))
+                    .contains("too large")
+            );
+            refused(validate_annotation_point(day, Some(&-rounds_up), today));
+        }
+        // ...while this rounds down to the largest value the column holds.
+        let rounds_down: BigDecimal = "99999999999999.9999994999".parse().unwrap();
+        validate_annotation_point(day, Some(&rounds_down), today).unwrap();
+        validate_annotation_point(day, Some(&-rounds_down), today).unwrap();
+        let too_big: BigDecimal = "100000000000000".parse().unwrap();
+        assert!(
+            refused(validate_annotation_point(day, Some(&too_big), today)).contains("too large")
+        );
+        refused(validate_annotation_point(day, Some(&-too_big), today));
     }
 }
 
@@ -924,6 +1125,7 @@ mod tests {
                 "note".into(),
                 None,
                 true,
+                None,
             )
             .await;
         assert!(

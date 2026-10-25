@@ -1,29 +1,29 @@
-# Listener https of Gateway econ-graph-gateway (gateway.yaml). Applied by
-# scripts/deploy/install-gateway.sh only when GATEWAY_HTTPS_HOSTNAME is set;
-# the script fills in the two placeholders. It is applied under its own
-# server-side-apply field manager, so it adds this listener (and the
-# annotation) to the Gateway without owning the rest, and the script removes
-# both again, and deletes the EnvoyPatchPolicy below, when the variable is
-# empty.
+# The public host's part of the gateway: listener https of Gateway
+# econ-graph-gateway (gateway.yaml), its certificate, and the rate-limit
+# bursts for it. Applied by scripts/deploy/apply-gateway-routes.sh only for a
+# public host (PUBLIC_HOST); the script fills in the placeholders, and removes
+# all of it again for PUBLIC_HOST=none.
 #
-# TLS terminates here with Secret econ-graph-tls in this namespace, which
-# cert-manager issues from the ClusterIssuer named in the annotation
-# (cert-manager runs with its Gateway API support enabled; see deploy.sh).
-# Only namespaces labelled econgraph.io/env: production attach to this listener.
+# The listener is a second server-side-apply field manager's part of the
+# Gateway, so it is added without owning the rest. It has no host name: the
+# Cloudflare Tunnel connector reaches it as
+# https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443
+# with that name as TLS server name, and any SNI gets the certificate. The
+# routes attached to it (the public copies, see render-public-host.py) match
+# only the public host names, and only namespaces labelled
+# econgraph.io/env: production attach. TLS terminates here with Secret
+# econ-graph-tls.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: econ-graph-gateway
   namespace: econ-graph-gateway
-  annotations:
-    cert-manager.io/cluster-issuer: __GATEWAY_TLS_ISSUER__
 spec:
   gatewayClassName: econ-graph
   listeners:
   - name: https
     protocol: HTTPS
     port: 443
-    hostname: __GATEWAY_HTTPS_HOSTNAME__
     tls:
       mode: Terminate
       certificateRefs:
@@ -35,6 +35,24 @@ spec:
         selector:
           matchLabels:
             econgraph.io/env: production
+---
+# The certificate for the public host and its www name, from the ClusterIssuer
+# GATEWAY_TLS_ISSUER (default econ-graph-selfsigned, selfsigned-issuer.yaml:
+# the tunnel connector does not verify it, and visitors see Cloudflare's).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: econ-graph-tls
+  namespace: econ-graph-gateway
+spec:
+  secretName: econ-graph-tls
+  dnsNames:
+  - __PUBLIC_HOST__
+  - www.__PUBLIC_HOST__
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: __TLS_ISSUER__
 ---
 # The rate-limit bursts of ratelimit-burst.yaml, for this listener.
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -53,13 +71,13 @@ spec:
     name: econ-graph-gateway/econ-graph-gateway/https
     operation:
       op: replace
-      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql(-public)?\\//)]"
       path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/0/token_bucket/max_tokens
       value: 100
   - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
     name: econ-graph-gateway/econ-graph-gateway/https
     operation:
       op: replace
-      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql(-public)?\\//)]"
       path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/1/token_bucket/max_tokens
       value: 100

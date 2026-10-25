@@ -64,22 +64,41 @@ else
     FRONTEND_NODEPORT=30000
 fi
 
+# The kind cluster runs on the rootful Docker daemon, and its own kubectl and
+# kubeconfig are used (on this host `kubectl` is the microk8s snap wrapper);
+# see scripts/deploy/lib/kind-env.sh. Sourced first: it sets DOCKER_HOST.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
 # Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found. Please run terraform first."
-    echo "   cd terraform/k8s && terraform init && terraform apply"
+if ! kind_cluster_exists; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
+    echo "   Create it with scripts/deploy/recreate-kind-cluster.sh --if-missing"
     exit 1
 fi
-
-# Set kubectl context
+ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
+
+# Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
+# https://econgraph.com through the cloudflared tunnel; empty serves
+# http://localhost only. See scripts/deploy/lib/public-host.sh, shared with
+# restart-k8s-rollout.sh, for the rules and render_manifest. The frontend image
+# needs no rebuild for it: it resolves its sign-in issuer against the page's origin.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+public_host_init
 
 # Apply all manifests
 echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
-kubectl apply -f k8s/manifests/configmap.yaml
+# Static PVs on the host btrfs subvolumes for both Postgres databases. Runs
+# before create-secrets.sh: it refuses to continue if a host data directory
+# already holds a database whose password Secret is missing.
+./scripts/deploy/apply-host-storage.sh
+render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
 ./scripts/deploy/create-secrets.sh
@@ -114,11 +133,11 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
-  kubectl apply -f k8s/manifests/keycloak/deployment.yaml
+  render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
   # The realm-import Job applies the realm file on every deploy; a Job cannot be
   # re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
-  kubectl apply -f k8s/manifests/keycloak/realm-import-job.yaml
+  render_manifest k8s/manifests/keycloak/realm-import-job.yaml | kubectl apply -f -
   KEYCLOAK_DEPLOYED=true
 else
   echo "⚠️  Secret econ-graph-keycloak not found, skipping Keycloak."
@@ -126,7 +145,7 @@ else
 fi
 
 # Deploy application
-kubectl apply -f k8s/manifests/backend-deployment.yaml
+render_manifest k8s/manifests/backend-deployment.yaml | kubectl apply -f -
 kubectl apply -f k8s/manifests/backend-service.yaml
 # Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
 # written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
@@ -140,12 +159,11 @@ kubectl apply -f k8s/manifests/frontend-service.yaml
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
-# 80/443 (k8s/manifests/gateway/; idempotent). Then this namespace's
-# HTTPRoutes and rate limits. GATEWAY_HTTPS_HOSTNAME=<host> adds listener
-# https for that host name, which the routes then also serve; =none removes
-# it; unset keeps what the Gateway has (see install-gateway.sh).
+# 80/443 (k8s/manifests/gateway/; idempotent). The routes, with the public
+# host's, follow once cert-manager is installed (apply_public_edge below).
 ./scripts/deploy/install-gateway.sh
-./scripts/deploy/apply-gateway-routes.sh
+# The tunnel connector (scripts/deploy/lib/public-host.sh).
+apply_cloudflared
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -212,6 +230,8 @@ if [ "$KEYCLOAK_DEPLOYED" = true ]; then
   esac
 fi
 
+wait_cloudflared
+
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
 
@@ -236,17 +256,17 @@ echo "⏳ Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
-# The gateway's https listener, when it has one, gets its certificate from the
-# ClusterIssuers in letsencrypt-issuer.yaml (HTTP-01 through the gateway).
-if [ -n "$(kubectl -n econ-graph-gateway get gateway econ-graph-gateway \
-    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null)" ]; then
-  kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
-fi
+
+# The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
+# public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
+apply_public_edge
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
-# prometheus-rules-crawler.yaml is a plain ConfigMap consumed via prometheus-config.yaml's
-# rule_files, not a PrometheusRule CRD, so it applies like any other manifest here.
+# The prometheus-rules-*.yaml files are plain ConfigMaps consumed via prometheus-config.yaml's
+# rule_files, not PrometheusRule CRDs, so they apply like any other manifest here. The glob
+# applies them after prometheus-deployment.yaml; the pod waits for its projected rules
+# volume until they exist.
 #
 # letsencrypt-cloudflare-dns01.yaml is applied separately below, with a retry: the
 # cert-manager webhook can report "available" slightly before its CA bundle is
@@ -299,7 +319,7 @@ cat >> /tmp/grafana-dashboards.yaml << 'EOF'
 EOF
 
 # Extract and append the JSON content from the YAML file
-yq eval '.data.dashboard' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
 
 # Apply the ConfigMap
 kubectl apply -f /tmp/grafana-dashboards.yaml
@@ -336,6 +356,10 @@ kubectl get pods -n econ-graph
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
+if [ -n "$PUBLIC_HOST" ]; then
+  echo "  Public:   https://${PUBLIC_HOST} (through the Cloudflare Tunnel; www redirects here)"
+  echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} [--via-cloudflare]"
+fi
 # The gateway's routes (k8s/manifests/gateway/routes/) answer on host localhost.
 echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (re-enabled by ECO-242, train 3).

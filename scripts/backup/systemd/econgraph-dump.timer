@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly econ-graph database dumps
+
+[Timer]
+# 03:00 Pacific; the in-cluster postgres-backup CronJob runs at 08:00 UTC.
+OnCalendar=*-*-* 10:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

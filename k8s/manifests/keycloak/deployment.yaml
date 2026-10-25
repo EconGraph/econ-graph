@@ -2,8 +2,12 @@
 #
 # Public URL: http://localhost/idp through the gateway (HTTPRoute econ-graph-idp,
 # k8s/manifests/gateway/routes/httproutes.yaml), so the issuer is
-# http://localhost/idp/realms/econ-graph. For a real domain, change KC_HOSTNAME,
-# KC_WEB_BASE_URL and the routes' host names together.
+# http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
+# KC_HOSTNAME and KC_WEB_BASE_URL below to https://<PUBLIC_HOST>, the backend's
+# OIDC_ISSUER and the routes' host names with them (scripts/deploy/render-public-host.py),
+# so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Keycloak
+# builds its URLs from the full KC_HOSTNAME, not from request headers, and the public
+# host is only served over https (plain http is redirected; scripts/deploy/render-public-host.py).
 #
 # Credentials come only from the Secret `econ-graph-keycloak`, written by
 # scripts/deploy/create-secrets.sh (never committed):
@@ -103,6 +107,9 @@ spec:
         # Plain HTTP behind the gateway; TLS, when configured, terminates at the gateway.
         - name: KC_HTTP_ENABLED
           value: "true"
+        # Only for the client address in Keycloak's events and brute-force detection: the
+        # gateway sets X-Forwarded-For to the client address it settled on and drops a
+        # client's X-Forwarded-Proto/-Host (k8s/manifests/gateway/client-traffic-policy.yaml).
         - name: KC_PROXY_HEADERS
           value: "xforwarded"
         - name: KC_HEALTH_ENABLED

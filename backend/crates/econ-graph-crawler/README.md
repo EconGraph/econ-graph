@@ -28,7 +28,7 @@ Job kinds: `fetch_series` (download one series), `discover_catalog` (write a sou
 
 ## `crawler` CLI
 
-Reads `DATABASE_URL` (or `--database-url`) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
+Reads `DATA_DATABASE_URL` (or `--database-url`; `DATABASE_URL` is not read) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
 `BEA_API_KEY`, `CENSUS_API_KEY`.
 
 ```bash
@@ -43,8 +43,9 @@ Run from `backend/` (use `cd backend` from the repository root):
 `cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
 
-Before queue commands or worker startup, export `DATABASE_URL` and apply migrations
-by starting the backend, as shown in the [local setup](../../README.md#development-workflow).
+Before queue commands or worker startup, apply migrations by starting the backend with
+`DATABASE_URL`, as shown in the [local setup](../../README.md#development-workflow), and export
+`DATA_DATABASE_URL` naming the same database.
 The worker does not apply migrations. Export the relevant provider API keys in the
 worker's environment as well as in the CLI's environment for direct `fetch` calls.
 

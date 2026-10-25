@@ -438,8 +438,8 @@ data:
 ### Secret
 
 Do not commit a Secret manifest. Create the Secrets out of band with
-`scripts/deploy/create-secrets.sh`; the database URL is stored in the
-`econ-graph-secrets` Secret under the key `database-url`. See
+`scripts/deploy/create-secrets.sh`; the database URLs are stored in the
+`econ-graph-secrets` Secret under the keys `app-database-url` and `data-database-url`. See
 [k8s/README.md](../../k8s/README.md#secrets) for the Secret names and keys.
 
 ### Deployment
@@ -474,7 +474,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
-              key: database-url
+              key: app-database-url
         envFrom:
         - configMapRef:
             name: econ-graph-config
@@ -915,8 +915,7 @@ pg_dump -h localhost -U econ_graph_prod econ_graph_prod > $BACKUP_FILE
 # Compress backup
 gzip $BACKUP_FILE
 
-# Remove old backups (keep 30 days)
-find $BACKUP_DIR -name "*.sql.gz" -mtime +30 -delete
+# Backups are never deleted automatically; remove old ones by hand.
 
 # Schedule in crontab
 # 0 2 * * * /path/to/backup_script.sh

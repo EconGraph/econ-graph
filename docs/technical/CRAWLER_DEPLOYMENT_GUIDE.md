@@ -18,7 +18,7 @@ Code: `backend/crates/econ-graph-crawler` (adapters, worker, CLI) and
 ## Enqueue work
 
 - **GraphQL**: the `triggerCrawl` mutation (admin only) enqueues jobs and returns immediately.
-- **CLI** (`crawler`, reads `DATABASE_URL`):
+- **CLI** (`crawler`, reads `DATA_DATABASE_URL`):
 
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE   # fetch_series jobs
@@ -29,9 +29,10 @@ crawler fetch    --source FRED --series GDP          # one fetch now, bypassing 
 ```
 
 From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
-root): `cargo run -p econ-graph-crawler --bin crawler -- <command>`. First export
-`DATABASE_URL` and start the backend once to apply migrations, following the
-[local setup](../../backend/README.md#development-workflow). Export any required
+root): `cargo run -p econ-graph-crawler --bin crawler -- <command>`. First start the backend
+once with `DATABASE_URL` to apply migrations, following the
+[local setup](../../backend/README.md#development-workflow), and export `DATA_DATABASE_URL`
+naming the same database for the CLI and worker. Export any required
 provider API keys in the worker's environment and in the CLI's environment for
 direct `fetch` calls.
 
@@ -40,7 +41,7 @@ same `(source, series_id, kind)`.
 
 ## Run the worker
 
-Locally, from `backend/` with `DATABASE_URL` and provider API keys exported:
+Locally, from `backend/` with `DATA_DATABASE_URL` and provider API keys exported:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
 
 Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
@@ -52,7 +53,7 @@ Configuration (flags or environment):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_URL` | required | Postgres |
+| `DATA_DATABASE_URL` | required | the data database (Postgres); `DATABASE_URL` alone is a startup error |
 | `CRAWLER_CONCURRENCY` | 4 | claim loops (per-source limits still apply) |
 | `CRAWLER_SOURCES` | all | comma-separated source filter |
 | `CRAWLER_WORKER_ID` | hostname-based | lock owner written to `crawl_queue.locked_by` |
@@ -110,7 +111,7 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO); those get weekly discovery
    but never a refresh (`fetch_series` is unimplemented for them). SEC filings are not covered by
    the scheduler at all; enqueue them with `sec-crawler enqueue --cik <CIK>[,<CIK>...]`
-   (`econ-graph-sec-crawler`'s binary, reads `DATABASE_URL`).
+   (`econ-graph-sec-crawler`'s binary, reads `DATA_DATABASE_URL`).
 
 **For QA's seven-day run:** with the defaults above, expect at most one catalog discovery per
 source over seven days (and none at all for a source whose discovery fails early in the run).

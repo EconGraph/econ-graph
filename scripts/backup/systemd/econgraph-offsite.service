@@ -1,0 +1,16 @@
+[Unit]
+Description=econ-graph off-site copy of the verified dumps (restic)
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+# Only meaningful once ~/.config/econgraph/restic.env exists.
+ConditionPathExists=%h/.config/econgraph/restic.env
+
+[Service]
+Type=oneshot
+# A user unit cannot wait for the system's network-online.target, and the
+# timer may fire right after boot or login: retry a failed run (restic
+# backup only adds, so a retry is safe).
+Restart=on-failure
+RestartSec=5min
+ExecStart=%h/.local/lib/econgraph-backup/offsite-restic.sh backup
+Nice=10
+IOSchedulingClass=idle

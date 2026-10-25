@@ -15,7 +15,9 @@ use warp::{Filter, Reply as _};
 // Import from our new crates
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
-    create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool,
+    create_pool,
+    models::admin::{ClientInfo, NewSecurityEvent},
+    redact_database_url, AppError, AppResult, Config, DatabasePool,
 };
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
@@ -257,7 +259,7 @@ fn validate_cors_origins(origins: &[String]) -> AppResult<Vec<String>> {
             .is_some();
         if !valid {
             return Err(AppError::ConfigError(format!(
-                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econ-graph.com",
+                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econgraph.com",
                 origin
             )));
         }
@@ -280,6 +282,137 @@ fn authorization_header(headers: &warp::http::HeaderMap) -> Option<&str> {
     headers
         .get(warp::http::header::AUTHORIZATION)
         .and_then(|value| std::str::from_utf8(value.as_bytes()).ok())
+}
+
+/// The TCP peer of the connection a request arrived on. The server puts it on every request's
+/// extensions, since `warp::service` cannot hand warp the peer address itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PeerAddr(std::net::SocketAddr);
+
+/// An address range written `ip/prefix` (or a bare `ip`), as listed in `TRUSTED_PROXIES`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IpRange {
+    network: std::net::IpAddr,
+    prefix: u8,
+}
+
+impl IpRange {
+    fn parse(text: &str) -> Option<Self> {
+        let (ip, prefix) = match text.split_once('/') {
+            Some((ip, prefix)) => (ip, Some(prefix)),
+            None => (text, None),
+        };
+        let network: std::net::IpAddr = ip.trim().parse().ok()?;
+        let max = if network.is_ipv4() { 32 } else { 128 };
+        let prefix = match prefix {
+            Some(p) => p.trim().parse::<u8>().ok().filter(|&p| p <= max)?,
+            None => max,
+        };
+        Some(Self { network, prefix })
+    }
+
+    fn contains(&self, ip: std::net::IpAddr) -> bool {
+        use std::net::IpAddr;
+        let mask = |bits: u32, prefix: u8| -> u128 {
+            if prefix == 0 {
+                0
+            } else {
+                (!0u128 << (bits - u32::from(prefix))) & (!0u128 >> (128 - bits))
+            }
+        };
+        match (self.network, ip.to_canonical()) {
+            (IpAddr::V4(net), IpAddr::V4(ip)) => {
+                let m = mask(32, self.prefix);
+                u128::from(u32::from(net)) & m == u128::from(u32::from(ip)) & m
+            }
+            (IpAddr::V6(net), IpAddr::V6(ip)) => {
+                let m = mask(128, self.prefix);
+                u128::from(net) & m == u128::from(ip) & m
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Parse `TRUSTED_PROXIES`: comma-separated addresses or `ip/prefix` ranges. Entries that do
+/// not parse are logged and skipped.
+fn parse_trusted_proxies(setting: Option<&str>) -> Vec<IpRange> {
+    setting
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            let range = IpRange::parse(entry);
+            if range.is_none() {
+                tracing::warn!("ignoring TRUSTED_PROXIES entry {entry:?}: not an address or range");
+            }
+            range
+        })
+        .collect()
+}
+
+/// The proxies whose `X-Forwarded-For` the backend believes, from `TRUSTED_PROXIES`. Empty
+/// (the default) means the header is ignored and the peer address is the client.
+static TRUSTED_PROXIES: once_cell::sync::Lazy<Vec<IpRange>> = once_cell::sync::Lazy::new(|| {
+    parse_trusted_proxies(std::env::var("TRUSTED_PROXIES").ok().as_deref())
+});
+
+/// The client address to record for a request from `peer` carrying `forwarded_for`
+/// (`X-Forwarded-For`).
+///
+/// The header is anyone's to write, so it counts only when the peer is a trusted proxy: then
+/// the entries are read right to left, past further trusted proxies, and the first address
+/// no trusted proxy owns is the client. A malformed entry stops the walk at the last address
+/// that could be checked. With no trusted proxies the peer is always the client.
+fn client_ip(
+    peer: Option<std::net::IpAddr>,
+    forwarded_for: Option<&str>,
+    trusted: &[IpRange],
+) -> Option<String> {
+    let is_trusted = |ip: std::net::IpAddr| trusted.iter().any(|range| range.contains(ip));
+    let mut client = peer?.to_canonical();
+    if is_trusted(client) {
+        let hops = forwarded_for.unwrap_or_default().rsplit(',').map(str::trim);
+        for hop in hops {
+            let Ok(ip) = hop.parse::<std::net::IpAddr>() else {
+                break;
+            };
+            client = ip.to_canonical();
+            if !is_trusted(client) {
+                break;
+            }
+        }
+    }
+    Some(client.to_string())
+}
+
+/// Every `X-Forwarded-For` field line of a request, in order, joined with commas: RFC 9110
+/// (section 5.3) makes that the header's value, so a proxy that adds its own line instead of
+/// extending the last one is still read in full. A line that is not text stands in as an
+/// empty entry, which stops [`client_ip`]'s walk there rather than skipping past it.
+fn forwarded_for(headers: &warp::http::HeaderMap) -> Option<String> {
+    let lines: Vec<&str> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .map(|value| std::str::from_utf8(value.as_bytes()).unwrap_or_default())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join(","))
+}
+
+/// Who sent a request: [`client_ip`] for its address and its `User-Agent` header, cut short.
+fn client_info(peer: Option<PeerAddr>, headers: &warp::http::HeaderMap) -> ClientInfo {
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|value| std::str::from_utf8(value.as_bytes()).ok());
+    ClientInfo::new(
+        client_ip(
+            peer.map(|PeerAddr(addr)| addr.ip()),
+            forwarded_for(headers).as_deref(),
+            &TRUSTED_PROXIES,
+        ),
+        user_agent,
+    )
 }
 
 /// Why a GraphQL request that sent a bearer token was refused before execution.
@@ -339,6 +472,7 @@ async fn graphql_caller(
     pool: &DatabasePool,
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
+    client: &ClientInfo,
 ) -> Result<Option<Caller>, GraphqlRefusal> {
     match authenticate(pool, verifier, authorization).await {
         Ok(caller) => Ok(caller),
@@ -352,6 +486,9 @@ async fn graphql_caller(
         }
         Err(BearerError::Inactive(id)) => {
             tracing::info!("refused a request from suspended account {id}");
+            NewSecurityEvent::suspended_account(id, "/graphql", client)
+                .record(pool)
+                .await;
             Err(GraphqlRefusal::Suspended)
         }
         Err(BearerError::Database(why)) => {
@@ -498,9 +635,11 @@ fn build_routes(
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
         .and(warp::header::headers_cloned())
+        .and(warp::ext::optional::<PeerAddr>())
         .and(graphql_request(schema))
         .and_then(
             move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
+                  peer: Option<PeerAddr>,
                   (_schema, request): (
                 async_graphql::Schema<
                     econ_graph_graphql::graphql::query::Query,
@@ -512,10 +651,12 @@ fn build_routes(
                 let pool_for_graphql = pool_for_graphql.clone();
                 let verifier = verifier_for_graphql.clone();
                 async move {
+                    let client = client_info(peer, &headers);
                     let caller = match graphql_caller(
                         &pool_for_graphql,
                         verifier.as_deref(),
                         authorization_header(&headers),
+                        &client,
                     )
                     .await
                     {
@@ -524,7 +665,8 @@ fn build_routes(
                     };
 
                     let auth_context = std::sync::Arc::new(
-                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller),
+                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller)
+                            .with_client(client),
                     );
                     let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
                         pool_for_graphql.clone(),
@@ -797,13 +939,16 @@ async fn main() -> AppResult<()> {
             let remote_addr = conn.remote_addr();
             let svc = warp::service(routes.clone());
             async move {
-                Ok::<_, Infallible>(hyper::service::service_fn(move |req| {
-                    let span = tracing::info_span!("connection", remote.addr = %remote_addr);
-                    // warp creates its request span inside call(), so enter ours for the call too.
-                    let mut svc = svc.clone();
-                    let response = span.in_scope(|| svc.call(req));
-                    response.instrument(span)
-                }))
+                Ok::<_, Infallible>(hyper::service::service_fn(
+                    move |mut req: hyper::Request<hyper::Body>| {
+                        req.extensions_mut().insert(PeerAddr(remote_addr));
+                        let span = tracing::info_span!("connection", remote.addr = %remote_addr);
+                        // warp creates its request span inside call(), so enter ours for the call too.
+                        let mut svc = svc.clone();
+                        let response = span.in_scope(|| svc.call(req));
+                        response.instrument(span)
+                    },
+                ))
             }
         });
     let server = hyper::Server::try_bind(&([0, 0, 0, 0], port).into())
@@ -865,12 +1010,12 @@ mod cors_tests {
     fn accepts_plain_origins_and_trims_them() {
         let validated = validate_cors_origins(&origins(&[
             "http://localhost:3000",
-            " https://econ-graph.com/ ",
+            " https://econgraph.com/ ",
         ]))
         .unwrap();
         assert_eq!(
             validated,
-            origins(&["http://localhost:3000", "https://econ-graph.com"])
+            origins(&["http://localhost:3000", "https://econgraph.com"])
         );
         // warp panics on origins it cannot parse; validated ones must not.
         let _ = cors_filter(&validated);
@@ -882,9 +1027,9 @@ mod cors_tests {
         for bad in [
             vec!["*"],
             vec!["https://*"],
-            vec!["econ-graph.com"],
-            vec!["ftp://econ-graph.com"],
-            vec!["https://econ-graph.com/app"],
+            vec!["econgraph.com"],
+            vec!["ftp://econgraph.com"],
+            vec!["https://econgraph.com/app"],
             vec![""],
             vec![],
         ] {
@@ -961,6 +1106,176 @@ mod cors_tests {
         assert_eq!(res.status(), 403);
         assert!(res.headers().get("access-control-allow-origin").is_none());
     }
+
+    /// The list deploy.sh gives the kind cluster with PUBLIC_HOST=econgraph.com (ECO-457):
+    /// the public site and the on-host http://localhost both reach the API. Browsers send
+    /// Origin on same-origin POSTs as well, so the app's own origin has to be listed.
+    /// www.econgraph.com only ever redirects to the apex, so it is never an origin.
+    #[tokio::test]
+    async fn the_deployed_public_and_local_origins_are_allowed() {
+        let deployed: Vec<String> = "https://econgraph.com,http://localhost,http://localhost:3000"
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        let app = warp::any()
+            .map(|| "ok")
+            .with(cors_filter(&validate_cors_origins(&deployed).unwrap()));
+        for origin in ["https://econgraph.com", "http://localhost"] {
+            let res = warp::test::request()
+                .method("POST")
+                .header("origin", origin)
+                .reply(&app)
+                .await;
+            assert_eq!(res.status(), 200, "{origin}");
+            assert_eq!(res.headers()["access-control-allow-origin"], origin);
+        }
+        for origin in ["https://www.econgraph.com", "http://econgraph.com"] {
+            let res = warp::test::request()
+                .method("POST")
+                .header("origin", origin)
+                .reply(&app)
+                .await;
+            assert_eq!(res.status(), 403, "{origin}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod client_ip_tests {
+    use super::{client_info, client_ip, forwarded_for, parse_trusted_proxies, IpRange, PeerAddr};
+    use std::net::IpAddr;
+
+    fn ip(text: &str) -> Option<IpAddr> {
+        Some(text.parse().unwrap())
+    }
+
+    /// With no trusted proxies the peer is the client and `X-Forwarded-For` is ignored.
+    #[test]
+    fn untrusted_peer_is_the_client() {
+        assert_eq!(
+            client_ip(ip("203.0.113.9"), Some("1.2.3.4"), &[]).as_deref(),
+            Some("203.0.113.9")
+        );
+        let trusted = parse_trusted_proxies(Some("10.0.0.0/8"));
+        assert_eq!(
+            client_ip(ip("203.0.113.9"), Some("1.2.3.4"), &trusted).as_deref(),
+            Some("203.0.113.9")
+        );
+        assert_eq!(client_ip(None, Some("1.2.3.4"), &trusted), None);
+    }
+
+    /// Behind trusted proxies the client is the rightmost address no trusted proxy owns, so a
+    /// client cannot pass itself off as anyone by prepending entries.
+    #[test]
+    fn trusted_proxies_vouch_for_the_forwarded_address() {
+        let trusted = parse_trusted_proxies(Some(" 10.0.0.0/8, 192.168.1.1 ,bogus, ::1"));
+        assert_eq!(trusted.len(), 3);
+        let from = |xff| client_ip(ip("10.1.2.3"), xff, &trusted);
+        assert_eq!(
+            from(Some("6.6.6.6, 203.0.113.9")).as_deref(),
+            Some("203.0.113.9")
+        );
+        assert_eq!(
+            from(Some("6.6.6.6, 203.0.113.9, 192.168.1.1, 10.9.9.9")).as_deref(),
+            Some("203.0.113.9")
+        );
+        // Nothing usable forwarded: the proxy itself is all that is known.
+        assert_eq!(from(None).as_deref(), Some("10.1.2.3"));
+        assert_eq!(from(Some("not-an-ip")).as_deref(), Some("10.1.2.3"));
+        assert_eq!(
+            from(Some("203.0.113.9, garbage, 10.0.0.1")).as_deref(),
+            Some("10.0.0.1")
+        );
+        // An IPv4-mapped IPv6 peer is matched and recorded as IPv4.
+        assert_eq!(
+            client_ip(ip("::ffff:10.1.2.3"), Some("203.0.113.9"), &trusted).as_deref(),
+            Some("203.0.113.9")
+        );
+        assert_eq!(
+            client_ip(ip("::1"), Some("2001:db8::7"), &trusted).as_deref(),
+            Some("2001:db8::7")
+        );
+    }
+
+    /// `X-Forwarded-For` sent as several field lines is read as one list, in order, so a
+    /// client cannot hide behind an extra line: the proxy's appended line is the one believed.
+    #[test]
+    fn forwarded_for_joins_every_field_line() {
+        let mut headers = warp::http::HeaderMap::new();
+        assert_eq!(forwarded_for(&headers), None);
+        // The client sends its own line claiming to be 6.6.6.6 behind a trusted proxy; the
+        // edge proxy adds a second line with the address it actually saw.
+        headers.append("x-forwarded-for", "6.6.6.6, 10.0.0.7".parse().unwrap());
+        headers.append("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        assert_eq!(
+            forwarded_for(&headers).as_deref(),
+            Some("6.6.6.6, 10.0.0.7,203.0.113.9")
+        );
+        let trusted = parse_trusted_proxies(Some("10.0.0.0/8"));
+        let peer = ip("10.1.2.3");
+        assert_eq!(
+            client_ip(peer, forwarded_for(&headers).as_deref(), &trusted).as_deref(),
+            Some("203.0.113.9")
+        );
+        // Reading only the first line would have believed the spoofed 6.6.6.6.
+        assert_eq!(
+            client_ip(peer, Some("6.6.6.6, 10.0.0.7"), &trusted).as_deref(),
+            Some("6.6.6.6")
+        );
+        // A trusted hop in the later line is walked past to the address before it.
+        let mut chained = warp::http::HeaderMap::new();
+        chained.append("x-forwarded-for", "6.6.6.6".parse().unwrap());
+        chained.append("x-forwarded-for", "198.51.100.4, 10.0.0.8".parse().unwrap());
+        assert_eq!(
+            client_ip(peer, forwarded_for(&chained).as_deref(), &trusted).as_deref(),
+            Some("198.51.100.4")
+        );
+        // A line that is not text stops the walk there instead of being skipped.
+        let mut opaque = warp::http::HeaderMap::new();
+        opaque.append("x-forwarded-for", "6.6.6.6".parse().unwrap());
+        opaque.append(
+            "x-forwarded-for",
+            warp::http::HeaderValue::from_bytes(b"\xff").unwrap(),
+        );
+        opaque.append("x-forwarded-for", "10.0.0.9".parse().unwrap());
+        assert_eq!(
+            client_ip(peer, forwarded_for(&opaque).as_deref(), &trusted).as_deref(),
+            Some("10.0.0.9")
+        );
+    }
+
+    #[test]
+    fn ip_ranges() {
+        let range = IpRange::parse("10.0.0.0/8").unwrap();
+        assert!(range.contains("10.255.0.1".parse().unwrap()));
+        assert!(!range.contains("11.0.0.1".parse().unwrap()));
+        assert!(IpRange::parse("0.0.0.0/0")
+            .unwrap()
+            .contains("8.8.8.8".parse().unwrap()));
+        assert!(IpRange::parse("10.0.0.0/33").is_none());
+        let v6 = IpRange::parse("2001:db8::/32").unwrap();
+        assert!(v6.contains("2001:db8:1::1".parse().unwrap()));
+        assert!(!v6.contains("2001:db9::1".parse().unwrap()));
+        assert!(!v6.contains("10.0.0.1".parse().unwrap()));
+    }
+
+    /// The request's peer and `User-Agent` become its client info; a long agent is cut.
+    #[test]
+    fn client_info_reads_the_request() {
+        let mut headers = warp::http::HeaderMap::new();
+        headers.insert("user-agent", "x".repeat(5000).parse().unwrap());
+        headers.insert("x-forwarded-for", "1.2.3.4".parse().unwrap());
+        let info = client_info(
+            Some(PeerAddr("203.0.113.9:4242".parse().unwrap())),
+            &headers,
+        );
+        assert_eq!(info.ip_address.as_deref(), Some("203.0.113.9"));
+        assert_eq!(info.user_agent.unwrap().len(), 512);
+        assert_eq!(
+            client_info(None, &warp::http::HeaderMap::new()),
+            Default::default()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -968,6 +1283,7 @@ mod request_auth_tests {
     use super::{graphql_caller, GraphqlRefusal};
     use econ_graph_auth::testkit::{now, sign_hs256, TestIssuer};
     use econ_graph_auth::{OidcConfig, OidcVerifier, Role};
+    use econ_graph_core::models::admin::ClientInfo;
     use econ_graph_core::DatabasePool;
     use uuid::Uuid;
     use warp::http::StatusCode;
@@ -1026,7 +1342,8 @@ mod request_auth_tests {
             Some("Bearer not.a.jwt".to_string()),
             Some(bearer(&token)),
         ] {
-            let caller = graphql_caller(&pool, None, header.as_deref()).await;
+            let caller =
+                graphql_caller(&pool, None, header.as_deref(), &ClientInfo::default()).await;
             assert!(matches!(caller, Ok(None)), "{header:?}");
         }
     }
@@ -1038,7 +1355,8 @@ mod request_auth_tests {
         let verifier = unreachable_verifier();
         let pool = unreachable_pool();
         for header in [None, Some("Basic dXNlcjpwYXNz")] {
-            let caller = graphql_caller(&pool, Some(&verifier), header).await;
+            let caller =
+                graphql_caller(&pool, Some(&verifier), header, &ClientInfo::default()).await;
             assert!(matches!(caller, Ok(None)), "{header:?}");
         }
     }
@@ -1052,6 +1370,7 @@ mod request_auth_tests {
             &unreachable_pool(),
             Some(&unreachable_verifier()),
             Some(&bearer(&token)),
+            &ClientInfo::default(),
         )
         .await;
         assert!(matches!(caller, Ok(None)));
@@ -1076,10 +1395,15 @@ mod request_auth_tests {
             bearer(&issuer.sign(&expired)),
             bearer(&hs256),
         ] {
-            let reply = graphql_caller(&unreachable_pool(), Some(&verifier), Some(&header))
-                .await
-                .expect_err(&header)
-                .into_response();
+            let reply = graphql_caller(
+                &unreachable_pool(),
+                Some(&verifier),
+                Some(&header),
+                &ClientInfo::default(),
+            )
+            .await
+            .expect_err(&header)
+            .into_response();
             assert_eq!(reply.status(), StatusCode::UNAUTHORIZED, "{header}");
             assert_eq!(
                 reply.headers()["WWW-Authenticate"],
@@ -1108,10 +1432,15 @@ mod request_auth_tests {
         let token = issuer.mint_token(sub, &["annotation:create", "offline_access"]);
 
         for _ in 0..2 {
-            let caller = graphql_caller(&pool, Some(&verifier), Some(&bearer(&token)))
-                .await
-                .expect("signed in")
-                .expect("a caller");
+            let caller = graphql_caller(
+                &pool,
+                Some(&verifier),
+                Some(&bearer(&token)),
+                &ClientInfo::default(),
+            )
+            .await
+            .expect("signed in")
+            .expect("a caller");
             assert_eq!(caller.user.id, sub);
             assert_eq!(caller.principal.user_id, sub);
             assert_eq!(
@@ -1123,11 +1452,36 @@ mod request_auth_tests {
         }
 
         set_active(&pool, sub, false).await;
-        let reply = graphql_caller(&pool, Some(&verifier), Some(&bearer(&token)))
+        let client = ClientInfo::new(Some("198.51.100.4".into()), Some("SuspendedTest/2.0"));
+        let reply = graphql_caller(&pool, Some(&verifier), Some(&bearer(&token)), &client)
             .await
             .expect_err("suspended");
         assert_eq!(reply, GraphqlRefusal::Suspended);
         assert_eq!(reply.into_response().status(), StatusCode::FORBIDDEN);
+
+        // The refusal is recorded as a security event for the admin console.
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::security_events;
+        let mut conn = pool.get().await.unwrap();
+        let events: Vec<(String, Option<String>, Option<String>)> = security_events::table
+            .filter(security_events::user_id.eq(sub))
+            .select((
+                security_events::event_type,
+                security_events::ip_address,
+                security_events::user_agent,
+            ))
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            events,
+            [(
+                "suspended_account".to_string(),
+                Some("198.51.100.4".to_string()),
+                Some("SuspendedTest/2.0".to_string())
+            )]
+        );
     }
 
     async fn set_active(pool: &DatabasePool, id: Uuid, active: bool) {

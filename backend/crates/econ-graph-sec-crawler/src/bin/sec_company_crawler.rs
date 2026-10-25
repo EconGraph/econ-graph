@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use econ_graph_core::database::DatabasePool;
+use econ_graph_core::database::DataPool;
 use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
 use std::collections::HashMap;
 use tracing::{error, info, warn};
@@ -91,9 +91,8 @@ async fn main() -> Result<()> {
     }
 
     if cli.enqueue {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
-        let pool = econ_graph_core::database::create_pool(&database_url).await?;
+        let database_url = econ_graph_core::config::data_database_url()?;
+        let pool = DataPool(econ_graph_core::database::create_pool(&database_url).await?);
         let (enqueued, active) =
             econ_graph_sec_crawler::enqueue_filings(&pool, &ciks, cli.priority).await?;
         println!(
@@ -141,11 +140,10 @@ async fn main() -> Result<()> {
     };
 
     // Initialize database connection
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
+    let database_url = econ_graph_core::config::data_database_url()?;
 
-    let pool = econ_graph_core::database::create_pool(&database_url).await?;
-    let crawler = SecEdgarCrawler::with_config(pool, config).await?;
+    let pool = DataPool(econ_graph_core::database::create_pool(&database_url).await?);
+    let crawler = SecEdgarCrawler::with_config(pool.0, config).await?;
 
     // Execute batch crawl
     let results = batch_crawl_companies(crawler, ciks, cli.max_concurrent).await?;

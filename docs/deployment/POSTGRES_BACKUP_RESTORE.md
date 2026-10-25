@@ -1,5 +1,11 @@
 # PostgreSQL Backups and Restore
 
+> On threadripper (production), the primary protection is now host-side:
+> btrfs snapshots, verified nightly dumps of both databases, a weekly restore
+> drill and a freshness check. See [BACKUPS.md](BACKUPS.md). The in-cluster
+> CronJob described here is kept as a second copy for now; BACKUPS.md says
+> why and when to retire it.
+
 The `econ-graph` namespace's PostgreSQL StatefulSet had no backups and its
 data could be deleted in one step (teardown, or the wrong `kubectl delete`).
 This document covers what was added to fix that, and how to use it.
@@ -20,23 +26,23 @@ This document covers what was added to fix that, and how to use it.
 - **`postgres-backup-configmap.yaml`**: the `backup.sh` / `sync.sh` /
   `restore.sh` scripts the CronJob and restore job run. `backup.sh` also
   reads the entire dump with `pg_restore --file=/dev/null` before it's considered
-  successful, and prunes dumps older than `BACKUP_RETENTION_DAYS` (default
-  14).
+  successful. It never deletes dumps.
 - **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
   `PersistentVolume`s for both PostgreSQL data and backups to
   `persistentVolumeReclaimPolicy: Retain`. It runs after PostgreSQL comes
   up and again before teardown. A backup PVC using delayed binding may not
   have a PV until the first backup job; teardown protects it once bound.
   Deleting either PVC leaves its PV `Released` for manual reattachment.
-- **`scripts/deploy/teardown.sh`**: now prompts before deleting the
-  `econ-graph` namespace (which owns both the PostgreSQL and backup PVCs).
-  Before removing resources, it sets both bound PVs to Retain and stops if
-  that step fails.
-  Pass `--yes`/`-y` to skip that prompt non-interactively (e.g. in CI).
-  This does **not** also delete the kind cluster: on kind, the cluster's
-  node is what actually stores every PV's data (Retain policy included), so
-  deleting it destroys the database and its backups regardless. That still
-  needs its own confirmation, or an explicit `--delete-cluster` flag.
+- **`scripts/deploy/teardown.sh`**: dumps both databases first and refuses
+  when `postgresql-0` is not running unless `--no-backup` is given. It sets
+  both bound PVs to Retain and stops if that step fails. Deleting the
+  application, its Secrets and the `econ-graph` namespace (which owns the
+  PostgreSQL and backup PVCs) needs the namespace name typed on a terminal,
+  or `--yes`; without either it refuses before changing anything.
+  `--dry-run` prints every step and changes nothing.
+  It does **not** delete the kind cluster unless `--delete-cluster` is given
+  or the cluster name is typed when asked: the cluster's nodes hold the
+  in-cluster backup volume and Grafana's data. `--yes` never implies it.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: runs the restore.
@@ -150,6 +156,19 @@ empty database instead of your old data. To bind back to the old volume:
 
 ## Retention
 
-`BACKUP_RETENTION_DAYS` on the `pg-dump` container (default 14) controls how
-many days of dumps are kept on the PVC. Raise the PVC size in
-`postgres-backup-pvc.yaml` if you raise retention.
+Nothing deletes backups automatically: every nightly dump stays on the PVC
+until an operator removes it. Watch the PVC's usage (20Gi by default, see
+`postgres-backup-pvc.yaml`), and when it fills, copy the dumps you want to keep
+elsewhere before deleting old ones by hand. List them with:
+
+```bash
+./scripts/deploy/restore-postgres-backup.sh --list
+```
+
+The PVC is `ReadWriteOnce`, so delete from a short-lived pod that mounts it while no
+backup Job is running, naming each dump explicitly:
+
+```bash
+kubectl -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.36 \
+  --overrides='{"spec":{"containers":[{"name":"cleanup","image":"busybox:1.36","stdin":true,"command":["rm","-v","/backups/econ_graph-20260101-080000.dump"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
+```

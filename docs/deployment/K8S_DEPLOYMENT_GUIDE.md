@@ -75,7 +75,7 @@ docker build \
   --build-arg VITE_API_URL="http://localhost" \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
-  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   -t econ-graph-frontend:v4.0.0 frontend
 docker build -t econ-graph-chart-api:v1.0.0 chart-api-service
@@ -88,8 +88,11 @@ for image in econ-graph-backend:v4.0.0 econ-graph-crawler-worker:v4.0.0 \
 done
 ```
 
-Set `VITE_OIDC_ISSUER` before building to enable frontend sign-in. Configure
-the issuer and client for the intended environment; an unset issuer hides sign-in.
+`VITE_OIDC_ISSUER` defaults to the path `/idp/realms/econ-graph`, which the app
+resolves against its own origin at runtime, so one image serves `http://localhost`
+and the public host (`PUBLIC_HOST`, see the Public site section of `k8s/README.md`)
+alike. Set a full URL only for a Keycloak on another origin; an empty value hides
+sign-in.
 Admin images are not built above. Review the admin manifests before applying the
 whole directory.
 
@@ -117,15 +120,11 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 
 # Apply Let's Encrypt issuers
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
-
-# The gateway, with listener https for the public host name, and the routes
-GATEWAY_HTTPS_HOSTNAME=econgraph.com ./scripts/deploy/install-gateway.sh
-./scripts/deploy/apply-gateway-routes.sh
 ```
 
-cert-manager issues the https listener's certificate only with its Gateway API support on
-(`--enable-gateway-api`), which `scripts/deploy/deploy.sh` adds to the cert-manager manifest it
-applies.
+The public site is served through the Cloudflare Tunnel: TLS for visitors ends at Cloudflare,
+and the tunnel reaches the gateway's https listener. `PUBLIC_HOST=econgraph.com
+./scripts/deploy/deploy.sh` sets it up; see "Public site" in `k8s/README.md`.
 
 ## Service URLs
 

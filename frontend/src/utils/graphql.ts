@@ -804,6 +804,11 @@ export interface CreateAnnotationInput {
   color?: string;
   /** False (the default) keeps the annotation private to its author. */
   isPublic: boolean;
+  /**
+   * New for each annotation, reused only to retry the same create: the backend answers a
+   * repeat with the annotation the first attempt stored instead of adding another (ECO-439).
+   */
+  idempotencyKey?: string;
 }
 
 /** Fields left out are unchanged. The date can't be changed. */

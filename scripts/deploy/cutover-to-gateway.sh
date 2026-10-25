@@ -6,19 +6,25 @@
 # ingress-nginx; deploy.sh installs the gateway directly on a new one.
 #
 # Usage:
-#   scripts/deploy/cutover-to-gateway.sh [--dry-run] [--yes] [--context NAME] [--host-url URL]
+#   scripts/deploy/cutover-to-gateway.sh [--dry-run] [--yes] [--context NAME] [--host-url URL] [--host-https-url URL]
 #   scripts/deploy/cutover-to-gateway.sh --rollback DIR [--dry-run] [--yes] [--context NAME] [--host-url URL]
 #
 #   --dry-run       Print every step; change nothing.
 #   --yes           Answer the confirmation before ingress-nginx is removed.
 #   --context NAME  kubectl context (default kind-econ-graph).
-#   --host-url URL  Where host ports 80/443 answer (default http://localhost).
+#   --host-url URL  Where host port 80 answers (default http://localhost).
+#   --host-https-url URL
+#                   Where host port 443 answers (default https://localhost);
+#                   checked only for a public host.
 #   --rollback DIR  Undo a cut-over from the state it saved in DIR (below).
 #
 # Steps:
 #   1. Read-only checks: the API server answers, namespace econ-graph and the
 #      frontend and backend Services exist; report the ingress-nginx
-#      controller, the Ingresses it serves and what else to look out for.
+#      controller, the Ingresses it serves and what else to look out for. The
+#      public host (PUBLIC_HOST, scripts/deploy/lib/public-host.sh) is the one
+#      the public Ingresses serve, unless PUBLIC_HOST is given; it needs
+#      cert-manager.
 #   2. Save what a rollback needs to
 #      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/
 #      (mode 700; the files 600): the Ingresses and NetworkPolicies of
@@ -32,28 +38,41 @@
 #      install the gateway next to ingress-nginx with install-gateway.sh,
 #      GATEWAY_HOST_PORTS=false: ingress-nginx keeps host ports 80/443, the
 #      proxy is reachable only through its Service. Apply the routes
-#      (apply-gateway-routes.sh).
+#      (apply-gateway-routes.sh), with the public host's https listener,
+#      certificate, public routes and redirects.
 #   4. Check every route through that Service (kubectl port-forward and
-#      test-gateway-routes.sh, rate limits included), and that a pod in
-#      econ-graph reaches the proxy Service (a short-lived curl pod, image
-#      curlimages/curl, which the NetworkPolicies must let through). If a
-#      check fails, stop here: nothing has been removed and the site is still
-#      on ingress-nginx.
+#      test-gateway-routes.sh, rate limits included): on port 80 for
+#      localhost, and for a public host on port 443 with its Host header, the
+#      way the tunnel connector sends it, plus its redirects. Check that a pod
+#      in econ-graph reaches the proxy Service, over https too for a public
+#      host (a short-lived curl pod, image curlimages/curl, which the
+#      NetworkPolicies must let through, as they must cloudflared). If a check
+#      fails, stop here: nothing has been removed and the site is still on
+#      ingress-nginx.
 #   5. Ask for a typed "yes" (or --yes).
 #   6. Delete the Ingresses in econ-graph, then ingress-nginx itself: its
 #      namespace (controller, admission webhook, ConfigMaps and Secrets) and
 #      its cluster-wide objects (IngressClass nginx, webhook configuration,
-#      RBAC). From here on a failure prints the rollback command.
+#      RBAC). From here on a failure prints the rollback command. With a
+#      cloudflared Deployment, the tunnel's origin keeps working: namespace
+#      ingress-nginx is re-created holding only Service ingress-nginx-controller
+#      of type ExternalName, pointing at the gateway's proxy Service (labelled
+#      econgraph.io/tunnel-origin-shim). Point the tunnel's public hostnames
+#      at https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443
+#      (No TLS Verify, as before) in the Cloudflare dashboard, then delete
+#      that namespace; the script prints both.
 #   7. Re-run install-gateway.sh with host ports: the proxy restarts on the
 #      control-plane node holding ports 80/443 (a few seconds without a
 #      proxy, plus the time ingress-nginx takes to stop).
-#   8. Check every route again at --host-url.
+#   8. Check every route again at --host-url, and for a public host at
+#      --host-https-url and through the tunnel's origin name.
 #
 # Rollback (--rollback DIR, with the DIR that step 2 printed):
 #   1. Move the gateway proxy off host ports 80/443 (install-gateway.sh with
 #      GATEWAY_HOST_PORTS=false, from the manifests saved in DIR); the
 #      gateway objects stay, so a later cut-over starts again from step 3.
-#   2. Wait for a terminating ingress-nginx namespace to be gone, install
+#   2. Delete the tunnel-origin Service of step 6, if any. Wait for a
+#      terminating ingress-nginx namespace to be gone, install
 #      ingress-nginx from the kind manifest saved in DIR, then put back its
 #      saved ConfigMaps, controller Deployment (its arguments and node
 #      selector included) and Secrets. The admission webhook's certificate
@@ -74,11 +93,7 @@
 #
 # Never touches PersistentVolumes, databases or the Secrets of econ-graph;
 # the only Secrets it deletes are those in namespace ingress-nginx, after
-# saving them. A Cloudflare Tunnel whose origin is ingress-nginx's Service
-# must be pointed at
-# http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:80
-# (the tunnel's public-hostname settings) when step 6 runs; the script
-# reminds you if it finds a cloudflared Deployment.
+# saving them. It never changes the Cloudflare side.
 
 set -euo pipefail
 
@@ -90,16 +105,18 @@ DRY_RUN=false
 ASSUME_YES=false
 KUBE_CONTEXT="kind-econ-graph"
 HOST_URL="http://localhost"
+HOST_HTTPS_URL="https://localhost"
 ROLLBACK_DIR=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=true ;;
         --yes | -y) ASSUME_YES=true ;;
-        --context | --host-url | --rollback)
+        --context | --host-url | --host-https-url | --rollback)
             [ $# -ge 2 ] || { echo "error: $1 needs a value" >&2; exit 2; }
             case "$1" in
                 --context) KUBE_CONTEXT="$2" ;;
                 --host-url) HOST_URL="$2" ;;
+                --host-https-url) HOST_HTTPS_URL="$2" ;;
                 --rollback) ROLLBACK_DIR="$2" ;;
             esac
             shift
@@ -116,6 +133,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 HOST_URL="${HOST_URL%/}"
+HOST_HTTPS_URL="${HOST_HTTPS_URL%/}"
+PROXY_FQDN="econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local"
+SHIM_LABEL="econgraph.io/tunnel-origin-shim"
 
 log() { echo; echo "==> $*"; }
 warn() { echo "warning: $*" >&2; }
@@ -164,25 +184,62 @@ install_gateway() {
 apply_routes() {
     local args=(--context "$KUBE_CONTEXT")
     [ "$DRY_RUN" = true ] && args+=(--dry-run)
-    "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" "${args[@]}"
+    PUBLIC_HOST="${PUBLIC_HOST:-none}" "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" "${args[@]}"
+}
+
+# The public host's redirects: plain http for HOST and www.HOST, and https for
+# www.HOST, answer 301 to https://HOST. BASE_HTTP and BASE_HTTPS are where
+# the gateway's ports 80 and 443 answer.
+check_public_redirects() {
+    local base_http="$1" base_https="$2" status=0 got spec scheme name base
+    for spec in "http ${PUBLIC_HOST} ${base_http}" "http www.${PUBLIC_HOST} ${base_http}" \
+        "https www.${PUBLIC_HOST} ${base_https}"; do
+        read -r scheme name base <<<"$spec"
+        got="$(curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 -H "Host: ${name}" "${base}/some/path")"
+        if [ "$got" = "301 https://${PUBLIC_HOST}/some/path" ]; then
+            echo "  ok    ${scheme}://${name}/some/path -> 301 https://${PUBLIC_HOST}/some/path"
+        else
+            echo "  FAIL  ${scheme}://${name}/some/path: got '${got}'"
+            status=1
+        fi
+    done
+    return "$status"
 }
 
 # Check the routes through the proxy Service, before the proxy has host ports.
 check_routes_in_cluster() {
     local port pf status=0
     if [ "$DRY_RUN" = true ]; then
-        echo "+ kubectl -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy <port>:80"
+        echo "+ kubectl -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy <port>:80 <port2>:443"
         echo "+ scripts/deploy/test-gateway-routes.sh --rate-limit http://127.0.0.1:<port>"
+        if [ -n "${PUBLIC_HOST:-}" ]; then
+            echo "+ ROUTE_HOST=${PUBLIC_HOST} scripts/deploy/test-gateway-routes.sh https://127.0.0.1:<port2>, and the redirects"
+        fi
         return 0
     fi
     port=$((20000 + RANDOM % 20000))
-    kc -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy "${port}:80" >/dev/null 2>&1 &
+    if [ -n "${PUBLIC_HOST:-}" ]; then
+        kc -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy "${port}:80" "$((port + 1)):443" >/dev/null 2>&1 &
+    else
+        kc -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy "${port}:80" >/dev/null 2>&1 &
+    fi
     pf=$!
     for _ in $(seq 1 30); do
         curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${port}/" && break
         sleep 1
     done
     "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" --rate-limit "http://127.0.0.1:${port}" || status=$?
+    if [ -n "${PUBLIC_HOST:-}" ]; then
+        # The certificate is issued by cert-manager; give it a moment.
+        for _ in $(seq 1 60); do
+            [ "$(kc -n econ-graph-gateway get certificate econ-graph-tls \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] && break
+            sleep 2
+        done
+        echo "Public host ${PUBLIC_HOST}, over https as the tunnel connector sends it:"
+        ROUTE_HOST="$PUBLIC_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "https://127.0.0.1:$((port + 1))" || status=$?
+        check_public_redirects "http://127.0.0.1:${port}" "https://127.0.0.1:$((port + 1))" || status=$?
+    fi
     kill "$pf" 2>/dev/null || true
     wait "$pf" 2>/dev/null || true
     return "$status"
@@ -191,22 +248,32 @@ check_routes_in_cluster() {
 # A pod in econ-graph (only the namespace-wide NetworkPolicy applies to it,
 # as to an in-cluster tunnel connector) reaches the gateway through its
 # Service.
+# check_pod_reaches_proxy URL HOST: a pod in econ-graph (only the
+# namespace-wide NetworkPolicy applies to it, as to the tunnel connector)
+# gets 200 for URL/health with Host HOST.
 check_pod_reaches_proxy() {
-    local out
+    local url="$1" host="$2" out
     if [ "$DRY_RUN" = true ]; then
-        echo "+ kubectl -n ${NAMESPACE} run gateway-preflight --rm -i --restart=Never --image=${PREFLIGHT_IMAGE} -- curl http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/health"
+        echo "+ kubectl -n ${NAMESPACE} run gateway-preflight --rm -i --restart=Never --image=${PREFLIGHT_IMAGE} -- curl -k -H 'Host: ${host}' ${url}/health"
         return 0
     fi
     kc -n "$NAMESPACE" delete pod gateway-preflight --ignore-not-found >/dev/null
     out="$(kc -n "$NAMESPACE" run gateway-preflight --rm -i --quiet --restart=Never \
         --image="$PREFLIGHT_IMAGE" --labels=app=gateway-preflight --pod-running-timeout=180s -- \
-        curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: localhost' \
-        http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/health 2>&1 || true)"
+        curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: ${host}" \
+        "${url}/health" 2>&1 || true)"
     if [ "${out: -3}" = 200 ]; then
-        echo "  ok    a pod in ${NAMESPACE} reaches econ-graph-gateway-proxy (200)"
+        echo "  ok    a pod in ${NAMESPACE} reaches ${url} for ${host} (200)"
     else
-        echo "  FAIL  a pod in ${NAMESPACE} does not reach econ-graph-gateway-proxy: ${out}"
+        echo "  FAIL  a pod in ${NAMESPACE} does not reach ${url} for ${host}: ${out}"
         return 1
+    fi
+}
+
+check_pods_reach_proxy() {
+    check_pod_reaches_proxy "http://${PROXY_FQDN}" localhost || return 1
+    if [ -n "${PUBLIC_HOST:-}" ]; then
+        check_pod_reaches_proxy "https://${PROXY_FQDN}" "$PUBLIC_HOST" || return 1
     fi
 }
 
@@ -263,6 +330,10 @@ if [ -n "$ROLLBACK_DIR" ]; then
     install_gateway false "$gateway_manifests"
 
     log "2/4 ingress-nginx ${version}"
+    # The tunnel-origin Service of the cut-over gives way to ingress-nginx's own.
+    if [ -n "$(kc -n ingress-nginx get service -l "${SHIM_LABEL}=true" -o name 2>/dev/null)" ]; then
+        run kc -n ingress-nginx delete service -l "${SHIM_LABEL}=true"
+    fi
     if [ "$DRY_RUN" != true ] && [ "$(kc get namespace ingress-nginx -o jsonpath='{.status.phase}' 2>/dev/null)" = Terminating ]; then
         echo "  waiting for namespace ingress-nginx to finish terminating"
         kc wait --for=delete namespace/ingress-nginx --timeout=600s
@@ -350,11 +421,23 @@ if kc -n ingress get daemonset nginx-ingress-microk8s-controller >/dev/null 2>&1
 fi
 echo "  Ingresses in ${NAMESPACE}:"
 kc -n "$NAMESPACE" get ingress 2>/dev/null | sed 's/^/    /' || true
+# The public host: given, or the one the public Ingresses serve
+# (scripts/deploy/lib/public-host.sh).
+if [ -z "${PUBLIC_HOST+x}" ]; then
+    PUBLIC_HOST="$(kc -n "$NAMESPACE" get ingress -l econgraph.io/public-host=true \
+        -o jsonpath='{range .items[*]}{.spec.rules[0].host}{"\n"}{end}' 2>/dev/null | sed -n '/./{s/^www\.//;p;q;}')"
+fi
+[ "${PUBLIC_HOST:-}" = none ] && PUBLIC_HOST=""
+if [ -n "$PUBLIC_HOST" ]; then
+    echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST)"
+    kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
+        die "the public host needs cert-manager (for the gateway's https listener certificate); install it first"
+else
+    echo "  public host: none"
+fi
 # Host names the Ingresses serve that the HTTPRoutes don't: after step 6 the
 # gateway answers them with 404.
-https_host="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
-    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null || true)"
-route_hosts="$(printf 'localhost\n%s\n' "$https_host")"
+route_hosts="$(printf 'localhost\n%s\n%s\n' "${PUBLIC_HOST}" "www.${PUBLIC_HOST}")"
 unserved=""
 for host in $(kc -n "$NAMESPACE" get ingress -o jsonpath='{.items[*].spec.rules[*].host}' 2>/dev/null | tr ' ' '\n' | sort -u); do
     grep -qx "$host" <<<"$route_hosts" || unserved="${unserved} ${host}"
@@ -363,9 +446,16 @@ if [ -n "$unserved" ]; then
     warn "the Ingresses also serve${unserved}, which the HTTPRoutes do not; the gateway will not answer for those host names"
 fi
 if [ -n "$nginx_image" ]; then
-    custom="$(kc -n ingress-nginx get configmap ingress-nginx-controller -o jsonpath='{.data}' 2>/dev/null || true)"
-    if [ -n "$custom" ] && [ "$custom" != "{}" ] && [ "$custom" != '{"allow-snippet-annotations":"false"}' ]; then
-        warn "ingress-nginx's ConfigMap has settings (${custom}); the gateway does not take them over (they are saved for a rollback)"
+    # The public host's client-address settings (enable-real-ip and the rest) have
+    # their counterpart in the gateway's client-traffic-policy.yaml; anything else
+    # is not carried over. ($k and $v are go-template variables.)
+    # shellcheck disable=SC2016
+    custom="$(kc -n ingress-nginx get configmap ingress-nginx-controller \
+        -o go-template='{{range $k, $v := .data}}{{$k}}={{$v}}{{"\n"}}{{end}}' 2>/dev/null |
+        grep -Ev '^(allow-snippet-annotations=false|enable-real-ip=|forwarded-for-header=|proxy-real-ip-cidr=)' |
+        tr '\n' ' ' || true)"
+    if [ -n "$custom" ]; then
+        warn "ingress-nginx's ConfigMap has settings the gateway does not take over: ${custom}(they are saved for a rollback)"
     fi
 fi
 if [ -z "${EXPECTED_ISSUER:-}" ]; then
@@ -379,8 +469,11 @@ fi
 if [ -n "$(kc -n "$NAMESPACE" get networkpolicy -o name 2>/dev/null)" ]; then
     warn "NetworkPolicies exist in ${NAMESPACE}; they must admit the Envoy proxy pods and let pods reach them (k8s/manifests/network-policy.yaml does), or the checks in step 4 fail"
 fi
+TUNNEL=false
 if kc -n "$NAMESPACE" get deployment cloudflared >/dev/null 2>&1; then
-    warn "a cloudflared Deployment runs in ${NAMESPACE}: after step 6, point the tunnel's public hostnames at http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:80"
+    TUNNEL=true
+    echo "  cloudflared: the tunnel's origin is kept working through step 6 (see the header)"
+    [ -n "$PUBLIC_HOST" ] || warn "a cloudflared Deployment runs, but there is no public host for it to serve"
 fi
 
 log "2/8 Saving rollback state"
@@ -435,6 +528,7 @@ else
     echo "  rollback: scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"
 fi
 
+export PUBLIC_HOST
 log "3/8 Gateway next to ingress-nginx (no host ports yet)"
 run kc label namespace "$NAMESPACE" --overwrite econgraph.io/gateway-access=true econgraph.io/env=production
 install_gateway false "$GATEWAY_MANIFESTS"
@@ -453,7 +547,7 @@ if [ "$DRY_RUN" != true ]; then
 fi
 
 log "4/8 Checking every route through the proxy Service"
-if ! check_routes_in_cluster || ! check_pod_reaches_proxy; then
+if ! check_routes_in_cluster || ! check_pods_reach_proxy; then
     die "a check failed; ingress-nginx is untouched and still serves the site. The gateway can stay installed (it holds no host ports)."
 fi
 
@@ -472,6 +566,37 @@ if [ -n "$nginx_image" ]; then
     run kc delete ingressclass,validatingwebhookconfiguration,clusterrole,clusterrolebinding \
         -l app.kubernetes.io/name=ingress-nginx --ignore-not-found
 fi
+if [ "$TUNNEL" = true ]; then
+    # The tunnel's dashboard origin names ingress-nginx's Service; keep that
+    # name answering, now from the gateway's proxy (port 443 is passed on).
+    echo "+ kubectl --context ${KUBE_CONTEXT} create namespace ingress-nginx; Service ingress-nginx-controller -> ${PROXY_FQDN} (ExternalName)"
+    if [ "$DRY_RUN" != true ]; then
+        cat <<EOF | kc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    ${SHIM_LABEL}: "true"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+  labels:
+    ${SHIM_LABEL}: "true"
+spec:
+  type: ExternalName
+  externalName: ${PROXY_FQDN}
+  ports:
+  - name: http
+    port: 80
+  - name: https
+    port: 443
+EOF
+    fi
+fi
 
 log "7/8 Gateway proxy onto host ports 80/443"
 install_gateway true "$GATEWAY_MANIFESTS"
@@ -481,7 +606,16 @@ if [ "$DRY_RUN" = true ]; then
     echo "+ scripts/deploy/test-gateway-routes.sh ${HOST_URL}"
 else
     wait_host_url || warn "${HOST_URL}/ is not answering yet"
-    if ! "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_URL"; then
+    failed=false
+    "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_URL" || failed=true
+    if [ -n "$PUBLIC_HOST" ]; then
+        ROUTE_HOST="$PUBLIC_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_HTTPS_URL" || failed=true
+        check_public_redirects "$HOST_URL" "$HOST_HTTPS_URL" || failed=true
+        if [ "$TUNNEL" = true ]; then
+            check_pod_reaches_proxy "https://ingress-nginx-controller.ingress-nginx.svc.cluster.local" "$PUBLIC_HOST" || failed=true
+        fi
+    fi
+    if [ "$failed" = true ]; then
         echo "A route check failed after the switch."
         exit 1
     fi
@@ -493,4 +627,12 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 echo "Done: ${HOST_URL} is served by the gateway; ingress-nginx is removed."
+if [ "$TUNNEL" = true ]; then
+    echo "The tunnel reaches the gateway through Service ingress-nginx/ingress-nginx-controller (ExternalName)."
+    echo "In the Cloudflare dashboard (Zero Trust > Networks > Tunnels > the tunnel > Public hostnames),"
+    echo "set the service of each public hostname to"
+    echo "  HTTPS  ${PROXY_FQDN}:443   (keep TLS > No TLS Verify on)"
+    echo "then remove the stand-in:"
+    echo "  kubectl --context ${KUBE_CONTEXT} delete namespace ingress-nginx"
+fi
 [ -z "$STATE_DIR" ] || echo "Rollback, if needed: scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"

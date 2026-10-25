@@ -15,8 +15,9 @@ All notable changes to EconGraph are documented here. The format follows
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
 - The kind cluster serves `/data/graphql`: the backend's `/graphql` with `Authorization` and
   `Cookie` removed, rate-limited like `/graphql`.
-- An optional HTTPS listener on the gateway (`GATEWAY_HTTPS_HOSTNAME=<host>`, removed again
-  with `none`), with a cert-manager certificate; the routes then also serve that host name.
+- For the public host (`PUBLIC_HOST`, served through the Cloudflare Tunnel), the gateway gets an
+  https listener with a cert-manager certificate, `-public` copies of the routes on it, and
+  redirects of plain http and `www` to `https://<host>`.
 - `scripts/deploy/test-gateway-routes.sh` checks every route on the gateway, and
   `scripts/deploy/cutover-to-gateway.sh` moves a running cluster from ingress-nginx to the
   gateway (with `--dry-run` and `--rollback`).
@@ -30,12 +31,25 @@ All notable changes to EconGraph are documented here. The format follows
   longer routed to the backend.
 - The `/graphql` rate limit (20 requests a second per client address, bursts of 100) now
   answers 429 instead of 503 when exceeded, and counts IPv6 clients too.
-- The services see only the client address and scheme the gateway sets: forwarding headers a
-  client sends (`X-Forwarded-For` and the like) are dropped.
+- The client address is the TCP peer, or, for requests from a pod (the tunnel connector), the
+  visitor in `X-Forwarded-For`, so the rate limits apply per visitor behind the tunnel. Every
+  route sets `X-Forwarded-For` to that address, and a client's `X-Forwarded-Proto/-Host/-Port`,
+  `Forwarded` and `X-Real-IP` are dropped.
+- The tunnel's origin is the gateway:
+  `https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443` (No TLS
+  Verify, as before).
 - The frontend's security headers (CSP, HSTS, frame options) are sent on every frontend
   response through the gateway, on plain HTTP too, and the API responses get
   `X-Content-Type-Options`, `X-Frame-Options` and HSTS. The CSP no longer allows connections to
   `https://api.econ-graph.com`.
+- The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
+  `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read
+  `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
+  longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. `seed-fixtures` applies only the
+  data migrations. The SEC crawlers no longer fall back to a local default database.
+- The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
+  next to `database-url`, all three naming the one database. The backend and crawler-worker
+  manifests read the new keys.
 
 ### Removed
 

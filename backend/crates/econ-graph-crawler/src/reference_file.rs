@@ -156,15 +156,35 @@ pub async fn refresh_at<'a, F>(
     ctx: &CrawlCtx,
     file: &ReferenceFile<'_>,
     request_url: &str,
+    apply: F,
+) -> Result<bool, CrawlError>
+where
+    F: FnMut(String) -> Apply<'a>,
+{
+    refresh_at_with(ctx, file, request_url, true, apply).await
+}
+
+/// [`refresh_at`], or, when `conditional` is false, a plain GET that sends none of the stored
+/// validators, so the body is always downloaded and passed to `apply` (and the response's
+/// validators stored as usual).
+async fn refresh_at_with<'a, F>(
+    ctx: &CrawlCtx,
+    file: &ReferenceFile<'_>,
+    request_url: &str,
+    conditional: bool,
     mut apply: F,
 ) -> Result<bool, CrawlError>
 where
     F: FnMut(String) -> Apply<'a>,
 {
     let db_err = db_err(file.source, file.url);
-    let known = persist::url_validators(&ctx.pool, file.source, file.url)
-        .await
-        .map_err(&db_err)?;
+    let known = if conditional {
+        persist::url_validators(&ctx.pool, file.source, file.url)
+            .await
+            .map_err(&db_err)?
+    } else {
+        None
+    };
     let (body, validators) = match ctx
         .http
         .get_reference_file_if_changed(file.source, request_url, known.as_ref())
@@ -197,11 +217,22 @@ pub async fn refresh_code_list(
     source: SourceId,
     list: &CodeList,
 ) -> Result<bool, CrawlError> {
+    refresh_code_list_with(ctx, source, list, true).await
+}
+
+/// [`refresh_code_list`], or, when `conditional` is false, with an unconditional GET (see
+/// [`refresh_at_with`]) for a caller that needs the codes parsed from a real body.
+pub async fn refresh_code_list_with(
+    ctx: &CrawlCtx,
+    source: SourceId,
+    list: &CodeList,
+    conditional: bool,
+) -> Result<bool, CrawlError> {
     let file = ReferenceFile {
         source,
         url: &list.url,
     };
-    refresh_at(ctx, &file, list.request_url(), |body| {
+    refresh_at_with(ctx, &file, list.request_url(), conditional, |body| {
         let parse = Arc::clone(&list.parse);
         let db_err = db_err(source, &list.url);
         Box::pin(async move {

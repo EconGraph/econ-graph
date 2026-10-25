@@ -11,6 +11,14 @@ echo "Building EconGraph Docker images..."
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Build in, and load from, the Docker daemon the kind cluster runs on (the
+# rootful one; scripts/deploy/lib/kind-env.sh sets DOCKER_HOST, override with
+# ECONGRAPH_DOCKER_HOST): `kind load docker-image` reads the image from the
+# same daemon that runs the cluster.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
 # Version to tag images with, read from backend/Cargo.toml (the one place the
 # version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml
 # and crawler-worker.yaml hard-code this same tag, so it can't be overridden
@@ -28,19 +36,27 @@ fi
 # Build backend image
 echo "Building backend image..."
 cd backend
-docker build -t econ-graph-backend:${VERSION} -t econ-graph-backend:latest .
+docker build -t econ-graph-backend:"${VERSION}" -t econ-graph-backend:latest .
 echo "Backend image built successfully"
 
 # Build crawler-worker image (same Dockerfile, separate stage; reuses the builder stage)
 echo "Building crawler-worker image..."
 docker build --target crawler-worker \
-  -t econ-graph-crawler-worker:${VERSION} -t econ-graph-crawler-worker:latest .
+  -t econ-graph-crawler-worker:"${VERSION}" -t econ-graph-crawler-worker:latest .
 echo "Crawler-worker image built successfully"
 
 # Build frontend image
 echo "Building frontend image..."
-if [ -z "${VITE_OIDC_ISSUER:-}" ]; then
-  echo "Warning: VITE_OIDC_ISSUER is not set; the frontend image will have sign-in hidden." >&2
+# The OIDC issuer is baked in at build time (Vite). The default is a path, which
+# the app resolves against its own origin at runtime (frontend/src/auth/oidcConfig.ts):
+# Keycloak is served under /idp on the same host as the app, so this one image
+# works at http://localhost and at the public host (PUBLIC_HOST in deploy.sh,
+# https://econgraph.com) without a rebuild per host. Set VITE_OIDC_ISSUER to a
+# full URL only for a Keycloak on another origin; set it to the empty string
+# to build with sign-in hidden.
+VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}"
+if [ -z "${VITE_OIDC_ISSUER}" ]; then
+  echo "Warning: VITE_OIDC_ISSUER is empty; the frontend image will have sign-in hidden." >&2
 fi
 cd ../frontend
 docker build \
@@ -48,10 +64,10 @@ docker build \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
   --build-arg VITE_DATA_GRAPHQL_URL="${VITE_DATA_GRAPHQL_URL:-}" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
-  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:${VERSION} -t econ-graph-frontend:latest .
+  -t econ-graph-frontend:"${VERSION}" -t econ-graph-frontend:latest .
 echo "Frontend image built successfully"
 
 # Build chart API service image
@@ -68,9 +84,9 @@ echo "Chart API service image built successfully"
 # a registry, and the manifests set imagePullPolicy: Never for these)
 echo "Loading images into kind cluster 'econ-graph'..."
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-econ-graph}"
-kind load docker-image econ-graph-backend:${VERSION} --name "${KIND_CLUSTER_NAME}"
-kind load docker-image econ-graph-crawler-worker:${VERSION} --name "${KIND_CLUSTER_NAME}"
-kind load docker-image econ-graph-frontend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-backend:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-crawler-worker:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-frontend:"${VERSION}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image econ-graph-chart-api:v1.0.0 --name "${KIND_CLUSTER_NAME}"
 # econ-graph-admin-frontend: not loaded (re-enabled by ECO-242, train 3).
 
@@ -82,7 +98,6 @@ echo "  - econ-graph-crawler-worker:${VERSION}"
 echo "  - econ-graph-frontend:${VERSION}"
 echo "  - econ-graph-chart-api:v1.0.0"
 echo ""
-echo "🔒 SSL Configuration:"
-echo "  - Let's Encrypt issuer configured for www.econ-graph.com"
-echo "  - SSL termination enabled with automatic certificate renewal"
-echo "  - HTTPS redirect enforced for production domain"
+echo "Frontend sign-in issuer: ${VITE_OIDC_ISSUER:-<none, sign-in hidden>}"
+echo "Public HTTPS is terminated by Cloudflare and reaches the cluster through the"
+echo "cloudflared tunnel (k8s/manifests/cloudflared.yaml); see PUBLIC_HOST in deploy.sh."

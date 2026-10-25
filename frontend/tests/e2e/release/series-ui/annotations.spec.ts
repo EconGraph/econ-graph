@@ -94,4 +94,66 @@ test.describe('public annotations for an anonymous viewer', () => {
     await expect(dialog).toBeHidden();
     await expect(page.getByText(title)).toHaveCount(0);
   });
+
+  // ECO-439: the backend stores the annotation but the response is lost (a dropped connection,
+  // a proxy timeout), so the page reports a failure and carol saves again. The retry resends
+  // the first attempt's idempotency key, and the backend returns the stored annotation instead
+  // of adding a second. Carol, in this serial group, so no other spec signs her in meanwhile.
+  test('saving again after a lost response stores one annotation', async ({ page }) => {
+    const retried = uniqueTitle('Lost-response annotation');
+    await page.goto(seriesPath);
+    await page.getByRole('button', { name: 'Sign in to annotate' }).click();
+    await signInOnKeycloak(page, USERS.publicAnnotator);
+    await expect(page.getByRole('button', { name: 'Add annotation' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const keys: unknown[] = [];
+    await page.route('**/graphql', async route => {
+      const body = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { input?: { idempotencyKey?: unknown } };
+      } | null;
+      if (!/\bmutation\s+CreateAnnotation\b/.test(body?.query ?? '')) {
+        await route.fallback();
+        return;
+      }
+      keys.push(body?.variables?.input?.idempotencyKey);
+      if (keys.length > 1) {
+        await route.fallback();
+        return;
+      }
+      await route.fetch(); // the backend commits it
+      await route.abort('connectionreset');
+    });
+
+    await page.getByRole('button', { name: 'Add annotation' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add annotation' });
+    await dialog.getByRole('textbox', { name: 'Title' }).fill(retried);
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+
+    // What the backend stores, not just what the page shows.
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.reload();
+    const list = annotationsList(page);
+    await expect(list.getByText(retried, { exact: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    const stored = await list.getByText(retried, { exact: true }).count();
+    // Remove every copy before failing, so a failure leaves nothing behind.
+    for (let left = stored; left > 0; left--) {
+      await list.getByRole('button', { name: `Delete ${retried}` }).first().click();
+      const confirm = page.getByRole('dialog', { name: 'Delete annotation?' });
+      await confirm.getByRole('button', { name: 'Delete' }).click();
+      await expect(confirm).toBeHidden();
+      await expect(list.getByText(retried, { exact: true })).toHaveCount(left - 1);
+    }
+    expect(stored).toBe(1);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
+  });
 });

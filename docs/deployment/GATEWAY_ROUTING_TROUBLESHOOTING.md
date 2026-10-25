@@ -6,8 +6,9 @@ This page is about finding out why a request does not arrive where it should.
 
 ```text
 client ──> host port 80/443 ──> Envoy proxy pod (envoy-gateway-system, control-plane node)
-                                  │  Gateway econ-graph-gateway, listener http / https
-                                  │  HTTPRoutes in econ-graph (host localhost)
+cloudflared ──> econ-graph-gateway-proxy:443 ─┘  Gateway econ-graph-gateway, listener http / https
+                                  │  HTTPRoutes in econ-graph: host localhost on http; for a
+                                  │  public host, <name>-public copies on https and redirects
                                   ├── /, /auth/callback, /silent-callback.html  ──> econ-graph-frontend-service:3000
                                   ├── /api, /auth, /health                      ──> econ-graph-backend-service:9876
                                   ├── /graphql                (rate-limited)    ──> econ-graph-backend-service:9876
@@ -20,6 +21,8 @@ client ──> host port 80/443 ──> Envoy proxy pod (envoy-gateway-system, c
 ```bash
 ./scripts/deploy/test-gateway-routes.sh                 # http://localhost
 ./scripts/deploy/test-gateway-routes.sh --rate-limit    # also the 429 behaviour
+ROUTE_HOST=econgraph.com ./scripts/deploy/test-gateway-routes.sh https://localhost   # the public host
+./scripts/deploy/check-public-site.sh --host econgraph.com                         # and its redirects, spoofing
 ```
 
 Each line names the route and what was expected. To test the proxy without the host ports (for

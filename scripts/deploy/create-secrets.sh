@@ -4,13 +4,20 @@
 # committed to the repository; this script is the only place they come from.
 #
 # Usage:
-#   [VAR=value ...] scripts/deploy/create-secrets.sh
+#   [VAR=value ...] scripts/deploy/create-secrets.sh [--prompt-tunnel-token]
 #
-# Every input is an environment variable. The script is idempotent: run it as
+# Every input is an environment variable, except that --prompt-tunnel-token
+# reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
+# piped input), so the token never lands in shell history, process arguments,
+# or the screen. Run that yourself; never paste the token into a command line. The script is idempotent: run it as
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
-#   econ-graph-secrets             database-url              built from app-password
+#   econ-graph-secrets             app-database-url          built from app-password
+#                                  data-database-url         built from app-password (the
+#                                                            same database as app-database-url)
+#                                  database-url              built from app-password (the
+#                                                            same database as app-database-url)
 #   econ-graph-postgres            postgres-password         POSTGRES_PASSWORD (generated)
 #                                  app-password              APP_DB_PASSWORD (generated)
 #   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
@@ -25,6 +32,12 @@
 #   monitoring-auth                auth                      MONITORING_BASIC_AUTH (optional,
 #                                                            one htpasswd line, e.g. from
 #                                                            `htpasswd -nB admin`, which prompts)
+#   cloudflare-tunnel              token                     CLOUDFLARE_TUNNEL_TOKEN (optional;
+#                                                            the Cloudflare Tunnel connector
+#                                                            token, read by
+#                                                            k8s/manifests/cloudflared.yaml.
+#                                                            Enter it with
+#                                                            --prompt-tunnel-token)
 #
 # Rules:
 #   - A variable set to the empty string counts as unset, for every key.
@@ -70,6 +83,21 @@ set +x
 NAMESPACE="${NAMESPACE:-econ-graph}"
 KUBECTL="${KUBECTL:-kubectl}"
 
+PROMPT_TUNNEL_TOKEN=false
+for arg in "$@"; do
+    case "$arg" in
+        --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
+        -h | --help)
+            sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "create-secrets: error: unknown argument: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
 APP_DB_USER="econgraph"
 DB_HOST="postgres-service"
 DB_PORT="5432"
@@ -83,6 +111,18 @@ die() {
 log() {
     echo "create-secrets: $*"
 }
+
+if [[ "$PROMPT_TUNNEL_TOKEN" == true ]]; then
+    # Only from a terminal: a token piped in by another program (or an agent)
+    # would have passed through that program first.
+    [[ -t 0 ]] || die "--prompt-tunnel-token reads from a terminal only; run it yourself"
+    [[ -z "${CLOUDFLARE_TUNNEL_TOKEN-}" ]] ||
+        die "CLOUDFLARE_TUNNEL_TOKEN is already set in the environment; unset it first"
+    read -rs -p "Cloudflare Tunnel token (input hidden): " CLOUDFLARE_TUNNEL_TOKEN
+    echo >&2
+    [[ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]] || die "no token entered; nothing was written"
+    export CLOUDFLARE_TUNNEL_TOKEN
+fi
 
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 command -v openssl >/dev/null 2>&1 || die "openssl not found"
@@ -312,9 +352,18 @@ apply_secret() {
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
-    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH; do
+    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
+    CLOUDFLARE_TUNNEL_TOKEN; do
     [[ -z "${!var-}" ]] || check_input "$var" "${!var}"
 done
+# A tunnel token is one base64 string (the dashboard shows it after
+# `cloudflared tunnel run --token`); catch a pasted command line or a stray
+# space without echoing the value.
+if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN-}" ]]; then
+    [[ "$CLOUDFLARE_TUNNEL_TOKEN" =~ ^[A-Za-z0-9+/_=-]{40,}$ ]] ||
+        die "CLOUDFLARE_TUNNEL_TOKEN must be the bare tunnel token (one base64 string," \
+            "no spaces, not the whole 'cloudflared ... --token' command)"
+fi
 if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     [[ "$MONITORING_BASIC_AUTH" =~ ^[^:[:space:]]+:[^[:space:]]+$ ]] ||
         die "MONITORING_BASIC_AUTH must be one htpasswd line (user:hash)"
@@ -394,9 +443,11 @@ esac
 
 # --- econ-graph-secrets ----------------------------------------------------
 begin_secret econ-graph-secrets
-put database-url \
-    "postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
-    "built for user $APP_DB_USER"
+# The app and data databases are one database here, so every URL names it.
+DB_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+put app-database-url "$DB_URL" "built for user $APP_DB_USER"
+put data-database-url "$DB_URL" "built for user $APP_DB_USER"
+put database-url "$DB_URL" "built for user $APP_DB_USER"
 drop_obsolete database-password # written by the old k8s/manifests/secret.yaml
 # The in-house login (AUTH-6) is gone, so nothing reads these; sign-in is Keycloak's.
 for key in jwt-secret google-client-id google-client-secret facebook-app-id \
@@ -427,6 +478,12 @@ add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
+apply_secret
+
+# --- cloudflare-tunnel (token for the cloudflared connector) -----------------
+# Optional: without it, deploy.sh runs cloudflared with no replicas.
+begin_secret cloudflare-tunnel
+add_optional CLOUDFLARE_TUNNEL_TOKEN token
 apply_secret
 
 # --- grafana-admin ---------------------------------------------------------

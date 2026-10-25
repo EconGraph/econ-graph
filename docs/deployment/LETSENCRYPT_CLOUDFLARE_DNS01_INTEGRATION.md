@@ -134,12 +134,13 @@ named in `GATEWAY_TLS_ISSUER`; with a DNS-01 issuer no HTTP-01 challenge has to 
 cluster:
 
 ```bash
-GATEWAY_HTTPS_HOSTNAME=yourdomain.com GATEWAY_TLS_ISSUER=letsencrypt-prod-cloudflare \
+PUBLIC_HOST=yourdomain.com GATEWAY_TLS_ISSUER=letsencrypt-prod-cloudflare \
   ./scripts/deploy/deploy.sh
 ```
 
-The listener takes one host name, and the certificate (Secret `econ-graph-tls` in namespace
-`econ-graph-gateway`) covers that name. See the "Gateway" section of `k8s/README.md`.
+The certificate (Secret `econ-graph-tls` in namespace `econ-graph-gateway`) covers the host
+and its `www` name. Without `GATEWAY_TLS_ISSUER` it is self-signed, which is all the Cloudflare
+Tunnel needs. See "Public site" in `k8s/README.md`.
 
 ## Configuration Options
 

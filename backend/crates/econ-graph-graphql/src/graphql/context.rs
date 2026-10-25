@@ -9,6 +9,7 @@
 
 use crate::imports::*;
 use econ_graph_auth::{Caller, Principal, Role};
+pub use econ_graph_core::models::admin::ClientInfo;
 use tracing::{debug, warn};
 
 /// GraphQL context containing the authenticated user and their fine-grained roles
@@ -19,10 +20,16 @@ pub struct GraphQLContext {
     pub principal: Option<Principal>,
     /// Client IP address for security logging
     pub client_ip: Option<String>,
+    /// The request's `User-Agent`, already cut to a sane length (see [`ClientInfo::new`])
+    pub user_agent: Option<String>,
     /// Request timestamp for audit trail
     pub request_timestamp: chrono::DateTime<chrono::Utc>,
     /// Request ID for tracking
     pub request_id: String,
+    /// Permission denials raised by this request, written by the
+    /// [`crate::graphql::audit::AuditWrites`] extension before the request's response is
+    /// returned.
+    pub(crate) denials: Arc<std::sync::Mutex<crate::graphql::audit::PendingDenials>>,
 }
 
 impl GraphQLContext {
@@ -39,8 +46,25 @@ impl GraphQLContext {
             user,
             principal,
             client_ip: None,
+            user_agent: None,
             request_timestamp: chrono::Utc::now(),
             request_id: uuid::Uuid::new_v4().to_string(),
+            denials: Default::default(),
+        }
+    }
+
+    /// The same context, recording `client` as the request's sender.
+    pub fn with_client(mut self, client: ClientInfo) -> Self {
+        self.client_ip = client.ip_address;
+        self.user_agent = client.user_agent;
+        self
+    }
+
+    /// The request's sender, for audit log entries and security events.
+    pub fn client(&self) -> ClientInfo {
+        ClientInfo {
+            ip_address: self.client_ip.clone(),
+            user_agent: self.user_agent.clone(),
         }
     }
 
@@ -127,10 +151,21 @@ pub fn current_user_id_opt(ctx: &Context<'_>) -> Result<Option<uuid::Uuid>> {
     Ok(context.user.as_ref().map(|user| user.id))
 }
 
-/// Helper function to require a fine-grained role from GraphQL context
+/// Helper function to require a fine-grained role from GraphQL context.
+///
+/// A signed-in caller who lacks `role` is also recorded as a `permission_denied` security event
+/// (at most one per request for the same role).
 pub fn require_role<'a>(ctx: &'a Context<'a>, role: Role) -> Result<&'a Principal> {
     let context = ctx.data::<Arc<GraphQLContext>>()?;
-    context.require_role(role)
+    let principal = context.principal()?;
+    context.require_role(role).inspect_err(|_| {
+        crate::graphql::audit::record_permission_denied(
+            ctx,
+            principal.user_id,
+            role.to_string(),
+            format!("missing role {role}"),
+        )
+    })
 }
 
 #[cfg(test)]

@@ -45,5 +45,6 @@ protect_pvc() {
 
 echo "🔒 Protecting PostgreSQL data and backup volumes..."
 protect_pvc "postgresql-data-postgresql-0" true
+protect_pvc "keycloak-postgres-data-keycloak-postgres-0" false
 protect_pvc "postgres-backup-data" false
 echo "   Released volumes must be manually reclaimed after namespace deletion."
