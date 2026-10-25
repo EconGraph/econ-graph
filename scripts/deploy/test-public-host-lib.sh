@@ -460,7 +460,7 @@ done
 # whatever KUBECTL or PATH says: on a host where kubectl is another cluster's wrapper.
 kubectl_line="$(grep -n '^export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"$' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
 ensure_line="$(grep -n '^ensure_kind_kubectl$' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
-pin_line="$(grep -n '^if ! cluster_role_use_context kind-econ-graph' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
+pin_line="$(grep -n '^if ! cluster_role_use_context "kind-${KIND_CLUSTER}"' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
 if ! { [ -n "$kubectl_line" ] && [ -n "$ensure_line" ] && [ -n "$pin_line" ] &&
   [ "$ensure_line" -lt "$kubectl_line" ] && [ "$kubectl_line" -lt "$pin_line" ]; }; then
   fail "deploy.sh does not pin the kind kubectl before its context (ensure $ensure_line, KUBECTL $kubectl_line, pin $pin_line)"

@@ -75,7 +75,7 @@ ensure_kind_kubectl
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
-cluster_role_use_context kind-econ-graph || die "${KUBECTL} has no context kind-econ-graph"
+cluster_role_use_context "kind-${KIND_CLUSTER}" || die "${KUBECTL} has no context kind-${KIND_CLUSTER}"
 kubectl() { kc "$@"; }
 
 if [ "$TUNNEL" = true ] && [ "$GOOGLE" = true ]; then
