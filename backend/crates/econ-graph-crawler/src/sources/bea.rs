@@ -119,7 +119,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -431,15 +431,17 @@ pub struct BeaAdapter {
     /// touch the database or the network for a title, so a BEA or DB hiccup there can't fail a
     /// `fetch` already in flight, only make it omit metadata for a table whose title isn't
     /// cached (see the module docs); `discover` instead skips such a table or fails (see
-    /// [`refreshed`](Self::refreshed)), rather than persisting the bare table name as a real
-    /// title.
+    /// [`listed`](Self::listed)), rather than persisting the bare table name as a real title.
+    /// Labels merged into the database accumulate, so a table BEA has dropped can keep its last
+    /// known title here.
     titles: tokio::sync::RwLock<HashMap<BeaDataset, HashMap<String, String>>>,
-    /// The datasets whose most recent [`refresh_table_titles`](Self::refresh_table_titles)
-    /// succeeded and left a non-empty title cache. For these, `discover` treats a curated table
-    /// missing from the cache as one BEA no longer lists and skips it; for any other dataset
-    /// (no refresh yet, or the last one failed) a missing title is `Transient`, so discovery
-    /// retries once BEA is reachable again.
-    refreshed: tokio::sync::RwLock<HashSet<BeaDataset>>,
+    /// The `TableName`s BEA currently lists, for each dataset whose most recent
+    /// [`refresh_table_titles`](Self::refresh_table_titles) succeeded: the codes that refresh
+    /// parsed, or, after a `304`, the set an earlier refresh in this process parsed (the stored
+    /// labels when this process has none yet). `discover` skips a curated table missing from it as
+    /// one BEA no longer lists. A dataset with no entry (no refresh yet, or the last one failed)
+    /// makes a table with no known title `Transient`, so discovery retries once BEA is reachable.
+    listed: tokio::sync::RwLock<HashMap<BeaDataset, HashSet<String>>>,
     /// The curated tables the last successful `discover` skipped (`Regional SAGDP2`, ...), for
     /// [`curated_missing`](SourceAdapter::curated_missing).
     skipped_tables: std::sync::Mutex<Vec<String>>,
@@ -452,7 +454,7 @@ impl BeaAdapter {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             current_year: None,
             titles: tokio::sync::RwLock::new(HashMap::new()),
-            refreshed: tokio::sync::RwLock::new(HashSet::new()),
+            listed: tokio::sync::RwLock::new(HashMap::new()),
             skipped_tables: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -479,14 +481,22 @@ impl BeaAdapter {
         }
     }
 
-    /// Marks `dataset`'s title cache as coming from a successful
-    /// [`refresh_table_titles`](Self::refresh_table_titles), bypassing BEA and the database.
+    /// Marks `dataset`'s cached titles as exactly what a successful
+    /// [`refresh_table_titles`](Self::refresh_table_titles) listed, bypassing BEA and the
+    /// database.
     #[cfg(test)]
     fn with_refreshed_titles(self, dataset: BeaDataset) -> Self {
-        let mut refreshed = self.refreshed.into_inner();
-        refreshed.insert(dataset);
+        let current: HashSet<String> = self
+            .titles
+            .try_read()
+            .unwrap()
+            .get(&dataset)
+            .map(|t| t.keys().cloned().collect())
+            .unwrap_or_default();
+        let mut listed = self.listed.into_inner();
+        listed.insert(dataset, current);
         Self {
-            refreshed: tokio::sync::RwLock::new(refreshed),
+            listed: tokio::sync::RwLock::new(listed),
             ..self
         }
     }
@@ -583,7 +593,25 @@ impl BeaAdapter {
         // `refresh_code_list`'s own HTTP layer already counts a transport/status error; a `parse`
         // error (BEA answered 200 with an in-body error envelope) comes from `apply`, after that,
         // so it needs its own record here or it's silently dropped from `crawler_errors_total`.
-        let refreshed = refresh_code_list(ctx, SourceId::Bea, list)
+        // Capture the codes this refresh parses: BEA's current list, unlike the stored labels,
+        // which keep every table BEA ever listed.
+        let parsed: Arc<std::sync::Mutex<Option<HashSet<String>>>> = Arc::default();
+        let capturing = CodeList {
+            parse: {
+                let parse = Arc::clone(&list.parse);
+                let parsed = Arc::clone(&parsed);
+                Arc::new(move |body| {
+                    let codes = parse(body)?;
+                    *parsed
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some(codes.iter().map(|c| c.code.clone()).collect());
+                    Ok(codes)
+                })
+            },
+            ..list.clone()
+        };
+        let refreshed = refresh_code_list(ctx, SourceId::Bea, &capturing)
             .await
             .inspect_err(|e| {
                 if e.kind() == "parse" {
@@ -609,24 +637,38 @@ impl BeaAdapter {
         } else {
             from_db
         };
-        let complete = refreshed.is_ok() && !titles.is_empty();
-        self.titles.write().await.insert(dataset, titles);
+        let parsed = parsed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .filter(|codes| !codes.is_empty());
         {
-            let mut ok = self.refreshed.write().await;
-            if complete {
-                ok.insert(dataset);
-            } else {
-                ok.remove(&dataset);
-            }
+            let mut listed = self.listed.write().await;
+            let current = match (&refreshed, parsed) {
+                (Err(_), _) => None,
+                (Ok(_), Some(codes)) => Some(codes),
+                // A `304`: BEA's list is what this process last parsed, or, in a process that has
+                // parsed none yet, the stored labels.
+                (Ok(_), None) => listed
+                    .get(&dataset)
+                    .cloned()
+                    .or_else(|| Some(titles.keys().cloned().collect()))
+                    .filter(|codes: &HashSet<String>| !codes.is_empty()),
+            };
+            match current {
+                Some(codes) => listed.insert(dataset, codes),
+                None => listed.remove(&dataset),
+            };
         }
+        self.titles.write().await.insert(dataset, titles);
         refreshed?;
         Ok(())
     }
 
-    /// Whether `dataset`'s title cache comes from a successful, non-empty refresh (see
-    /// [`refreshed`](Self::refreshed)).
-    async fn titles_refreshed(&self, dataset: BeaDataset) -> bool {
-        self.refreshed.read().await.contains(&dataset)
+    /// The `TableName`s BEA listed in `dataset`'s last successful refresh, or `None` when the
+    /// last refresh failed or none has run (see [`listed`](Self::listed)).
+    async fn listed_tables(&self, dataset: BeaDataset) -> Option<HashSet<String>> {
+        self.listed.read().await.get(&dataset).cloned()
     }
 
     /// `table_name` -> BEA's title, from the last call to
@@ -949,31 +991,35 @@ impl SourceAdapter for BeaAdapter {
         let (nipa, regional) = (def(NIPA_DATASET)?, def(REGIONAL_DATASET)?);
         let nipa_titles = self.table_titles(BeaDataset::Nipa).await;
         let regional_titles = self.table_titles(BeaDataset::Regional).await;
-        let nipa_refreshed = self.titles_refreshed(BeaDataset::Nipa).await;
-        let regional_refreshed = self.titles_refreshed(BeaDataset::Regional).await;
+        let nipa_listed = self.listed_tables(BeaDataset::Nipa).await;
+        let regional_listed = self.listed_tables(BeaDataset::Regional).await;
 
         let mut found = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
         for table in tables {
-            let (titles, refreshed) = match table.dataset {
-                BeaDataset::Nipa => (&nipa_titles, nipa_refreshed),
-                BeaDataset::Regional => (&regional_titles, regional_refreshed),
+            let (titles, listed) = match table.dataset {
+                BeaDataset::Nipa => (&nipa_titles, &nipa_listed),
+                BeaDataset::Regional => (&regional_titles, &regional_listed),
             };
+            // After a successful refresh, a table BEA no longer lists (renamed or dropped) is
+            // skipped and the rest of BEA is still discovered, even if its last known title is
+            // still stored.
+            if listed
+                .as_ref()
+                .is_some_and(|listed| !listed.contains(&table.table_name))
+            {
+                skipped.push(format!("{} {}", table.dataset.api_name(), table.table_name));
+                continue;
+            }
             let (title, known) = title_for(titles, &table.table_name);
             // A table whose title isn't known is never discovered with the bare-table-name
             // placeholder as every one of its series' titles: `persist_discovered` writes
             // `DiscoveredSeries::title` unconditionally, so that would overwrite real stored
             // titles on the very next fetch, defeating the staleness protection
-            // `fetch_nipa`/`fetch_regional` rely on. If the dataset's titles come from a
-            // successful refresh, BEA no longer lists the table (it was renamed or dropped), so
-            // it is skipped and the rest of BEA is still discovered. Otherwise the titles may
-            // just not be synced yet (refresh_reference_data never ran, or failed), so discovery
-            // fails `Transient` and retries.
+            // `fetch_nipa`/`fetch_regional` rely on. With no successful refresh behind the
+            // titles (refresh_reference_data never ran, or failed), they may just not be synced
+            // yet, so discovery fails `Transient` and retries.
             if !known {
-                if refreshed {
-                    skipped.push(format!("{} {}", table.dataset.api_name(), table.table_name));
-                    continue;
-                }
                 return Err(CrawlError::Transient(format!(
                     "BEA {} {}: title not yet known; refresh_reference_data hasn't synced it",
                     table.dataset.api_name(),
@@ -2984,10 +3030,10 @@ mod tests {
         db.drop().await;
     }
 
-    /// Through the real refresh: a successful Regional title refresh that no longer lists the
-    /// curated `SAGDP2` lets discovery skip it and still discover NIPA. A later refresh that
-    /// fails (a BEA error, or a response with no titles) makes the same missing title
-    /// `Transient` again, even though the titles already stored still load.
+    /// Through the real refresh. A refresh that fails (a BEA error, or a response with no titles)
+    /// leaves a curated table with no known title `Transient`. A successful Regional refresh that
+    /// no longer lists the curated `SAGDP2` skips it and still discovers NIPA, even though
+    /// SAGDP2's title from an earlier refresh is still stored (stored labels only accumulate).
     #[tokio::test]
     async fn discover_skips_a_missing_table_only_after_a_successful_refresh() {
         let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
@@ -3018,33 +3064,12 @@ mod tests {
             .unwrap();
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-
         let mock = MockSource::start().await;
-        mock.mount(
-            &table_titles_route("Regional"),
-            Reply::json(serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
-                {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary"}
-            ]}}})),
-        )
-        .await;
-        mount_discovery(&mock).await;
         let a = BeaAdapter::new(mock.base_url())
             .with_current_year(2024)
             .with_table_titles(BeaDataset::Nipa, NIPA_TEST_TITLES)
             .with_refreshed_titles(BeaDataset::Nipa);
         let regional_list = table_titles_code_list(&a, BeaDataset::Regional);
-        a.refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
-            .await
-            .unwrap();
-        let found = a.discover(&ctx).await.unwrap();
-        assert!(!found.is_empty());
-        assert!(found.iter().all(|s| s.external_id.starts_with("bea_nipa/")));
-        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
-        assert!(!mock.received_requests().await.iter().any(|r| r
-            .url
-            .query()
-            .unwrap_or_default()
-            .contains("TableName=SAGDP2")));
 
         for failed in [
             serde_json::json!({"BEAAPI": {"Results": {"Error": {
@@ -3058,14 +3083,64 @@ mod tests {
             a.refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
                 .await
                 .unwrap_err();
-            assert!(a
-                .table_titles(BeaDataset::Regional)
-                .await
-                .contains_key("SAINC1"));
             let e = a.discover(&ctx).await.unwrap_err();
             assert_eq!(e.kind(), "transient", "{e}");
             assert!(e.to_string().contains("Regional SAGDP2"), "{e}");
         }
+
+        // An earlier refresh stored SAGDP2's title; it stays after BEA stops listing the table.
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            REGIONAL_DATASET,
+            "table_name",
+            &[(
+                "SAGDP2".to_string(),
+                "SAGDP2 Gross domestic product (GDP) by state".to_string(),
+            )],
+        )
+        .await
+        .unwrap();
+        mock.reset().await;
+        mock.mount(
+            &table_titles_route("Regional"),
+            Reply::json(serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
+                {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary"}
+            ]}}}))
+            .header("ETag", "\"r1\""),
+        )
+        .await;
+        mount_discovery(&mock).await;
+        a.refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
+            .await
+            .unwrap();
+        assert!(a
+            .table_titles(BeaDataset::Regional)
+            .await
+            .contains_key("SAGDP2"));
+        let found = a.discover(&ctx).await.unwrap();
+        assert!(!found.is_empty());
+        assert!(found.iter().all(|s| s.external_id.starts_with("bea_nipa/")));
+        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
+        assert!(!mock.received_requests().await.iter().any(|r| r
+            .url
+            .query()
+            .unwrap_or_default()
+            .contains("TableName=SAGDP2")));
+
+        // A `304` keeps the list this process last parsed, so SAGDP2 stays skipped.
+        mock.reset().await;
+        mock.mount(
+            &table_titles_route("Regional"),
+            Reply::status(304).header("ETag", "\"r1\""),
+        )
+        .await;
+        mount_discovery(&mock).await;
+        a.refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
+            .await
+            .unwrap();
+        a.discover(&ctx).await.unwrap();
+        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
 
         db.drop().await;
     }
