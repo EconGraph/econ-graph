@@ -6,6 +6,7 @@
       "external_id": "GDP",
       "routes": [
         { "method": "GET", "path": "/series", "fixture": "fred/series_gdp.json" },
+        { "method": "GET", "path": "/series/vintagedates", "fixture": "fred/vintagedates_gdp.json" },
         { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_gdp_e2e.json" }
       ]
     },
@@ -14,6 +15,7 @@
       "external_id": "EGE2EMULTIPAGE",
       "routes": [
         { "method": "GET", "path": "/series", "fixture": "fred/series_multipage_e2e.json" },
+        { "method": "GET", "path": "/series/vintagedates", "fixture": "fred/vintagedates_multipage_e2e.json" },
         { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_multipage_e2e.json" }
       ]
     },
