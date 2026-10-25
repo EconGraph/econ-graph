@@ -103,9 +103,9 @@ fi
 
 echo "Removing application resources..."
 for manifest in admin-ingress graphql-ingress ingress frontend-service frontend-deployment \
-    admin-frontend-service admin-frontend-deployment crawler-worker backend-service \
-    backend-deployment chart-api-service chart-api-deployment postgres postgres-deployment \
-    postgres-init; do
+    admin-frontend-service admin-frontend-deployment crawler-worker crawler-migrate-job \
+    backend-service backend-deployment chart-api-service chart-api-deployment postgres \
+    postgres-deployment postgres-init; do
     run kubectl delete -f "k8s/manifests/${manifest}.yaml" --ignore-not-found=true
 done
 run kubectl delete cronjob postgres-backup -n "${NAMESPACE}" --ignore-not-found=true

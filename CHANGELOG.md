@@ -13,8 +13,19 @@ All notable changes to EconGraph are documented here. The format follows
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
   token. Unset, every request goes where it went before. The dev server and `vite preview`
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
+- `crawler migrate [--dry-run]` applies the pending data migrations to `DATA_DATABASE_URL` and
+  prints each version applied; `--dry-run` prints the pending versions and changes nothing. It
+  never applies or records an app migration.
+- `scripts/deploy/deploy.sh` runs `crawler migrate` as the Kubernetes Job `crawler-migrate`
+  (`k8s/manifests/crawler-migrate-job.yaml`) before it applies the backend and crawler-worker,
+  and stops if the Job fails. It skips the Job in a namespace whose `econ-graph-secrets` has no
+  `data-database-url`. `deploy.sh --dry-run` prints the deploy's commands and applies nothing.
 
 ### Changed
+
+- The backend applies only the app migrations at startup, and its `/readyz` checks only the app
+  migrations. No service applies the data migrations at startup, so redeploying one never
+  changes a data database; run `crawler migrate` first on a new or older database.
 
 - The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
   `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read

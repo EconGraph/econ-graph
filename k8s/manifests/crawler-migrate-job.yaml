@@ -1,0 +1,103 @@
+# crawler-migrate: applies the data migrations (backend/migrations/data) to the data
+# database with `/app/crawler migrate`. No service applies them at startup: not the
+# backend (it applies only the app migrations), not the crawler-worker. It never touches
+# the app migrations, and a run with nothing pending changes nothing.
+#
+# scripts/deploy/deploy.sh deletes the previous Job, applies this one before the backend
+# and crawler-worker, and stops the deploy unless it completes. It runs only in a
+# namespace that owns a data database, i.e. whose Secret econ-graph-secrets has the key
+# data-database-url; elsewhere deploy.sh skips it.
+#
+# Image: the crawler-worker image (built from backend/Dockerfile with
+# `--target crawler-worker`), which ships /app/crawler; keep the tag in step with
+# crawler-worker.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crawler-migrate
+  namespace: econ-graph
+  labels:
+    app: crawler-migrate
+    component: crawler
+spec:
+  # Migrations run under an advisory lock and each one in its own transaction, so a retry
+  # after a lost connection is safe; a migration that fails fails the same way again.
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: crawler-migrate
+        component: crawler
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for PostgreSQL to be ready..."
+          until nc -z postgres-service.econ-graph.svc.cluster.local 5432; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: crawler-migrate
+        image: econ-graph-crawler-worker:v4.0.0
+        imagePullPolicy: Never  # Use local image (imported by build-images.sh)
+        command: ["/app/crawler", "migrate"]
+        env:
+        # The data database, from Secret econ-graph-secrets (created by
+        # scripts/deploy/create-secrets.sh). The crawler reads no other database URL.
+        - name: DATA_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: data-database-url
+        - name: RUST_LOG
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: RUST_LOG
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

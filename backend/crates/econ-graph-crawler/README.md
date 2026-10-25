@@ -43,10 +43,11 @@ Run from `backend/` (use `cd backend` from the repository root):
 `cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
 
-Before queue commands or worker startup, apply migrations by starting the backend with
-`DATABASE_URL`, as shown in the [local setup](../../README.md#development-workflow), and export
-`DATA_DATABASE_URL` naming the same database.
-The worker does not apply migrations. Export the relevant provider API keys in the
+Before queue commands or worker startup, export `DATA_DATABASE_URL` and apply the data
+migrations with `crawler migrate` (`--dry-run` lists the pending versions and changes nothing);
+see the [local setup](../../README.md#development-workflow). `crawler migrate` is the only
+command that applies them: the worker applies no migrations, and the backend applies only the
+app migrations. Export the relevant provider API keys in the
 worker's environment as well as in the CLI's environment for direct `fetch` calls.
 
 ## Development-only static catalogs

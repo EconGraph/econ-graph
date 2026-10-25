@@ -1,9 +1,11 @@
 # Database migrations
 
 The backend's Diesel migrations are in two sets under `backend/migrations`. The backend applies
-both to its database when it starts (`econ_graph_core::database::run_migrations`): the data set
-first, then the app set. This page covers which set a migration belongs in, how migrations are
-written between releases, and how app migrations are squashed when a release is tagged.
+the app set to its database when it starts. The data set is applied only by `crawler migrate`
+(see [Applying the data set](#applying-the-data-set-crawler-migrate)); no service applies it at
+startup, so redeploying a service never changes a data database. This page covers which set a
+migration belongs in, how migrations are written between releases, and how app migrations are
+squashed when a release is tagged.
 
 ## Migration sets
 
@@ -131,19 +133,43 @@ from before stable ids onto its stable id, or changing the namespace, the name f
 source's `SOURCE` string or a series' `external_id`) is a critical change, and its PR also ships
 a migration that maps the old ids to the new ones in `chart_annotations.series_id`.
 
+## Applying the data set: `crawler migrate`
+
+```sh
+crawler migrate [--dry-run]
+```
+
+`crawler migrate` applies the pending data migrations to `DATA_DATABASE_URL` (or
+`--database-url`) under the migration advisory lock, prints each version it applied, one per
+line, and exits 0 once the data set is current. A second run applies nothing and prints nothing.
+`--dry-run` prints the pending versions and changes nothing; on a new database it does not even
+create `__diesel_schema_migrations`. It never applies or records an app migration, even when the
+database holds both sets. From `backend/`: `cargo run --bin crawler -- migrate`. In the
+crawler-worker image it is `/app/crawler migrate`.
+
+In Kubernetes, `scripts/deploy/deploy.sh` runs it as the Job `crawler-migrate`
+(`k8s/manifests/crawler-migrate-job.yaml`, from the crawler-worker image) before it applies the
+backend and the crawler-worker, and stops the deploy if the Job fails. It runs the Job only in a
+namespace that owns a data database: one whose Secret `econ-graph-secrets` has the key
+`data-database-url`. Without that key it skips the Job. `deploy.sh --dry-run` lists the Job with
+the rest of the deploy.
+
+Besides `crawler migrate`, only `seed-fixtures` (which loads recorded fixtures into a test
+database) and tests apply the data set.
+
 ## Applying both sets to one database
 
-`run_migrations` applies the data set and then the app set to one database, holding a Postgres
-advisory lock (`MIGRATION_LOCK_KEY`) for the whole run, so two backends starting together take
-turns. The backend's readiness check requires, for each set, the newest migration embedded in
-the binary to be recorded; the table's highest version mixes the two sets, so it is not used.
+`run_migration_set(url, MigrationSet::App)` (or `MigrationSet::Data`) applies one set, holding a
+Postgres advisory lock (`MIGRATION_LOCK_KEY`) for the whole run, so two backends starting
+together take turns. Advisory locks are scoped to a database, so runs against separate app and
+data databases never contend, and two sets in one database run one after the other. Applying
+the app set alone leaves a pending data set untouched. Tests use `run_migrations`, which applies
+the data set and then the app set to one database under the same lock.
 
-One set can be applied on its own with `run_migration_set(url, MigrationSet::App)` (or
-`MigrationSet::Data`), which takes the same lock. Advisory locks are scoped to a database, so
-runs against separate app and data databases never contend. `readiness_check_set` checks one
-set the same way, ignoring the other set's versions in a database that holds both. Applying the
-app set alone leaves a pending data set untouched, and the data set's readiness check fails
-until it is applied. `seed-fixtures` applies only the data set, to `DATA_DATABASE_URL`.
+The backend's readiness check (`readiness_check_set(pool, MigrationSet::App)`) requires the
+newest app migration embedded in the binary to be recorded. `readiness_check_set` checks one set
+at a time, ignoring the other set's versions in a database that holds both; the table's highest
+version mixes the two sets, so it is not used.
 
 With the diesel CLI, from `backend/`, on a new database:
 
@@ -177,9 +203,10 @@ baseline, except for those three foreign keys. Run against a commit from before 
 to read.
 
 A database built from the single baseline already has `20261021000100` recorded, so it skips the
-data baseline. Before applying either set, `run_migrations` checks whether the database is such
-a database: `20261021000100` is recorded, `20261021000200` is not, and all 12 app baseline
-tables exist (`APP_BASELINE_TABLES` in `econ_graph_core::database`). If so, it records
+data baseline. A run that applies the app set (the backend's at startup, or `run_migrations`)
+first checks whether the database is such a database: `20261021000100` is recorded,
+`20261021000200` is not, and all 12 app baseline tables exist (`APP_BASELINE_TABLES` in
+`econ_graph_core::database`). If so, it records
 `20261021000200` without running it and logs that at `warn`. A database that has only some of
 the app tables is not recognised, and the app baseline's guard stops on it. This query returns
 a row on a database the check recognises:

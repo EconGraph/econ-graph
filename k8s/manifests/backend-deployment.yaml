@@ -86,8 +86,9 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: data-database-url
-        # The backend binary connects to and migrates DATABASE_URL, which holds both migration
-        # sets: the app database's URL.
+        # The backend binary connects to DATABASE_URL, the app database's URL, and applies the
+        # app migrations to it at startup. It never applies the data migrations: the Job
+        # crawler-migrate (crawler-migrate-job.yaml) does, before deploy.sh applies this.
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -130,9 +131,9 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
-        # startupProbe and readinessProbe hit /readyz (database reachable AND schema at least
-        # as new as this binary needs), so a pod is never routed traffic before migrations
-        # have actually caught up. livenessProbe hits /livez, which only checks the process is
+        # startupProbe and readinessProbe hit /readyz (database reachable AND app migrations at
+        # least as new as this binary needs), so a pod is never routed traffic before its
+        # migrations have actually caught up. livenessProbe hits /livez, which only checks the process is
         # up, so a slow or briefly-down database can't get a healthy pod killed and restarted.
         startupProbe:
           httpGet:
