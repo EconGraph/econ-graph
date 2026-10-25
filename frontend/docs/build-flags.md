@@ -1,8 +1,9 @@
 # Build-time feature flags
 
-Build-time flags compile code out of the frontend bundle. They implement phase 1
-of [the feature flags roadmap](../../docs/roadmap/feature-flags.md): unfinished
-or unscheduled screens are absent from a release build, not hidden at runtime.
+Build-time flags compile code out of the frontend bundle: a screen whose flag is
+off is absent from that build, not hidden at runtime. Each profile (`release`,
+`dev`) sets every flag, so a release build leaves out screens that are not
+ready to ship.
 
 ## Where the values come from
 
