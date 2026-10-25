@@ -2,7 +2,7 @@
 
 The backend applies Diesel migrations from `backend/migrations` when it starts
 (`econ_graph_core::database::run_migrations`). This page covers how migrations are written
-between releases and how they are squashed when a release is tagged (Joe, 2026-10-02).
+between releases and how they are squashed when a release is tagged.
 
 ## Rules
 

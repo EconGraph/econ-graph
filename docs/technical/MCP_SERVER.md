@@ -336,20 +336,29 @@ Common error codes:
 ## Development
 
 ### Running the Server
+
+`/mcp` is compiled in only when the `mcp` build flag is on, which it is in the `dev`
+flag profile and not in `release` (the default). From the repository root, with
+`DATABASE_URL` exported as in the [backend development setup](../../backend/README.md#development-workflow):
+
 ```bash
 cd backend
-cargo run
+FLAGS_PROFILE=dev cargo run -p econ-graph-backend --bin econ-graph-backend
 ```
 
-The MCP server will be available at `http://localhost:9876/mcp`.
+The MCP server will be available at `http://localhost:9876/mcp`. Requests need a
+bearer access token for a signed-in account holding the `api:mcp` role, so the backend
+must be started with `OIDC_ISSUER` and `OIDC_AUDIENCE` set; without a token `/mcp`
+answers 401.
 
 ### Testing
 ```bash
-# Test the MCP server functionality
-cargo run --bin mcp_test
+# Run the MCP crate's tests (from backend/)
+cargo test -p econ-graph-mcp
 
-# Test with curl
+# Test with curl, using an access token from the identity provider
 curl -X POST http://localhost:9876/mcp \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
 ```

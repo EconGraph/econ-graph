@@ -107,6 +107,7 @@ describe('SeriesDetail annotations', () => {
     vi.mocked(useAuth).mockReturnValue({
       user: null,
       isAuthenticated: false,
+      isSuspended: false,
       isLoading: false,
       isConfigured: false,
       accountUrl: null,
@@ -114,6 +115,7 @@ describe('SeriesDetail annotations', () => {
       signIn: vi.fn(),
       signOut: vi.fn(),
       completeSignIn: vi.fn(),
+      completeSignOut: vi.fn(async () => null),
       clearError: vi.fn(),
     });
   });

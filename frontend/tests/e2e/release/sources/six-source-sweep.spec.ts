@@ -9,12 +9,12 @@ import { DEPLOYED } from '../env';
 import { SWEPT_SOURCES } from '../fixtures';
 import {
   applyTransformation,
+  asShown,
   downloadLevelsCsv,
   expectWithinCadence,
   latestShown,
   parseShown,
   searchAndOpen,
-  toIsoDate,
 } from '../seriesPage';
 
 // Live QA: REL-QA check 3's per-source sweep on the deployed build. For each train 1 source
@@ -114,7 +114,8 @@ test.describe('six-source sweep', () => {
         }
         // The newest non-missing row is the point the page lists first.
         const newest = [...rows].reverse().find(([, value]) => value !== '');
-        expect(newest?.[0]).toBe(toIsoDate((await latestShown(page)).date));
+        const shownDate = (await latestShown(page)).date;
+        expect(asShown(newest?.[0] ?? '', shownDate)).toBe(shownDate);
       });
     });
   }

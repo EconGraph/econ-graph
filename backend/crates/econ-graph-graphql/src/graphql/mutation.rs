@@ -207,6 +207,9 @@ impl Mutation {
         }
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
+        if input.is_active == Some(false) {
+            refuse_self_lockout(caller, user_id, "suspend")?;
+        }
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -249,11 +252,12 @@ impl Mutation {
         Ok(UserType::from(final_user))
     }
 
-    /// Delete a user (requires `admin.users:delete`)
+    /// Delete a user (requires `admin.users:delete`); never the caller's own account
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersDelete)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
+        refuse_self_lockout(caller, user_id, "delete")?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -272,11 +276,12 @@ impl Mutation {
         Ok(true)
     }
 
-    /// Suspend a user account (requires `admin.users:suspend`)
+    /// Suspend a user account (requires `admin.users:suspend`); never the caller's own
     async fn suspend_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
+        refuse_self_lockout(caller, user_id, "suspend")?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -487,6 +492,21 @@ fn require_manageable(ctx: &Context<'_>, caller: &Principal, target_id: uuid::Uu
         caller,
         &format!("acting on user {target_id} needs every staff role"),
     ))
+}
+
+/// Refuse to suspend or delete the caller's own account.
+///
+/// A suspended or deleted account is refused on every request, `activateUser` included, so an
+/// admin who did this to themselves could not undo it, and with a single admin nobody could.
+/// Refusing it also keeps the last active admin: whoever suspends or deletes someone else is
+/// still active afterwards. (Roles live in the identity provider, so the API cannot demote anyone.)
+fn refuse_self_lockout(caller: &Principal, target_id: uuid::Uuid, action: &str) -> Result<()> {
+    if target_id == caller.user_id {
+        return Err(GraphQLError::new(format!(
+            "You cannot {action} your own account"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

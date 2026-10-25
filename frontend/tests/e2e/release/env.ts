@@ -72,27 +72,34 @@ const qaUser = (n: 1 | 2, username: string, displayName: string): ReleaseUser =>
  * Who each spec signs in as. `annotator` writes public and private annotations and `viewer` checks
  * it sees only the public one (auth/sign-in.spec.ts); `journey` annotates at the end of
  * journey.spec.ts; `publicAnnotator` writes a public annotation for series-ui/annotations.spec.ts
- * to check an anonymous viewer sees it.
+ * to check an anonymous viewer sees it; `failureAnnotator` and `failureSignIn` are
+ * failures/annotation-failures.spec.ts's and failures/sign-in-failures.spec.ts's (ECO-264).
  *
  * The dev realm has a user per role, so no user signs in from two specs at once (Keycloak's
  * brute-force detection locks a user out when that happens). The deployed realm has only the two
- * QA users, so there `journey` and `publicAnnotator` share `qa-bob`, safe only because deployed
+ * QA users, so there `journey`, `publicAnnotator` and the failure specs' users share `qa-bob`, safe only because deployed
  * mode runs one spec at a time (playwright.release.config.ts).
  */
-export const USERS: Record<'annotator' | 'viewer' | 'journey' | 'publicAnnotator', ReleaseUser> =
-  DEPLOYED
-    ? {
-        annotator: qaUser(1, 'qa-alice', 'QA Alice'),
-        viewer: qaUser(2, 'qa-bob', 'QA Bob'),
-        journey: qaUser(2, 'qa-bob', 'QA Bob'),
-        publicAnnotator: qaUser(2, 'qa-bob', 'QA Bob'),
-      }
-    : {
-        annotator: devUser('alice', 'Alice Tester'),
-        viewer: devUser('bob', 'Bob Tester'),
-        journey: devUser('dave', 'Dave Tester'),
-        publicAnnotator: devUser('carol', 'Carol Tester'),
-      };
+export const USERS: Record<
+  'annotator' | 'viewer' | 'journey' | 'publicAnnotator' | 'failureAnnotator' | 'failureSignIn',
+  ReleaseUser
+> = DEPLOYED
+  ? {
+      annotator: qaUser(1, 'qa-alice', 'QA Alice'),
+      viewer: qaUser(2, 'qa-bob', 'QA Bob'),
+      journey: qaUser(2, 'qa-bob', 'QA Bob'),
+      publicAnnotator: qaUser(2, 'qa-bob', 'QA Bob'),
+      failureAnnotator: qaUser(2, 'qa-bob', 'QA Bob'),
+      failureSignIn: qaUser(2, 'qa-bob', 'QA Bob'),
+    }
+  : {
+      annotator: devUser('alice', 'Alice Tester'),
+      viewer: devUser('bob', 'Bob Tester'),
+      journey: devUser('dave', 'Dave Tester'),
+      publicAnnotator: devUser('carol', 'Carol Tester'),
+      failureAnnotator: devUser('erin', 'Erin Tester'),
+      failureSignIn: devUser('frank', 'Frank Tester'),
+    };
 
 /**
  * Fails fast with what to set when deployed mode lacks what the signed-in specs need.
