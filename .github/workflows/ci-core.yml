@@ -85,6 +85,7 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
+      e2e_images: ${{ steps.filter.outputs.e2e_images }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -164,6 +165,26 @@ jobs:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
             - 'backend/scripts/check_migration_order.py'
+          # E2E Image Build builds the ci/docker/e2e images. Beyond the
+          # Dockerfiles: what decides the build context, the files they COPY
+          # by name, and what decides where the frontend build lands (the
+          # Vite output directory) or whether the backend compiles at all.
+          e2e_images:
+            - '.github/workflows/ci-core.yml'
+            - 'ci/docker/e2e/**'
+            - '.dockerignore'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+            - 'frontend/dev-server/package.json'
+            - 'frontend/dev-server/package-lock.json'
+            - 'frontend/vite.config.ts'
+            - 'frontend/playwright.mobile.config.ts'
+            - 'frontend/ci/**'
+            - 'rust-toolchain.toml'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'backend/crates/econ-graph-core/data/**'
+            - 'backend/crates/econ-graph-crawler/data/**'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
@@ -1373,7 +1394,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs: [frontend-integration-tests]
-    if: ${{ github.event.inputs.run_e2e_tests == true }}
+    if: ${{ inputs.run_e2e_tests }}
 
     steps:
     - name: Checkout code
@@ -1412,7 +1433,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'core' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'core' || github.event.inputs.e2e_test_suite == '') }}
     # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
     # The DATABASE_URL in Docker containers should handle authentication
 
@@ -1560,7 +1581,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'comprehensive' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -1763,7 +1784,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-core' || github.event.inputs.e2e_test_suite == 'mobile-comprehensive' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-core' || github.event.inputs.e2e_test_suite == 'mobile-comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -1966,6 +1987,43 @@ jobs:
       run: |
         docker stop backend-server || true
         docker stop frontend-server || true
+
+  e2e-image-build:
+    name: E2E Image Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [changes]
+    # Builds the E2E test images without running any tests, so a broken image
+    # fails the PR that breaks it. Runs on PRs that touch what the images are
+    # built from, and on every push and manual run.
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.e2e_images == 'true' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    # Plain docker build on the runner's daemon, not buildx with the GHA cache:
+    # the mobile image builds FROM the optimized image's local tag, and the
+    # repository's Actions cache is already at its size limit, where these
+    # multi-gigabyte layers would evict the Rust and npm caches other jobs use.
+    - name: Build E2E image
+      run: |
+        docker build -f ci/docker/e2e/Dockerfile -t econ-graph-e2e:ci .
+        # Free the disk for the optimized image's backend build
+        docker image rm econ-graph-e2e:ci
+        docker builder prune -af
+        df -h /
+
+    - name: Build optimized E2E image
+      run: |
+        docker build -f ci/docker/e2e/Dockerfile.optimized -t econ-graph-e2e-optimized:latest .
+        docker builder prune -af
+        df -h /
+
+    - name: Build optimized mobile E2E image
+      run: docker build -f ci/docker/e2e/Dockerfile.mobile.optimized -t econ-graph-e2e-mobile-optimized:ci .
 
   docker-build:
     name: Docker Build Test
