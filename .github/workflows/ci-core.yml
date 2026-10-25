@@ -403,7 +403,7 @@ jobs:
         RUST_LOG: warn
         FLAGS_PROFILE: release
 
-    # REL-3 "nothing fake" check, backend half: a release build's default feature set must
+    # Nothing-fake check, backend half: a release build's default feature set must
     # not include the unfinished xbrl-parser or dev-only static-catalogs features.
     - name: Check release build default features
       run: |

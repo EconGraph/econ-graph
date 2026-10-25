@@ -68,14 +68,6 @@
 - Demonstrate export functionality if available
 - Navigate smoothly between features to show integration
 
-### [165-195 seconds] **Future Vision (Roadmap)**
-**SAY:** "This is just the beginning. Our roadmap includes machine learning models, LSTM forecasting, interactive world maps, and advanced analytics - all built on this solid foundation."
-
-**DO:**
-- Show the current features working smoothly
-- Emphasize the professional UI and responsive design
-- Maybe open the GitHub repository to show the roadmap
-
 ### [195-210 seconds] **Closing**
 **SAY:** "EconGraph: a working prototype today, with a vision for advanced economic analysis tomorrow. Built with React, Rust, and real attention to user experience."
 
@@ -93,12 +85,6 @@
 - "Reduces time from data to insight"
 - "Professional UI that economists actually want to use"
 - "Full-stack application ready for deployment"
-
-### 🚀 **Future Potential:**
-- "Roadmap includes ML and advanced analytics"
-- "Foundation for sophisticated economic modeling"
-- "Scalable architecture for enterprise deployment"
-- "Open source with customization potential"
 
 ### 🎯 **Target Audience:**
 - "Economic research teams"
@@ -123,4 +109,3 @@
 - ✅ Professional presentation quality
 - ✅ No cursor visible in recording
 - ✅ Smooth, confident navigation
-

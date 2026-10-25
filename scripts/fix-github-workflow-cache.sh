@@ -80,11 +80,6 @@ cat >> ci/docs/workflow-status-report.md << EOF
 2. **Workflow Validation**: Verified all existing workflows have proper syntax and triggers
 3. **Documentation**: Created this report for future reference
 
-## Next Steps
-1. Commit these changes to trigger GitHub's workflow cache refresh
-2. Monitor workflow execution to ensure parsing issues are resolved
-3. Consider implementing workflow cleanup procedures for future test branches
-
 ## Prevention
 - Always clean up test branches that create temporary workflows
 - Use descriptive branch names for workflow testing

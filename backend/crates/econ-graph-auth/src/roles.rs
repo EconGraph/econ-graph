@@ -5,8 +5,9 @@
 //! `admin.users:suspend`). Plans, organization roles and staff levels never appear here: the
 //! identity provider composes them out of these roles. A Keycloak protocol mapper on the
 //! `econ-graph-api` client puts the flattened client roles in a top-level `roles` claim
-//! (Keycloak's default `resource_access.<client>.roles` is not used); see
-//! `docs/roadmap/auth-plans-permissions.md`.
+//! (Keycloak's default `resource_access.<client>.roles` is not used); see the auth, plans and
+//! permissions design record:
+//! <https://linear.app/econgraph/document/auth-plans-and-permissions-roadmap-design-record-from-pr-176-eae73ef9ee81>.
 //!
 //! This enum is the source of truth for the catalog. The Keycloak realm defines the same set
 //! as client roles; `econ-graph-roles --list` prints the catalog for the CI check that

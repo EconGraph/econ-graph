@@ -2,8 +2,7 @@
 
 Crawler: `backend/crates/econ-graph-sec-crawler/` (not a `SourceAdapter` in the main
 crawler). Fixture: `test_data/sec_mock/submissions_CIK0009999901.json` (real shape,
-invented company). No key; SEC requires a descriptive `User-Agent`. Background and the
-full plan: [SEC EDGAR XBRL implementation plan](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md).
+invented company). No key; SEC requires a descriptive `User-Agent`.
 
 Unlike the other sources, SEC data **stays in Postgres** under the federation plan
 (`companies`, `financial_statements`, `financial_line_items`, the `xbrl_*` taxonomy

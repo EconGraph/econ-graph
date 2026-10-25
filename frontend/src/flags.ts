@@ -24,7 +24,7 @@
  */
 import type releaseFlags from '../flags/release.json';
 
-/** A flag key in the generated flag file (every flag in train 1 is `kind: build`). */
+/** A flag key in the generated flag file (every flag is `kind: build`). */
 export type FlagName = keyof (typeof releaseFlags)['flags'];
 
 declare global {

@@ -1,18 +1,19 @@
 # Release process
 
-How a release train goes from `main` to a tag.
+How a release goes from `main` to a tag. What each release contains is tracked in
+[Linear](https://linear.app/econgraph/project/releases-and-release-engineering-ee56b60d9c7a).
 
 ## Branches
 
-- **`main`** holds all development until a train reaches QA, and is open to experimental work and
-  the next trains after that.
-- **`release/vX.Y`** (for example `release/v4.0`) is cut from `main` when a train reaches QA. The
+- **`main`** holds all development until a release reaches QA, and is open to experimental work
+  and later releases after that.
+- **`release/vX.Y`** (for example `release/v4.0`) is cut from `main` when a release reaches QA. The
   QA cycle runs on it, and the release tag is made on it. Patch releases (`vX.Y.1`, ...) come
   from the same branch.
 
 ## Cutting the branch
 
-Cut when all of the train's items are merged on `main` and CI is green. A release's QA plan
+Cut when all of the release's items are merged on `main` and CI is green. A release's QA plan
 lists any further conditions under "Before QA starts" (for example the
 [v4.0.0 QA plan](../release/v4.0.0-qa.md)).
 
@@ -21,7 +22,7 @@ git fetch origin main
 git push origin origin/main:refs/heads/release/v4.0
 ```
 
-After the cut, `main` can take work for the next train, including flag and experimental
+After the cut, `main` can take work for later releases, including flag and experimental
 changes the release must not ship.
 
 ## During QA
@@ -60,7 +61,8 @@ release branch like any fix, forward-ported to `main`. No squash is needed when 
 no app migrations, or exactly one. Data migrations (`backend/migrations/data`) are never
 squashed: they ship as they are.
 
-When QA passes and the maintainer agrees, tag the tested commit on the release branch, `vX.Y.0` plus the
-train tag (`train-N`, which the feature flag `remove_by` check reads). Before pushing `train-N`
+When QA passes and the maintainer agrees, tag the tested commit on the release branch with
+`scripts/release/tag.sh`: `vX.Y.0` plus the marker tag `train-N`, which the feature flag
+`remove_by` check reads. Before pushing `train-N`
 the flags `remove_by` check runs with that tag, so a flag that is due for removal blocks the tag.
 The tag workflow reuses the tested image digests instead of rebuilding.

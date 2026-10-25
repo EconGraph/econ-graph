@@ -11,8 +11,8 @@
  * A `${...}` that fills a whole path segment matches one segment, so `/series/${id}` matches
  * `/series/:id`; the path is only checked up to a `${...}` glued to other text. Anything after `?`
  * or `#` is ignored, and so are paths to files (`/manifest.json`) and to the API (`/api/…`,
- * `/graphql`). Targets built any other way are not checked; the release crawl (REL-4) is the
- * backstop for those.
+ * `/graphql`). Targets built any other way are not checked; the release crawl (`tests/e2e/release/crawl`)
+ * is the backstop for those.
  *
  * Known dead targets live in KNOWN_DEAD below, each with the issue that fixes it. An entry whose
  * target no longer appears fails the test, so the list stays exact; one whose file is gone is

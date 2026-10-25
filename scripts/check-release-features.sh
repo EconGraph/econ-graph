@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# REL-3 "nothing fake" check (exit criterion 4), backend half: unfinished or dev-only backend
-# code must not ship in a release build by default.
+# Nothing-fake check, backend half: unfinished or dev-only backend code must not ship in a
+# release build by default.
 #
 # `cargo build --release` (no --features) is what `backend/Dockerfile` runs, so whatever ends
 # up in cargo's actual resolved feature set for each crate (not just its own `default = [...]`
@@ -8,15 +8,14 @@
 # local feature enables it) or by a different workspace crate's dependency declaration
 # unconditionally requesting it. This is a static, metadata-only check (no compile) for two
 # known risks:
-#   - econ-graph-sec-crawler's `xbrl-parser` feature (SEC-2): the XBRL parser, DTS download and
+#   - econ-graph-sec-crawler's `xbrl-parser` feature: the XBRL parser, DTS download and
 #     financial ratio calculator are unfinished. Always a cargo feature; must stay off.
-#   - econ-graph-crawler / econ-graph-crawler-worker's dev-only static-catalog adapters
-#     (DATA-1/FLAGS-4): ten hardcoded sources that can't fetch live data. Currently a cargo
-#     feature, `static-catalogs`, that must stay off; FLAGS-4 replaces it with a build flag,
-#     `static_catalogs`, gated by `cfg(flag_static_catalogs)` the same way `mcp` is (see
-#     backend/crates/econ-graph-flags-build). This script checks whichever mechanism is
-#     present, so it keeps working whichever of this PR and FLAGS-4 merges second.
-# The Docker build arg that can turn the cargo feature on must also default to empty.
+#   - econ-graph-crawler / econ-graph-crawler-worker's dev-only static-catalog adapters: ten
+#     hardcoded sources that can't fetch live data. They are gated by the `static_catalogs`
+#     build flag, `cfg(flag_static_catalogs)`, the same way `mcp` is (see
+#     backend/crates/econ-graph-flags-build), which must be off in the release profile. If a
+#     crate declares a `static-catalogs` cargo feature again, that feature must stay off.
+# If backend/Dockerfile has a CARGO_FEATURES build arg, it must default to empty.
 #
 # A full-build confirmation that each feature is actually compiled out (not just absent from
 # cargo's resolved feature set / off in the release flag profile) already runs as "Check the
@@ -94,8 +93,7 @@ check_build_flag_off_in_release() {
 check_cargo_feature_off_by_default econ-graph-sec-crawler xbrl-parser
 
 # static-catalogs: check the cargo feature on whichever of econ-graph-crawler /
-# econ-graph-crawler-worker still declares it, or the static_catalogs build flag once FLAGS-4
-# has removed the feature from both. (Presence is a plain Cargo.toml lookup, not resolution:
+# econ-graph-crawler-worker declares it, or the static_catalogs build flag when neither does. (Presence is a plain Cargo.toml lookup, not resolution:
 # we need to know whether the feature exists at all before asking whether it's active.)
 static_catalogs_crates_with_feature=()
 for crate in econ-graph-crawler econ-graph-crawler-worker; do
@@ -111,7 +109,7 @@ fi
 
 dockerfile="backend/Dockerfile"
 if grep -q "CARGO_FEATURES" "$dockerfile"; then
-  # The build-arg mechanism still exists (pre-FLAGS-4, or reintroduced): it must default to empty.
+  # A CARGO_FEATURES build arg exists: it must default to empty.
   if ! grep -qE '^ARG CARGO_FEATURES=""$' "$dockerfile"; then
     echo "::error::$dockerfile's CARGO_FEATURES build arg no longer defaults to empty, so a plain docker build could enable xbrl-parser or static-catalogs in a release image without anyone passing --build-arg."
     fail=1
@@ -119,7 +117,7 @@ if grep -q "CARGO_FEATURES" "$dockerfile"; then
     echo "ok: $dockerfile's CARGO_FEATURES build arg defaults to empty"
   fi
 else
-  # FLAGS-4 removed the build-arg mechanism entirely: the builder stage's cargo build must not
+  # No CARGO_FEATURES build arg: the builder stage's cargo build must not
   # pass --features at all, so there's no way to turn a feature on via a Docker build-arg.
   if grep -qE 'cargo build .*--features' "$dockerfile"; then
     echo "::error::$dockerfile has no CARGO_FEATURES build-arg, but its cargo build still passes --features from somewhere — check what enables it."

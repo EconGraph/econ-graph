@@ -4,7 +4,7 @@ The Playwright project `release` (`frontend/playwright.release.config.ts`) runs
 the frontend release build against the real backend on Postgres 18. The database
 is seeded from recorded fixtures through the crawler adapters, so nothing
 touches the network and no API keys are needed. This suite is the release exit
-check (release 1 exit criterion 5). The other specs under `tests/e2e/` belong to
+check (exit criterion 5 in ECO-5). The other specs under `tests/e2e/` belong to
 the older configs, which skip this directory — except
 `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`
 (ECO-282), which only mock GraphQL via `page.route` and so also run under the
@@ -86,7 +86,7 @@ In this mode (`env.ts`):
 - Specs that compare with fixture values check live data instead: the journey
   checks that GDP's newest point is within FRED's publication cadence
   (`liveMaxAgeDays` in `fixtures.ts`) and that each transformation shows a
-  number. The six-source sweep checks each other train 1 source's newest point
+  number. The six-source sweep checks each other source's newest point
   against its own cadence (`liveMaxAgeDays` in `SWEPT_SOURCES`). Census BDS
   series crawled before #316 have their external id as title until the crawler
   fetches them again (weekly, since their frequency reads "Unknown"), and the
@@ -104,7 +104,7 @@ In this mode (`env.ts`):
 
 - `smoke.spec.ts`: the home page loads, the seeded series are reachable through
   the frontend's `/graphql` proxy, and explore search finds one.
-- `journey.spec.ts`: release 1 exit criterion 5's cross-area journey in one
+- `journey.spec.ts`: exit criterion 5's cross-area journey in one
   browser session. Search for GDP, open it, check the chart's newest point,
   apply every transformation and check the value it shows, then sign in and
   annotate. The CSV download step joins it with UI-6 (#223).
@@ -123,7 +123,7 @@ In this mode (`env.ts`):
   `stale allowlist entry` annotations. A new route in `App.tsx` fails the crawl
   until `ROUTE_URLS` in `crawl/every-control.spec.ts` says which URLs to visit
   for it.
-- `sources/six-source-sweep.spec.ts`: one series from each train 1 source (FRED,
+- `sources/six-source-sweep.spec.ts`: one series from each source (FRED,
   BLS, Census BDS, BEA, FHFA, World Bank WDI), signed out. Search for it on the
   explore page and open it, check its newest point, apply every transformation
   the page offers (checking its value, or that the page says there aren't enough
@@ -210,7 +210,7 @@ Put them in `tests/e2e/release/<area>/`, for example
   spec asserts a fixture value, branch on `DEPLOYED` from `env.ts` and assert
   what holds live instead.
 
-## Not in the stack yet
+## Known differences from the deployed build
 
 - **Test-only code in the backend binary.** The e2e backend is a debug build
   that shares one cargo invocation with `seed-fixtures`. That means it links the

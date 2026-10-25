@@ -46,7 +46,7 @@ codes = [
 name = "place_id"
 label = "Place"
 
-# The file has two value columns, index_nsa and index_sa. Train 1 stores one value per
+# The file has two value columns, index_nsa and index_sa. data_points stores one value per
 # observation, so each column is its own series.
 [[dataset.dimensions]]
 name = "seasonal_adjustment"

@@ -34,7 +34,7 @@ pub enum SourceId {
     /// International Monetary Fund. `"IMF"`
     ///
     /// No adapter is registered: the IMF adapter used made-up series ids and was removed.
-    /// The variant stays for the SDMX work planned in release train 4.
+    /// The variant stays for a future SDMX adapter.
     #[serde(rename = "IMF")]
     Imf,
     /// European Central Bank. `"ECB"`
