@@ -102,7 +102,7 @@ async fn livez_handler() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::json(&json!({ "status": "alive" })))
 }
 
-/// Readiness (and startup): the database must be reachable and its applied schema must be at
+/// Readiness (and startup): the database must be reachable and its applied app migrations at
 /// least as new as this binary's minimum. Unlike `/health`, this can actually fail, so a pod
 /// whose database is down or mid-migration is taken out of rotation instead of serving errors.
 async fn readyz_handler(pool: DatabasePool) -> Result<impl warp::Reply, Infallible> {
@@ -113,7 +113,7 @@ async fn readyz_handler(pool: DatabasePool) -> Result<impl warp::Reply, Infallib
     // handler outlive the probe that's waiting on it.
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        econ_graph_core::readiness_check(&pool),
+        econ_graph_core::readiness_check_set(&pool, econ_graph_core::MigrationSet::App),
     )
     .await;
 
@@ -851,9 +851,9 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Database connection pool created successfully");
 
-    // Run migrations
+    // Run the app migrations. The data migrations are `crawler migrate`'s, never the backend's.
     info!("🔄 Running database migrations...");
-    econ_graph_core::run_migrations(&config.database_url)
+    econ_graph_core::run_migration_set(&config.database_url, econ_graph_core::MigrationSet::App)
         .await
         .map_err(|e| {
             let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));

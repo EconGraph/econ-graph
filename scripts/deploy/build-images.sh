@@ -20,8 +20,8 @@ source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
 
 # Version to tag images with, read from backend/Cargo.toml (the one place the
-# version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml
-# and crawler-worker.yaml hard-code this same tag, so it can't be overridden
+# version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml,
+# crawler-worker.yaml and crawler-migrate-job.yaml hard-code this same tag, so it can't be overridden
 # independently: doing so would load images under a tag the manifests don't
 # reference and pods would sit on ErrImageNeverPull.
 WORKSPACE_VERSION="$(grep -m1 '^version' backend/Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
