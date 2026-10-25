@@ -124,9 +124,11 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
-        # startupProbe and readinessProbe hit /readyz (database reachable AND app migrations at
+        # startupProbe and readinessProbe hit /readyz (app database reachable AND app migrations at
         # least as new as this binary needs), so a pod is never routed traffic before its
-        # migrations have actually caught up. livenessProbe hits /livez, which only checks the process is
+        # migrations have actually caught up. The data database's state is reported in the
+        # /readyz body but never fails it, so a data outage doesn't take sign-in out of rotation.
+        # livenessProbe hits /livez, which only checks the process is
         # up, so a slow or briefly-down database can't get a healthy pod killed and restarted.
         startupProbe:
           httpGet:

@@ -170,12 +170,19 @@ for the local anonymous server.
 | Variable | Meaning |
 |----------|---------|
 | `APP_DATABASE_URL` | Required. The app database: users and everything they create. The backend applies the app migration set to it at startup. |
-| `DATA_DATABASE_URL` | Optional. The data database: sources, series, observations, crawl state. Never migrated by the backend. Without it, every data field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` (message `Data is served by the data plane at /data/graphql`), `systemHealth`'s `queueItems` is null, `createAnnotation` does not check that its series exists, and `/readyz` checks only the app database. |
+| `DATA_DATABASE_URL` | Optional. The data database: sources, series, observations, crawl state. Never migrated by the backend. Without it, every data field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` (message `Data is served by the data plane at /data/graphql`), `systemHealth`'s `queueItems` is null, `createAnnotation` does not check that its series exists, and `/readyz` reports the data database as `not_configured`. |
+| `APP_DB_POOL_SIZE` | Optional, default 10. Connections in the app database pool. |
+| `DATA_DB_POOL_SIZE` | Optional, default 10. Connections in the data database pool. When the two URLs are the same, the backend opens one pool of `APP_DB_POOL_SIZE + DATA_DB_POOL_SIZE` connections for both. |
 
 Both may name the same database. `DATABASE_URL` is not read: with it set and `APP_DATABASE_URL`
 unset, the backend exits at startup with
 `DATABASE_URL is no longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. Tests still read
 `DATABASE_URL`, as one database holding both sets.
+
+`/readyz` answers 503 only when the app database is unreachable or its migrations are pending.
+Its body reports the data database as `ok`, `unreachable`, `pending_migrations` or
+`not_configured` without failing on it, so a data outage does not take sign-in down; data fields
+fail on their own until it is over.
 
 To enable sign-in, start the repository's development Keycloak realm using the
 [Keycloak local-stack instructions](../config/keycloak/README.md#local-stack), or

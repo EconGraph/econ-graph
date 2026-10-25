@@ -18,6 +18,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # Applies the data migrations (`crawler migrate`) to the data database, then exits. The backend
+  # applies only the app migrations, so both backends wait for this to finish.
+  crawler-migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: crawler-worker
+    environment:
+      DATA_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+    command: ["/app/crawler", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -39,6 +53,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      crawler-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -146,6 +162,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      crawler-migrate:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
       - cargo_cache:/usr/local/cargo/registry

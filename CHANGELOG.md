@@ -40,13 +40,22 @@ All notable changes to EconGraph are documented here. The format follows
   Users, annotations, comments, collaborators, audit logs and security events use the app
   database; series, observations, sources, datasets, search and the crawl queue use the data
   database. Both may be the same database.
-- The backend applies only the app migrations when it starts. It never migrates the data
-  database, and `/readyz` fails until the data database's migrations are current.
+- The backend never migrates the data database; operators apply the data set with
+  `crawler migrate` (the `crawler-migrate` Job in Kubernetes, the `crawler-migrate` service in
+  docker-compose). `/readyz` fails only when the app database is unreachable or its migrations
+  are pending, each database check bounded on its own. It reports the data database as `ok`,
+  `unreachable`, `pending_migrations` or `not_configured` in its body without failing, so a data
+  outage does not take sign-in down.
+- When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, the backend opens one pool for
+  both. `APP_DB_POOL_SIZE` and `DATA_DB_POOL_SIZE` (default 10 each) size the pools; a shared
+  pool gets their sum, so a backend opens at most 20 connections by default either way.
 - With no `DATA_DATABASE_URL`, app operations work as before and every data field fails with
   `extensions.code = DATA_SERVED_REMOTELY` (`Data is served by the data plane at /data/graphql`);
-  `/readyz` checks only the app database, `createAnnotation` does not check that its series
-  exists, and `systemHealth`'s `queueItems` is null. `queueItems` is nullable in the schema for
-  this.
+  `createAnnotation` does not check that its series exists, `systemHealth`'s `queueItems` is
+  null, and `triggerCrawl` is refused but still audited (outcome `unavailable`). `queueItems` is
+  nullable in the schema for this.
+- docker-compose runs `crawler migrate` as a one-shot `crawler-migrate` service that the
+  backends wait for.
 - The backend pod no longer gets `DATABASE_URL`.
 
 ## [4.0.0] - 2026-10-08
