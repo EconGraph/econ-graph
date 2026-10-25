@@ -75,7 +75,7 @@ jobs:
 
     - name: Run database migrations
       working-directory: ./backend
-      run: cargo run --bin migrate
+      run: cargo run -p econ-graph-crawler --bin crawler -- migrate
       env:
         APP_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
         DATA_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test

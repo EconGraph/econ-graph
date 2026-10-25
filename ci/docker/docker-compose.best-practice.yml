@@ -18,6 +18,22 @@ services:
     networks:
       - test-network
 
+  # Applies the data migrations (`crawler migrate`), then exits. The backend applies only the
+  # app migrations, so it waits for this to finish.
+  crawler-migrate:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+      target: crawler-worker
+    environment:
+      - DATA_DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["/app/crawler", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - test-network
+
   # Backend service (pre-built)
   backend:
     build:
@@ -32,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      crawler-migrate:
+        condition: service_completed_successfully
     networks:
       - test-network
 

@@ -38,12 +38,11 @@ impl ScratchDatabase {
         diesel::sql_query(format!("CREATE DATABASE {name}"))
             .execute(&mut conn)
             .expect("Should create a scratch database");
-        let mut url = url::Url::parse(&admin_url).expect("DATABASE_URL should be a URL");
-        url.set_path(&format!("/{name}"));
+        let url = scratch_url(&admin_url, &name);
         Self {
             admin_url,
             name,
-            url: url.to_string(),
+            url,
         }
     }
 
@@ -51,6 +50,48 @@ impl ScratchDatabase {
     pub fn connect(&self) -> diesel::PgConnection {
         use diesel::Connection;
         diesel::PgConnection::establish(&self.url).expect("Should connect to the scratch database")
+    }
+}
+
+/// `admin_url` pointed at database `name`. A `dbname` query parameter would override the path
+/// (libpq takes a repeated keyword's last value), so it is removed; other parameters are kept.
+fn scratch_url(admin_url: &str, name: &str) -> String {
+    let mut url = url::Url::parse(admin_url).expect("DATABASE_URL should be a URL");
+    url.set_path(&format!("/{name}"));
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "dbname")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    if kept.is_empty() {
+        url.set_query(None);
+    } else {
+        url.query_pairs_mut().clear().extend_pairs(kept);
+    }
+    url.to_string()
+}
+
+#[cfg(test)]
+mod scratch_url_tests {
+    use super::scratch_url;
+
+    #[test]
+    fn the_scratch_database_name_wins_over_a_dbname_parameter() {
+        assert_eq!(
+            scratch_url(
+                "postgres://u:p@h:5432/shared?dbname=shared&sslmode=disable",
+                "eg_s"
+            ),
+            "postgres://u:p@h:5432/eg_s?sslmode=disable"
+        );
+        assert_eq!(
+            scratch_url("postgres://u:p@h:5432/shared?dbname=shared", "eg_s"),
+            "postgres://u:p@h:5432/eg_s"
+        );
+        assert_eq!(
+            scratch_url("postgres://h/shared", "eg_s"),
+            "postgres://h/eg_s"
+        );
     }
 }
 

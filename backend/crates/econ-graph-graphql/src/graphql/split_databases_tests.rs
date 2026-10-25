@@ -366,6 +366,27 @@ async fn without_a_data_database_data_fields_are_served_remotely() {
     assert_eq!(health["systemHealth"]["metrics"]["queueItems"], Value::Null);
     assert_eq!(health["users"]["totalCount"], 2);
 
+    // A configured but unreachable data database also leaves the app metrics and a null count.
+    let unreachable = DataPool(
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(
+                diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+                    diesel_async::AsyncPgConnection,
+                >::new("postgres://nobody@127.0.0.1:1/none"),
+            ),
+    );
+    let health = ok(run(
+        app,
+        Some(&unreachable),
+        &staff,
+        true,
+        "{ systemHealth { metrics { totalUsers queueItems } } }",
+    )
+    .await);
+    assert_eq!(health["systemHealth"]["metrics"]["totalUsers"], 2);
+    assert_eq!(health["systemHealth"]["metrics"]["queueItems"], Value::Null);
+
     // The schema doesn't depend on the databases.
     let with_data = create_schema_with_data(app.clone(), Some(db.data.clone()), ()).sdl();
     let without_data = create_schema_with_data(app.clone(), None, ()).sdl();

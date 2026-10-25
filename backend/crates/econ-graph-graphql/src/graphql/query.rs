@@ -650,12 +650,28 @@ impl Query {
             .await?;
         drop(conn);
 
-        // The crawl queue is in the data database, which this backend may not have.
+        // The crawl queue is in the data database, which this backend may not have, and which may
+        // be down: either way the count is null and the app metrics are still reported.
         let queue_items = match ctx.data_opt::<DataPool>() {
             Some(data) => {
-                let mut conn = data.get().await?;
-                let count: i64 = crawl_queue::table.count().get_result(&mut conn).await?;
-                Some(count as i32)
+                let count = async {
+                    let mut conn = data.get().await.map_err(|e| e.to_string())?;
+                    crawl_queue::table
+                        .count()
+                        .get_result::<i64>(&mut conn)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+                .await;
+                match count {
+                    Ok(count) => Some(count as i32),
+                    Err(e) => {
+                        tracing::warn!(
+                            "systemHealth: no crawl queue count from the data database: {e}"
+                        );
+                        None
+                    }
+                }
             }
             None => None,
         };
