@@ -163,9 +163,9 @@ In this mode (`env.ts`):
   once on retry; an unreachable sign-in service, a failed callback and a session
   ended at Keycloak leave the page signed out with a way to sign in again; a map
   whose values fail to load says so and Retry recovers. The detailed permutations
-  are the component tests'. The signed-in specs use `erin` and `frank`. Two
-  known gaps are `test.fixme`: a failed source listing has no Retry, and saving
-  an annotation again after a lost response stores a duplicate.
+  are the component tests'. The signed-in specs use `erin` and `frank`. Saving
+  an annotation again after a lost response stores it once. One known gap is
+  `test.fixme`: a failed source listing has no Retry.
   The backend side of ECO-264 is mapped in
   `docs/testing/failure-behavior-matrix.md`.
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
