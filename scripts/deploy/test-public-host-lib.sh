@@ -566,16 +566,22 @@ done
 # --- deploy.sh --dry-run reaches no cluster --------------------------------------------
 # With the kind kubectl layout above (and the real yq, which deploy.sh needs for more than
 # the replica count), a dry run writes nothing through $KUBECTL, the kind kubectl or the
-# kubectl on PATH, with or without a public host, and reports the production check.
+# kubectl on PATH, with or without a public host, and reports the production check. It
+# runs from a copy of scripts/deploy and k8s only, so deploy.sh skips the dashboard and
+# monitoring linters (scripts/test-*.sh), which check other things with other tools.
 if command -v yq >/dev/null 2>&1; then
   writes_re='(^| )(apply|delete|patch|scale|create|label|annotate|replace|edit|set|cordon|drain|taint)( |$)|rollout restart'
+  deploy_root="$stub_dir/deploy-root"
+  mkdir -p "$deploy_root/scripts"
+  cp -r scripts/deploy "$deploy_root/scripts/"
+  cp -r k8s "$deploy_root/"
   for host in '' econgraph.com; do
     printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
     : >"$log"
     if ! env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
       PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
-      PUBLIC_HOST="$host" scripts/deploy/deploy.sh --dry-run </dev/null >"$out" 2>&1; then
-      fail "deploy.sh --dry-run (PUBLIC_HOST=$host) failed: $(tail -5 "$out")"
+      PUBLIC_HOST="$host" "$deploy_root/scripts/deploy/deploy.sh" --dry-run </dev/null >"$out" 2>&1; then
+      fail "deploy.sh --dry-run (PUBLIC_HOST=$host) failed: $(grep -E '❌|error' "$out" | head -5)"
     fi
     grep -E "$writes_re" "$log" && fail "deploy.sh --dry-run (PUBLIC_HOST=$host) wrote through the kind kubectl"
     [ ! -s "$path_log" ] || fail "deploy.sh --dry-run (PUBLIC_HOST=$host) called another kubectl: $(cat "$path_log")"
