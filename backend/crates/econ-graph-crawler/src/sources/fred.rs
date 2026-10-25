@@ -9,6 +9,9 @@
 //!   request per curated id) and by fetching.
 //! - `{base}/series/observations?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=..&offset=..[&observation_start=YYYY-MM-DD]`
 //!   — observations with their vintages (ALFRED), paged. See [Vintages](#vintages).
+//! - `{base}/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=..&limit=..&offset=..`
+//!   — the vintage dates in a fetch's real-time window, paged, to plan the observations
+//!   requests. See [Vintage-date limit](#vintage-date-limit).
 //!
 //! # Discovery
 //!
@@ -43,7 +46,39 @@
 //!   same rows. No `observation_start` is sent, so revisions to old dates (annual and benchmark
 //!   revisions) are picked up.
 //! - **Paging**: FRED returns at most [`OBSERVATIONS_PAGE_SIZE`] rows per request. Pages are
-//!   requested with `offset` until `count` rows have arrived (at most [`MAX_OBSERVATION_PAGES`]).
+//!   requested with `offset` until `count` rows have arrived (at most [`MAX_OBSERVATION_PAGES`]
+//!   per real-time window).
+//!
+//! # Vintage-date limit
+//!
+//! One `/series/observations` request may cover at most [`FRED_DOCUMENTED_VINTAGE_DATE_LIMIT`]
+//! vintage dates; FRED rejects a real-time window holding more with an HTTP 400 (daily series
+//! such as DFF or DGS10 have over 5,000). So every fetch first lists the vintage dates of its
+//! real-time window (`/series/vintagedates`, one request for any series with up to 10,000) and
+//! requests the observations as consecutive windows ([`RealtimeWindow`]) of at most
+//! [`FRED_MAX_VINTAGE_DATES_PER_REQUEST`] vintage dates each, half the documented limit (the
+//! margin is explained there). Each window is paged as above:
+//!
+//! - **Splitting**: the vintage dates are cut into groups of at most the default. The first
+//!   window starts where the whole one did; each later one starts the day before its first
+//!   vintage and ends the day before the next window's first vintage; the last ends at
+//!   `9999-12-31`. A window with no more vintage dates than the default is the whole window,
+//!   so most series take one observations request, the same one as without splitting.
+//! - **No gaps or duplicates**: a row is kept only by the window whose range, from its first
+//!   vintage to its end, holds the row's `realtime_start`. Those ranges partition the real-time
+//!   axis, so every row FRED has is kept exactly once, whatever FRED does at the edges.
+//! - **Original releases**: starting each window the day before its first vintage makes FRED
+//!   also return every value already in effect then, clamped to that day, exactly as for an
+//!   incremental fetch. Those rows aren't kept, but take part in choosing each date's earliest
+//!   row, so a date first published in an earlier window has no original release in a later
+//!   one, and the points match a single-window fetch.
+//! - **Fallback**: if FRED still answers a planned window with the vintage-limit 400
+//!   ([`is_too_many_vintage_dates`]), for instance because the limit was lowered, the window is
+//!   split in half (down to a single vintage) and retried, with a warning logged. No other 400
+//!   is retried.
+//! - **Politeness**: every request, the vintage-date listing included, goes through the shared
+//!   [`HttpFetcher`](crate::HttpFetcher), so windows are requested one after another under
+//!   FRED's rate limit, with its User-Agent and retries.
 //!
 //! # Re-crawls
 //!
@@ -53,8 +88,8 @@
 //! every fetch requests for metadata anyway, gives `last_updated`, which FRED moves whenever the
 //! series' data changes, revisions included. It is stored, prefixed with [`PARSE_VERSION`], as the
 //! series' validator `version`, and
-//! an incremental fetch whose `last_updated` matches the stored one skips `/series/observations`:
-//! the series is marked crawled with the new metadata and keeps its points
+//! an incremental fetch whose `last_updated` matches the stored one skips `/series/vintagedates` and
+//! `/series/observations`: the series is marked crawled with the new metadata and keeps its points
 //! ([`FetchedSeries::unchanged`]). A first fetch (no known vintage), a series that stored no
 //! `last_updated`, a response without one, or a failure reading the stored value fetches the
 //! observations as before. QA verifies against the live API that `last_updated` moves on a
@@ -62,8 +97,9 @@
 //!
 //! FRED reports errors as JSON `{"error_code": 400, "error_message": "Bad Request.  ..."}`
 //! with the same HTTP status. An unknown `series_id` is HTTP **400** (not 404) with the message
-//! `"Bad Request.  The series does not exist."`; that is mapped to [`CrawlError::NotFound`], and
-//! every other 400 stays [`CrawlError::Permanent`]. Recognising the message requires the
+//! `"Bad Request.  The series does not exist."`; that is mapped to [`CrawlError::NotFound`].
+//! The vintage-limit 400 splits the request (see [Vintage-date limit](#vintage-date-limit)),
+//! and every other 400 stays [`CrawlError::Permanent`]. Recognising a message requires the
 //! [`HttpFetcher`](crate::HttpFetcher) error to quote the (redacted) response body; see
 //! [`classify_fred_error`].
 //!
@@ -110,15 +146,43 @@ const MISSING_VALUE: &str = ".";
 /// `realtime_start`, meaning "every vintage".
 pub const EARLIEST_REALTIME_START: &str = "1776-07-04";
 
-/// End of the real-time window: FRED's documented latest `realtime_end`, meaning "still current".
-const LATEST_REALTIME_END: &str = "9999-12-31";
-
 /// Rows per `/series/observations` page (FRED's maximum `limit`).
 const OBSERVATIONS_PAGE_SIZE: usize = 100_000;
 
-/// Upper bound on observation pages per series, so a response that keeps claiming more rows
-/// can't page forever (10 million rows; daily series with every vintage stay far below this).
+/// Upper bound on observation pages per real-time window, so a response that keeps claiming
+/// more rows can't page forever (10 million rows; daily series with every vintage stay far
+/// below this).
 const MAX_OBSERVATION_PAGES: usize = 100;
+
+/// FRED's limit on the vintage dates one `/series/observations` request may cover, for JSON.
+/// From the `vintage_dates` parameter of
+/// <https://fred.stlouisfed.org/docs/api/fred/series_observations.html>: "Your query will be
+/// limited to a specific number of vintage dates depending on the series_id, file_type and
+/// output_type specified", with "any output_type or other series: 1000 csv, 1000 xlsx, 2000
+/// json, 2000 xml" (the smaller limits listed there are for output_type=2, which this adapter
+/// doesn't use). FRED applies it to a `realtime_start`..`realtime_end` window too, answering
+/// HTTP 400 `"Bad Request.  This exceeds the maximum number of vintage dates allowed (2000)."`
+/// (see [`is_too_many_vintage_dates`]).
+pub const FRED_DOCUMENTED_VINTAGE_DATE_LIMIT: usize = 2000;
+
+/// Vintage dates each `/series/observations` request is planned to cover: half of
+/// [`FRED_DOCUMENTED_VINTAGE_DATE_LIMIT`]. The margin is deliberately wide, because what FRED
+/// counts against its limit isn't documented exactly: every window after the first starts the
+/// day before its first vintage, which can itself be a vintage date or be counted as one for
+/// the values clamped to it; the count comes from `/series/vintagedates`, which leaves out
+/// release dates on which the series didn't change; and 1000 is also FRED's own limit for the
+/// other formats, so a JSON limit lowered to match them still isn't hit. The cost is a few
+/// more requests for the daily series that need splitting at all (DFF's ~5,150 vintages take 6
+/// windows instead of 3); a series with fewer vintages than this is still one request.
+pub const FRED_MAX_VINTAGE_DATES_PER_REQUEST: usize = 1000;
+
+/// Dates per `/series/vintagedates` page (FRED's maximum `limit`, per
+/// <https://fred.stlouisfed.org/docs/api/fred/series_vintagedates.html>).
+const VINTAGE_DATES_PAGE_SIZE: usize = 10_000;
+
+/// Upper bound on `/series/vintagedates` pages per listing (100,000 dates, far beyond one per
+/// day since ALFRED began).
+const MAX_VINTAGE_DATE_PAGES: usize = 10;
 
 /// Lower-cased substrings of a series' `notes` known to mark it as copyright-restricted, e.g. the
 /// Coinbase `CBBTCUSD` family ("reproduction ... is prohibited except with prior written
@@ -227,10 +291,14 @@ impl FredAdapter {
         ))
     }
 
-    /// Every observation vintage of `series_id`, paged (see [Vintages](self#vintages)).
+    /// Every observation vintage of `series_id`, paged and, when FRED's per-request vintage
+    /// limit needs it, split into real-time windows (see [Vintages](self#vintages) and
+    /// [Vintage-date limit](self#vintage-date-limit)).
     ///
     /// `observation_start` limits the observation dates. `known_vintage` starts the real-time
-    /// window there and drops rows already stored; `None` asks for every vintage.
+    /// window there and drops rows already stored; `None` asks for every vintage. The window's
+    /// vintage dates are listed first, and it is requested in windows of at most
+    /// [`FRED_MAX_VINTAGE_DATES_PER_REQUEST`] of them.
     async fn fetch_observations(
         &self,
         ctx: &CrawlCtx,
@@ -239,12 +307,94 @@ impl FredAdapter {
         observation_start: Option<NaiveDate>,
         known_vintage: Option<NaiveDate>,
     ) -> Result<Vec<FetchedPoint>, CrawlError> {
-        let observation_start = observation_start.map(|d| d.format("%Y-%m-%d").to_string());
         // The day before the known vintage, so vintage `known_vintage` itself is re-read.
-        let realtime_start = known_vintage.and_then(|k| k.pred_opt()).map_or_else(
-            || EARLIEST_REALTIME_START.to_string(),
-            |d| d.format("%Y-%m-%d").to_string(),
-        );
+        let start = known_vintage
+            .and_then(|k| k.pred_opt())
+            .unwrap_or_else(earliest_realtime_start);
+        let whole = RealtimeWindow {
+            start,
+            end: latest_realtime_end(),
+            keep_from: known_vintage,
+            vintages: None,
+        };
+        let vintages = self
+            .fetch_vintage_dates(ctx, api_key, series_id, whole.start, whole.end)
+            .await?;
+        let mut pending = whole.split(&vintages, FRED_MAX_VINTAGE_DATES_PER_REQUEST);
+        pending.reverse(); // used as a stack, earliest window on top
+
+        let mut rows = Vec::new();
+        while let Some(window) = pending.pop() {
+            match self
+                .fetch_window(ctx, api_key, series_id, observation_start, &window)
+                .await
+            {
+                Ok(window_rows) => rows.extend(window_rows),
+                Err(err) if is_too_many_vintage_dates(&err) => {
+                    let parts = self
+                        .split_rejected(ctx, api_key, series_id, &window)
+                        .await?;
+                    if parts.len() < 2 {
+                        return Err(err);
+                    }
+                    // Planned windows stay well under FRED's documented limit, so this means
+                    // FRED counts or limits vintage dates differently than documented.
+                    tracing::warn!(
+                        series_id,
+                        vintages = window.vintages.as_ref().map(Vec::len),
+                        windows = parts.len(),
+                        realtime_start = %window.start,
+                        realtime_end = %window.end,
+                        "FRED rejected a real-time window for too many vintage dates; \
+                         splitting it further"
+                    );
+                    pending.extend(parts.into_iter().rev());
+                }
+                Err(err) => return Err(classify_fred_error(err)),
+            }
+        }
+        Ok(to_points(rows))
+    }
+
+    /// The windows to retry `window` as after FRED rejected it for too many vintage dates: at
+    /// most [`FRED_MAX_VINTAGE_DATES_PER_REQUEST`] vintages each, and at most half of
+    /// `window`'s, so a window that FRED counts differently from `/series/vintagedates` still
+    /// shrinks on every retry. Fewer than two windows means it can't be split any further.
+    async fn split_rejected(
+        &self,
+        ctx: &CrawlCtx,
+        api_key: &str,
+        series_id: &str,
+        window: &RealtimeWindow,
+    ) -> Result<Vec<RealtimeWindow>, CrawlError> {
+        let vintages = match &window.vintages {
+            Some(v) => v.clone(),
+            None => {
+                self.fetch_vintage_dates(ctx, api_key, series_id, window.start, window.end)
+                    .await?
+            }
+        };
+        if vintages.len() < 2 {
+            return Ok(vec![]);
+        }
+        let per_window = FRED_MAX_VINTAGE_DATES_PER_REQUEST.min(vintages.len().div_ceil(2));
+        Ok(window.split(&vintages, per_window))
+    }
+
+    /// One real-time window's observation rows, paged with `limit`/`offset`. Each row's `keep`
+    /// says whether this window is the one that reads it (see [`RealtimeWindow::keeps`]).
+    /// Errors are returned unclassified, so the caller can recognise the vintage-limit 400.
+    async fn fetch_window(
+        &self,
+        ctx: &CrawlCtx,
+        api_key: &str,
+        series_id: &str,
+        observation_start: Option<NaiveDate>,
+        window: &RealtimeWindow,
+    ) -> Result<Vec<VintageRow>, CrawlError> {
+        let observation_start = observation_start.map(|d| d.format("%Y-%m-%d").to_string());
+        let realtime_start = window.start.format("%Y-%m-%d").to_string();
+        let realtime_end = window.end.format("%Y-%m-%d").to_string();
         let limit = OBSERVATIONS_PAGE_SIZE.to_string();
         let mut rows = Vec::new();
         for _ in 0..MAX_OBSERVATION_PAGES {
@@ -254,7 +404,7 @@ impl FredAdapter {
                 ("api_key", api_key),
                 ("file_type", "json"),
                 ("realtime_start", realtime_start.as_str()),
-                ("realtime_end", LATEST_REALTIME_END),
+                ("realtime_end", realtime_end.as_str()),
                 ("limit", limit.as_str()),
                 ("offset", offset.as_str()),
             ];
@@ -264,19 +414,72 @@ impl FredAdapter {
             let page: ObservationsResponse = ctx
                 .http
                 .get_json(SourceId::Fred, &self.url("/series/observations"), &query)
-                .await
-                .map_err(classify_fred_error)?;
+                .await?;
             let got = page.observations.len();
             for o in page.observations {
-                rows.push(parse_row(series_id, o)?);
+                let mut row = parse_row(series_id, o)?;
+                row.keep = window.keeps(row.realtime_start);
+                rows.push(row);
             }
             if got == 0 || rows.len() >= page.count {
-                return Ok(to_points(rows, known_vintage));
+                return Ok(rows);
             }
         }
         Err(CrawlError::Permanent(format!(
             "FRED {series_id}: more than {MAX_OBSERVATION_PAGES} pages of \
              {OBSERVATIONS_PAGE_SIZE} observations"
+        )))
+    }
+
+    /// The series' vintage dates from `start` to `end` (`/series/vintagedates`, paged), sorted
+    /// and deduplicated.
+    async fn fetch_vintage_dates(
+        &self,
+        ctx: &CrawlCtx,
+        api_key: &str,
+        series_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<NaiveDate>, CrawlError> {
+        let realtime_start = start.format("%Y-%m-%d").to_string();
+        let realtime_end = end.format("%Y-%m-%d").to_string();
+        let limit = VINTAGE_DATES_PAGE_SIZE.to_string();
+        let mut dates = Vec::new();
+        let mut received = 0;
+        for _ in 0..MAX_VINTAGE_DATE_PAGES {
+            let offset = received.to_string();
+            let page: VintageDatesResponse = ctx
+                .http
+                .get_json(
+                    SourceId::Fred,
+                    &self.url("/series/vintagedates"),
+                    &[
+                        ("series_id", series_id),
+                        ("api_key", api_key),
+                        ("file_type", "json"),
+                        ("realtime_start", realtime_start.as_str()),
+                        ("realtime_end", realtime_end.as_str()),
+                        ("limit", limit.as_str()),
+                        ("offset", offset.as_str()),
+                    ],
+                )
+                .await
+                .map_err(classify_fred_error)?;
+            let got = page.vintage_dates.len();
+            received += got;
+            for s in &page.vintage_dates {
+                dates.push(parse_date(series_id, "vintage date", s)?);
+            }
+            if got == 0 || received >= page.count {
+                dates.retain(|d| (start..=end).contains(d));
+                dates.sort_unstable();
+                dates.dedup();
+                return Ok(dates);
+            }
+        }
+        Err(CrawlError::Permanent(format!(
+            "FRED {series_id}: more than {MAX_VINTAGE_DATE_PAGES} pages of \
+             {VINTAGE_DATES_PAGE_SIZE} vintage dates"
         )))
     }
 
@@ -390,7 +593,8 @@ impl SourceAdapter for FredAdapter {
     }
 
     /// `/series` (metadata), then every vintage of the observations on or after `since` from
-    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows). Refuses with
+    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows per real-time
+    /// window; see [Vintage-date limit](self#vintage-date-limit)). Refuses with
     /// [`CrawlError::Permanent`] if the series' notes are copyright-restricted (see
     /// [`is_copyright_restricted`]), whether or not it was reached via discovery.
     async fn fetch_series(
@@ -532,6 +736,93 @@ struct VintageRow {
     date: NaiveDate,
     realtime_start: NaiveDate,
     value: Option<BigDecimal>,
+    /// Whether this row becomes a point. A row that isn't kept was already stored (before the
+    /// known vintage) or is read by an earlier window; it still counts when choosing each
+    /// date's original release.
+    keep: bool,
+}
+
+/// A real-time window of `/series/observations` requests (`realtime_start..=realtime_end`).
+///
+/// A series' history is read as consecutive windows whose kept rows partition the real-time
+/// axis: a row is kept by the one window whose `keep_from..=end` holds its `realtime_start`.
+/// Every window after the first starts the day before its `keep_from`, its first vintage, so
+/// FRED also returns the values in effect on that day (with `realtime_start` clamped to the
+/// window start); those are not kept, but show the date was already published, so a later row
+/// isn't mistaken for an original release. This is the same mechanism as an incremental fetch.
+#[derive(Debug, Clone, PartialEq)]
+struct RealtimeWindow {
+    start: NaiveDate,
+    end: NaiveDate,
+    /// The earliest `realtime_start` kept; `None` keeps everything from `start`.
+    keep_from: Option<NaiveDate>,
+    /// The vintage dates this window covers, when known (from `/series/vintagedates`).
+    vintages: Option<Vec<NaiveDate>>,
+}
+
+impl RealtimeWindow {
+    /// Whether this window is the one that turns a row starting on `realtime_start` into a point.
+    fn keeps(&self, realtime_start: NaiveDate) -> bool {
+        self.keep_from.is_none_or(|k| realtime_start >= k) && realtime_start <= self.end
+    }
+
+    /// This window as consecutive windows of at most `per_window` of `vintages` (the vintage
+    /// dates inside it, sorted) each. The first keeps this window's start and `keep_from`; each
+    /// later one starts the day before its first vintage and keeps from that vintage; each
+    /// ends the day before the next one's first vintage, and the last at this window's end.
+    /// No vintages, or no more than `per_window`, is this window unchanged.
+    fn split(&self, vintages: &[NaiveDate], per_window: usize) -> Vec<RealtimeWindow> {
+        let groups: Vec<&[NaiveDate]> = vintages.chunks(per_window.max(1)).collect();
+        if groups.len() <= 1 {
+            return vec![RealtimeWindow {
+                vintages: Some(vintages.to_vec()),
+                ..self.clone()
+            }];
+        }
+        groups
+            .iter()
+            .enumerate()
+            .map(|(i, group)| {
+                let first = group[0];
+                let (start, keep_from) = if i == 0 {
+                    (self.start, self.keep_from)
+                } else {
+                    (first.pred_opt().unwrap_or(first), Some(first))
+                };
+                let end = groups
+                    .get(i + 1)
+                    .and_then(|next| next[0].pred_opt())
+                    .unwrap_or(self.end);
+                RealtimeWindow {
+                    start,
+                    end,
+                    keep_from,
+                    vintages: Some(group.to_vec()),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Whether `err` is FRED rejecting a request for covering too many vintage dates, the one HTTP
+/// 400 that is answered by splitting the request rather than failing the series. FRED's body
+/// reads `"Bad Request.  This exceeds the maximum number of vintage dates allowed (2000)."`;
+/// only the stable part of it is matched, so a changed limit in the text still matches.
+fn is_too_many_vintage_dates(err: &CrawlError) -> bool {
+    matches!(err, CrawlError::Permanent(msg)
+        if msg.starts_with("HTTP 400")
+            && msg.to_ascii_lowercase().contains("maximum number of vintage dates"))
+}
+
+/// [`EARLIEST_REALTIME_START`] as a date.
+fn earliest_realtime_start() -> NaiveDate {
+    NaiveDate::from_ymd_opt(1776, 7, 4).expect("valid date")
+}
+
+/// End of every fetch's real-time window: FRED's documented latest `realtime_end`, meaning
+/// "still current".
+fn latest_realtime_end() -> NaiveDate {
+    NaiveDate::from_ymd_opt(9999, 12, 31).expect("valid date")
 }
 
 fn parse_row(series_id: &str, o: FredObservation) -> Result<VintageRow, CrawlError> {
@@ -549,32 +840,36 @@ fn parse_row(series_id: &str, o: FredObservation) -> Result<VintageRow, CrawlErr
         date,
         realtime_start,
         value,
+        keep: true,
     })
 }
 
-/// Turns vintage rows into points: `revision_date = realtime_start`, and each date's earliest
-/// row is its original release. With `known_vintage`, rows starting before it are dropped as
-/// already stored; when a date's earliest row is dropped, none of its remaining rows is an
-/// original release. See [Vintages](self#vintages).
+/// Turns vintage rows into points: each kept row becomes one, with `revision_date =
+/// realtime_start`, and is the original release if no row of its date (kept or not) starts
+/// earlier. Rows not kept were stored before the known vintage or belong to another real-time
+/// window; when a date's earliest row is one of them, none of its kept rows is an original
+/// release. See [Vintages](self#vintages).
 ///
-/// `is_original_release` is part of the `data_points` upsert key, so a full and an incremental
-/// fetch must mark the same rows, or one vintage would be stored twice. They do: the earliest
-/// row is chosen before anything is dropped.
-fn to_points(mut rows: Vec<VintageRow>, known_vintage: Option<NaiveDate>) -> Vec<FetchedPoint> {
-    rows.sort_by_key(|r| (r.date, r.realtime_start));
+/// `is_original_release` is part of the `data_points` upsert key, so a full, an incremental
+/// and a windowed fetch must mark the same rows, or one vintage would be stored twice. They
+/// do: the earliest row is chosen among all rows, before anything is dropped. Kept rows are
+/// unique by `(date, realtime_start)`, since windows keep disjoint ranges of `realtime_start`.
+fn to_points(mut rows: Vec<VintageRow>) -> Vec<FetchedPoint> {
+    rows.sort_by_key(|r| (r.date, r.realtime_start, !r.keep));
     let mut points = Vec::with_capacity(rows.len());
-    let mut prev_date = None;
+    let mut earliest: Option<(NaiveDate, NaiveDate)> = None;
     for r in rows {
-        let earliest = prev_date != Some(r.date);
-        prev_date = Some(r.date);
-        if known_vintage.is_some_and(|k| r.realtime_start < k) {
+        if earliest.is_none_or(|(date, _)| date != r.date) {
+            earliest = Some((r.date, r.realtime_start));
+        }
+        if !r.keep {
             continue;
         }
         points.push(FetchedPoint {
             date: r.date,
             value: r.value,
             revision_date: r.realtime_start,
-            is_original_release: earliest,
+            is_original_release: earliest == Some((r.date, r.realtime_start)),
         });
     }
     points
@@ -621,6 +916,13 @@ struct ObservationsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct VintageDatesResponse {
+    /// Total dates across all pages.
+    count: usize,
+    vintage_dates: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FredObservation {
     date: String,
     value: String,
@@ -640,9 +942,19 @@ mod tests {
         include_str!("../../tests/fixtures/fred/error_series_does_not_exist.json");
     const ERR_BAD_VARIABLE: &str =
         include_str!("../../tests/fixtures/fred/error_bad_variable.json");
+    const VINTAGES_GDP: &str = include_str!("../../tests/fixtures/fred/vintagedates_gdp.json");
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    /// Serves [`VINTAGES_GDP`] for every `/series/vintagedates` request.
+    async fn mount_vintages(mock: &MockSource) {
+        mock.mount(
+            &Route::get("/series/vintagedates"),
+            Reply::json_str(VINTAGES_GDP),
+        )
+        .await;
     }
 
     async fn mock_gdp() -> MockSource {
@@ -652,6 +964,7 @@ mod tests {
             Reply::json_str(SERIES_GDP),
         )
         .await;
+        mount_vintages(&mock).await;
         mock.mount(
             &Route::get("/series/observations").query("series_id", "GDP"),
             Reply::json_str(OBS_GDP),
@@ -718,16 +1031,24 @@ mod tests {
             ]
         );
 
-        // Two requests, both with the key and file_type=json; observations ask for every vintage.
+        // Metadata, the vintage dates, then one observations request (the series has far fewer
+        // vintages than one request may cover), all with the key and file_type=json; both
+        // the vintage dates and the observations cover every vintage.
         let reqs = mock.received_requests().await;
-        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs.len(), 3);
         for r in &reqs {
             let q = query_of(r);
             assert_eq!(param(&q, "api_key"), Some(TEST_API_KEY));
             assert_eq!(param(&q, "file_type"), Some("json"));
         }
         let q = query_of(&reqs[1]);
-        assert_eq!(reqs[1].url.path(), "/series/observations");
+        assert_eq!(reqs[1].url.path(), "/series/vintagedates");
+        assert_eq!(param(&q, "realtime_start"), Some(EARLIEST_REALTIME_START));
+        assert_eq!(param(&q, "realtime_end"), Some("9999-12-31"));
+        assert_eq!(param(&q, "limit"), Some("10000"));
+        assert_eq!(param(&q, "offset"), Some("0"));
+        let q = query_of(&reqs[2]);
+        assert_eq!(reqs[2].url.path(), "/series/observations");
         assert_eq!(param(&q, "realtime_start"), Some(EARLIEST_REALTIME_START));
         assert_eq!(param(&q, "realtime_end"), Some("9999-12-31"));
         assert_eq!(param(&q, "limit"), Some("100000"));
@@ -770,6 +1091,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         // Known vintage 2026-04-29: the window starts the day before, so that vintage is re-read.
         mock.mount_expect(
             &Route::get("/series/observations")
@@ -819,8 +1141,9 @@ mod tests {
             .unwrap();
         assert_eq!(s.points.len(), 6);
         let reqs = mock.received_requests().await;
+        assert_eq!(reqs[2].url.path(), "/series/observations");
         assert_eq!(
-            param(&query_of(&reqs[1]), "realtime_start"),
+            param(&query_of(&reqs[2]), "realtime_start"),
             Some(EARLIEST_REALTIME_START)
         );
         assert!(FredAdapter::default().tracks_vintages());
@@ -911,6 +1234,7 @@ mod tests {
             Reply::json_str(SERIES_GDP.replace("2026-08-28 07:54:02-05", "2026-09-25 07:52:02-05")),
         )
         .await;
+        mount_vintages(&mock).await;
         mock.mount(
             &Route::get("/series/observations"),
             Reply::json_str(OBS_GDP_SINCE),
@@ -935,6 +1259,22 @@ mod tests {
             date: d(date),
             realtime_start: d(rt),
             value: Some(BigDecimal::from_str(v).unwrap()),
+            keep: true,
+        };
+        // Rows as one window keeping from `keep_from` would tag them.
+        let keeping = |rows: &[VintageRow], keep_from: Option<&str>| -> Vec<VintageRow> {
+            let window = RealtimeWindow {
+                start: earliest_realtime_start(),
+                end: latest_realtime_end(),
+                keep_from: keep_from.map(d),
+                vintages: None,
+            };
+            rows.iter()
+                .map(|r| VintageRow {
+                    keep: window.keeps(r.realtime_start),
+                    ..r.clone()
+                })
+                .collect()
         };
         // Out of order on purpose; FRED's order isn't relied on.
         let rows = vec![
@@ -943,7 +1283,7 @@ mod tests {
             row("2024-01-01", "2024-02-10", "1"),
         ];
         assert_eq!(
-            to_points(rows.clone(), None),
+            to_points(rows.clone()),
             vec![
                 point("2024-01-01", Some("1"), "2024-02-10", true),
                 point("2024-01-01", Some("1.1"), "2024-03-10", false),
@@ -953,7 +1293,7 @@ mod tests {
         // Known vintage 2024-02-20: January was published before it, so its later row is a
         // revision. The dropped row starts before the known vintage here (FRED not clamping).
         assert_eq!(
-            to_points(rows.clone(), Some(d("2024-02-20"))),
+            to_points(keeping(&rows, Some("2024-02-20"))),
             vec![
                 point("2024-01-01", Some("1.1"), "2024-03-10", false),
                 point("2024-02-01", Some("2"), "2024-03-10", true),
@@ -962,14 +1302,142 @@ mod tests {
         // Rows of the known vintage itself are kept (it may have changed since the last crawl),
         // and an earliest row keeps its original-release mark.
         assert_eq!(
-            to_points(rows.clone(), Some(d("2024-03-10"))),
+            to_points(keeping(&rows, Some("2024-03-10"))),
             vec![
                 point("2024-01-01", Some("1.1"), "2024-03-10", false),
                 point("2024-02-01", Some("2"), "2024-03-10", true),
             ]
         );
         // Everything already known: nothing to write.
-        assert_eq!(to_points(rows, Some(d("2024-03-11"))), vec![]);
+        assert_eq!(to_points(keeping(&rows, Some("2024-03-11"))), vec![]);
+
+        // The same row returned by two windows (FRED not clamping), once kept and once not, in
+        // either order: the kept copy is still the original release.
+        for kept_first in [true, false] {
+            let mut copies = vec![
+                VintageRow {
+                    keep: kept_first,
+                    ..row("2024-01-01", "2024-02-10", "1")
+                },
+                VintageRow {
+                    keep: !kept_first,
+                    ..row("2024-01-01", "2024-02-10", "1")
+                },
+            ];
+            copies.push(row("2024-01-01", "2024-03-10", "1.1"));
+            assert_eq!(
+                to_points(copies),
+                vec![
+                    point("2024-01-01", Some("1"), "2024-02-10", true),
+                    point("2024-01-01", Some("1.1"), "2024-03-10", false),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn windows_split_at_vintage_boundaries() {
+        let whole = RealtimeWindow {
+            start: earliest_realtime_start(),
+            end: latest_realtime_end(),
+            keep_from: None,
+            vintages: None,
+        };
+        let vintages = [
+            d("2020-01-01"),
+            d("2020-01-02"),
+            d("2020-02-01"),
+            d("2020-03-01"),
+            d("2020-03-02"),
+        ];
+        let w = whole.split(&vintages, 2);
+        let summary: Vec<_> = w
+            .iter()
+            .map(|w| (w.start, w.end, w.keep_from, w.vintages.clone().unwrap()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (
+                    d("1776-07-04"),
+                    d("2020-01-31"),
+                    None,
+                    vec![d("2020-01-01"), d("2020-01-02")]
+                ),
+                // Starts the day before its first vintage, keeps from that vintage.
+                (
+                    d("2020-01-31"),
+                    d("2020-03-01"),
+                    Some(d("2020-02-01")),
+                    vec![d("2020-02-01"), d("2020-03-01")]
+                ),
+                // Its start, the day before its first vintage, is the previous window's last
+                // vintage: a vintage date on the boundary.
+                (
+                    d("2020-03-01"),
+                    d("9999-12-31"),
+                    Some(d("2020-03-02")),
+                    vec![d("2020-03-02")]
+                ),
+            ]
+        );
+        // Every realtime_start is kept by exactly one window, the boundary days included.
+        let mut day = d("2019-12-30");
+        while day <= d("2020-03-05") {
+            assert_eq!(w.iter().filter(|w| w.keeps(day)).count(), 1, "{day}");
+            day = day.succ_opt().unwrap();
+        }
+        assert_eq!(w.iter().filter(|w| w.keeps(d("1776-07-04"))).count(), 1);
+        assert_eq!(w.iter().filter(|w| w.keeps(d("9999-12-31"))).count(), 1);
+
+        // At most `per_window` vintages: the window is unchanged, its vintages recorded.
+        let one = whole.split(&vintages, 5);
+        assert_eq!(one.len(), 1);
+        assert_eq!(
+            (one[0].start, one[0].end, one[0].keep_from),
+            (whole.start, whole.end, None)
+        );
+        assert_eq!(whole.split(&[], 5).len(), 1);
+
+        // Splitting an incremental window keeps its own start and keep_from first.
+        let incremental = RealtimeWindow {
+            start: d("2020-01-01"),
+            end: latest_realtime_end(),
+            keep_from: Some(d("2020-01-02")),
+            vintages: None,
+        };
+        let w = incremental.split(&vintages, 3);
+        assert_eq!(
+            (w[0].start, w[0].end, w[0].keep_from),
+            (d("2020-01-01"), d("2020-02-29"), Some(d("2020-01-02")))
+        );
+        assert_eq!(
+            (w[1].start, w[1].keep_from),
+            (d("2020-02-29"), Some(d("2020-03-01")))
+        );
+    }
+
+    #[test]
+    fn recognises_only_the_vintage_limit_400() {
+        let too_many = CrawlError::Permanent(
+            "HTTP 400: FRED GET http://x/series/observations?series_id=DFF&api_key=REDACTED: \
+             {\"error_code\":400,\"error_message\":\"Bad Request.  This exceeds the maximum \
+             number of vintage dates allowed (2000).\"}"
+                .into(),
+        );
+        assert!(is_too_many_vintage_dates(&too_many));
+        // It is still an ordinary permanent error to everything else.
+        assert_eq!(classify_fred_error(too_many).kind(), "permanent");
+        for other in [
+            CrawlError::Permanent(format!("HTTP 400: FRED GET http://x: {ERR_BAD_VARIABLE}")),
+            CrawlError::Permanent(format!("HTTP 400: FRED GET http://x: {ERR_NO_SERIES}")),
+            CrawlError::Permanent("HTTP 400: FRED GET http://x".into()),
+            // Same words, not a 400.
+            CrawlError::Transient("maximum number of vintage dates".into()),
+            CrawlError::Permanent("HTTP 403: maximum number of vintage dates".into()),
+        ] {
+            assert!(!is_too_many_vintage_dates(&other), "{other:?}");
+        }
     }
 
     #[test]
@@ -1015,6 +1483,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         mock.mount_expect(
             &Route::get("/series/observations")
                 .query("series_id", "GDP")
@@ -1053,6 +1522,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         // 5 rows, served 2 per page (as if FRED's limit were 2).
         for (offset, n) in [(0, 2), (2, 2), (4, 1)] {
             mock.mount_expect(
@@ -1081,6 +1551,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         // Claims far more rows than it ever sends, one row per page.
         mock.mount(
             &Route::get("/series/observations"),
@@ -1094,7 +1565,7 @@ mod tests {
         assert_eq!(e.kind(), "permanent", "{e}");
         assert_eq!(
             mock.received_requests().await.len(),
-            1 + MAX_OBSERVATION_PAGES
+            2 + MAX_OBSERVATION_PAGES
         );
     }
 
@@ -1103,6 +1574,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         mock.mount(&Route::get("/series/observations"), obs_page(10, 0, 0))
             .await;
         let s = FredAdapter::new(mock.base_url())
@@ -1110,7 +1582,7 @@ mod tests {
             .await
             .unwrap();
         assert!(s.points.is_empty());
-        assert_eq!(mock.received_requests().await.len(), 2);
+        assert_eq!(mock.received_requests().await.len(), 3);
     }
 
     #[tokio::test]
@@ -1147,6 +1619,7 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
+        mount_vintages(&mock).await;
         mock.mount(
             &Route::get("/series/observations"),
             Reply::json_str(format!("<html>bad key {TEST_API_KEY}</html>")),
@@ -1531,6 +2004,9 @@ mod tests {
 }
 
 #[cfg(test)]
+mod vintage_tests;
+
+#[cfg(test)]
 mod contract {
     use super::FredAdapter;
     use crate::testkit::{Reply, Route};
@@ -1545,6 +2021,11 @@ mod contract {
             mock.mount(
                 &Route::get("/series").query("series_id", "GDP"),
                 Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
+            )
+            .await;
+            mock.mount(
+                &Route::get("/series/vintagedates").query("series_id", "GDP"),
+                Reply::json_str(include_str!("../../tests/fixtures/fred/vintagedates_gdp.json")),
             )
             .await;
         },
