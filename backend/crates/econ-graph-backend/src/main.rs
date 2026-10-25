@@ -259,7 +259,7 @@ fn validate_cors_origins(origins: &[String]) -> AppResult<Vec<String>> {
             .is_some();
         if !valid {
             return Err(AppError::ConfigError(format!(
-                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econ-graph.com",
+                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econgraph.com",
                 origin
             )));
         }
@@ -1010,12 +1010,12 @@ mod cors_tests {
     fn accepts_plain_origins_and_trims_them() {
         let validated = validate_cors_origins(&origins(&[
             "http://localhost:3000",
-            " https://econ-graph.com/ ",
+            " https://econgraph.com/ ",
         ]))
         .unwrap();
         assert_eq!(
             validated,
-            origins(&["http://localhost:3000", "https://econ-graph.com"])
+            origins(&["http://localhost:3000", "https://econgraph.com"])
         );
         // warp panics on origins it cannot parse; validated ones must not.
         let _ = cors_filter(&validated);
@@ -1027,9 +1027,9 @@ mod cors_tests {
         for bad in [
             vec!["*"],
             vec!["https://*"],
-            vec!["econ-graph.com"],
-            vec!["ftp://econ-graph.com"],
-            vec!["https://econ-graph.com/app"],
+            vec!["econgraph.com"],
+            vec!["ftp://econgraph.com"],
+            vec!["https://econgraph.com/app"],
             vec![""],
             vec![],
         ] {
@@ -1105,6 +1105,38 @@ mod cors_tests {
         let res = preflight("https://evil.example").reply(&app()).await;
         assert_eq!(res.status(), 403);
         assert!(res.headers().get("access-control-allow-origin").is_none());
+    }
+
+    /// The list deploy.sh gives the kind cluster with PUBLIC_HOST=econgraph.com (ECO-457):
+    /// the public site and the on-host http://localhost both reach the API. Browsers send
+    /// Origin on same-origin POSTs as well, so the app's own origin has to be listed.
+    /// www.econgraph.com only ever redirects to the apex, so it is never an origin.
+    #[tokio::test]
+    async fn the_deployed_public_and_local_origins_are_allowed() {
+        let deployed: Vec<String> = "https://econgraph.com,http://localhost,http://localhost:3000"
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        let app = warp::any()
+            .map(|| "ok")
+            .with(cors_filter(&validate_cors_origins(&deployed).unwrap()));
+        for origin in ["https://econgraph.com", "http://localhost"] {
+            let res = warp::test::request()
+                .method("POST")
+                .header("origin", origin)
+                .reply(&app)
+                .await;
+            assert_eq!(res.status(), 200, "{origin}");
+            assert_eq!(res.headers()["access-control-allow-origin"], origin);
+        }
+        for origin in ["https://www.econgraph.com", "http://econgraph.com"] {
+            let res = warp::test::request()
+                .method("POST")
+                .header("origin", origin)
+                .reply(&app)
+                .await;
+            assert_eq!(res.status(), 403, "{origin}");
+        }
     }
 }
 

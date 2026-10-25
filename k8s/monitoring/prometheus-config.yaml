@@ -9,8 +9,8 @@ data:
       scrape_interval: 15s
       evaluation_interval: 15s
 
-    # The rules ConfigMap (prometheus-rules-crawler.yaml) mounted by prometheus-deployment.yaml.
-    # A second rules ConfigMap needs a projected volume there, since one path holds one volume.
+    # The rules ConfigMaps (prometheus-rules-*.yaml), projected into one directory by
+    # prometheus-deployment.yaml; a new one must be added to that projected volume too.
     rule_files:
       - /etc/prometheus/rules/*.yml
 

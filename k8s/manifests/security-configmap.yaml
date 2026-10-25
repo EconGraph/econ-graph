@@ -8,7 +8,8 @@ metadata:
 data:
   # Security configuration for nginx ingress controller.
   # NOTE: as of 2026-09, nothing mounts this ConfigMap into a Deployment or Ingress; the headers
-  # actually served come from the ssl-ingress.yaml / terraform/modules/ingress annotations instead.
+  # actually served come from the terraform/modules/ingress annotations instead (the kind
+  # deployment's ssl-ingress.yaml is retired; see "Public site" in k8s/README.md).
   # The location blocks below are directive snippets, not complete server blocks: each needs the
   # same proxy_pass/root as the surrounding server block wherever this file is included.
   security.conf: |
