@@ -220,7 +220,7 @@ resource "kubernetes_manifest" "letsencrypt_prod" {
     spec = {
       acme = {
         server = "https://acme-v02.api.letsencrypt.org/directory"
-        email  = "admin@${var.domain}"
+        email  = "support@econgraph.com"
         privateKeySecretRef = {
           name = "letsencrypt-prod"
         }
@@ -253,7 +253,7 @@ resource "kubernetes_manifest" "letsencrypt_staging" {
     spec = {
       acme = {
         server = "https://acme-staging-v02.api.letsencrypt.org/directory"
-        email  = "admin@${var.domain}"
+        email  = "support@econgraph.com"
         privateKeySecretRef = {
           name = "letsencrypt-staging"
         }
@@ -302,7 +302,7 @@ resource "kubernetes_manifest" "letsencrypt_prod_cloudflare" {
     spec = {
       acme = {
         server = "https://acme-v02.api.letsencrypt.org/directory"
-        email  = "admin@${var.domain}"
+        email  = "support@econgraph.com"
         privateKeySecretRef = {
           name = "letsencrypt-prod-cloudflare"
         }
@@ -338,7 +338,7 @@ resource "kubernetes_manifest" "letsencrypt_staging_cloudflare" {
     spec = {
       acme = {
         server = "https://acme-staging-v02.api.letsencrypt.org/directory"
-        email  = "admin@${var.domain}"
+        email  = "support@econgraph.com"
         privateKeySecretRef = {
           name = "letsencrypt-staging-cloudflare"
         }

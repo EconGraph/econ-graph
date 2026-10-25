@@ -425,9 +425,8 @@ Visit `/financial-components-demo` to see all components in action with:
 
 ### Support
 
-- [GitHub Issues](https://github.com/jmalicki/econ-graph/issues)
-- [Documentation Site](https://docs.econ-graph.com)
-- [Community Forum](https://community.econ-graph.com)
+- [GitHub Issues](https://github.com/EconGraph/econ-graph/issues)
+- support@econgraph.com
 
 ---
 

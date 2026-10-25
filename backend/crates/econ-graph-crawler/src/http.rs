@@ -57,12 +57,12 @@ pub struct HttpConfig {
 }
 
 impl Default for HttpConfig {
-    /// 30s timeout; `User-Agent: EconGraph/<crate version> (+https://econgraph.com; jmalicki@econgraph.com)`.
+    /// 30s timeout; `User-Agent: EconGraph/<crate version> (+https://econgraph.com; support@econgraph.com)`.
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(30),
             user_agent: format!(
-                "EconGraph/{} (+https://econgraph.com; jmalicki@econgraph.com)",
+                "EconGraph/{} (+https://econgraph.com; support@econgraph.com)",
                 env!("CARGO_PKG_VERSION")
             ),
         }
@@ -761,7 +761,12 @@ mod tests {
         let c = HttpConfig::default();
         assert_eq!(c.timeout, Duration::from_secs(30));
         assert!(c.user_agent.starts_with("EconGraph/"));
-        assert!(c.user_agent.contains('@'), "SEC requires a contact address");
+        assert!(
+            c.user_agent
+                .ends_with("(+https://econgraph.com; support@econgraph.com)"),
+            "SEC requires a contact address: {}",
+            c.user_agent
+        );
         assert!(
             !c.user_agent.contains("github.com"),
             "download.bls.gov refuses a User-Agent that links to github.com"

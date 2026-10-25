@@ -291,8 +291,7 @@ If normal admin access is unavailable:
 
 For security incidents or questions:
 
-- **Security Team**: security@company.com
-- **On-Call Engineer**: +1-555-ONCALL
+- **Security Team**: support@econgraph.com
 - **Emergency Escalation**: Follow incident response procedures
 
 ---
