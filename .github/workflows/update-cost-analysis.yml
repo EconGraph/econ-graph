@@ -27,10 +27,10 @@ jobs:
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Record validated source
@@ -52,7 +52,7 @@ jobs:
           git diff --stat >> "$GITHUB_STEP_SUMMARY"
       - name: Save validated outputs
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cost-analysis
           retention-days: 1
@@ -69,7 +69,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           persist-credentials: false
@@ -77,12 +77,12 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cost-analysis
           path: .
       - name: Create or update cost analysis PR
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: automation/update-cost-analysis
