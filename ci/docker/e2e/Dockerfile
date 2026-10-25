@@ -1,30 +1,27 @@
 # E2E Test Container with Pre-installed Browsers
 # This container has Playwright browsers pre-installed to speed up E2E test execution
 
-FROM node:24-bookworm
+FROM node:24-trixie
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \
     # Playwright system dependencies
     libnss3 \
     libnspr4 \
-    libatk-bridge2.0-0 \
+    libatk-bridge2.0-0t64 \
     libdrm2 \
     libxkbcommon0 \
-    libgtk-3-0 \
+    libgtk-3-0t64 \
     libgbm1 \
-    libasound2 \
+    libasound2t64 \
     # Additional dependencies for better browser support
     libxss1 \
-    libgconf-2-4 \
     libxtst6 \
     libxrandr2 \
-    libasound2 \
     libpangocairo-1.0-0 \
-    libatk1.0-0 \
+    libatk1.0-0t64 \
     libcairo-gobject2 \
-    libgtk-3-0 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 

@@ -62,7 +62,7 @@ const buildProjection = (projectionType: string, size?: [number, number]): GeoPr
 };
 
 export const useWorldMap = (
-  svgRef: React.RefObject<SVGSVGElement>,
+  svgRef: React.RefObject<SVGSVGElement | null>,
   projectionType = 'naturalEarth',
   size?: [number, number]
 ) => {

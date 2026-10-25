@@ -204,7 +204,10 @@ impl Fixture {
     }
 
     async fn query(&self, query: &str) -> Value {
-        let schema = crate::graphql::schema::create_schema(self.pool.clone());
+        let schema = crate::graphql::schema::create_schema(
+            econ_graph_core::database::AppPool(self.pool.clone()),
+            Some(econ_graph_core::database::DataPool(self.pool.clone())),
+        );
         let resp = schema.execute(query).await;
         assert!(resp.errors.is_empty(), "{query}: {:?}", resp.errors);
         resp.data.into_json().unwrap()
@@ -571,7 +574,10 @@ async fn rejects_bad_paging_arguments() {
             "SELECT DATE '2020-01-01', 1::numeric, DATE '2020-01-01', true",
         )
         .await;
-    let schema = crate::graphql::schema::create_schema(db.pool.clone());
+    let schema = crate::graphql::schema::create_schema(
+        econ_graph_core::database::AppPool(db.pool.clone()),
+        Some(econ_graph_core::database::DataPool(db.pool.clone())),
+    );
     for args in ["first: -1", "after: \"-3\"", "after: \"abc\""] {
         let resp = schema
             .execute(format!(

@@ -31,7 +31,12 @@ k8s/
 ├── manifests/           # Kubernetes deployment manifests
 │   ├── namespace.yaml   # Namespace definition
 │   ├── configmap.yaml   # Configuration
-│   ├── postgres.yaml    # PostgreSQL service
+│   ├── host-storage.yaml        # StorageClass and static PVs on host subvolumes
+│   ├── postgres-deployment.yaml # Data database (StatefulSet postgresql)
+│   ├── postgres.yaml            # data-postgres-service, alias postgres-service
+│   ├── postgres-init.yaml       # Data database roles
+│   ├── app-postgres.yaml        # App database (StatefulSet app-postgres, app-postgres-service)
+│   ├── app-postgres-init.yaml   # App database roles
 │   ├── backend-deployment.yaml  # Backend deployment
 │   ├── frontend-deployment.yaml # Frontend deployment
 │   ├── admin-frontend-deployment.yaml # Admin UI deployment
@@ -58,7 +63,8 @@ scripts/deploy/         # Deployment scripts
 ├── test-gateway-routes.sh # Check every route on the gateway
 ├── cutover-to-gateway.sh  # Move a cluster from ingress-nginx to the gateway
 ├── deploy.sh          # Deploy to K8s
-└── teardown.sh        # Cleanup
+├── teardown.sh        # Remove the app plane (the data plane only on request)
+└── released-pvs.sh    # List Released PVs; delete one on typed confirmation
 ```
 
 ## 🛠️ Manual Setup
@@ -333,15 +339,38 @@ The application is configured via ConfigMap and Secrets:
 - **ConfigMap**: Contains non-sensitive configuration
 - **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. See [Secrets](#secrets)
 
-### Database Connection
+### Databases
 
-PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
-`econgraph` user. `create-secrets.sh` builds the URL and stores it in the `econ-graph-secrets`
-Secret as `app-database-url`, `data-database-url` and `database-url`, since the app and data
-databases are one database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend gets
-`APP_DATABASE_URL` and `DATA_DATABASE_URL`, and connects through `DATABASE_URL`, set from
-`app-database-url`. That one database holds both migration sets, data and app
-([database migrations](../docs/development/MIGRATIONS.md)).
+The namespace `econ-graph` runs three PostgreSQL servers, each a one-replica StatefulSet on a
+static PersistentVolume over a host directory
+([host storage](../docs/deployment/HOST_STORAGE.md)):
+
+| Database | StatefulSet | Service (5432) | Secret | Host directory |
+| --- | --- | --- | --- | --- |
+| Data, `econ_graph`: sources, series, observations, crawl state | `postgresql` (`postgres-deployment.yaml`) | `data-postgres-service`, and the alias `postgres-service` | `econ-graph-postgres` | `/srv/econgraph/data-plane/pg` |
+| App, `econ_graph_app`: users and everything they create | `app-postgres` (`app-postgres.yaml`) | `app-postgres-service` | `econ-graph-app-postgres` | `/srv/econgraph/app-prod/app-pg` |
+| Keycloak, `keycloak` | `keycloak-postgres` (`keycloak/postgres.yaml`) | `keycloak-postgres-service` | `econ-graph-keycloak` | `/srv/econgraph/app-prod/keycloak-pg` |
+
+`postgres-service` has the same selector as `data-postgres-service`, for manifests that still
+name it. The data and app databases each have a role `econgraph`, created by their init scripts
+(`postgres-init.yaml`, `app-postgres-init.yaml`) from the `app-password` key of their Secret.
+
+`create-secrets.sh` writes the connection URLs into the `econ-graph-secrets` Secret:
+
+- `data-database-url`: `econ_graph` on `data-postgres-service`. The crawler-worker and the
+  `crawler-migrate` Job read it as `DATA_DATABASE_URL`, and so does the backend (optional there).
+- `app-database-url`: the backend reads it as `APP_DATABASE_URL` and applies the app migrations
+  to it at startup. It names `econ_graph_app` on
+  `app-postgres-service` (`APP_DATABASE=separate`), or, in a cluster deployed before the app
+  database existed, the data database's URL (`APP_DATABASE=shared`). An existing cluster keeps
+  its setting until `create-secrets.sh` runs with `APP_DATABASE` set; a new Secret gets
+  `separate`. Moving an existing cluster to `separate` means moving its app rows into
+  `econ_graph_app` first: the script only rewrites the URL.
+- `database-url`: the same URL as `data-database-url`. No binary reads `DATABASE_URL`; the key is
+  kept for manifests of earlier versions, which read it.
+
+The data migrations go to the data database and the app migrations to the database
+`app-database-url` names ([database migrations](../docs/development/MIGRATIONS.md)).
 
 ### Migrations
 
@@ -370,8 +399,9 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 
 | Secret | Keys (environment variable) | Used by |
 | --- | --- | --- |
-| `econ-graph-secrets` | `app-database-url`, `data-database-url` and `database-url` (all built from `app-password`, naming the same database); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`) |
-| `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
+| `econ-graph-secrets` | `app-database-url`, `data-database-url`, and `database-url` (the same URL as `data-database-url`); see [Databases](#databases). The retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`), manifests of earlier versions (`database-url`) |
+| `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | the data database (`postgresql`), its init script |
+| `econ-graph-app-postgres` | `postgres-password` (`APP_POSTGRES_PASSWORD`, generated), `app-password` (`APP_POSTGRES_APP_PASSWORD`, generated) | the app database (`app-postgres`), its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
@@ -392,8 +422,10 @@ existed has tables owned by `postgres` and an `econgraph` password that no longe
 local cluster, recreate it (`./scripts/deploy/teardown.sh`, then deploy again); to keep the data,
 dump it with `pg_dump --no-owner` and restore it as `econgraph` into a fresh volume.
 `create-secrets.sh` stops when it finds such a volume (a `postgresql-data-postgresql-*` PVC) but no
-`econ-graph-postgres` Secret; set `ALLOW_EXISTING_DB_VOLUME=1` to continue anyway. It also stops,
-without writing anything, when it cannot query the cluster.
+`econ-graph-postgres` Secret, or an `app-postgres-data-app-postgres-*` PVC but no
+`econ-graph-app-postgres` Secret; set `ALLOW_EXISTING_DB_VOLUME=1` to continue anyway. It also
+stops, without writing anything, when it cannot query the cluster. `--dry-run` runs every check
+and prints the keys it would write, and writes nothing.
 
 #### Upgrading a cluster deployed before these Secrets
 
@@ -417,17 +449,57 @@ later runs don't need them.
 
 ## 🗑️ Cleanup
 
-### Remove Application Only
+Every database lives on a host directory (`docs/deployment/HOST_STORAGE.md`). No script deletes
+those directories or their PersistentVolumes, and each teardown below first dumps the data, app
+and Keycloak databases to `~/econgraph-backups/<UTC timestamp>/`. Add `--dry-run` to see every
+step without changing anything.
+
+### Remove the app plane
 
 ```bash
 ./scripts/deploy/teardown.sh
 ```
 
-### Remove Entire Cluster
+Deletes the routes, the cloudflared connector, frontend, backend, chart API, Keycloak, and the
+`app-postgres` and `keycloak-postgres` StatefulSets and Services, after you type the namespace
+name (`--yes` answers that). Their Secrets and PVCs stay, so `deploy.sh` brings the same
+databases back. The data plane keeps running: `postgresql`, `data-postgres-service`,
+`postgres-service`, `econ-graph-postgres`, the crawler and the backup CronJob.
+
+### Remove the data plane too
 
 ```bash
-kind delete cluster --name econ-graph
+./scripts/deploy/teardown.sh --include-data-plane
 ```
+
+Also deletes the data Postgres StatefulSet and its Services, the crawler, the backup CronJob,
+the Secrets and the namespace with its PVCs, after you type `econ_graph` on a terminal. `--yes`
+never answers this prompt, and without a terminal the script stops before changing anything.
+The next `deploy.sh` needs the Secrets back first: `restore-kind-databases.sh --from <backup>`
+recreates them from the backup the teardown took.
+
+### Remove the cluster
+
+```bash
+./scripts/deploy/teardown.sh --include-data-plane --delete-cluster
+```
+
+Asks for the cluster name, typed on a terminal, before deleting the cluster. Deleting the
+cluster loses what is stored only in its nodes: the in-cluster nightly backups and Grafana's
+data. `scripts/deploy/recreate-kind-cluster.sh` replaces a cluster the same way (dump first,
+then a confirmation). `terraform destroy` in `terraform/k8s/` does not delete the cluster.
+
+### Released PersistentVolumes
+
+```bash
+./scripts/deploy/released-pvs.sh                  # report
+./scripts/deploy/released-pvs.sh --delete PV_NAME # one PV object, after typing its name
+```
+
+A deleted PVC leaves its PV `Released`. The host-storage PVs (label
+`econgraph.io/protected=true`) are re-armed by the next `deploy.sh` and are never deleted by
+the script; it deletes only an unprotected PV with policy `Retain`, which leaves the data in
+place.
 
 ## 🐛 Troubleshooting
 

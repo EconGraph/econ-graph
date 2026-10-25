@@ -96,7 +96,6 @@ const FormattedTimestamp = React.memo(
 );
 
 const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
-  const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [performanceMetrics, setPerformanceMetrics] =
     useState<PerformanceMetrics>({
       cpu_usage: 0,
@@ -136,11 +135,20 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
     searchTerm.length > 0,
   );
 
-  // Filter logs based on search term and filters
-  useEffect(() => {
-    const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
+  const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
 
-    const filtered = (logsToFilter || []).filter((log: any) => {
+  // "Clear" hides the logs currently shown until the next fetch replaces them
+  const [clearedLogs, setClearedLogs] = useState<typeof logsToFilter | null>(
+    null,
+  );
+
+  // Filter logs based on search term and filters
+  const filteredLogs = useMemo<LogEntry[]>(() => {
+    if (logsToFilter === clearedLogs) {
+      return [];
+    }
+
+    return (logsToFilter || []).filter((log: any) => {
       const matchesLevel = levelFilter === "all" || log.level === levelFilter;
       const matchesSource =
         sourceFilter === "all" || log.source === sourceFilter;
@@ -151,9 +159,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
       return matchesLevel && matchesSource && matchesSearch;
     });
-
-    setFilteredLogs(filtered);
-  }, [logs, searchResults, levelFilter, sourceFilter, searchTerm]);
+  }, [logsToFilter, clearedLogs, levelFilter, sourceFilter, searchTerm]);
 
   // Mock performance metrics - KEPT for UI demonstration purposes
   // NOTE: This component is disabled due to missing backend implementation (see GitHub issue)
@@ -191,8 +197,8 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   }, []);
 
   const handleClearLogs = useCallback(() => {
-    setFilteredLogs([]);
-  }, []);
+    setClearedLogs(logsToFilter);
+  }, [logsToFilter]);
 
   const getLevelColor = useCallback((level: string) => {
     switch (level) {
@@ -323,10 +329,20 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 <Storage sx={{ mr: 1, color: "warning.main" }} />
                 <Typography variant="h6">Queue Depth</Typography>
               </Box>
-              <Typography variant="h4" color="warning.main">
+              <Typography
+                variant="h4"
+                sx={{
+                  color: "warning.main",
+                }}
+              >
                 {performanceMetrics.queue_depth}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography
+                variant="body2"
+                sx={{
+                  color: "text.secondary",
+                }}
+              >
                 items pending
               </Typography>
             </CardContent>
@@ -340,10 +356,20 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 <NetworkCheck sx={{ mr: 1, color: "error.main" }} />
                 <Typography variant="h6">Error Rate</Typography>
               </Box>
-              <Typography variant="h4" color="error.main">
+              <Typography
+                variant="h4"
+                sx={{
+                  color: "error.main",
+                }}
+              >
                 {performanceMetrics.error_rate.toFixed(1)}%
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography
+                variant="body2"
+                sx={{
+                  color: "text.secondary",
+                }}
+              >
                 last hour
               </Typography>
             </CardContent>
@@ -390,10 +416,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 fullWidth
                 size="small"
-                InputProps={{
-                  startAdornment: (
-                    <Search sx={{ mr: 1, color: "action.active" }} />
-                  ),
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <Search sx={{ mr: 1, color: "action.active" }} />
+                    ),
+                  },
                 }}
               />
             </Grid>
@@ -478,14 +506,24 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                       />
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: "medium",
+                        }}
+                      >
                         {log.source}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">{log.message}</Typography>
                       {log.details && (
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "text.secondary",
+                          }}
+                        >
                           {JSON.stringify(log.details)}
                         </Typography>
                       )}
@@ -522,7 +560,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
           {filteredLogs.length === 0 && (
             <Box sx={{ textAlign: "center", py: 4 }}>
-              <Typography variant="body1" color="text.secondary">
+              <Typography
+                variant="body1"
+                sx={{
+                  color: "text.secondary",
+                }}
+              >
                 No logs found matching your criteria
               </Typography>
             </Box>

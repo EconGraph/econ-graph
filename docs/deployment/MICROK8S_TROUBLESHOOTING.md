@@ -227,7 +227,7 @@ kubectl delete namespace kubeflow
 
 #### Problem
 ```bash
-curl http://localhost/
+curl https://econgraph.com
 # Connection refused or timeout
 ```
 

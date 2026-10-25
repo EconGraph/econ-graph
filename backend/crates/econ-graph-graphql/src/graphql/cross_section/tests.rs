@@ -146,9 +146,12 @@ query ($datasetId: ID!, $date: NaiveDate, $latest: Boolean, $asOf: NaiveDate) {
 }"#;
 
 async fn run(pool: &DatabasePool, variables: Value) -> async_graphql::Response {
-    create_schema(pool.clone())
-        .execute(Request::new(QUERY).variables(Variables::from_json(variables)))
-        .await
+    create_schema(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    )
+    .execute(Request::new(QUERY).variables(Variables::from_json(variables)))
+    .await
 }
 
 fn error_code(response: &async_graphql::Response) -> Option<String> {
@@ -296,13 +299,16 @@ query ($datasetId: ID!) {
 
     let pool = test_pool().await;
     let dataset_id = seed(&pool).await;
-    let response = create_schema(pool)
-        .execute(
-            Request::new(DUPLICATE_FILTER_QUERY).variables(Variables::from_json(
-                json!({"datasetId": dataset_id.to_string()}),
-            )),
-        )
-        .await;
+    let response = create_schema(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool)),
+    )
+    .execute(
+        Request::new(DUPLICATE_FILTER_QUERY).variables(Variables::from_json(
+            json!({"datasetId": dataset_id.to_string()}),
+        )),
+    )
+    .await;
     assert_eq!(error_code(&response).as_deref(), Some("BAD_REQUEST"));
 }
 

@@ -1111,9 +1111,9 @@ type SystemMetricsType {
 	"""
 	databaseSizeMb: Float!
 	"""
-	Number of queue items
+	Number of crawl queue items; null on a backend with no data database
 	"""
-	queueItems: Int!
+	queueItems: Int
 	"""
 	API requests per minute
 	"""

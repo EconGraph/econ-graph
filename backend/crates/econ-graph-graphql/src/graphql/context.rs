@@ -136,6 +136,40 @@ impl GraphQLContext {
     }
 }
 
+/// `extensions.code` of the error a data field returns on a backend with no data database.
+pub const DATA_SERVED_REMOTELY: &str = "DATA_SERVED_REMOTELY";
+
+/// Message of the error a data field returns on a backend with no data database.
+pub const DATA_SERVED_REMOTELY_MESSAGE: &str = "Data is served by the data plane at /data/graphql";
+
+/// The error every data field returns when this backend has no data database
+/// (`DATA_DATABASE_URL` unset): the data plane answers those fields at `/data/graphql`.
+pub fn data_served_remotely() -> GraphQLError {
+    use async_graphql::ErrorExtensions as _;
+    GraphQLError::new(DATA_SERVED_REMOTELY_MESSAGE)
+        .extend_with(|_, extensions| extensions.set("code", DATA_SERVED_REMOTELY))
+}
+
+/// The app database's pool: users and everything they create. Every schema has one.
+pub fn app_pool<'a>(ctx: &Context<'a>) -> Result<&'a AppPool> {
+    ctx.data::<AppPool>()
+}
+
+/// The data database's pool (sources, series, observations, crawl state), or the
+/// [`DATA_SERVED_REMOTELY`] error when this backend has none.
+pub fn data_pool<'a>(ctx: &Context<'a>) -> Result<&'a DataPool> {
+    ctx.data_opt::<DataPool>().ok_or_else(data_served_remotely)
+}
+
+/// The data database's DataLoaders, or the [`DATA_SERVED_REMOTELY`] error when this backend
+/// has no data database.
+pub fn data_loaders<'a>(ctx: &Context<'a>) -> Result<&'a crate::graphql::dataloaders::DataLoaders> {
+    ctx.data::<crate::graphql::schema::SchemaResources>()?
+        .data_loaders
+        .as_deref()
+        .ok_or_else(data_served_remotely)
+}
+
 /// Helper function to get the current user from GraphQL context
 pub fn current_user<'a>(ctx: &'a Context<'a>) -> Result<&'a User> {
     let context = ctx.data::<Arc<GraphQLContext>>()?;

@@ -15,6 +15,99 @@ use testcontainers::{Container, ContainerAsync, GenericImage, ImageExt};
 /// Keep in sync with the `postgres_image` anchors in `.github/workflows/`.
 pub const POSTGRES_IMAGE_TAG: &str = "18";
 
+/// A database created for one test on `DATABASE_URL`'s server (the test Postgres), and dropped
+/// when it goes out of scope, for tests that need an empty database or several separate ones
+/// (an app database and a data database, say) without touching the shared one.
+pub struct ScratchDatabase {
+    admin_url: String,
+    name: String,
+    /// The scratch database's URL.
+    pub url: String,
+}
+
+impl ScratchDatabase {
+    /// Create an empty database whose name starts with `eg_scratch_<tag>_`.
+    pub fn create(tag: &str) -> Self {
+        use diesel::{Connection, RunQueryDsl};
+
+        let admin_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        let name = format!("eg_scratch_{tag}_{}", uuid::Uuid::new_v4().simple());
+        let mut conn =
+            diesel::PgConnection::establish(&admin_url).expect("Should connect to DATABASE_URL");
+        diesel::sql_query(format!("CREATE DATABASE {name}"))
+            .execute(&mut conn)
+            .expect("Should create a scratch database");
+        let url = scratch_url(&admin_url, &name);
+        Self {
+            admin_url,
+            name,
+            url,
+        }
+    }
+
+    /// A synchronous connection to the scratch database.
+    pub fn connect(&self) -> diesel::PgConnection {
+        use diesel::Connection;
+        diesel::PgConnection::establish(&self.url).expect("Should connect to the scratch database")
+    }
+}
+
+/// `admin_url` pointed at database `name`. A `dbname` query parameter would override the path
+/// (libpq takes a repeated keyword's last value), so it is removed; other parameters are kept.
+fn scratch_url(admin_url: &str, name: &str) -> String {
+    let mut url = url::Url::parse(admin_url).expect("DATABASE_URL should be a URL");
+    url.set_path(&format!("/{name}"));
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "dbname")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    if kept.is_empty() {
+        url.set_query(None);
+    } else {
+        url.query_pairs_mut().clear().extend_pairs(kept);
+    }
+    url.to_string()
+}
+
+#[cfg(test)]
+mod scratch_url_tests {
+    use super::scratch_url;
+
+    #[test]
+    fn the_scratch_database_name_wins_over_a_dbname_parameter() {
+        assert_eq!(
+            scratch_url(
+                "postgres://u:p@h:5432/shared?dbname=shared&sslmode=disable",
+                "eg_s"
+            ),
+            "postgres://u:p@h:5432/eg_s?sslmode=disable"
+        );
+        assert_eq!(
+            scratch_url("postgres://u:p@h:5432/shared?dbname=shared", "eg_s"),
+            "postgres://u:p@h:5432/eg_s"
+        );
+        assert_eq!(
+            scratch_url("postgres://h/shared", "eg_s"),
+            "postgres://h/eg_s"
+        );
+    }
+}
+
+impl Drop for ScratchDatabase {
+    fn drop(&mut self) {
+        use diesel::{Connection, RunQueryDsl};
+        if let Ok(mut conn) = diesel::PgConnection::establish(&self.admin_url) {
+            let _ = diesel::sql_query(format!(
+                "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                self.name
+            ))
+            .execute(&mut conn);
+        }
+    }
+}
+
 /// Test container for database testing
 pub struct TestContainer {
     pool: DatabasePool,

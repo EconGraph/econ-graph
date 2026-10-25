@@ -148,7 +148,7 @@ pub(crate) async fn resolve(
         tracing::error!("crossSection: {e}");
         async_graphql::Error::new("reference data unavailable")
     })?;
-    let pool = ctx.data::<DatabasePool>()?;
+    let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
     let mut conn = pool.get().await.map_err(|e| {
         tracing::error!("crossSection: database pool: {e}");
         async_graphql::Error::new("database unavailable")

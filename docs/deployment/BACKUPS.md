@@ -21,7 +21,7 @@ root.
 | Mount point                  | Subvolume               | Contents                                                        |
 |------------------------------|-------------------------|-----------------------------------------------------------------|
 | `/srv/econgraph/data-plane`  | `@econgraph-data-plane` | `pg/`: main Postgres (`econ_graph`, pod `postgresql-0`); `objects/`: future Parquet/Iceberg |
-| `/srv/econgraph/app-prod`    | `@econgraph-app-prod`   | `keycloak-pg/` (pod `keycloak-postgres-0`, db `keycloak`); later the app DB |
+| `/srv/econgraph/app-prod`    | `@econgraph-app-prod`   | `app-pg/`: the app database (`econ_graph_app`, pod `app-postgres-0`); `keycloak-pg/` (pod `keycloak-postgres-0`, db `keycloak`) |
 | `/srv/econgraph/snapshots`   | `@econgraph-snapshots`  | read-only snapshots of the two above                            |
 | `/srv/econgraph-backups`     | `@econgraph-backups` on the 870 pool | `snapshots/` (root, 0700): copies of every snapshot, by send/receive; `dumps/`: nightly logical dumps. Created by `scripts/host/setup-backup-pool.sh` |
 | `~/econgraph-backups/`       | (inside `@home`)        | nightly logical dumps until `/srv/econgraph-backups/dumps` exists |
@@ -60,7 +60,8 @@ to the rootless daemon, which has no kind nodes.
 
 ### File ownership
 
-The Postgres data directories (`data-plane/pg/`, `app-prod/keycloak-pg/`)
+The Postgres data directories (`data-plane/pg/`, `app-prod/app-pg/`,
+`app-prod/keycloak-pg/`)
 are owned by host UID **999**, mode 0700: the `postgres` user of the
 `postgres:18` image (`uid=999(postgres) gid=999(postgres)`), which the
 manifests run as (`runAsUser: 999`). Rootful Docker uses no user namespace,
@@ -122,7 +123,7 @@ automatically.
 |---|---|---|---|
 | hourly, on the hour | `scripts/host/backup-snapshots.sh`: read-only snapshots of `data-plane` and `app-prod` into `/srv/econgraph/snapshots/<name>.<UTC stamp>`, then incremental `btrfs send`/`receive` of every snapshot not yet on the backup pool into `/srv/econgraph-backups/snapshots` (skipped with a message while the pool is not mounted) | root | `econgraph-backup-snapshots.timer` (system; installed by `scripts/host/install-backup-timer.sh`) |
 | hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | operator | `econgraph-backup-freshness.timer` (user) |
-| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph` and `keycloak` | operator | `econgraph-dump.timer` (user) |
+| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph`, `econ_graph_app` and `keycloak` | operator | `econgraph-dump.timer` (user) |
 | daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
 | Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | operator | `econgraph-restore-drill.timer` (user) |
 | before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
@@ -248,8 +249,9 @@ daemon, since the host's `kubectl` is a microk8s wrapper) and writes:
 
 ```
 ~/econgraph-backups/<YYYYMMDDTHHMMZ>/
-  econ_graph.dump  econ_graph.dump.toc
-  keycloak.dump    keycloak.dump.toc
+  econ_graph.dump      econ_graph.dump.toc
+  econ_graph_app.dump  econ_graph_app.dump.toc
+  keycloak.dump        keycloak.dump.toc
   MANIFEST         sizes, TOC entry counts, row counts at dump time
   SHA256SUMS
   VERIFIED         written last, only when every dump passed
@@ -280,10 +282,11 @@ scripts/backup/restore-drill.sh --expect-series 10528 --expect-data-points 50300
 ```
 
 It starts `postgres:18` on a random localhost port, restores `econ_graph`
-(and `keycloak` from the same directory), and checks: `economic_series`,
+(and `econ_graph_app` and `keycloak` from the same directory), and checks: `economic_series`,
 `data_points` and `data_sources` are non-empty, no data point references a
 missing series, no data point lacks a date, the Diesel migration table is
-populated, Keycloak has realms, and any `--expect-*` counts match exactly.
+populated (in the app database too, once it has tables), Keycloak has
+realms, and any `--expect-*` counts match exactly.
 Without `--expect-*` it compares against the counts in the dump's
 `MANIFEST` and warns on a difference. It prints one `RESTORE DRILL PASS` or
 `RESTORE DRILL FAIL` line, removes the container, and on a pass records
@@ -365,7 +368,8 @@ is set aside, not deleted.
    k() { docker -H unix:///var/run/docker.sock exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
    k scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0
    k scale statefulset/postgresql --replicas=0      # data-plane
-   # app-prod: k scale deployment/keycloak statefulset/keycloak-postgres --replicas=0
+   # app-prod: k scale deployment/econ-graph-backend deployment/keycloak \
+   #   statefulset/app-postgres statefulset/keycloak-postgres --replicas=0
    ```
 3. `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
    then without `--dry-run`. It refuses while the Postgres pod still exists,
@@ -465,7 +469,7 @@ not pointed at the new layout because:
 - moving it onto a host path would need a static PV and kind `extraMounts`
   (owned by the cluster wiring work, not this), and the obvious host path,
   inside `data-plane`, would put backups on the subvolume they back up;
-- it covers only `econ_graph`, not Keycloak, and has no restore drill or
+- it covers only `econ_graph`, not the app database or Keycloak, and has no restore drill or
   freshness check.
 
 Retire it (remove the three manifests and their references in

@@ -43,11 +43,11 @@ use crate::security::{
     BlockReason, LoggingSecurityEventHandler, SecurityConfig, SecurityEvent, SecurityEventHandler,
     SecurityMetrics, SecurityMiddleware,
 };
-use econ_graph_core::database::DatabasePool;
+use econ_graph_core::database::{AppPool, DataPool, DatabasePool};
 
 /// Secure GraphQL server
 pub struct SecureGraphQLServer {
-    /// Database connection pool
+    /// Pool on one database holding both the app and the data tables
     pool: Arc<DatabasePool>,
     /// Security middleware
     security: Arc<SecurityMiddleware>,
@@ -129,8 +129,10 @@ impl SecureGraphQLServer {
             }
         }
 
-        // Create schema with security context
-        let schema = create_schema((*self.pool).clone());
+        // Create schema with security context, on one database holding both the app and the
+        // data tables
+        let pool = (*self.pool).clone();
+        let schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool)));
 
         // Execute GraphQL request with timeout
         let execution_result = self

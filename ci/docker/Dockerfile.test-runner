@@ -1,13 +1,12 @@
 # Lightweight Test Runner Container
 # This only contains test dependencies and connects to external services
-FROM mcr.microsoft.com/playwright:v1.40.0-focal
-
-# Install Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs
+# The tag matches the @playwright/test version resolved in
+# frontend/package-lock.json, so the browsers bundled in /ms-playwright are the
+# ones the tests expect. The image provides Ubuntu 24.04 and Node.js 24.
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \

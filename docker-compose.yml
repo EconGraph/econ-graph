@@ -18,12 +18,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # Applies the data migrations (`crawler migrate`) to the data database, then exits. The backend
+  # applies only the app migrations, so both backends wait for this to finish.
+  crawler-migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: crawler-worker
+    environment:
+      DATA_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+    command: ["/app/crawler", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+      # One database is both the app and the data database.
+      APP_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+      DATA_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
       RUST_LOG: info
       ENABLE_GRAPHQL_PLAYGROUND: "true"
       # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
@@ -37,6 +53,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      crawler-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -129,7 +147,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+      # One database is both the app and the data database.
+      APP_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
+      DATA_DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
       RUST_LOG: debug
       # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
       # browser-facing URL as issuer; the API fetches signing keys from the service directly.
@@ -142,6 +162,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      crawler-migrate:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
       - cargo_cache:/usr/local/cargo/registry

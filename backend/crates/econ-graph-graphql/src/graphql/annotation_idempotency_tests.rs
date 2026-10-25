@@ -86,7 +86,8 @@ async fn make_series(pool: &DatabasePool) -> String {
 /// Runs `query` against the real schema on `pool`, as `user`.
 async fn run_as(pool: &DatabasePool, user: &User, query: &str) -> async_graphql::Response {
     let schema = create_schema_with_data(
-        pool.clone(),
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
         Arc::new(GraphQLContext::for_test_user(Some(user.clone()), false)),
     );
     schema.execute(query).await

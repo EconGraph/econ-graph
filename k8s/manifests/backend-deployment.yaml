@@ -23,7 +23,7 @@ spec:
     spec:
       initContainers:
       - name: wait-for-postgres
-        image: busybox:1.35
+        image: busybox:1.38
         command: ['sh', '-c']
         args:
         - |
@@ -75,25 +75,20 @@ spec:
         # Credentials come from the econ-graph-secrets Secret, created out of band by
         # scripts/deploy/create-secrets.sh. OAuth keys are optional: the script omits
         # them when unset.
-        # The app and data databases. Both URLs name the one Postgres database.
+        # The app and data databases (see "Databases" in k8s/README.md).
         - name: APP_DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: app-database-url
+        # Optional: a namespace without a data database has no data-database-url, and the
+        # backend then serves data fields as DATA_SERVED_REMOTELY (deploy.sh skips crawler-migrate).
         - name: DATA_DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: data-database-url
-        # The backend binary connects to DATABASE_URL, the app database's URL, and applies the
-        # app migrations to it at startup. It never applies the data migrations: the Job
-        # crawler-migrate (crawler-migrate-job.yaml) does, before deploy.sh applies this.
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: app-database-url
+              optional: true
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:
@@ -132,9 +127,11 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
-        # startupProbe and readinessProbe hit /readyz (database reachable AND app migrations at
+        # startupProbe and readinessProbe hit /readyz (app database reachable AND app migrations at
         # least as new as this binary needs), so a pod is never routed traffic before its
-        # migrations have actually caught up. livenessProbe hits /livez, which only checks the process is
+        # migrations have actually caught up. The data database's state is reported in the
+        # /readyz body but never fails it, so a data outage doesn't take sign-in out of rotation.
+        # livenessProbe hits /livez, which only checks the process is
         # up, so a slow or briefly-down database can't get a healthy pod killed and restarted.
         startupProbe:
           httpGet:

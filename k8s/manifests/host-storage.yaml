@@ -3,9 +3,10 @@
 #
 # Host layout (created by the owner with sudo; see docs/deployment/HOST_STORAGE.md):
 #   /srv/econgraph/data-plane   subvolume @econgraph-data-plane
-#     pg/                       postgresql-0 (database econ_graph)
+#     pg/                       postgresql-0 (the data database, econ_graph)
 #     objects/                  reserved (Parquet/Iceberg)
 #   /srv/econgraph/app-prod     subvolume @econgraph-app-prod
+#     app-pg/                   app-postgres-0 (the app database, econ_graph_app)
 #     keycloak-pg/              keycloak-postgres-0
 #   /srv/econgraph/snapshots    subvolume @econgraph-snapshots (read-only snapshots)
 #
@@ -86,6 +87,34 @@ spec:
   claimRef:
     namespace: econ-graph
     name: keycloak-postgres-data-keycloak-postgres-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: econgraph.io/host-storage
+          operator: In
+          values: ["true"]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: econgraph-app-prod-app-pg
+  labels:
+    app: app-postgres
+    econgraph.io/protected: "true"
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: econgraph-host
+  volumeMode: Filesystem
+  hostPath:
+    path: /srv/econgraph/app-prod/app-pg
+    type: Directory
+  claimRef:
+    namespace: econ-graph
+    name: app-postgres-data-app-postgres-0
   nodeAffinity:
     required:
       nodeSelectorTerms:

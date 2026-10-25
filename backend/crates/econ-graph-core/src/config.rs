@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
-/// Application configuration
+/// Application configuration. The database URLs are read separately: [`backend_database_urls`]
+/// and [`data_database_url`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub database_url: String,
     pub server: ServerConfig,
     pub cors: CorsConfig,
     pub crawler: CrawlerConfig,
@@ -43,9 +43,6 @@ impl Config {
         dotenvy::dotenv().ok();
 
         Ok(Config {
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgresql://localhost:5432/econ_graph".to_string()),
-
             server: ServerConfig {
                 host: env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
                 port: env::var("BACKEND_PORT")
@@ -165,6 +162,65 @@ pub fn data_database_url_from(
     required_url(&var, DATA_DATABASE_URL)
 }
 
+/// The backend's app database pool size variable.
+pub const APP_DB_POOL_SIZE: &str = "APP_DB_POOL_SIZE";
+
+/// The backend's data database pool size variable.
+pub const DATA_DB_POOL_SIZE: &str = "DATA_DB_POOL_SIZE";
+
+/// Default connections in the backend's app database pool.
+///
+/// With the data pool's default, a backend opens at most 20 connections, as many as when it had
+/// one pool. In Kubernetes (2 backend replicas plus 1 during a rolling update, and the
+/// crawler-worker's 20) that stays at 80, under Postgres's `max_connections = 100`
+/// (`k8s/manifests/postgresql-config.yaml`), even when both databases are on one server.
+pub const DEFAULT_APP_DB_POOL_SIZE: u32 = 10;
+
+/// Default connections in the backend's data database pool; see [`DEFAULT_APP_DB_POOL_SIZE`].
+pub const DEFAULT_DATA_DB_POOL_SIZE: u32 = 10;
+
+/// The backend's pool sizes. When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, the
+/// backend opens one pool of `app + data` connections for both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackendPoolSizes {
+    /// `APP_DB_POOL_SIZE`, default [`DEFAULT_APP_DB_POOL_SIZE`].
+    pub app: u32,
+    /// `DATA_DB_POOL_SIZE`, default [`DEFAULT_DATA_DB_POOL_SIZE`].
+    pub data: u32,
+}
+
+/// A pool size variable that is not a positive whole number.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{name} must be a positive whole number, not {value:?}")]
+pub struct PoolSizeError {
+    /// The variable.
+    pub name: &'static str,
+    /// Its value.
+    pub value: String,
+}
+
+/// The backend's pool sizes from the environment. Unset or empty values take the defaults.
+pub fn backend_pool_sizes() -> Result<BackendPoolSizes, PoolSizeError> {
+    backend_pool_sizes_from(|name| env::var(name).ok())
+}
+
+/// [`backend_pool_sizes`] with the environment read through `var`.
+pub fn backend_pool_sizes_from(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<BackendPoolSizes, PoolSizeError> {
+    let size = |name: &'static str, default: u32| match non_empty(&var, name) {
+        None => Ok(default),
+        Some(value) => match value.trim().parse::<u32>() {
+            Ok(n) if n > 0 => Ok(n),
+            _ => Err(PoolSizeError { name, value }),
+        },
+    };
+    Ok(BackendPoolSizes {
+        app: size(APP_DB_POOL_SIZE, DEFAULT_APP_DB_POOL_SIZE)?,
+        data: size(DATA_DB_POOL_SIZE, DEFAULT_DATA_DB_POOL_SIZE)?,
+    })
+}
+
 fn non_empty(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     var(name).filter(|v| !v.trim().is_empty())
 }
@@ -185,7 +241,6 @@ fn required_url(
 impl Default for Config {
     fn default() -> Self {
         Config {
-            database_url: "postgresql://localhost:5432/econ_graph_test".to_string(),
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
                 port: env::var("BACKEND_PORT")
@@ -225,13 +280,11 @@ mod tests {
         // This ensures developers can run the app without extensive configuration setup
 
         // Store original values to restore later
-        let original_database_url = env::var("DATABASE_URL").ok();
         let original_backend_port = env::var("BACKEND_PORT").ok();
         let original_frontend_port = env::var("FRONTEND_PORT").ok();
         let original_cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS").ok();
 
         // Clear environment variables to test true defaults
-        env::remove_var("DATABASE_URL");
         env::remove_var("BACKEND_PORT");
         env::remove_var("FRONTEND_PORT");
         env::remove_var("CORS_ALLOWED_ORIGINS");
@@ -246,11 +299,6 @@ mod tests {
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
 
         // Restore original environment variables
-        if let Some(val) = original_database_url {
-            env::set_var("DATABASE_URL", val);
-        } else {
-            env::remove_var("DATABASE_URL");
-        }
         if let Some(val) = original_backend_port {
             env::set_var("BACKEND_PORT", val);
         } else {
@@ -276,39 +324,24 @@ mod tests {
         // This is essential for containerized deployments and different environments
 
         // Store original values to restore later
-        let original_database_url = env::var("DATABASE_URL").ok();
         let original_backend_port = env::var("BACKEND_PORT").ok();
         let original_frontend_port = env::var("FRONTEND_PORT").ok();
 
         // Clear any existing environment variables first to ensure clean test state
-        env::remove_var("DATABASE_URL");
         env::remove_var("BACKEND_PORT");
         env::remove_var("FRONTEND_PORT");
 
         // Set test environment variables
-        env::set_var(
-            "DATABASE_URL",
-            "postgresql://test:test@localhost:5432/test_db",
-        );
         env::set_var("BACKEND_PORT", "9000");
         env::set_var("FRONTEND_PORT", "4000");
 
         let config = Config::from_env().unwrap();
 
         // Verify environment variables override defaults - required for deployment flexibility
-        assert_eq!(
-            config.database_url,
-            "postgresql://test:test@localhost:5432/test_db"
-        );
         assert_eq!(config.server.port, 9000);
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
 
         // Restore original environment variables
-        if let Some(val) = original_database_url {
-            env::set_var("DATABASE_URL", val);
-        } else {
-            env::remove_var("DATABASE_URL");
-        }
         if let Some(val) = original_backend_port {
             env::set_var("BACKEND_PORT", val);
         } else {
@@ -318,6 +351,31 @@ mod tests {
             env::set_var("FRONTEND_PORT", val);
         } else {
             env::remove_var("FRONTEND_PORT");
+        }
+    }
+
+    /// Pool sizes default to 10 each, read positive whole numbers, and refuse anything else.
+    #[test]
+    fn backend_pool_sizes_default_and_parse() {
+        assert_eq!(
+            backend_pool_sizes_from(env_of(&[])),
+            Ok(BackendPoolSizes { app: 10, data: 10 })
+        );
+        assert_eq!(
+            backend_pool_sizes_from(env_of(&[
+                ("APP_DB_POOL_SIZE", " 4 "),
+                ("DATA_DB_POOL_SIZE", ""),
+            ])),
+            Ok(BackendPoolSizes { app: 4, data: 10 })
+        );
+        for bad in ["0", "-1", "ten", "2.5"] {
+            assert_eq!(
+                backend_pool_sizes_from(env_of(&[("DATA_DB_POOL_SIZE", bad)])),
+                Err(PoolSizeError {
+                    name: "DATA_DB_POOL_SIZE",
+                    value: bad.to_string()
+                })
+            );
         }
     }
 

@@ -11,8 +11,9 @@
 # keeps what it wrote as <stamp>.failed for inspection. Watch the space
 # with check-freshness.sh; remove old dumps by hand if ever needed.
 #
-# Exits non-zero if any database fails to dump or verify. Nothing in the
-# cluster is modified.
+# Exits non-zero if any database fails to dump or verify. A database whose
+# StatefulSet and data PVC both don't exist (never econ_graph) is skipped and noted in the
+# MANIFEST (<db>.skipped). Nothing in the cluster is modified.
 #
 # Usage: dump-databases.sh [--dry-run] [--target-dir DIR]
 #
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run|-n) DRY_RUN="true"; shift ;;
         --target-dir) BACKUP_ROOT="$2"; shift 2 ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -87,6 +88,14 @@ failures=0
 for entry in ${BACKUP_DATABASES}; do
     IFS=: read -r db pod user <<<"${entry}"
     out="${WORK}/${db}.dump"
+    # The data database is never skipped: a run without its dump must fail.
+    if [[ "${db}" != "econ_graph" ]] && not_deployed "${pod}"; then
+        # Neither its StatefulSet nor its data volume exists (e.g. a cluster
+        # deployed before the app database): nothing to dump.
+        log "${db}: pod ${pod} is not deployed (no StatefulSet, no PVC); skipped"
+        echo "${db}.skipped=not deployed" >>"${WORK}/MANIFEST"
+        continue
+    fi
     log "dumping ${db} from pod ${pod} as ${user}"
     if ! kube exec "${pod}" -- pg_dump --format=custom --username="${user}" --dbname="${db}" >"${out}"; then
         log "pg_dump of ${db} failed"
@@ -124,6 +133,23 @@ for entry in ${BACKUP_DATABASES}; do
         if [[ "${counts}" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
             echo "econ_graph.series=${BASH_REMATCH[1]}" >>"${WORK}/MANIFEST"
             echo "econ_graph.data_points=${BASH_REMATCH[2]}" >>"${WORK}/MANIFEST"
+        fi
+    elif [[ "${db}" == "econ_graph_app" ]]; then
+        # Before the backend's first start the app database has no tables.
+        counts="$(kube exec "${pod}" -- psql -X -At --username="${user}" --dbname="${db}" \
+            -c "select case when to_regclass('public.users') is null then 'none' end" || true)"
+        if [[ -z "${counts}" ]]; then
+            counts="$(kube exec "${pod}" -- psql -X -At --username="${user}" --dbname="${db}" \
+                -c "select (select count(*) from users) || ' ' || (select count(*) from chart_annotations)" || true)"
+        fi
+        if [[ "${counts}" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+            echo "econ_graph_app.users=${BASH_REMATCH[1]}" >>"${WORK}/MANIFEST"
+            echo "econ_graph_app.chart_annotations=${BASH_REMATCH[2]}" >>"${WORK}/MANIFEST"
+        elif [[ "${counts}" == "none" ]]; then
+            echo "econ_graph_app.counts=no tables" >>"${WORK}/MANIFEST"
+        else
+            log "WARNING: could not count rows in ${db}; the restore drill will not compare them"
+            echo "econ_graph_app.counts=unavailable" >>"${WORK}/MANIFEST"
         fi
     fi
     log "${db}: OK (${size} bytes, ${entries} TOC entries)"

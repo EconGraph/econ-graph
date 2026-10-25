@@ -53,8 +53,11 @@ async fn search_series_db_error_is_generic_and_logged() {
     let Some(pool) = broken_pool().await else {
         return;
     };
-    let schema =
-        create_schema_with_data(pool, Arc::new(GraphQLContext::for_test_user(None, false)));
+    let schema = create_schema_with_data(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool)),
+        Arc::new(GraphQLContext::for_test_user(None, false)),
+    );
     let (_guard, logs) = capture_logs();
     let response = schema
         .execute(r#"{ searchSeries(query: "unemployment") { totalCount } }"#)
@@ -70,7 +73,7 @@ async fn global_analysis_db_errors_are_generic_and_logged() {
         return;
     };
     let schema = Schema::build(GlobalAnalysisQuery, EmptyMutation, EmptySubscription)
-        .data(pool)
+        .data(econ_graph_core::database::DataPool(pool))
         .extension(SanitizeErrors)
         .finish();
     for (query, relation) in [

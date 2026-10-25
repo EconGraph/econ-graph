@@ -124,7 +124,12 @@ const CrawlerConfig: React.FC = () => {
     }, [lastSuccess]);
 
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography
+        variant="body2"
+        sx={{
+          color: "text.secondary",
+        }}
+      >
         {formattedDate}
       </Typography>
     );
@@ -406,7 +411,9 @@ const CrawlerConfig: React.FC = () => {
                     fullWidth
                     size="small"
                     data-testid="max-workers-input"
-                    inputProps={{ "aria-label": "Maximum number of workers" }}
+                    slotProps={{
+                      htmlInput: { "aria-label": "Maximum number of workers" },
+                    }}
                   />
                 </Grid>
 
@@ -424,7 +431,9 @@ const CrawlerConfig: React.FC = () => {
                     fullWidth
                     size="small"
                     data-testid="queue-size-limit-input"
-                    inputProps={{ "aria-label": "Queue size limit" }}
+                    slotProps={{
+                      htmlInput: { "aria-label": "Queue size limit" },
+                    }}
                   />
                 </Grid>
 
@@ -463,8 +472,10 @@ const CrawlerConfig: React.FC = () => {
                 <Grid item xs={12}>
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    sx={{ mb: 1 }}
+                    sx={{
+                      color: "text.secondary",
+                      mb: 1,
+                    }}
                   >
                     Global Rate Limit (requests per minute)
                   </Typography>
@@ -558,12 +569,19 @@ const CrawlerConfig: React.FC = () => {
                       <TableRow key={source.id}>
                         <TableCell>
                           <Box>
-                            <Typography variant="body2" fontWeight="medium">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: "medium",
+                              }}
+                            >
                               {source.name}
                             </Typography>
                             <Typography
                               variant="caption"
-                              color="text.secondary"
+                              sx={{
+                                color: "text.secondary",
+                              }}
                             >
                               Priority: {source.priority} | Rate:{" "}
                               {source.rate_limit}/min

@@ -240,7 +240,12 @@ export default function SystemHealthPage() {
           <Typography variant="h4" gutterBottom component="h1">
             System Health
           </Typography>
-          <Typography variant="subtitle1" color="text.secondary">
+          <Typography
+            variant="subtitle1"
+            sx={{
+              color: "text.secondary",
+            }}
+          >
             Real-time system status and performance metrics
           </Typography>
         </Box>
@@ -363,9 +368,11 @@ export default function SystemHealthPage() {
 
                 <Typography
                   variant="body2"
-                  color="text.secondary"
-                  sx={{ mb: 1 }}
                   data-testid={`metric-description-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
+                  sx={{
+                    color: "text.secondary",
+                    mb: 1,
+                  }}
                 >
                   {metric.description}
                 </Typography>
@@ -377,7 +384,12 @@ export default function SystemHealthPage() {
                     alignItems: "center",
                   }}
                 >
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     <FormattedTime dateString={metric.lastCheck} />
                   </Typography>
                   {getTrendIcon(metric.trend)}
@@ -434,7 +446,12 @@ export default function SystemHealthPage() {
                   }
                   secondary={
                     <Box>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: "text.secondary",
+                        }}
+                      >
                         Version: {service.version} • Uptime: {service.uptime}
                       </Typography>
                       <Box sx={{ display: "flex", gap: 2, mt: 1 }}>

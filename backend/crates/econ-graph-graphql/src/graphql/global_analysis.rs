@@ -225,7 +225,7 @@ impl GlobalAnalysisQuery {
         &self,
         ctx: &Context<'_>,
     ) -> Result<Vec<CountryWithEconomicDataType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         let countries = GlobalAnalysisService::get_countries_with_economic_data(&pool)
             .await
@@ -242,7 +242,7 @@ impl GlobalAnalysisQuery {
         end_date: Option<String>,
         min_impact_score: Option<f64>,
     ) -> Result<Vec<GlobalEventWithImpactsType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         let start = start_date
             .as_ref()

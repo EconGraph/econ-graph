@@ -12,14 +12,14 @@ use std::sync::Arc;
 use warp::http::StatusCode;
 use warp::Reply;
 
-use econ_graph_core::database::DatabasePool;
+use econ_graph_core::database::{AppPool, DataPool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
 /// MCP Server implementation for EconGraph
 #[derive(Clone)]
 pub struct EconGraphMcpServer {
-    /// Database connection pool
-    pool: Arc<DatabasePool>,
+    /// The app database's pool
+    app: AppPool,
     /// GraphQL schema for data operations
     schema: async_graphql::Schema<
         econ_graph_graphql::graphql::query::Query,
@@ -33,16 +33,18 @@ pub struct EconGraphMcpServer {
 }
 
 impl EconGraphMcpServer {
-    /// Create a new MCP server instance
-    pub fn new(pool: Arc<DatabasePool>) -> Self {
-        let schema = create_schema_with_data((*pool).clone(), ());
+    /// Create an MCP server on the app database and, when this process has one, the data
+    /// database. Every tool reads data, so with `data` `None` each fails with the GraphQL
+    /// schema's `DATA_SERVED_REMOTELY` error.
+    pub fn new(app: AppPool, data: Option<DataPool>) -> Self {
+        let schema = create_schema_with_data(app.clone(), data, ());
         let http_client = Client::new();
         let frontend_chart_api_url = std::env::var("CHART_API_SERVICE_URL").unwrap_or_else(|_| {
             "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart".to_string()
         });
 
         Self {
-            pool,
+            app,
             schema,
             http_client,
             frontend_chart_api_url,
@@ -733,10 +735,10 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test that we can get a connection from the pool
-        let connection_result = server.pool.get().await;
+        let connection_result = server.app.get().await;
         assert!(
             connection_result.is_ok(),
             "Failed to get database connection: {:?}",
@@ -793,10 +795,10 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test that we can execute a simple database query
-        let connection_result = server.pool.get().await;
+        let connection_result = server.app.get().await;
         assert!(
             connection_result.is_ok(),
             "Failed to get database connection"
@@ -815,7 +817,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test the search tool with a simple query
         let search_args = json!({
@@ -837,7 +839,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test the get series tool with a mock series ID
         let get_args = json!({
@@ -866,7 +868,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test tools/list request
         let tools_list_request = json!({
@@ -904,7 +906,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with malformed JSON
         let malformed_json = "{ invalid json }";
@@ -938,7 +940,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with invalid method
         let invalid_request = json!({
@@ -974,7 +976,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with large payload (search with many parameters)
         let large_request = json!({
@@ -1020,7 +1022,10 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+        let server = Arc::new(EconGraphMcpServer::new(
+            AppPool(pool.clone()),
+            Some(DataPool(pool.clone())),
+        ));
 
         // Test concurrent requests to ensure thread safety
         let mut handles = vec![];
@@ -1079,7 +1084,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test empty body
         let empty_body = warp::hyper::body::Bytes::new();
@@ -1111,7 +1116,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test tools/call with search_economic_series
         let tools_call_request = json!({
@@ -1155,7 +1160,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test resources/list request
         let resources_list_request = json!({
@@ -1192,7 +1197,7 @@ mod tests {
     async fn test_get_data_sources() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_data_sources method
         let result = server.get_data_sources().await;
@@ -1208,7 +1213,7 @@ mod tests {
     async fn test_get_series_catalog() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_catalog method
         let result = server.get_series_catalog().await;
@@ -1224,7 +1229,7 @@ mod tests {
     async fn test_create_fallback_visualization() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test fallback visualization with sample data
         let series_data = vec![
@@ -1271,7 +1276,7 @@ mod tests {
     async fn test_get_series_data_for_visualization() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with a valid UUID (this will fail at GraphQL level but tests the function)
         let result = server
@@ -1291,7 +1296,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_start_date_only() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with start date only
         let result = server
@@ -1311,7 +1316,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_end_date_only() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with end date only
         let result = server
@@ -1331,7 +1336,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_no_dates() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with no date filters
         let result = server
@@ -1347,7 +1352,7 @@ mod tests {
     async fn test_search_economic_series_with_custom_limit() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test search with custom limit
         let arguments = json!({
@@ -1368,7 +1373,7 @@ mod tests {
     async fn test_search_economic_series_missing_query() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test search with missing query parameter
         let arguments = json!({
@@ -1389,7 +1394,7 @@ mod tests {
     async fn test_get_series_data_missing_series_id() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_data with missing series_id
         let arguments = json!({
@@ -1411,7 +1416,7 @@ mod tests {
     async fn test_get_series_data_with_custom_limit() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_data with custom limit
         let arguments = json!({
@@ -1429,7 +1434,7 @@ mod tests {
     async fn test_create_data_visualization_missing_series_id() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with missing series_id
         let arguments = json!({
@@ -1451,7 +1456,7 @@ mod tests {
     async fn test_create_data_visualization_missing_chart_type() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with missing chart_type
         let arguments = json!({
@@ -1473,7 +1478,7 @@ mod tests {
     async fn test_create_data_visualization_with_title() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with title
         let arguments = json!({
@@ -1492,7 +1497,7 @@ mod tests {
     async fn test_create_data_visualization_without_title() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization without title
         let arguments = json!({
@@ -1510,7 +1515,7 @@ mod tests {
     async fn test_create_data_visualization_with_date_filters() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with date filters
         let arguments = json!({

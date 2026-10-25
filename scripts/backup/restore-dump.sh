@@ -5,7 +5,8 @@
 # sign-off and take snapshot-now.sh + dump-databases.sh first.
 #
 # Usage: restore-dump.sh [--dry-run] [--yes] <database> <dump file>
-#   <database> is econ_graph or keycloak (see BACKUP_DATABASES in lib.sh).
+#   <database> is econ_graph, econ_graph_app or keycloak (see BACKUP_DATABASES
+#   in lib.sh).
 #   --dry-run checks the dump (pg_restore --list) and the pod, prints the
 #   plan and changes nothing. Without it you are asked to type the
 #   database name on a terminal (refused without one); --yes skips that.
@@ -27,7 +28,7 @@ for a in "$@"; do
     case "$a" in
         --yes|-y) yes=1 ;;
         --dry-run|-n) dry_run=1 ;;
-        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
         -*) die "unknown option: $a" ;;
         *) args+=("$a") ;;
     esac

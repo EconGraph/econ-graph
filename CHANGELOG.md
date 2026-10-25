@@ -60,6 +60,28 @@ All notable changes to EconGraph are documented here. The format follows
 - The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
   next to `database-url`, all three naming the one database. The backend and crawler-worker
   manifests read the new keys.
+- The backend reads `APP_DATABASE_URL` (required) and `DATA_DATABASE_URL` (optional) instead of
+  `DATABASE_URL`, and exits at startup with the same message when only `DATABASE_URL` is set.
+  Users, annotations, comments, collaborators, audit logs and security events use the app
+  database; series, observations, sources, datasets, search and the crawl queue use the data
+  database. Both may be the same database.
+- The backend never migrates the data database; operators apply the data set with
+  `crawler migrate` (the `crawler-migrate` Job in Kubernetes, the `crawler-migrate` service in
+  docker-compose). `/readyz` fails only when the app database is unreachable or its migrations
+  are pending, each database check bounded on its own. It reports the data database as `ok`,
+  `unreachable`, `pending_migrations` or `not_configured` in its body without failing, so a data
+  outage does not take sign-in down.
+- When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, the backend opens one pool for
+  both. `APP_DB_POOL_SIZE` and `DATA_DB_POOL_SIZE` (default 10 each) size the pools; a shared
+  pool gets their sum, so a backend opens at most 20 connections by default either way.
+- With no `DATA_DATABASE_URL`, app operations work as before and every data field fails with
+  `extensions.code = DATA_SERVED_REMOTELY` (`Data is served by the data plane at /data/graphql`);
+  `createAnnotation` does not check that its series exists, `systemHealth`'s `queueItems` is
+  null, and `triggerCrawl` is refused but still audited (outcome `unavailable`). `queueItems` is
+  nullable in the schema for this.
+- docker-compose runs `crawler migrate` as a one-shot `crawler-migrate` service that the
+  backends wait for.
+- The backend pod no longer gets `DATABASE_URL`.
 
 - New kind clusters (`recreate-kind-cluster.sh`, `terraform/k8s`) run Kubernetes 1.36
   (`kindest/node:v1.36.4`, pinned by digest in `kind-config.yaml`), which needs kind v0.33.0 or

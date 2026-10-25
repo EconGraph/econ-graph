@@ -6,18 +6,18 @@
 //! (`config/flags/flags.flagd.json`), which it is in the dev profile and not in release.
 
 use econ_graph_auth::{authenticate, BearerError, OidcVerifier, Role};
-use econ_graph_core::DatabasePool;
+use econ_graph_core::AppPool;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 use serde_json::json;
 use std::sync::Arc;
 use warp::{Filter, Reply as _};
 
-use super::{authorization_header, client_info, PeerAddr};
+use super::{authorization_header, client_info, Databases, PeerAddr};
 use econ_graph_core::models::admin::ClientInfo;
 
 /// Check that a request may use `/mcp`: an active, signed-in caller holding `api:mcp`.
 async fn mcp_access(
-    pool: &DatabasePool,
+    pool: &AppPool,
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
     client: &ClientInfo,
@@ -132,7 +132,7 @@ fn mcp_error(status: warp::http::StatusCode, code: i32, message: &str) -> warp::
 /// The token is checked before the body is read, so unauthenticated clients cannot make the
 /// server buffer a body, and bodies over [`MCP_BODY_LIMIT`] are refused as they stream in.
 fn mcp_route(
-    pool: DatabasePool,
+    pool: AppPool,
     verifier: Option<Arc<OidcVerifier>>,
     server: Arc<EconGraphMcpServer>,
 ) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
@@ -224,11 +224,14 @@ fn mcp_route(
 
 /// `/mcp`, boxed so it has the same type as the flagged-off stand-in in `main.rs`.
 pub(crate) fn mcp_filter(
-    pool: DatabasePool,
+    databases: Databases,
     verifier: Option<Arc<OidcVerifier>>,
 ) -> warp::filters::BoxedFilter<(warp::reply::Response,)> {
-    let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
-    mcp_route(pool, verifier, server).boxed()
+    let server = Arc::new(EconGraphMcpServer::new(
+        databases.app.clone(),
+        databases.data,
+    ));
+    mcp_route(databases.app, verifier, server).boxed()
 }
 
 #[cfg(test)]
@@ -238,36 +241,46 @@ mod tests {
     };
     use econ_graph_auth::testkit::TestIssuer;
     use econ_graph_auth::{OidcConfig, OidcVerifier};
-    use econ_graph_core::DatabasePool;
+    use econ_graph_core::test_utils::ScratchDatabase;
+    use econ_graph_core::{AppPool, DataPool, DatabasePool, MigrationSet};
     use econ_graph_mcp::mcp_server::EconGraphMcpServer;
     use std::sync::Arc;
     use uuid::Uuid;
     use warp::http::StatusCode;
 
     /// A pool that never connects: every case using it is decided before any database access.
-    fn unreachable_pool() -> DatabasePool {
+    fn unreachable_pool() -> AppPool {
         let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
             diesel_async::AsyncPgConnection,
         >::new("postgres://nobody@127.0.0.1:1/none");
-        DatabasePool::builder()
-            .connection_timeout(std::time::Duration::from_secs(1))
-            .build_unchecked(manager)
+        AppPool(
+            DatabasePool::builder()
+                .connection_timeout(std::time::Duration::from_secs(1))
+                .build_unchecked(manager),
+        )
     }
 
-    /// A pool on `DATABASE_URL` with migrations applied, or `None` to skip the test.
-    async fn database() -> Option<DatabasePool> {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
+    /// Both databases, unreachable.
+    fn unreachable_databases() -> super::Databases {
+        super::Databases {
+            app: unreachable_pool(),
+            data: Some(DataPool(unreachable_pool().0)),
+        }
+    }
+
+    /// A new app database on `DATABASE_URL`'s server with only the app set applied, or `None`
+    /// to skip the test.
+    async fn database() -> Option<(ScratchDatabase, AppPool)> {
+        if std::env::var("DATABASE_URL").is_err() {
             eprintln!("DATABASE_URL not set; skipping DB-backed MCP auth test");
             return None;
-        };
-        econ_graph_core::database::run_migrations(&url)
+        }
+        let db = ScratchDatabase::create("mcp_auth_app");
+        econ_graph_core::run_migration_set(&db.url, MigrationSet::App)
             .await
-            .expect("migrations");
-        Some(
-            econ_graph_core::database::create_pool(&url)
-                .await
-                .expect("pool"),
-        )
+            .expect("app migrations");
+        let pool = econ_graph_core::create_pool(&db.url).await.expect("pool");
+        Some((db, AppPool(pool)))
     }
 
     fn bearer(token: &str) -> String {
@@ -316,7 +329,10 @@ mod tests {
         let issuer = TestIssuer::start().await;
         let token = issuer.mint_token(Uuid::new_v4(), &["api:mcp"]);
         let pool = unreachable_pool();
-        let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+        let server = Arc::new(EconGraphMcpServer::new(
+            pool.clone(),
+            Some(DataPool(pool.0.clone())),
+        ));
         let too_big = vec![b' '; super::MCP_BODY_LIMIT + 1];
         let invalid = r#"Bearer error="invalid_token""#;
         let header = |v: &str| Some(warp::http::HeaderValue::from_str(v).unwrap());
@@ -374,11 +390,10 @@ mod tests {
     }
 
     /// `/mcp` needs an active account whose token grants `api:mcp`.
-    // Shares the database with `integration_tests`, which drop the schema.
     #[tokio::test]
     #[serial_test::serial]
     async fn mcp_needs_the_api_mcp_role_and_an_active_account() {
-        let Some(pool) = database().await else {
+        let Some((_db, pool)) = database().await else {
             return;
         };
         let issuer = TestIssuer::start().await;
@@ -450,7 +465,7 @@ mod tests {
             .method("POST")
             .path("/mcp")
             .body("{}")
-            .reply(&mcp_filter(unreachable_pool(), None))
+            .reply(&mcp_filter(unreachable_databases(), None))
             .await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(response.headers()["WWW-Authenticate"], "Bearer");

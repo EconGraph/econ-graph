@@ -166,7 +166,7 @@ metadata:
 spec:
   acme:
     server: ${ACME_SERVER}
-    email: admin@${DOMAIN}
+    email: ${ACME_EMAIL:-support@econgraph.com}
     privateKeySecretRef:
       name: ${CLUSTER_ISSUER_NAME}
     solvers:

@@ -122,7 +122,7 @@ docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || t
 # Check if PostgreSQL is running
 echo "🗄️  Checking PostgreSQL..."
 if kubectl get pod postgresql-0 -n econ-graph >/dev/null 2>&1; then
-    echo "✅ PostgreSQL found - migrations will be handled by backend startup"
+    echo "✅ PostgreSQL found - the backend applies the app migrations at startup; run the crawler-migrate Job (scripts/deploy/deploy.sh) for the data migrations"
 else
     echo "⚠️  PostgreSQL not found - please deploy PostgreSQL first"
 fi
