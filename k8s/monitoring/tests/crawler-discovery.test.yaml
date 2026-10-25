@@ -31,3 +31,35 @@ tests:
       - eval_time: 1h10m
         alertname: CrawlerCuratedEntriesMissing
         exp_alerts: []
+
+  # A worker restart drops BEA's series at 3h, and the new pod only reports again after its first
+  # discovery, ~6 days later. The alert keeps firing through that gap and clears once the new pod's
+  # discovery reports 0.
+  - interval: 1h
+    input_series:
+      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-1"}'
+        values: '0 1 1 stale'
+      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-2"}'
+        values: '_x150 0'
+    alert_rule_test:
+      - eval_time: 2h30m
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: BEA
+            exp_annotations:
+              summary: 1 curated BEA entries are missing upstream
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+      - eval_time: 100h
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: BEA
+            exp_annotations:
+              summary: 1 curated BEA entries are missing upstream
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+      - eval_time: 151h
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts: []
