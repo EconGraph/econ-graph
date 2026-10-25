@@ -55,7 +55,12 @@ function DashboardPage() {
           <Card>
             <CardHeader title="Quick Actions" />
             <CardContent>
-              <Typography variant="body2" color="text.secondary">
+              <Typography
+                variant="body2"
+                sx={{
+                  color: "text.secondary",
+                }}
+              >
                 Admin functionality is being implemented. The basic
                 infrastructure is now in place.
               </Typography>

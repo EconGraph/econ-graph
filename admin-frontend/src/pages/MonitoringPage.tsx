@@ -176,7 +176,13 @@ export default function MonitoringPage() {
         <Typography variant="h4" gutterBottom component="h1">
           System Monitoring
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography
+          variant="body1"
+          sx={{
+            color: "text.secondary",
+            mb: 2,
+          }}
+        >
           Grafana dashboards and system metrics
         </Typography>
         <Box sx={{ display: "flex", gap: 1 }}>
@@ -348,52 +354,104 @@ export default function MonitoringPage() {
 
                     <Typography
                       variant="body2"
-                      color="text.secondary"
-                      sx={{ mb: 2 }}
+                      sx={{
+                        color: "text.secondary",
+                        mb: 2,
+                      }}
                     >
                       {dashboard.description}
                     </Typography>
 
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: "text.secondary",
+                      }}
+                    >
                       Last Update: {new Date().toLocaleString()}
                     </Typography>
 
                     <Grid container spacing={1} sx={{ mb: 2 }}>
                       <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "text.secondary",
+                          }}
+                        >
                           Series
                         </Typography>
-                        <Typography variant="body2" fontWeight="medium">
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: "medium",
+                          }}
+                        >
                           {formatNumber(dashboard.metrics.totalSeries)}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "text.secondary",
+                          }}
+                        >
                           Crawlers
                         </Typography>
-                        <Typography variant="body2" fontWeight="medium">
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: "medium",
+                          }}
+                        >
                           {dashboard.metrics.activeCrawlers}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "text.secondary",
+                          }}
+                        >
                           Data Points
                         </Typography>
-                        <Typography variant="body2" fontWeight="medium">
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: "medium",
+                          }}
+                        >
                           {formatNumber(dashboard.metrics.dataPoints)}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "text.secondary",
+                          }}
+                        >
                           Uptime
                         </Typography>
-                        <Typography variant="body2" fontWeight="medium">
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: "medium",
+                          }}
+                        >
                           {dashboard.metrics.uptime}
                         </Typography>
                       </Grid>
                     </Grid>
 
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: "text.secondary",
+                      }}
+                    >
                       Last updated:{" "}
                       {new Date(dashboard.lastUpdate).toLocaleString()}
                     </Typography>
@@ -444,7 +502,12 @@ export default function MonitoringPage() {
                   <Typography variant="h4">
                     {metrics.totalDashboards}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     {metrics.healthyDashboards} healthy
                   </Typography>
                 </CardContent>
@@ -463,7 +526,12 @@ export default function MonitoringPage() {
                   <Typography variant="h4">
                     {formatNumber(metrics.totalSeries)}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Across all dashboards
                   </Typography>
                 </CardContent>
@@ -482,7 +550,12 @@ export default function MonitoringPage() {
                   <Typography variant="h4">
                     {formatNumber(metrics.totalDataPoints)}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Total collected
                   </Typography>
                 </CardContent>
@@ -501,7 +574,12 @@ export default function MonitoringPage() {
                   <Typography variant="h4">
                     {metrics.averageUptime.toFixed(1)}%
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     System reliability
                   </Typography>
                 </CardContent>
@@ -514,10 +592,22 @@ export default function MonitoringPage() {
           <Typography variant="h6" gutterBottom>
             Embedded Dashboard Views
           </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+          <Typography
+            variant="body1"
+            sx={{
+              color: "text.secondary",
+              mb: 3,
+            }}
+          >
             These are embedded views from Grafana dashboards
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              color: "text.secondary",
+              mb: 3,
+            }}
+          >
             Click the fullscreen icon to open in Grafana
           </Typography>
           <Grid container spacing={3}>
@@ -527,7 +617,12 @@ export default function MonitoringPage() {
                   <Typography variant="h6" gutterBottom>
                     Embedded Grafana Dashboard
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Last Update: {new Date().toLocaleString()}
                   </Typography>
                   <Box
@@ -540,7 +635,12 @@ export default function MonitoringPage() {
                       justifyContent: "center",
                     }}
                   >
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: "text.secondary",
+                      }}
+                    >
                       Grafana Dashboard Placeholder
                     </Typography>
                   </Box>
@@ -553,7 +653,12 @@ export default function MonitoringPage() {
                   <Typography variant="h6" gutterBottom>
                     Embedded Grafana Dashboard
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Last Update: {new Date().toLocaleString()}
                   </Typography>
                   <Box
@@ -566,7 +671,12 @@ export default function MonitoringPage() {
                       justifyContent: "center",
                     }}
                   >
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: "text.secondary",
+                      }}
+                    >
                       Grafana Dashboard Placeholder
                     </Typography>
                   </Box>
@@ -579,7 +689,12 @@ export default function MonitoringPage() {
                   <Typography variant="h6" gutterBottom>
                     Embedded Grafana Dashboard
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Last Update: {new Date().toLocaleString()}
                   </Typography>
                   <Box
@@ -592,7 +707,12 @@ export default function MonitoringPage() {
                       justifyContent: "center",
                     }}
                   >
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: "text.secondary",
+                      }}
+                    >
                       Grafana Dashboard Placeholder
                     </Typography>
                   </Box>

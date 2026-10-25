@@ -67,8 +67,10 @@ function App() {
             <Typography
               variant="subtitle1"
               align="center"
-              color="text.secondary"
-              sx={{ mb: 3 }}
+              sx={{
+                color: "text.secondary",
+                mb: 3,
+              }}
             >
               Real-time monitoring and management of data acquisition
               infrastructure
