@@ -387,20 +387,31 @@ fn client_ip(
     Some(client.to_string())
 }
 
+/// Every `X-Forwarded-For` field line of a request, in order, joined with commas: RFC 9110
+/// (section 5.3) makes that the header's value, so a proxy that adds its own line instead of
+/// extending the last one is still read in full. A line that is not text stands in as an
+/// empty entry, which stops [`client_ip`]'s walk there rather than skipping past it.
+fn forwarded_for(headers: &warp::http::HeaderMap) -> Option<String> {
+    let lines: Vec<&str> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .map(|value| std::str::from_utf8(value.as_bytes()).unwrap_or_default())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join(","))
+}
+
 /// Who sent a request: [`client_ip`] for its address and its `User-Agent` header, cut short.
 fn client_info(peer: Option<PeerAddr>, headers: &warp::http::HeaderMap) -> ClientInfo {
-    let header = |name: &str| {
-        headers
-            .get(name)
-            .and_then(|value| std::str::from_utf8(value.as_bytes()).ok())
-    };
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|value| std::str::from_utf8(value.as_bytes()).ok());
     ClientInfo::new(
         client_ip(
             peer.map(|PeerAddr(addr)| addr.ip()),
-            header("x-forwarded-for"),
+            forwarded_for(headers).as_deref(),
             &TRUSTED_PROXIES,
         ),
-        header("user-agent"),
+        user_agent,
     )
 }
 
@@ -1099,7 +1110,7 @@ mod cors_tests {
 
 #[cfg(test)]
 mod client_ip_tests {
-    use super::{client_info, client_ip, parse_trusted_proxies, IpRange, PeerAddr};
+    use super::{client_info, client_ip, forwarded_for, parse_trusted_proxies, IpRange, PeerAddr};
     use std::net::IpAddr;
 
     fn ip(text: &str) -> Option<IpAddr> {
@@ -1151,6 +1162,53 @@ mod client_ip_tests {
         assert_eq!(
             client_ip(ip("::1"), Some("2001:db8::7"), &trusted).as_deref(),
             Some("2001:db8::7")
+        );
+    }
+
+    /// `X-Forwarded-For` sent as several field lines is read as one list, in order, so a
+    /// client cannot hide behind an extra line: the proxy's appended line is the one believed.
+    #[test]
+    fn forwarded_for_joins_every_field_line() {
+        let mut headers = warp::http::HeaderMap::new();
+        assert_eq!(forwarded_for(&headers), None);
+        // The client sends its own line claiming to be 6.6.6.6 behind a trusted proxy; the
+        // edge proxy adds a second line with the address it actually saw.
+        headers.append("x-forwarded-for", "6.6.6.6, 10.0.0.7".parse().unwrap());
+        headers.append("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        assert_eq!(
+            forwarded_for(&headers).as_deref(),
+            Some("6.6.6.6, 10.0.0.7,203.0.113.9")
+        );
+        let trusted = parse_trusted_proxies(Some("10.0.0.0/8"));
+        let peer = ip("10.1.2.3");
+        assert_eq!(
+            client_ip(peer, forwarded_for(&headers).as_deref(), &trusted).as_deref(),
+            Some("203.0.113.9")
+        );
+        // Reading only the first line would have believed the spoofed 6.6.6.6.
+        assert_eq!(
+            client_ip(peer, Some("6.6.6.6, 10.0.0.7"), &trusted).as_deref(),
+            Some("6.6.6.6")
+        );
+        // A trusted hop in the later line is walked past to the address before it.
+        let mut chained = warp::http::HeaderMap::new();
+        chained.append("x-forwarded-for", "6.6.6.6".parse().unwrap());
+        chained.append("x-forwarded-for", "198.51.100.4, 10.0.0.8".parse().unwrap());
+        assert_eq!(
+            client_ip(peer, forwarded_for(&chained).as_deref(), &trusted).as_deref(),
+            Some("198.51.100.4")
+        );
+        // A line that is not text stops the walk there instead of being skipped.
+        let mut opaque = warp::http::HeaderMap::new();
+        opaque.append("x-forwarded-for", "6.6.6.6".parse().unwrap());
+        opaque.append(
+            "x-forwarded-for",
+            warp::http::HeaderValue::from_bytes(b"\xff").unwrap(),
+        );
+        opaque.append("x-forwarded-for", "10.0.0.9".parse().unwrap());
+        assert_eq!(
+            client_ip(peer, forwarded_for(&opaque).as_deref(), &trusted).as_deref(),
+            Some("10.0.0.9")
         );
     }
 
