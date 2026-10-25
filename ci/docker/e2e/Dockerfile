@@ -1,7 +1,7 @@
 # E2E Test Container with Pre-installed Browsers
 # This container has Playwright browsers pre-installed to speed up E2E test execution
 
-FROM node:24-bookworm
+FROM node:26-bookworm
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \

@@ -1,7 +1,7 @@
 # Mobile E2E Test Container - Alternative approach
 # This container installs mobile dependencies in the base image instead
 
-FROM node:18-bullseye
+FROM node:26-bookworm
 
 # Install system dependencies for Playwright AND mobile testing
 RUN apt-get update && apt-get install -y \

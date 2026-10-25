@@ -22,9 +22,6 @@ on:
     # Run every Monday at 9 AM UTC (weekly accessibility audit)
     - cron: '0 9 * * 1'
 
-env:
-  NODE_VERSION: '24'
-
 jobs:
   accessibility-static-analysis:
     name: Accessibility Static Analysis (eslint-plugin-jsx-a11y)
@@ -41,7 +38,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: |
           frontend/package-lock.json
@@ -193,7 +190,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ env.NODE_VERSION }}
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: |
           frontend/package-lock.json
