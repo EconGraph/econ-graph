@@ -327,6 +327,16 @@ async fn without_a_data_database_data_fields_are_served_remotely() {
         let response = run(app, None, actor, as_staff, &query).await;
         assert_served_remotely(&response);
     }
+    // The refused triggerCrawl is still audited, as unavailable.
+    assert_eq!(
+        count(
+            app,
+            "SELECT count(*) AS n FROM audit_logs \
+             WHERE action = 'trigger_crawl' AND details->>'outcome' = 'unavailable'"
+        )
+        .await,
+        1
+    );
 
     // App operations: an annotation (its series can't be checked here), its listing, users,
     // and systemHealth with no queue count.

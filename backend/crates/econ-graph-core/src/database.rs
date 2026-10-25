@@ -62,12 +62,20 @@ pub fn redact_database_url(database_url: &str) -> String {
     }
 }
 
-/// Create a database connection pool
+/// Connections a pool from [`create_pool`] opens at most.
+pub const DEFAULT_POOL_SIZE: u32 = 20;
+
+/// Create a database connection pool of at most [`DEFAULT_POOL_SIZE`] connections.
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
+    create_pool_with_size(database_url, DEFAULT_POOL_SIZE).await
+}
+
+/// Create a database connection pool of at most `max_size` connections.
+pub async fn create_pool_with_size(database_url: &str, max_size: u32) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
     let pool = Pool::builder()
-        .max_size(20)
+        .max_size(max_size)
         .connection_timeout(Duration::from_secs(30))
         .idle_timeout(Some(Duration::from_secs(300))) // 5 minutes idle timeout
         .build(config)

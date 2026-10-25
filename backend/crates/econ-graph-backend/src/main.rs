@@ -15,8 +15,8 @@ use warp::{Filter, Reply as _};
 // Import from our new crates
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
-    config::{backend_database_urls, BackendDatabaseUrls},
-    create_pool,
+    config::{backend_database_urls, backend_pool_sizes, BackendDatabaseUrls, BackendPoolSizes},
+    create_pool_with_size,
     database::{readiness_check_set, run_migration_set, MigrationSet},
     models::admin::{ClientInfo, NewSecurityEvent},
     redact_database_url, AppError, AppPool, AppResult, Config, DataPool,
@@ -34,40 +34,95 @@ mod metrics;
 use mcp_routes::mcp_filter;
 
 /// The backend's databases: the app database always, the data database when
-/// `DATA_DATABASE_URL` is set. Both may be the same database.
+/// `DATA_DATABASE_URL` is set. Both may be the same database, and then share one pool.
 #[derive(Clone)]
 pub(crate) struct Databases {
     pub(crate) app: AppPool,
     pub(crate) data: Option<DataPool>,
 }
 
+/// How long `/readyz` waits for each database. k8s's probe timeout (3s, see
+/// backend-deployment.yaml) is well under the pool's 30s connection timeout, so each check is
+/// bounded rather than letting a down database make the handler outlive the probe. The two
+/// databases are checked at the same time.
+const READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The data database's state, as `/readyz` reports it. None of them makes the backend unready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DataReadiness {
+    /// Reachable, with the newest data migration this binary embeds recorded.
+    Ok,
+    /// No connection within [`READINESS_TIMEOUT`], or the connection failed.
+    Unreachable,
+    /// Reachable, but the data set is behind this binary (`crawler migrate` has not run).
+    PendingMigrations,
+    /// This backend has no `DATA_DATABASE_URL`.
+    NotConfigured,
+}
+
+impl DataReadiness {
+    fn as_str(self) -> &'static str {
+        match self {
+            DataReadiness::Ok => "ok",
+            DataReadiness::Unreachable => "unreachable",
+            DataReadiness::PendingMigrations => "pending_migrations",
+            DataReadiness::NotConfigured => "not_configured",
+        }
+    }
+}
+
 impl Databases {
     /// Connect to the app database and apply its migration set, then connect to the data
     /// database when there is one.
     ///
-    /// The data database is never migrated here (docs/development/MIGRATIONS.md lists what
-    /// applies the data set), so a data database behind this binary keeps `/readyz` failing
-    /// until it is migrated.
-    async fn open(urls: &BackendDatabaseUrls) -> AppResult<Self> {
+    /// When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, one pool of
+    /// `sizes.app + sizes.data` connections serves both, so the database sees no more
+    /// connections than from a backend with one database URL. The data database is never
+    /// migrated here: `crawler migrate` applies the data set.
+    async fn open(urls: &BackendDatabaseUrls, sizes: BackendPoolSizes) -> AppResult<Self> {
+        let pool = |url: &str, size: u32, which: &'static str| {
+            let url = url.to_string();
+            async move {
+                create_pool_with_size(&url, size).await.map_err(|e| {
+                    AppError::DatabaseError(format!(
+                        "Failed to create the {which} database pool: {e}"
+                    ))
+                })
+            }
+        };
+
+        let shared = urls.data.as_deref() == Some(urls.app.as_str());
         info!("🗄️  App database: {}", redact_database_url(&urls.app));
-        let app = AppPool(create_pool(&urls.app).await.map_err(|e| {
-            AppError::DatabaseError(format!("Failed to create the app database pool: {e}"))
-        })?);
+        let app_size = if shared {
+            sizes.app + sizes.data
+        } else {
+            sizes.app
+        };
+        let app = AppPool(pool(&urls.app, app_size, "app").await?);
 
         info!("🔄 Applying the app migration set...");
-        run_migration_set(&urls.app, MigrationSet::App)
+        let applied = run_migration_set(&urls.app, MigrationSet::App)
             .await
             .map_err(|e| {
                 AppError::DatabaseError(format!("Failed to run the app migrations: {e}"))
             })?;
-        info!("✅ App migrations are current");
+        info!(
+            "✅ App migrations are current (applied now: {})",
+            if applied.is_empty() {
+                "none".to_string()
+            } else {
+                applied.join(", ")
+            }
+        );
 
         let data = match &urls.data {
+            Some(_) if shared => {
+                info!("🗄️  Data database: the app database, sharing its pool");
+                Some(DataPool(app.0.clone()))
+            }
             Some(url) => {
                 info!("🗄️  Data database: {}", redact_database_url(url));
-                Some(DataPool(create_pool(url).await.map_err(|e| {
-                    AppError::DatabaseError(format!("Failed to create the data database pool: {e}"))
-                })?))
+                Some(DataPool(pool(url, sizes.data, "data").await?))
             }
             None => {
                 tracing::warn!(
@@ -80,19 +135,41 @@ impl Databases {
         Ok(Self { app, data })
     }
 
-    /// Ready when the app database is reachable with its set current and, when this backend
-    /// has a data database, the data database is too. The error names the database that is
-    /// not ready.
-    async fn readiness_check(&self) -> Result<(), String> {
-        readiness_check_set(&self.app, MigrationSet::App)
-            .await
-            .map_err(|e| format!("app database: {e}"))?;
-        if let Some(data) = &self.data {
-            readiness_check_set(data, MigrationSet::Data)
-                .await
-                .map_err(|e| format!("data database: {e}"))?;
+    /// The app database's readiness: reachable within [`READINESS_TIMEOUT`] with its set
+    /// current. The error says why, naming the app database.
+    async fn app_readiness(&self) -> Result<(), String> {
+        match tokio::time::timeout(
+            READINESS_TIMEOUT,
+            readiness_check_set(&self.app, MigrationSet::App),
+        )
+        .await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(format!("app database: {e}")),
+            Err(_) => Err("app database: readiness check timed out".to_string()),
         }
-        Ok(())
+    }
+
+    /// The data database's state; each step is bounded by [`READINESS_TIMEOUT`] in all.
+    async fn data_readiness(&self) -> DataReadiness {
+        let Some(data) = &self.data else {
+            return DataReadiness::NotConfigured;
+        };
+        let check = async {
+            if data.get().await.is_err() {
+                return DataReadiness::Unreachable;
+            }
+            match readiness_check_set(data, MigrationSet::Data).await {
+                Ok(()) => DataReadiness::Ok,
+                Err(e) => {
+                    tracing::warn!("data database readiness: {e}");
+                    DataReadiness::PendingMigrations
+                }
+            }
+        };
+        tokio::time::timeout(READINESS_TIMEOUT, check)
+            .await
+            .unwrap_or(DataReadiness::Unreachable)
     }
 }
 
@@ -159,36 +236,29 @@ async fn livez_handler() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::json(&json!({ "status": "alive" })))
 }
 
-/// Readiness (and startup): each of the backend's databases must be reachable and have the
-/// newest migration this binary embeds for its set ([`Databases::readiness_check`]). Unlike
-/// `/health`, this can actually fail, so a pod whose database is down or behind is taken out of
-/// rotation instead of serving errors.
+/// Readiness (and startup): ready when the app database is reachable and its app migrations
+/// are current ([`Databases::app_readiness`]). Unlike `/health`, this can fail, so a pod whose
+/// app database is down or behind is taken out of rotation instead of serving errors.
+///
+/// The data database's state (`ok`, `unreachable`, `pending_migrations` or `not_configured`) is
+/// reported as `data` in the body but never fails the check: sign-in and the other app
+/// operations keep working through a data outage, and data fields fail on their own until it
+/// is over.
 async fn readyz_handler(databases: Databases) -> Result<impl warp::Reply, Infallible> {
     use warp::http::StatusCode;
 
-    // k8s's probe timeout (3s, see backend-deployment.yaml) is well under the pool's 30s
-    // connection_timeout, so bound the check itself rather than let a down database make this
-    // handler outlive the probe that's waiting on it.
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        databases.readiness_check(),
-    )
-    .await;
-
-    let (status, body) = match outcome {
-        Ok(Ok(())) => (StatusCode::OK, json!({ "status": "ready" })),
-        Ok(Err(e)) => {
-            tracing::warn!("readiness check failed: {e}");
+    let (app, data) = tokio::join!(databases.app_readiness(), databases.data_readiness());
+    let data = data.as_str();
+    let (status, body) = match app {
+        Ok(()) => (
+            StatusCode::OK,
+            json!({ "status": "ready", "app": "ok", "data": data }),
+        ),
+        Err(reason) => {
+            tracing::warn!("readiness check failed: {reason}");
             (
                 StatusCode::SERVICE_UNAVAILABLE,
-                json!({ "status": "not_ready", "reason": e.to_string() }),
-            )
-        }
-        Err(_) => {
-            tracing::warn!("readiness check timed out");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({ "status": "not_ready", "reason": "readiness check timed out" }),
+                json!({ "status": "not_ready", "reason": reason, "data": data }),
             )
         }
     };
@@ -897,11 +967,19 @@ async fn main() -> AppResult<()> {
         eprintln!("❌ {}", e);
         error
     })?;
-    let databases = Databases::open(&database_urls).await.map_err(|e| {
-        e.log_with_context("Application startup databases");
+    let pool_sizes = backend_pool_sizes().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup database configuration");
         eprintln!("❌ {}", e);
-        e
+        error
     })?;
+    let databases = Databases::open(&database_urls, pool_sizes)
+        .await
+        .map_err(|e| {
+            e.log_with_context("Application startup databases");
+            eprintln!("❌ {}", e);
+            e
+        })?;
 
     // Create GraphQL schema
     let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());

@@ -37,6 +37,8 @@ pub(crate) enum Outcome {
     SelfLockout,
     /// The database failed.
     Error,
+    /// This backend has no data database, so the data the mutation needs is served elsewhere.
+    Unavailable,
 }
 
 impl Outcome {
@@ -49,6 +51,7 @@ impl Outcome {
             Self::Denied => "denied",
             Self::SelfLockout => "self_lockout",
             Self::Error => "error",
+            Self::Unavailable => "unavailable",
         }
     }
 }

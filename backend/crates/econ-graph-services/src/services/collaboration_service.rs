@@ -237,17 +237,18 @@ pub struct CollaborationService {
 }
 
 impl CollaborationService {
-    /// A service on one database holding both the app and data tables: new annotations' series
-    /// are checked in `pool` too.
+    /// A service on the app database `pool` that does not check new annotations' series; see
+    /// [`Self::with_series_pool`] for one that does.
     pub fn new(pool: DatabasePool) -> Self {
         Self {
-            series_pool: Some(pool.clone()),
             pool,
+            series_pool: None,
         }
     }
 
     /// A service on the app database `pool` that checks new annotations' series in
-    /// `series_pool` (the data database), or not at all when it is `None`.
+    /// `series_pool` (the data database), or not at all when it is `None`. The data pool is
+    /// always passed explicitly, never assumed to be `pool`.
     pub fn with_series_pool(pool: DatabasePool, series_pool: Option<DatabasePool>) -> Self {
         Self { pool, series_pool }
     }

@@ -39,7 +39,6 @@ impl Mutation {
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
         let caller = require_role(ctx, Role::AdminCrawlersManage)?;
-        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         let mut details = serde_json::json!({
             "source": input.source,
@@ -48,6 +47,9 @@ impl Mutation {
             "priority": input.priority,
         });
         let attempt = async {
+            // Inside the audited attempt, so a backend with no data database still records it.
+            let pool: &DatabasePool =
+                crate::graphql::context::data_pool(ctx).or_outcome(Outcome::Unavailable)?;
             let jobs = plan_trigger_crawl(&input).or_outcome(Outcome::Invalid)?;
             details["requested"] = jobs.len().into();
             let mut enqueued = 0i32;
@@ -66,10 +68,10 @@ impl Mutation {
                 enqueued,
                 "triggerCrawl enqueued jobs"
             );
-            Ok(enqueued)
+            Ok((enqueued, pool))
         }
         .await;
-        let enqueued =
+        let (enqueued, pool) =
             audit::audited(ctx, "trigger_crawl", "crawl_queue", None, details, attempt).await?;
 
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
