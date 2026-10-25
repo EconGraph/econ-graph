@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # Restore a backup taken by backup-kind-databases.sh (or recreate-kind-cluster.sh)
-# into postgresql-0 and keycloak-postgres-0, then check the row counts against
-# the ones recorded at backup time (counts.env). Any mismatch is an error.
+# into postgresql-0 (econ_graph), app-postgres-0 (econ_graph_app) and
+# keycloak-postgres-0 (keycloak), then check the row counts against the ones
+# recorded at backup time (counts.env). Any mismatch is an error.
 #
 # First, unless --no-bootstrap, it makes sure the databases exist to restore
 # into: namespace, the Secrets saved with the backup (the passwords the data
-# was created with), the host-storage PVs and both Postgres StatefulSets. On a
+# was created with), the host-storage PVs and the Postgres StatefulSets. On a
 # freshly created cluster that is everything before deploy.sh; on a running
 # one it changes nothing (existing Secrets are kept, manifests re-applied).
 #
@@ -26,7 +27,7 @@
 # Usage:
 #   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/<ts> \
 #       [--expect-series N] [--expect-data-points N] \
-#       [--only econ_graph|keycloak] [--replace] [--no-bootstrap] [--yes] [--dry-run]
+#       [--only econ_graph|econ_graph_app|keycloak] [--replace] [--no-bootstrap] [--yes] [--dry-run]
 # A dry run may create a temporary directory under $TMPDIR (a copy of the
 # cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 #
@@ -45,7 +46,7 @@ REPLACE="false"
 BOOTSTRAP="true"
 EXPECT_SERIES=""
 EXPECT_DATA_POINTS=""
-usage="usage: $0 --from DIR [--expect-series N] [--expect-data-points N] [--only econ_graph|keycloak] [--replace] [--no-bootstrap] [--yes] [--dry-run]"
+usage="usage: $0 --from DIR [--expect-series N] [--expect-data-points N] [--only econ_graph|econ_graph_app|keycloak] [--replace] [--no-bootstrap] [--yes] [--dry-run]"
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) FROM="$2"; shift 2 ;;
@@ -60,7 +61,10 @@ while [ $# -gt 0 ]; do
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
-case "$ONLY" in "" | econ_graph | keycloak) ;; *) die "--only must be econ_graph or keycloak" ;; esac
+case "$ONLY" in
+    "" | econ_graph | econ_graph_app | keycloak) ;;
+    *) die "--only must be econ_graph, econ_graph_app or keycloak" ;;
+esac
 [ -n "$FROM" ] || die "--from DIR is required"
 [ -d "$FROM" ] || die "$FROM is not a directory"
 FROM="$(cd "$FROM" && pwd)"
@@ -80,10 +84,13 @@ fail_counts() {
     exit 1
 }
 
+# wanted DB: true if DB is to be restored (no --only, or --only DB).
+wanted() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
+
 log "Checking backup ${FROM}"
 read_counts "$FROM"
-for db in econ_graph keycloak; do
-    [ -n "$ONLY" ] && [ "$ONLY" != "$db" ] && continue
+for db in econ_graph econ_graph_app keycloak; do
+    wanted "$db" || continue
     f="$FROM/$db.dump"
     if [ -s "$f" ]; then
         # pg_dump -Fc archives start with "PGDMP".
@@ -91,16 +98,23 @@ for db in econ_graph keycloak; do
         echo "  $db.dump: $(du -h "$f" | cut -f1)"
     fi
 done
-[ -s "$FROM/econ_graph.dump" ] || [ -s "$FROM/keycloak.dump" ] || die "no dumps in $FROM"
-if [ -s "$FROM/econ_graph.dump" ] && [ "$ONLY" != "keycloak" ]; then
+[ -s "$FROM/econ_graph.dump" ] || [ -s "$FROM/econ_graph_app.dump" ] || [ -s "$FROM/keycloak.dump" ] ||
+    die "no dumps in $FROM"
+if [ -s "$FROM/econ_graph.dump" ] && wanted econ_graph; then
     [ -n "$SERIES_COUNT" ] && [ -n "$DATA_POINTS_COUNT" ] ||
         die "$FROM/counts.env lacks SERIES_COUNT/DATA_POINTS_COUNT; can't verify an econ_graph restore"
 fi
-if [ -s "$FROM/keycloak.dump" ] && [ "$ONLY" != "econ_graph" ]; then
+# An app dump without counts is of an app database that had no tables yet:
+# there is nothing in it to restore (backup_databases in lib/kind-env.sh).
+if [ -s "$FROM/econ_graph_app.dump" ] && wanted econ_graph_app && [ -z "$APP_USER_COUNT" ]; then
+    warn "$FROM/counts.env has no app row counts: the app database had no tables when it was dumped; not restoring it"
+fi
+if [ -s "$FROM/keycloak.dump" ] && wanted keycloak; then
     [ -n "$KEYCLOAK_REALM_COUNT" ] && [ -n "$KEYCLOAK_USER_COUNT" ] ||
         die "$FROM/counts.env lacks KEYCLOAK_REALM_COUNT/KEYCLOAK_USER_COUNT; can't verify a keycloak restore"
 fi
 echo "  counts.env: economic_series=${SERIES_COUNT:-?} data_points=${DATA_POINTS_COUNT:-?}" \
+    "users=${APP_USER_COUNT:-?} chart_annotations=${APP_ANNOTATION_COUNT:-?}" \
     "realm=${KEYCLOAK_REALM_COUNT:-?} user_entity=${KEYCLOAK_USER_COUNT:-?}"
 if [ -n "$EXPECT_SERIES" ] && [ "$EXPECT_SERIES" != "$SERIES_COUNT" ]; then
     fail_counts "counts.env has economic_series=${SERIES_COUNT}, expected ${EXPECT_SERIES} (--expect-series). Wrong backup?"
@@ -176,12 +190,17 @@ restore_db() {
     log "$db restored; row counts match counts.env ($actual)"
 }
 
-if [ -z "$ONLY" ] || [ "$ONLY" = "econ_graph" ]; then
+if wanted econ_graph; then
     restore_db econ_graph postgresql-0 postgresql postgres economic_series \
         "${SERIES_COUNT} ${DATA_POINTS_COUNT}" \
         "select count(*) from economic_series union all select count(*) from data_points"
 fi
-if [ -z "$ONLY" ] || [ "$ONLY" = "keycloak" ]; then
+if wanted econ_graph_app && [ -n "$APP_USER_COUNT" ]; then
+    restore_db econ_graph_app app-postgres-0 postgres postgres users \
+        "${APP_USER_COUNT} ${APP_ANNOTATION_COUNT}" \
+        "select count(*) from users union all select count(*) from chart_annotations"
+fi
+if wanted keycloak; then
     restore_db keycloak keycloak-postgres-0 postgres keycloak realm \
         "${KEYCLOAK_REALM_COUNT} ${KEYCLOAK_USER_COUNT}" \
         "select count(*) from realm union all select count(*) from user_entity"
@@ -189,6 +208,7 @@ fi
 if [ "${DRY_RUN}" = "true" ]; then
     log "Dry run complete; nothing was changed"
 else
-    log "Restore verified: economic_series=${SERIES_COUNT} data_points=${DATA_POINTS_COUNT}" \
+    log "Restore verified: economic_series=${SERIES_COUNT:-n/a} data_points=${DATA_POINTS_COUNT:-n/a}" \
+        "(app users=${APP_USER_COUNT:-n/a} chart_annotations=${APP_ANNOTATION_COUNT:-n/a})" \
         "(keycloak realm=${KEYCLOAK_REALM_COUNT:-n/a} user_entity=${KEYCLOAK_USER_COUNT:-n/a})"
 fi

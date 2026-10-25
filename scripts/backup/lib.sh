@@ -19,8 +19,9 @@ fi
 KIND_NODE="${KIND_NODE:-econ-graph-control-plane}"
 K8S_NAMESPACE="${K8S_NAMESPACE:-econ-graph}"
 
-# Databases to dump: space-separated "database:pod:user" entries.
-BACKUP_DATABASES="${BACKUP_DATABASES:-econ_graph:postgresql-0:postgres keycloak:keycloak-postgres-0:keycloak}"
+# Databases to dump: space-separated "database:pod:user" entries: the data
+# database, the app database and Keycloak's.
+BACKUP_DATABASES="${BACKUP_DATABASES:-econ_graph:postgresql-0:postgres econ_graph_app:app-postgres-0:postgres keycloak:keycloak-postgres-0:keycloak}"
 
 # Logical dumps: on the 870 SATA backup pool once
 # scripts/host/setup-backup-pool.sh has mounted it, otherwise in $HOME
@@ -77,6 +78,17 @@ check_docker_daemon() {
 
 # Run kubectl inside the kind node.
 kube() { docker exec -i "${KIND_NODE}" kubectl -n "${K8S_NAMESPACE}" "$@"; }
+
+# not_deployed POD: true only if neither POD's StatefulSet (POD minus "-0")
+# nor its data PVC (<sts>-data-<sts>-0) exists. A failed lookup counts as
+# deployed, so a database is never skipped because the API didn't answer.
+not_deployed() {
+    local sts="${1%-0}" found
+    found="$(kube get statefulset "${sts}" -o name --ignore-not-found 2>/dev/null)" || return 1
+    [[ -z "${found}" ]] || return 1
+    found="$(kube get persistentvolumeclaim "${sts}-data-${sts}-0" -o name --ignore-not-found 2>/dev/null)" || return 1
+    [[ -z "${found}" ]]
+}
 
 # Print the command prefix to run pg_restore with: the host's when it is new
 # enough, otherwise the PG_IMAGE container. Callers must pass files that live

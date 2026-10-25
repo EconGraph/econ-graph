@@ -26,6 +26,12 @@ baseline split").
 `backend/diesel.toml` points the diesel CLI at `migrations/app`; pass
 `--migration-dir migrations/data` for the data set.
 
+In the kind deployment, both databases are in the namespace `econ-graph`: the data set belongs to
+`econ_graph` on `data-postgres-service` (Secret `econ-graph-secrets`, key `data-database-url`),
+the app set to `econ_graph_app` on `app-postgres-service` (key `app-database-url`). A cluster
+whose `app-database-url` still names the data database keeps both sets in `econ_graph`; see
+"Databases" in [k8s/README.md](../../k8s/README.md).
+
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited, renumbered or removed.**

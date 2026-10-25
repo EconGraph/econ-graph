@@ -6,8 +6,19 @@
 # This patches the PV directly rather than relying on a StorageClass with
 # reclaimPolicy: Retain, so it works regardless of which provisioner the
 # cluster uses (kind's local-path, microk8s-hostpath, EBS, etc.).
+#
+# Usage: scripts/deploy/protect-postgres-pv.sh [--dry-run]
+#   --dry-run  reads the PVCs and PVs and prints the patches; changes nothing.
 
 set -euo pipefail
+
+DRY_RUN=false
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n) DRY_RUN=true ;;
+        *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
+    esac
+done
 
 NAMESPACE="econ-graph"
 protect_pvc() {
@@ -22,7 +33,7 @@ protect_pvc() {
             echo "❌ PVC ${pvc_name} not found in namespace ${NAMESPACE}." >&2
             return 1
         fi
-        echo "ℹ️  Backup PVC ${pvc_name} does not exist yet."
+        echo "ℹ️  PVC ${pvc_name} does not exist yet."
         return 0
     fi
 
@@ -37,6 +48,8 @@ protect_pvc() {
     current_policy="$(kubectl get pv "${pv_name}" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}')"
     if [ "${current_policy}" = Retain ]; then
         echo "✅ ${pv_name} (backing ${pvc_name}) is already set to Retain."
+    elif [ "${DRY_RUN}" = true ]; then
+        echo "+ kubectl patch pv ${pv_name} (backing ${pvc_name}): persistentVolumeReclaimPolicy ${current_policy} -> Retain"
     else
         kubectl patch pv "${pv_name}" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
         echo "✅ ${pv_name} (backing ${pvc_name}) is now Retain."
@@ -45,6 +58,7 @@ protect_pvc() {
 
 echo "🔒 Protecting PostgreSQL data and backup volumes..."
 protect_pvc "postgresql-data-postgresql-0" true
+protect_pvc "app-postgres-data-app-postgres-0" false
 protect_pvc "keycloak-postgres-data-keycloak-postgres-0" false
 protect_pvc "postgres-backup-data" false
 echo "   Released volumes must be manually reclaimed after namespace deletion."

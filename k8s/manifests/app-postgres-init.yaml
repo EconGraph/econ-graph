@@ -1,0 +1,39 @@
+# app-postgres initialization ConfigMap
+#
+# The postgres image runs this script once, when the app database's data
+# volume is first initialised (app-postgres.yaml). It creates the role
+# `econgraph`, which the backend connects as through app-database-url in the
+# econ-graph-secrets Secret, and makes it the owner of the public schema of
+# econ_graph_app, so the backend can apply the app migrations at startup.
+# pgcrypto, which those migrations create, is a trusted extension, so no
+# superuser is needed.
+#
+# The password comes from APP_DB_PASSWORD, which app-postgres.yaml reads from
+# the econ-graph-app-postgres Secret (key app-password). psql reads it from
+# the environment with \getenv, so it appears neither in this file, nor in the
+# SQL text, nor on a command line.
+#
+# The data database's roles are created by postgres-init.yaml on postgresql.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-postgres-init
+  namespace: econ-graph
+  labels:
+    app: app-postgres
+data:
+  10-init-econgraph-app.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    : "${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set (econ-graph-app-postgres/app-password)}"
+
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'EOSQL'
+    \getenv app_password APP_DB_PASSWORD
+    \getenv db_name POSTGRES_DB
+
+    CREATE USER econgraph WITH ENCRYPTED PASSWORD :'app_password';
+    GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO econgraph;
+    ALTER SCHEMA public OWNER TO econgraph;
+    GRANT ALL ON SCHEMA public TO econgraph;
+    EOSQL

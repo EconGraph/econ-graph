@@ -11,9 +11,9 @@ data:
   DATABASE_PORT: "5432"
 
   # Backend configuration. Credentials, including APP_DATABASE_URL and
-  # DATA_DATABASE_URL (both naming the one database), live in the
-  # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh, keys
-  # app-database-url and data-database-url.
+  # DATA_DATABASE_URL, live in the econ-graph-secrets Secret created by
+  # scripts/deploy/create-secrets.sh, keys app-database-url and
+  # data-database-url (see "Databases" in k8s/README.md).
   RUST_LOG: "info"
   # Browsers send Origin on same-origin POSTs too, and the backend refuses any origin not
   # listed, so the origin the app is served from (http://localhost on the kind ingress) must

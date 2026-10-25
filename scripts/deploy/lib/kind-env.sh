@@ -24,16 +24,41 @@ KIND_CONTROL_PLANE="${KIND_CLUSTER}-control-plane"
 KIND_STORAGE_NODE="${KIND_CLUSTER}-worker"
 NAMESPACE="${NAMESPACE:-econ-graph}"
 
-HOST_DATA_PLANE="/srv/econgraph/data-plane"
-HOST_APP_PROD="/srv/econgraph/app-prod"
+# The storage node sees the host subvolumes at these paths, which the PVs in
+# k8s/manifests/host-storage.yaml name.
+NODE_DATA_PLANE="/srv/econgraph/data-plane"
+NODE_APP_PROD="/srv/econgraph/app-prod"
+
+# Host side of the same subvolumes. In production they are bind-mounted at the
+# same paths. ECONGRAPH_SCRATCH_STORAGE=DIR is for a throwaway test cluster
+# only (KIND_CLUSTER other than econ-graph): the host side is then
+# DIR/data-plane and DIR/app-prod, btrfs subvolumes owned by you rather than
+# mount points, and that cluster's kind config bind-mounts them at the node
+# paths above.
+SCRATCH_STORAGE="${ECONGRAPH_SCRATCH_STORAGE:-}"
+if [ -n "${SCRATCH_STORAGE}" ]; then
+    if [ "${KIND_CLUSTER}" = "econ-graph" ]; then
+        echo "error: ECONGRAPH_SCRATCH_STORAGE is for a throwaway cluster; set KIND_CLUSTER to its name" >&2
+        exit 1
+    fi
+    HOST_DATA_PLANE="${SCRATCH_STORAGE}/data-plane"
+    HOST_APP_PROD="${SCRATCH_STORAGE}/app-prod"
+else
+    HOST_DATA_PLANE="${NODE_DATA_PLANE}"
+    HOST_APP_PROD="${NODE_APP_PROD}"
+fi
+# The data database (postgresql-0), the app database (app-postgres-0) and
+# Keycloak's (keycloak-postgres-0).
 HOST_PG_DIR="${HOST_DATA_PLANE}/pg"
-# Host UID that owns pg/ and keycloak-pg/ once Postgres (pod UID 999) has run.
-# Rootful Docker has no user namespace, so it is 999 on the host too.
-HOST_POSTGRES_UID="${ECONGRAPH_HOST_POSTGRES_UID:-999}"
+HOST_APP_PG_DIR="${HOST_APP_PROD}/app-pg"
 HOST_KEYCLOAK_PG_DIR="${HOST_APP_PROD}/keycloak-pg"
+# Host UID that owns pg/, app-pg/ and keycloak-pg/ once Postgres (pod UID 999)
+# has run. Rootful Docker has no user namespace, so it is 999 on the host too.
+HOST_POSTGRES_UID="${ECONGRAPH_HOST_POSTGRES_UID:-999}"
 # PGDATA of each database, as seen inside the storage node.
-NODE_PG_VERSION_FILE="${HOST_PG_DIR}/pgdata/PG_VERSION"
-NODE_KEYCLOAK_PG_VERSION_FILE="${HOST_KEYCLOAK_PG_DIR}/18/docker/PG_VERSION"
+NODE_PG_VERSION_FILE="${NODE_DATA_PLANE}/pg/pgdata/PG_VERSION"
+NODE_APP_PG_VERSION_FILE="${NODE_APP_PROD}/app-pg/pgdata/PG_VERSION"
+NODE_KEYCLOAK_PG_VERSION_FILE="${NODE_APP_PROD}/keycloak-pg/18/docker/PG_VERSION"
 
 BACKUP_ROOT="${ECONGRAPH_BACKUP_ROOT:-$HOME/econgraph-backups}"
 ECONGRAPH_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
@@ -41,8 +66,8 @@ ECONGRAPH_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
 # Secrets that only exist in the cluster (scripts/deploy/create-secrets.sh keeps
 # whatever is there). They're saved next to each dump: the databases were
 # initialised with these passwords, and API keys can't be regenerated.
-APP_SECRETS=(econ-graph-secrets econ-graph-postgres crawler-api-keys
-    econ-graph-keycloak grafana-admin monitoring-auth cloudflare-tunnel)
+APP_SECRETS=(econ-graph-secrets econ-graph-postgres econ-graph-app-postgres
+    crawler-api-keys econ-graph-keycloak grafana-admin monitoring-auth cloudflare-tunnel)
 
 # A kubectl go-template ($k/$v are template variables, not shell ones).
 # shellcheck disable=SC2016
@@ -229,18 +254,32 @@ wait_postgres_settled() {
 
 # --- host storage ------------------------------------------------------------
 
+# A directory the kind config bind-mounts into the storage node: a mount point,
+# or under ECONGRAPH_SCRATCH_STORAGE the root of a btrfs subvolume (inode 256).
+bind_source_ok() {
+    if [ -n "${SCRATCH_STORAGE}" ]; then
+        [ -d "$1" ] && [ "$(stat -c %i "$1")" = 256 ] && [ "$(stat -f -c %T "$1")" = btrfs ]
+    else
+        mountpoint -q "$1" 2>/dev/null
+    fi
+}
+
 # The subvolumes are created and mounted by scripts/host/setup-subvolumes.sh
 # (sudo). Check, without sudo, that each root is a mounted btrfs filesystem
 # owned by the current user.
 check_host_storage_on_host() {
     local dir ok=true fstype owner
     for dir in "${HOST_DATA_PLANE}" "${HOST_APP_PROD}"; do
-        if ! mountpoint -q "$dir" 2>/dev/null; then
-            echo "  $dir is not a mount point" >&2
+        if ! bind_source_ok "$dir"; then
+            if [ -n "${SCRATCH_STORAGE}" ]; then
+                echo "  $dir is not the root of a btrfs subvolume" >&2
+            else
+                echo "  $dir is not a mount point" >&2
+            fi
             ok=false
             continue
         fi
-        fstype="$(findmnt -no FSTYPE --mountpoint "$dir")"
+        fstype="$(stat -f -c %T "$dir")"
         owner="$(stat -c %U "$dir")"
         if [ "$fstype" != "btrfs" ]; then
             echo "  $dir is $fstype, not btrfs" >&2
@@ -257,11 +296,11 @@ check_host_storage_on_host() {
     fi
 }
 
-# Check that the storage node sees the host subvolumes at the same paths, i.e.
+# Check that the storage node sees the host subvolumes at the node paths, i.e.
 # the cluster was created from a kind config with the extraMounts.
 check_host_storage_in_node() {
     local dir
-    for dir in "${HOST_DATA_PLANE}" "${HOST_APP_PROD}"; do
+    for dir in "${NODE_DATA_PLANE}" "${NODE_APP_PROD}"; do
         docker exec "${KIND_STORAGE_NODE}" mountpoint -q "$dir" 2>/dev/null || return 1
     done
 }
@@ -272,14 +311,16 @@ new_backup_dir() {
     echo "${BACKUP_ROOT}/$(date -u +%Y%m%dT%H%M%SZ)"
 }
 
-# pg_dump both databases, verify the archives, record row counts and save the
-# app Secrets into $1, which must not exist yet. Needs use_kind_kubectl first.
+# pg_dump the data, app and Keycloak databases, verify the archives, record
+# row counts and save the app Secrets into $1, which must not exist yet.
+# Needs use_kind_kubectl first.
 backup_databases() {
     local dir="$1" name
     [ ! -e "$dir" ] || die "$dir already exists; refusing to overwrite a backup"
     log "Backing up to $dir"
     if [ "${DRY_RUN}" = "true" ]; then
         echo "+ pg_dump -Fc econ_graph (postgresql-0) > $dir/econ_graph.dump"
+        echo "+ pg_dump -Fc econ_graph_app (app-postgres-0) > $dir/econ_graph_app.dump"
         echo "+ pg_dump -Fc keycloak (keycloak-postgres-0) > $dir/keycloak.dump"
         echo "+ save row counts to $dir/counts.env and Secrets to $dir/secrets/"
         return 0
@@ -288,37 +329,43 @@ backup_databases() {
     (umask 077 && mkdir -p "$dir")
 
     dump_one postgresql-0 postgresql postgres econ_graph "$dir/econ_graph.dump"
+    if pod_running app-postgres-0; then
+        dump_one app-postgres-0 postgres postgres econ_graph_app "$dir/econ_graph_app.dump"
+    else
+        require_not_deployed app-postgres "the app database" ALLOW_MISSING_APP_DUMP
+    fi
     if pod_running keycloak-postgres-0; then
         dump_one keycloak-postgres-0 postgres keycloak keycloak "$dir/keycloak.dump"
     else
-        # Keycloak's database may exist but can't be dumped: every caller goes
-        # on to delete or replace the cluster, which would lose it. A failed
-        # lookup counts as "exists" (fail closed). The PVC outlives a deleted
-        # StatefulSet, so it is checked too.
-        local keycloak_sts keycloak_pvc
-        if [ "${ALLOW_MISSING_KEYCLOAK_DUMP:-}" != 1 ]; then
-            keycloak_sts="$(k get statefulset keycloak-postgres -o name --ignore-not-found)" ||
-                die "could not tell whether statefulset/keycloak-postgres exists, so no Keycloak backup can be promised; no cluster was deleted"
-            [ -z "$keycloak_sts" ] ||
-                die "statefulset/keycloak-postgres exists but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start it, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
-            keycloak_pvc="$(k get persistentvolumeclaim keycloak-postgres-data-keycloak-postgres-0 -o name --ignore-not-found)" ||
-                die "could not tell whether persistentvolumeclaim/keycloak-postgres-data-keycloak-postgres-0 exists, so no Keycloak backup can be promised; no cluster was deleted"
-            [ -z "$keycloak_pvc" ] ||
-                die "persistentvolumeclaim/keycloak-postgres-data-keycloak-postgres-0 may still hold Keycloak's database but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start keycloak-postgres, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
-        fi
-        warn "keycloak-postgres-0 is not running; no Keycloak dump taken"
+        require_not_deployed keycloak-postgres "Keycloak's database" ALLOW_MISSING_KEYCLOAK_DUMP
     fi
 
     # Each count is taken (and checked) on its own before counts.env is
     # written: inside echo "...$(...)" a failed query would leave an empty
     # value and the backup would still be reported complete.
-    local series points realms="" users=""
+    local series points realms="" users="" app_users="" app_annotations="" app_tables
     series="$(count_rows econ_graph 'select count(*) from economic_series')" \
         || die "counting economic_series failed; backup in $dir is incomplete"
     points="$(count_rows econ_graph 'select count(*) from data_points')" \
         || die "counting data_points failed; backup in $dir is incomplete"
     [[ "$series" =~ ^[0-9]+$ && "$points" =~ ^[0-9]+$ ]] \
         || die "non-numeric row counts '$series' '$points'; backup in $dir is incomplete"
+    if [ -s "$dir/econ_graph_app.dump" ]; then
+        # Before the backend's first start the app database has no tables; its
+        # dump is kept, with no counts, and there is nothing to restore from it.
+        app_tables="$(count_rows econ_graph_app "select to_regclass('public.users') is not null")" \
+            || die "inspecting the app database failed; backup in $dir is incomplete"
+        if [ "$app_tables" = "t" ]; then
+            app_users="$(count_rows econ_graph_app 'select count(*) from users')" \
+                || die "counting app users failed; backup in $dir is incomplete"
+            app_annotations="$(count_rows econ_graph_app 'select count(*) from chart_annotations')" \
+                || die "counting chart_annotations failed; backup in $dir is incomplete"
+            [[ "$app_users" =~ ^[0-9]+$ && "$app_annotations" =~ ^[0-9]+$ ]] \
+                || die "non-numeric app row counts '$app_users' '$app_annotations'; backup in $dir is incomplete"
+        else
+            warn "the app database has no tables yet; its dump holds no rows"
+        fi
+    fi
     if [ -s "$dir/keycloak.dump" ]; then
         realms="$(count_rows keycloak 'select count(*) from realm')" \
             || die "counting Keycloak realms failed; backup in $dir is incomplete"
@@ -331,6 +378,10 @@ backup_databases() {
         echo "# Row counts at backup time, compared after a restore."
         echo "SERIES_COUNT=$series"
         echo "DATA_POINTS_COUNT=$points"
+        if [ -n "$app_users" ]; then
+            echo "APP_USER_COUNT=$app_users"
+            echo "APP_ANNOTATION_COUNT=$app_annotations"
+        fi
         if [ -n "$realms" ]; then
             echo "KEYCLOAK_REALM_COUNT=$realms"
             echo "KEYCLOAK_USER_COUNT=$users"
@@ -365,11 +416,34 @@ dump_one() {
     mv "$file.partial" "$file"
 }
 
+# require_not_deployed STATEFULSET WHAT ALLOW_VAR: called when STATEFULSET's
+# pod isn't running, so its database can't be dumped. Every caller of
+# backup_databases goes on to delete or replace something, so stop unless the
+# database doesn't exist (no StatefulSet and no PVC) or ALLOW_VAR=1. A failed
+# lookup counts as "exists" (fail closed). The PVC outlives a deleted
+# StatefulSet, so it is checked too.
+require_not_deployed() {
+    local sts="$1" what="$2" allow="$3" found pvc
+    pvc="${sts}-data-${sts}-0"
+    if [ "${!allow:-}" != 1 ]; then
+        found="$(k get statefulset "$sts" -o name --ignore-not-found)" ||
+            die "could not tell whether statefulset/$sts exists, so no backup of $what can be promised; nothing was deleted"
+        [ -z "$found" ] ||
+            die "statefulset/$sts exists but $sts-0 is not running, so $what can't be backed up; nothing was deleted. Start it, or set $allow=1 to go on without a dump of $what"
+        found="$(k get persistentvolumeclaim "$pvc" -o name --ignore-not-found)" ||
+            die "could not tell whether persistentvolumeclaim/$pvc exists, so no backup of $what can be promised; nothing was deleted"
+        [ -z "$found" ] ||
+            die "persistentvolumeclaim/$pvc may still hold $what but $sts-0 is not running, so it can't be backed up; nothing was deleted. Start $sts, or set $allow=1 to go on without a dump of $what"
+    fi
+    warn "$sts-0 is not running; no dump of $what taken"
+}
+
 # count_rows DB SQL: run a count query in the right pod.
 count_rows() {
     local db="$1" sql="$2"
     case "$db" in
         econ_graph) k exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph -Atc "$sql" ;;
+        econ_graph_app) k exec app-postgres-0 -c postgres -- psql -U postgres -d econ_graph_app -Atc "$sql" ;;
         keycloak) k exec keycloak-postgres-0 -c postgres -- psql -U keycloak -d keycloak -Atc "$sql" ;;
         *) die "unknown database $db" ;;
     esac
@@ -399,15 +473,18 @@ restore_secrets() {
 }
 
 # Read the row counts of a backup (DIR/counts.env) into SERIES_COUNT,
-# DATA_POINTS_COUNT, KEYCLOAK_REALM_COUNT and KEYCLOAK_USER_COUNT. Parsed, not
-# sourced, and every value must be a number. Keys the file lacks stay empty.
+# DATA_POINTS_COUNT, APP_USER_COUNT, APP_ANNOTATION_COUNT, KEYCLOAK_REALM_COUNT
+# and KEYCLOAK_USER_COUNT. Parsed, not sourced, and every value must be a
+# number. Keys the file lacks stay empty.
 read_counts() {
     local file="$1/counts.env" key value
     SERIES_COUNT="" DATA_POINTS_COUNT="" KEYCLOAK_REALM_COUNT="" KEYCLOAK_USER_COUNT=""
+    APP_USER_COUNT="" APP_ANNOTATION_COUNT=""
     [ -s "$file" ] || die "$file is missing or empty"
     while IFS='=' read -r key value; do
         case "$key" in
-            SERIES_COUNT | DATA_POINTS_COUNT | KEYCLOAK_REALM_COUNT | KEYCLOAK_USER_COUNT)
+            SERIES_COUNT | DATA_POINTS_COUNT | KEYCLOAK_REALM_COUNT | KEYCLOAK_USER_COUNT | \
+                APP_USER_COUNT | APP_ANNOTATION_COUNT)
                 [[ "$value" =~ ^[0-9]+$ ]] || die "$file: $key='$value' is not a number"
                 printf -v "$key" '%s' "$value"
                 ;;
@@ -417,9 +494,10 @@ read_counts() {
 
 # bootstrap_databases SRC_ROOT BACKUP_DIR: namespace, the Secrets saved in
 # BACKUP_DIR (plus any create-secrets.sh still needs), the host-storage PVs and
-# both Postgres StatefulSets from SRC_ROOT's manifests, so a dump can be
-# restored before any app (backend migrations, Keycloak) starts against an
-# empty database. Idempotent: existing Secrets are kept, the rest is applied.
+# the Postgres StatefulSets from SRC_ROOT's manifests (the app database only if
+# SRC_ROOT has one), so a dump can be restored before any app (backend
+# migrations, Keycloak) starts against an empty database. Idempotent: existing
+# Secrets are kept, the rest is applied.
 bootstrap_databases() {
     local src="$1" backup="$2"
     log "Creating namespace, Secrets and databases from ${src}"
@@ -433,6 +511,8 @@ bootstrap_databases() {
         echo "+ scripts/deploy/create-secrets.sh (keeps existing Secrets, generates missing ones)"
         [ -f "$src/k8s/manifests/host-storage.yaml" ] && echo "+ scripts/deploy/apply-host-storage.sh"
         echo "+ kubectl apply postgres-init, postgres-deployment, postgres; wait for postgresql-0"
+        [ -f "$src/k8s/manifests/app-postgres.yaml" ] &&
+            echo "+ kubectl apply app-postgres-init, app-postgres; wait for app-postgres-0"
         [ -s "${backup}/keycloak.dump" ] && echo "+ kubectl apply keycloak/postgres; wait for keycloak-postgres-0"
         return 0
     fi
@@ -447,6 +527,12 @@ bootstrap_databases() {
     kubectl apply -f "$src/k8s/manifests/postgres.yaml"
     k rollout status statefulset/postgresql --timeout=600s
     wait_postgres_settled postgresql-0 postgresql
+    if [ -f "$src/k8s/manifests/app-postgres.yaml" ]; then
+        kubectl apply -f "$src/k8s/manifests/app-postgres-init.yaml"
+        kubectl apply -f "$src/k8s/manifests/app-postgres.yaml"
+        k rollout status statefulset/app-postgres --timeout=600s
+        wait_postgres_settled app-postgres-0 postgres
+    fi
     if [ -s "${backup}/keycloak.dump" ]; then
         kubectl apply -f "$src/k8s/manifests/keycloak/postgres.yaml"
         k rollout status statefulset/keycloak-postgres --timeout=600s

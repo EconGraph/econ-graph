@@ -79,7 +79,7 @@ if [ -n "$mounts" ]; then
         check_host_storage_on_host || die "host subvolumes are not ready; nothing was deleted"
     fi
     for m in $mounts; do
-        mountpoint -q "$m" || die "$m is not mounted; nothing was deleted"
+        bind_source_ok "$m" || die "$m is not mounted; nothing was deleted"
         echo "  ok: $m"
     done
 fi
@@ -145,7 +145,7 @@ fi
 
 use_kind_kubectl
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
-check_host_storage_in_node || die "node ${KIND_STORAGE_NODE} does not see ${HOST_DATA_PLANE} and ${HOST_APP_PROD}"
+check_host_storage_in_node || die "node ${KIND_STORAGE_NODE} does not see ${NODE_DATA_PLANE} and ${NODE_APP_PROD}"
 install_ingress_nginx
 check_restart_on_boot
 

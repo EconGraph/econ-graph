@@ -3,7 +3,8 @@
 #
 # Starts a throwaway Postgres container (PG_IMAGE, random localhost port,
 # removed afterwards), restores the econ_graph dump into it (and the
-# keycloak dump next to it, if present), runs verification queries and
+# econ_graph_app and keycloak dumps next to it, if present), runs
+# verification queries and
 # prints one PASS/FAIL line. On PASS it records the result in
 # ECONGRAPH_STATE_DIR/restore-drill.last for check-freshness.sh.
 #
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run|-n) DRY_RUN="true"; shift ;;
         --expect-series) expect_series="$2"; shift 2 ;;
         --expect-data-points) expect_points="$2"; shift 2 ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         -*) die "unknown option: $1" ;;
         *) dump="$1"; shift ;;
     esac
@@ -51,6 +52,7 @@ dump_dir="$(dirname "${dump}")"
 check_docker_daemon
 if [[ "${DRY_RUN}" == "true" ]]; then
     log "dry run: would restore ${dump} into a throwaway ${PG_IMAGE} container on ${DOCKER_HOST}"
+    [[ -f "${dump_dir}/econ_graph_app.dump" ]] && log "dry run: and ${dump_dir}/econ_graph_app.dump"
     [[ -f "${dump_dir}/keycloak.dump" ]] && log "dry run: and ${dump_dir}/keycloak.dump"
     log "dry run: then record a PASS in ${ECONGRAPH_STATE_DIR}/restore-drill.last"
     exit 0
@@ -141,6 +143,27 @@ if [[ -n "${m_series}" && "${m_series}" != "${series}" ]] || [[ -n "${m_points}"
         "expected only if the crawler wrote during the dump"
 fi
 
+app_note="app: no dump"
+if [[ -f "${dump_dir}/econ_graph_app.dump" ]]; then
+    restore_one econ_graph_app econ_graph_app.dump || fail "pg_restore of econ_graph_app failed"
+    app_q() { psql_in -d econ_graph_app -Atc "$1"; }
+    if [[ "$(app_q "select to_regclass('public.users') is not null")" == "t" ]]; then
+        app_users="$(app_q 'select count(*) from users')"
+        app_annotations="$(app_q 'select count(*) from chart_annotations')"
+        app_migrations="$(app_q 'select count(*) from __diesel_schema_migrations')"
+        (( app_migrations > 0 )) || fail "econ_graph_app restored with no diesel migrations recorded"
+        m_users="$(manifest_value econ_graph_app.users || true)"
+        m_annotations="$(manifest_value econ_graph_app.chart_annotations || true)"
+        if [[ -n "${m_users}" && "${m_users}" != "${app_users}" ]] \
+            || [[ -n "${m_annotations}" && "${m_annotations}" != "${app_annotations}" ]]; then
+            log "drill: WARNING app counts differ from MANIFEST (users ${m_users}, chart_annotations ${m_annotations})"
+        fi
+        app_note="app: users=${app_users} chart_annotations=${app_annotations}"
+    else
+        app_note="app: no tables"
+    fi
+fi
+
 keycloak_note="keycloak: no dump"
 if [[ -f "${dump_dir}/keycloak.dump" ]]; then
     restore_one keycloak keycloak.dump || fail "pg_restore of keycloak failed"
@@ -150,7 +173,7 @@ if [[ -f "${dump_dir}/keycloak.dump" ]]; then
     keycloak_note="keycloak: realms=${realms} users=${users}"
 fi
 
-summary="series=${series} data_points=${points} sources=${sources} ${keycloak_note}"
+summary="series=${series} data_points=${points} sources=${sources} ${app_note} ${keycloak_note}"
 echo "RESTORE DRILL PASS: ${summary} (dump ${dump}, $(( $(date +%s) - start ))s)"
 
 mkdir -p "${ECONGRAPH_STATE_DIR}"

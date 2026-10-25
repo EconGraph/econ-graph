@@ -75,7 +75,7 @@ spec:
         # Credentials come from the econ-graph-secrets Secret, created out of band by
         # scripts/deploy/create-secrets.sh. OAuth keys are optional: the script omits
         # them when unset.
-        # The app and data databases. Both URLs name the one Postgres database.
+        # The app and data databases (see "Databases" in k8s/README.md).
         - name: APP_DATABASE_URL
           valueFrom:
             secretKeyRef:
