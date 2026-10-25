@@ -443,6 +443,56 @@ mod tests {
             .unwrap();
     }
 
+    /// Deleting an admin keeps the audit rows they wrote: `auditLogs` returns them with
+    /// `userDeleted: true`, no `userId`, and the name they had when they acted.
+    #[tokio::test]
+    async fn audit_rows_outlive_their_author() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let author = insert_user(&pool, "departing admin").await;
+        let remover = insert_user(&pool, "remaining admin").await;
+        let target = insert_user(&pool, "audit subject").await;
+
+        run(
+            &pool,
+            &author,
+            staff(),
+            &format!(r#"mutation {{ suspendUser(id: "{}") }}"#, target.id),
+        )
+        .await;
+        run(
+            &pool,
+            &remover,
+            staff(),
+            &format!(r#"mutation {{ deleteUser(id: "{}") }}"#, author.id),
+        )
+        .await;
+
+        let data = run(
+            &pool,
+            &remover,
+            staff(),
+            r#"{ auditLogs(filter: { action: "suspend_user" }, pagination: { first: 100 }) { nodes { userId userName userDeleted resourceId } } }"#,
+        )
+        .await;
+        let rows: Vec<&Value> = data["auditLogs"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["resourceId"] == target.id.to_string())
+            .collect();
+        assert_eq!(
+            rows,
+            [&json!({
+                "userId": null,
+                "userName": "departing admin",
+                "userDeleted": true,
+                "resourceId": target.id.to_string(),
+            })]
+        );
+    }
+
     /// A failed admin mutation still writes an audit row, whose outcome says why it failed;
     /// the error message and the refused values stay out of it.
     #[tokio::test]
