@@ -9,7 +9,7 @@
 //! dates. Each test compares the fetched points with the ones the whole history gives in one
 //! request, so windowing must neither lose, duplicate nor re-mark a single revision.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -45,9 +45,16 @@ struct Period {
 /// publishes the observation of the day before it (value `i`) and, per `revisions`, revises
 /// older ones. `revisions` are `(observation index, vintage index, value)`.
 struct History {
+    /// Every vintage date: what FRED counts against its limit.
     vintages: Vec<NaiveDate>,
+    /// Vintage dates `/series/vintagedates` leaves out (FRED's listing omits release dates on
+    /// which the series didn't change, so the listing and FRED's count can differ).
+    unlisted: HashSet<NaiveDate>,
     periods: Vec<Period>,
 }
+
+/// Per observation date, the value published on each date it changed.
+type Values = BTreeMap<NaiveDate, BTreeMap<NaiveDate, String>>;
 
 impl History {
     fn daily(n: usize, revisions: &[(usize, usize, &str)]) -> Self {
@@ -55,34 +62,85 @@ impl History {
             .map(|i| d("2010-01-01") + chrono::Duration::days(i as i64))
             .collect();
         let date = |i: usize| vintages[i].pred_opt().unwrap();
-        let mut by_date: BTreeMap<NaiveDate, BTreeMap<usize, String>> = BTreeMap::new();
-        for i in 0..n {
-            by_date.entry(date(i)).or_default().insert(i, i.to_string());
+        let mut by_date = Values::new();
+        for (i, v) in vintages.iter().enumerate() {
+            by_date
+                .entry(date(i))
+                .or_default()
+                .insert(*v, i.to_string());
         }
         for &(obs, vintage, value) in revisions {
             assert!(obs < vintage && vintage < n, "revision ({obs}, {vintage})");
             by_date
                 .entry(date(obs))
                 .or_default()
-                .insert(vintage, value.to_string());
+                .insert(vintages[vintage], value.to_string());
         }
+        Self::from_values(vintages, HashSet::new(), by_date)
+    }
+
+    /// A weekly series whose windows' "day before" is never a vintage date, and whose listing
+    /// is incomplete: vintage `i` is week `i` from 2010-01-04; it publishes the observation of
+    /// the week before it (value `i`), and every 7th one also revises the observation three
+    /// weeks before. Every 5th vintage (`i % 5 == 4`) is left out of `/series/vintagedates`,
+    /// though its rows are still returned. One observation, 1999-12-01, was published on
+    /// 2000-01-03, a decade before the first vintage, and revised on vintages 600 and 1599.
+    fn weekly_gappy(n: usize) -> Self {
+        let vintages: Vec<NaiveDate> = (0..n)
+            .map(|i| d("2010-01-04") + chrono::Duration::weeks(i as i64))
+            .collect();
+        let unlisted = (0..n).filter(|i| i % 5 == 4).map(|i| vintages[i]).collect();
+        let week_before = |i: usize, weeks: i64| vintages[i] - chrono::Duration::weeks(weeks);
+        let mut by_date = Values::new();
+        for (i, v) in vintages.iter().enumerate() {
+            by_date
+                .entry(week_before(i, 1))
+                .or_default()
+                .insert(*v, i.to_string());
+            if i % 7 == 3 {
+                by_date
+                    .entry(week_before(i, 3))
+                    .or_default()
+                    .insert(*v, format!("{i}.5"));
+            }
+        }
+        let early = by_date.entry(d("1999-12-01")).or_default();
+        early.insert(d("2000-01-03"), "1999.12".into());
+        for i in [600, 1599] {
+            if i < n {
+                early.insert(vintages[i], format!("1999.{i}"));
+            }
+        }
+        Self::from_values(vintages, unlisted, by_date)
+    }
+
+    /// Turns each date's values into real-time periods, each ending the day before the next.
+    fn from_values(
+        vintages: Vec<NaiveDate>,
+        unlisted: HashSet<NaiveDate>,
+        by_date: Values,
+    ) -> Self {
         let mut periods = Vec::new();
         for (date, values) in by_date {
             let values: Vec<_> = values.into_iter().collect();
-            for (j, (vintage, value)) in values.iter().enumerate() {
+            for (j, (start, value)) in values.iter().enumerate() {
                 let end = values
                     .get(j + 1)
-                    .map(|(next, _)| vintages[*next].pred_opt().unwrap())
+                    .map(|(next, _)| next.pred_opt().unwrap())
                     .unwrap_or_else(latest_realtime_end);
                 periods.push(Period {
                     date,
-                    start: vintages[*vintage],
+                    start: *start,
                     end,
                     value: value.clone(),
                 });
             }
         }
-        Self { vintages, periods }
+        Self {
+            vintages,
+            unlisted,
+            periods,
+        }
     }
 
     /// The points one request for the whole history would give, from `known_vintage` on.
@@ -186,14 +244,19 @@ impl Respond for FakeAlfred {
             .collect();
         let path = req.url.path().to_string();
         let (status, body) = if path.ends_with("/vintagedates") {
-            let page: Vec<String> = vintages
+            let listed: Vec<NaiveDate> = vintages
+                .iter()
+                .copied()
+                .filter(|v| !self.history.unlisted.contains(v))
+                .collect();
+            let page: Vec<String> = listed
                 .iter()
                 .skip(offset)
                 .take(limit.min(self.vintage_page))
                 .map(|v| v.to_string())
                 .collect();
             let body = serde_json::json!({
-                "count": vintages.len(), "offset": offset, "limit": limit, "vintage_dates": page,
+                "count": listed.len(), "offset": offset, "limit": limit, "vintage_dates": page,
             });
             (200, body.to_string())
         } else if vintages.len() > self.vintage_limit {
@@ -362,6 +425,50 @@ async fn a_large_series_is_requested_in_windows_below_the_limit() {
         of(20),
         vec![(v[20], "20".into(), true), (v[30], ".".into(), false)]
     );
+}
+
+/// The same oracle on a history where the windowing's assumptions don't line up with FRED: the
+/// day before each window is never a vintage date, every 5th vintage is missing from the
+/// listing (so FRED counts more vintages than were planned for, and rows start on dates the
+/// adapter never heard of), and one row starts a decade before the first vintage. Full and
+/// incremental fetches (from the first vintage, a listed one and an unlisted one) give the
+/// single-request points at FRED's limit and at limits forcing the fallback.
+#[tokio::test]
+async fn a_gappy_weekly_history_matches_one_request() {
+    let weekly = History::weekly_gappy(1600);
+    let v = weekly.vintages.clone();
+    assert!(!weekly.unlisted.contains(&v[700]) && weekly.unlisted.contains(&v[1599]));
+    let fakes = [2000, 300, 37].map(|limit| {
+        let mut fake = FakeAlfred::new(History::weekly_gappy(1600));
+        fake.vintage_limit = limit;
+        fake
+    });
+    for fake in fakes {
+        for known in [None, Some(v[0]), Some(v[700]), Some(v[1599])] {
+            let mock = MockSource::start().await;
+            fake.log.lock().unwrap().clear();
+            fake.mount(&mock).await;
+            let what = format!("limit {}, known {known:?}", fake.vintage_limit);
+            let s = fetch(&test_ctx(), &mock, known)
+                .await
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(s.points, fake.history.expected(known), "{what}");
+            let obs = fake.observation_requests();
+            assert!(
+                obs.iter()
+                    .all(|l| l.status == 400 || l.vintages <= fake.vintage_limit),
+                "{what}"
+            );
+            if fake.vintage_limit == 2000 {
+                assert!(obs.iter().all(|l| l.status == 200), "{what}: {obs:#?}");
+            }
+        }
+    }
+    // The early row is a point of the full fetch, an original release.
+    let full = weekly.expected(None);
+    assert!(full
+        .iter()
+        .any(|p| p.revision_date == d("2000-01-03") && p.is_original_release));
 }
 
 /// A series under the default is one observations request, the same one as before windowing.
