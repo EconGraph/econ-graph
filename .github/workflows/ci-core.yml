@@ -244,6 +244,11 @@ jobs:
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
 
+    # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
+    # confirmation they need can't be typed.
+    - name: Check the teardown guards
+      run: scripts/deploy/test-teardown-guards.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
