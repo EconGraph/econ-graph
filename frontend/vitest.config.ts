@@ -91,6 +91,13 @@ export default defineConfig({
         '@tanstack/react-query',
       ],
     },
+    server: {
+      deps: {
+        // MUI X imports Material UI v5 subpaths as directories (`@mui/material/styles`), which
+        // Node's ESM resolver rejects; Vite resolves them when it processes these packages.
+        inline: ['@mui/x-date-pickers', '@mui/x-internals'],
+      },
+    },
   },
   resolve: {
     alias: {
