@@ -144,18 +144,26 @@ test.describe('annotation save and delete failures', () => {
       const title = uniqueTitle('Lost-response annotation');
       try {
         let dropped = 0;
+        // The id the backend returned for the first create, whose response the page never sees.
+        let firstCreatedId: unknown;
         await page.route('**/graphql', async route => {
           if (dropped > 0 || graphqlOperation(route.request()) !== 'CreateAnnotation') {
             await route.fallback();
             return;
           }
           dropped += 1;
-          await route.fetch(); // the backend commits it
+          const response = await route.fetch(); // the backend commits it
+          const body = await response.json().catch(() => null);
+          firstCreatedId = body?.data?.createAnnotation?.id;
           await route.abort('connectionreset');
         });
 
         const dialog = await fillAndSave(page, title);
         await expect(dialog.getByRole('alert')).toBeVisible();
+        // Otherwise the retry would store the only copy and the count below would prove nothing.
+        expect(firstCreatedId, 'the first create was stored before its response was lost').toEqual(
+          expect.any(String)
+        );
         await dialog.getByRole('button', { name: 'Save' }).click();
         await expect(dialog).toBeHidden();
 
