@@ -368,6 +368,9 @@ jobs:
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
 
+    - name: Check that the off-site wrapper refuses forget and prune
+      run: scripts/backup/test-offsite-restic.sh
+
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest

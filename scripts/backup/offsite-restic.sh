@@ -89,11 +89,17 @@ case "${cmd}" in
         restic snapshots --tag econgraph-dumps "$@"
         ;;
     restic)
-        case "${1:-}" in
-            forget|prune|key|unlock|migrate|repair|rewrite|tag)
-                die "restic $1 is refused by this wrapper; run restic directly if Joe decides to"
-                ;;
-        esac
+        # Every argument is checked, not just the first, so leading options
+        # (restic -r REPO forget, restic --verbose prune) cannot slip a
+        # refused subcommand past. An option value or tag that happens to
+        # equal one of these names is refused too; that is the safe side.
+        for a in "$@"; do
+            case "${a}" in
+                forget|prune|key|unlock|migrate|repair|rewrite|tag)
+                    die "restic ${a} is refused by this wrapper; run restic directly if the maintainer decides to"
+                    ;;
+            esac
+        done
         restic "$@"
         ;;
     *)
