@@ -47,22 +47,33 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 [ -f "$SRC" ] || { echo "error: $SRC not found" >&2; exit 1; }
 
+# True when <path> is a regular file (not a symlink) owned by root:root with
+# exactly <mode>: content alone is not enough, since a file the jmalicki
+# account could write would let it change what root runs.
+root_owned() {
+    local path="$1" mode="$2"
+    [ -f "$path" ] && [ ! -L "$path" ] \
+        && [ "$(stat -c '%u:%g %a' "$path")" = "0:0 ${mode#0}" ]
+}
+
 # install_file <content> <path> <mode>
 install_file() {
     local content="$1" path="$2" mode="$3"
-    if [ -f "$path" ] && [ "$(cat "$path")" = "$content" ]; then
+    if root_owned "$path" "$mode" && [ "$(cat "$path")" = "$content" ]; then
         echo "= $path already up to date"
         return
     fi
     echo "+ write $path (mode $mode)"
     if [ "$DRY_RUN" = "false" ]; then
-        printf '%s\n' "$content" >"$path.tmp"
+        rm -f "$path.tmp"
+        (umask 077 && printf '%s\n' "$content" >"$path.tmp")
+        chown root:root "$path.tmp"
         chmod "$mode" "$path.tmp"
-        mv "$path.tmp" "$path"
+        mv -f "$path.tmp" "$path"
     fi
 }
 
-if [ -f "$BIN" ] && cmp -s "$SRC" "$BIN"; then
+if root_owned "$BIN" 0755 && cmp -s "$SRC" "$BIN"; then
     echo "= $BIN already up to date"
 else
     run install -o root -g root -m 0755 "$SRC" "$BIN"

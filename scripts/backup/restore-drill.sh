@@ -13,8 +13,8 @@
 #   restore-drill.sh [--dry-run] [--expect-series N] [--expect-data-points N] [DUMP_FILE]
 #
 # DUMP_FILE defaults to econ_graph.dump in the newest verified dump
-# directory under BACKUP_ROOT (or, failing that, the newest directory that
-# has an econ_graph.dump at all). Without --expect-*, the counts recorded in
+# directory under BACKUP_ROOT; with none, the drill fails rather than pass on
+# a dump that dump-databases.sh did not mark VERIFIED. Without --expect-*, the counts recorded in
 # that directory's MANIFEST at dump time are compared, as a warning only.
 # --dry-run checks the Docker daemon, picks the dump and prints the plan,
 # without starting a container or writing state.
@@ -41,12 +41,7 @@ done
 
 if [[ -z "${dump}" ]]; then
     dir="$(latest_verified_dump_dir || true)"
-    if [[ -z "${dir}" ]]; then
-        dir="$(find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name econ_graph.dump -printf '%h\n' 2>/dev/null \
-            | grep -E '/[0-9]{8}T[0-9]{4}Z$' | sort | tail -n 1 || true)"
-        [[ -n "${dir}" ]] && log "no VERIFIED dump directory; using newest unverified ${dir}"
-    fi
-    [[ -n "${dir}" ]] || die "no econ_graph.dump found under ${BACKUP_ROOT}"
+    [[ -n "${dir}" ]] || die "no VERIFIED dump directory under ${BACKUP_ROOT} (pass DUMP_FILE to drill an unverified dump)"
     dump="${dir}/econ_graph.dump"
 fi
 dump="$(readlink -f "${dump}")"

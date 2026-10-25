@@ -96,6 +96,20 @@ if [ ! -d "$TARGET" ]; then
     run mkdir -p "$TARGET"
 fi
 
+# A mount at $TARGET is accepted only if it is this pool's $SUBVOL.
+check_mount() {
+    local uuid fsroot
+    read -r uuid fsroot < <(findmnt -n -o UUID,FSROOT --mountpoint "$TARGET" | tail -n 1) || true
+    if [ "$uuid" != "$FS_UUID" ] || [ "$fsroot" != "/$SUBVOL" ]; then
+        echo "error: $TARGET is mounted from UUID=$uuid subvolume $fsroot, not UUID=$FS_UUID /$SUBVOL; refusing" >&2
+        exit 1
+    fi
+}
+# Checked before /etc/fstab is touched, so a refusal changes nothing.
+if mountpoint -q "$TARGET"; then
+    check_mount
+fi
+
 line="UUID=$FS_UUID $TARGET btrfs subvol=/$SUBVOL,$MOUNT_OPTS 0 0"
 # An existing fstab entry for $TARGET is accepted only if it mounts this
 # pool's $SUBVOL; anything else is refused before any ownership changes.
@@ -114,6 +128,13 @@ if [ -n "$existing" ]; then
         echo "  expected: $line" >&2
         exit 1
     fi
+    if grep -qE "(^|,)noauto(,|$)" <<<"$fs_opts"; then
+        # The hourly copy needs the pool mounted after every boot.
+        echo "error: the /etc/fstab entry for $TARGET has noauto, so it would not be mounted at boot:" >&2
+        echo "  $existing" >&2
+        echo "  expected: $line" >&2
+        exit 1
+    fi
     echo "= fstab already mounts $TARGET from UUID=$FS_UUID subvol=/$SUBVOL"
 else
     echo "+ append to /etc/fstab: $line"
@@ -123,17 +144,7 @@ else
     fi
 fi
 
-# A mount at $TARGET is accepted only if it is this pool's $SUBVOL.
-check_mount() {
-    local uuid fsroot
-    read -r uuid fsroot < <(findmnt -n -o UUID,FSROOT --mountpoint "$TARGET" | tail -n 1)
-    if [ "$uuid" != "$FS_UUID" ] || [ "$fsroot" != "/$SUBVOL" ]; then
-        echo "error: $TARGET is mounted from UUID=$uuid subvolume $fsroot, not UUID=$FS_UUID /$SUBVOL; refusing" >&2
-        exit 1
-    fi
-}
 if mountpoint -q "$TARGET"; then
-    check_mount
     echo "= $TARGET already mounted from UUID=$FS_UUID /$SUBVOL"
 else
     run mount "$TARGET"
