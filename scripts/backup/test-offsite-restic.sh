@@ -60,6 +60,10 @@ if [[ "$(cat "${STUB_LOG}")" != "stats" ]]; then
     failures=$((failures + 1))
 fi
 expect 0 "" restic --verbose ls latest
+if [[ "$(cat "${STUB_LOG}")" != "--verbose ls latest" ]]; then
+    echo "FAIL offsite-restic.sh restic --verbose ls latest: restic got '$(cat "${STUB_LOG}")'"
+    failures=$((failures + 1))
+fi
 
 if [[ "${failures}" -ne 0 ]]; then
     echo "${failures} offsite-restic test(s) failed"
