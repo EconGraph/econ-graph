@@ -42,7 +42,7 @@ The script does five things:
 3. It builds `econ-graph-backend` and `seed-fixtures` in one cargo invocation,
    with `FLAGS_PROFILE=release`, so the backend has the build flags that ship
    (no `/mcp`, no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404.
-4. It runs `seed-fixtures`, which applies migrations and loads the series listed
+4. It runs `seed-fixtures`, which applies the data migrations and loads the series listed
    in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
 5. It runs Playwright. Playwright starts the backend on port 18080, pointed at
    Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend

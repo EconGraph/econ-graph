@@ -4,8 +4,8 @@
 
 //! The `crawler` operator CLI.
 //!
-//! Everything except `fetch` only touches `crawl_queue`: jobs are enqueued here and processed by
-//! the `crawler-worker` deployment.
+//! Everything except `fetch` and `migrate` only touches `crawl_queue`: jobs are enqueued here and
+//! processed by the `crawler-worker` deployment.
 //!
 //! ```text
 //! crawler enqueue  --source FRED --series GDP,UNRATE [--priority N]
@@ -15,7 +15,12 @@
 //! crawler sources
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
+//! crawler migrate  [--dry-run]   # apply the data migrations
 //! ```
+//!
+//! `migrate` applies the data migrations (`backend/migrations/data`) to the data database. No
+//! service applies them at startup, so this is how they reach a deployed database. It never
+//! touches the app migrations.
 //!
 //! `record-reference-seeds` downloads a source's code lists and writes them, with the `ETag`s
 //! they were served with, as a seed migration for new databases (see [`crate::reference_file`]).
@@ -135,6 +140,13 @@ pub enum Command {
         /// unseeded (the crawl still fetches them). Without it, any failure writes nothing.
         #[arg(long)]
         skip_failed: bool,
+    },
+    /// Apply the pending data migrations (backend/migrations/data) and print each version
+    /// applied, one per line. Never touches the app migrations.
+    Migrate {
+        /// Print the pending versions, one per line, and change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -259,6 +271,9 @@ impl Cli {
             None => econ_graph_core::config::data_database_url()
                 .map_err(|e| anyhow!("{e} (or pass --database-url)"))?,
         };
+        if let Command::Migrate { dry_run } = self.command {
+            return migrate(&url, dry_run).await;
+        }
         let pool = DataPool(
             econ_graph_core::create_pool(&url)
                 .await
@@ -330,11 +345,46 @@ impl Cli {
                 series,
                 full,
             } => fetch_one(pool.0, source, series.trim(), full).await,
-            Command::Sources | Command::RecordReferenceSeeds { .. } => {
+            Command::Sources | Command::RecordReferenceSeeds { .. } | Command::Migrate { .. } => {
                 unreachable!("handled above")
             }
         }
     }
+}
+
+/// `crawler migrate`: applies the data set's pending migrations to `database_url` under the
+/// migration advisory lock and returns their versions, one per line; with `dry_run`, returns the
+/// pending versions and changes nothing. Fails unless the data set is current afterwards.
+pub async fn migrate(database_url: &str, dry_run: bool) -> anyhow::Result<String> {
+    use econ_graph_core::MigrationSet;
+
+    let pending = || async {
+        econ_graph_core::pending_migration_versions(database_url, MigrationSet::Data)
+            .await
+            .context("reading the pending data migrations")
+    };
+    let versions = if dry_run {
+        let pending = pending().await?;
+        tracing::info!("{} data migration(s) pending", pending.len());
+        pending
+    } else {
+        let applied = econ_graph_core::run_migration_set(database_url, MigrationSet::Data)
+            .await
+            .context("running the data migrations")?;
+        let still_pending = pending().await?;
+        if !still_pending.is_empty() {
+            bail!(
+                "data migrations still pending after the run: {}",
+                still_pending.join(", ")
+            );
+        }
+        tracing::info!(
+            "applied {} data migration(s); the data set is current",
+            applied.len()
+        );
+        applied
+    };
+    Ok(versions.iter().map(|v| format!("{v}\n")).collect())
 }
 
 /// Downloads `adapter`'s code lists and writes them as the migration
@@ -658,6 +708,9 @@ pub fn format_sources(registry: &AdapterRegistry, keys: &ApiKeys) -> String {
 }
 
 #[cfg(test)]
+mod migrate_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
@@ -772,6 +825,14 @@ mod tests {
             Command::Status { json: true }
         );
         assert_eq!(parse(&["sources"]).unwrap().command, Command::Sources);
+        assert_eq!(
+            parse(&["migrate"]).unwrap().command,
+            Command::Migrate { dry_run: false }
+        );
+        assert_eq!(
+            parse(&["migrate", "--dry-run"]).unwrap().command,
+            Command::Migrate { dry_run: true }
+        );
         assert_eq!(
             parse(&["coverage"]).unwrap().command,
             Command::Coverage {

@@ -335,9 +335,19 @@ PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and cra
 Secret as `app-database-url`, `data-database-url` and `database-url`, since the app and data
 databases are one database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend gets
 `APP_DATABASE_URL` and `DATA_DATABASE_URL`, and connects through `DATABASE_URL`, set from
-`app-database-url`. That one database holds both migration sets, data and app; the backend
-applies them when it starts, the data set first
+`app-database-url`. That one database holds both migration sets, data and app
 ([database migrations](../docs/development/MIGRATIONS.md)).
+
+### Migrations
+
+No service applies the data migrations at startup. `deploy.sh` runs the Job `crawler-migrate`
+(`manifests/crawler-migrate-job.yaml`: `/app/crawler migrate` from the crawler-worker image,
+reading `data-database-url`) after PostgreSQL is ready and before it applies the backend and
+the crawler-worker. A failed Job stops the deploy and prints its logs. The Job runs only in a
+namespace that owns a data database, i.e. whose `econ-graph-secrets` has the key
+`data-database-url`; without that key `deploy.sh` skips it. The backend applies the app
+migrations itself at startup. `deploy.sh --dry-run` prints every command of the deploy,
+including the Job, and changes nothing.
 
 ### Secrets
 

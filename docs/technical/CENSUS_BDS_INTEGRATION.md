@@ -234,8 +234,8 @@ cargo test -p econ-graph-crawler --all-features sources::census::tests::fetch_pa
 
 ### Database Migrations
 The Census data source row seeded by the v4.0.0 baseline migration
-(`2026-10-21-000100_v4_0_baseline`) is marked as requiring `CENSUS_API_KEY`. The backend applies
-migrations at startup.
+(`2026-10-21-000100_v4_0_baseline`) is marked as requiring `CENSUS_API_KEY`. `crawler migrate`
+applies the data migrations.
 
 ### Monitoring
 - Monitor API response times (may be slow)

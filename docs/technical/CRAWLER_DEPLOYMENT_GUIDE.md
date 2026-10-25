@@ -26,13 +26,14 @@ crawler discover --source BLS                        # discover_catalog job (wri
 crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
+crawler migrate  [--dry-run]                         # apply (or list) pending data migrations
 ```
 
 From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
-root): `cargo run -p econ-graph-crawler --bin crawler -- <command>`. First start the backend
-once with `DATABASE_URL` to apply migrations, following the
-[local setup](../../backend/README.md#development-workflow), and export `DATA_DATABASE_URL`
-naming the same database for the CLI and worker. Export any required
+root): `cargo run -p econ-graph-crawler --bin crawler -- <command>`. First export
+`DATA_DATABASE_URL` for the CLI and worker and apply the data migrations with
+`crawler migrate`, following the [local setup](../../backend/README.md#development-workflow).
+Export any required
 provider API keys in the worker's environment and in the CLI's environment for
 direct `fetch` calls.
 
@@ -47,7 +48,10 @@ Locally, from `backend/` with `DATA_DATABASE_URL` and provider API keys exported
 Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `econ-graph-crawler-worker:<version>` built from `backend/Dockerfile --target crawler-worker`).
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
-does not run migrations; the backend applies them at startup.
+does not run migrations. Before applying it, `deploy.sh` runs the Job `crawler-migrate`
+(`k8s/manifests/crawler-migrate-job.yaml`, `/app/crawler migrate` from the same image), which
+applies the data migrations and must complete; see
+[database migrations](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate).
 
 Configuration (flags or environment):
 

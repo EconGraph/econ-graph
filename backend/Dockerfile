@@ -81,8 +81,8 @@ WORKDIR /app
 FROM runtime-base AS crawler-worker
 
 COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-worker
-# The operator CLI (`kubectl exec deploy/crawler-worker -- /app/crawler coverage`); it reads the
-# pod's DATABASE_URL and API keys.
+# The operator CLI (`kubectl exec deploy/crawler-worker -- /app/crawler coverage`), and the
+# crawler-migrate Job's `/app/crawler migrate`; it reads the pod's DATA_DATABASE_URL and API keys.
 COPY --from=builder --chown=econuser:econuser /out/crawler /app/crawler
 # Reference data read at runtime (not compiled in), e.g. the BLS series list and dataset files.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
@@ -95,7 +95,8 @@ USER econuser
 
 # Serves Prometheus /metrics and /healthz on 9102 (CRAWLER_METRICS_ADDR, default
 # 0.0.0.0:9102); otherwise it only talks to Postgres and upstream APIs.
-# It does not run migrations (the backend applies them at startup).
+# The worker does not run migrations; `/app/crawler migrate` applies the data migrations
+# (the crawler-migrate Job, k8s/manifests/crawler-migrate-job.yaml).
 EXPOSE 9102
 # SIGTERM: stops claiming new jobs and finishes in-flight ones.
 STOPSIGNAL SIGTERM

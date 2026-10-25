@@ -2,8 +2,31 @@
 
 # Deploy EconGraph to local Kubernetes cluster
 # This script deploys the application using the K8s manifests
+#
+# Usage: deploy.sh [--dry-run]
+#   --dry-run  print the kubectl and kind commands and the helper scripts this deploy runs,
+#              in order, and contact no cluster. Lookups succeed with no output, so optional
+#              steps (Keycloak, the crawler-migrate Job) are shown, and nothing is waited for.
 
 set -e
+
+DRY_RUN=false
+case "${1:-}" in
+  "") ;;
+  --dry-run) DRY_RUN=true ;;
+  *) echo "Usage: $0 [--dry-run]" >&2; exit 2 ;;
+esac
+# Runs a helper script, or prints it in a dry run.
+run_script() {
+  if [ "$DRY_RUN" = true ]; then echo "[dry-run] $*"; else "$@"; fi
+}
+if [ "$DRY_RUN" = true ]; then
+  echo "🔎 Dry run: nothing is applied."
+  kubectl() { echo "[dry-run] kubectl $*" >&2; }
+  kind() { echo "[dry-run] kind $*" >&2; echo econ-graph; }
+  # Exported, so the linters below never reach a cluster either.
+  export -f kubectl kind
+fi
 
 echo "🚀 Deploying EconGraph to local Kubernetes cluster..."
 
@@ -97,11 +120,11 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # Static PVs on the host btrfs subvolumes for both Postgres databases. Runs
 # before create-secrets.sh: it refuses to continue if a host data directory
 # already holds a database whose password Secret is missing.
-./scripts/deploy/apply-host-storage.sh
+run_script ./scripts/deploy/apply-host-storage.sh
 render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
-./scripts/deploy/create-secrets.sh
+run_script ./scripts/deploy/create-secrets.sh
 
 # Deploy PostgreSQL
 echo "🗄️  Deploying PostgreSQL..."
@@ -118,7 +141,7 @@ echo "🗄️  Deploying PostgreSQL backup CronJob..."
 kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
 kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
 kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
-"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
+run_script "$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
 
 # Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).
 # Its credentials are in the Secret econ-graph-keycloak, written by
@@ -144,6 +167,46 @@ else
   echo "   Create it with scripts/deploy/create-secrets.sh (see the Keycloak section of k8s/README.md)."
 fi
 
+# Data migrations: the crawler-migrate Job applies backend/migrations/data and must
+# complete before the backend and crawler-worker are applied; no service applies them at
+# startup. It runs only in a namespace that owns a data database: one whose Secret
+# econ-graph-secrets has the key data-database-url (create-secrets.sh writes it). Without
+# that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
+# create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
+# rather than skipping the migrations.
+has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
+  -o jsonpath='{.data.data-database-url}')"
+if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
+  echo "🗄️  Applying data migrations (crawler-migrate Job)..."
+  # A Job cannot be re-run in place, so the previous one goes first.
+  kubectl -n econ-graph delete job crawler-migrate --ignore-not-found
+  kubectl apply -f k8s/manifests/crawler-migrate-job.yaml
+  if [ "$DRY_RUN" = false ]; then
+    # Poll for either terminal condition: `kubectl wait --for=condition=complete` alone
+    # would sit out its whole timeout on a failed Job. The Job's activeDeadlineSeconds
+    # (30 minutes) fails it before this gives up.
+    migrate_status=""
+    for _ in $(seq 1 372); do
+      migrate_status="$(kubectl -n econ-graph get job crawler-migrate \
+        -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)"
+      case "$migrate_status" in
+        *Complete*|*Failed*) break ;;
+      esac
+      sleep 5
+    done
+    case "$migrate_status" in
+      *Complete*) echo "✅ Data migrations applied" ;;
+      *)
+        echo "❌ crawler-migrate did not complete (status: ${migrate_status:-none}); the backend and crawler-worker were not applied:"
+        kubectl -n econ-graph logs job/crawler-migrate --all-containers || true
+        exit 1
+        ;;
+    esac
+  fi
+else
+  echo "⚠️  Secret econ-graph-secrets has no data-database-url: no data database here, skipping crawler-migrate."
+fi
+
 # Deploy application
 render_manifest k8s/manifests/backend-deployment.yaml | kubectl apply -f -
 kubectl apply -f k8s/manifests/backend-service.yaml
@@ -161,7 +224,7 @@ kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
 # 80/443 (k8s/manifests/gateway/; idempotent). The routes, with the public
 # host's, follow once cert-manager is installed (apply_public_edge below).
-./scripts/deploy/install-gateway.sh
+run_script ./scripts/deploy/install-gateway.sh
 # The tunnel connector (scripts/deploy/lib/public-host.sh).
 apply_cloudflared
 
@@ -190,7 +253,7 @@ MONITOR_PID=$!
 echo "Waiting for backend deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-backend -n econ-graph
 
-# Wait for crawler worker (it relies on the backend having applied migrations)
+# Wait for crawler worker (the crawler-migrate Job above applied the data migrations)
 echo "Waiting for crawler-worker deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/crawler-worker -n econ-graph
 
@@ -204,7 +267,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-fron
 echo "Waiting for chart API service deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/chart-api-service -n econ-graph
 
-if [ "$KEYCLOAK_DEPLOYED" = true ]; then
+if [ "$KEYCLOAK_DEPLOYED" = true ] && [ "$DRY_RUN" = false ]; then
   echo "Waiting for Keycloak deployment..."
   kubectl wait --for=condition=available --timeout=600s deployment/keycloak -n econ-graph
   echo "Waiting for the Keycloak realm import..."
@@ -259,7 +322,11 @@ kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-ca
 
 # The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
 # public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
-apply_public_edge
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none})"
+else
+  apply_public_edge
+fi
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."

@@ -3,8 +3,9 @@
 # Image: built from backend/Dockerfile with `--target crawler-worker`
 #   (scripts/deploy/build-images.sh builds and imports econ-graph-crawler-worker:<VERSION>).
 #
-# The worker does NOT run migrations -- the backend applies them at startup, so
-# deploy the backend first (scripts/deploy/deploy.sh does).
+# The worker does NOT run migrations. The data migrations are applied by the Job
+# crawler-migrate (crawler-migrate-job.yaml), which scripts/deploy/deploy.sh runs to
+# completion before applying this Deployment.
 #
 # API keys come from the optional Secret `crawler-api-keys`. Every key is optional:
 # the worker starts without them, and jobs for a source that requires a missing key

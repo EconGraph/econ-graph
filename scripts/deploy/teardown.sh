@@ -108,9 +108,9 @@ echo "Removing application resources..."
 run kubectl delete -f k8s/manifests/gateway/routes/ --ignore-not-found=true
 run kubectl -n "${NAMESPACE}" delete httproute,backendtrafficpolicy -l econgraph.io/public-host=true --ignore-not-found=true
 for manifest in frontend-service frontend-deployment \
-    admin-frontend-service admin-frontend-deployment crawler-worker backend-service \
-    backend-deployment chart-api-service chart-api-deployment postgres postgres-deployment \
-    postgres-init; do
+    admin-frontend-service admin-frontend-deployment crawler-worker crawler-migrate-job \
+    backend-service backend-deployment chart-api-service chart-api-deployment postgres \
+    postgres-deployment postgres-init; do
     run kubectl delete -f "k8s/manifests/${manifest}.yaml" --ignore-not-found=true
 done
 run kubectl delete cronjob postgres-backup -n "${NAMESPACE}" --ignore-not-found=true
