@@ -229,7 +229,7 @@ impl GlobalAnalysisQuery {
 
         let countries = GlobalAnalysisService::get_countries_with_economic_data(&pool)
             .await
-            .map_err(|e| async_graphql::Error::new(format!("Failed to get countries: {}", e)))?;
+            .map_err(async_graphql::Error::new_with_source)?;
 
         Ok(countries.into_iter().map(Into::into).collect())
     }
@@ -258,7 +258,7 @@ impl GlobalAnalysisQuery {
             min_impact_score,
         )
         .await
-        .map_err(|e| async_graphql::Error::new(format!("Failed to get global events: {}", e)))?;
+        .map_err(async_graphql::Error::new_with_source)?;
 
         Ok(events.into_iter().map(Into::into).collect())
     }

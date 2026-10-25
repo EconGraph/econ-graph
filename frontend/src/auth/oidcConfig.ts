@@ -93,7 +93,8 @@ export function buildUserManagerSettings(config: OidcConfig, origin: string): Us
     silentRequestTimeoutInSeconds: 5,
     requestTimeoutInSeconds: 5,
     // Tokens never touch localStorage or sessionStorage. Only the short-lived PKCE verifier and
-    // state for an in-flight redirect use sessionStorage (the library default for stateStore).
+    // state for an in-flight redirect are stored, in localStorage (oidc-client-ts 3.x's default
+    // stateStore), which every tab of this origin shares.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
   };
 }
@@ -110,7 +111,7 @@ export function getUserManager(): UserManager | null {
     sharedUserManager = config
       ? new UserManager(buildUserManagerSettings(config, window.location.origin))
       : null;
-    // Drop state left in sessionStorage by sign-ins that never came back (timeouts, closed tabs).
+    // Drop state left in localStorage by sign-ins that never came back (timeouts, closed tabs).
     void sharedUserManager?.clearStaleState().catch(() => undefined);
   }
   return sharedUserManager;

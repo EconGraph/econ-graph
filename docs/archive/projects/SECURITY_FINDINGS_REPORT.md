@@ -38,7 +38,7 @@ pub fn get_jwt_secret() -> String {
 
 **Implementation Approach**: 
 - **Secrets Management**: Sealed Secrets with Git submodule
-- **Repository**: `https://github.com/jmalicki/econ-graph-secrets` (private)
+- **Repository**: a private repository, registered as the `k8s/secrets` submodule in `.gitmodules`
 - **Encryption**: Bitnami Sealed Secrets for cluster-specific encryption
 - **Access Control**: Private repository with team-based permissions
 

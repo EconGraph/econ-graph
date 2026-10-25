@@ -2853,7 +2853,7 @@ node create-demo-video.js
 ```
 
 **Video Output Location**:
-- **GitHub URL**: `https://github.com/jmalicki/econ-graph/raw/main/demo-videos/epic-system-demo.webm`
+- **GitHub URL**: `https://github.com/EconGraph/econ-graph/raw/main/demo-videos/epic-system-demo.webm`
 - **Local Path**: `./demo-videos/epic-system-demo.webm`
 - **File Size**: 5.5MB (GitHub optimized)
 - **Quality**: HD 1920x1080 WebM format
@@ -4352,7 +4352,7 @@ This session created the most detailed and comprehensive economic analysis platf
 - ✅ **Committed**: All demo files and scripts committed to main branch
 - ✅ **Tagged**: Version v3.4.0 created with comprehensive release notes
 - ✅ **Pushed**: All commits and tags uploaded to GitHub
-- ✅ **Public**: Available at https://github.com/jmalicki/econ-graph
+- ✅ **Public**: Available at https://github.com/EconGraph/econ-graph
 
 **Live Application Status**:
 - ✅ **Frontend Running**: React app successfully running on localhost:3000
@@ -4440,7 +4440,7 @@ This session created the most detailed and comprehensive economic analysis platf
 - ✅ **README Updated**: Professional demonstrations section featured
 
 **Available for Linking**:
-- 🌐 **GitHub Repository**: https://github.com/jmalicki/econ-graph
+- 🌐 **GitHub Repository**: https://github.com/EconGraph/econ-graph
 - 🎵 **Professional Narration**: Available in demo-videos directory
 - 📋 **Demo Scripts**: Ready for execution and professional presentation
 - 🏢 **Business Impact Materials**: Positioned for institutional audiences

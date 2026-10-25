@@ -1,6 +1,8 @@
 # EconGraph Secrets Management
 
-> **Security**: This document describes the secure secrets management approach used in the EconGraph platform.
+> **Not in use.** This document describes a Sealed Secrets design. The deployed
+> credentials are Kubernetes Secrets created by `scripts/deploy/create-secrets.sh`, and the
+> `k8s/secrets` submodule is registered in `.gitmodules` but not initialized.
 
 ## Overview
 
@@ -32,7 +34,7 @@ econ-graph-secrets/           # Private secrets repository
 - **Decryption**: Only the target cluster can decrypt secrets
 
 ### 2. Private Secrets Repository
-- **Repository**: `https://github.com/jmalicki/econ-graph-secrets`
+- **Repository**: the private repository registered as the `k8s/secrets` submodule in `.gitmodules`
 - **Access**: Private repository with team-based permissions
 - **Content**: Encrypted secrets, public keys, templates
 - **Integration**: Git submodule in main repository
@@ -65,8 +67,8 @@ econ-graph-secrets/           # Private secrets repository
 ### For Developers
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/jmalicki/econ-graph5.git
-cd econ-graph5
+git clone --recursive https://github.com/EconGraph/econ-graph.git
+cd econ-graph
 
 # Update secrets
 git submodule update --remote k8s/secrets

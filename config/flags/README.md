@@ -19,7 +19,7 @@ flagd's own rule for several sources.
 `node scripts/flags-merge` applies that rule once and writes the resolved values
 to `frontend/flags/<profile>.json` and `backend/flags/<profile>.json`, because
 the frontend and backend Docker builds can't see `config/flags`. The Vite build
-and the backend build (wired in follow-up PRs) read only the generated file for
+and the backend build read only the generated file for
 their profile, so neither re-implements the merge. The generated files are committed, and CI fails when
 they are stale. Their shape:
 

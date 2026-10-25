@@ -1,0 +1,23 @@
+{
+  "realtime_start": "2026-01-02",
+  "realtime_end": "2026-01-02",
+  "seriess": [
+    {
+      "id": "EGE2EMULTIPAGE",
+      "realtime_start": "2026-01-02",
+      "realtime_end": "2026-01-02",
+      "title": "Multi-Page Daily Test Series",
+      "observation_start": "1960-01-01",
+      "observation_end": "2020-03-25",
+      "frequency": "Daily",
+      "frequency_short": "D",
+      "units": "Index",
+      "units_short": "Index",
+      "seasonal_adjustment": "Not Seasonally Adjusted",
+      "seasonal_adjustment_short": "NSA",
+      "last_updated": "2026-01-02 07:30:00-06",
+      "popularity": 1,
+      "notes": "Synthetic end-to-end fixture (ECO-261): 22,000 daily observations, three seriesData pages. Not real data."
+    }
+  ]
+}

@@ -1,10 +1,8 @@
 # Admin UI roadmap
 
-Status: draft, surveyed 2026-09-26 against `main` at `1f17cc8`.
-
 This roadmap covers the unfinished work in `admin-frontend/`, the separate React admin app. It does not design the role, identity or plan model. That belongs to the auth, plans and permissions roadmap ([PR #176](https://github.com/EconGraph/econ-graph/pull/176)). This plan depends on that model and marks where it plugs in, as "auth phase N".
 
-## Where things stand
+## Where things stood (`main` at `1f17cc8`)
 
 The admin app builds, lints and passes its unit tests in CI (`admin-frontend-tests` in `.github/workflows/ci-core.yml`). But it cannot run against the real backend. The tests pass only because they check hand-written mocks against a hand-written copy of the schema, never the backend's real one.
 
@@ -56,16 +54,16 @@ Because those pages are unreachable, `AuthContext`, `SecurityContext`, `useUsers
 
 **Two clients, and neither is shared.** `App.tsx` sets up Apollo, but the hooks use react-query with a separate copy of a raw `fetch` wrapper in each hook.
 
-### Roles today
+### Roles
 
 The admin frontend's roles don't agree with the backend's:
 
 | Where                                         | Roles                                                                                                                                                                                                                                                                                                                                                                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Admin frontend                                | `read_only`, `admin`, `super_admin`, with a client-side permission table in `SecurityContext.tsx`                                                                                                                                                                                                                                                                                                                |
-| `econ-graph-auth/src/roles.rs` (AUTH-1, #226) | A 15-variant `Role` catalog, each `resource:action` (`annotation:create`, `admin.users:suspend`, ...). `authorize(&principal, role)` and `ctx.require_role(Role::X)` replace the old `UserRole`/`Permission` enums and the `can_*`/`require_*_permission` helpers in `context.rs`. Until Keycloak issues tokens, `roles_for_legacy(users.role)` maps each legacy value to roles; `read_only` still maps to none. |
+| `econ-graph-auth/src/roles.rs` (AUTH-1, #226) | A 15-variant `Role` catalog, each `resource:action` (`annotation:create`, `admin.users:suspend`, ...). `authorize(&principal, role)` and `ctx.require_role(Role::X)` replace the old `UserRole`/`Permission` enums and the `can_*`/`require_*_permission` helpers in `context.rs`. Keycloak issues the roles in the token's `roles` claim. |
 
-`user(userId)`'s admin guard landed in PR #183 (auth phase 0). Whether `crawlerStatus`, `queueStatistics` and `dataSources` should stay public, or move to specific roles, is AUTH-2's resolver call-site pass, which stacks on #226 once it merges.
+`user(userId)`'s admin guard is PR #183 (auth phase 0). Whether `crawlerStatus`, `queueStatistics` and `dataSources` should stay public, or move to specific roles, is AUTH-2's resolver call-site pass, on top of #226.
 
 ### Crawler model drift
 
@@ -135,20 +133,20 @@ Keycloak owns identities, sessions and roles after auth phase 2, and plan assign
 - Re-derive the crawler GraphQL surface from the post-#157 crawler: its queue, source adapters and worker. Decide which of the missing operations are real needs and which were speculative (`restartSystem`, `backupSystem`, `setMaintenanceMode`). Add only the backend resolvers that are needed, each guarded by a specific fine-grained role through `authorize()` (auth phase 1, #226) rather than `require_admin`.
 - Add the missing data source fields (`enabled`, health) to the backend, or drop them from the UI.
 - Logs: serve crawler logs from wherever the worker writes them. Remove the random metrics in `CrawlerLogs`.
-- Real-time: poll first. Add subscriptions only if polling proves insufficient; the schema has none today.
+- Real-time: poll first. Add subscriptions only if polling proves insufficient; the schema has none.
 - Port #151's admin half here. Rebuild `searchCompanies`, `company`, `triggerSecCrawl` and `importSecRss` in `econ-graph-graphql` on top of `econ-graph-sec-crawler`, then land its components and tests.
 
 ### Backend fixes to make early
 
-These are backend fixes in resolvers the admin UI calls. They belong with the auth roadmap's work, and are listed here so the admin work doesn't assume they're done.
+These are backend fixes in resolvers the admin UI calls. They belong with the auth roadmap's work.
 
-- Restricting `user(userId)` to the user themselves or an admin landed in auth phase 0, PR #183.
-- The fine-grained role catalog and `authorize()`/`require_role()` are auth phase 1, PR #226 (open), replacing the two `UserRole` enums and the `Permission` enum. That PR also resolves the two same-named `GraphQLContext` structs: the pool, dataloaders and security middleware in `graphql/schema.rs` are renamed `SchemaResources`, so the per-request caller in `graphql/context.rs` is the only thing still called `GraphQLContext`.
+- Restricting `user(userId)` to the user themselves or an admin is auth phase 0, PR #183.
+- The fine-grained role catalog and `authorize()`/`require_role()` are auth phase 1, PR #226, replacing the two `UserRole` enums and the `Permission` enum. That PR also resolves the two same-named `GraphQLContext` structs: the pool, dataloaders and security middleware in `graphql/schema.rs` are renamed `SchemaResources`, so the per-request caller in `graphql/context.rs` is the only thing still called `GraphQLContext`.
 - Whether `crawlerStatus`, `queueStatistics` and `dataSources` should be public, or guarded by a specific role, is AUTH-2's resolver call-site pass (stacked on #226), which moves resolvers off `require_admin` onto specific roles.
 
 ## Release placement
 
-The release-train plan (`docs/roadmap/releases.md`, PR #190) schedules these phases. As of 2026-09-26:
+The release-train plan (`docs/roadmap/releases.md`, PR #190) schedules these phases:
 
 | Phase                                                           | Train                                                                                       |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -163,6 +161,6 @@ If the two docs disagree, the release-train plan decides the order.
 
 | This roadmap needs                                                                                                                                                                                 | From                                                                               |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Fine-grained role catalog and `authorize()` (all phases; open as PR #226), Keycloak login (phase 2 here), Keycloak Organizations, plan composites and the staff Admin API workflows (phase 3 here) | Auth, plans and permissions roadmap, #176: auth phases 1, 2, 3, 4 and 7            |
+| Fine-grained role catalog and `authorize()` (all phases; PR #226), Keycloak login (phase 2 here), Keycloak Organizations, plan composites and the staff Admin API workflows (phase 3 here) | Auth, plans and permissions roadmap, #176: auth phases 1, 2, 3, 4 and 7            |
 | The current crawler model                                                                                                                                                                          | `econ-graph-crawler`, `econ-graph-crawler-worker` (#157)                           |
 | Time series storage for any admin data views                                                                                                                                                       | Postgres and Arrow Flight federation roadmap, only if admin pages show series data |

@@ -1,7 +1,5 @@
 # Roadmap: analysis workspace (multi-series charts, saved charts, export)
 
-Status: accepted for train 1 (2026-09-26). Later phases are proposals.
-
 Train 1 of the [release plan](./releases.md) removes `/analysis` from the build and ships
 annotations and a CSV download on the series page. This doc covers what train 1 leaves
 out: charts with more than one series, charts a user can save and share, chart
@@ -14,13 +12,13 @@ with a colleague or a link, and take it out of the product as data or an image. 
 number on the chart comes from the backend, and the chart looks the same for everyone
 who opens it.
 
-The long-term direction is collaborative analysis (Joe, 2026-09-26): people discuss
+The long-term direction is collaborative analysis: people discuss
 specific details, such as one data point, a date range or one line of a financial
 statement, not only a chart as a whole. Real-time collaboration comes later, but the
 data model for notes on details comes first, so later phases add features rather than
 migrate.
 
-## Where things stand today (main at `140fadf`)
+## Where things stood before train 1 (main at `140fadf`)
 
 ### The `/analysis` page
 
@@ -119,8 +117,8 @@ the "My charts" list, not a separate page.
   Chart.js `time` axis, at its own frequency. Nothing is aligned by index.
 - **Transformations stay per series and server side.** The existing
   `DataTransformationType` (none, YoY, QoQ, MoM, percent change, log difference) is
-  applied by `seriesData` for each series. The browser receives plain JSON arrays (Joe's
-  decision) and does no math.
+  applied by `seriesData` for each series. The browser receives plain JSON arrays and does
+  no math.
 - **Units decide the axes.** Series with the same unit share an axis. Two units get a
   left and a right axis. A third unit is refused, with a suggestion to switch to
   "index to 100 at date X" or percent change. Two axes are the most a reader can follow.
@@ -133,14 +131,14 @@ the "My charts" list, not a separate page.
   list, not two.
 - **Technical analysis is compiled out, not deleted.** The indicator math (SMA, EMA,
   Bollinger bands, RSI, rate of change, the peak finder) isn't known to be wrong, only
-  a poor fit for monthly and quarterly data. Joe prefers compiling code out to deleting
-  it unless it's known bad. So `utils/technicalAnalysis.ts` stays in the tree. Once
+  a poor fit for monthly and quarterly data. Code is compiled out rather than deleted
+  unless it's known bad, so `utils/technicalAnalysis.ts` stays in the tree. Once
   `ProfessionalChart` is deleted nothing imports it, so it is already absent from the
   bundle. A build flag `technical_analysis` in the flag file (`kind: build`, `remove_by:
   unscheduled`, off in every profile), compiled in through the flags area's build-time define, following the
   [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), gates any future indicator overlay on the one
   chart component. The overlay would be computed on the transformed series the server
-  returns. The file has no tests today, and the flag PR adds them. The same file's
+  returns. Its tests are in `utils/__tests__/technicalAnalysis.test.ts`. The same file's
   `calculateCorrelation` and `calculateStandardDeviation` don't come back on the
   client: correlation is server work (decision 5). If users ask for smoothing, a
   centered moving average is also a candidate for a server-side transformation.
@@ -183,7 +181,7 @@ The same PR fixes the tables that point at charts:
 - `chart_annotations.series_id` becomes a UUID (no production data, so no migration of
   rows).
 - `chart_collaborators.role` becomes a native enum (`viewer`, `commenter`, `editor`),
-  per Joe's rule on enum columns. The unused `permissions` JSONB is dropped. Ownership
+  like the repo's other enum columns. The unused `permissions` JSONB is dropped. Ownership
   lives in `charts.owner_id`, not in a collaborator row.
 - `chart_annotations.is_visible` becomes a native `visibility` enum (private or public)
   in train 1, in the auth area's work. Phase 5 adds `is_hidden` (the author's own view
@@ -236,15 +234,15 @@ The same PR fixes the tables that point at charts:
   Both describe a threaded note on a detail. One proposal is a single `annotations`
   table with a native `anchor_kind` enum and one comments table, shared with the SEC
   roadmap (#193), which would keep its `highlights` JSON in its own anchor columns.
-  The SEC roadmap records it as the leading candidate, not a commitment. Joe deferred
-  the choice (2026-09-26): it is settled when saved charts (phase 5) or SEC phase 6
-  start, whichever comes first. Until then each side keeps its own tables,
+  The SEC roadmap records it as the leading candidate, not a commitment. The choice is
+  deferred: it is settled when saved charts (phase 5) or SEC phase 6 start, whichever
+  comes first. Until then each side keeps its own tables,
   and both follow the natural-key rule above, so either design stays open.
 - **Collaboration is asynchronous first.** Comments, replies, mentions and resolved
   threads come with phase 5. Live presence (online dots, "who's viewing", real-time
   cursors, as in `CollaborativePresence` and the mock's `isOnline`) is the later step
   toward collaborative analysis. It needs a subscription transport the backend doesn't
-  have yet, so it is phase 7.
+  have, so it is phase 7.
 
 ### 5. Frequency alignment and formulas
 
@@ -283,9 +281,8 @@ first thing a reader of a report asks about.
      state.
 
    Code that works but doesn't fit train 1 stays, unimported and so out of the bundle:
-   the indicator functions in `utils/technicalAnalysis.ts`. A follow-up PR registers
-   the `technical_analysis` build flag for any future overlay and adds the file's first
-   tests. The hard-coded event list moves into the global analysis events file if
+   the indicator functions in `utils/technicalAnalysis.ts`, with the `technical_analysis`
+   build flag for any future overlay and the file's tests. The hard-coded event list moves into the global analysis events file if
    that lands first; otherwise it stays in the same file.
 2. **Make the collaboration API safe** (train 1, before release item 14). Take the
    acting user from the token in all four mutations and `annotationsForSeries`. Remove
@@ -323,9 +320,9 @@ first thing a reader of a report asks about.
 
 | Train | Phases | Why there |
 |---|---|---|
-| 1 (`v4.0.0`) | 1, 2, 3 | Removing `/analysis` is already train 1 item 17. Phase 2 is a precondition of item 14: sign-in makes the collaboration API reachable, and today it trusts user ids from the request body |
-| 2 (`v0.3.0`) | 4, 5 | The release plan already lists saved charts in train 2. Both need Keycloak accounts (train 1) and nothing else |
-| 3 (`v0.4.0`) | 6 | Frequency conversion is a store-level read, so it lands on the `TimeSeriesStore` trait (federation phase 1), and it shares its correlation code with the global analysis comparison (also train 3) |
+| 1 (`v4.0.0`) | 1, 2, 3 | Removing `/analysis` is already train 1 item 17. Phase 2 is a precondition of item 14: sign-in makes the collaboration API reachable, and before phase 2 it trusted user ids from the request body |
+| 2 (`v4.1.0`) | 4, 5 | The release plan already lists saved charts in train 2. Both need Keycloak accounts (train 1) and nothing else |
+| 3 (`v4.2.0`) | 6 | Frequency conversion is a store-level read, so it lands on the `TimeSeriesStore` trait (federation phase 1), and it shares its correlation code with the global analysis comparison (also train 3) |
 
 ## Where this challenged the release plan
 
@@ -346,13 +343,12 @@ The release plan has since taken the first two points in.
 
 - Trading indicators (SMA, EMA, Bollinger bands, RSI) and the peak finder in the
   default build. They stay in the tree, unimported, behind the `technical_analysis` build flag.
-- A second chart library. Series charts stay on Chart.js (Joe's decision).
+- A second chart library. Series charts stay on Chart.js.
 - Client-side data math. The browser gets arrays and draws them.
 
 ## Decisions taken
 
-Joe asked on 2026-09-26 for release 1 to proceed autonomously on the recommended options.
-These were the open questions, and the option taken:
+These were the open questions, and the option taken (the recommended one in each case):
 
 1. **Sharing in train 1: no.** Train 1 ships private and public annotations only, and
    sharing moves to train 2 with saved charts. The release plan's item 14 already says
@@ -368,23 +364,23 @@ These were the open questions, and the option taken:
 
 Phases 1 and 3 are these PRs. Phase 2 is #194 in the security work. The same list
 covers the other series-page and dashboard items in the release plan (7, 8, 9, 11).
-Each PR updates its row here when it merges or changes scope.
+Their progress is tracked in Linear.
 
-| Id | Change | Phase or release item | PR | Status (2026-09-26) |
-|---|---|---|---|---|
-| UI-1 | Delete `/analysis`, `ProfessionalChart`, `ChartCollaboration` | Phase 1, item 17 | #199 | Ready |
-| UI-2 | `technical_analysis` build flag and first indicator tests | Phase 1 | | Waits for UI-1 and the frontend flags PR |
-| UI-3 | `seriesByExternalId` and `latestObservation` | Item 8 | #200 | Ready |
-| UI-4 | Series page on real data; drops the no-op bookmark, share and mock download buttons; log difference not offered until UI-11 | Item 7 | #204 | Merged |
-| UI-5 | One `SeriesChart` component | Phase 3 | #209 | Draft |
-| UI-6 | CSV download of the shown points | Item 7, export | #223 | Draft, waits for UI-5 |
-| UI-7 | Dashboard on real latest values; drops the dashboard's other fake panels (recent releases, collaboration badges, system status) and the no-op category buttons | Item 8 | #212 | Ready, merges after #200 |
-| UI-8 | Public annotations on the series chart, read-only | Phase 3, item 14 | | In progress, merges after #194 |
-| UI-9 | Explore page cleanup: drops the random search time, made-up dates, fake relevance scores and dead controls; fixes `useSeriesSearch` against `searchSeries`; source filter from `dataSources`; results capped at 100 with a message. Hiding empty series is DATA-11 | Item 9 | #201 | Draft |
-| UI-10 | Release e2e specs for the series pages | Item 11 | | After UI-4 to UI-8 |
-| UI-11 | `seriesData` returns every point; real log difference | Item 7 | | In progress, merges after #184 |
-| UI-12 | Series page pages through all data | Item 7 | | After UI-11 |
+| Id | Change | Phase or release item | PR |
+|---|---|---|---|
+| UI-1 | Delete `/analysis`, `ProfessionalChart`, `ChartCollaboration` | Phase 1, item 17 | #199 |
+| UI-2 | `technical_analysis` build flag and first indicator tests | Phase 1 | |
+| UI-3 | `seriesByExternalId` and `latestObservation` | Item 8 | #200 |
+| UI-4 | Series page on real data; drops the no-op bookmark, share and mock download buttons | Item 7 | #204 |
+| UI-5 | One `SeriesChart` component | Phase 3 | #209 |
+| UI-6 | CSV download of the shown points | Item 7, export | #223 |
+| UI-7 | Dashboard on real latest values; drops the dashboard's other fake panels (recent releases, collaboration badges, system status) and the no-op category buttons | Item 8 | #212 |
+| UI-8 | Public annotations on the series chart, read-only | Phase 3, item 14 | |
+| UI-9 | Explore page cleanup: drops the random search time, made-up dates, fake relevance scores and dead controls; fixes `useSeriesSearch` against `searchSeries`; source filter from `dataSources`; results capped at 100 with a message. Hiding empty series is DATA-11 | Item 9 | #201 |
+| UI-10 | Release e2e specs for the series pages | Item 11 | |
+| UI-11 | `seriesData` returns every point; real log difference | Item 7 | |
+| UI-12 | Series page pages through all data | Item 7 | |
 
-UI-11 and UI-12 were added after UI-4 found that `seriesData` returns at most 10,000
+UI-11 and UI-12 were added after UI-4 found that `seriesData` returned at most 10,000
 rows with `totalCount` equal to the rows returned, so long daily series were cut short
 without notice, and that log difference was computed as `ratio - 1`.

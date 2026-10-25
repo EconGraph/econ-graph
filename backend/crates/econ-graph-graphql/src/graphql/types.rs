@@ -1121,10 +1121,12 @@ pub struct SecurityEventType {
 pub struct AuditLogType {
     /// Log entry ID
     pub id: ID,
-    /// User ID who performed action
-    pub user_id: ID,
-    /// User name who performed action
+    /// User ID who performed action; null once that user has been deleted
+    pub user_id: Option<ID>,
+    /// User name who performed action, kept after the user is deleted
     pub user_name: String,
+    /// Whether the user who performed the action has since been deleted
+    pub user_deleted: bool,
     /// Action performed
     pub action: String,
     /// Type of resource affected

@@ -119,7 +119,7 @@ After deployment, the application will be available at:
 
 **Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
 `host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
-`deploy.sh` (re-enabled by ECO-242, train 2); `/admin` has no backend until then.
+`deploy.sh`, and `/admin` has no backend in this release (ECO-242).
 
 ## 🌍 Public site (Cloudflare Tunnel)
 
