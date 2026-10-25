@@ -296,12 +296,17 @@ backup_databases() {
     dump_one postgresql-0 postgresql postgres econ_graph "$dir/econ_graph.dump"
     if pod_running keycloak-postgres-0; then
         dump_one keycloak-postgres-0 postgres keycloak keycloak "$dir/keycloak.dump"
-    elif [ -n "$(k get statefulset keycloak-postgres -o name --ignore-not-found)" ] &&
-        [ "${ALLOW_MISSING_KEYCLOAK_DUMP:-}" != 1 ]; then
-        # Keycloak's database exists but can't be dumped: every caller goes
-        # on to delete or replace the cluster, which would lose it.
-        die "statefulset/keycloak-postgres exists but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start it, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
     else
+        # Keycloak's database may exist but can't be dumped: every caller goes
+        # on to delete or replace the cluster, which would lose it. A failed
+        # lookup counts as "exists" (fail closed).
+        local keycloak_sts
+        if [ "${ALLOW_MISSING_KEYCLOAK_DUMP:-}" != 1 ]; then
+            keycloak_sts="$(k get statefulset keycloak-postgres -o name --ignore-not-found)" ||
+                die "could not tell whether statefulset/keycloak-postgres exists, so no Keycloak backup can be promised; no cluster was deleted"
+            [ -z "$keycloak_sts" ] ||
+                die "statefulset/keycloak-postgres exists but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start it, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
+        fi
         warn "keycloak-postgres-0 is not running; no Keycloak dump taken"
     fi
 
