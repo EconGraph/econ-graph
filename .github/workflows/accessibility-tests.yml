@@ -34,12 +34,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -170,7 +170,7 @@ jobs:
         npx eslint src --config .eslintrc.accessibility.js
 
     - name: Upload accessibility lint results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: accessibility-lint-results-${{ github.sha }}
         path: |
@@ -186,12 +186,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -332,7 +332,7 @@ jobs:
         npm test -- --config=jest.config.accessibility.js --coverage --testNamePattern="accessibility" || echo "Accessibility tests completed with results"
 
     - name: Upload accessibility test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: accessibility-test-results-${{ github.sha }}
         path: |
@@ -348,7 +348,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -388,7 +388,7 @@ jobs:
         echo "- [ ] Orientation changes are supported" >> accessibility-test-report.md
 
     - name: Upload accessibility testing report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: accessibility-test-report-${{ github.sha }}
         path: accessibility-test-report.md
@@ -403,12 +403,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Download accessibility artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         pattern: accessibility-*
         path: accessibility-results/
@@ -466,7 +466,7 @@ jobs:
         echo "4. Integrate accessibility testing into development workflow" >> accessibility-summary.md
 
     - name: Upload accessibility summary
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: accessibility-summary-${{ github.sha }}
         path: accessibility-summary.md
@@ -474,7 +474,7 @@ jobs:
 
     - name: Comment on PR (if applicable)
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       with:
         script: |
           const fs = require('fs');

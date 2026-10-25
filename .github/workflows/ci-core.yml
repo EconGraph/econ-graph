@@ -87,8 +87,8 @@ jobs:
       migrations: ${{ steps.filter.outputs.migrations }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
-    - uses: dorny/paths-filter@v3
+      uses: actions/checkout@v7
+    - uses: dorny/paths-filter@v4
       id: filter
       # Protected-branch pushes run the ordinary suite without path filtering.
       if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
@@ -175,7 +175,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -207,7 +207,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install promtool
       run: |
@@ -231,7 +231,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         persist-credentials: false
 
@@ -255,14 +255,14 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
-        python-version: '3.9'
+        python-version: '3.14'
 
     - name: Run migration order validation
       run: |
@@ -337,7 +337,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -440,12 +440,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -506,7 +506,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -544,7 +544,7 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -629,7 +629,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
@@ -828,7 +828,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -961,12 +961,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -989,7 +989,7 @@ jobs:
       run: npm run test:run -- --coverage --reporter=verbose --exclude="tests/**/*.spec.ts"
 
     - name: Upload admin frontend test coverage
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: admin-frontend-coverage-${{ github.sha }}
         path: admin-frontend/coverage/
@@ -1007,12 +1007,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -1049,7 +1049,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1062,7 +1062,7 @@ jobs:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -1085,7 +1085,7 @@ jobs:
         cargo clippy -- -W clippy::all
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -1122,7 +1122,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1149,7 +1149,7 @@ jobs:
       working-directory: backend
 
     - name: Setup Node.js for npm audit
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -1189,7 +1189,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1205,7 +1205,7 @@ jobs:
         save-if: ${{ github.job == 'backend-build-cache' }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -1267,7 +1267,7 @@ jobs:
         echo "✅ License compliance check completed successfully"
 
     - name: Upload license reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: license-compliance-reports-${{ github.sha }}
         path: |
@@ -1298,7 +1298,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1345,12 +1345,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -1375,12 +1375,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Build optimized E2E container
       run: |
@@ -1397,7 +1397,7 @@ jobs:
         docker save econ-graph-e2e-mobile-optimized:latest | gzip > e2e-mobile-container-optimized.tar.gz
 
     - name: Upload optimized E2E containers
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: e2e-containers-optimized
         path: |
@@ -1431,7 +1431,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1504,7 +1504,7 @@ jobs:
       working-directory: backend
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: e2e-containers-optimized
 
@@ -1577,7 +1577,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1631,7 +1631,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: e2e-containers-optimized
 
@@ -1742,7 +1742,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: playwright-test-results-e2e-comprehensive
         path: |
@@ -1780,7 +1780,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1836,7 +1836,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: e2e-containers-optimized
 
@@ -1951,7 +1951,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: playwright-test-results-mobile-e2e-core
         path: |
@@ -1993,15 +1993,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Build backend Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v7
       with:
         context: ./backend
         push: false
@@ -2011,7 +2011,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build frontend Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v7
       with:
         context: ./frontend
         push: false

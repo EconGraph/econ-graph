@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: 'npm'
@@ -45,7 +45,7 @@ jobs:
         PLAYWRIGHT_BASE_URL: ${{ inputs.base_url || vars.PLAYWRIGHT_BASE_URL || 'http://localhost' }}
 
     - name: Upload Playwright Report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: playwright-report-${{ github.ref_name }}
@@ -53,7 +53,7 @@ jobs:
         retention-days: 30
 
     - name: Upload test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: playwright-test-results-${{ github.ref_name }}
@@ -61,7 +61,7 @@ jobs:
         retention-days: 30
 
     - name: Upload screenshots on failure
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: failure()
       with:
         name: playwright-screenshots-${{ github.ref_name }}
