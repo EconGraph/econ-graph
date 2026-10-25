@@ -17,10 +17,14 @@
 # Each key is read with hidden input. Press Enter to keep the value already in
 # the cluster. The values go to scripts/deploy/create-secrets.sh through its
 # environment, which keeps every other Secret as it is and never prints values.
+# create-secrets.sh runs with an environment cut down to the basics plus the
+# keys of the selected mode, so credentials exported in your shell for other
+# keys (another mode's keys, database or Grafana passwords) are not written.
 #
 # Afterwards the crawler worker is scaled to one replica and restarted so it
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
-# restarted to pick up the new Google client.
+# restarted and the keycloak-realm-import Job is run again (as deploy.sh
+# does), since that Job is what puts the Google client into the realm.
 #
 # --dry-run prints which keys are currently set (names only) and what would
 # happen; it prompts for nothing and writes nothing.
@@ -123,7 +127,8 @@ done
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
-    [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak"
+    [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
+        "then delete and re-apply job/keycloak-realm-import and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/cloudflared --replicas=1 and restart it"
     exit 0
 fi
@@ -151,7 +156,22 @@ if [ "$entered" -eq 0 ]; then
     echo "==> No keys entered; nothing changed"
 else
     echo "==> Writing ${entered} key(s) through create-secrets.sh"
-    "$PROJECT_ROOT/scripts/deploy/create-secrets.sh"
+    # In a subshell: drop every exported variable except the basics and the
+    # selected keys, so create-secrets.sh cannot pick up other credentials
+    # from the caller's environment. The values stay in the environment (not
+    # on any command line). KUBECTL is dropped too, so create-secrets.sh uses
+    # the same kind kubectl (on PATH) as this script.
+    (
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG ${vars[*]} "
+        while IFS= read -r name; do
+            case "$keep" in
+                *" $name "*) ;;
+                *) [[ "$name" == LC_* ]] || unset "$name" 2>/dev/null || true ;;
+            esac
+        done < <(compgen -e)
+        export NAMESPACE
+        exec "$PROJECT_ROOT/scripts/deploy/create-secrets.sh"
+    )
 fi
 for v in "${vars[@]}"; do
     unset "$v"
@@ -167,6 +187,29 @@ if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
     kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
     echo "==> Restarting Keycloak for the new Google client"
     kubectl -n "$NAMESPACE" rollout restart deployment/keycloak
+    kubectl -n "$NAMESPACE" rollout status deployment/keycloak --timeout=600s
+    # The realm-import Job renders the Google client from the Secret into
+    # the realm; a restart alone does not re-run it. A finished Job cannot be
+    # re-run in place, so the old one goes first (as in deploy.sh).
+    echo "==> Re-running the Keycloak realm import for the new Google client"
+    kubectl -n "$NAMESPACE" delete job keycloak-realm-import --ignore-not-found
+    kubectl -n "$NAMESPACE" apply -f "$PROJECT_ROOT/k8s/manifests/keycloak/realm-import-job.yaml"
+    realm_import_status=""
+    for _ in $(seq 1 120); do
+        realm_import_status="$(kubectl -n "$NAMESPACE" get job keycloak-realm-import \
+            -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)"
+        case "$realm_import_status" in
+            *Complete* | *Failed*) break ;;
+        esac
+        sleep 5
+    done
+    case "$realm_import_status" in
+        *Complete*) echo "==> Keycloak realm applied with the new Google client" ;;
+        *)
+            kubectl -n "$NAMESPACE" logs job/keycloak-realm-import --all-containers || true
+            die "the Keycloak realm import did not complete (status: ${realm_import_status:-none})"
+            ;;
+    esac
 fi
 if [ "$TUNNEL" = true ] && [ "$entered" -gt 0 ]; then
     if kubectl -n "$NAMESPACE" get deployment cloudflared >/dev/null 2>&1; then
