@@ -281,6 +281,3 @@ The platform is positioned to capture significant market share in the $8.2B econ
 
 *Document Version: 1.0*
 *Prepared by: Product Manager*
-
-
-

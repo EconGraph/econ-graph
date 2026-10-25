@@ -229,7 +229,6 @@ query {
 
 See the [GraphQL API reference](../docs/api/GRAPHQL_API.md) for data queries.
 
-
 ### **REST Endpoints**
 Additional REST endpoints for specific functionality:
 
@@ -283,10 +282,10 @@ docker build -t econ-graph-backend .
 ```
 
 For a local server and frontend, use the [development workflow](#development-workflow).
-The repository's full `docker-compose.yml` still maps and checks backend port 8000,
-while the current image listens on 9876 by default; it needs configuration updates
-before it can serve as a full-stack quick start. Starting only its Keycloak service,
-as documented above, does not start that backend service.
+The repository's `docker-compose.yml` maps and health-checks the backend on port
+8000, and the backend listens on `BACKEND_PORT` (9876 by default), so its `backend` and
+`frontend` services do not run a working stack. Starting only its Keycloak service,
+as documented above, does not start a backend.
 
 ### **Kubernetes Deployment**
 ```bash
@@ -294,7 +293,7 @@ as documented above, does not start that backend service.
 kubectl apply -f ../k8s/manifests/
 
 # Monitor deployment
-kubectl get pods -l app=econ-graph-backend
+kubectl get pods -n econ-graph -l app=econ-graph-backend
 ```
 
 ### **Database Migrations**
@@ -332,5 +331,3 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL). 
 ## Support
 
 For technical support, feature requests, or bug reports, please refer to the project documentation or contact the development team.
-
-
