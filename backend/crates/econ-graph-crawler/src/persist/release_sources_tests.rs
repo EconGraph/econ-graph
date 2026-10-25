@@ -1,7 +1,7 @@
 //! ECO-392 regression: on a freshly migrated database, every source the release build registers
 //! (`FRED`, `BLS`, `CENSUS`, `BEA`, `WORLD_BANK`, `FHFA`; see `sources::default_registry`) must be
 //! due for crawling and counted by coverage. The consolidated baseline migration seeded World
-//! Bank and BEA as `is_enabled = false` behind an admin-approval step that release 1 never shipped
+//! Bank and BEA as `is_enabled = false` behind an admin-approval step that v4.0 doesn't ship
 //! (the admin frontend is out of scope) -- Census was seeded disabled the same way but the same
 //! migration re-enables it further down. The scheduler's due and discovery queries, and the
 //! coverage report, all skip a source whose `data_sources` row has `is_enabled = false`, so World

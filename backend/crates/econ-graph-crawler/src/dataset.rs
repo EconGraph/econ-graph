@@ -16,7 +16,7 @@
 //!   ([`SeriesDataset`]). [`DatasetCatalog::check`] rejects a dataset the adapter did not declare,
 //!   or dimension keys that differ from the definition, before anything is written.
 //!
-//! Train 1 stores every dataset long: `data_points` holds one value, so a source with several
+//! Every dataset is stored long: `data_points` holds one value, so a source with several
 //! measures publishes each measure as its own series with the measure as a dimension, and every
 //! dataset declares the single measure [`DEFAULT_MEASURE`].
 
@@ -33,7 +33,7 @@ use crate::adapter::{AdapterRegistry, SourceAdapter};
 use crate::error::CrawlError;
 use crate::source::SourceId;
 
-/// The one measure every train 1 dataset declares, and so its `default_measure`.
+/// The one measure every dataset declares, and so its `default_measure`.
 pub const DEFAULT_MEASURE: &str = VALUE_MEASURE;
 
 /// Which dataset a series belongs to, and its value for each of the dataset's dimensions.
@@ -157,7 +157,7 @@ pub struct DatasetDef {
     /// Dimensions, in the order the canonical external id lists their values.
     #[serde(default)]
     pub dimensions: Vec<Component>,
-    /// Measures. Train 1 allows exactly one, named [`DEFAULT_MEASURE`]; omitted means that one.
+    /// Measures. Exactly one is allowed, named [`DEFAULT_MEASURE`]; omitted means that one.
     #[serde(default = "default_measures")]
     pub measures: Vec<Component>,
     /// Attributes (observation or series flags).
@@ -210,7 +210,7 @@ impl DatasetDef {
     }
 
     /// Checks the definition on its own: a valid code, lowercase `snake_case` component names that
-    /// are unique across dimensions, measures and attributes, and train 1's single
+    /// are unique across dimensions, measures and attributes, and the single
     /// [`DEFAULT_MEASURE`].
     pub fn validate(&self) -> Result<(), String> {
         let code = &self.code;
@@ -268,7 +268,7 @@ impl DatasetDef {
                 ));
             }
         }
-        // Train 1: data_points holds one value, so datasets are stored long (see module docs).
+        // data_points holds one value, so datasets are stored long (see module docs).
         if !matches!(self.measures.as_slice(),
             [m] if m.name == DEFAULT_MEASURE
                 && m.component_type == ComponentType::Decimal

@@ -640,8 +640,8 @@ async fn invalid_requests_are_bad_requests() {
 
 #[tokio::test]
 async fn a_declared_measure_other_than_value_is_a_bad_request() {
-    // Train 1 stores every dataset long, so a dataset that declares a second measure (not
-    // yet written to data_points) must still be rejected, not just an undeclared name.
+    // Every dataset is stored long, so a dataset that declares a second measure (not
+    // written to data_points) must still be rejected, not just an undeclared name.
     let pool = create_pool(&migrated_url().await).await.expect("pool");
     let source = DataSource::create(
         &pool,

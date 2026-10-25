@@ -76,7 +76,7 @@
 //! metadata, so [`persist_series`](crate::persist::persist_series)'s COALESCE keeps the series'
 //! already-stored title instead of overwriting it with the table name.
 //!
-//! `NoteRef` is dropped: train 1 has no place for observation attributes, and the notes are table
+//! `NoteRef` is dropped: `data_points` has no place for observation attributes, and the notes are table
 //! footnotes or the `(D)` marker already reflected in the missing value.
 //!
 //! The API returns current estimates only (vintages are published as archived releases, not

@@ -1,7 +1,8 @@
 //! Cross-sections: one measure of one dataset, for every value of one dimension, at one date.
 //!
-//! This backs the GraphQL `crossSection` query (the world map reads it), decision 3 of
-//! `docs/roadmap/global-analysis.md`. A request names a dataset, pins every dimension but one
+//! This backs the GraphQL `crossSection` query (the world map reads it), decision 3 of the
+//! global analysis design record
+//! (<https://linear.app/econgraph/document/global-analysis-roadmap-design-record-from-docsroadmapglobal-d2b43004c9dd>). A request names a dataset, pins every dimension but one
 //! with `filter`, and asks for the remaining dimension (`across`) at a fixed date or at each
 //! key's latest non-null observation.
 //!
@@ -85,7 +86,7 @@ pub struct CrossSectionRow {
 ///
 /// Errors: `NotFound` for an unknown dataset; `BadRequest` when `across` or a filter
 /// dimension is not one of the dataset's dimensions, `filter` sets `across` or leaves another
-/// dimension unset, or the measure is not declared (or, in train 1, is not `value`).
+/// dimension unset, or the measure is not declared (or is not `value`).
 pub async fn cross_section(
     conn: &mut AsyncPgConnection,
     areas: &Areas,
@@ -196,7 +197,7 @@ fn validate(dataset: &Dataset, request: &CrossSectionRequest) -> AppResult<bool>
     if !dataset.measures.contains(measure) {
         return bad(format!("dataset {code} has no measure {measure:?}"));
     }
-    // Train 1 stores every dataset long, so data_points holds the value measure only.
+    // Every dataset is stored long, so data_points holds the value measure only.
     if measure != VALUE_MEASURE {
         return bad(format!(
             "measure {measure:?} of dataset {code} is not stored yet; only {VALUE_MEASURE:?} is"

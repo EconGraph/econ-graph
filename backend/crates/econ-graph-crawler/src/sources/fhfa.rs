@@ -16,7 +16,7 @@
 //! public documentation; the fixture is built from it, not recorded (see
 //! `tests/fixtures/fhfa/README.md`).
 //!
-//! # Scope (train 1)
+//! # Scope
 //!
 //! Rows with `hpi_type` `traditional`, `hpi_flavor` `purchase-only` or `all-transactions`,
 //! `frequency` `monthly` or `quarterly`, and `level` `USA or Census Division` or `State`: the
@@ -27,8 +27,8 @@
 //!
 //! Each series is in dataset [`DATASET`] (`data/datasets/fhfa.toml`). Its dimensions are the file's
 //! `hpi_type`, `hpi_flavor`, `frequency`, `level` and `place_id` columns, plus
-//! `seasonal_adjustment` (`nsa` for the `index_nsa` column, `sa` for `index_sa`): train 1 stores
-//! one value per observation, so the two value columns are separate series. Ids are canonical
+//! `seasonal_adjustment` (`nsa` for the `index_nsa` column, `sa` for `index_sa`): `data_points`
+//! stores one value per observation, so the two value columns are separate series. Ids are canonical
 //! dataset ids, for example `fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa`.
 //! `level` is FHFA's value lowercased with spaces replaced by `-` (one way: ids are never parsed
 //! back). A series exists only when its column has at least one value (`index_sa` is empty for
@@ -38,7 +38,7 @@
 //!
 //! Discovery downloads the file, and so does each fetch batch. Every series shares one
 //! [`batch_key`](SourceAdapter::batch_key) and the policy's `max_batch` ([`MAX_BATCH`]) covers
-//! every train 1 series, so fetching them all is normally one download (discovery downloads the
+//! every in-scope series, so fetching them all is normally one download (discovery downloads the
 //! file separately). The file is also one of [`code_lists`](SourceAdapter::code_lists): the
 //! default `refresh_reference_data` reads it once more, under its own `ETag` cache (a full
 //! download whenever FHFA sends no `ETag`; QA checks whether it does), to label every `place_id` dimension code (states and census divisions alike) from its own
@@ -133,7 +133,7 @@ pub const MASTER_CSV_PATH: &str = "/hpi/download/monthly/hpi_master.csv";
 /// The dataset every FHFA series belongs to.
 pub const DATASET: &str = "fhfa_hpi";
 
-/// Most series fetched per download: more than train 1's roughly 200, so one download fetches
+/// Most series fetched per download: more than the roughly 200 in scope, so one download fetches
 /// them all.
 pub const MAX_BATCH: usize = 500;
 
@@ -308,7 +308,7 @@ fn period_start(frequency: &str, yr: &str, period: &str) -> Result<NaiveDate, St
 /// up to one series per value column.
 type RowKey = (String, String, String, String, String);
 
-/// Parses the master CSV into the train 1 series, keyed by external id (see the module docs).
+/// Parses the master CSV into the in-scope series, keyed by external id (see the module docs).
 fn parse_master(text: &str, def: &DatasetDef) -> Result<BTreeMap<String, HpiSeries>, CrawlError> {
     let file_error = |e: csv::Error| CrawlError::Parse(format!("FHFA HPI master file: {e}"));
     let mut reader = csv::ReaderBuilder::new()
@@ -650,7 +650,7 @@ impl SourceAdapter for FhfaAdapter {
         )]
     }
 
-    /// Every train 1 series in the master file (see the module docs).
+    /// Every in-scope series in the master file (see the module docs).
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         Ok(self.discovered(self.master(ctx).await?))
     }

@@ -178,7 +178,7 @@ export const SEEDED_WDI = {
   ],
 } as const;
 
-/** One train 1 source's series as the six-source sweep (sources/six-source-sweep.spec.ts) checks it. */
+/** One release source's series as the six-source sweep (sources/six-source-sweep.spec.ts) checks it. */
 export interface SweptSeries {
   source: string;
   sourceName: string;
@@ -211,7 +211,7 @@ export interface SweptSeries {
 const shown = (date: string, value: string) => ({ date, value });
 
 /**
- * One series per train 1 source, for the six-source sweep. Values are what the series page shows
+ * One series per release source, for the six-source sweep. Values are what the series page shows
  * for the seeded fixtures: levels with the decimals the series carries, up to 2 (none for counts
  * and whole dollars), changes to 2 decimal places and log differences to 4 significant digits.
  * Quarterly and annual dates read as their period ("2024 Q4", "2022"). The comments say where

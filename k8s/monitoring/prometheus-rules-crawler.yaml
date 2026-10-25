@@ -215,9 +215,9 @@ data:
       - name: crawler.coverage
         rules:
         # A source with nothing discovered reports 0, so it alerts too. The long `for` lets a fresh
-        # deployment finish its first discovery and backfill before this fires. Until the scheduler
-        # also fetches discovered-only series (release 1 item DATA-13), catalog ids nobody enqueued
-        # keep coverage low and this fires; `crawler coverage` shows it.
+        # deployment finish its first discovery and backfill before this fires. Catalog ids that
+        # discovery found but nobody enqueued keep coverage low, so this can fire for them;
+        # `crawler coverage` shows it.
         - alert: CrawlerCoverageLow
           expr: max by (source) (crawler_coverage_ratio) < 0.95
           for: 6h

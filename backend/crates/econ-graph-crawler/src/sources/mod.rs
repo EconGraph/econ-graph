@@ -7,8 +7,8 @@
 //! To add a source: add `pub mod <name>;` below and one `registry.register(..)`
 //! line in each of [`default_registry`] and [`registry_at`].
 //!
-//! `SourceId::Imf` has no adapter (its series ids were made up); it is kept for the SDMX work
-//! in release train 3.
+//! `SourceId::Imf` has no adapter (its series ids were made up); it is kept for a future SDMX
+//! adapter.
 
 use crate::adapter::AdapterRegistry;
 

@@ -1,7 +1,7 @@
 # Build-time feature flags
 
 Build-time flags compile code out of the frontend bundle. They implement phase 1
-of [the feature flags roadmap](../../docs/roadmap/feature-flags.md): unfinished
+of [the feature flags design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2): unfinished
 or unscheduled screens are absent from a release build, not hidden at runtime.
 
 ## Where the values come from
@@ -75,12 +75,10 @@ Rules:
   may not be folded, which keeps the flagged code in the bundle. Lint in
   `eslint.config.js` rejects a bare or computed `__FLAGS__`.
 - Never read the flag files at runtime (`config/flags`, `frontend/flags`). Lint
-  in `eslint.config.js` forbids importing or naming them in `src/`. Runtime
-  flags are train 2 (OFREP served by the backend).
+  in `eslint.config.js` forbids importing or naming them in `src/`.
 
 Only `kind: "build"` flags are defined. The type in `src/flags.ts` lists every
-flag in the generated file, which in train 1 are all build flags; runtime flags
-(train 2) get their own API rather than `__FLAGS__`. The build fails if its
+flag in the generated file, all of which are build flags. The build fails if its
 output still reads `__FLAGS__`, which catches a mistyped or non-build flag even
 where `tsc` did not run.
 

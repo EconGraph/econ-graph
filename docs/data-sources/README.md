@@ -33,17 +33,15 @@ state fixture and FHFA's master CSV).
 | BEA | [bea.md](bea.md) | Discovery (curated tables) and fetch | Catalog recorded, data from public docs |
 | FHFA HPI | [fhfa.md](fhfa.md) | Discovery and fetch from the HPI master CSV | File layout from public docs, not a recording |
 | World Bank | [world-bank.md](world-bank.md) | Discovery (curated indicators) and fetch | Recorded |
-| IMF | [imf.md](imf.md) | No adapter (removed in #217) | n/a |
 | SEC XBRL | [sec-xbrl.md](sec-xbrl.md) | Separate crawler (`econ-graph-sec-crawler`) | From public docs |
 
-Each page describes the adapter as it ships in release 1 (release/v4.0). Status (draft,
-merged, blocked) is tracked in Linear (linear.app/econgraph, prefix ECO), not here.
+Each page describes the adapter as it is on this branch. Status is tracked in Linear
+(linear.app/econgraph, prefix ECO), not here.
 
 The other ten sources in `SourceId` (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO)
 are static catalogs (`static_catalogs.rs`): hard-coded series lists, no HTTP, and
 `fetch_series` always fails. They have no data shape to document yet, and are gated off in
-release builds by the `static_catalogs` build flag (dev builds only). ECB, OECD, ILO and
-the UN publish SDMX, so they would look like [imf.md](imf.md).
+release builds by the `static_catalogs` build flag (dev builds only).
 
 ## Findings that matter for the data model
 
@@ -62,9 +60,8 @@ the UN publish SDMX, so they would look like [imf.md](imf.md).
    observation on each such release; the others still overwrite (see finding 1).
 3. **Flags are mostly still dropped.** BLS footnotes (`P` preliminary, `X` unavailable) are
    now parsed and logged, but not stored as a column (`data_points` has no attribute
-   columns in train 1). World Bank `obs_status`, BEA `NoteRef` and SDMX `OBS_STATUS` are
-   still not parsed. FRED has no per-observation flags (missing is `"."`). These become
-   attributes.
+   columns). World Bank `obs_status` and BEA `NoteRef` are not parsed. FRED has no
+   per-observation flags (missing is `"."`).
 4. **Dimensions are now mostly real columns.** Census BDS (`geo_level`, `state`,
    `variable`), BLS (per-survey layouts for CU/CE/LN/LA, e.g. `CUUR0000SA0` splits into
    survey `CU`, seasonal `U`, area `0000`, item `SA0`), BEA, FHFA and World Bank all carry
@@ -82,11 +79,9 @@ the UN publish SDMX, so they would look like [imf.md](imf.md).
    indicator is a dimension, one value column). FRED and BLS are single value series; a
    FRED "dataset" is best a release or a category, not the whole of FRED.
 
-## Release 1 changes
+## Changes in v4.0.0
 
-Delivered by the data area for release 1 (release/v4.0); each page above describes the
-adapter as it ships. Status going forward is tracked in Linear (linear.app/econgraph,
-prefix ECO), not here.
+Each page above describes the adapter as it is after these changes.
 
 | Change | Source | PR |
 |---|---|---|
@@ -100,7 +95,7 @@ prefix ECO), not here.
 | The scheduler fetches series that were discovered but never fetched | All | #228 |
 
 Together these address finding 1 above for FRED and WDI, the two sources that now publish a
-revision date (crawl-date vintages for the other sources come later), and finding 5 for
+revision date (the other sources overwrite in place), and finding 5 for
 FRED, BLS, BEA and World Bank (curated id lists) and FHFA (a real master file instead of
 made-up ids).
 
@@ -113,5 +108,4 @@ These older notes are kept where they are and linked, not duplicated:
   [Census Bureau integration summary](../technical/CENSUS_BUREAU_INTEGRATION_SUMMARY.md)
 - [World Bank API experimental findings](../technical/WORLD_BANK_API_EXPERIMENTAL_FINDINGS.md)
   and [World Bank integration post-mortem](../archive/technical/WORLD_BANK_INTEGRATION_POST_MORTEM.md)
-- [SEC EDGAR XBRL implementation plan](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md)
 - [Rate limits by source](../technical/RATE_LIMIT_SOURCES.md)

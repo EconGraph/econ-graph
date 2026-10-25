@@ -51,7 +51,8 @@ Imported users get no default roles automatically, so each one lists
 
 ## Roles
 
-The backend authorizes with fine-grained roles only (`docs/roadmap/auth-plans-permissions.md`).
+The backend authorizes with fine-grained roles only
+([design record](https://linear.app/econgraph/document/auth-plans-and-permissions-roadmap-design-record-from-pr-176-eae73ef9ee81)).
 They are client roles on `econ-graph-api`, one per variant of the `Role` enum in
 `econ-graph-auth`, and `scripts/check-keycloak-roles` fails CI when the two differ
 (`scripts/keycloak/test-check-keycloak-roles.sh` tests it against fixtures). Realm

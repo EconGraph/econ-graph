@@ -46,7 +46,7 @@ external id built from them (see below): never rename or reorder them once serie
 that dataset, add a new dataset instead. `sync_datasets` never deletes a `datasets` row for a
 code a definitions file drops; remove the row by hand if a dataset is retired.
 
-In train 1 every dataset is stored long, because `data_points` holds one value per
+Every dataset is stored long, because `data_points` holds one value per
 observation. A dataset therefore has the single measure `value`, which is also its
 `default_measure`. Both are the defaults, so leave them out. A source with several
 measures publishes each one as its own series, with the measure as a dimension (for
