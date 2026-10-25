@@ -261,6 +261,16 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Curated or configured entries (BEA tables, FRED series ids, ...) that the last successful
+    /// [`discover`](Self::discover) on this adapter instance skipped because the source no longer
+    /// lists them, each named as the skip warning names it. The worker reads this after each
+    /// changed discovery, publishes its length as `crawler_curated_missing{source}`, and retires
+    /// nothing for a discovery that skipped entries, so the stored series of an entry the source
+    /// dropped or renamed stay as they are. Defaults to none, for adapters with no curated list.
+    fn curated_missing(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Restricts [`discovery_is_complete`](Self::discovery_is_complete) retirement to
     /// `external_id`s starting with this prefix, when this adapter isn't the only thing that
     /// writes series under its [`SourceId`] (for example Census, whose BDS discovery is complete

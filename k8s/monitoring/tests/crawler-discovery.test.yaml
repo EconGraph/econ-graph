@@ -1,0 +1,33 @@
+# promtool unit tests for the crawler.discovery group of prometheus-rules-crawler.yaml.
+# Run through ../check-prometheus-rules.sh, which writes each rule ConfigMap's files to a temp
+# directory and copies this file next to them.
+rule_files:
+  - crawler.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # BEA's discovery skips one curated table from 10m on; the alert fires once that lasts 15m.
+  # FRED resolves every curated id and never fires. A fixed list (BEA back to 0 at 1h) clears it.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-1"}'
+        values: '0 0 1x10 0x12'
+      - series: 'crawler_curated_missing{source="FRED", pod="crawler-worker-1"}'
+        values: '0x24'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: BEA
+            exp_annotations:
+              summary: 1 curated BEA entries are missing upstream
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+      - eval_time: 1h10m
+        alertname: CrawlerCuratedEntriesMissing
+        exp_alerts: []
