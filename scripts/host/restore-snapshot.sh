@@ -93,6 +93,16 @@ subvol="@econgraph-$name"
 mounted_subvol() {
     findmnt -n -o UUID,FSROOT --mountpoint "$1" | tail -n 1
 }
+# mount_target: mount $target from /etc/fstab (its options), then check it
+# really is $subvol on this filesystem; if not, unmount it again and fail.
+mount_target() {
+    mount "$target" || return 1
+    if [ "$(mounted_subvol "$target")" != "$FS_UUID /$subvol" ]; then
+        echo "error: /etc/fstab mounted $target from $(mounted_subvol "$target"), not UUID=$FS_UUID /$subvol" >&2
+        umount "$target" || true
+        return 1
+    fi
+}
 # Dry run or not, before anything else: the checks below read
 # $SNAPSHOT_DIR/$snap and the restore uses @econgraph-snapshots/$snap at the
 # top level, so $SNAPSHOT_DIR must be that subvolume (and $target, if
@@ -218,8 +228,8 @@ put_back() {
         echo "    sudo umount /mnt && sudo mount $target" >&2
         exit 1
     fi
-    if ! mount "$target"; then
-        echo "error: $subvol is back under its name but mounting $target failed; run: sudo mount $target" >&2
+    if ! mount_target; then
+        echo "error: $subvol is back under its name but mounting $target failed; check /etc/fstab, then: sudo mount $target" >&2
     fi
     echo "Nothing was restored; $target holds the data it had before." >&2
     exit 1
@@ -228,7 +238,9 @@ if ! run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvo
     echo "error: creating $subvol from $snap failed" >&2
     put_back
 fi
-if ! run mount "$target"; then
+if [ "$DRY_RUN" = "true" ]; then
+    echo "+ mount $target   (from /etc/fstab, then checked to be UUID=$FS_UUID /$subvol)"
+elif ! mount_target; then
     # Set the new copy aside (kept, not deleted) and put the original back.
     echo "error: mounting the restored $subvol at $target failed" >&2
     if ! mv "$top/$subvol" "$top/$subvol.failed-restore-$stamp"; then
