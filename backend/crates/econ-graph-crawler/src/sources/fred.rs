@@ -71,6 +71,7 @@
 //! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
 use std::str::FromStr;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -166,6 +167,9 @@ fn is_copyright_restricted(notes: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub struct FredAdapter {
     base_url: String,
+    /// The curated ids the last successful discovery skipped because their lookup failed, for
+    /// [`curated_missing`](SourceAdapter::curated_missing).
+    skipped_ids: Arc<Mutex<Vec<String>>>,
 }
 
 impl FredAdapter {
@@ -173,6 +177,7 @@ impl FredAdapter {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            skipped_ids: Arc::default(),
         }
     }
 
@@ -350,6 +355,11 @@ impl FredAdapter {
                     dropped_errors = skipped_ids.len(),
                     "FRED discovery finished"
                 );
+                *self
+                    .skipped_ids
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) =
+                    skipped_ids.iter().map(|id| id.to_string()).collect();
                 Ok(found)
             }
         }
@@ -390,6 +400,15 @@ impl SourceAdapter for FredAdapter {
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
         self.fetch(ctx, external_id, since, None).await
+    }
+
+    /// The curated ids the last successful discovery skipped because their lookup failed
+    /// (`NotFound`, `Parse` or `Permanent`; see `discover_ids`).
+    fn curated_missing(&self) -> Vec<String> {
+        self.skipped_ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn tracks_vintages(&self) -> bool {
@@ -1325,12 +1344,16 @@ mod tests {
 
         let ctx = test_ctx();
         let ids = ["NOPE".to_string(), "GDP".to_string()];
-        let found = FredAdapter::new(mock.base_url())
+        let adapter = FredAdapter::new(mock.base_url());
+        assert!(adapter.curated_missing().is_empty());
+        let found = adapter
             .discover_ids(&ctx, TEST_API_KEY, &ids)
             .await
             .unwrap();
         let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
         assert_eq!(got, ["GDP"]);
+        // The skipped id is reported for `crawler_curated_missing`.
+        assert_eq!(adapter.curated_missing(), ["NOPE"]);
     }
 
     #[tokio::test]
