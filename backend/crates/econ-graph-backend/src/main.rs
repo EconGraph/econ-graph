@@ -199,7 +199,7 @@ fn data_plane_for_series_check(
             let client = DataPlaneClient::new(&config)?;
             info!(
                 "🔎 createAnnotation checks series through the data plane at {} (Host: {}, timeout {:?})",
-                client.url(),
+                client.log_url(),
                 client.host().unwrap_or("from the URL"),
                 client.timeout()
             );
@@ -2167,7 +2167,7 @@ mod series_check_startup_tests {
     fn a_data_plane_url_is_used_without_a_data_database() {
         let (data_plane, lines) = logged(|| data_plane_for_series_check(false, Some(config())));
         let data_plane = data_plane.unwrap().expect("a data plane client");
-        assert_eq!(data_plane.url(), "http://gateway.example/data/graphql");
+        assert_eq!(data_plane.log_url(), "http://gateway.example/data/graphql");
         assert_eq!(data_plane.host(), Some("br-1.localhost"));
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(

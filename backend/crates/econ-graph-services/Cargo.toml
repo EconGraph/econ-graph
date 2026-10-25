@@ -43,3 +43,5 @@ serial_test.workspace = true
 rust_decimal_macros.workspace = true
 # In-process stand-in for the data plane's GraphQL endpoint
 wiremock.workspace = true
+# Captures log output in the tests that check no secret is logged
+tracing-subscriber.workspace = true

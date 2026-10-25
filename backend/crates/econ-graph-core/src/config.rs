@@ -258,6 +258,10 @@ pub enum DataGraphqlConfigError {
     /// URL is logged.
     #[error("DATA_GRAPHQL_URL must not contain a user name or password")]
     UrlWithCredentials,
+    /// `DATA_GRAPHQL_URL` has a query string or fragment. The endpoint needs neither, and either
+    /// could carry a secret into the logs.
+    #[error("DATA_GRAPHQL_URL must not contain a query string or fragment")]
+    UrlWithQueryOrFragment,
     /// `DATA_GRAPHQL_HOST` is not a host name (with an optional port).
     #[error("DATA_GRAPHQL_HOST={0:?} is not a host name")]
     InvalidHost(String),
@@ -267,6 +271,21 @@ pub enum DataGraphqlConfigError {
     /// `DATA_GRAPHQL_HOST` or `DATA_GRAPHQL_TIMEOUT_MS` is set without `DATA_GRAPHQL_URL`.
     #[error("{0} is set but DATA_GRAPHQL_URL is not")]
     WithoutUrl(&'static str),
+}
+
+/// `url` as it may be logged: `scheme://host[:port]/path`, without any user name, password,
+/// query string or fragment. A value that doesn't parse as a URL is replaced entirely.
+pub fn redacted_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => {
+            let host = parsed.host_str().unwrap_or_default();
+            match parsed.port() {
+                Some(port) => format!("{}://{host}:{port}{}", parsed.scheme(), parsed.path()),
+                None => format!("{}://{host}{}", parsed.scheme(), parsed.path()),
+            }
+        }
+        Err(_) => "<unparseable URL>".to_string(),
+    }
 }
 
 /// The data plane's GraphQL settings from the environment, or `None` when `DATA_GRAPHQL_URL`
@@ -296,6 +315,9 @@ pub fn data_graphql_config_from(
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(DataGraphqlConfigError::UrlWithCredentials);
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(DataGraphqlConfigError::UrlWithQueryOrFragment);
     }
     if let Some(host) = &host {
         let valid = host
@@ -650,7 +672,7 @@ mod tests {
 
     #[test]
     fn data_graphql_config_refuses_unusable_settings() {
-        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 9] = [
+        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 12] = [
             (
                 &[(DATA_GRAPHQL_URL, "gw.example/data/graphql")],
                 DataGraphqlConfigError::InvalidUrl,
@@ -670,6 +692,18 @@ mod tests {
             (
                 &[(DATA_GRAPHQL_URL, "http://:s3cret@gw/data/graphql")],
                 DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql?api_key=s3cret")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql?")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql#s3cret")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
             ),
             (
                 &[(DATA_GRAPHQL_URL, "http://gw/"), (DATA_GRAPHQL_HOST, "a b")],
@@ -696,6 +730,24 @@ mod tests {
             assert_eq!(refused, Err(expected));
             // The startup error never repeats a secret from the URL.
             assert!(!refused.unwrap_err().to_string().contains("s3cret"));
+        }
+    }
+
+    #[test]
+    fn redacted_url_keeps_only_scheme_host_port_and_path() {
+        for (url, redacted) in [
+            (
+                "http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql",
+                "http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql",
+            ),
+            (
+                "https://user:s3cret@gw:8443/data/graphql?api_key=s3cret#s3cret",
+                "https://gw:8443/data/graphql",
+            ),
+            ("http://127.0.0.1:9/graphql?", "http://127.0.0.1:9/graphql"),
+            ("not a url s3cret", "<unparseable URL>"),
+        ] {
+            assert_eq!(redacted_url(url), redacted, "{url}");
         }
     }
 }
