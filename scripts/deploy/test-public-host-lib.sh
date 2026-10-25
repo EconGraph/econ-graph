@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The stubs below are called by the sourced library; the scripts given to run_lib are
-# expanded there, not here.
-# shellcheck disable=SC2329,SC2016
+# The scripts given to run_lib are expanded in its subshell, not here.
+# The yq stub is called by the sourced library.
+# shellcheck disable=SC2016,SC2329
 # Tests for scripts/deploy/lib/public-host.sh against a stub kubectl, no cluster:
 #   - PUBLIC_HOST unset on a cluster that serves a public host (public Ingresses, or the
 #     retired econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
@@ -9,7 +9,20 @@
 #     removes use-forwarded-headers; no public host removes all of them again and
 #     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way,
 #     before any Ingress is applied (in public_host_init);
-#   - cloudflared gets 0 replicas without its Secret or without a public host.
+#   - cloudflared gets 0 replicas without its Secret or without a public host;
+#   - only a cluster marked production (scripts/deploy/lib/cluster-role.sh) runs
+#     cloudflared or takes a PUBLIC_HOST: unmarked or a marker copied from another cluster
+#     (kube-system UID mismatch) mean 0 replicas, a PUBLIC_HOST there stops the deploy
+#     before anything is applied, and a failed or empty lookup stops it without touching
+#     cloudflared;
+#   - every kubectl call goes to $KUBECTL (never the kubectl on PATH) on one pinned context;
+#   - deploy.sh and restart-k8s-rollout.sh leave cloudflared.yaml to apply_cloudflared,
+#     and no script applies it or the whole k8s/manifests directory itself.
+# And, with the same stubbed cluster:
+#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
+#   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
+#     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
+#     cloudflared before removing the marker and deletes the token only when told to.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -22,33 +35,86 @@ fail() {
   failures=$((failures + 1))
 }
 
-# run_lib SCRIPT: runs SCRIPT in a subshell with the library and a stub kubectl.
-# STUB_PUBLIC_HOST is what the cluster serves; STUB_SECRET=1 means cloudflare-tunnel exists.
-# Every kubectl call (and stdin piped to apply) is appended to $log.
 log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
+out="$(mktemp)"
+path_log="$(mktemp)"
+stub_dir="$(mktemp -d)"
+trap 'rm -rf "$log" "$out" "$path_log" "$stub_dir"' EXIT
+
+# The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
+# appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
+#   STUB_MARKER          production (made on this cluster, the default), copied (made on
+#                        another cluster), other-role, none, or fails (the lookup fails)
+#   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
+#   STUB_NO_CONTEXT=1    there is no current context
+#   STUB_PUBLIC_HOST     the host the public Ingresses serve; STUB_SSL_HOSTS the retired one's
+#   STUB_SECRET=1        cloudflare-tunnel exists (with a fake token); STUB_SECRET_FAILS=1
+#                        looking it up fails
+#   STUB_CLOUDFLARED_REPLICAS  the cloudflared Deployment's replicas (unset: no Deployment);
+#                        STUB_SCALE_FAILS=1 scaling it fails
+#   STUB_LOOKUP_FAILS=1, STUB_NO_NAMESPACE=1, STUB_DELETE_FAILS=1  the econ-graph namespace
+#                        lookup fails / finds nothing; deleting the retired Ingress fails
+cat >"$stub_dir/kubectl" <<'STUB'
+#!/usr/bin/env bash
+echo "kubectl $*" >>"$STUB_LOG"
+case "$*" in
+  *"config current-context"*) [ "${STUB_NO_CONTEXT:-0}" = 1 ] && exit 1; echo kind-test ;;
+  *"config view"*) echo https://127.0.0.1:6443 ;;
+  *"get namespace kube-system"*)
+    [ "${STUB_CLUSTER_FAILS:-0}" != 1 ] || exit 1
+    [ "${STUB_EMPTY_UID:-0}" = 1 ] || printf 'uid-this-cluster' ;;
+  *"get configmap econgraph-cluster-role"*)
+    case "${STUB_MARKER:-production}" in
+      production) printf 'production uid-this-cluster' ;;
+      copied) printf 'production uid-other-cluster' ;;
+      other-role) printf 'staging uid-this-cluster' ;;
+      fails) exit 1 ;;
+    esac ;;
+  *"get namespace econ-graph"*)
+    [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
+    [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
+  *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
+  *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
+  *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] || exit 1 ;;
+  *"get nodes"*"podCIDR"*) printf '10.244.0.0/24 10.244.1.0/24' ;;
+  *"get nodes"*) printf 'node-a node-b' ;;
+  *"get secret cloudflare-tunnel"*"{.data.token}"*)
+    # base64 of a fake token, not a real one.
+    [ "${STUB_SECRET:-0}" != 1 ] || printf 'ZmFrZS1leGlzdGluZy10dW5uZWwtdG9rZW4tMDAwMDAwMDAwMDAwMDAwMDAwMDAwMA==' ;;
+  *"get secret cloudflare-tunnel"*)
+    [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
+    [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
+  *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
+  *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
+  *"apply"*"-f -"*) sed 's/^/  stdin: /' >>"$STUB_LOG" ;;
+esac
+exit 0
+STUB
+chmod +x "$stub_dir/kubectl"
+# A different kubectl first on PATH, as on a host where kubectl is another cluster's
+# wrapper: nothing may call it. Checked at the end.
+mkdir "$stub_dir/path"
+printf '#!/usr/bin/env bash\necho "kubectl on PATH: $*" >>%q\nexit 1\n' "$path_log" >"$stub_dir/path/kubectl"
+chmod +x "$stub_dir/path/kubectl"
+export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
+
+# run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out.
 run_lib() {
   : >"$log"
   (
-    kubectl() {
-      echo "kubectl $*" >>"$log"
-      case "$*" in
-        *"get namespace econ-graph"*)
-          [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || return 1
-          [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
-        *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
-        *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
-        *"get nodes"*) printf '10.244.0.0/24 10.244.1.0/24' ;;
-        *"get secret cloudflare-tunnel"*) [ "${STUB_SECRET:-0}" = 1 ] ;;
-        *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] ;;
-        *"apply -f -"*) sed 's/^/  stdin: /' >>"$log" ;;
-      esac
+    # Only the '.spec.replicas = N' form apply_cloudflared uses.
+    yq() {
+      python3 -c 'import re, sys, yaml
+d = yaml.safe_load(open(sys.argv[2]))
+d["spec"]["replicas"] = int(re.fullmatch(r"\.spec\.replicas = (\d+)", sys.argv[1])[1])
+print(yaml.safe_dump(d))' "$1" "$2"
     }
-    yq() { python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); d["spec"]["replicas"]=0; print(yaml.safe_dump(d))' "$2"; }
+    unset CLUSTER_ROLE_CONTEXT
     # shellcheck source=scripts/deploy/lib/public-host.sh
     source scripts/deploy/lib/public-host.sh
     eval "$1"
-  ) >/dev/null 2>&1
+  ) >"$out" 2>&1
 }
 
 # Unset on a cluster serving econgraph.com: stop.
@@ -75,7 +141,8 @@ if PUBLIC_HOST="not a host" run_lib public_host_init; then
 fi
 
 # The retired Ingress goes in public_host_init, before anything applies an Ingress.
-PUBLIC_HOST=econgraph.com run_lib public_host_init
+PUBLIC_HOST=econgraph.com run_lib public_host_init ||
+  fail "public_host_init failed: $(cat "$out")"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public_host_init: econ-graph-ssl-ingress not deleted"
 
 # A failed delete stops: the old Ingress would keep serving the public names.
@@ -84,7 +151,8 @@ if PUBLIC_HOST='' STUB_DELETE_FAILS=1 run_lib public_host_init; then
 fi
 
 # With a public host: real-ip settings only, use-forwarded-headers removed.
-PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge'
+PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge' ||
+  fail "public host: deploy failed: $(cat "$out")"
 grep -q 'patch configmap ingress-nginx-controller' "$log" || fail "public host: ConfigMap not patched"
 grep -q '"enable-real-ip":"true","forwarded-for-header":"CF-Connecting-IP","proxy-real-ip-cidr":"10.244.0.0/24,10.244.1.0/24","use-forwarded-headers":null' "$log" ||
   fail "public host: wrong ingress-nginx settings: $(grep patch "$log")"
@@ -92,22 +160,297 @@ grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public host: eco
 grep -q 'delete ingress -l' "$log" && fail "public host: public Ingresses deleted"
 
 # Without one: every setting removed, public Ingresses deleted.
-PUBLIC_HOST='' run_lib 'public_host_init; apply_public_edge'
+PUBLIC_HOST='' run_lib 'public_host_init; apply_public_edge' ||
+  fail "no public host: deploy failed: $(cat "$out")"
 grep -q '"enable-real-ip":null,"forwarded-for-header":null,"proxy-real-ip-cidr":null,"use-forwarded-headers":null' "$log" ||
   fail "no public host: settings not removed: $(grep patch "$log")"
 grep -q 'delete ingress -l econgraph.io/public-host=true' "$log" || fail "no public host: public Ingresses kept"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "no public host: econ-graph-ssl-ingress not deleted"
 
-# cloudflared: 0 replicas without the Secret or without a public host, 1 with both.
-PUBLIC_HOST=econgraph.com STUB_SECRET=0 run_lib 'public_host_init; apply_cloudflared'
+# cloudflared on a marked cluster: 0 replicas without the Secret or without a public
+# host, 1 with both.
+PUBLIC_HOST=econgraph.com STUB_SECRET=0 run_lib 'public_host_init; apply_cloudflared' ||
+  fail "no Secret: apply_cloudflared failed: $(cat "$out")"
 grep -q 'stdin: .*replicas: 0' "$log" || fail "no Secret: cloudflared not at 0 replicas"
-PUBLIC_HOST='' STUB_SECRET=1 run_lib 'public_host_init; apply_cloudflared'
+PUBLIC_HOST='' STUB_SECRET=1 run_lib 'public_host_init; apply_cloudflared' ||
+  fail "no public host: apply_cloudflared failed: $(cat "$out")"
 grep -q 'stdin: .*replicas: 0' "$log" || fail "no public host: cloudflared not at 0 replicas"
-PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib 'public_host_init; apply_cloudflared'
-grep -q 'kubectl apply -f k8s/manifests/cloudflared.yaml' "$log" || fail "Secret and host: cloudflared not applied"
+PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib 'public_host_init; apply_cloudflared; [ "$CLOUDFLARED_DEPLOYED" = true ]' ||
+  fail "marked, Secret and host: apply_cloudflared failed: $(cat "$out")"
+grep -q 'stdin: .*replicas: 1' "$log" || fail "marked, Secret and host: cloudflared not at 1 replica"
+grep -q 'apply -f k8s/manifests/cloudflared.yaml' "$log" &&
+  fail "cloudflared.yaml applied as committed instead of with the replica count"
+# The Secret cannot be looked up: stop, and leave cloudflared as it is (a failed lookup
+# must not scale a running connector to 0).
+if PUBLIC_HOST=econgraph.com STUB_SECRET=1 STUB_SECRET_FAILS=1 run_lib apply_cloudflared; then
+  fail "a failed Secret lookup did not stop the deploy"
+fi
+grep -q 'apply' "$log" && fail "a failed Secret lookup changed cloudflared: $(grep apply "$log")"
+grep -q 'Could not look up the Secret cloudflare-tunnel' "$out" || fail "a failed Secret lookup was not reported"
+
+# The committed manifest never starts the connector by itself.
+grep -q '^  replicas: 0$' k8s/manifests/cloudflared.yaml || fail "cloudflared.yaml is not committed with replicas: 0"
+
+# Not production: 0 replicas even with the Secret, and a PUBLIC_HOST stops the deploy
+# before anything is applied.
+for marker in none copied other-role; do
+  PUBLIC_HOST='' STUB_SECRET=1 STUB_MARKER=$marker run_lib 'public_host_init; apply_cloudflared; [ "$CLOUDFLARED_DEPLOYED" = false ]' ||
+    fail "marker $marker, no public host: apply_cloudflared failed: $(cat "$out")"
+  grep -q 'stdin: .*replicas: 0' "$log" || fail "marker $marker: cloudflared not at 0 replicas"
+  grep -q 'stdin: .*replicas: [1-9]' "$log" && fail "marker $marker: cloudflared started"
+
+  if PUBLIC_HOST=econgraph.com STUB_SECRET=1 STUB_MARKER=$marker run_lib public_host_init; then
+    fail "marker $marker: PUBLIC_HOST accepted on a cluster that is not production"
+  fi
+  grep -q 'mark-production-cluster.sh' "$out" || fail "marker $marker: the refusal does not name mark-production-cluster.sh"
+  grep -Eq 'apply|delete|patch' "$log" && fail "marker $marker: the refused deploy changed the cluster: $(grep -E 'apply|delete|patch' "$log")"
+
+  # apply_cloudflared on its own refuses too, after stopping the connector.
+  if PUBLIC_HOST=econgraph.com STUB_SECRET=1 STUB_MARKER=$marker run_lib apply_cloudflared; then
+    fail "marker $marker: apply_cloudflared accepted a PUBLIC_HOST"
+  fi
+  grep -q 'stdin: .*replicas: 0' "$log" || fail "marker $marker, PUBLIC_HOST: cloudflared not at 0 replicas"
+  grep -q 'stdin: .*replicas: [1-9]' "$log" && fail "marker $marker, PUBLIC_HOST: cloudflared started"
+done
+PUBLIC_HOST=econgraph.com STUB_MARKER=copied run_lib public_host_init || true
+grep -q 'made on another cluster' "$out" || fail "copied marker: the refusal does not say it was made on another cluster"
+
+# The cluster cannot be asked for its identity or its marker: not production, and said
+# so. A PUBLIC_HOST stops the deploy before anything is applied, and apply_cloudflared
+# stops without touching cloudflared, so a failed lookup neither starts the connector nor
+# takes the site down.
+for case_env in STUB_CLUSTER_FAILS=1 STUB_EMPTY_UID=1 STUB_MARKER=fails; do
+  if (export "${case_env?}"; PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib public_host_init); then
+    fail "$case_env: a failed lookup counted as production"
+  fi
+  grep -q 'treated as not production' "$out" || fail "$case_env: a failed lookup was not reported"
+  grep -Eq 'apply|delete|patch' "$log" && fail "$case_env: the refused deploy changed the cluster"
+  for host in '' econgraph.com; do
+    if (export "${case_env?}"; PUBLIC_HOST=$host STUB_SECRET=1 run_lib apply_cloudflared); then
+      fail "$case_env, PUBLIC_HOST=$host: apply_cloudflared went on after a failed lookup"
+    fi
+    grep -q 'apply' "$log" && fail "$case_env, PUBLIC_HOST=$host: a failed lookup changed cloudflared"
+  done
+done
+
+# run_stubbed [VAR=value ...] COMMAND...: COMMAND with the stub kubectl, no terminal.
+run_stubbed() {
+  : >"$log"
+  env -u CLUSTER_ROLE_CONTEXT "$@" </dev/null >"$out" 2>&1
+}
+# run_in_terminal [VAR=value ...] COMMAND-STRING: the same under a terminal (script(1)),
+# with stdin fed to it.
+run_in_terminal() {
+  local cmd="${*: -1}"
+  : >"$log"
+  env -u CLUSTER_ROLE_CONTEXT "${@:1:$#-1}" script -qec "$cmd" /dev/null >"$out" 2>&1
+}
+have_script=false
+command -v script >/dev/null 2>&1 && have_script=true
+
+# --- create-secrets.sh: the tunnel token goes only into a marked cluster ---------
+fake_token="fake-tunnel-token-for-tests-00000000000000000000000"
+# Refused before anything is written, whichever way the marker check fails.
+for case_env in STUB_MARKER=none STUB_MARKER=copied STUB_MARKER=fails STUB_CLUSTER_FAILS=1 STUB_EMPTY_UID=1; do
+  if run_stubbed "$case_env" CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh; then
+    fail "create-secrets ($case_env): wrote the tunnel token into a cluster that is not production"
+  fi
+  grep -q 'create secret' "$log" && fail "create-secrets ($case_env): wrote Secrets before refusing the token"
+  grep -q 'mark-production-cluster.sh' "$out" ||
+    fail "create-secrets ($case_env): the refusal does not name mark-production-cluster.sh: $(cat "$out")"
+done
+# Marked: the token is written.
+run_stubbed STUB_MARKER=production CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused the tunnel token on a marked cluster: $(cat "$out")"
+grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
+  fail "create-secrets: the tunnel token was not written on a marked cluster"
+# No token given: as before on an unmarked cluster; a token already there is reported.
+run_stubbed STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: failed without a token on an unmarked cluster: $(cat "$out")"
+grep -q 'create secret generic cloudflare-tunnel' "$log" && fail "create-secrets: wrote cloudflare-tunnel without a token"
+run_stubbed STUB_MARKER=copied STUB_SECRET=1 scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: failed keeping a token on an unmarked cluster: $(cat "$out")"
+grep -q 'warning: cloudflare-tunnel holds a tunnel token' "$out" ||
+  fail "create-secrets: a token in an unmarked cluster was not reported"
+# --prompt-tunnel-token refuses before it prompts.
+if [ "$have_script" = true ]; then
+  if run_in_terminal STUB_MARKER=copied 'scripts/deploy/create-secrets.sh --prompt-tunnel-token' </dev/null; then
+    fail "create-secrets --prompt-tunnel-token: accepted an unmarked cluster"
+  fi
+  grep -q 'input hidden' "$out" && fail "create-secrets --prompt-tunnel-token: prompted on an unmarked cluster"
+  grep -q 'mark-production-cluster.sh' "$out" ||
+    fail "create-secrets --prompt-tunnel-token: the refusal is not shown: $(cat "$out")"
+fi
+
+# --- mark-production-cluster.sh ---------------------------------------------------
+mark=scripts/deploy/mark-production-cluster.sh
+writes='apply|delete|scale'
+run_stubbed STUB_MARKER=production "$mark" || fail "mark: failed on a marked cluster: $(cat "$out")"
+grep -q 'already marked' "$out" || fail "mark: a marked cluster was not reported as marked"
+grep -Eq "$writes" "$log" && fail "mark: changed a marked cluster"
+run_stubbed STUB_MARKER=copied "$mark" --dry-run || fail "mark --dry-run failed: $(cat "$out")"
+grep -q 'made on another cluster' "$out" || fail "mark --dry-run: a copied marker was not reported"
+grep -q 'kube-system-uid=uid-this-cluster' "$out" || fail "mark --dry-run: does not show this cluster's UID"
+grep -Eq "$writes" "$log" && fail "mark --dry-run: changed the cluster"
+if run_stubbed STUB_MARKER=none "$mark"; then
+  fail "mark: went on without a terminal"
+fi
+grep -Eq "$writes" "$log" && fail "mark without a terminal: changed the cluster"
+if run_stubbed STUB_MARKER=production "$mark" --unmark; then
+  fail "mark --unmark: went on without a terminal"
+fi
+grep -Eq "$writes" "$log" && fail "mark --unmark without a terminal: changed the cluster"
+run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=0 "$mark" --unmark ||
+  fail "mark --unmark: failed on an unmarked cluster: $(cat "$out")"
+grep -q 'nothing to do' "$out" || fail "mark --unmark: an unmarked cluster without cloudflared running was not left alone"
+grep -Eq "$writes" "$log" && fail "mark --unmark: changed an unmarked cluster"
+# No marker but cloudflared still running: --unmark still stops it (a deploy with
+# PUBLIC_HOST would refuse before scaling it down).
+run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run failed: $(cat "$out")"
+grep -q 'would scale deployment/cloudflared' "$out" || fail "mark --unmark --dry-run: a running cloudflared without a marker is not stopped"
+grep -q 'would delete ConfigMap' "$out" && fail "mark --unmark --dry-run: would delete a marker that does not exist"
+grep -Eq "$writes" "$log" && fail "mark --unmark --dry-run: changed the cluster"
+if run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark; then
+  fail "mark --unmark: stopped cloudflared without a terminal, or did nothing"
+fi
+# --unmark warns on the live production cluster, also in a dry run.
+run_stubbed STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run on production failed: $(cat "$out")"
+grep -q 'WARNING: context kind-test is the cluster marked production' "$out" ||
+  fail "mark --unmark --dry-run: no warning on the production cluster"
+# A token without a marker or a running connector is still something to unmark.
+run_stubbed STUB_MARKER=none STUB_SECRET=1 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run with a token failed: $(cat "$out")"
+grep -q 'would offer to delete Secret econ-graph/cloudflare-tunnel' "$out" ||
+  fail "mark --unmark --dry-run: a token on an unmarked cluster is not offered for deletion"
+# --unmark works on econ-graph, whatever NAMESPACE says.
+run_stubbed NAMESPACE=elsewhere STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark --dry-run || true
+grep -q -- '-n elsewhere' "$log" && fail "mark --unmark: followed NAMESPACE instead of econ-graph"
+grep -q -- '-n econ-graph get deployment cloudflared' "$log" || fail "mark --unmark: did not look in econ-graph"
+if run_stubbed STUB_CLUSTER_FAILS=1 "$mark" --dry-run; then
+  fail "mark: went on without the cluster's kube-system UID"
+fi
+if run_stubbed STUB_EMPTY_UID=1 "$mark" --dry-run; then
+  fail "mark: went on with an empty kube-system UID"
+fi
+if [ "$have_script" = true ]; then
+  # The confirmation shows the cluster's identity and wants the kube-system UID's first 8
+  # characters ("uid-this" here): a wrong answer, or the shared context name, changes
+  # nothing.
+  for answer in wrong kind-test; do
+    if printf '%s\n' "$answer" | run_in_terminal STUB_MARKER=none "$mark"; then
+      fail "mark: the confirmation '$answer' was accepted"
+    fi
+    grep -Eq "$writes" "$log" && fail "mark: the confirmation '$answer' changed the cluster"
+  done
+  for shown in 'this host' 'API server .*https://127.0.0.1:6443' 'nodes .*node-a node-b' 'kube-system UID uid-this-cluster'; do
+    grep -Eq "$shown" "$out" || fail "mark: the confirmation does not show '$shown': $(cat "$out")"
+  done
+  # The right answer writes the marker (the stub cluster still reports no marker
+  # afterwards, so the final check fails, as it must for a marker that does not check out).
+  printf 'uid-this\n' | run_in_terminal STUB_MARKER=none "$mark" || true
+  grep -q 'create configmap econgraph-cluster-role --from-literal=role=production --from-literal=kube-system-uid=uid-this-cluster' "$log" ||
+    fail "mark: the confirmed marker was not written: $(cat "$out")"
+
+  # --unmark scales cloudflared to 0 before it deletes the marker, and keeps the token
+  # unless told to delete it...
+  printf 'uid-this\n\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 STUB_SECRET=1 "$mark --unmark" ||
+    fail "mark --unmark failed: $(cat "$out")"
+  grep -Eo 'scale deployment/cloudflared --replicas=0|delete configmap econgraph-cluster-role' "$log" | tr '\n' ' ' |
+    grep -q '^scale deployment/cloudflared --replicas=0 delete configmap econgraph-cluster-role $' ||
+    fail "mark --unmark: did not scale cloudflared, then delete the marker: $(grep -E 'scale|delete' "$log")"
+  grep -q 'delete secret' "$log" && fail "mark --unmark: deleted the token without being told to"
+  grep -q 'kept Secret econ-graph/cloudflare-tunnel' "$out" || fail "mark --unmark: did not say the token was kept"
+  # On the live production cluster it warns, before the confirmation.
+  warning_line="$(grep -n 'WARNING: context kind-test is the cluster marked production' "$out" | cut -d: -f1 || true)"
+  prompt_line="$(grep -n 'Type the first 8 characters' "$out" | cut -d: -f1 || true)"
+  [ -n "$warning_line" ] && [ -n "$prompt_line" ] && [ "$warning_line" -lt "$prompt_line" ] ||
+    fail "mark --unmark: no warning before the confirmation on the production cluster: $(cat "$out")"
+  # End of input at the token prompt keeps the token (and does not fail).
+  printf 'uid-this\n' | run_in_terminal STUB_MARKER=none STUB_SECRET=1 "$mark --unmark" ||
+    fail "mark --unmark: end of input at the token prompt failed: $(cat "$out")"
+  grep -q 'delete secret' "$log" && fail "mark --unmark: end of input deleted the token"
+  grep -q 'kept Secret econ-graph/cloudflare-tunnel' "$out" || fail "mark --unmark: end of input did not say the token was kept"
+  grep -q 'WARNING' "$out" && fail "mark --unmark: warned about production on an unmarked cluster"
+  # ...deletes it when told to...
+  printf 'uid-this\ndelete\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=0 STUB_SECRET=1 "$mark --unmark" ||
+    fail "mark --unmark (delete the token) failed: $(cat "$out")"
+  grep -q -- '-n econ-graph delete secret cloudflare-tunnel' "$log" || fail "mark --unmark: did not delete the token when told to"
+  # ...and keeps the marker when scaling fails.
+  if printf 'uid-this\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 STUB_SCALE_FAILS=1 "$mark --unmark"; then
+    fail "mark --unmark: went on after failing to scale cloudflared"
+  fi
+  grep -q 'delete configmap' "$log" && fail "mark --unmark: deleted the marker although cloudflared was not scaled to 0"
+fi
+
+# --- one kubectl, one context --------------------------------------------------------
+# A full deploy pass: every call goes to $KUBECTL with the pinned context.
+PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib 'public_host_init; apply_public_edge; apply_cloudflared' ||
+  fail "full deploy pass failed: $(cat "$out")"
+grep '^kubectl ' "$log" | grep -v 'config current-context' | grep -v -- '--context kind-test' &&
+  fail "a kubectl call did not use the pinned context"
+grep -q '^kubectl config current-context' "$log" || fail "the context was not pinned"
+# No current context: stop before anything else.
+if PUBLIC_HOST='' STUB_NO_CONTEXT=1 run_lib public_host_init; then
+  fail "public_host_init went on without a current context"
+fi
+# A CLUSTER_ROLE_CONTEXT inherited from the environment (another cluster's) does not
+# redirect a deploy: cluster_role_use_context replaces it, as deploy.sh and
+# restart-k8s-rollout.sh do, and their kubectl wrapper sends their own calls through kc.
+PUBLIC_HOST='' STUB_SECRET=1 run_lib 'export CLUSTER_ROLE_CONTEXT=prod-elsewhere
+  cluster_role_use_context kind-test; kubectl() { kc "$@"; }
+  public_host_init; apply_public_edge; apply_cloudflared; kubectl get nodes' ||
+  fail "deploy pass after cluster_role_use_context failed: $(cat "$out")"
+grep -q 'prod-elsewhere' "$log" && fail "an inherited CLUSTER_ROLE_CONTEXT redirected the deploy: $(grep prod-elsewhere "$log")"
+grep -q '^kubectl config use-context kind-test' "$log" || fail "cluster_role_use_context did not switch the context"
+grep '^kubectl ' "$log" | grep -v 'config use-context' | grep -v -- '--context kind-test' &&
+  fail "a call of the deploy pass did not use the pinned context"
+grep -q '^kubectl --context kind-test get nodes' "$log" || fail "the kubectl wrapper did not go through kc"
+# mark-production-cluster.sh ignores an inherited CLUSTER_ROLE_CONTEXT too.
+run_stubbed CLUSTER_ROLE_CONTEXT=prod-elsewhere STUB_MARKER=production "$mark" ||
+  fail "mark: failed with an inherited CLUSTER_ROLE_CONTEXT: $(cat "$out")"
+grep -q 'prod-elsewhere' "$log" && fail "mark: followed an inherited CLUSTER_ROLE_CONTEXT"
+# The kubectl first on PATH (another cluster's) was never called, by any test above.
+[ ! -s "$path_log" ] || fail "calls went to the kubectl on PATH instead of \$KUBECTL: $(cat "$path_log")"
+# With KUBECTL unset, the wrapper reaches the kubectl binary on PATH through kc, once,
+# instead of calling itself.
+timeout 20 env -u KUBECTL CLUSTER_ROLE_CONTEXT=ctx bash -c \
+  'source scripts/deploy/lib/cluster-role.sh; kubectl() { kc "$@"; }; kubectl version' >/dev/null 2>&1 || true
+[ "$(cat "$path_log")" = "kubectl on PATH: --context ctx version" ] ||
+  fail "the kubectl wrapper without KUBECTL did not call the binary once: $(cat "$path_log")"
+: >"$path_log"
+
+# --- static: who applies cloudflared.yaml ----------------------------------------------
+for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
+  grep -q '^apply_cloudflared$' "$script" || fail "$script does not call apply_cloudflared"
+done
+grep -q 'cloudflared.yaml) continue' scripts/deploy/restart-k8s-rollout.sh ||
+  fail "restart-k8s-rollout.sh does not skip cloudflared.yaml in its manifest loop"
+# Both pin their context and send every kubectl call through kc before the first deploy step.
+for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
+  pin="$(grep -n '^if ! cluster_role_use_context ' "$script" | cut -d: -f1 || true)"
+  wrap="$(grep -nF 'kubectl() { kc "$@"; }' "$script" | cut -d: -f1 || true)"
+  init="$(grep -n '^public_host_init$' "$script" | cut -d: -f1 || true)"
+  first="$(grep -nE '^[^#]*\bkubectl (apply|get|wait|delete|patch|rollout|scale|create)' "$script" | head -1 | cut -d: -f1 || true)"
+  if ! { [ -n "$pin" ] && [ -n "$wrap" ] && [ "$pin" -lt "$wrap" ] && [ "$wrap" -lt "$init" ] &&
+    { [ -z "$first" ] || [ "$wrap" -lt "$first" ]; }; }; then
+    fail "$script does not pin its context and wrap kubectl before using it (pin $pin, wrap $wrap, init $init, first call $first)"
+  fi
+done
+grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
+  fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
+# Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
+# stop the connector on production, since the manifest is committed with 0 replicas), or
+# k8s/ recursively or through kustomize.
+offenders="$(grep -rnE '\bapply\b' scripts --include='*.sh' |
+  grep -E -e '[[:space:]](-k|--kustomize)([[:space:]=]|$)' -e '[[:space:]](-R|--recursive)([[:space:]=]|$)' \
+    -e '(-f|--filename)[[:space:]=]"?[^[:space:]"]*(cloudflared\.yaml|k8s/?|manifests/?)("|[[:space:]]|$)' |
+  grep -v -e '^scripts/deploy/lib/public-host.sh:' -e '^scripts/deploy/test-' || true)"
+[ -z "$offenders" ] || fail "scripts apply cloudflared.yaml or k8s/manifests wholesale: $offenders"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"
   exit 1
 fi
-echo "public-host.sh: all checks passed"
+echo "public-host.sh, create-secrets.sh and mark-production-cluster.sh: all checks passed"

@@ -71,8 +71,19 @@ if ! kind get clusters | grep -q "econ-graph"; then
     exit 1
 fi
 
-# Set kubectl context
-kubectl config use-context kind-econ-graph
+# One kubectl, one cluster for the whole deploy: switch ${KUBECTL:-kubectl} to
+# kind-econ-graph and pin it (replacing any CLUSTER_ROLE_CONTEXT from the
+# environment), then send every kubectl call below through kc, the same binary
+# and context the production check uses (scripts/deploy/lib/cluster-role.sh).
+# Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
+# public routes and stop its tunnel connector.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_use_context kind-econ-graph; then
+    echo "❌ ${KUBECTL:-kubectl} has no context kind-econ-graph"
+    exit 1
+fi
+kubectl() { kc "$@"; }
 
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves

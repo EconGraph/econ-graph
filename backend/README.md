@@ -289,8 +289,10 @@ as documented above, does not start a backend.
 
 ### **Kubernetes Deployment**
 ```bash
-# Deploy to Kubernetes (from backend/)
-kubectl apply -f ../k8s/manifests/
+# Deploy to Kubernetes (from the repository root). Don't run
+# `kubectl apply -f k8s/manifests/`: cloudflared.yaml is committed with 0 replicas,
+# so that stops the tunnel connector on the production cluster.
+PUBLIC_HOST= ./scripts/deploy/deploy.sh   # PUBLIC_HOST=econgraph.com on production
 
 # Monitor deployment
 kubectl get pods -n econ-graph -l app=econ-graph-backend

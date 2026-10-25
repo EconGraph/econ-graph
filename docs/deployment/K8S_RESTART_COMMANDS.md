@@ -68,7 +68,12 @@ cd ..
 # ingress.yaml first: graphql-ingress.yaml sorts before it and would clash with
 # an older ingress.yaml that still routes /graphql
 kubectl apply -f k8s/manifests/ingress.yaml
-kubectl apply -f k8s/manifests/
+# Every manifest except cloudflared.yaml: it is committed with 0 replicas, so
+# applying it stops the tunnel connector. scripts/deploy/deploy.sh and
+# restart-k8s-rollout.sh start it, on the production cluster only.
+for f in k8s/manifests/*.yaml; do
+  [ "${f##*/}" = cloudflared.yaml ] || kubectl apply -f "$f"
+done
 kubectl apply -f k8s/monitoring/
 ```
 
