@@ -205,7 +205,9 @@ scripts/deploy/create-secrets.sh --prompt-tunnel-token
 ```
 
 It reads from the terminal only, refuses piped input, and refuses a cluster that is not
-marked production. Don't put the token on a command line (`CLOUDFLARE_TUNNEL_TOKEN=...`),
+marked production. On the kind cluster, `scripts/deploy/set-crawler-keys.sh --tunnel` does
+the same (it refuses an unmarked cluster before asking) and then starts cloudflared through
+`apply_cloudflared`, for the public host the cluster serves. Don't put the token on a command line (`CLOUDFLARE_TUNNEL_TOKEN=...`),
 where shell history keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0
 replicas and says so. If a cluster that is not marked already holds the Secret,
 `create-secrets.sh` keeps it and warns; delete it there with
@@ -298,9 +300,11 @@ How the scripts use the marker:
   `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
 - The check and every kubectl call of `deploy.sh`, `restart-k8s-rollout.sh`, the deploy
   library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
-  context: `deploy.sh` pins `kind-econ-graph` and `restart-k8s-rollout.sh` pins `microk8s`
-  (replacing any `CLUSTER_ROLE_CONTEXT` in the environment), and scripts they start
-  inherit it. So the check and the writes it allows cannot reach different clusters.
+  context: `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own
+  kubectl (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`;
+  `restart-k8s-rollout.sh` pins `microk8s`. Each replaces any `CLUSTER_ROLE_CONTEXT` in
+  the environment, and scripts they start inherit the pin. So the check and the writes it
+  allows cannot reach different clusters.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not
   production, and the scripts say so. The deploy then stops with cloudflared left as it is,
   as it does when the Secret `cloudflare-tunnel` cannot be looked up: a failed lookup never

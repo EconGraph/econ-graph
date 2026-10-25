@@ -212,6 +212,10 @@ re-run only verifies.
 
 **If `deploy.sh` fails in step 7**, the databases are already restored on the
 subvolumes. Fix the cause and re-run the migration script, or run `deploy.sh`.
+The recreated cluster has a new kube-system UID, so it is not marked production
+(see "Production marker" in `k8s/README.md`). With `PUBLIC_HOST` set, `deploy.sh`
+stops there before applying anything. On production, run
+`scripts/deploy/mark-production-cluster.sh`, then re-run the migration script.
 
 ### Rollback
 
@@ -265,10 +269,19 @@ Run each step with `--dry-run` first. Every step can be re-run.
    scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/20261024T052524Z --expect-series 10528 --expect-data-points 503001
    ```
 
-4. Everything else:
+4. Mark the new cluster as production. It has a new kube-system UID, so no
+   earlier marker counts, and without one `deploy.sh` refuses `PUBLIC_HOST`
+   and cloudflared stays at 0 replicas (see "Production marker" in
+   `k8s/README.md`):
 
    ```bash
-   scripts/deploy/deploy.sh
+   scripts/deploy/mark-production-cluster.sh
+   ```
+
+5. Everything else:
+
+   ```bash
+   PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh
    ```
 
 The rootful daemon still had a kind cluster named `econ-graph` from

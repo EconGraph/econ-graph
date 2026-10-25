@@ -22,7 +22,10 @@
 #   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
-#     cloudflared before removing the marker and deletes the token only when told to.
+#     cloudflared before removing the marker and deletes the token only when told to;
+#   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
+#     asks for the token, and on a marked one starts cloudflared only through
+#     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -438,6 +441,15 @@ for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
     fail "$script does not pin its context and wrap kubectl before using it (pin $pin, wrap $wrap, init $init, first call $first)"
   fi
 done
+# deploy.sh pins the kind kubectl that ensure_kind_kubectl set up (lib/kind-env.sh), not
+# whatever KUBECTL or PATH says: on a host where kubectl is another cluster's wrapper.
+kubectl_line="$(grep -n '^export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"$' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
+ensure_line="$(grep -n '^ensure_kind_kubectl$' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
+pin_line="$(grep -n '^if ! cluster_role_use_context kind-econ-graph' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
+if ! { [ -n "$kubectl_line" ] && [ -n "$ensure_line" ] && [ -n "$pin_line" ] &&
+  [ "$ensure_line" -lt "$kubectl_line" ] && [ "$kubectl_line" -lt "$pin_line" ]; }; then
+  fail "deploy.sh does not pin the kind kubectl before its context (ensure $ensure_line, KUBECTL $kubectl_line, pin $pin_line)"
+fi
 grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
   fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
 # Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
@@ -449,8 +461,71 @@ offenders="$(grep -rnE '\bapply\b' scripts --include='*.sh' |
   grep -v -e '^scripts/deploy/lib/public-host.sh:' -e '^scripts/deploy/test-' || true)"
 [ -z "$offenders" ] || fail "scripts apply cloudflared.yaml or k8s/manifests wholesale: $offenders"
 
+# --- set-crawler-keys.sh --tunnel (kind cluster, lib/kind-env.sh) --------------------
+# The kind kubectl ensure_kind_kubectl expects, already in place: ${XDG_CACHE_HOME}/econgraph
+# holds bin/kubectl (first on PATH) and kubeconfig-econ-graph (KUBECONFIG), so it is used
+# as it is. set-crawler-keys.sh runs create-secrets.sh with a scrubbed environment, so that
+# kubectl reads the stub settings from $stub_dir/stub.env rather than the environment.
+kind_dir="$stub_dir/cache/econgraph"
+mkdir -p "$kind_dir/bin"
+: >"$kind_dir/kubeconfig-econ-graph"
+printf '#!/usr/bin/env bash\nset -a\n. %q\nset +a\nexec %q "$@"\n' "$stub_dir/stub.env" "$stub_dir/kubectl" >"$kind_dir/bin/kubectl"
+printf '#!/usr/bin/env bash\necho "27.0 /var/lib/docker [name=seccomp]"\n' >"$kind_dir/bin/docker"
+cat >"$kind_dir/bin/yq" <<'STUB'
+#!/usr/bin/env python3
+# Only the '.spec.replicas = N' form apply_cloudflared uses.
+import re, sys, yaml
+d = yaml.safe_load(open(sys.argv[2]))
+d["spec"]["replicas"] = int(re.fullmatch(r"\.spec\.replicas = (\d+)", sys.argv[1])[1])
+print(yaml.safe_dump(d))
+STUB
+chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$kind_dir/bin/yq"
+keys=scripts/deploy/set-crawler-keys.sh
+# run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
+# and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
+run_keys() {
+  printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
+  : >"$log"
+  printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+    PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
+    script -qec "$keys $2" /dev/null >"$out" 2>&1
+}
+if [ "$have_script" = true ]; then
+  # Not production: refused before the prompt, nothing written or started.
+  if run_keys 'STUB_MARKER=none STUB_SECRET=1 STUB_CLOUDFLARED_REPLICAS=0' --tunnel "$fake_token"$'\n'; then
+    fail "set-crawler-keys --tunnel: accepted a cluster that is not production"
+  fi
+  grep -q 'Enter each key' "$out" && fail "set-crawler-keys --tunnel: prompted on a cluster that is not production"
+  grep -q 'mark-production-cluster.sh' "$out" || fail "set-crawler-keys --tunnel: the refusal is not shown: $(cat "$out")"
+  grep -Eq 'create secret|apply|scale|rollout' "$log" && fail "set-crawler-keys --tunnel: changed a cluster that is not production"
+  run_keys 'STUB_MARKER=copied' '--tunnel --dry-run' || fail "set-crawler-keys --tunnel --dry-run failed: $(cat "$out")"
+  grep -q 'would refuse the tunnel token' "$out" || fail "set-crawler-keys --tunnel --dry-run: no refusal on a copied marker"
+
+  # Production with a public host: the token is written, then cloudflared is started by
+  # apply_cloudflared (1 replica) and restarted; never scaled directly.
+  run_keys 'STUB_MARKER=production STUB_SECRET=1 STUB_CLOUDFLARED_REPLICAS=0 STUB_PUBLIC_HOST=econgraph.com' \
+    --tunnel "$fake_token"$'\n' || fail "set-crawler-keys --tunnel failed on production: $(cat "$out")"
+  grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
+    fail "set-crawler-keys --tunnel: the token was not written: $(cat "$out")"
+  grep -q 'stdin: .*replicas: 1' "$log" || fail "set-crawler-keys --tunnel: cloudflared not started through apply_cloudflared"
+  grep -q 'rollout restart deployment/cloudflared' "$log" || fail "set-crawler-keys --tunnel: cloudflared not restarted"
+  grep -q 'scale deployment/cloudflared' "$log" && fail "set-crawler-keys --tunnel: scaled cloudflared directly"
+  grep '^kubectl ' "$log" | grep -v 'config use-context kind-econ-graph' | grep -v -- '--context kind-econ-graph' &&
+    fail "set-crawler-keys --tunnel: a call did not use the kind context"
+  grep -q 'prod-elsewhere' "$log" && fail "set-crawler-keys --tunnel: followed an inherited CLUSTER_ROLE_CONTEXT"
+
+  # Production without a public host yet: token written, cloudflared left at 0.
+  run_keys 'STUB_MARKER=production STUB_SECRET=1 STUB_CLOUDFLARED_REPLICAS=0' --tunnel "$fake_token"$'\n' ||
+    fail "set-crawler-keys --tunnel failed without a public host: $(cat "$out")"
+  grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
+  grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
+    fail "set-crawler-keys --tunnel: started cloudflared without a public host"
+  # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
+  [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"
   exit 1
 fi
-echo "public-host.sh, create-secrets.sh and mark-production-cluster.sh: all checks passed"
+echo "public-host.sh, create-secrets.sh, mark-production-cluster.sh and set-crawler-keys.sh: all checks passed"
