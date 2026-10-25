@@ -24,12 +24,6 @@ KIND_CONTROL_PLANE="${KIND_CLUSTER}-control-plane"
 KIND_STORAGE_NODE="${KIND_CLUSTER}-worker"
 NAMESPACE="${NAMESPACE:-econ-graph}"
 
-# The public host this cluster serves (ECO-457): deploy.sh adds it to the
-# ingress, Keycloak, the realm and the backend (scripts/deploy/render-public-host.py),
-# and the cloudflared tunnel carries https://econgraph.com to it. Set
-# PUBLIC_HOST= (empty) to deploy for http://localhost only.
-PUBLIC_HOST="${PUBLIC_HOST-econgraph.com}"
-
 HOST_DATA_PLANE="/srv/econgraph/data-plane"
 HOST_APP_PROD="/srv/econgraph/app-prod"
 HOST_PG_DIR="${HOST_DATA_PLANE}/pg"
