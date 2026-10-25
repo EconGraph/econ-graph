@@ -17,13 +17,21 @@ moving the live deployment onto it, and recovering production.
 
 | Host path | Subvolume | Contents |
 |---|---|---|
-| `/srv/econgraph/data-plane/pg/` | `@econgraph-data-plane` | `postgresql-0`, database `econ_graph` (`PGDATA` = `pg/pgdata`) |
+| `/srv/econgraph/data-plane/pg/` | `@econgraph-data-plane` | `postgresql-0`, the data database `econ_graph` (`PGDATA` = `pg/pgdata`) |
 | `/srv/econgraph/data-plane/objects/` | `@econgraph-data-plane` | reserved for Parquet/Iceberg |
-| `/srv/econgraph/app-prod/keycloak-pg/` | `@econgraph-app-prod` | `keycloak-postgres-0` (`PGDATA` = `keycloak-pg/18/docker`); later the app database |
+| `/srv/econgraph/app-prod/app-pg/` | `@econgraph-app-prod` | `app-postgres-0`, the app database `econ_graph_app` (`PGDATA` = `app-pg/pgdata`) |
+| `/srv/econgraph/app-prod/keycloak-pg/` | `@econgraph-app-prod` | `keycloak-postgres-0` (`PGDATA` = `keycloak-pg/18/docker`) |
 | `/srv/econgraph/snapshots/` | `@econgraph-snapshots` | read-only snapshots |
 
 `pg/` and `objects/` share one subvolume, so a single snapshot of it is
-consistent across both.
+consistent across both. `app-pg/` and `keycloak-pg/` share the other, so the
+app plane (the app database and its sign-in) snapshots as one unit.
+
+| Database | StatefulSet | PV | Secret |
+|---|---|---|---|
+| data, `econ_graph` | `postgresql` | `econgraph-data-plane-pg` | `econ-graph-postgres` |
+| app, `econ_graph_app` | `app-postgres` | `econgraph-app-prod-app-pg` | `econ-graph-app-postgres` |
+| Keycloak, `keycloak` | `keycloak-postgres` | `econgraph-app-prod-keycloak-pg` | `econ-graph-keycloak` |
 
 `scripts/host/setup-subvolumes.sh` (needs sudo) creates the subvolumes, adds
 them to `/etc/fstab` and mounts them, with the subvolume roots owned by
@@ -36,26 +44,32 @@ the operator account (`<operator>`). Everything after that runs without sudo.
   `econ-graph-worker` at the same paths, and labels that node
   `econgraph.io/host-storage=true`.
 - `k8s/manifests/host-storage.yaml` defines the StorageClass `econgraph-host`
-  (no provisioner, `Retain`) and two static `hostPath` PersistentVolumes,
-  `econgraph-data-plane-pg` and `econgraph-app-prod-keycloak-pg`. Each one is
-  pinned to the labelled node and pre-bound by `claimRef` to its StatefulSet's
-  PVC. Both StatefulSets also set `nodeSelector` to that label and name their PV
-  in `volumeClaimTemplates`.
+  (no provisioner, `Retain`) and three static `hostPath` PersistentVolumes,
+  `econgraph-data-plane-pg`, `econgraph-app-prod-app-pg` and
+  `econgraph-app-prod-keycloak-pg`. Each one is pinned to the labelled node and
+  pre-bound by `claimRef` to its StatefulSet's PVC. The StatefulSets also set
+  `nodeSelector` to that label and name their PV in `volumeClaimTemplates`.
 - The `hostPath` type is `Directory`, not `DirectoryOrCreate`. If the bind mount
   is missing (the subvolume failed to mount at boot, since fstab uses
   `nofail`), the pod fails to start. It does not quietly initialise an empty
   database inside the node container.
 - `scripts/deploy/apply-host-storage.sh`, which `deploy.sh` runs before
   anything touches Postgres, checks the host mounts and the node's bind mounts,
-  creates `pg/` and `keycloak-pg/` if they are missing, and applies the PVs. A
-  PV left `Released` by a deleted PVC (after `teardown.sh` deletes the
-  namespace) is re-armed so the new PVC binds to the same directory. It also
-  stops if a data directory already holds a database but the Secret with that
-  database's passwords is missing. Generating new passwords would lock the apps
-  out of the database.
-- No script deletes these PVs or their directories. `teardown.sh` leaves them
-  alone and takes a host-side dump first. `recreate-kind-cluster.sh` takes a
-  dump and asks for a typed confirmation before deleting the cluster.
+  creates `pg/`, `app-pg/` and `keycloak-pg/` if they are missing, and applies
+  the PVs. A PV left `Released` by a deleted PVC (after
+  `teardown.sh --include-data-plane` deletes the namespace, or after a PVC is
+  deleted by hand) is re-armed so the new PVC binds to the same directory. It
+  also stops if a data directory already holds a database but the Secret with
+  that database's passwords is missing. Generating new passwords would lock the
+  apps out of the database.
+- No script deletes these PVs or their directories. `teardown.sh` takes a
+  host-side dump of all three databases first and, by default, removes only
+  the app plane (the app and Keycloak StatefulSets, not their PVCs or
+  Secrets); the data plane goes only with `--include-data-plane` and the data
+  database's name typed on a terminal. `released-pvs.sh` never deletes a PV
+  labelled `econgraph.io/protected=true`, which these three are.
+  `recreate-kind-cluster.sh` takes a dump and asks for a confirmation before
+  deleting the cluster, and `terraform destroy` doesn't delete it.
 
 ## Which Docker daemon
 
@@ -98,7 +112,7 @@ Postgres runs as UID 999 and must create and own its data directory, mode
 `init-data-dir` initContainer. It runs as root with only `CHOWN`, `FOWNER` and
 `DAC_READ_SEARCH`, and it:
 
-1. chowns the volume root to 999:999 with mode 0700. That root is `pg/` or
+1. chowns the volume root to 999:999 with mode 0700. That root is `pg/`, `app-pg/` or
    `keycloak-pg/`, never the subvolume root: snapshots need the subvolume
    roots to stay owned by the operator account.
 2. If `PGDATA` exists but isn't owned by 999 (for example after a copy that
@@ -107,7 +121,7 @@ Postgres runs as UID 999 and must create and own its data directory, mode
 
 What this means in practice:
 
-- On the host, `pg/` and `keycloak-pg/` and everything in them belong to
+- On the host, `pg/`, `app-pg/` and `keycloak-pg/` and everything in them belong to
   **999:999**, mode 0700. The operator account can't list or read them directly.
   The subvolume roots stay the operator account's, so unprivileged
   `btrfs subvolume snapshot -r` still works.
@@ -241,8 +255,8 @@ Run each step with `--dry-run` first. Every step can be re-run.
    scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/20261024T052524Z/local-images.txt
    ```
 
-3. Databases: namespace, the saved Secrets, PVs and both Postgres
-   StatefulSets, then both restores. It stops with
+3. Databases: namespace, the saved Secrets, PVs and the Postgres
+   StatefulSets, then the restores. It stops with
    `RESTORE VERIFICATION FAILED` unless `counts.env` says 10,528 series and
    503,001 data points and the restored database has exactly the counts in
    `counts.env`:
@@ -275,6 +289,41 @@ orders dockerd after the two mounts.
 kubeadm's certificates in a kind cluster expire one year after it is created.
 That is what stopped the 2025 cluster. Renew them, or recreate the cluster,
 before then.
+
+## The app database on an existing cluster
+
+`deploy.sh` creates `app-pg/`, the PV `econgraph-app-prod-app-pg`, the Secret
+`econ-graph-app-postgres` and the StatefulSet `app-postgres` wherever they are
+missing, and leaves everything else as it is. It moves no rows: on a cluster
+whose `app-database-url` names the data database (`APP_DATABASE=shared`, see
+`k8s/README.md`), the app keeps using the data database until its rows are
+moved and `create-secrets.sh` runs with `APP_DATABASE=separate`. Until the
+StatefulSet exists, the nightly dump skips the app database and notes it in
+its `MANIFEST`.
+
+## Testing on a scratch cluster
+
+The scripts can run against a throwaway kind cluster whose storage node
+bind-mounts scratch directories instead of `/srv/econgraph`:
+
+1. Create two btrfs subvolumes you own, e.g. `btrfs subvolume create
+   ~/scratch/data-plane ~/scratch/app-prod` (no sudo; they need not be mount
+   points).
+2. Copy `terraform/k8s/kind-config.yaml`, drop the `extraPortMappings` (or move
+   them to unused loopback ports), and point the worker's `extraMounts`
+   `hostPath`s at the scratch subvolumes, keeping the `containerPath`s
+   `/srv/econgraph/data-plane` and `/srv/econgraph/app-prod`: the PVs name those.
+3. Export `KIND_CLUSTER=<name>`, `ECONGRAPH_SCRATCH_STORAGE=~/scratch`,
+   `XDG_CACHE_HOME=<scratch dir>` (the cluster's kubectl copy and kubeconfig)
+   and `ECONGRAPH_BACKUP_ROOT=<scratch dir>`, then run
+   `recreate-kind-cluster.sh --if-missing --config <copy>` and the other scripts
+   as usual. `kind-env.sh` refuses `ECONGRAPH_SCRATCH_STORAGE` when
+   `KIND_CLUSTER` is `econ-graph`.
+
+Postgres leaves files owned by UID 999 in the scratch subvolumes; remove them
+through Docker (`docker run --rm -v ~/scratch:/s postgres:18 rm -rf
+/s/data-plane/pg /s/app-prod/app-pg /s/app-prod/keycloak-pg`) before deleting
+the subvolumes.
 
 ## Other notes
 

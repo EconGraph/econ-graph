@@ -4,7 +4,7 @@
 # committed to the repository; this script is the only place they come from.
 #
 # Usage:
-#   [VAR=value ...] scripts/deploy/create-secrets.sh [--prompt-tunnel-token]
+#   [VAR=value ...] scripts/deploy/create-secrets.sh [--dry-run] [--prompt-tunnel-token]
 #
 # Every input is an environment variable, except that --prompt-tunnel-token
 # reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
@@ -13,13 +13,21 @@
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
-#   econ-graph-secrets             app-database-url          built from app-password
-#                                  data-database-url         built from app-password (the
-#                                                            same database as app-database-url)
-#                                  database-url              built from app-password (the
-#                                                            same database as app-database-url)
+#   econ-graph-secrets             app-database-url          the app database, econ_graph_app on
+#                                                            app-postgres-service, built from
+#                                                            econ-graph-app-postgres/app-password;
+#                                                            or the data database's URL (see
+#                                                            APP_DATABASE below)
+#                                  data-database-url         the data database, econ_graph on
+#                                                            data-postgres-service, built from
+#                                                            econ-graph-postgres/app-password
+#                                  database-url              the same URL as data-database-url
+#                                                            (read by manifests of earlier
+#                                                            versions)
 #   econ-graph-postgres            postgres-password         POSTGRES_PASSWORD (generated)
-#                                  app-password              APP_DB_PASSWORD (generated)
+#   (the data database)            app-password              APP_DB_PASSWORD (generated)
+#   econ-graph-app-postgres        postgres-password         APP_POSTGRES_PASSWORD (generated)
+#   (the app database)             app-password              APP_POSTGRES_APP_PASSWORD (generated)
 #   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
 #                                                            FRED_API_KEY, BLS_API_KEY,
 #                                                            BEA_API_KEY, CENSUS_API_KEY (optional)
@@ -53,8 +61,15 @@
 #   - If econ-graph-postgres does not exist yet but a Postgres data volume
 #     (PVC postgresql-data-postgresql-*) does, the script stops: that database
 #     was initialised with other passwords, which new ones would not match.
-#     Follow the recovery steps in k8s/README.md, or set
-#     ALLOW_EXISTING_DB_VOLUME=1 to go ahead anyway.
+#     The same goes for econ-graph-app-postgres and PVC
+#     app-postgres-data-app-postgres-*. Follow the recovery steps in
+#     k8s/README.md, or set ALLOW_EXISTING_DB_VOLUME=1 to go ahead anyway.
+#   - APP_DATABASE=separate points app-database-url at the app database;
+#     APP_DATABASE=shared points it at the data database (one database holding
+#     both, as in a cluster deployed before the app database existed). Unset,
+#     the cluster's current choice is kept, and a new Secret gets separate.
+#     Switching an existing cluster to separate is part of moving the app rows
+#     into the app database; the script only rewrites the URL.
 #   - Likewise, if grafana-admin/admin-password would be generated but a
 #     Grafana volume (PVC grafana-storage-grafana-*) exists, the script stops
 #     unless GRAFANA_ADMIN_PASSWORD is given (and set in Grafana) or
@@ -67,12 +82,16 @@
 #     anything rather than generating new passwords.
 #   - Postgres and Grafana only read their passwords when their data volume is
 #     first initialised. Changing POSTGRES_PASSWORD / APP_DB_PASSWORD /
-#     GRAFANA_ADMIN_PASSWORD later updates the Secret but not the running
-#     database or Grafana; change them there too (see k8s/README.md).
+#     APP_POSTGRES_PASSWORD / APP_POSTGRES_APP_PASSWORD / GRAFANA_ADMIN_PASSWORD
+#     later updates the Secret but not the running database or Grafana; change
+#     them there too (see k8s/README.md).
 #
 # Values are never printed. They reach kubectl through files in a private
 # temporary directory, not the command line, and are applied with server-side
 # apply, so no copy lands in the last-applied-configuration annotation.
+#
+# --dry-run runs every check against the cluster and prints, per Secret, the
+# keys it would write and how each value was resolved; it writes nothing.
 #
 # Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl).
 
@@ -84,9 +103,11 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 KUBECTL="${KUBECTL:-kubectl}"
 
 PROMPT_TUNNEL_TOKEN=false
+DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
         --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
+        --dry-run | -n) DRY_RUN=true ;;
         -h | --help)
             sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -99,9 +120,20 @@ for arg in "$@"; do
 done
 
 APP_DB_USER="econgraph"
-DB_HOST="postgres-service"
 DB_PORT="5432"
-DB_NAME="econ_graph"
+# The data database (StatefulSet postgresql) and the app database (StatefulSet
+# app-postgres); k8s/manifests/postgres.yaml and app-postgres.yaml.
+DATA_DB_HOST="data-postgres-service"
+DATA_DB_NAME="econ_graph"
+APP_DB_HOST="app-postgres-service"
+APP_DB_NAME="econ_graph_app"
+case "${APP_DATABASE-}" in
+    "" | separate | shared) ;;
+    *)
+        echo "create-secrets: error: APP_DATABASE must be separate or shared" >&2
+        exit 2
+        ;;
+esac
 
 die() {
     echo "create-secrets: error: $*" >&2
@@ -305,6 +337,15 @@ drop_obsolete() {
 
 apply_secret() {
     local name="$CURRENT_SECRET" joined
+    if [[ "$DRY_RUN" == true ]]; then
+        if ((${#SUMMARY[@]} == 0)); then
+            log "$name: no keys (dry run: nothing to write)"
+        else
+            joined="$(printf '%s, ' "${SUMMARY[@]}")"
+            log "$name: ${joined%, } (dry run: not written)"
+        fi
+        return
+    fi
     if ((${#FILE_ARGS[@]} == 0)); then
         if ((${#SUMMARY[@]} == 0)); then
             log "$name: no keys, skipped"
@@ -349,7 +390,7 @@ apply_secret() {
 
 # Validate every supplied value before anything is written, so a bad input
 # never leaves the Secrets half updated.
-for var in POSTGRES_PASSWORD APP_DB_PASSWORD \
+for var in POSTGRES_PASSWORD APP_DB_PASSWORD APP_POSTGRES_PASSWORD APP_POSTGRES_APP_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
     KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
@@ -371,18 +412,23 @@ fi
 
 # --- existing-volume guard -------------------------------------------------
 # Checked before anything is written.
-if ! secret_exists econ-graph-postgres && pvc_exists postgresql-data-postgresql-; then
-    if [[ "${ALLOW_EXISTING_DB_VOLUME-}" == 1 ]]; then
-        log "warning: a Postgres data volume exists without econ-graph-postgres;" \
-            "continuing because ALLOW_EXISTING_DB_VOLUME=1"
-    else
-        die "a Postgres data volume (PVC postgresql-data-postgresql-*) exists but the" \
-            "econ-graph-postgres Secret does not. That database was initialised with" \
-            "other passwords, so new ones would not work. See 'Secrets' in" \
-            "k8s/README.md to recreate or migrate the volume, or rerun with" \
-            "ALLOW_EXISTING_DB_VOLUME=1 to continue anyway."
+guard_db_volume() {
+    local secret="$1" pvc_prefix="$2"
+    if ! secret_exists "$secret" && pvc_exists "$pvc_prefix"; then
+        if [[ "${ALLOW_EXISTING_DB_VOLUME-}" == 1 ]]; then
+            log "warning: a Postgres data volume (PVC $pvc_prefix*) exists without $secret;" \
+                "continuing because ALLOW_EXISTING_DB_VOLUME=1"
+        else
+            die "a Postgres data volume (PVC $pvc_prefix*) exists but the" \
+                "$secret Secret does not. That database was initialised with" \
+                "other passwords, so new ones would not work. See 'Secrets' in" \
+                "k8s/README.md to recreate or migrate the volume, or rerun with" \
+                "ALLOW_EXISTING_DB_VOLUME=1 to continue anyway."
+        fi
     fi
-fi
+}
+guard_db_volume econ-graph-postgres postgresql-data-postgresql-
+guard_db_volume econ-graph-app-postgres app-postgres-data-app-postgres-
 
 # --- Grafana volume guard ---------------------------------------------------
 # Grafana reads GF_SECURITY_ADMIN_PASSWORD only when its volume is first
@@ -441,13 +487,48 @@ case "${SUMMARY[*]}" in
         ;;
 esac
 
+# --- econ-graph-app-postgres -------------------------------------------------
+begin_secret econ-graph-app-postgres
+add_required APP_POSTGRES_PASSWORD postgres-password
+resolve_required APP_POSTGRES_APP_PASSWORD app-password
+APP_DB_APP_PASSWORD="$RESOLVED"
+put app-password "$APP_DB_APP_PASSWORD" "$RESOLVED_HOW"
+apply_secret
+case "${SUMMARY[*]}" in
+    *changed*)
+        log "warning: a running database keeps its old passwords until you change" \
+            "them there too (see k8s/README.md)"
+        ;;
+esac
+
 # --- econ-graph-secrets ----------------------------------------------------
 begin_secret econ-graph-secrets
-# The app and data databases are one database here, so every URL names it.
-DB_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-put app-database-url "$DB_URL" "built for user $APP_DB_USER"
-put data-database-url "$DB_URL" "built for user $APP_DB_USER"
-put database-url "$DB_URL" "built for user $APP_DB_USER"
+DATA_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DATA_DB_HOST}:${DB_PORT}/${DATA_DB_NAME}"
+SEPARATE_APP_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_DB_APP_PASSWORD")@${APP_DB_HOST}:${DB_PORT}/${APP_DB_NAME}"
+# Which database app-database-url names: APP_DATABASE if given, else what the
+# cluster's current URL names, else (a new Secret) the app database.
+app_database="${APP_DATABASE-}"
+app_database_how="from APP_DATABASE"
+if [[ -z "$app_database" ]]; then
+    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
+    if [[ -z "$current_app_url" ]]; then
+        app_database=separate
+        app_database_how="new"
+    elif [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
+        app_database=separate
+        app_database_how="kept"
+    else
+        app_database=shared
+        app_database_how="kept"
+    fi
+fi
+if [[ "$app_database" == separate ]]; then
+    put app-database-url "$SEPARATE_APP_URL" "$APP_DB_NAME on $APP_DB_HOST, $app_database_how"
+else
+    put app-database-url "$DATA_URL" "shared with the data database, $app_database_how"
+fi
+put data-database-url "$DATA_URL" "$DATA_DB_NAME on $DATA_DB_HOST"
+put database-url "$DATA_URL" "same as data-database-url"
 drop_obsolete database-password # written by the old k8s/manifests/secret.yaml
 # The in-house login (AUTH-6) is gone, so nothing reads these; sign-in is Keycloak's.
 for key in jwt-secret google-client-id google-client-secret facebook-app-id \
@@ -497,7 +578,7 @@ if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     put auth "$MONITORING_BASIC_AUTH" "from MONITORING_BASIC_AUTH"
     apply_secret
 elif secret_exists monitoring-auth; then
-    if [[ -n "${keep_manifest_monitoring_auth-}" ]]; then
+    if [[ -n "${keep_manifest_monitoring_auth-}" && "$DRY_RUN" != true ]]; then
         # Drop the client-side-apply annotation (it holds a copy of the data) so
         # the guard above does not fire again on the next run.
         "$KUBECTL" -n "$NAMESPACE" annotate secret monitoring-auth \
@@ -511,4 +592,8 @@ else
         "host returns 503 until this Secret exists."
 fi
 
-log "done. Pods read Secrets at start: restart deployments to pick up changes."
+if [[ "$DRY_RUN" == true ]]; then
+    log "dry run complete; nothing was written."
+else
+    log "done. Pods read Secrets at start: restart deployments to pick up changes."
+fi

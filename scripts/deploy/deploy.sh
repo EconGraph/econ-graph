@@ -96,12 +96,12 @@ check_docker_daemon
 
 # Check if kind cluster exists
 if ! kind_cluster_exists; then
-    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
+    echo "❌ Kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}."
     echo "   Create it with scripts/deploy/recreate-kind-cluster.sh --if-missing"
     exit 1
 fi
 ensure_kind_kubectl
-kubectl config use-context kind-econ-graph
+kubectl config use-context "kind-${KIND_CLUSTER}"
 
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves
@@ -117,24 +117,29 @@ echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
-# Static PVs on the host btrfs subvolumes for both Postgres databases. Runs
-# before create-secrets.sh: it refuses to continue if a host data directory
-# already holds a database whose password Secret is missing.
+# Static PVs on the host btrfs subvolumes for the data, app and Keycloak Postgres
+# databases. Runs before create-secrets.sh: it refuses to continue if a host data
+# directory already holds a database whose password Secret is missing.
 run_script ./scripts/deploy/apply-host-storage.sh
 render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
 run_script ./scripts/deploy/create-secrets.sh
 
-# Deploy PostgreSQL
+# Deploy PostgreSQL: the data database (StatefulSet postgresql, Services
+# data-postgres-service and its alias postgres-service) and the app database
+# (StatefulSet app-postgres, Service app-postgres-service).
 echo "🗄️  Deploying PostgreSQL..."
 kubectl apply -f k8s/manifests/postgres-init.yaml
 kubectl apply -f k8s/manifests/postgres-deployment.yaml
 kubectl apply -f k8s/manifests/postgres.yaml
+kubectl apply -f k8s/manifests/app-postgres-init.yaml
+kubectl apply -f k8s/manifests/app-postgres.yaml
 
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+kubectl -n econ-graph rollout status statefulset/app-postgres --timeout=300s
 
 # Deploy PostgreSQL backups
 echo "🗄️  Deploying PostgreSQL backup CronJob..."

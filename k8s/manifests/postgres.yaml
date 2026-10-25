@@ -1,4 +1,26 @@
-# PostgreSQL service for Kubernetes cluster
+# Services of the data database (StatefulSet postgresql, postgres-deployment.yaml).
+#
+# data-postgres-service is its name: data-database-url in the econ-graph-secrets
+# Secret points here. postgres-service is an alias with the same selector, for
+# the manifests that still name it (and the StatefulSet's serviceName, which
+# can't change in place).
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-postgres-service
+  namespace: econ-graph
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  selector:
+    app: postgresql
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+---
 apiVersion: v1
 kind: Service
 metadata:
