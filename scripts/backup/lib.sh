@@ -50,7 +50,7 @@ ECONGRAPH_STATE_DIR="${ECONGRAPH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # so the cluster moved to the rootful one (as in scripts/deploy/lib/kind-env.sh).
 # The operator's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
 # that variable is deliberately not the override; ECONGRAPH_DOCKER_HOST is
-# (environment or backup.env). jmalicki is in the docker group, so the
+# (environment or backup.env). The operator is in the docker group, so the
 # systemd --user units reach /var/run/docker.sock without sudo. Exported, so
 # docker and everything run from here use the same daemon.
 ECONGRAPH_DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"

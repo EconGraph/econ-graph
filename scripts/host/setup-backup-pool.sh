@@ -17,7 +17,7 @@
 #   - keeps the subvolume root root:root 0755
 #   - creates (or, on a rerun, corrects the owner and mode of) snapshots/
 #     (root:root 0700: where backup-snapshots.sh receives the snapshots, out
-#     of reach of the jmalicki account) and dumps/ (sudo user, 0700: the
+#     of reach of the operator account) and dumps/ (sudo user, 0700: the
 #     nightly logical dumps)
 #
 # It is a different filesystem from /home, so snapshots reach it only via

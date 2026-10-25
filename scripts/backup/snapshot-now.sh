@@ -15,7 +15,7 @@
 # the backup pool with the hourly ones. Delete by hand, if ever, with
 # scripts/host/delete-snapshots.sh (see docs/deployment/BACKUPS.md).
 #
-# Runs as jmalicki without sudo, provided jmalicki owns the subvolume roots
+# Runs as the operator without sudo, provided the operator owns the subvolume roots
 # (the kernel only lets a non-root user snapshot subvolumes it owns) and can
 # write to SNAPSHOT_DIR. Postgres can keep running: each data directory,
 # WAL included, is inside one subvolume, so the snapshot is crash-consistent.
