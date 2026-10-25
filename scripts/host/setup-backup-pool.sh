@@ -78,7 +78,11 @@ if [ "$DRY_RUN" = "true" ]; then
     seen="$(findmnt -n -o TARGET -S "UUID=$FS_UUID" | head -n 1 || true)"
     if [ -n "$seen" ]; then
         echo "= subvolumes on the pool, read through $seen (left untouched):"
-        subvols="$(btrfs subvolume list "$seen" | sed -nE 's/.* path (<FS_TREE>\/)?//p')"
+        subvols="$(btrfs subvolume list "$seen")" || {
+            echo "error: btrfs subvolume list $seen failed" >&2
+            exit 1
+        }
+        subvols="$(sed -nE 's/.* path (<FS_TREE>\/)?//p' <<<"$subvols")"
         while IFS= read -r sv; do echo "    $sv"; done <<<"$subvols"
         if grep -qx "$SUBVOL" <<<"$subvols"; then
             echo "= subvolume $SUBVOL already exists"

@@ -97,7 +97,13 @@ for n in "${names[@]}"; do
                     echo "error: $LOCAL_DIR is not mounted from UUID=$FS_UUID; cannot look up $n" >&2
                     exit 1
                 fi
-                if btrfs subvolume list "$LOCAL_DIR" | sed -nE 's/.* top level 5 path (<FS_TREE>\/)?//p' | grep -qxF "$n"; then
+                # The whole list is read first (no grep -q in a pipeline,
+                # which could end it early and trip pipefail).
+                if ! subvol_list="$(btrfs subvolume list "$LOCAL_DIR")"; then
+                    echo "error: btrfs subvolume list $LOCAL_DIR failed; cannot look up $n" >&2
+                    exit 1
+                fi
+                if sed -nE 's/.* top level 5 path (<FS_TREE>\/)?//p' <<<"$subvol_list" | grep -xF "$n" >/dev/null; then
                     echo "= $n: a top-level subvolume of UUID=$FS_UUID"
                     paths+=("<top level of UUID=$FS_UUID>/$n")
                 else
