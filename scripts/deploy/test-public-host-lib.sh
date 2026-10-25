@@ -43,7 +43,7 @@ log="$(mktemp)"
 out="$(mktemp)"
 path_log="$(mktemp)"
 stub_dir="$(mktemp -d)"
-trap 'rm -rf "$log" "$out" "$path_log" "$stub_dir"' EXIT
+trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
@@ -62,7 +62,8 @@ cat >"$stub_dir/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
 case "$*" in
-  *"config current-context"*) [ "${STUB_NO_CONTEXT:-0}" = 1 ] && exit 1; echo kind-test ;;
+  *"config current-context"*) [ "${STUB_NO_CONTEXT:-0}" = 1 ] && exit 1; cat "$STUB_LOG.ctx" 2>/dev/null || echo kind-test ;;
+  *"config use-context "*) echo "${!#}" >"$STUB_LOG.ctx" ;;
   *"config view"*) echo https://127.0.0.1:6443 ;;
   *"get namespace kube-system"*)
     [ "${STUB_CLUSTER_FAILS:-0}" != 1 ] || exit 1
@@ -105,7 +106,7 @@ export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 
 # run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out.
 run_lib() {
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   (
     # Only the '.spec.replicas = N' form apply_cloudflared uses.
     yq() {
@@ -239,14 +240,14 @@ done
 
 # run_stubbed [VAR=value ...] COMMAND...: COMMAND with the stub kubectl, no terminal.
 run_stubbed() {
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env -u CLUSTER_ROLE_CONTEXT "$@" </dev/null >"$out" 2>&1
 }
 # run_in_terminal [VAR=value ...] COMMAND-STRING: the same under a terminal (script(1)),
 # with stdin fed to it.
 run_in_terminal() {
   local cmd="${*: -1}"
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env -u CLUSTER_ROLE_CONTEXT "${@:1:$#-1}" script -qec "$cmd" /dev/null >"$out" 2>&1
 }
 have_script=false
@@ -285,6 +286,28 @@ if [ "$have_script" = true ]; then
   grep -q 'mark-production-cluster.sh' "$out" ||
     fail "create-secrets --prompt-tunnel-token: the refusal is not shown: $(cat "$out")"
 fi
+
+# An inherited CLUSTER_ROLE_CONTEXT is followed only while it is the selected kubectl's
+# current context (as from deploy.sh, which switches to it first); a stray one is refused
+# before anything is written, and before --prompt-tunnel-token asks.
+if run_stubbed CLUSTER_ROLE_CONTEXT=prod-elsewhere STUB_MARKER=production \
+  CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh; then
+  fail "create-secrets: followed a stray CLUSTER_ROLE_CONTEXT"
+fi
+grep -q 'create secret' "$log" && fail "create-secrets: wrote Secrets with a stray CLUSTER_ROLE_CONTEXT"
+grep -q -- '--context prod-elsewhere' "$log" && fail "create-secrets: asked the stray context"
+grep -q 'is not the current' "$out" || fail "create-secrets: the stray context was not reported: $(cat "$out")"
+if [ "$have_script" = true ]; then
+  if run_in_terminal CLUSTER_ROLE_CONTEXT=prod-elsewhere STUB_MARKER=production \
+    'scripts/deploy/create-secrets.sh --prompt-tunnel-token' </dev/null; then
+    fail "create-secrets --prompt-tunnel-token: followed a stray CLUSTER_ROLE_CONTEXT"
+  fi
+  grep -q 'input hidden' "$out" && fail "create-secrets --prompt-tunnel-token: prompted with a stray CLUSTER_ROLE_CONTEXT"
+fi
+run_stubbed CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=production scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused the context it is on: $(cat "$out")"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets: did not write on the inherited context"
 
 # --- mark-production-cluster.sh ---------------------------------------------------
 mark=scripts/deploy/mark-production-cluster.sh
@@ -444,6 +467,13 @@ for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
 done
 grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
   fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
+# restart-k8s-rollout.sh binds plain kubectl to the kubeconfig it wrote from MicroK8s,
+# not a KUBECTL or KUBECONFIG from the environment, before it pins microk8s.
+bind_line="$(grep -n '^export KUBECTL=kubectl KUBECONFIG="$HOME/.kube/config"$' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
+pin_line="$(grep -n '^if ! cluster_role_use_context microk8s' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
+if ! { [ -n "$bind_line" ] && [ -n "$pin_line" ] && [ "$bind_line" -lt "$pin_line" ]; }; then
+  fail "restart-k8s-rollout.sh does not bind its kubectl and kubeconfig before pinning microk8s"
+fi
 # Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
 # stop the connector on production, since the manifest is committed with 0 replicas), or
 # k8s/ recursively or through kustomize.
@@ -479,7 +509,7 @@ detected="Using the kind cluster's kubectl $kind_cache/bin/kubectl and KUBECONFI
 # run_bare [VAR=value ...] COMMAND...: no KUBECTL, KUBECONFIG or pinned context, and the
 # working plain kubectl first on PATH.
 run_bare() {
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env -u KUBECTL -u KUBECONFIG -u CLUSTER_ROLE_CONTEXT XDG_CACHE_HOME="$stub_dir/cache" \
     PATH="$stub_dir/plain:$PATH" "$@" </dev/null >"$out" 2>&1
 }
@@ -523,11 +553,12 @@ grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark wi
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
 used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
 
-# A context pinned by deploy.sh: create-secrets.sh stays on deploy.sh's kubectl and context.
-run_bare CLUSTER_ROLE_CONTEXT=kind-econ-graph STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+# A context pinned by deploy.sh (which switches to it first, so it is the current one):
+# create-secrets.sh stays on deploy.sh's kubectl and context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with a pinned context failed: $(cat "$out")"
 grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
-grep -q -- '--context kind-econ-graph -n econ-graph create secret generic econ-graph-postgres' "$log" ||
+grep -q -- '--context kind-test -n econ-graph create secret generic econ-graph-postgres' "$log" ||
   fail "create-secrets with a pinned context: did not write on it"
 used_only plain "" "create-secrets with a pinned context"
 

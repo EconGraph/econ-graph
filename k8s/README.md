@@ -266,7 +266,11 @@ Which cluster it reaches:
 - `deploy.sh` switches the current context of `${KUBECTL:-kubectl}`'s kubeconfig to
   `kind-econ-graph` and pins it (`create-secrets.sh`, run from it, stays on it). So
   `KUBECONFIG` has to be the production cluster's for that reason too: the context is
-  switched in whichever kubeconfig is in effect.
+  switched in whichever kubeconfig is in effect. `create-secrets.sh` follows such an
+  inherited context (`CLUSTER_ROLE_CONTEXT`) only while it is its kubectl's current
+  context; otherwise it stops before asking for or writing anything.
+- `restart-k8s-rollout.sh` uses plain `kubectl` with the kubeconfig it writes from
+  MicroK8s (`~/.kube/config`), whatever `KUBECTL` or `KUBECONFIG` says, and pins `microk8s`.
 
 To choose the cluster explicitly, set both, for example:
 

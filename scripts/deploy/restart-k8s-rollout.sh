@@ -94,10 +94,13 @@ if ! microk8s kubectl config view --raw > ~/.kube/config; then
     exit 1
 fi
 
-# One kubectl, one cluster for the whole rollout: switch ${KUBECTL:-kubectl} to
-# microk8s and pin it (replacing any CLUSTER_ROLE_CONTEXT from the environment),
-# then send every kubectl call below through kc, the same binary and context the
+# One kubectl, one cluster for the whole rollout: plain kubectl with the
+# kubeconfig just written from MicroK8s (a KUBECTL or KUBECONFIG from the
+# environment, say the kind cluster's, is not followed), switched to microk8s
+# and pinned (replacing any CLUSTER_ROLE_CONTEXT from the environment). Every
+# kubectl call below then goes through kc, the same binary and context the
 # production check uses (scripts/deploy/lib/cluster-role.sh).
+export KUBECTL=kubectl KUBECONFIG="$HOME/.kube/config"
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
 if ! cluster_role_use_context microk8s; then
