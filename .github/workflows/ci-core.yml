@@ -222,6 +222,26 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+  postgres-backup-scripts:
+    name: PostgreSQL Backup Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    # The postgres-backup CronJob's backup, sync and restore scripts, in its
+    # images, against scratch econ_graph and keycloak databases and an S3 mock.
+    - name: Check the backup and restore scripts
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-postgres-backup-scripts.sh
+
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest

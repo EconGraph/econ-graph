@@ -1,8 +1,13 @@
 # Nightly PostgreSQL backup.
 #
-# Writes a pg_dump to postgres-backup-data (a PVC separate from the
-# database's own postgresql-data volume, see postgres-backup-pvc.yaml), so a
-# lost/corrupted/torn-down primary volume doesn't take the backups with it.
+# Writes a pg_dump of econ_graph, and of Keycloak's database when Keycloak is
+# deployed, to postgres-backup-data (a PVC separate from both databases' own
+# volumes, see postgres-backup-pvc.yaml), so a lost/corrupted/torn-down
+# primary volume doesn't take the backups with it.
+#
+# If one database's dump fails, the other is still taken and kept: pg-dump
+# (backup.sh) records the failure in the status emptyDir and exits 0, and
+# backup-sync (sync.sh) syncs what was written, then exits 1 so the Job fails.
 #
 # To also ship backups to object storage, set BACKUP_DESTINATION=s3 and the
 # BACKUP_S3_* env vars below (and provide AWS credentials, e.g. via a
@@ -55,13 +60,36 @@ spec:
                   key: postgres-password
             - name: PGDATABASE
               value: "econ_graph"
+            # Keycloak's database (k8s/manifests/keycloak/postgres.yaml). The
+            # Secret exists only where Keycloak is deployed (deploy.sh skips
+            # Keycloak without it); optional, so econ_graph is still backed up
+            # where it doesn't, and backup.sh skips Keycloak when the password
+            # is unset.
+            - name: KEYCLOAK_PGHOST
+              value: "keycloak-postgres-service"
+            - name: KEYCLOAK_PGPORT
+              value: "5432"
+            - name: KEYCLOAK_PGUSER
+              value: "keycloak"
+            - name: KEYCLOAK_PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-keycloak
+                  key: db-password
+                  optional: true
+            - name: KEYCLOAK_PGDATABASE
+              value: "keycloak"
             - name: BACKUP_DIR
               value: "/backups"
+            - name: BACKUP_STATUS_FILE
+              value: "/status/failed"
             volumeMounts:
             - name: scripts
               mountPath: /scripts
             - name: backup-data
               mountPath: /backups
+            - name: status
+              mountPath: /status
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
@@ -84,11 +112,16 @@ spec:
               value: "postgres/econ-graph"
             - name: BACKUP_S3_ENDPOINT
               value: "" # optional, for S3-compatible endpoints (e.g. MinIO)
+            - name: BACKUP_STATUS_FILE
+              value: "/status/failed"
             volumeMounts:
             - name: scripts
               mountPath: /scripts
             - name: backup-data
               mountPath: /backups
+              readOnly: true
+            - name: status
+              mountPath: /status
               readOnly: true
             securityContext:
               allowPrivilegeEscalation: false
@@ -105,3 +138,7 @@ spec:
           - name: backup-data
             persistentVolumeClaim:
               claimName: postgres-backup-data
+          # Which dumps failed, from pg-dump to backup-sync (see the top).
+          - name: status
+            emptyDir:
+              sizeLimit: 1Mi
