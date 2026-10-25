@@ -43,6 +43,12 @@ out="$(mktemp)"
 path_log="$(mktemp)"
 stub_dir="$(mktemp -d)"
 trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
+# Nothing here may touch the operator's files: home, caches and backups are scratch
+# directories (tests that need the kind kubectl cache set XDG_CACHE_HOME themselves). The
+# host storage under /srv/econgraph is never written: every script that could
+# (apply-host-storage.sh and the other deploy helpers) is a stub wherever deploy.sh runs.
+export HOME="$stub_dir/home" XDG_CACHE_HOME="$stub_dir/xdg-cache" ECONGRAPH_BACKUP_ROOT="$stub_dir/backups"
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
@@ -300,6 +306,14 @@ run_stubbed CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=production scripts/deploy
   fail "create-secrets: refused the context it is on: $(cat "$out")"
 grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
   fail "create-secrets: did not write on the inherited context"
+# An inherited context with no current context to compare it with (kubectl config
+# current-context fails or prints nothing) is not followed either.
+if run_stubbed STUB_NO_CONTEXT=1 CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=production \
+  CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh; then
+  fail "create-secrets: followed an inherited context without a current context"
+fi
+grep -q 'create secret' "$log" && fail "create-secrets: wrote Secrets without a current context"
+grep -q 'is not the current' "$out" || fail "create-secrets: no current context was not reported: $(cat "$out")"
 
 # --- mark-production-cluster.sh ---------------------------------------------------
 mark=scripts/deploy/mark-production-cluster.sh
