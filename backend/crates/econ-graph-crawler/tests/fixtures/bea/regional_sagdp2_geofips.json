@@ -6,7 +6,7 @@
     {"ParameterName": "METHOD", "ParameterValue": "GETPARAMETERVALUESFILTERED"},
     {"ParameterName": "DATASETNAME", "ParameterValue": "REGIONAL"},
     {"ParameterName": "TARGETPARAMETER", "ParameterValue": "GEOFIPS"},
-    {"ParameterName": "TABLENAME", "ParameterValue": "SAGDP2N"},
+    {"ParameterName": "TABLENAME", "ParameterValue": "SAGDP2"},
     {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
    ]
   },

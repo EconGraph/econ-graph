@@ -28,7 +28,7 @@ code = "bea_regional"
 name = "BEA Regional Economic Accounts"
 description = "Lines of BEA Regional tables by state, one series per table line and area"
 
-# bea_regional/{table_name}.{line_code}.{geo_fips}, for example bea_regional/SAGDP2N.1.06000
+# bea_regional/{table_name}.{line_code}.{geo_fips}, for example bea_regional/SAGDP2.1.06000
 [[dataset.dimensions]]
 name = "table_name"
 label = "Regional table"
