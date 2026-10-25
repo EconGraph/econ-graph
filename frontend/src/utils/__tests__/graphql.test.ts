@@ -2,7 +2,12 @@ import { vi } from 'vitest';
 // REQUIREMENT: Comprehensive unit tests for GraphQL utilities
 // PURPOSE: Test GraphQL query execution, error handling, and response processing
 // This ensures reliable communication with the backend API
-import { executeGraphQL, QUERIES } from '../graphql';
+import {
+  DATA_PLANE_UNAVAILABLE,
+  executeGraphQL,
+  GraphQLResponseError,
+  QUERIES,
+} from '../graphql';
 // Removed unused imports: server, http
 
 // Mock fetch for testing
@@ -95,6 +100,29 @@ describe('GraphQL Utilities', () => {
         variables: { id: 'non-existent' },
       })
     ).rejects.toThrow('Series not found');
+  });
+
+  test('a GraphQL error is thrown with its extensions.code', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: null,
+        errors: [
+          {
+            message: "Couldn't check the series right now; try again",
+            path: ['createAnnotation'],
+            extensions: { code: DATA_PLANE_UNAVAILABLE },
+          },
+        ],
+      }),
+    });
+
+    const error = await executeGraphQL({
+      query: 'mutation CreateAnnotation { createAnnotation { id } }',
+    }).catch(e => e);
+    expect(error).toBeInstanceOf(GraphQLResponseError);
+    expect(error.message).toBe("Couldn't check the series right now; try again");
+    expect(error.code).toBe(DATA_PLANE_UNAVAILABLE);
   });
 
   test('should handle network errors', async () => {

@@ -58,6 +58,7 @@ async fn readyz(databases: &Databases) -> (u16, serde_json::Value) {
     let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
     let routes = build_routes(
         databases.clone(),
+        None,
         schema,
         None,
         &["http://localhost:3000".to_string()],
@@ -77,6 +78,7 @@ async fn graphql(databases: &Databases, query: &str) -> serde_json::Value {
     let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
     let routes = build_routes(
         databases.clone(),
+        None,
         schema,
         None,
         &["http://localhost:3000".to_string()],

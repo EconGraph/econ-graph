@@ -55,3 +55,5 @@ regex.workspace = true
 serial_test.workspace = true
 # Captures log output in tests that check what a sanitized error logs.
 tracing-subscriber.workspace = true
+# In-process stand-in for the data plane's GraphQL endpoint.
+wiremock.workspace = true

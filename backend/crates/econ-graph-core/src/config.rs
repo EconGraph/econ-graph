@@ -221,6 +221,93 @@ pub fn backend_pool_sizes_from(
     })
 }
 
+/// In-cluster URL of the data plane's GraphQL endpoint, for the backend's server-side data
+/// checks when it has no [`DATA_DATABASE_URL`].
+pub const DATA_GRAPHQL_URL: &str = "DATA_GRAPHQL_URL";
+
+/// `Host` header sent with [`DATA_GRAPHQL_URL`] requests: the backend's own route hostname, so a
+/// request through the shared gateway takes the same route as the browser's.
+pub const DATA_GRAPHQL_HOST: &str = "DATA_GRAPHQL_HOST";
+
+/// How long, in milliseconds, a [`DATA_GRAPHQL_URL`] request may take in all.
+pub const DATA_GRAPHQL_TIMEOUT_MS: &str = "DATA_GRAPHQL_TIMEOUT_MS";
+
+/// Default for [`DATA_GRAPHQL_TIMEOUT_MS`]: long enough for a one-row lookup through the
+/// gateway, short enough that someone saving an annotation isn't left waiting on an outage.
+pub const DEFAULT_DATA_GRAPHQL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Where the backend asks the data plane over HTTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataGraphqlConfig {
+    /// `DATA_GRAPHQL_URL`: an `http` or `https` URL.
+    pub url: String,
+    /// `DATA_GRAPHQL_HOST`, or `None` to send the URL's own host.
+    pub host: Option<String>,
+    /// `DATA_GRAPHQL_TIMEOUT_MS`, default [`DEFAULT_DATA_GRAPHQL_TIMEOUT`].
+    pub timeout: std::time::Duration,
+}
+
+/// Why the data plane's GraphQL settings are unusable.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DataGraphqlConfigError {
+    /// `DATA_GRAPHQL_URL` is not an `http` or `https` URL with a host.
+    #[error("DATA_GRAPHQL_URL={0:?} is not an http(s) URL")]
+    InvalidUrl(String),
+    /// `DATA_GRAPHQL_HOST` is not a host name (with an optional port).
+    #[error("DATA_GRAPHQL_HOST={0:?} is not a host name")]
+    InvalidHost(String),
+    /// `DATA_GRAPHQL_TIMEOUT_MS` is not a positive whole number of milliseconds.
+    #[error("DATA_GRAPHQL_TIMEOUT_MS={0:?} is not a positive number of milliseconds")]
+    InvalidTimeout(String),
+    /// `DATA_GRAPHQL_HOST` or `DATA_GRAPHQL_TIMEOUT_MS` is set without `DATA_GRAPHQL_URL`.
+    #[error("{0} is set but DATA_GRAPHQL_URL is not")]
+    WithoutUrl(&'static str),
+}
+
+/// The data plane's GraphQL settings from the environment, or `None` when `DATA_GRAPHQL_URL`
+/// is unset. Empty values count as unset.
+pub fn data_graphql_config() -> Result<Option<DataGraphqlConfig>, DataGraphqlConfigError> {
+    data_graphql_config_from(|name| env::var(name).ok())
+}
+
+/// [`data_graphql_config`] with the environment read through `var`.
+pub fn data_graphql_config_from(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<Option<DataGraphqlConfig>, DataGraphqlConfigError> {
+    let host = non_empty(&var, DATA_GRAPHQL_HOST).map(|h| h.trim().to_string());
+    let timeout = non_empty(&var, DATA_GRAPHQL_TIMEOUT_MS);
+    let Some(url) = non_empty(&var, DATA_GRAPHQL_URL).map(|u| u.trim().to_string()) else {
+        if host.is_some() {
+            return Err(DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_HOST));
+        }
+        if timeout.is_some() {
+            return Err(DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_TIMEOUT_MS));
+        }
+        return Ok(None);
+    };
+    let parsed =
+        reqwest::Url::parse(&url).map_err(|_| DataGraphqlConfigError::InvalidUrl(url.clone()))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(DataGraphqlConfigError::InvalidUrl(url));
+    }
+    if let Some(host) = &host {
+        let valid = host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+        if !valid {
+            return Err(DataGraphqlConfigError::InvalidHost(host.clone()));
+        }
+    }
+    let timeout = match timeout {
+        None => DEFAULT_DATA_GRAPHQL_TIMEOUT,
+        Some(value) => match value.trim().parse::<u64>() {
+            Ok(ms) if ms > 0 => std::time::Duration::from_millis(ms),
+            _ => return Err(DataGraphqlConfigError::InvalidTimeout(value)),
+        },
+    };
+    Ok(Some(DataGraphqlConfig { url, host, timeout }))
+}
+
 fn non_empty(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     var(name).filter(|v| !v.trim().is_empty())
 }
@@ -514,5 +601,79 @@ mod tests {
             ))
         );
         assert_eq!(set.1.as_deref(), Ok("postgres://data/econ_graph"));
+    }
+
+    /// `var` for [`data_graphql_config_from`], reading `pairs`.
+    fn vars<'a>(pairs: &'a [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn data_graphql_config_reads_url_host_and_timeout() {
+        assert_eq!(data_graphql_config_from(vars(&[])), Ok(None));
+        assert_eq!(
+            data_graphql_config_from(vars(&[(DATA_GRAPHQL_URL, "  ")])),
+            Ok(None)
+        );
+        assert_eq!(
+            data_graphql_config_from(vars(&[
+                (DATA_GRAPHQL_URL, "http://gw.example/data/graphql"),
+                (DATA_GRAPHQL_HOST, "br-1.localhost"),
+            ])),
+            Ok(Some(DataGraphqlConfig {
+                url: "http://gw.example/data/graphql".to_string(),
+                host: Some("br-1.localhost".to_string()),
+                timeout: DEFAULT_DATA_GRAPHQL_TIMEOUT,
+            }))
+        );
+        assert_eq!(
+            data_graphql_config_from(vars(&[
+                (DATA_GRAPHQL_URL, "http://gw.example/data/graphql"),
+                (DATA_GRAPHQL_TIMEOUT_MS, "250"),
+            ]))
+            .map(|c| c.map(|c| (c.host, c.timeout))),
+            Ok(Some((None, std::time::Duration::from_millis(250))))
+        );
+    }
+
+    #[test]
+    fn data_graphql_config_refuses_unusable_settings() {
+        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 6] = [
+            (
+                &[(DATA_GRAPHQL_URL, "gw.example/data/graphql")],
+                DataGraphqlConfigError::InvalidUrl("gw.example/data/graphql".to_string()),
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "ftp://gw.example/")],
+                DataGraphqlConfigError::InvalidUrl("ftp://gw.example/".to_string()),
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://gw/"), (DATA_GRAPHQL_HOST, "a b")],
+                DataGraphqlConfigError::InvalidHost("a b".to_string()),
+            ),
+            (
+                &[
+                    (DATA_GRAPHQL_URL, "http://gw/"),
+                    (DATA_GRAPHQL_TIMEOUT_MS, "0"),
+                ],
+                DataGraphqlConfigError::InvalidTimeout("0".to_string()),
+            ),
+            (
+                &[(DATA_GRAPHQL_HOST, "localhost")],
+                DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_HOST),
+            ),
+            (
+                &[(DATA_GRAPHQL_TIMEOUT_MS, "500")],
+                DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_TIMEOUT_MS),
+            ),
+        ];
+        for (pairs, expected) in cases {
+            assert_eq!(data_graphql_config_from(vars(pairs)), Err(expected));
+        }
     }
 }
