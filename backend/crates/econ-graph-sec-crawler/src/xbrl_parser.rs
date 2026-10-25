@@ -320,7 +320,7 @@ impl XbrlParser {
         })
     }
 
-    /// Check that an XBRL document parses. Fact-level validation rules are not implemented yet
+    /// Check that an XBRL document parses. Fact-level validation rules are not implemented
     /// (`FactValidator` accepts every fact), so a document with facts is reported valid only
     /// because it parsed; a document with none is reported invalid, since something that parses
     /// but yields no facts is not a usable XBRL instance.

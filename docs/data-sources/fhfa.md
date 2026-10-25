@@ -11,7 +11,7 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/fhfa.rs`. Fixtures:
   download the same file; a process-local in-flight reservation keyed by the URL stops two
   workers downloading it at once (the second gets a retryable `Busy` instead of making a
   redundant request).
-- **Scope (train 1)**: rows with `hpi_type` `traditional`, `hpi_flavor` `purchase-only` or
+- **Scope**: rows with `hpi_type` `traditional`, `hpi_flavor` `purchase-only` or
   `all-transactions`, `frequency` `monthly` or `quarterly`, and `level`
   `USA or Census Division` or `State` — the United States, the nine census divisions, and
   the states and DC. Every other row (metros, expanded-data, non-metro, distress-free, ...)
@@ -31,7 +31,7 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/fhfa.rs`. Fixtures:
 **The master CSV's layout has never been verified against a live download.** The column
 names and order, the `hpi_type`/`hpi_flavor`/`frequency`/`level` values, and the division
 and state `place_id`s are carried over from FHFA's public documentation, not a recording;
-see `tests/fixtures/fhfa/README.md` for the exact pre-release checks planned (URL, header,
+see `tests/fixtures/fhfa/README.md` for the pre-release checks QA runs (URL, header,
 `place_id` values, which series have `index_sa`, and the base periods the adapter states as
 units).
 

@@ -2,11 +2,12 @@
 //!
 //! A dataset follows the SDMX model. Its dimensions identify a series within it, its measures
 //! are the observed values and its attributes are per-observation flags. Each series records
-//! its dataset and its dimension values (see [`SeriesDimensions`]). The design is in
-//! `docs/roadmap/federation.md`, "Data model: datasets and series".
+//! its dataset and its dimension values (see [`SeriesDimensions`]). The design is in the
+//! federation design record, "Data model: datasets and series":
+//! <https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d>.
 //!
-//! In train 1 observations stay single-valued in `data_points`, so every dataset is stored long
-//! and its default measure is [`VALUE_MEASURE`].
+//! Observations are single-valued in `data_points`, so every dataset is stored long and its
+//! default measure is [`VALUE_MEASURE`].
 
 use chrono::{DateTime, Utc};
 use diesel::deserialize::{self, FromSql, FromSqlRow};
@@ -25,7 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::reference::Area;
 use crate::schema::datasets;
 
-/// Name of the single measure every train 1 dataset has.
+/// Name of the single measure of every dataset the crawler writes.
 pub const VALUE_MEASURE: &str = "value";
 
 /// Shared code list of countries and areas (ISO 3166 alpha-3 plus World Bank aggregate codes).

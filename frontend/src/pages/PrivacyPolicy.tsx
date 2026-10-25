@@ -1,7 +1,7 @@
 /**
  * Privacy Policy page.
  *
- * Describes what EconGraph stores about a signed-in user in release 1:
+ * Describes what EconGraph stores about a signed-in user:
  * a Google account signed in through Keycloak, the annotations and comments
  * a user writes, and the theme preference kept in the browser, plus ordinary
  * server logs. Nothing else about visitors is collected.

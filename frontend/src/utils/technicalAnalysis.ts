@@ -4,7 +4,8 @@
  * This module implements statistical indicators commonly used in economic analysis.
  */
 
-// Unused by any current page (see docs/roadmap/analysis-workspace.md). A future chart
+// Unused by any current page (see the analysis workspace design record,
+// https://linear.app/econgraph/document/analysis-workspace-roadmap-design-record-from-docsroadmapanalysis-c1571aa15034). A future chart
 // overlay that uses these indicators belongs behind the `technical_analysis` build flag
 // (ECO-57): `__FLAGS__.technical_analysis ? lazy(() => import(...)) : null`, per
 // docs/build-flags.md. Import this module statically only from a module already gated

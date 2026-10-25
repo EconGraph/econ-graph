@@ -233,14 +233,15 @@ data:
             summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
             description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; update the curated list (for BEA, data/bea_tables.csv).
 
-      # Release exit criteria 2 (coverage) and 3 (freshness), plus crawl failures.
+      # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
+      # keeps series current), and crawl failures.
       # `max by (source)` drops the pod labels the kubernetes-pods scrape job adds.
       - name: crawler.coverage
         rules:
         # A source with nothing discovered reports 0, so it alerts too. The long `for` lets a fresh
-        # deployment finish its first discovery and backfill before this fires. Until the scheduler
-        # also fetches discovered-only series (release 1 item DATA-13), catalog ids nobody enqueued
-        # keep coverage low and this fires; `crawler coverage` shows it.
+        # deployment finish its first discovery and backfill before this fires. Catalog ids that
+        # discovery found but nobody enqueued keep coverage low, so this can fire for them;
+        # `crawler coverage` shows it.
         - alert: CrawlerCoverageLow
           expr: max by (source) (crawler_coverage_ratio) < 0.95
           for: 6h

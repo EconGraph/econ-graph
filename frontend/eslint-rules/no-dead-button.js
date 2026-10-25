@@ -8,7 +8,7 @@
  * Flags a `Button`, `IconButton` or `ListItemButton` element with no event handler (`onClick`,
  * `onMouseDown`, any `on…` prop), no `href`, `component` or `to`, no `type` other than 'button',
  * and no spread props that could supply one. Such a button renders, takes focus and does nothing,
- * which the release crawl (REL-4, ECO-246) found several of.
+ * which the release crawl (`tests/e2e/release/crawl`, ECO-246) found several of.
  *
  * A button that is the child of an `asChild` element (a Radix `SheetTrigger`, `DrawerTrigger`, ...)
  * gets its handler from that parent, so it is not flagged.

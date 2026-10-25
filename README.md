@@ -259,7 +259,7 @@ The explicit `BACKEND_URL` aligns Vite's proxy with the backend's default port.
 ```
 econ-graph/
 ├── 📚 docs/                 # Comprehensive documentation
-│   ├── business/            # Business docs (investor pitch, roadmap)
+│   ├── business/            # Privacy policy
 │   ├── technical/           # Technical architecture and implementation
 │   ├── deployment/          # Deployment and infrastructure guides
 │   ├── development/         # Development workflow and CI/CD
@@ -302,7 +302,7 @@ econ-graph/
 
 ### 📚 **Documentation**
 - **[📖 Complete Documentation Index](./docs/README.md)** - Comprehensive documentation guide
-- **[🏢 Business Documentation](./docs/business/)** - Investor pitch, roadmap, privacy policy
+- **[🏢 Business Documentation](./docs/business/)** - Privacy policy
 - **[🔧 Technical Documentation](./docs/technical/)** - Architecture, implementation, APIs
 - **[🚀 Deployment Guide](./docs/deployment/)** - Infrastructure and deployment procedures
 - **[💻 Development Guide](./docs/development/)** - Setup, workflow, and CI/CD
