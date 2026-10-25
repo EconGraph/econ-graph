@@ -27,7 +27,7 @@ consistent across both.
 
 `scripts/host/setup-subvolumes.sh` (needs sudo) creates the subvolumes, adds
 them to `/etc/fstab` and mounts them, with the subvolume roots owned by
-`jmalicki`. Everything after that runs without sudo.
+the operator account (`<operator>`). Everything after that runs without sudo.
 
 ### How the cluster reaches them
 
@@ -66,7 +66,7 @@ login shell exports `DOCKER_HOST` for the rootless daemon, so the deploy
 scripts don't use that variable: `scripts/deploy/lib/kind-env.sh` sets
 `DOCKER_HOST=unix:///var/run/docker.sock` for themselves and everything they
 run (kind, docker, `deploy.sh`). Override it with `ECONGRAPH_DOCKER_HOST`.
-`jmalicki` is in the `docker` group, so none of this needs sudo. Every script
+The operator account is in the `docker` group, so none of this needs sudo. Every script
 prints the daemon it uses and warns if it is a rootless one.
 
 Images built before the switch exist only in the rootless daemon.
@@ -87,7 +87,7 @@ with `docker run --rm --entrypoint id postgres:18 postgres` on 2026-10-24):
 |---|---|
 | 0 (root) | 0 |
 | 999 (`postgres` in `postgres:18`) | **999** (named `systemd-coredump` in this host's `/etc/passwd`) |
-| 1000 | 1000 (`jmalicki`) |
+| 1000 | 1000 (the operator account, `<operator>`) |
 
 Any data directory not owned by 999:999 (for example one written under the
 earlier rootless daemon, or copied without keeping ownership) is re-chowned by
@@ -100,7 +100,7 @@ Postgres runs as UID 999 and must create and own its data directory, mode
 
 1. chowns the volume root to 999:999 with mode 0700. That root is `pg/` or
    `keycloak-pg/`, never the subvolume root: snapshots need the subvolume
-   roots to stay owned by `jmalicki`.
+   roots to stay owned by the operator account.
 2. If `PGDATA` exists but isn't owned by 999 (for example after a copy that
    didn't keep ownership), chowns it recursively once. Otherwise it changes
    nothing.
@@ -108,8 +108,8 @@ Postgres runs as UID 999 and must create and own its data directory, mode
 What this means in practice:
 
 - On the host, `pg/` and `keycloak-pg/` and everything in them belong to
-  **999:999**, mode 0700. `jmalicki` can't list or read them directly.
-  The subvolume roots stay `jmalicki`'s, so unprivileged
+  **999:999**, mode 0700. The operator account can't list or read them directly.
+  The subvolume roots stay the operator account's, so unprivileged
   `btrfs subvolume snapshot -r` still works.
 - To read the files without sudo, go through the cluster (`kubectl exec` into
   the Postgres pod) or `docker exec econ-graph-worker`; both run as root on
@@ -129,10 +129,8 @@ What this means in practice:
 ### Verified on this host
 
 These checks ran under the earlier rootless daemon, so the host-side owner they
-saw was a user-namespace UID, not 999. The rootful setup has not run a
-database on these subvolumes yet; the first restore in "Recovering
-production" below is its first real test, and `migrate-to-host-storage.sh`'s
-verify step checks that `pg/` is owned by 999.
+saw was a user-namespace UID, not 999. `migrate-to-host-storage.sh`'s verify
+step checks that `pg/` is owned by 999.
 
 - With a scratch directory under `~/.cache` and then throwaway
   subdirectories on the real `/srv/econgraph/data-plane` and
@@ -142,7 +140,7 @@ verify step checks that `pg/` is owned by 999.
   initialised and served as UID 999 in both layouts (`/data/pgdata`, and
   `/var/lib/postgresql/18/docker`), and restarted cleanly on the same data.
   Host view: `drwx------`, owned by the namespace-mapped UID of 999.
-- Without the initContainer, Postgres fails on an empty `jmalicki`-owned
+- Without the initContainer, Postgres fails on an empty operator-owned
   directory: `mkdir: cannot create directory '/data/pgdata': Permission denied`.
 - A `PGDATA` copied without ownership (host UID 1000) was repaired by the
   initContainer, and Postgres started on it.

@@ -55,7 +55,7 @@ spec:
         - -ec
         - |
           root="$1"; pgdata="$2"
-          # The host directory starts out owned by jmalicki (uid 1000). Postgres runs
+          # The host directory starts out owned by the operator account. Postgres runs
           # as 999 and has to create PGDATA inside it, so hand the volume root over.
           chown 999:999 "$root"
           chmod 0700 "$root"
