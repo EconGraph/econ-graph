@@ -252,6 +252,19 @@ A cluster is production while it carries the marker written by:
 ./scripts/deploy/mark-production-cluster.sh --unmark   # stop cloudflared, remove the marker, offer to delete the token
 ```
 
+It works on the current context of `${KUBECTL:-kubectl}`, like `deploy.sh` and
+`create-secrets.sh`. Where plain `kubectl` reaches another cluster (on a host with the
+microk8s snap, `kubectl` is microk8s's own wrapper and ignores `~/.kube/config`), give the
+production cluster's kubectl and kubeconfig to all three:
+
+```bash
+KUBECTL=/path/to/that/clusters/kubectl KUBECONFIG=/path/to/its/kubeconfig \
+  ./scripts/deploy/mark-production-cluster.sh
+```
+
+Before it changes anything it shows the context, API server and nodes it reached; check
+them before typing the UID.
+
 The marker is the ConfigMap `kube-system/econgraph-cluster-role`, with `role: production`
 and the UID of the cluster's `kube-system` namespace when it was marked. It counts only
 while that UID matches the live one, so a marker copied or restored into another cluster

@@ -26,7 +26,9 @@
 # token) is left as it is. It deletes no data, volumes or clusters: --unmark
 # removes the marker and, only if you confirm, the token.
 #
-# Other environment: KUBECTL (default kubectl).
+# Other environment: KUBECTL (default kubectl) and its KUBECONFIG; it works on
+# that kubectl's current context. Where plain kubectl is another cluster's
+# (the microk8s snap wrapper ignores ~/.kube/config), set both.
 
 set -euo pipefail
 
@@ -40,7 +42,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=true ;;
         --unmark) UNMARK=true ;;
         -h | --help)
-            sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -89,6 +91,7 @@ confirm() {
     echo "  API server      ${server:-(unknown)}"
     echo "  nodes           ${nodes:-(none)}"
     echo "  kube-system UID $uid"
+    echo "  If that is not the cluster you mean, stop here: KUBECTL and KUBECONFIG select it."
     echo
     echo "$1"
     read -r -p "Type the first 8 characters of the kube-system UID above to continue: " answer
