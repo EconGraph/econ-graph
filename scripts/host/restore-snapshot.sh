@@ -206,9 +206,10 @@ if mountpoint -q "$target"; then
     run umount "$target"
 fi
 run mv "$top/$subvol" "$top/$subvol.replaced-$stamp"
-if ! run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvol"; then
-    # Put the original back under its name so $target can be mounted again.
-    echo "error: creating $subvol from $snap failed; renaming $subvol.replaced-$stamp back to $subvol" >&2
+# put_back: rename $subvol.replaced-$stamp back to $subvol, remount $target,
+# say that nothing was restored, exit 1. Only renames; nothing is deleted.
+put_back() {
+    echo "  renaming $subvol.replaced-$stamp back to $subvol" >&2
     if [ -e "$top/$subvol" ] || ! mv "$top/$subvol.replaced-$stamp" "$top/$subvol"; then
         echo "error: could not rename it back. The data is intact in $subvol.replaced-$stamp" >&2
         echo "  at the top level of UUID=$FS_UUID. To put it back by hand:" >&2
@@ -222,8 +223,21 @@ if ! run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvo
     fi
     echo "Nothing was restored; $target holds the data it had before." >&2
     exit 1
+}
+if ! run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvol"; then
+    echo "error: creating $subvol from $snap failed" >&2
+    put_back
 fi
-run mount "$target"
+if ! run mount "$target"; then
+    # Set the new copy aside (kept, not deleted) and put the original back.
+    echo "error: mounting the restored $subvol at $target failed" >&2
+    if ! mv "$top/$subvol" "$top/$subvol.failed-restore-$stamp"; then
+        echo "error: could not set the restored copy aside; $subvol.replaced-$stamp still holds the previous data" >&2
+        exit 1
+    fi
+    echo "  the restored copy is kept as $subvol.failed-restore-$stamp" >&2
+    put_back
+fi
 
 if [ "$DRY_RUN" = "false" ]; then
     findmnt "$target"

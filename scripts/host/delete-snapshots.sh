@@ -14,6 +14,7 @@
 #                                  (with --pool: in /srv/econgraph-backups/snapshots,
 #                                  including *.incomplete-* leftovers)
 #   @econgraph-data-plane.replaced-* / @econgraph-app-prod.replaced-*
+#   @econgraph-data-plane.failed-restore-* / @econgraph-app-prod.failed-restore-*
 #                                  a subvolume set aside by restore-snapshot.sh
 # The live subvolumes can never be named here.
 #
@@ -74,6 +75,7 @@ fi
 for n in "${names[@]}"; do
     case "$n" in
         data-plane.?*|app-prod.?*|@econgraph-data-plane.replaced-?*|@econgraph-app-prod.replaced-?*) ;;
+        @econgraph-data-plane.failed-restore-?*|@econgraph-app-prod.failed-restore-?*) ;;
         *) echo "error: refusing $n: not a snapshot or set-aside subvolume name" >&2; exit 1 ;;
     esac
 done
