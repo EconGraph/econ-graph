@@ -170,8 +170,8 @@ The application is configured via ConfigMap and Secrets:
 
 PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
 `econgraph` user. `create-secrets.sh` builds the URL and stores it in the `econ-graph-secrets`
-Secret twice, as `app-database-url` and `data-database-url`, since the app and data databases
-are one database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend gets
+Secret as `app-database-url`, `data-database-url` and `database-url`, since the app and data
+databases are one database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend gets
 `APP_DATABASE_URL` and `DATA_DATABASE_URL`, and connects through `DATABASE_URL`, set from
 `app-database-url`. That one database holds both migration sets, data and app; the backend
 applies them when it starts, the data set first
@@ -193,7 +193,7 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 
 | Secret | Keys (environment variable) | Used by |
 | --- | --- | --- |
-| `econ-graph-secrets` | `app-database-url` and `data-database-url` (both built from `app-password`, naming the same database); `database-url` and the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`) |
+| `econ-graph-secrets` | `app-database-url`, `data-database-url` and `database-url` (all built from `app-password`, naming the same database); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |

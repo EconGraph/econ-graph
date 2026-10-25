@@ -13,6 +13,8 @@
 #   econ-graph-secrets             app-database-url          built from app-password
 #                                  data-database-url         built from app-password (the
 #                                                            same database as app-database-url)
+#                                  database-url              built from app-password (the
+#                                                            same database as app-database-url)
 #   econ-graph-postgres            postgres-password         POSTGRES_PASSWORD (generated)
 #                                  app-password              APP_DB_PASSWORD (generated)
 #   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
@@ -396,11 +398,11 @@ esac
 
 # --- econ-graph-secrets ----------------------------------------------------
 begin_secret econ-graph-secrets
-# The app and data databases are one database here, so both URLs name it.
+# The app and data databases are one database here, so every URL names it.
 DB_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 put app-database-url "$DB_URL" "built for user $APP_DB_USER"
 put data-database-url "$DB_URL" "built for user $APP_DB_USER"
-drop_obsolete database-url # replaced by app-database-url and data-database-url
+put database-url "$DB_URL" "built for user $APP_DB_USER"
 drop_obsolete database-password # written by the old k8s/manifests/secret.yaml
 # The in-house login (AUTH-6) is gone, so nothing reads these; sign-in is Keycloak's.
 for key in jwt-secret google-client-id google-client-secret facebook-app-id \

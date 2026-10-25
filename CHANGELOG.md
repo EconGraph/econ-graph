@@ -21,9 +21,9 @@ All notable changes to EconGraph are documented here. The format follows
   `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
   longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. `seed-fixtures` applies only the
   data migrations. The SEC crawlers no longer fall back to a local default database.
-- The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`,
-  both naming the one database, in place of `database-url`; `create-secrets.sh` removes the
-  old key. The backend and crawler-worker manifests read the new keys.
+- The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
+  next to `database-url`, all three naming the one database. The backend and crawler-worker
+  manifests read the new keys.
 
 ## [4.0.0] - 2026-10-08
 
