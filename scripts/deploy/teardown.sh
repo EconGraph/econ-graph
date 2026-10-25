@@ -175,8 +175,16 @@ run kubectl delete -f k8s/manifests/cloudflared.yaml --ignore-not-found=true
 # This namespace's routes and rate limits on the gateway, the public host's
 # copies included. The gateway itself (k8s/manifests/gateway/, its own
 # namespaces) serves the whole cluster and stays.
-run kubectl delete -f k8s/manifests/gateway/routes/ --ignore-not-found=true
-run kubectl -n "${NAMESPACE}" delete httproute,backendtrafficpolicy -l econgraph.io/public-host=true --ignore-not-found=true
+# Each kind only when its CRD exists (a cluster without the gateway has
+# neither): `kubectl delete -f` fails on an unknown kind even with
+# --ignore-not-found.
+if kubectl get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+    run kubectl delete -f k8s/manifests/gateway/routes/httproutes.yaml --ignore-not-found=true
+    run kubectl -n "${NAMESPACE}" delete httproute -l econgraph.io/public-host=true --ignore-not-found=true
+fi
+if kubectl get crd backendtrafficpolicies.gateway.envoyproxy.io >/dev/null 2>&1; then
+    run kubectl delete -f k8s/manifests/gateway/routes/ratelimit-policies.yaml --ignore-not-found=true
+fi
 for manifest in frontend-service frontend-deployment \
     admin-frontend-service admin-frontend-deployment backend-service \
     backend-deployment chart-api-service chart-api-deployment; do

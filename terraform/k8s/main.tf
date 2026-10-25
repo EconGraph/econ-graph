@@ -101,13 +101,21 @@ resource "null_resource" "kind_cluster" {
           brew install kind
         elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
           # Linux
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
         else
           echo "Unsupported OS: $OSTYPE"
           exit 1
         fi
+      fi
+
+      # The node image (var.node_image, Kubernetes 1.36) needs kind v0.33.0 or
+      # newer: older kind creates the cluster but cannot load images into it.
+      kind_have="$(kind version | awk '{print $2}')"
+      if [ "$(printf '%s\n%s\n' 0.33.0 "$${kind_have#v}" | sort -V | head -1)" != "0.33.0" ]; then
+        echo "kind $${kind_have} is too old for ${var.node_image}: install kind v0.33.0 or newer"
+        exit 1
       fi
 
       # Check if kubectl is installed
