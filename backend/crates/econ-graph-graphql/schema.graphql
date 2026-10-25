@@ -147,13 +147,17 @@ type AuditLogType {
 	"""
 	id: ID!
 	"""
-	User ID who performed action
+	User ID who performed action; null once that user has been deleted
 	"""
-	userId: ID!
+	userId: ID
 	"""
-	User name who performed action
+	User name who performed action, kept after the user is deleted
 	"""
 	userName: String!
+	"""
+	Whether the user who performed the action has since been deleted
+	"""
+	userDeleted: Boolean!
 	"""
 	Action performed
 	"""
