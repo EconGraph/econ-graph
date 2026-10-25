@@ -299,13 +299,18 @@ backup_databases() {
     else
         # Keycloak's database may exist but can't be dumped: every caller goes
         # on to delete or replace the cluster, which would lose it. A failed
-        # lookup counts as "exists" (fail closed).
-        local keycloak_sts
+        # lookup counts as "exists" (fail closed). The PVC outlives a deleted
+        # StatefulSet, so it is checked too.
+        local keycloak_sts keycloak_pvc
         if [ "${ALLOW_MISSING_KEYCLOAK_DUMP:-}" != 1 ]; then
             keycloak_sts="$(k get statefulset keycloak-postgres -o name --ignore-not-found)" ||
                 die "could not tell whether statefulset/keycloak-postgres exists, so no Keycloak backup can be promised; no cluster was deleted"
             [ -z "$keycloak_sts" ] ||
                 die "statefulset/keycloak-postgres exists but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start it, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
+            keycloak_pvc="$(k get persistentvolumeclaim keycloak-postgres-data-keycloak-postgres-0 -o name --ignore-not-found)" ||
+                die "could not tell whether persistentvolumeclaim/keycloak-postgres-data-keycloak-postgres-0 exists, so no Keycloak backup can be promised; no cluster was deleted"
+            [ -z "$keycloak_pvc" ] ||
+                die "persistentvolumeclaim/keycloak-postgres-data-keycloak-postgres-0 may still hold Keycloak's database but keycloak-postgres-0 is not running, so it can't be backed up; no cluster was deleted. Start keycloak-postgres, or set ALLOW_MISSING_KEYCLOAK_DUMP=1 to go on without a Keycloak dump"
         fi
         warn "keycloak-postgres-0 is not running; no Keycloak dump taken"
     fi
