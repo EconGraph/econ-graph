@@ -37,10 +37,12 @@ const MapValuesTable: React.FC<MapValuesTableProps> = ({ values, unit, frequency
       disableGutters
       variant='outlined'
       sx={{ mt: 2 }}
-      TransitionProps={{ unmountOnExit: true }}
+      slotProps={{
+        transition: { unmountOnExit: true },
+      }}
     >
       <AccordionSummary expandIcon={<ExpandMore />}>
-        <Typography variant='body2'>
+        <Typography component='span' variant='body2'>
           Values as a table ({rows.length === 1 ? '1 country' : `${rows.length} countries`})
         </Typography>
       </AccordionSummary>

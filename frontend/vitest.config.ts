@@ -93,8 +93,8 @@ export default defineConfig({
     },
     server: {
       deps: {
-        // MUI X date pickers import Material UI v5 subpaths as directories (`@mui/material/styles`), which
-        // Node's ESM resolver rejects; Vite resolves them when it processes the package.
+        // MUI X date pickers import Material UI subpaths as directories (`@mui/material/styles`). Material UI 6
+        // has no `exports` map, so Node's ESM resolver rejects them; Vite resolves them when it processes the package.
         inline: ['@mui/x-date-pickers'],
       },
     },

@@ -85,7 +85,7 @@ frontend/
 - **React Router 7**: Modern routing with hooks API
 
 ### UI Framework  
-- **Material-UI 5**: Complete design system with theming
+- **Material UI 6**: Complete design system with theming
 - **Emotion**: CSS-in-JS styling with performance optimizations
 - **Material Icons**: Comprehensive icon library
 

@@ -58,7 +58,13 @@ const MapLegend: React.FC<MapLegendProps> = ({
     <Paper variant='outlined' sx={{ p: 2 }} data-testid='map-legend'>
       <Typography variant='subtitle2'>{indicator}</Typography>
       {unit && (
-        <Typography variant='caption' color='text.secondary' component='div'>
+        <Typography
+          variant='caption'
+          component='div'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Unit: {unit}
         </Typography>
       )}
@@ -84,7 +90,14 @@ const MapLegend: React.FC<MapLegendProps> = ({
         />
         <Typography variant='caption'>No data</Typography>
       </Box>
-      <Typography variant='caption' color='text.secondary' component='div' sx={{ mt: 1 }}>
+      <Typography
+        variant='caption'
+        component='div'
+        sx={{
+          color: 'text.secondary',
+          mt: 1,
+        }}
+      >
         {countryCount === 1 ? '1 country' : `${countryCount} countries`} with data.
         {datesNote ? ` ${datesNote}` : ''}
         {undrawnCount > 0
