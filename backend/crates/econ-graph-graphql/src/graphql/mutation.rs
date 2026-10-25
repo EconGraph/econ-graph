@@ -17,6 +17,7 @@
 //! - Database transactions must be atomic and consistent
 //! - All mutations must have comprehensive documentation
 
+use crate::graphql::audit::{self, fail, OrOutcome, Outcome};
 use crate::imports::*;
 use crate::types::*;
 
@@ -40,22 +41,36 @@ impl Mutation {
         let caller = require_role(ctx, Role::AdminCrawlersManage)?;
         let pool = ctx.data::<DatabasePool>()?;
 
-        let jobs = plan_trigger_crawl(&input).map_err(GraphQLError::new)?;
-        let mut enqueued = 0i32;
-        for job in &jobs {
-            if core_models::CrawlQueueItem::enqueue(pool, job)
-                .await?
-                .is_some()
-            {
-                enqueued += 1;
+        let mut details = serde_json::json!({
+            "source": input.source,
+            "sources": input.sources,
+            "series_ids": input.series_ids,
+            "priority": input.priority,
+        });
+        let attempt = async {
+            let jobs = plan_trigger_crawl(&input).or_outcome(Outcome::Invalid)?;
+            details["requested"] = jobs.len().into();
+            let mut enqueued = 0i32;
+            for job in &jobs {
+                let inserted = core_models::CrawlQueueItem::enqueue(pool, job)
+                    .await
+                    .or_outcome(Outcome::Error)?;
+                if inserted.is_some() {
+                    enqueued += 1;
+                }
+                details["enqueued"] = enqueued.into();
             }
+            tracing::info!(
+                user_id = %caller.user_id,
+                requested = jobs.len(),
+                enqueued,
+                "triggerCrawl enqueued jobs"
+            );
+            Ok(enqueued)
         }
-        tracing::info!(
-            user_id = %caller.user_id,
-            requested = jobs.len(),
-            enqueued,
-            "triggerCrawl enqueued jobs"
-        );
+        .await;
+        let enqueued =
+            audit::audited(ctx, "trigger_crawl", "crawl_queue", None, details, attempt).await?;
 
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         let mut status = CrawlerStatusType::from_snapshot(snapshot);
@@ -202,14 +217,8 @@ impl Mutation {
         input: UpdateUserInput,
     ) -> Result<UserType> {
         let caller = require_role(ctx, Role::AdminUsersUpdate)?;
-        if input.is_active.is_some() {
-            require_role(ctx, Role::AdminUsersSuspend)?;
-        }
         let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
-        if input.is_active == Some(false) {
-            refuse_self_lockout(caller, user_id, "suspend")?;
-        }
+        let user_id = uuid::Uuid::parse_str(&id).ok();
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -228,26 +237,46 @@ impl Mutation {
             email_verified: input.email_verified,
             is_active: input.is_active,
         };
-        if changes.is_empty() {
-            return Err(GraphQLError::new("No fields to update"));
+        let details = serde_json::json!({ "fields": changes.field_names() });
+        let attempt = async {
+            if changes.is_active.is_some() {
+                require_role(ctx, Role::AdminUsersSuspend).or_outcome(Outcome::Denied)?;
+            }
+            let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
+            if changes.is_active == Some(false) {
+                refuse_self_lockout(caller, user_id, "suspend").or_outcome(Outcome::SelfLockout)?;
+            }
+            if changes.is_empty() {
+                return Err(fail(Outcome::Invalid, "No fields to update"));
+            }
+            require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
+            let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
+            diesel::update(users::table.filter(users::id.eq(user_id)))
+                .set(&changes)
+                .returning(User::as_select())
+                .get_result::<User>(&mut conn)
+                .await
+                .map_err(|error| match error {
+                    diesel::result::Error::NotFound => fail(Outcome::NotFound, "User not found"),
+                    diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::UniqueViolation,
+                        info,
+                    ) if info.constraint_name() == Some("users_email_key") => {
+                        fail(Outcome::Conflict, "User with this email already exists")
+                    }
+                    other => fail(Outcome::Error, other),
+                })
         }
-        require_manageable(ctx, caller, user_id)?;
-        let mut conn = pool.get().await?;
-        let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
-            .set(&changes)
-            .returning(User::as_select())
-            .get_result(&mut conn)
-            .await
-            .map_err(|error| match error {
-                diesel::result::Error::NotFound => GraphQLError::new("User not found"),
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    info,
-                ) if info.constraint_name() == Some("users_email_key") => {
-                    GraphQLError::new("User with this email already exists")
-                }
-                other => other.into(),
-            })?;
+        .await;
+        let final_user = audit::audited(
+            ctx,
+            "update_user",
+            "user",
+            user_id.map(|id| id.to_string()),
+            details,
+            attempt,
+        )
+        .await?;
 
         Ok(UserType::from(final_user))
     }
@@ -256,74 +285,97 @@ impl Mutation {
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersDelete)?;
         let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
-        refuse_self_lockout(caller, user_id, "delete")?;
+        let user_id = uuid::Uuid::parse_str(&id).ok();
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        require_manageable(ctx, caller, user_id)?;
-        let mut conn = pool.get().await?;
-
-        // Delete user (cascade will handle related records)
-        let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
-            .execute(&mut conn)
-            .await?;
-        if deleted == 0 {
-            return Err(GraphQLError::new("User not found"));
+        let attempt = async {
+            let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
+            refuse_self_lockout(caller, user_id, "delete").or_outcome(Outcome::SelfLockout)?;
+            require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
+            let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
+            // Delete user (cascade will handle related records)
+            let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
+                .execute(&mut conn)
+                .await
+                .or_outcome(Outcome::Error)?;
+            if deleted == 0 {
+                return Err(fail(Outcome::NotFound, "User not found"));
+            }
+            Ok(true)
         }
-        Ok(true)
+        .await;
+        audit::audited(
+            ctx,
+            "delete_user",
+            "user",
+            user_id.map(|id| id.to_string()),
+            serde_json::json!({}),
+            attempt,
+        )
+        .await
     }
 
     /// Suspend a user account (requires `admin.users:suspend`); never the caller's own
     async fn suspend_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersSuspend)?;
-        let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
-        refuse_self_lockout(caller, user_id, "suspend")?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::users;
-
-        require_manageable(ctx, caller, user_id)?;
-        let mut conn = pool.get().await?;
-
-        // Suspend user
-        let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
-            .set(users::is_active.eq(false))
-            .execute(&mut conn)
-            .await?;
-        if updated == 0 {
-            return Err(GraphQLError::new("User not found"));
-        }
-        Ok(true)
+        set_user_active(ctx, caller, &id, false).await
     }
 
     /// Activate a user account (requires `admin.users:suspend`)
     async fn activate_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersSuspend)?;
-        let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
+        set_user_active(ctx, caller, &id, true).await
+    }
+}
 
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::users;
+/// Suspend (`active = false`) or activate user `id` for `suspendUser` / `activateUser`, and
+/// audit the attempt. The caller already holds `admin.users:suspend`.
+async fn set_user_active(
+    ctx: &Context<'_>,
+    caller: &Principal,
+    id: &str,
+    active: bool,
+) -> Result<bool> {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::schema::users;
 
-        require_manageable(ctx, caller, user_id)?;
-        let mut conn = pool.get().await?;
-
-        // Activate user
+    let pool = ctx.data::<DatabasePool>()?;
+    let user_id = uuid::Uuid::parse_str(id).ok();
+    let attempt = async {
+        let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
+        if !active {
+            refuse_self_lockout(caller, user_id, "suspend").or_outcome(Outcome::SelfLockout)?;
+        }
+        require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
+        let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
-            .set(users::is_active.eq(true))
+            .set(users::is_active.eq(active))
             .execute(&mut conn)
-            .await?;
+            .await
+            .or_outcome(Outcome::Error)?;
         if updated == 0 {
-            return Err(GraphQLError::new("User not found"));
+            return Err(fail(Outcome::NotFound, "User not found"));
         }
         Ok(true)
     }
+    .await;
+    audit::audited(
+        ctx,
+        if active {
+            "activate_user"
+        } else {
+            "suspend_user"
+        },
+        "user",
+        user_id.map(|id| id.to_string()),
+        serde_json::json!({}),
+        attempt,
+    )
+    .await
 }
 
 /// Turns a `triggerCrawl` input into queue rows, or a validation message.
@@ -452,6 +504,25 @@ impl AdminUserChangeset {
             && self.email_verified.is_none()
             && self.is_active.is_none()
     }
+
+    /// The GraphQL names of the fields this changes, for the audit log (not their values).
+    fn field_names(&self) -> Vec<&'static str> {
+        [
+            ("email", self.email.is_some()),
+            ("name", self.name.is_some()),
+            ("avatarUrl", self.avatar_url.is_some()),
+            ("organization", self.organization.is_some()),
+            ("theme", self.theme.is_some()),
+            ("defaultChartType", self.default_chart_type.is_some()),
+            ("notificationsEnabled", self.notifications_enabled.is_some()),
+            ("collaborationEnabled", self.collaboration_enabled.is_some()),
+            ("emailVerified", self.email_verified.is_some()),
+            ("isActive", self.is_active.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, set)| set.then_some(name))
+        .collect()
+    }
 }
 
 /// Refuse with "Insufficient permissions", logging the denial like `require_role` does.
@@ -464,6 +535,12 @@ fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLE
             .unwrap_or("unknown"),
         "User {} denied: {why}",
         caller.user_id
+    );
+    audit::record_permission_denied(
+        ctx,
+        caller.user_id,
+        "every staff role".to_string(),
+        why.to_string(),
     );
     GraphQLError::new("Insufficient permissions")
 }
