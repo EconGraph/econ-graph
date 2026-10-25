@@ -267,13 +267,31 @@ backup_databases() {
         warn "keycloak-postgres-0 is not running; no Keycloak dump taken"
     fi
 
+    # Each count is taken (and checked) on its own before counts.env is
+    # written: inside echo "...$(...)" a failed query would leave an empty
+    # value and the backup would still be reported complete.
+    local series points realms="" users=""
+    series="$(count_rows econ_graph 'select count(*) from economic_series')" \
+        || die "counting economic_series failed; backup in $dir is incomplete"
+    points="$(count_rows econ_graph 'select count(*) from data_points')" \
+        || die "counting data_points failed; backup in $dir is incomplete"
+    [[ "$series" =~ ^[0-9]+$ && "$points" =~ ^[0-9]+$ ]] \
+        || die "non-numeric row counts '$series' '$points'; backup in $dir is incomplete"
+    if [ -s "$dir/keycloak.dump" ]; then
+        realms="$(count_rows keycloak 'select count(*) from realm')" \
+            || die "counting Keycloak realms failed; backup in $dir is incomplete"
+        users="$(count_rows keycloak 'select count(*) from user_entity')" \
+            || die "counting Keycloak users failed; backup in $dir is incomplete"
+        [[ "$realms" =~ ^[0-9]+$ && "$users" =~ ^[0-9]+$ ]] \
+            || die "non-numeric Keycloak row counts '$realms' '$users'; backup in $dir is incomplete"
+    fi
     {
         echo "# Row counts at backup time, compared after a restore."
-        echo "SERIES_COUNT=$(count_rows econ_graph 'select count(*) from economic_series')"
-        echo "DATA_POINTS_COUNT=$(count_rows econ_graph 'select count(*) from data_points')"
-        if [ -s "$dir/keycloak.dump" ]; then
-            echo "KEYCLOAK_REALM_COUNT=$(count_rows keycloak 'select count(*) from realm')"
-            echo "KEYCLOAK_USER_COUNT=$(count_rows keycloak 'select count(*) from user_entity')"
+        echo "SERIES_COUNT=$series"
+        echo "DATA_POINTS_COUNT=$points"
+        if [ -n "$realms" ]; then
+            echo "KEYCLOAK_REALM_COUNT=$realms"
+            echo "KEYCLOAK_USER_COUNT=$users"
         fi
     } >"$dir/counts.env"
 
