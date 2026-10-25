@@ -82,9 +82,8 @@ terraform apply
 `scripts/deploy/deploy.sh` deploys Keycloak from `k8s/manifests/keycloak/` (its own
 Postgres, then Keycloak with the `econ-graph` realm from `config/keycloak/`). Its
 credentials are never committed: they live in the Secret `econ-graph-keycloak`,
-written by `scripts/deploy/create-secrets.sh` (from the secrets PR, which also makes
-`deploy.sh` run it). That script generates the admin and database passwords on its
-first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
+written by `scripts/deploy/create-secrets.sh`, which `deploy.sh` runs. That script generates the
+admin and database passwords on its first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
 does not exist.
 
 ```bash
@@ -118,7 +117,8 @@ After deployment, the application will be available at:
 
 **Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
 `host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
-`deploy.sh` (re-enabled by ECO-242, train 3); `/admin` has no backend until then.
+`deploy.sh`: `ingress.yaml` routes `/admin` to `econ-graph-admin-frontend-service`, which
+`deploy.sh` doesn't create, so it removes that route before applying the ingress.
 
 ## 📊 Monitoring
 
@@ -164,17 +164,19 @@ kubectl scale deployment econ-graph-frontend --replicas=2 -n econ-graph
 The application is configured via ConfigMap and Secrets:
 
 - **ConfigMap**: Contains non-sensitive configuration
-- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed before #227 remain in Git history and must be rotated. See [Secrets](#secrets)
+- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. See [Secrets](#secrets)
 
 ### Database Connection
 
 PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
 `econgraph` user through `DATABASE_URL`, which `create-secrets.sh` builds and stores in the
-`econ-graph-secrets` Secret.
+`econ-graph-secrets` Secret. That one database holds both migration sets, data and app; the
+backend applies them when it starts, the data set first
+([database migrations](../docs/development/MIGRATIONS.md)).
 
 ### Secrets
 
-Current manifests contain no credentials. Google and Facebook credentials committed before #227 remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
+Current manifests contain no credentials. Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
 `econ-graph` namespace from environment variables; `deploy.sh` runs it on every deploy. It is
 idempotent: internal passwords are generated with `openssl rand` on the first run and kept on
 later runs, optional keys that are unset keep their current value (or are omitted), and obvious
@@ -191,7 +193,7 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 | `econ-graph-secrets` | `database-url` (built from `app-password`); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend, crawler-worker (`database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
-| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak (manifests arrive with the Keycloak deploy PR) |
+| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
 
