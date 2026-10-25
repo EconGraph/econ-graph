@@ -92,7 +92,9 @@ fn is_client_facing(error: &ServerError) -> bool {
     )
 }
 
-/// Logs a server-side error with its detail and replaces its message with a generic one.
+/// Logs a server-side error with its detail and replaces its message with a generic one. Its
+/// extensions are replaced too, with only the generic `code`, since a resolver may have put
+/// server-side detail in them.
 fn sanitize(error: &mut ServerError, operation_name: Option<&str>) {
     if is_client_facing(error) {
         return;
@@ -113,10 +115,9 @@ fn sanitize(error: &mut ServerError, operation_name: Option<&str>) {
         error.message
     );
     error.message = INTERNAL_ERROR_MESSAGE.to_string();
-    error
-        .extensions
-        .get_or_insert_with(Default::default)
-        .set("code", "INTERNAL_SERVER_ERROR");
+    let mut extensions = async_graphql::ErrorExtensionValues::default();
+    extensions.set("code", "INTERNAL_SERVER_ERROR");
+    error.extensions = Some(extensions);
 }
 
 /// Collects log output for tests: everything logged on this thread while the returned guard
@@ -153,7 +154,9 @@ impl std::io::Write for LogWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_graphql::{EmptyMutation, EmptySubscription, Object, Result, Schema};
+    use async_graphql::{
+        EmptyMutation, EmptySubscription, ErrorExtensions, Object, Result, Schema,
+    };
 
     struct Query;
 
@@ -203,6 +206,22 @@ mod tests {
             Err(async_graphql::Error::new_with_source(
                 AppError::DatabaseError("pg detail".to_string()),
             ))
+        }
+
+        /// A server-side error carrying detail in an extension.
+        async fn with_source_and_detail(&self) -> Result<i32> {
+            Err(
+                async_graphql::Error::new_with_source(AppError::DatabaseError(
+                    "pg detail".to_string(),
+                ))
+                .extend_with(|_, extensions| extensions.set("detail", "relation secret_table")),
+            )
+        }
+
+        /// A client error carrying an extension of its own.
+        async fn hand_written_with_extension(&self) -> Result<i32> {
+            Err(async_graphql::Error::new("Too many requests")
+                .extend_with(|_, extensions| extensions.set("retryAfter", 30)))
         }
 
         async fn hand_written(&self) -> Result<i32> {
@@ -281,6 +300,29 @@ mod tests {
         assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
         let error = first_error("{ withSource }").await;
         assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
+    }
+
+    /// A hidden error's extensions are replaced with only the generic code, so server-side
+    /// detail a resolver put there doesn't reach the client. Client errors keep theirs.
+    #[tokio::test]
+    async fn hidden_errors_drop_their_extensions() {
+        let error = first_error("{ withSourceAndDetail }").await;
+        assert_eq!(error.message, INTERNAL_ERROR_MESSAGE);
+        let extensions = error.extensions.expect("code extension");
+        assert_eq!(extensions.get("detail"), None);
+        assert_eq!(
+            extensions.get("code"),
+            Some(&"INTERNAL_SERVER_ERROR".into())
+        );
+        let json = serde_json::to_value(&extensions).unwrap();
+        assert_eq!(json, serde_json::json!({ "code": "INTERNAL_SERVER_ERROR" }));
+
+        let error = first_error("{ handWrittenWithExtension }").await;
+        assert_eq!(error.message, "Too many requests");
+        assert_eq!(
+            error.extensions.and_then(|e| e.get("retryAfter").cloned()),
+            Some(30.into())
+        );
     }
 
     /// Hand-written messages and malformed-argument errors still reach the client.

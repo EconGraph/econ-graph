@@ -220,8 +220,12 @@ data:
         rules:
         # The gauge only changes when a discovery runs, so it stays above 0 until the curated list
         # is fixed and the source is discovered again. Skipped entries keep their stored series.
+        # The gauge is process-local: a worker restart drops the series until the next discovery,
+        # up to the 7-day discovery interval later, and the new pod reports under a new pod label.
+        # `last_over_time` over an 8-day subquery of the per-source max keeps the last reported
+        # value through that gap, so the alert keeps firing, and a discovery reporting 0 clears it.
         - alert: CrawlerCuratedEntriesMissing
-          expr: max by (source) (crawler_curated_missing) > 0
+          expr: last_over_time((max by (source) (crawler_curated_missing))[8d:5m]) > 0
           for: 15m
           labels:
             severity: warning
