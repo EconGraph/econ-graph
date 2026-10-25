@@ -21,13 +21,13 @@
 # of silently re-resolving.
 
 # Keep in sync with rust-toolchain.toml at the repository root (channel = "1.98.1").
-# Bookworm to match the runtime image's glibc/OpenSSL/libpq.
+# Trixie to match the runtime image's glibc/OpenSSL/libpq.
 ARG RUST_VERSION=1.98.1
 
 ############################
 # Build stage
 ############################
-FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+FROM rust:${RUST_VERSION}-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
@@ -62,11 +62,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 ############################
 # Shared runtime base
 ############################
-FROM debian:bookworm-slim AS runtime-base
+FROM debian:trixie-slim AS runtime-base
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libssl3 \
+        libssl3t64 \
         libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
