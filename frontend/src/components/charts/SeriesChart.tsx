@@ -402,7 +402,6 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
                   textField: {
                     size: 'small',
                     fullWidth: true,
-                    inputProps: { 'data-testid': 'date-picker-start', 'aria-label': 'Start Date' },
                   },
                 }}
               />
@@ -421,7 +420,6 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
                   textField: {
                     size: 'small',
                     fullWidth: true,
-                    inputProps: { 'data-testid': 'date-picker-end', 'aria-label': 'End Date' },
                   },
                 }}
               />

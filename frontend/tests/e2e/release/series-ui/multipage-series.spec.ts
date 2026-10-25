@@ -206,7 +206,10 @@ function recordPageReads(page: Page): PageRead[] {
  * @param typed - The digits to type, e.g. `05151961`.
  */
 async function typeDate(page: Page, label: string, typed: string) {
-  await page.getByRole('textbox', { name: label }).click();
+  await page
+    .getByRole('group', { name: label })
+    .getByRole('spinbutton', { name: 'Month' })
+    .click();
   await page.keyboard.type(typed);
 }
 
