@@ -290,9 +290,11 @@ How the scripts use the marker:
   running there keeps running until `--unmark` or a deploy with `PUBLIC_HOST=` (empty).
 - `create-secrets.sh` refuses to write `CLOUDFLARE_TUNNEL_TOKEN` (or
   `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
-- The check and every kubectl call of the deploy library and `create-secrets.sh` use the
-  same binary, `${KUBECTL:-kubectl}`, on one context, pinned at the start, so they cannot
-  reach different clusters.
+- The check and every kubectl call of `deploy.sh`, `restart-k8s-rollout.sh`, the deploy
+  library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
+  context: `deploy.sh` pins `kind-econ-graph` and `restart-k8s-rollout.sh` pins `microk8s`
+  (replacing any `CLUSTER_ROLE_CONTEXT` in the environment), and scripts they start
+  inherit it. So the check and the writes it allows cannot reach different clusters.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not
   production, and the scripts say so. The deploy then stops with cloudflared left as it is,
   as it does when the Secret `cloudflare-tunnel` cannot be looked up: a failed lookup never

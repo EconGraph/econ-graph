@@ -51,9 +51,11 @@ tests:
         exp_alerts: []
 
   # No tunnel configured on a cluster that is not production: deploy.sh scales cloudflared
-  # to 0. Nothing fires.
+  # to 0. Other kube-system ConfigMaps (coredns) are not the marker. Nothing fires.
   - interval: 1m
     input_series:
+      - series: 'kube_configmap_info{namespace="kube-system", configmap="coredns"}'
+        values: '1x30'
       - series: 'kube_deployment_spec_replicas{namespace="econ-graph", deployment="cloudflared"}'
         values: '0x30'
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'

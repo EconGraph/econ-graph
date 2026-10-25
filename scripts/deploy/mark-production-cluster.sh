@@ -64,7 +64,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 
-# Every call below goes through kc, on this one context.
+# Every call below goes through kc, on this one context: the current one, never
+# a CLUSTER_ROLE_CONTEXT inherited from the environment.
+unset CLUSTER_ROLE_CONTEXT
 cluster_role_pin_context || die "$KUBECTL has no current context"
 context="$CLUSTER_ROLE_CONTEXT"
 uid="$(kube_system_uid)" || die "could not read the kube-system namespace UID of context $context"
@@ -108,6 +110,12 @@ if [[ "$UNMARK" == true ]]; then
         log "context $context: not marked production, cloudflared not running, no tunnel token; nothing to do"
         exit 0
     fi
+    if cluster_is_marked_production; then
+        echo
+        echo "!!! WARNING: context $context is the cluster marked production, the one serving"
+        echo "!!! econgraph.com now. Unmarking it stops cloudflared and takes the public site down."
+        echo "!!! Go on only if another cluster is taking over, or the site is meant to go down."
+    fi
     if [[ "$DRY_RUN" == true ]]; then
         [[ "$running" == false ]] ||
             log "dry run: would scale deployment/cloudflared in $TUNNEL_NAMESPACE from $replicas to 0 replicas"
@@ -131,7 +139,8 @@ if [[ "$UNMARK" == true ]]; then
     if [[ -n "$token" ]]; then
         echo "Secret $TUNNEL_NAMESPACE/cloudflare-tunnel holds the tunnel token. Only the production"
         echo "cluster may hold it: anything that starts cloudflared with it serves part of the site."
-        read -r -p "Type delete to delete it now, or press Enter to keep it: " answer
+        # End of input means keep it.
+        read -r -p "Type delete to delete it now, or press Enter to keep it: " answer || answer=""
         if [[ "$answer" == delete ]]; then
             kc -n "$TUNNEL_NAMESPACE" delete secret cloudflare-tunnel --ignore-not-found
             log "deleted Secret $TUNNEL_NAMESPACE/cloudflare-tunnel"

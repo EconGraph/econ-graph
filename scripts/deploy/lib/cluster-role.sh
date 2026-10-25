@@ -22,11 +22,13 @@ CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
 
 # kubectl, as ${KUBECTL:-kubectl}, on the pinned context once there is one.
+# `command` runs the binary even where a script wraps kubectl in a function
+# that calls kc (deploy.sh, restart-k8s-rollout.sh).
 kc() {
     if [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
-        "${KUBECTL:-kubectl}" --context "$CLUSTER_ROLE_CONTEXT" "$@"
+        command "${KUBECTL:-kubectl}" --context "$CLUSTER_ROLE_CONTEXT" "$@"
     else
-        "${KUBECTL:-kubectl}" "$@"
+        command "${KUBECTL:-kubectl}" "$@"
     fi
 }
 
@@ -35,8 +37,18 @@ kc() {
 # deploy.sh, stay on it). Fails when there is no current context.
 cluster_role_pin_context() {
     [ -z "${CLUSTER_ROLE_CONTEXT:-}" ] || return 0
-    CLUSTER_ROLE_CONTEXT="$("${KUBECTL:-kubectl}" config current-context)" || return 1
+    CLUSTER_ROLE_CONTEXT="$(command "${KUBECTL:-kubectl}" config current-context)" || return 1
     [ -n "$CLUSTER_ROLE_CONTEXT" ] || return 1
+    export CLUSTER_ROLE_CONTEXT
+}
+
+# For the top-level scripts (deploy.sh, restart-k8s-rollout.sh): make CONTEXT
+# the current context of ${KUBECTL:-kubectl} and pin it. A CLUSTER_ROLE_CONTEXT
+# inherited from the environment is replaced, never followed: it must not send
+# the check and the writes to another cluster than the one the script deploys.
+cluster_role_use_context() {
+    command "${KUBECTL:-kubectl}" config use-context "$1" >/dev/null || return 1
+    CLUSTER_ROLE_CONTEXT="$1"
     export CLUSTER_ROLE_CONTEXT
 }
 

@@ -314,6 +314,11 @@ grep -Eq "$writes" "$log" && fail "mark --unmark --dry-run: changed the cluster"
 if run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark; then
   fail "mark --unmark: stopped cloudflared without a terminal, or did nothing"
 fi
+# --unmark warns on the live production cluster, also in a dry run.
+run_stubbed STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run on production failed: $(cat "$out")"
+grep -q 'WARNING: context kind-test is the cluster marked production' "$out" ||
+  fail "mark --unmark --dry-run: no warning on the production cluster"
 # A token without a marker or a running connector is still something to unmark.
 run_stubbed STUB_MARKER=none STUB_SECRET=1 "$mark" --unmark --dry-run ||
   fail "mark --unmark --dry-run with a token failed: $(cat "$out")"
@@ -357,6 +362,17 @@ if [ "$have_script" = true ]; then
     fail "mark --unmark: did not scale cloudflared, then delete the marker: $(grep -E 'scale|delete' "$log")"
   grep -q 'delete secret' "$log" && fail "mark --unmark: deleted the token without being told to"
   grep -q 'kept Secret econ-graph/cloudflare-tunnel' "$out" || fail "mark --unmark: did not say the token was kept"
+  # On the live production cluster it warns, before the confirmation.
+  warning_line="$(grep -n 'WARNING: context kind-test is the cluster marked production' "$out" | cut -d: -f1 || true)"
+  prompt_line="$(grep -n 'Type the first 8 characters' "$out" | cut -d: -f1 || true)"
+  [ -n "$warning_line" ] && [ -n "$prompt_line" ] && [ "$warning_line" -lt "$prompt_line" ] ||
+    fail "mark --unmark: no warning before the confirmation on the production cluster: $(cat "$out")"
+  # End of input at the token prompt keeps the token (and does not fail).
+  printf 'uid-this\n' | run_in_terminal STUB_MARKER=none STUB_SECRET=1 "$mark --unmark" ||
+    fail "mark --unmark: end of input at the token prompt failed: $(cat "$out")"
+  grep -q 'delete secret' "$log" && fail "mark --unmark: end of input deleted the token"
+  grep -q 'kept Secret econ-graph/cloudflare-tunnel' "$out" || fail "mark --unmark: end of input did not say the token was kept"
+  grep -q 'WARNING' "$out" && fail "mark --unmark: warned about production on an unmarked cluster"
   # ...deletes it when told to...
   printf 'uid-this\ndelete\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=0 STUB_SECRET=1 "$mark --unmark" ||
     fail "mark --unmark (delete the token) failed: $(cat "$out")"
@@ -379,8 +395,31 @@ grep -q '^kubectl config current-context' "$log" || fail "the context was not pi
 if PUBLIC_HOST='' STUB_NO_CONTEXT=1 run_lib public_host_init; then
   fail "public_host_init went on without a current context"
 fi
+# A CLUSTER_ROLE_CONTEXT inherited from the environment (another cluster's) does not
+# redirect a deploy: cluster_role_use_context replaces it, as deploy.sh and
+# restart-k8s-rollout.sh do, and their kubectl wrapper sends their own calls through kc.
+PUBLIC_HOST='' STUB_SECRET=1 run_lib 'export CLUSTER_ROLE_CONTEXT=prod-elsewhere
+  cluster_role_use_context kind-test; kubectl() { kc "$@"; }
+  public_host_init; apply_public_edge; apply_cloudflared; kubectl get nodes' ||
+  fail "deploy pass after cluster_role_use_context failed: $(cat "$out")"
+grep -q 'prod-elsewhere' "$log" && fail "an inherited CLUSTER_ROLE_CONTEXT redirected the deploy: $(grep prod-elsewhere "$log")"
+grep -q '^kubectl config use-context kind-test' "$log" || fail "cluster_role_use_context did not switch the context"
+grep '^kubectl ' "$log" | grep -v 'config use-context' | grep -v -- '--context kind-test' &&
+  fail "a call of the deploy pass did not use the pinned context"
+grep -q '^kubectl --context kind-test get nodes' "$log" || fail "the kubectl wrapper did not go through kc"
+# mark-production-cluster.sh ignores an inherited CLUSTER_ROLE_CONTEXT too.
+run_stubbed CLUSTER_ROLE_CONTEXT=prod-elsewhere STUB_MARKER=production "$mark" ||
+  fail "mark: failed with an inherited CLUSTER_ROLE_CONTEXT: $(cat "$out")"
+grep -q 'prod-elsewhere' "$log" && fail "mark: followed an inherited CLUSTER_ROLE_CONTEXT"
 # The kubectl first on PATH (another cluster's) was never called, by any test above.
 [ ! -s "$path_log" ] || fail "calls went to the kubectl on PATH instead of \$KUBECTL: $(cat "$path_log")"
+# With KUBECTL unset, the wrapper reaches the kubectl binary on PATH through kc, once,
+# instead of calling itself.
+timeout 20 env -u KUBECTL CLUSTER_ROLE_CONTEXT=ctx bash -c \
+  'source scripts/deploy/lib/cluster-role.sh; kubectl() { kc "$@"; }; kubectl version' >/dev/null 2>&1 || true
+[ "$(cat "$path_log")" = "kubectl on PATH: --context ctx version" ] ||
+  fail "the kubectl wrapper without KUBECTL did not call the binary once: $(cat "$path_log")"
+: >"$path_log"
 
 # --- static: who applies cloudflared.yaml ----------------------------------------------
 for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
@@ -388,9 +427,25 @@ for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
 done
 grep -q 'cloudflared.yaml) continue' scripts/deploy/restart-k8s-rollout.sh ||
   fail "restart-k8s-rollout.sh does not skip cloudflared.yaml in its manifest loop"
-# Nothing else applies cloudflared.yaml or the whole k8s/manifests directory (which would
-# stop the connector on production, since the manifest is committed with 0 replicas).
-offenders="$(grep -rnE 'apply .*-f [^ ]*(cloudflared\.yaml|manifests/?)("|[[:space:]]|$)' scripts --include='*.sh' |
+# Both pin their context and send every kubectl call through kc before the first deploy step.
+for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
+  pin="$(grep -n '^if ! cluster_role_use_context ' "$script" | cut -d: -f1 || true)"
+  wrap="$(grep -nF 'kubectl() { kc "$@"; }' "$script" | cut -d: -f1 || true)"
+  init="$(grep -n '^public_host_init$' "$script" | cut -d: -f1 || true)"
+  first="$(grep -nE '^[^#]*\bkubectl (apply|get|wait|delete|patch|rollout|scale|create)' "$script" | head -1 | cut -d: -f1 || true)"
+  if ! { [ -n "$pin" ] && [ -n "$wrap" ] && [ "$pin" -lt "$wrap" ] && [ "$wrap" -lt "$init" ] &&
+    { [ -z "$first" ] || [ "$wrap" -lt "$first" ]; }; }; then
+    fail "$script does not pin its context and wrap kubectl before using it (pin $pin, wrap $wrap, init $init, first call $first)"
+  fi
+done
+grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
+  fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
+# Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
+# stop the connector on production, since the manifest is committed with 0 replicas), or
+# k8s/ recursively or through kustomize.
+offenders="$(grep -rnE '\bapply\b' scripts --include='*.sh' |
+  grep -E -e '[[:space:]](-k|--kustomize)([[:space:]=]|$)' -e '[[:space:]](-R|--recursive)([[:space:]=]|$)' \
+    -e '(-f|--filename)[[:space:]=]"?[^[:space:]"]*(cloudflared\.yaml|k8s/?|manifests/?)("|[[:space:]]|$)' |
   grep -v -e '^scripts/deploy/lib/public-host.sh:' -e '^scripts/deploy/test-' || true)"
 [ -z "$offenders" ] || fail "scripts apply cloudflared.yaml or k8s/manifests wholesale: $offenders"
 
