@@ -31,6 +31,12 @@
 #   crawler_coverage_oldest_success_timestamp_seconds{source}  gauge; oldest last successful crawl
 #   crawler_coverage_last_refresh_timestamp_seconds  gauge; last successful refresh of the above
 #
+# Discovery metrics, also served by crawler-worker (econ-graph-metrics CrawlerDiscoveryMetrics),
+# set after each discovery that lists a source's catalog:
+#   crawler_curated_missing{source}                  gauge; curated entries (BEA tables, FRED ids)
+#                                                    the last discovery skipped because the source
+#                                                    no longer lists them
+#
 # How QA forces each coverage alert: docs/monitoring/crawler-coverage-runbook.md.
 #
 # Scraping: crawler-worker serves GET /metrics on :9102 (CRAWLER_METRICS_ADDR), and its pod
@@ -209,6 +215,23 @@ data:
           annotations:
             summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
             description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
+
+      - name: crawler.discovery
+        rules:
+        # The gauge only changes when a discovery runs, so it stays above 0 until the curated list
+        # is fixed and the source is discovered again. Skipped entries keep their stored series.
+        # The gauge is process-local: a worker restart drops the series until the next discovery,
+        # up to the 7-day discovery interval later, and the new pod reports under a new pod label.
+        # `last_over_time` over an 8-day subquery of the per-source max keeps the last reported
+        # value through that gap, so the alert keeps firing, and a discovery reporting 0 clears it.
+        - alert: CrawlerCuratedEntriesMissing
+          expr: last_over_time((max by (source) (crawler_curated_missing))[8d:5m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
+            description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; update the curated list (for BEA, data/bea_tables.csv).
 
       # Release exit criteria 2 (coverage) and 3 (freshness), plus crawl failures.
       # `max by (source)` drops the pod labels the kubernetes-pods scrape job adds.

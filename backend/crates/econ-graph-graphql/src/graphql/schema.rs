@@ -7,6 +7,7 @@ use async_graphql::{EmptySubscription, Schema, SchemaBuilder};
 use std::sync::Arc;
 
 use crate::graphql::dataloaders::DataLoaders;
+use crate::graphql::errors::SanitizeErrors;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
@@ -36,8 +37,13 @@ pub const MAX_QUERY_COMPLEXITY: usize = 1000;
 /// [`create_schema`], [`create_schema_with_data`] and [`sdl`] all build from
 /// this, so the committed `schema.graphql` snapshot describes the schema the
 /// server actually serves.
+///
+/// Every schema writes the permission denials its requests raise before returning their
+/// responses ([`crate::graphql::audit::AuditWrites`]).
 fn schema_builder() -> SchemaBuilder<Query, Mutation, EmptySubscription> {
     Schema::build(Query, Mutation, EmptySubscription)
+        .extension(SanitizeErrors)
+        .extension(crate::graphql::audit::AuditWrites)
 }
 
 /// Print the schema as GraphQL SDL.

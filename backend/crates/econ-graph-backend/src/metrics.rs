@@ -243,8 +243,47 @@ impl AppMetrics {
 pub static METRICS: once_cell::sync::Lazy<AppMetrics> =
     once_cell::sync::Lazy::new(|| AppMetrics::new().expect("Failed to initialize metrics"));
 
+/// Audit log entries and security events the server could not write, by `table`. Those
+/// writes are best-effort (a failure never fails the request), so this is what makes a
+/// broken audit trail visible; alert on any increase.
+static AUDIT_WRITE_FAILURES: once_cell::sync::Lazy<IntCounterVec> =
+    once_cell::sync::Lazy::new(|| {
+        let counter = IntCounterVec::new(
+            Opts::new(
+                "audit_write_failures_total",
+                "Audit log entries and security events that could not be written",
+            ),
+            &["table"],
+        )
+        .expect("valid metric");
+        REGISTRY
+            .register(Box::new(counter.clone()))
+            .expect("audit_write_failures_total registers once");
+        counter
+    });
+
+/// Bring [`AUDIT_WRITE_FAILURES`] up to the totals `econ-graph-core` counts.
+fn sync_audit_write_failures() {
+    use econ_graph_core::models::admin::{audit_log_write_failures, security_event_write_failures};
+    static SYNC: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = SYNC
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (table, total) in [
+        ("audit_logs", audit_log_write_failures()),
+        ("security_events", security_event_write_failures()),
+    ] {
+        let counter = AUDIT_WRITE_FAILURES.with_label_values(&[table]);
+        let seen = counter.get();
+        if total > seen {
+            counter.inc_by(total - seen);
+        }
+    }
+}
+
 /// Generate Prometheus metrics output
 pub fn generate_metrics() -> anyhow::Result<String> {
+    sync_audit_write_failures();
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     encoder

@@ -775,6 +775,28 @@ mod tests {
             .collect()
     }
 
+    /// The versions `sets` embed, sorted and deduplicated: what a database those sets fully
+    /// migrated records. Derived from the embedded migrations, so adding a migration to a set
+    /// doesn't need these tests changed; the baselines themselves are pinned by
+    /// `each_set_embeds_its_permanent_baseline_version`.
+    fn embedded_versions(sets: &[MigrationSet]) -> Vec<String> {
+        use diesel::migration::{Migration, MigrationSource};
+
+        let mut versions: Vec<String> = sets
+            .iter()
+            .flat_map(|set| {
+                MigrationSource::<diesel::pg::Pg>::migrations(&set.migrations())
+                    .expect("should read embedded migrations")
+                    .iter()
+                    .map(|m| m.name().version().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        versions.sort();
+        versions.dedup();
+        versions
+    }
+
     fn recorded_versions(conn: &mut diesel::PgConnection) -> Vec<String> {
         text_rows(
             conn,
@@ -851,14 +873,10 @@ mod tests {
             .expect("migrations should apply to a new database");
 
         let mut conn = db.connect();
-        assert_eq!(
-            recorded_versions(&mut conn),
-            [
-                "00000000000000",
-                DATA_BASELINE_VERSION,
-                APP_BASELINE_VERSION
-            ]
-        );
+        let expected = embedded_versions(&[MigrationSet::Data, MigrationSet::App]);
+        assert!(expected.iter().any(|v| v == DATA_BASELINE_VERSION));
+        assert!(expected.iter().any(|v| v == APP_BASELINE_VERSION));
+        assert_eq!(recorded_versions(&mut conn), expected);
         let mut all = DATA_TABLES.to_vec();
         all.extend(APP_TABLES);
         assert_eq!(public_tables(&mut conn), sorted(&all));
@@ -883,14 +901,14 @@ mod tests {
         assert_eq!(public_tables(&mut data_conn), sorted(&DATA_TABLES));
         assert_eq!(
             recorded_versions(&mut data_conn),
-            ["00000000000000", DATA_BASELINE_VERSION]
+            embedded_versions(&[MigrationSet::Data])
         );
 
         let mut app_conn = app_db.connect();
         assert_eq!(public_tables(&mut app_conn), sorted(&APP_TABLES));
         assert_eq!(
             recorded_versions(&mut app_conn),
-            ["00000000000000", APP_BASELINE_VERSION]
+            embedded_versions(&[MigrationSet::App])
         );
 
         // Each database is ready for its own set and not for the other one.
@@ -999,19 +1017,25 @@ mod tests {
         )
     }
 
-    /// A database built by the single v4.0.0 baseline, before the split, is brought forward
-    /// without any schema change: the app baseline is recorded, not run.
-    ///
-    /// The single baseline is rebuilt here from its two halves (the data baseline through
-    /// Diesel, the app baseline's SQL run directly so its version is not recorded) plus the three
-    /// foreign keys the split dropped, under their original names. scripts/compare_migrations.sh
-    /// checks that the halves are the single baseline less those keys.
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn run_migrations_records_the_app_baseline_on_a_single_baseline_database() {
+    /// App migrations that release/v4.0 ships after its single baseline, as (version, up.sql).
+    /// A database migrated on release/v4.0 has these applied and recorded. Each forward-port of
+    /// such a migration adds one entry here.
+    const RELEASE_V4_0_APP_MIGRATIONS: &[(&str, &str)] = &[(
+        "20261024000100",
+        include_str!(
+            "../../../migrations/app/2026-10-24-000100_audit_logs_keep_on_user_delete/up.sql"
+        ),
+    )];
+
+    /// Rebuilds a database created by the single v4.0.0 baseline, before the split, from its two
+    /// halves: the data baseline through Diesel, and the app baseline's SQL run directly so its
+    /// version is not recorded. It also adds the three foreign keys the split dropped, under
+    /// their original names. scripts/compare_migrations.sh checks that the halves are the single
+    /// baseline less those keys.
+    async fn single_baseline_database(name: &str) -> (ScratchDatabase, diesel::PgConnection) {
         use diesel::connection::SimpleConnection;
 
-        let db = ScratchDatabase::create("single_baseline");
+        let db = ScratchDatabase::create(name);
         run_migration_sets(&db.url, &[MigrationSet::Data])
             .await
             .expect("the data set should apply");
@@ -1036,30 +1060,86 @@ mod tests {
             ["00000000000000", DATA_BASELINE_VERSION],
             "a single-baseline database has only the data baseline's version"
         );
-        let before = schema_signature(&mut conn);
-        assert!(before
+        assert!(schema_signature(&mut conn)
             .iter()
             .any(|l| l.contains("financial_annotations_statement_id_fkey")));
+        (db, conn)
+    }
+
+    /// Applies and records `RELEASE_V4_0_APP_MIGRATIONS`, as release/v4.0 has.
+    fn apply_release_v4_0_app_migrations(conn: &mut diesel::PgConnection) {
+        use diesel::connection::SimpleConnection;
+
+        for (version, up) in RELEASE_V4_0_APP_MIGRATIONS {
+            conn.batch_execute(up)
+                .unwrap_or_else(|e| panic!("release migration {version} should run: {e}"));
+            conn.batch_execute(&format!(
+                "INSERT INTO __diesel_schema_migrations (version) VALUES ('{version}')"
+            ))
+            .unwrap_or_else(|e| panic!("release migration {version} should be recorded: {e}"));
+        }
+    }
+
+    /// A single-baseline database without the later app migrations (a release candidate from
+    /// before them): the app baseline is recorded, not run, and the later app migrations run.
+    /// The schema ends up exactly as the single baseline plus those migrations.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_migrations_records_the_app_baseline_and_applies_later_app_migrations() {
+        let (db, mut conn) = single_baseline_database("single_baseline_rc").await;
+        let (_reference, mut reference_conn) =
+            single_baseline_database("single_baseline_rc_reference").await;
+        apply_release_v4_0_app_migrations(&mut reference_conn);
+        let before = schema_signature(&mut conn);
+        let expected_schema = schema_signature(&mut reference_conn);
+        assert_ne!(
+            before, expected_schema,
+            "the later app migrations should change the schema"
+        );
 
         run_migrations(&db.url)
             .await
             .expect("migrations should succeed on a single-baseline database");
 
+        let expected = embedded_versions(&[MigrationSet::Data, MigrationSet::App]);
+        assert!(expected.iter().any(|v| v == APP_BASELINE_VERSION));
+        assert_eq!(recorded_versions(&mut conn), expected);
         assert_eq!(
-            recorded_versions(&mut conn),
-            [
-                "00000000000000",
-                DATA_BASELINE_VERSION,
-                APP_BASELINE_VERSION
-            ]
+            schema_signature(&mut conn),
+            expected_schema,
+            "only the later app migrations should change the schema; the app baseline is recorded, not run"
         );
+
+        run_migrations(&db.url)
+            .await
+            .expect("a second run should succeed");
+        assert_eq!(schema_signature(&mut conn), expected_schema);
+    }
+
+    /// A database migrated on release/v4.0 (the single baseline plus its later app migrations,
+    /// applied and recorded) is brought forward without any schema change: the app baseline is
+    /// recorded, not run.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_migrations_records_the_app_baseline_on_a_single_baseline_database() {
+        let (db, mut conn) = single_baseline_database("single_baseline").await;
+        apply_release_v4_0_app_migrations(&mut conn);
+        let before = schema_signature(&mut conn);
+
+        run_migrations(&db.url)
+            .await
+            .expect("migrations should succeed on a release/v4.0 database");
+
+        let expected = embedded_versions(&[MigrationSet::Data, MigrationSet::App]);
+        assert!(expected.iter().any(|v| v == DATA_BASELINE_VERSION));
+        assert!(expected.iter().any(|v| v == APP_BASELINE_VERSION));
+        assert_eq!(recorded_versions(&mut conn), expected);
         assert_eq!(
             schema_signature(&mut conn),
             before,
             "recording the app baseline should not change the schema"
         );
 
-        // And it is idempotent: a second run changes nothing either.
         run_migrations(&db.url)
             .await
             .expect("a second run should succeed");

@@ -123,7 +123,7 @@ diesel::table! {
 diesel::table! {
     audit_logs (id) {
         id -> Uuid,
-        user_id -> Uuid,
+        user_id -> Nullable<Uuid>,
         #[max_length = 255]
         user_name -> Varchar,
         #[max_length = 100]
