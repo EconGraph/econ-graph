@@ -100,7 +100,17 @@ if [ "$FROM_POOL" = "true" ]; then
             echo "(dry run: stopping here, the remaining checks need the local copy)"
             exit 0
         fi
-        btrfs send -q "$POOL_SNAPSHOT_DIR/$snap" | btrfs receive "$SNAPSHOT_DIR"
+        if ! btrfs send -q "$POOL_SNAPSHOT_DIR/$snap" | btrfs receive "$SNAPSHOT_DIR"; then
+            echo "error: copying $snap back from the backup pool failed" >&2
+            if [ -e "$SNAPSHOT_DIR/$snap" ]; then
+                # Set the partial copy aside (never delete it), so a rerun
+                # receives again instead of finding a writable leftover.
+                leftover="$SNAPSHOT_DIR/$snap.incomplete-$(date -u +%Y%m%dT%H%M%SZ)"
+                echo "  the partial copy is set aside as $leftover (not deleted)" >&2
+                mv "$SNAPSHOT_DIR/$snap" "$leftover" || echo "  could not rename it; move it aside by hand" >&2
+            fi
+            exit 1
+        fi
     fi
 fi
 
