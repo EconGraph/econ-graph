@@ -28,6 +28,12 @@
 # you to restart econ-graph-worker before scaling Postgres back up.
 #
 # Nothing is deleted. Safe to re-run with a different snapshot.
+#
+# --dry-run (-n) writes nothing and mounts nothing: it runs the read-only
+# checks (the snapshot is a read-only subvolume, the Postgres pod is gone,
+# and, through findmnt on the existing mounts, that the target and the
+# snapshot directory are the expected subvolumes of this filesystem), then
+# prints each step. With --from-pool it stops before the copy back.
 
 set -euo pipefail
 
@@ -153,24 +159,44 @@ if [ "$YES" = "false" ] && [ "$DRY_RUN" = "false" ]; then
     fi
 fi
 
-top="$(mktemp -d /mnt/econgraph-top.XXXXXX)"
-cleanup() {
-    if mountpoint -q "$top"; then umount "$top"; fi
-    rmdir "$top"
+# mounted_subvol <mountpoint>: "<uuid> <subvolume path>" of the mount there.
+mounted_subvol() {
+    findmnt -n -o UUID,FSROOT --mountpoint "$1" | tail -n 1
 }
-trap cleanup EXIT
 if [ "$DRY_RUN" = "true" ]; then
-    mount -o ro,subvolid=5 "UUID=$FS_UUID" "$top"
-else
-    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
-fi
-
-for p in "$top/$subvol" "$top/@econgraph-snapshots/$snap"; do
-    if ! btrfs subvolume show "$p" >/dev/null 2>&1; then
-        echo "error: $p not found at the filesystem top level" >&2
+    # No temporary directory and no top-level mount: check through the
+    # mounts that already exist.
+    if [ "$(mounted_subvol "$SNAPSHOT_DIR")" != "$FS_UUID /@econgraph-snapshots" ]; then
+        echo "error: $SNAPSHOT_DIR is not @econgraph-snapshots on UUID=$FS_UUID" >&2
         exit 1
     fi
-done
+    if mountpoint -q "$target"; then
+        if [ "$(mounted_subvol "$target")" != "$FS_UUID /$subvol" ]; then
+            echo "error: $target is not $subvol on UUID=$FS_UUID" >&2
+            exit 1
+        fi
+        echo "= $target is $subvol on UUID=$FS_UUID"
+    else
+        echo "= $target is not mounted, so a dry run cannot confirm $subvol exists"
+    fi
+    echo "+ mount -o subvolid=5 UUID=$FS_UUID <temporary directory under /mnt>   (not in a dry run)"
+    top="<top>"
+else
+    top="$(mktemp -d /mnt/econgraph-top.XXXXXX)"
+    cleanup() {
+        if mountpoint -q "$top"; then umount "$top"; fi
+        rmdir "$top"
+    }
+    trap cleanup EXIT
+    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
+
+    for p in "$top/$subvol" "$top/@econgraph-snapshots/$snap"; do
+        if ! btrfs subvolume show "$p" >/dev/null 2>&1; then
+            echo "error: $p not found at the filesystem top level" >&2
+            exit 1
+        fi
+    done
+fi
 
 if mountpoint -q "$target"; then
     run umount "$target"
