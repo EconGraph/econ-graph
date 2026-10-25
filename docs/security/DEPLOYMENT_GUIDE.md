@@ -940,8 +940,7 @@ pg_dump -h localhost -U econ_graph_prod econ_graph_prod > $BACKUP_FILE
 # Compress backup
 gzip $BACKUP_FILE
 
-# Remove old backups (keep 30 days)
-find $BACKUP_DIR -name "*.sql.gz" -mtime +30 -delete
+# Backups are never deleted automatically; remove old ones by hand.
 
 # Schedule in crontab
 # 0 2 * * * /path/to/backup_script.sh
