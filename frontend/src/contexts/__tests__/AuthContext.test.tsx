@@ -20,7 +20,8 @@ import { vi } from 'vitest';
 import { AuthProvider, safeReturnTo, useAuth } from '../AuthContext';
 import Header from '../../components/layout/Header';
 import { executeGraphQL } from '../../utils/graphql';
-import { getAccessToken } from '../../auth/accessToken';
+import { getAccessToken, setAccountSuspended } from '../../auth/accessToken';
+import SuspendedAccountBanner from '../../components/layout/SuspendedAccountBanner';
 import ResetQueriesOnUserChange from '../../auth/ResetQueriesOnUserChange';
 
 // setupTests.vitest.ts replaces the auth context with a stub for every other test.
@@ -94,6 +95,9 @@ function mockUserManager(initialUser: OidcUser | null = null) {
       throw new Error('no callback response');
     }),
     signoutRedirect: vi.fn(async () => undefined),
+    signoutRedirectCallback: vi.fn(async (): Promise<{ userState?: unknown }> => {
+      throw new Error('No matching state found in storage');
+    }),
     removeUser: vi.fn(async () => {
       stored = null;
       listeners.unloaded.forEach(cb => cb());
@@ -160,6 +164,14 @@ const CallbackProbe: React.FC<{ onReturn: (path: string) => void }> = ({ onRetur
   return null;
 };
 
+const SignOutProbe: React.FC<{ onReturn: (path: string | null) => void }> = ({ onReturn }) => {
+  const { completeSignOut } = useAuth();
+  React.useEffect(() => {
+    void completeSignOut().then(onReturn);
+  }, [completeSignOut, onReturn]);
+  return null;
+};
+
 describe('AuthContext with Keycloak (oidc-client-ts)', () => {
   const fetchMock = vi.fn();
 
@@ -173,6 +185,7 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
     storage.clear();
     vi.stubGlobal('localStorage', workingLocalStorage);
     window.history.replaceState(null, '', '/series/gdp?range=10y');
+    setAccountSuspended(false);
   });
 
   afterEach(() => {
@@ -750,8 +763,72 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
     );
     await userEvent.click(screen.getByRole('menuitem', { name: /sign out/i }));
 
+    // Keycloak returns to the home page; the state names the page to go back to (ECO-418).
     expect(manager.signoutRedirect).toHaveBeenCalledTimes(1);
+    expect(manager.signoutRedirect).toHaveBeenCalledWith({
+      state: { returnTo: '/series/gdp?range=10y' },
+    });
   });
+
+  it('returns to the page sign-out began on once Keycloak sends the browser home', async () => {
+    const { manager, userManager } = mockUserManager();
+    manager.signoutRedirectCallback.mockResolvedValue({
+      userState: { returnTo: '/series/gdp?range=10y' },
+    });
+    window.history.replaceState(null, '', '/?state=so-1');
+    const onReturn = vi.fn();
+    render(
+      <React.StrictMode>
+        <AuthProvider userManager={userManager}>
+          <SignOutProbe onReturn={onReturn} />
+        </AuthProvider>
+      </React.StrictMode>
+    );
+
+    await waitFor(() => expect(onReturn).toHaveBeenCalledWith('/series/gdp?range=10y'));
+    // The response can be read only once, so StrictMode's second effect shares the first read.
+    expect(manager.signoutRedirectCallback).toHaveBeenCalledTimes(1);
+    expect(onReturn).not.toHaveBeenCalledWith('/');
+  });
+
+  it.each([
+    ['an off-site return path', async () => ({ userState: { returnTo: '//evil.test/' } })],
+    [
+      'a state this tab never stored',
+      async () => {
+        throw new Error('No matching state found in storage');
+      },
+    ],
+  ])('stays on the home page after sign-out given %s', async (_, callback) => {
+    const { manager, userManager } = mockUserManager();
+    manager.signoutRedirectCallback.mockImplementation(callback);
+    window.history.replaceState(null, '', '/?state=so-1');
+    const onReturn = vi.fn();
+    render(
+      <AuthProvider userManager={userManager}>
+        <SignOutProbe onReturn={onReturn} />
+      </AuthProvider>
+    );
+
+    await waitFor(() => expect(onReturn).toHaveBeenCalledWith('/'));
+  });
+
+  it.each(['/', '/series/gdp?state=so-1'])(
+    'leaves %s alone when it is not the sign-out redirect',
+    async path => {
+      const { manager, userManager } = mockUserManager();
+      window.history.replaceState(null, '', path);
+      const onReturn = vi.fn();
+      render(
+        <AuthProvider userManager={userManager}>
+          <SignOutProbe onReturn={onReturn} />
+        </AuthProvider>
+      );
+
+      await waitFor(() => expect(onReturn).toHaveBeenCalledWith(null));
+      expect(manager.signoutRedirectCallback).not.toHaveBeenCalled();
+    }
+  );
 
   it('forgets local tokens when Keycloak cannot be reached on sign out', async () => {
     const { manager, userManager } = mockUserManager(makeUser());
@@ -769,5 +846,137 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
     expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument();
     expect(storage.has('econgraph.auth.signedIn')).toBe(false);
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not be reached/);
+  });
+
+  describe('a suspended account (403 ACCOUNT_SUSPENDED)', () => {
+    const suspended = () =>
+      new Response(
+        JSON.stringify({
+          data: null,
+          errors: [
+            { message: 'This account is suspended', extensions: { code: 'ACCOUNT_SUSPENDED' } },
+          ],
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    const ok = (data: unknown) =>
+      new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+    const SourceList: React.FC = () => {
+      const sources = useQuery(['sources'], () =>
+        executeGraphQL<{ dataSources: { name: string }[] }>({
+          query: '{ dataSources { name } }',
+        })
+      );
+      if (sources.isError) return <p>Could not load the list of sources</p>;
+      return <p>{sources.data?.data?.dataSources.map(source => source.name).join(', ')}</p>;
+    };
+
+    const renderSignedIn = (userManager: UserManager) =>
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <AuthProvider userManager={userManager}>
+            <AuthProbe />
+            <SuspendedAccountBanner />
+            <SourceList />
+          </AuthProvider>
+        </QueryClientProvider>
+      );
+
+    it('still renders public pages and says the account is suspended', async () => {
+      const { userManager } = mockUserManager(makeUser({ accessToken: 'token-bob' }));
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(suspended())
+        .mockImplementation(async () => ok({ dataSources: [{ name: 'FRED' }] }));
+
+      renderSignedIn(userManager);
+
+      expect(await screen.findByText('FRED')).toBeInTheDocument();
+      expect(screen.queryByText(/could not load/i)).not.toBeInTheDocument();
+      expect(await screen.findByText('Your account is suspended')).toBeInTheDocument();
+      // The refused request went with the token; its retry, and later reads, go anonymously.
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer token-bob');
+      expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
+      await executeGraphQL({ query: '{ ok }' });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[2][1].headers.Authorization).toBeUndefined();
+    });
+
+    it('offers to sign out from the suspended message', async () => {
+      const { manager, userManager } = mockUserManager(makeUser());
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(suspended())
+        .mockImplementation(async () => ok({ dataSources: [] }));
+
+      renderSignedIn(userManager);
+      await screen.findByText('Your account is suspended');
+      await userEvent.click(screen.getByRole('button', { name: /sign out/i }));
+
+      expect(manager.signoutRedirect).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails a mutation with the suspended message instead of retrying it anonymously', async () => {
+      const { userManager } = mockUserManager(makeUser());
+      render(
+        <AuthProvider userManager={userManager}>
+          <AuthProbe />
+        </AuthProvider>
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('status')).toHaveTextContent('signed-in:Alice Analyst')
+      );
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValue(suspended());
+
+      await expect(
+        executeGraphQL({ query: 'mutation { deleteAnnotation(input: { annotationId: "a" }) }' })
+      ).rejects.toThrow('This account is suspended');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // Later mutations are refused without a round trip.
+      await expect(executeGraphQL({ query: 'mutation { x }' })).rejects.toThrow(
+        'This account is suspended'
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the suspended message when the user is signed out', async () => {
+      const { userManager } = mockUserManager(makeUser());
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(suspended())
+        .mockImplementation(async () => ok({ dataSources: [] }));
+
+      renderSignedIn(userManager);
+      await screen.findByText('Your account is suspended');
+      await act(async () => {
+        await userManager.removeUser();
+      });
+
+      await waitFor(() =>
+        expect(screen.queryByText('Your account is suspended')).not.toBeInTheDocument()
+      );
+    });
+
+    it('keeps a 403 that is not a suspension an ordinary error', async () => {
+      const { userManager } = mockUserManager(makeUser());
+      render(
+        <AuthProvider userManager={userManager}>
+          <SuspendedAccountBanner />
+        </AuthProvider>
+      );
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValue(
+        new Response(JSON.stringify({ errors: [{ message: 'Forbidden' }] }), { status: 403 })
+      );
+
+      await expect(executeGraphQL({ query: '{ ok }' })).rejects.toThrow('HTTP error! status: 403');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('Your account is suspended')).not.toBeInTheDocument();
+    });
   });
 });

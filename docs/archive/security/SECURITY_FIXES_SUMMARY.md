@@ -117,7 +117,7 @@ This document summarizes the comprehensive security vulnerability fixes implemen
 ## 🔄 Next Steps
 
 ### Immediate Actions
-1. **Review and Merge PR**: [PR #61](https://github.com/jmalicki/econ-graph/pull/61)
+1. **Review and Merge PR**: [PR #61](https://github.com/EconGraph/econ-graph/pull/61)
 2. **Deploy Security Fixes**: Apply changes to development/staging environments
 3. **Validate Functionality**: Ensure all security fixes work correctly in deployment
 

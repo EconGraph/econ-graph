@@ -11,7 +11,7 @@
   },
   "Results": {
    "ParamValue": [
-    {"Key": "SAGDP2N", "Desc": "SAGDP2N Gross domestic product (GDP) by state"},
+    {"Key": "SAGDP2", "Desc": "SAGDP2 Gross domestic product (GDP) by state"},
     {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary: personal income, population, per capita personal income"}
    ]
   }

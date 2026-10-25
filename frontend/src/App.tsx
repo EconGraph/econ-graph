@@ -6,6 +6,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
+import SuspendedAccountBanner from './components/layout/SuspendedAccountBanner';
 import Dashboard from './pages/Dashboard';
 import SeriesExplorer from './pages/SeriesExplorer';
 import SeriesDetail from './pages/SeriesDetail';
@@ -17,6 +18,7 @@ import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import { CALLBACK_PATH } from './auth/oidcConfig';
 import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
+import ReturnAfterSignOut from './auth/ReturnAfterSignOut';
 
 // Build-time flag pattern (docs/build-flags.md): read `__FLAGS__.<name>` in the condition
 // and import the page lazily, so a release build without the flag contains none of its code.
@@ -58,6 +60,7 @@ function App() {
   return (
     <AuthProvider>
       <ResetQueriesOnUserChange />
+      <ReturnAfterSignOut />
       <ThemeProvider>
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
           {/* REQUIREMENT: Modern responsive design */}
@@ -76,6 +79,7 @@ function App() {
             }}
           >
             <Container maxWidth='xl' sx={{ py: 3 }}>
+              <SuspendedAccountBanner />
               <Routes>
                 {/* REQUIREMENT: Function similarly to FRED but with modern UX */}
                 <Route path='/' element={<Dashboard />} />

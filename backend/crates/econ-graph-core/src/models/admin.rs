@@ -11,7 +11,52 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
+
+/// Who sent a request, as recorded on audit log entries and security events.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientInfo {
+    /// The client's address (the backend decides which address that is: the peer, or the
+    /// `X-Forwarded-For` entry its trusted proxies vouch for).
+    pub ip_address: Option<String>,
+    /// The `User-Agent` header, cut to [`ClientInfo::USER_AGENT_MAX_CHARS`] characters.
+    pub user_agent: Option<String>,
+}
+
+impl ClientInfo {
+    /// Longest `User-Agent` kept, in characters; the rest is dropped.
+    pub const USER_AGENT_MAX_CHARS: usize = 512;
+
+    /// Client info with `user_agent` trimmed and cut to [`Self::USER_AGENT_MAX_CHARS`]
+    /// characters; a blank one counts as missing.
+    pub fn new(ip_address: Option<String>, user_agent: Option<&str>) -> Self {
+        let user_agent = user_agent
+            .map(str::trim)
+            .filter(|ua| !ua.is_empty())
+            .map(|ua| ua.chars().take(Self::USER_AGENT_MAX_CHARS).collect());
+        Self {
+            ip_address,
+            user_agent,
+        }
+    }
+}
+
+/// Audit log entries that could not be written since the process started.
+static AUDIT_LOG_WRITE_FAILURES: AtomicU64 = AtomicU64::new(0);
+/// Security events that could not be written since the process started.
+static SECURITY_EVENT_WRITE_FAILURES: AtomicU64 = AtomicU64::new(0);
+
+/// How many audit log entries could not be written since the process started. The backend
+/// exports it as a Prometheus counter so a broken audit trail can be alerted on.
+pub fn audit_log_write_failures() -> u64 {
+    AtomicU64::load(&AUDIT_LOG_WRITE_FAILURES, Ordering::Relaxed)
+}
+
+/// How many security events could not be written since the process started.
+pub fn security_event_write_failures() -> u64 {
+    AtomicU64::load(&SECURITY_EVENT_WRITE_FAILURES, Ordering::Relaxed)
+}
 
 /// Audit log entry model for tracking admin actions
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
@@ -19,7 +64,10 @@ use uuid::Uuid;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AuditLog {
     pub id: Uuid,
-    pub user_id: Uuid,
+    /// User who performed the action; `None` once that user has been deleted
+    /// (`ON DELETE SET NULL`), in which case `user_name` still names them.
+    pub user_id: Option<Uuid>,
+    /// Name of the user at the time of the action, kept after the user is deleted.
     pub user_name: String,
     pub action: String,
     pub resource_type: String,
@@ -88,6 +136,11 @@ pub struct SecurityEventUpdate {
 }
 
 impl AuditLog {
+    /// Whether the user who performed this action has since been deleted.
+    pub fn user_deleted(&self) -> bool {
+        self.user_id.is_none()
+    }
+
     /// Create a new audit log entry
     pub async fn create(
         pool: &DatabasePool,
@@ -124,12 +177,10 @@ impl AuditLog {
         Ok(log)
     }
 
-    /// Get audit logs with filtering and pagination
+    /// Get audit logs matching `filter`, newest first
     pub async fn get_logs(
         pool: &DatabasePool,
-        user_id: Option<Uuid>,
-        action: Option<String>,
-        resource_type: Option<String>,
+        filter: &AuditLogFilter,
         limit: i64,
         offset: i64,
     ) -> AppResult<Vec<AuditLog>> {
@@ -137,22 +188,9 @@ impl AuditLog {
             AppError::DatabaseError(format!("Failed to get database connection: {}", e))
         })?;
 
-        let mut query = audit_logs::table.into_boxed();
-
-        if let Some(user_id) = user_id {
-            query = query.filter(audit_logs::user_id.eq(user_id));
-        }
-
-        if let Some(action) = action {
-            query = query.filter(audit_logs::action.eq(action));
-        }
-
-        if let Some(resource_type) = resource_type {
-            query = query.filter(audit_logs::resource_type.eq(resource_type));
-        }
-
-        let logs = query
-            .order(audit_logs::created_at.desc())
+        let logs = filter
+            .apply(audit_logs::table.into_boxed())
+            .order((audit_logs::created_at.desc(), audit_logs::id.desc()))
             .limit(limit)
             .offset(offset)
             .get_results::<AuditLog>(&mut conn)
@@ -162,38 +200,84 @@ impl AuditLog {
         Ok(logs)
     }
 
-    /// Get total count of audit logs matching filters
-    pub async fn get_count(
-        pool: &DatabasePool,
-        user_id: Option<Uuid>,
-        action: Option<String>,
-        resource_type: Option<String>,
-    ) -> AppResult<i64> {
+    /// Get total count of audit logs matching `filter`
+    pub async fn get_count(pool: &DatabasePool, filter: &AuditLogFilter) -> AppResult<i64> {
         let mut conn = pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {}", e))
         })?;
 
-        let mut query = audit_logs::table.into_boxed();
-
-        if let Some(user_id) = user_id {
-            query = query.filter(audit_logs::user_id.eq(user_id));
-        }
-
-        if let Some(action) = action {
-            query = query.filter(audit_logs::action.eq(action));
-        }
-
-        if let Some(resource_type) = resource_type {
-            query = query.filter(audit_logs::resource_type.eq(resource_type));
-        }
-
-        let count = query
+        let count = filter
+            .apply(audit_logs::table.into_boxed())
             .count()
             .get_result::<i64>(&mut conn)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(count)
+    }
+}
+
+/// Which audit log entries to read; `None` leaves that column unfiltered.
+#[derive(Debug, Clone, Default)]
+pub struct AuditLogFilter {
+    pub user_id: Option<Uuid>,
+    pub action: Option<String>,
+    pub resource_type: Option<String>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+}
+
+impl AuditLogFilter {
+    fn apply<'a>(
+        &self,
+        mut query: audit_logs::BoxedQuery<'a, diesel::pg::Pg>,
+    ) -> audit_logs::BoxedQuery<'a, diesel::pg::Pg> {
+        if let Some(user_id) = self.user_id {
+            query = query.filter(audit_logs::user_id.eq(user_id));
+        }
+        if let Some(action) = &self.action {
+            query = query.filter(audit_logs::action.eq(action.clone()));
+        }
+        if let Some(resource_type) = &self.resource_type {
+            query = query.filter(audit_logs::resource_type.eq(resource_type.clone()));
+        }
+        if let Some(after) = self.created_after {
+            query = query.filter(audit_logs::created_at.gt(after));
+        }
+        if let Some(before) = self.created_before {
+            query = query.filter(audit_logs::created_at.lt(before));
+        }
+        query
+    }
+}
+
+impl NewAuditLog {
+    /// Insert the entry, logging rather than returning a failure: the action it records has
+    /// already happened, so a failed write must not turn it into an error for the caller.
+    ///
+    /// The trade-off: the write is best-effort and runs after the action's own statement,
+    /// not in one transaction with it (none of the admin mutations runs in a transaction), so
+    /// a database failure in between can leave a committed action with no audit row. Each
+    /// such failure is logged at error level and counted in [`audit_log_write_failures`],
+    /// which the backend exports for alerting.
+    pub async fn record(self, pool: &DatabasePool) {
+        let written = async {
+            let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+            diesel::insert_into(audit_logs::table)
+                .values(&self)
+                .execute(&mut conn)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+        if let Err(why) = written {
+            AUDIT_LOG_WRITE_FAILURES.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                "could not write the audit log entry for {} by {}: {why}",
+                self.action,
+                self.user_id
+            );
+        }
     }
 }
 
@@ -312,6 +396,51 @@ impl SecurityEvent {
     }
 }
 
+/// `security_events.event_type` values the server writes.
+pub mod security_event_type {
+    /// A signed-in caller was refused for lacking a role (or the full staff set).
+    pub const PERMISSION_DENIED: &str = "permission_denied";
+    /// A request carried a valid token for a suspended account.
+    pub const SUSPENDED_ACCOUNT: &str = "suspended_account";
+}
+
+impl NewSecurityEvent {
+    /// A request to `route` from `client` refused because account `user_id` is suspended.
+    pub fn suspended_account(user_id: Uuid, route: &str, client: &ClientInfo) -> Self {
+        Self {
+            event_type: security_event_type::SUSPENDED_ACCOUNT.into(),
+            user_id: Some(user_id),
+            user_email: None,
+            severity: "medium".into(),
+            ip_address: client.ip_address.clone(),
+            user_agent: client.user_agent.clone(),
+            description: format!("refused a {route} request from a suspended account"),
+            metadata: Some(serde_json::json!({ "route": route })),
+        }
+    }
+
+    /// Insert the event, logging rather than returning a failure: recording it must not
+    /// change the reply to the request that raised it.
+    pub async fn record(self, pool: &DatabasePool) {
+        let written = async {
+            let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+            diesel::insert_into(security_events::table)
+                .values(&self)
+                .execute(&mut conn)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+        if let Err(why) = written {
+            SECURITY_EVENT_WRITE_FAILURES.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                "could not write a {} security event: {why}",
+                self.event_type
+            );
+        }
+    }
+}
+
 /// System health metrics for admin dashboard
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemHealthMetrics {
@@ -377,5 +506,95 @@ impl SystemHealthMetrics {
             unresolved_security_events,
             recent_audit_logs,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::user::NewUser;
+    use crate::schema::users;
+
+    static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+
+    /// Pool on `DATABASE_URL` with the embedded migrations applied (once per test binary).
+    async fn test_pool() -> DatabasePool {
+        let url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must point at a Postgres database for admin model tests");
+        MIGRATED
+            .get_or_init(|| async {
+                crate::database::run_migrations(&url)
+                    .await
+                    .expect("migrations failed");
+            })
+            .await;
+        crate::database::create_pool(&url)
+            .await
+            .expect("Failed to connect to test database")
+    }
+
+    /// Deleting a user keeps their audit rows: `user_id` becomes NULL and `user_name`
+    /// still names them (migration 2026-10-24-000100_audit_logs_keep_on_user_delete).
+    #[tokio::test]
+    async fn audit_logs_survive_user_deletion() {
+        let pool = &test_pool().await;
+        let mut conn = pool.get().await.expect("connection");
+
+        let email = format!("audit-delete-{}@example.com", Uuid::new_v4());
+        let user_id: Uuid = diesel::insert_into(users::table)
+            .values(&NewUser {
+                email,
+                name: "Audit Deletion Tester".to_string(),
+                avatar_url: None,
+                organization: None,
+                theme: "light".to_string(),
+                default_chart_type: "line".to_string(),
+                notifications_enabled: true,
+                collaboration_enabled: true,
+                email_verified: false,
+            })
+            .returning(users::id)
+            .get_result(&mut conn)
+            .await
+            .expect("insert user");
+
+        let mut log_ids = Vec::new();
+        for action in ["login", "update_series"] {
+            let log = AuditLog::create(
+                pool,
+                user_id,
+                "Audit Deletion Tester".to_string(),
+                action.to_string(),
+                "user".to_string(),
+                Some(user_id.to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create audit log");
+            assert_eq!(log.user_id, Some(user_id));
+            assert!(!log.user_deleted());
+            log_ids.push(log.id);
+        }
+
+        let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
+            .execute(&mut conn)
+            .await
+            .expect("delete user");
+        assert_eq!(deleted, 1);
+
+        let rows: Vec<AuditLog> = audit_logs::table
+            .filter(audit_logs::id.eq_any(&log_ids))
+            .select(AuditLog::as_select())
+            .load(&mut conn)
+            .await
+            .expect("load audit logs");
+        assert_eq!(rows.len(), 2, "audit rows must survive the user's deletion");
+        for row in rows {
+            assert_eq!(row.user_id, None);
+            assert!(row.user_deleted());
+            assert_eq!(row.user_name, "Audit Deletion Tester");
+        }
     }
 }

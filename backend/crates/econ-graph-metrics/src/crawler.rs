@@ -490,6 +490,47 @@ pub static CRAWLER_COVERAGE_METRICS: Lazy<CrawlerCoverageMetrics> = Lazy::new(||
         .expect("Failed to initialize crawler coverage metrics")
 });
 
+/// Per-source discovery metrics, served by `crawler-worker` and set after each discovery that
+/// lists the source's catalog.
+///
+/// - `crawler_curated_missing{source}`: curated or configured entries (BEA tables, FRED series
+///   ids, ...) the last discovery skipped because the source no longer lists them. 0 when every
+///   entry resolved; the skip warning in the worker log names the entries.
+pub struct CrawlerDiscoveryMetrics {
+    /// Curated entries missing upstream at the last discovery, by source.
+    pub curated_missing: IntGaugeVec,
+}
+
+impl CrawlerDiscoveryMetrics {
+    /// Creates the discovery metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any metric fails to register with the provided registry
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let curated_missing = IntGaugeVec::new(
+            Opts::new(
+                "crawler_curated_missing",
+                "Curated or configured entries the last discovery skipped because the source no \
+                 longer lists them, by source",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(curated_missing.clone()))?;
+        Ok(Self { curated_missing })
+    }
+}
+
+/// Global discovery metrics, registered with [`DEFAULT_REGISTRY`].
+///
+/// # Panics
+///
+/// Panics if the metrics fail to initialize during lazy initialization
+pub static CRAWLER_DISCOVERY_METRICS: Lazy<CrawlerDiscoveryMetrics> = Lazy::new(|| {
+    CrawlerDiscoveryMetrics::new(&DEFAULT_REGISTRY)
+        .expect("Failed to initialize crawler discovery metrics")
+});
+
 #[cfg(test)]
 mod queue_metrics_tests {
     use super::*;
@@ -534,5 +575,18 @@ mod queue_metrics_tests {
         ] {
             assert!(names.contains(&n.to_string()), "{n} missing: {names:?}");
         }
+    }
+
+    #[test]
+    fn discovery_metrics_register() {
+        let registry = Registry::new();
+        let m = CrawlerDiscoveryMetrics::new(&registry).unwrap();
+        m.curated_missing.with_label_values(&["BEA"]).set(1);
+        let names: Vec<String> = registry
+            .gather()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect();
+        assert!(names.contains(&"crawler_curated_missing".to_string()));
     }
 }

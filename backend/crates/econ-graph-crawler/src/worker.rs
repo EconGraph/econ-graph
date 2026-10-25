@@ -758,14 +758,23 @@ impl Worker {
                 );
             }
         }
+        let discovering = adapter.clone();
         let (found, validator) =
-            match guarded(async move { adapter.discover_if_changed(&ctx).await }).await? {
+            match guarded(async move { discovering.discover_if_changed(&ctx).await }).await? {
                 Discovery::Unchanged => {
                     tracing::info!(%source, "catalog unchanged since last discovery");
                     return Ok(JobWrite::DiscoveryUnchanged);
                 }
                 Discovery::Changed { found, validator } => (found, validator),
             };
+        // A curated entry the source no longer lists keeps its stored series: a discovery that
+        // skipped one retires nothing, and the gauge alerts so the curated list gets fixed.
+        let missing = adapter.curated_missing();
+        econ_graph_metrics::crawler::CRAWLER_DISCOVERY_METRICS
+            .curated_missing
+            .with_label_values(&[source.as_str()])
+            .set(i64::try_from(missing.len()).unwrap_or(i64::MAX));
+        let complete = complete && missing.is_empty();
         self.datasets.check_all(
             source,
             found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),

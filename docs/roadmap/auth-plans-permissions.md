@@ -1,8 +1,7 @@
 # Roadmap: Authentication, Plans and Permissions
 
-> **Status**: Draft roadmap, 2026-09-26
 > **Scope**: Backend (`backend/crates`), Keycloak configuration, and the admin UI surfaces that depend on them
-> **Supersedes**: the auth/authorization parts of open PRs #141 (Keycloak + mTLS) and #149 (JWT permissions)
+> **Supersedes**: the auth/authorization parts of PRs #141 (Keycloak + mTLS) and #149 (JWT permissions)
 
 ## Goal
 
@@ -15,9 +14,11 @@ Move EconGraph from a single hardcoded `role` column to an authorization model t
 
 Billing is deferred: plans are modeled now and assigned by staff, and payment integration comes later.
 
-## Where we are today
+## Starting point (before train 1)
 
-Checked against `main` at `fd2d1db` (2026-09-27). Items marked fixed landed after the first draft of this document.
+This is the code this roadmap started from, checked against `main` at `fd2d1db`. Train 1
+replaced the in-house authentication below with Keycloak (phase 2) and the role
+vocabularies with the fine-grained catalog (phase 1); see "Release trains".
 
 ### Authentication
 
@@ -26,7 +27,7 @@ Checked against `main` at `fd2d1db` (2026-09-27). Items marked fixed landed afte
 - The GraphQL handler re-reads the user from Postgres on every request (`econ-graph-backend/src/main.rs:500`), so a role change takes effect immediately. **Fixed (#181):** a `sub` that is not a UUID is now rejected instead of being mapped to the nil UUID.
 - **Fixed (#185).** `/mcp` now requires a signed-in user's token (`main.rs:306`). OAuth for MCP clients arrives in Phase 6.
 - **Fixed (#182).** CORS allows only the configured frontend origins (`main.rs:195`). Earlier security docs had recorded the CORS and JWT-secret fixes as done, but those fixes landed only in the pre-workspace `backend/src`, which has since been deleted.
-- The GraphQL `user(userId)` query (`econ-graph-graphql/src/graphql/query.rs:327`) returns any user's record to any caller, authenticated or not (fix open in #183).
+- The GraphQL `user(userId)` query (`econ-graph-graphql/src/graphql/query.rs:327`) returned any user's record to any caller, authenticated or not. #183 restricted it to the caller's own record or `admin.users:read`.
 - A `user_sessions` table and model exist (`econ-graph-core/src/models/user.rs`), but login never writes a row and token verification never reads one, so logging out or revoking a session does not invalidate an issued token.
 
 ### Authorization
@@ -182,10 +183,10 @@ Sources: [MCP 2026-07-28 authorization changes (WorkOS)](https://workos.com/blog
 
 Each phase is a small PR or a short stack, in order. Later phases depend on earlier ones.
 
-### Phase 0: Hygiene (mostly done)
+### Phase 0: Hygiene
 
-- Done: fail startup when `JWT_SECRET` is unset (#180); reject tokens whose `sub` is not a UUID (#181); require a token on `/mcp` (#185; OAuth arrives in Phase 6); allow CORS only from configured frontend origins (#182).
-- Open: restrict the `user(userId)` query to the user themselves or an admin (#183); close #141 and #149 with a link to this roadmap.
+- Fail startup when `JWT_SECRET` is unset (#180); reject tokens whose `sub` is not a UUID (#181); require a token on `/mcp` (#185; OAuth arrives in Phase 6); allow CORS only from configured frontend origins (#182).
+- Restrict the `user(userId)` query to the user themselves or an admin (#183).
 
 ### Phase 1: Fine-grained role catalog
 
@@ -236,7 +237,7 @@ Not scheduled. When it is: Stripe as the default choice, with a small webhook se
 
 ## Release trains
 
-Train 1 ([releases.md](./releases.md)) takes phases 1 and 2 plus signed-in annotations. Organizations, plans, MCP OAuth and staff tooling come in later trains. The train 1 work is split into small PRs, and each PR updates this section when it lands or changes the plan.
+Train 1 ([releases.md](./releases.md)) takes phases 1 and 2 plus signed-in annotations. Organizations, plans, MCP OAuth and staff tooling come in later trains.
 
 Decisions taken for train 1:
 
@@ -250,11 +251,11 @@ Decisions taken for train 1:
 - **Annotation visibility.** It is a native Postgres enum with two values, `private` (the default) and `public`, replacing `chart_annotations.is_visible`. Comments are visible exactly when their annotation is, and only the author can edit or delete either.
 - **The realm is applied on every deploy.** `--import-realm` only creates a realm, so a `keycloak-config-cli` job applies the realm file through the admin API after each deploy, changing only what differs and leaving users and role mappings alone. Dev and QA users live in separate import files; a CI check keeps them out of the Kubernetes manifests, and the QA file (two password users for the release checks) is behind a switch that is off by default.
 - **Sign-in and annotation controls are hidden** when `VITE_OIDC_ISSUER` is unset, which is the read-only fallback if Keycloak is not deployed. The auth release spec is its own file so the release suite can skip it.
-- **No `preview:access` yet.** Train 1 has only build-time flags.
+- **No `preview:access` in train 1.** Train 1 has only build-time flags.
 
 ## Open decisions
 
-These change the shape of the work and are Joe's call. The roadmap assumes the first option in each.
+These change the shape of the work and are the maintainer's call. The roadmap assumes the first option in each.
 
 1. **Per-organization roles in Keycloak**: groups per organization (assumed) or a custom mapper, decided after a prototype; or switch to Auth0 if neither is workable.
 2. **Launch plans**: which paid tiers exist at launch and which fine-grained roles each plan composite includes. The `free` / `pro` / `team` / `enterprise` set is a placeholder.

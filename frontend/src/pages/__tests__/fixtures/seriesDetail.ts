@@ -6,6 +6,8 @@
 export const UNRATE_ID = '0192a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 export const EMPTY_ID = '0192a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c';
 export const UNKNOWN_ID = '0192a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5d';
+export const GDP_Q_ID = '0192a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5e';
+export const ESTAB_ID = '0192a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5f';
 
 const unrate = {
   id: UNRATE_ID,
@@ -37,6 +39,33 @@ export const seriesResponses: Record<string, { series: typeof unrate | null }> =
     },
   },
   [UNKNOWN_ID]: { series: null },
+  // Quarterly, in whole dollars (BEA applies UNIT_MULT 6), dated at each quarter's start.
+  [GDP_Q_ID]: {
+    series: {
+      ...unrate,
+      id: GDP_Q_ID,
+      externalId: 'bea_nipa/T10105.1.Q',
+      title: 'Gross domestic product (quarterly)',
+      source: { name: 'Bureau of Economic Analysis (BEA)' },
+      frequency: 'Quarterly',
+      units: 'Current Dollars',
+      startDate: '2024-01-01',
+      endDate: '2024-10-01',
+    },
+  },
+  // Annual counts, dated January 1.
+  [ESTAB_ID]: {
+    series: {
+      ...unrate,
+      id: ESTAB_ID,
+      externalId: 'ESTAB',
+      title: 'Establishments',
+      frequency: 'Annual',
+      units: 'Establishments',
+      startDate: '2019-01-01',
+      endDate: '2022-01-01',
+    },
+  },
 };
 
 const node = (date: string, value: string | null, isOriginalRelease = false) => ({
@@ -62,6 +91,18 @@ export const page = (
 export const unrateLevels = page(
   [node('2024-01-01', '3.7'), node('2024-02-01', '3.9'), node('2024-03-01', '3.8', true)],
   3
+);
+
+/** Quarterly GDP levels in dollars: whole numbers of 14 digits. */
+export const gdpQuarterlyLevels = page(
+  [node('2024-07-01', '28511400000000'), node('2024-10-01', '28624702000000', true)],
+  2
+);
+
+/** Annual establishment counts: whole numbers. */
+export const estabLevels = page(
+  [node('2019-01-01', '7106316'), node('2022-01-01', '7324017', true)],
+  2
 );
 
 /** Year-over-year: the backend returns null where no prior-year point exists. */

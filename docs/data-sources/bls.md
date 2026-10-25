@@ -31,7 +31,7 @@ years, without one 10. Background: [BLS API experimental findings](../technical/
   reports the frequency and the seasonal adjustment the id encodes, and the series keeps the
   title and units discovery stored from the series files. Each
   observation's `footnotes` (`{code, text}`) are parsed and logged — a `P` (preliminary)
-  footnote and an `X` ("data unavailable") footnote are recognised — but not yet stored:
+  footnote and an `X` ("data unavailable") footnote are recognised — but not stored:
   `data_points` has no footnote column in train 1.
 - **Dropped**: `latest`, `periodName`, the catalog's `area` and `item`; annual averages
   `M13`, `Q05` and `S03` are skipped.

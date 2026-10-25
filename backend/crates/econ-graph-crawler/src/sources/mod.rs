@@ -43,6 +43,7 @@ pub fn default_registry() -> AdapterRegistry {
 
 /// Registry with every HTTP adapter pointed at `base_url` instead of its real upstream, plus the
 /// static catalogs. For mock upstreams serving recorded fixtures (tests and `seed-fixtures`).
+/// Census reads its state file from `{base_url}/geo/state.txt`, not from www2.census.gov.
 ///
 /// Unlike [`default_registry`], the static catalogs are unconditional here regardless of the
 /// `static_catalogs` flag: `seed-fixtures` already requires the dev-only `testkit` feature, so
@@ -55,7 +56,9 @@ pub fn registry_at(base_url: &str) -> AdapterRegistry {
     registry.register(std::sync::Arc::new(world_bank::WorldBankAdapter::new(
         base_url,
     )));
-    registry.register(std::sync::Arc::new(census::CensusAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(
+        census::CensusAdapter::new(base_url).with_states_url(format!("{base_url}/geo/state.txt")),
+    ));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::new(base_url)));
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
@@ -95,6 +98,28 @@ mod tests {
         let expected = cfg!(flag_static_catalogs);
         for s in static_catalogs::STATIC_CATALOG_SOURCES {
             assert_eq!(ids.contains(&s), expected, "{s}");
+        }
+    }
+
+    /// `seed-fixtures` refreshes an adapter's reference data only when every code list points at
+    /// its mock, so a reference-data URL `registry_at` leaves at the real upstream silently goes
+    /// unseeded. BLS is the known exception: its code files are fixed URLs on download.bls.gov.
+    #[test]
+    fn registry_at_points_reference_data_at_the_base_url() {
+        let base = "http://127.0.0.1:1";
+        let registry = registry_at(base);
+        for id in registry.ids() {
+            if id == SourceId::Bls {
+                continue;
+            }
+            let adapter = registry.get(id).unwrap();
+            for list in adapter.code_lists(&crate::testkit::test_keys()) {
+                assert!(
+                    list.request_url().starts_with(base),
+                    "{id}: {}",
+                    list.request_url()
+                );
+            }
         }
     }
 

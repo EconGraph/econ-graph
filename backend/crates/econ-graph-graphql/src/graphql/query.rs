@@ -674,36 +674,65 @@ impl Query {
     async fn security_events(
         &self,
         ctx: &Context<'_>,
-        _limit: Option<i32>,
+        limit: Option<i32>,
     ) -> Result<Vec<SecurityEventType>> {
         require_role(ctx, Role::AdminSecurityRead)?;
-        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
+        let pool = ctx.data::<DatabasePool>()?;
 
-        // Get security events logic would go here
-        // For now, return empty vector
-        Ok(vec![])
+        let limit = limit.unwrap_or(50).clamp(1, 100) as i64;
+        let events =
+            core_models::admin::SecurityEvent::get_events(pool, None, None, None, limit).await?;
+        Ok(events.into_iter().map(SecurityEventType::from).collect())
     }
 
     /// Get audit logs (requires `admin.audit:read`)
     async fn audit_logs(
         &self,
         ctx: &Context<'_>,
-        _filter: Option<AuditLogFilterInput>,
-        _pagination: Option<PaginationInput>,
+        filter: Option<AuditLogFilterInput>,
+        pagination: Option<PaginationInput>,
     ) -> Result<AuditLogConnection> {
-        require_role(ctx, Role::AdminAuditRead)?;
-        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
+        use core_models::admin::{AuditLog, AuditLogFilter};
 
-        // Get audit logs logic would go here
-        // For now, return empty connection
+        require_role(ctx, Role::AdminAuditRead)?;
+        let pool = ctx.data::<DatabasePool>()?;
+
+        let filter = match filter {
+            Some(f) => AuditLogFilter {
+                user_id: f.user_id.map(|id| uuid::Uuid::parse_str(&id)).transpose()?,
+                action: f.action,
+                resource_type: f.resource_type,
+                created_after: f.created_after,
+                created_before: f.created_before,
+            },
+            None => AuditLogFilter::default(),
+        };
+        // Same offset cursors as `users`.
+        let limit = pagination
+            .as_ref()
+            .and_then(|p| p.first)
+            .unwrap_or(50)
+            .clamp(1, 100) as i64;
+        let offset = pagination
+            .as_ref()
+            .and_then(|p| p.after.as_deref())
+            .and_then(|cursor| cursor.parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0);
+
+        let total_count = AuditLog::get_count(pool, &filter).await?;
+        let logs = AuditLog::get_logs(pool, &filter, limit, offset).await?;
+        let has_next_page = (offset + limit) < total_count;
+        let has_previous_page = offset > 0;
+
         Ok(AuditLogConnection {
-            nodes: vec![],
-            total_count: 0,
+            nodes: logs.into_iter().map(AuditLogType::from).collect(),
+            total_count: total_count as i32,
             page_info: PageInfo {
-                has_next_page: false,
-                has_previous_page: false,
-                start_cursor: None,
-                end_cursor: None,
+                has_next_page,
+                has_previous_page,
+                start_cursor: has_previous_page.then(|| offset.to_string()),
+                end_cursor: has_next_page.then(|| (offset + limit).to_string()),
             },
         })
     }
