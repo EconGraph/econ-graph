@@ -14,11 +14,13 @@
 # cluster's UID and does not count.
 #
 #   --dry-run  show what would change, change nothing (no confirmation needed)
-#   --unmark   remove the marker and scale cloudflared to 0 replicas
+#   --unmark   scale cloudflared to 0 replicas (also when there is no marker),
+#              then remove the marker; it is kept if scaling fails
 #
 # Changes ask for the context name to be typed from a terminal. Idempotent: a
-# cluster already marked (or not marked, with --unmark) is left as it is. It
-# deletes no data, volumes or clusters: --unmark removes only the marker.
+# cluster already marked (or, with --unmark, not marked and not running
+# cloudflared) is left as it is. It deletes no data, volumes or clusters:
+# --unmark removes only the marker.
 #
 # Other environment: KUBECTL (default kubectl), NAMESPACE (where cloudflared
 # runs, default econ-graph).
@@ -34,7 +36,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=true ;;
         --unmark) UNMARK=true ;;
         -h | --help)
-            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -76,21 +78,33 @@ confirm() {
 }
 
 if [[ "$UNMARK" == true ]]; then
-    if [[ -z "$marker" ]]; then
-        log "not marked production; nothing to do"
+    # cloudflared is stopped first, and even without a marker: once the marker is
+    # gone a deploy with PUBLIC_HOST stops before apply_cloudflared, so a
+    # connector still running then would never be scaled down by it.
+    replicas="$("$KUBECTL" -n "$NAMESPACE" get deployment cloudflared --ignore-not-found \
+        -o 'jsonpath={.spec.replicas}')" ||
+        die "could not look up deployment/cloudflared in $NAMESPACE; nothing was changed"
+    running=false
+    [[ -z "$replicas" || "$replicas" == 0 ]] || running=true
+    if [[ -z "$marker" && "$running" == false ]]; then
+        log "not marked production and cloudflared is not running; nothing to do"
         exit 0
     fi
     if [[ "$DRY_RUN" == true ]]; then
-        log "dry run: would delete ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_CONFIGMAP" \
-            "and scale deployment/cloudflared in $NAMESPACE to 0 replicas"
+        [[ "$running" == false ]] ||
+            log "dry run: would scale deployment/cloudflared in $NAMESPACE from $replicas to 0 replicas"
+        [[ -z "$marker" ]] ||
+            log "dry run: would delete ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_CONFIGMAP"
         exit 0
     fi
     confirm "Context $context will no longer be production: cloudflared stops, and the public site is no longer served from it."
-    "$KUBECTL" -n "$CLUSTER_ROLE_NAMESPACE" delete configmap "$CLUSTER_ROLE_CONFIGMAP" --ignore-not-found
-    deployment="$("$KUBECTL" -n "$NAMESPACE" get deployment cloudflared --ignore-not-found -o name)" ||
-        die "unmarked, but could not look up deployment/cloudflared in $NAMESPACE; scale it to 0 yourself"
-    if [[ -n "$deployment" ]]; then
-        "$KUBECTL" -n "$NAMESPACE" scale deployment/cloudflared --replicas=0
+    if [[ "$running" == true ]]; then
+        "$KUBECTL" -n "$NAMESPACE" scale deployment/cloudflared --replicas=0 ||
+            die "could not scale deployment/cloudflared in $NAMESPACE to 0; the marker was kept." \
+                "Scale it to 0 yourself, then run --unmark again"
+    fi
+    if [[ -n "$marker" ]]; then
+        "$KUBECTL" -n "$CLUSTER_ROLE_NAMESPACE" delete configmap "$CLUSTER_ROLE_CONFIGMAP" --ignore-not-found
     fi
     log "unmarked; deploy with PUBLIC_HOST= (empty) to remove the public routes too"
     exit 0

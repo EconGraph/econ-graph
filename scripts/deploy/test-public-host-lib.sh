@@ -212,7 +212,9 @@ done
 
 # --- an executable stub kubectl, for the scripts below (passed as KUBECTL) -------
 # Every Secret is absent, except that STUB_TUNNEL_SECRET=1 gives cloudflare-tunnel a
-# (fake) token. Writes are logged to $STUB_LOG, never made.
+# (fake) token. STUB_CLOUDFLARED_REPLICAS is the cloudflared Deployment's replica count
+# (unset: no Deployment); STUB_SCALE_FAILS=1 makes scaling it fail. Writes are logged to
+# $STUB_LOG, never made.
 {
   echo '#!/usr/bin/env bash'
   cat "$stub_dir/cluster-role-stub.sh"
@@ -227,6 +229,8 @@ case "$*" in
     # base64 of a fake token, not a real one.
     [ "${STUB_TUNNEL_SECRET:-0}" != 1 ] || printf 'ZmFrZS1leGlzdGluZy10dW5uZWwtdG9rZW4tMDAwMDAwMDAwMDAwMDAwMDAwMDAwMA==' ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
+  *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
+  *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *apply*) cat >/dev/null ;;
 esac
 exit 0
@@ -302,8 +306,20 @@ if run_stubbed STUB_MARKER=production "$mark" --unmark; then
   fail "mark --unmark: went on without a terminal"
 fi
 grep -Eq "$writes" "$log" && fail "mark --unmark without a terminal: changed the cluster"
-run_stubbed STUB_MARKER=none "$mark" --unmark || fail "mark --unmark: failed on an unmarked cluster: $(cat "$out")"
+run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=0 "$mark" --unmark ||
+  fail "mark --unmark: failed on an unmarked cluster: $(cat "$out")"
+grep -q 'nothing to do' "$out" || fail "mark --unmark: an unmarked cluster without cloudflared running was not left alone"
 grep -Eq "$writes" "$log" && fail "mark --unmark: changed an unmarked cluster"
+# No marker but cloudflared still running: --unmark still stops it (a deploy with
+# PUBLIC_HOST would refuse before scaling it down).
+run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run failed: $(cat "$out")"
+grep -q 'would scale deployment/cloudflared' "$out" || fail "mark --unmark --dry-run: a running cloudflared without a marker is not stopped"
+grep -q 'would delete ConfigMap' "$out" && fail "mark --unmark --dry-run: would delete a marker that does not exist"
+grep -Eq "$writes" "$log" && fail "mark --unmark --dry-run: changed the cluster"
+if run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark; then
+  fail "mark --unmark: stopped cloudflared without a terminal, or did nothing"
+fi
 if run_stubbed STUB_CLUSTER_FAILS=1 "$mark" --dry-run; then
   fail "mark: went on without the cluster's kube-system UID"
 fi
@@ -318,6 +334,18 @@ if [ "$have_script" = true ]; then
   printf 'kind-test\n' | run_in_terminal STUB_MARKER=none "$mark" || true
   grep -q 'create configmap econgraph-cluster-role --from-literal=role=production --from-literal=kube-system-uid=uid-this-cluster' "$log" ||
     fail "mark: the confirmed marker was not written: $(cat "$out")"
+
+  # --unmark scales cloudflared to 0 before it deletes the marker...
+  printf 'kind-test\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 "$mark --unmark" ||
+    fail "mark --unmark failed: $(cat "$out")"
+  grep -Eo 'scale deployment/cloudflared --replicas=0|delete configmap econgraph-cluster-role' "$log" | tr '\n' ' ' |
+    grep -q '^scale deployment/cloudflared --replicas=0 delete configmap econgraph-cluster-role $' ||
+    fail "mark --unmark: did not scale cloudflared, then delete the marker: $(grep -E 'scale|delete' "$log")"
+  # ...and keeps the marker when scaling fails.
+  if printf 'kind-test\n' | run_in_terminal STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 STUB_SCALE_FAILS=1 "$mark --unmark"; then
+    fail "mark --unmark: went on after failing to scale cloudflared"
+  fi
+  grep -q 'delete configmap' "$log" && fail "mark --unmark: deleted the marker although cloudflared was not scaled to 0"
 fi
 
 if [ "$failures" -gt 0 ]; then

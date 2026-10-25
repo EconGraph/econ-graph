@@ -248,7 +248,7 @@ A cluster is production while it carries the marker written by:
 ```bash
 ./scripts/deploy/mark-production-cluster.sh            # mark (asks you to type the context name)
 ./scripts/deploy/mark-production-cluster.sh --dry-run  # show what it would do
-./scripts/deploy/mark-production-cluster.sh --unmark   # remove the marker, scale cloudflared to 0
+./scripts/deploy/mark-production-cluster.sh --unmark   # scale cloudflared to 0, then remove the marker
 ```
 
 The marker is the ConfigMap `kube-system/econgraph-cluster-role`, with `role: production`
