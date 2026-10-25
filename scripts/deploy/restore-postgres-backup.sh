@@ -33,8 +33,8 @@ done
 if [ "${LIST_ONLY}" = "true" ]; then
     echo "📋 Backups available in postgres-backup-data:"
     kubectl run "postgres-backup-list-$(date +%s)" --rm -i --restart=Never \
-        --image=busybox:1.36 -n "${NAMESPACE}" \
-        --overrides="{\"spec\":{\"containers\":[{\"name\":\"list\",\"image\":\"busybox:1.36\",\"command\":[\"ls\",\"-la\",\"/backups\"],\"volumeMounts\":[{\"name\":\"backup-data\",\"mountPath\":\"/backups\"}]}],\"volumes\":[{\"name\":\"backup-data\",\"persistentVolumeClaim\":{\"claimName\":\"postgres-backup-data\"}}]}}" \
+        --image=busybox:1.38 -n "${NAMESPACE}" \
+        --overrides="{\"spec\":{\"containers\":[{\"name\":\"list\",\"image\":\"busybox:1.38\",\"command\":[\"ls\",\"-la\",\"/backups\"],\"volumeMounts\":[{\"name\":\"backup-data\",\"mountPath\":\"/backups\"}]}],\"volumes\":[{\"name\":\"backup-data\",\"persistentVolumeClaim\":{\"claimName\":\"postgres-backup-data\"}}]}}" \
         -- true
     exit 0
 fi
