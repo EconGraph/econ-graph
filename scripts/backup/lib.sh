@@ -48,7 +48,7 @@ ECONGRAPH_STATE_DIR="${ECONGRAPH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # The Docker daemon the kind cluster runs on: the rootful system daemon. kind
 # can't start under rootless Docker on this host (its data root is on btrfs),
 # so the cluster moved to the rootful one (as in scripts/deploy/lib/kind-env.sh).
-# Joe's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
+# The operator's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
 # that variable is deliberately not the override; ECONGRAPH_DOCKER_HOST is
 # (environment or backup.env). jmalicki is in the docker group, so the
 # systemd --user units reach /var/run/docker.sock without sudo. Exported, so

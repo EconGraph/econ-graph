@@ -1,7 +1,7 @@
 #!/bin/bash
 # Take a read-only btrfs snapshot of the production data before a risky
 # change: a data migration, a deliberate recrawl, a schema change, a restore.
-# Such changes are "critical" under the repo's rules and need Joe's sign-off
+# Such changes are "critical" under the repo's rules and need the maintainer's sign-off
 # plus a dump first; run this together with dump-databases.sh.
 #
 # Usage: snapshot-now.sh [--dry-run] [--only data-plane|app-prod] <reason>

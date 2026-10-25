@@ -15,7 +15,7 @@
 #   3. Writes a status file and (at most daily) a size report to
 #      /var/lib/econgraph/ for scripts/backup/check-freshness.sh.
 #
-# It never deletes anything: snapshots accumulate on both sides until Joe
+# It never deletes anything: snapshots accumulate on both sides until the operator
 # removes some by hand with scripts/host/delete-snapshots.sh. A receive that
 # fails half-way is renamed <name>.<stamp>.incomplete-<when> (not deleted)
 # and retried on the next run.
