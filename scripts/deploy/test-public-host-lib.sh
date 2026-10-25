@@ -42,7 +42,7 @@ log="$(mktemp)"
 out="$(mktemp)"
 path_log="$(mktemp)"
 stub_dir="$(mktemp -d)"
-trap 'rm -rf "$log" "$out" "$path_log" "$stub_dir"' EXIT
+trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
@@ -61,7 +61,8 @@ cat >"$stub_dir/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
 case "$*" in
-  *"config current-context"*) [ "${STUB_NO_CONTEXT:-0}" = 1 ] && exit 1; echo kind-test ;;
+  *"config current-context"*) [ "${STUB_NO_CONTEXT:-0}" = 1 ] && exit 1; cat "$STUB_LOG.ctx" 2>/dev/null || echo kind-test ;;
+  *"config use-context "*) echo "${!#}" >"$STUB_LOG.ctx" ;;
   *"config view"*) echo https://127.0.0.1:6443 ;;
   *"get namespace kube-system"*)
     [ "${STUB_CLUSTER_FAILS:-0}" != 1 ] || exit 1
@@ -104,7 +105,7 @@ export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 
 # run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out.
 run_lib() {
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   (
     # Only the '.spec.replicas = N' form apply_cloudflared uses.
     yq() {
@@ -238,14 +239,14 @@ done
 
 # run_stubbed [VAR=value ...] COMMAND...: COMMAND with the stub kubectl, no terminal.
 run_stubbed() {
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env -u CLUSTER_ROLE_CONTEXT "$@" </dev/null >"$out" 2>&1
 }
 # run_in_terminal [VAR=value ...] COMMAND-STRING: the same under a terminal (script(1)),
 # with stdin fed to it.
 run_in_terminal() {
   local cmd="${*: -1}"
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env -u CLUSTER_ROLE_CONTEXT "${@:1:$#-1}" script -qec "$cmd" /dev/null >"$out" 2>&1
 }
 have_script=false
@@ -284,6 +285,20 @@ if [ "$have_script" = true ]; then
   grep -q 'mark-production-cluster.sh' "$out" ||
     fail "create-secrets --prompt-tunnel-token: the refusal is not shown: $(cat "$out")"
 fi
+
+# An inherited CLUSTER_ROLE_CONTEXT is followed only while it is the selected kubectl's
+# current context (as from deploy.sh, which switches to it first); a stray one is refused
+# before anything is written.
+if run_stubbed CLUSTER_ROLE_CONTEXT=prod-elsewhere STUB_MARKER=production \
+  CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh; then
+  fail "create-secrets: followed a stray CLUSTER_ROLE_CONTEXT"
+fi
+grep -q 'create secret' "$log" && fail "create-secrets: wrote Secrets with a stray CLUSTER_ROLE_CONTEXT"
+grep -q 'is not the current' "$out" || fail "create-secrets: the stray context was not reported: $(cat "$out")"
+run_stubbed CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=production scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused the context it is on: $(cat "$out")"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets: did not write on the inherited context"
 
 # --- mark-production-cluster.sh ---------------------------------------------------
 mark=scripts/deploy/mark-production-cluster.sh
@@ -452,6 +467,13 @@ if ! { [ -n "$kubectl_line" ] && [ -n "$ensure_line" ] && [ -n "$pin_line" ] &&
 fi
 grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
   fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
+# restart-k8s-rollout.sh binds plain kubectl to the kubeconfig it wrote from MicroK8s,
+# not a KUBECTL or KUBECONFIG from the environment, before it pins microk8s.
+bind_line="$(grep -n '^export KUBECTL=kubectl KUBECONFIG="$HOME/.kube/config"$' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
+pin_line="$(grep -n '^if ! cluster_role_use_context microk8s' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
+if ! { [ -n "$bind_line" ] && [ -n "$pin_line" ] && [ "$bind_line" -lt "$pin_line" ]; }; then
+  fail "restart-k8s-rollout.sh does not bind its kubectl and kubeconfig before pinning microk8s"
+fi
 # Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
 # stop the connector on production, since the manifest is committed with 0 replicas), or
 # k8s/ recursively or through kustomize.
@@ -485,7 +507,7 @@ keys=scripts/deploy/set-crawler-keys.sh
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
 run_keys() {
   printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     script -qec "$keys $2" /dev/null >"$out" 2>&1
@@ -510,7 +532,7 @@ if [ "$have_script" = true ]; then
   grep -q 'stdin: .*replicas: 1' "$log" || fail "set-crawler-keys --tunnel: cloudflared not started through apply_cloudflared"
   grep -q 'rollout restart deployment/cloudflared' "$log" || fail "set-crawler-keys --tunnel: cloudflared not restarted"
   grep -q 'scale deployment/cloudflared' "$log" && fail "set-crawler-keys --tunnel: scaled cloudflared directly"
-  grep '^kubectl ' "$log" | grep -v 'config use-context kind-econ-graph' | grep -v -- '--context kind-econ-graph' &&
+  grep '^kubectl ' "$log" | grep -v -e 'config use-context kind-econ-graph' -e 'config current-context' | grep -v -- '--context kind-econ-graph' &&
     fail "set-crawler-keys --tunnel: a call did not use the kind context"
   grep -q 'prod-elsewhere' "$log" && fail "set-crawler-keys --tunnel: followed an inherited CLUSTER_ROLE_CONTEXT"
 
@@ -526,7 +548,7 @@ fi
 
 # --- mark-production-cluster.sh run bare: the kind cluster, through its own kubectl --------
 printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
-: >"$log"
+: >"$log"; rm -f "$log.ctx"
 env -u KUBECTL XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
   PATH="$kind_dir/bin:$PATH" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
   "$mark" --dry-run </dev/null >"$out" 2>&1 || fail "mark (bare) --dry-run failed: $(cat "$out")"
@@ -544,7 +566,7 @@ for s in grafana-admin cloudflare-tunnel; do
 done
 for marker in none copied fails production; do
   printf 'STUB_LOG=%q\nSTUB_MARKER=%s\n' "$log" "$marker" >"$stub_dir/stub.env"
-  : >"$log"
+  : >"$log"; rm -f "$log.ctx"
   env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     bash -c 'source scripts/deploy/lib/kind-env.sh; DRY_RUN=false; restore_secrets "$1"' _ "$backup" >"$out" 2>&1 ||
@@ -577,7 +599,7 @@ if command -v yq >/dev/null 2>&1; then
   cp -r k8s "$deploy_root/"
   for host in '' econgraph.com; do
     printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
-    : >"$log"
+    : >"$log"; rm -f "$log.ctx"
     if ! env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
       PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
       PUBLIC_HOST="$host" "$deploy_root/scripts/deploy/deploy.sh" --dry-run </dev/null >"$out" 2>&1; then

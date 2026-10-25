@@ -309,9 +309,11 @@ How the scripts use the marker:
   library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
   context: `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own
   kubectl (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`;
-  `restart-k8s-rollout.sh` pins `microk8s`. Each replaces any `CLUSTER_ROLE_CONTEXT` in
-  the environment, and scripts they start inherit the pin. So the check and the writes it
-  allows cannot reach different clusters.
+  `restart-k8s-rollout.sh` uses plain `kubectl` with the kubeconfig it writes from
+  MicroK8s and pins `microk8s`. Each replaces any `CLUSTER_ROLE_CONTEXT` in the
+  environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
+  inherited one only while it is its kubectl's current context. So the check and the
+  writes it allows cannot reach different clusters.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not
   production, and the scripts say so. The deploy then stops with cloudflared left as it is,
   as it does when the Secret `cloudflare-tunnel` cannot be looked up: a failed lookup never

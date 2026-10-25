@@ -157,6 +157,18 @@ log() {
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
+# A CLUSTER_ROLE_CONTEXT from the environment is followed only while it is the
+# current context of $KUBECTL, as when deploy.sh, restart-k8s-rollout.sh or
+# set-crawler-keys.sh run this right after switching to it. A stray one would
+# send the check and the writes to a context the selected kubectl is not on.
+if [[ -n "${CLUSTER_ROLE_CONTEXT:-}" ]]; then
+    current_context="$(command "$KUBECTL" config current-context 2>/dev/null || true)"
+    [[ "$current_context" == "$CLUSTER_ROLE_CONTEXT" ]] ||
+        die "CLUSTER_ROLE_CONTEXT=$CLUSTER_ROLE_CONTEXT in the environment is not the current" \
+            "context of $KUBECTL (${current_context:-none}); unset it or switch to it first." \
+            "Nothing was written."
+fi
+
 # The tunnel token goes only into the production cluster (ECO-468). Checked
 # before the prompt, so the token is never typed for a cluster that refuses it.
 require_production_for_token() {
