@@ -38,6 +38,7 @@ const MapValuesTable: React.FC<MapValuesTableProps> = ({ values, unit, frequency
       variant='outlined'
       sx={{ mt: 2 }}
       slotProps={{
+        heading: { component: 'div' },
         transition: { unmountOnExit: true },
       }}
     >
