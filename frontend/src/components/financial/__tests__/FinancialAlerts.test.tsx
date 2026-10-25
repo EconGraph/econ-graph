@@ -71,7 +71,7 @@ const testQueryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
-      cacheTime: 0, // Don't cache between tests
+      gcTime: 0, // Don't cache between tests
     },
   },
 });

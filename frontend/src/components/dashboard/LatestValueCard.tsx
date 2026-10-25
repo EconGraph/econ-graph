@@ -33,14 +33,14 @@ interface LatestValueCardProps {
 export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
   const {
     data: series,
-    isLoading,
+    isPending,
     isError,
   } = useLatestObservation(entry.sourceName, entry.externalId);
   const observation = series?.latestObservation ?? null;
   const headingId = `dashboard-card-${entry.id}`;
 
   let body: React.ReactNode;
-  if (isLoading) {
+  if (isPending) {
     body = (
       <Skeleton variant='text' width={160} height={48} role='progressbar' aria-label='Loading' />
     );

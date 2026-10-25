@@ -45,7 +45,7 @@ const DATE_RANGE = { startDate: '2024-01-01', endDate: '2024-01-31' };
 
 function renderUseSeriesData(transformation: 'NONE' | 'LOG_DIFFERENCE' = 'NONE') {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, cacheTime: 0 } },
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>

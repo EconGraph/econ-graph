@@ -185,7 +185,7 @@ const SeriesExplorer: React.FC = () => {
   // search waits for it.
   const resolvedSourceId = resolveSourceId(selectedSource, dataSources);
   const sourceListed = resolvedSourceId !== undefined;
-  const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isLoading);
+  const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isPending);
   const activeSource = sourceListed ? resolvedSourceId : waitingForSources ? selectedSource : '';
 
   // Send the search once typing pauses, not on every keystroke
@@ -219,7 +219,7 @@ const SeriesExplorer: React.FC = () => {
   const activeResult = browsing ? browseResult : searchResult;
   const searchResults = browsing ? browseResult?.data?.series : searchResult?.data;
   const browseTotal = browseResult?.data?.totalCount ?? 0;
-  const { isInitialLoading: isSearchLoading, error: searchError } = activeResult || {};
+  const { isLoading: isSearchLoading, error: searchError } = activeResult || {};
   // The Search button reflects the search request only, not a browse in the background
   const isSearchFetching = !browsing && Boolean(searchResult?.isFetching);
   const hasQuery = debouncedQuery.length >= 2 || browsing;

@@ -13,7 +13,6 @@ const createTestWrapper = () => {
     defaultOptions: {
       queries: {
         retry: false,
-        suspense: true,
       },
     },
   });

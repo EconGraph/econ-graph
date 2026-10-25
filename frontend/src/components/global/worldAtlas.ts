@@ -31,8 +31,8 @@ export const worldAtlasQuery = {
   queryKey: ['world-atlas'],
   queryFn: () => loadWorldAtlas(),
   staleTime: Infinity,
-  cacheTime: Infinity,
-  useErrorBoundary: false,
+  gcTime: Infinity,
+  throwOnError: false,
   retry: 1,
 };
 

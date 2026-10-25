@@ -51,15 +51,17 @@ vi.mock('../../utils/graphql', async () => {
 // The global test setup mocks these hooks with sample results; this file needs an empty
 // backend, so the hooks return no sources and no series.
 vi.mock('../../hooks/useSeriesData', () => ({
-  useDataSources: vi.fn(() => ({ data: [], isLoading: false, error: null })),
+  useDataSources: vi.fn(() => ({ data: [], isPending: false, isLoading: false, error: null })),
   useSeriesBrowse: vi.fn(() => ({
     data: undefined,
-    isInitialLoading: false,
+    isPending: true,
+    isLoading: false,
     isFetching: false,
     error: null,
   })),
   useSeriesSearch: vi.fn(() => ({
     data: [],
+    isPending: false,
     isLoading: false,
     isFetching: false,
     error: null,

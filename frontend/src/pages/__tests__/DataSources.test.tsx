@@ -44,7 +44,7 @@ const sources: DataSource[] = [
 const mockSources = (data: DataSource[] | undefined, extra: object = {}) =>
   vi.mocked(useDataSources).mockReturnValue({
     data,
-    isLoading: false,
+    isPending: false,
     error: null,
     ...extra,
   } as unknown as ReturnType<typeof useDataSources>);
@@ -103,7 +103,7 @@ describe('DataSources', () => {
   });
 
   it('shows a spinner while loading', () => {
-    mockSources(undefined, { isLoading: true });
+    mockSources(undefined, { isPending: true });
     renderWithProviders(<DataSources />);
 
     expect(screen.getByLabelText('Loading data sources')).toBeInTheDocument();

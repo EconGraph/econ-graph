@@ -12,8 +12,8 @@ import AnnotationComments from '../AnnotationComments';
 import { COMMENT_MAX_CHARS } from '../annotationLimits';
 
 vi.mock('../../../hooks/useAnnotationEditing', () => ({
-  useAnnotationComments: () => ({ isLoading: false, isError: false, data: [] }),
-  useAddComment: () => ({ mutate: vi.fn(), isLoading: false, isError: false, error: null }),
+  useAnnotationComments: () => ({ isPending: false, isError: false, data: [] }),
+  useAddComment: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }),
 }));
 
 const renderComments = () =>

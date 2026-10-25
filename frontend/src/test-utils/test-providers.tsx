@@ -31,7 +31,7 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
       defaultOptions: {
         queries: {
           retry: false, // Disable retries in tests
-          cacheTime: 0, // Disable caching in tests
+          gcTime: 0, // Disable caching in tests
           staleTime: 0,
         },
         mutations: {
@@ -112,7 +112,7 @@ export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
     defaultOptions: {
       queries: {
         retry: false,
-        cacheTime: 0,
+        gcTime: 0,
         staleTime: 0,
       },
       mutations: {

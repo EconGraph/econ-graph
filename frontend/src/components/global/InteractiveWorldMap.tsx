@@ -10,7 +10,7 @@
  * the map.
  */
 
-import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, Suspense } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
 import {
@@ -26,7 +26,7 @@ import { Add, Remove, CenterFocusStrong } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { useWorldMap, MAX_ZOOM, MIN_ZOOM } from './hooks/useWorldMap';
 import type { MapCountryValue } from './hooks/useWorldMapData';
-import { worldAtlasQuery } from './worldAtlas';
+import { worldAtlasQuery, type WorldAtlasTopology } from './worldAtlas';
 import CountryTooltip from './CountryTooltip';
 import { NO_DATA_FILL } from './mapFormat';
 
@@ -70,9 +70,6 @@ interface HoverState {
   boxHeight: number;
 }
 
-// Load the bundled world atlas, suspending until it is in
-const useWorldAtlasData = () => useQuery({ ...worldAtlasQuery, suspense: true });
-
 /**
  * The ISO numeric code of a world-atlas feature.
  * @param feature - A country feature; its id is the code as a zero-padded string, e.g. `"040"`.
@@ -84,8 +81,15 @@ const featureIsoNumeric = (feature: any): number | null => {
   return Number.isInteger(code) ? code : null;
 };
 
-// Main map content component - assumes data is loaded
-const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
+/** Props of the map once its outline is loaded. */
+interface WorldMapContentProps extends InteractiveWorldMapProps {
+  /** The loaded world-atlas outline. */
+  worldData: WorldAtlasTopology;
+}
+
+// The map itself, mounted once the outline is loaded
+const WorldMapContent: React.FC<WorldMapContentProps> = ({
+  worldData,
   valuesByIsoNumeric,
   colorScale,
   unit = null,
@@ -105,9 +109,6 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   // last tapped, so that a tap can show the tooltip before a second one opens the country.
   const lastPointerType = useRef<string | null>(null);
   const tappedIsoNumeric = useRef<number | null>(null);
-
-  // Load world atlas data with Suspense
-  const { data: worldData, isError } = useWorldAtlasData();
 
   const { path, zoomBehavior, zoomLevel, isTransformed, zoomBy, resetZoom } = useWorldMap(
     svgRef,
@@ -141,7 +142,7 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
 
   // Build the map
   useEffect(() => {
-    if (!worldData || !svgRef.current) return;
+    if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove(); // Clear previous content
@@ -277,23 +278,6 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
     applyFills();
   }, [valuesByIsoNumeric, colorScale, applyFills]);
 
-  if (isError) {
-    return (
-      <Box display='flex' justifyContent='center' alignItems='center' width={width} height={height}>
-        <Alert
-          severity='error'
-          action={
-            <Button color='inherit' size='small' onClick={() => window.location.reload()}>
-              Reload
-            </Button>
-          }
-        >
-          Failed to load world map data
-        </Alert>
-      </Box>
-    );
-  }
-
   const hoveredEntry =
     hover && hover.isoNumeric !== null ? valuesByIsoNumeric.get(hover.isoNumeric) : undefined;
 
@@ -394,26 +378,49 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   );
 };
 
-// Wrapper component with Suspense boundary
+/**
+ * Load the bundled world atlas, showing a spinner until it is in and an error in place of the
+ * map if it fails to load, then draw the map.
+ * @param props - The map props.
+ * @returns The map, or its loading or error state.
+ */
 const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
-  return (
-    <Suspense
-      fallback={
-        <Box
-          display='flex'
-          justifyContent='center'
-          alignItems='center'
-          height={props.height}
-          width='100%'
-          maxWidth={props.width}
+  const { data: worldData, isError } = useQuery(worldAtlasQuery);
+  const { width, height } = props;
+
+  if (isError) {
+    return (
+      <Box display='flex' justifyContent='center' alignItems='center' width={width} height={height}>
+        <Alert
+          severity='error'
+          action={
+            <Button color='inherit' size='small' onClick={() => window.location.reload()}>
+              Reload
+            </Button>
+          }
         >
-          <CircularProgress />
-        </Box>
-      }
-    >
-      <WorldMapContent {...props} />
-    </Suspense>
-  );
+          Failed to load world map data
+        </Alert>
+      </Box>
+    );
+  }
+
+  if (!worldData) {
+    return (
+      <Box
+        display='flex'
+        justifyContent='center'
+        alignItems='center'
+        height={height}
+        width='100%'
+        maxWidth={width}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return <WorldMapContent {...props} worldData={worldData} />;
 };
 
 export default InteractiveWorldMap;

@@ -681,7 +681,7 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
       return restored;
     });
     const QueryOnMount: React.FC = () => {
-      useQuery(['on-mount'], () => executeGraphQL({ query: '{ ok }' }));
+      useQuery({ queryKey: ['on-mount'], queryFn: () => executeGraphQL({ query: '{ ok }' }) });
       return null;
     };
 
@@ -866,11 +866,13 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
       });
 
     const SourceList: React.FC = () => {
-      const sources = useQuery(['sources'], () =>
-        executeGraphQL<{ dataSources: { name: string }[] }>({
-          query: '{ dataSources { name } }',
-        })
-      );
+      const sources = useQuery({
+        queryKey: ['sources'],
+        queryFn: () =>
+          executeGraphQL<{ dataSources: { name: string }[] }>({
+            query: '{ dataSources { name } }',
+          }),
+      });
       if (sources.isError) return <p>Could not load the list of sources</p>;
       return <p>{sources.data?.data?.dataSources.map(source => source.name).join(', ')}</p>;
     };

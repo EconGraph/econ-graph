@@ -121,6 +121,7 @@ vi.mock('./hooks/useSeriesData', () => ({
   useDataSources: vi.fn().mockImplementation(() => ({
     data: mockDataSources,
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,
@@ -128,19 +129,22 @@ vi.mock('./hooks/useSeriesData', () => ({
   useSeriesSearch: vi.fn().mockImplementation(() => ({
     data: mockSearchResults,
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
   useSeriesBrowse: vi.fn(() => ({
     data: undefined,
-    isInitialLoading: false,
+    isPending: true,
+    isLoading: false,
     isFetching: false,
     error: null,
   })),
   useSeriesDetail: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,
@@ -148,6 +152,7 @@ vi.mock('./hooks/useSeriesData', () => ({
   useSeriesData: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,
@@ -155,6 +160,7 @@ vi.mock('./hooks/useSeriesData', () => ({
   useSearchSuggestions: vi.fn().mockImplementation(() => ({
     data: [],
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,
@@ -162,6 +168,7 @@ vi.mock('./hooks/useSeriesData', () => ({
   useCrawlerStatus: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
+    isPending: false,
     error: null,
     isError: false,
     isSuccess: true,

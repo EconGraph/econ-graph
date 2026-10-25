@@ -154,7 +154,7 @@ const WorldMapTab: React.FC = () => {
             </Alert>
           )}
           {crossSectionQuery.isSuccess &&
-            !crossSectionQuery.isPreviousData &&
+            !crossSectionQuery.isPlaceholderData &&
             countriesWithData.length === 0 && (
               <Alert severity='info' sx={{ mb: 2 }}>
                 No country has a value for {indicatorLabel} yet.

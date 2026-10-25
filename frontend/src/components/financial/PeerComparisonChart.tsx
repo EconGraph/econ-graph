@@ -55,19 +55,17 @@ const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
   const [sortBy, setSortBy] = useState<'name' | 'performance' | 'marketCap'>('performance');
 
   // Fetch peer companies data from GraphQL
-  const { data: peerCompaniesData, isLoading: _peerCompaniesLoading } = useQuery(
-    ['peer-companies', company.id],
-    async () => {
+  const { data: peerCompaniesData, isPending: _peerCompaniesLoading } = useQuery({
+    queryKey: ['peer-companies', company.id],
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: GET_PEER_COMPANIES,
         variables: { companyId: company.id },
       });
-      return result.data;
+      return result.data ?? null;
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   // Memoize to avoid new array identity when data is missing, satisfying exhaustive-deps
   const peerCompanies = useMemo(() => {

@@ -3,7 +3,7 @@
  * indicator's latest value per country from the `crossSection` query.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { executeGraphQL, type GraphQLResponse } from '../../../utils/graphql';
 
 /** Code of the World Bank's World Development Indicators dataset. */
@@ -189,17 +189,17 @@ export function pickMapDataset(datasets: DatasetsData['datasets']): MapDataset |
  * @returns The react-query result; `data` is null when the dataset isn't loaded.
  */
 export const useMapDataset = () =>
-  useQuery(
-    ['worldMap', 'dataset'],
-    async ({ signal }) => {
+  useQuery({
+    queryKey: ['worldMap', 'dataset'],
+    queryFn: async ({ signal }) => {
       const result = await executeGraphQL<DatasetsData>(
         { query: GET_MAP_DATASETS, operationName: 'GetMapDatasets' },
         signal
       );
       return pickMapDataset(dataOrThrow(result).datasets);
     },
-    { staleTime: 30 * 60 * 1000 }
-  );
+    staleTime: 30 * 60 * 1000,
+  });
 
 /**
  * Keep the entries the map can show: countries with a value.
@@ -232,9 +232,9 @@ export function toCountryValues(entries: CrossSectionData['crossSection']): MapC
  * @returns The react-query result.
  */
 export const useMapCrossSection = (dataset: MapDataset | null | undefined, indicator: string) =>
-  useQuery(
-    ['worldMap', 'crossSection', dataset?.id, indicator],
-    async ({ signal }): Promise<MapCrossSection> => {
+  useQuery({
+    queryKey: ['worldMap', 'crossSection', dataset?.id, indicator],
+    queryFn: async ({ signal }): Promise<MapCrossSection> => {
       if (!dataset) throw new Error('No dataset');
       const result = await executeGraphQL<CrossSectionData>(
         {
@@ -275,10 +275,8 @@ export const useMapCrossSection = (dataset: MapDataset | null | undefined, indic
       }
       return { indicator, values, unit, frequency };
     },
-    {
-      enabled: Boolean(dataset && indicator),
-      staleTime: 5 * 60 * 1000,
-      // Keep showing the last indicator while the next loads; the result says which it is.
-      keepPreviousData: true,
-    }
-  );
+    enabled: Boolean(dataset && indicator),
+    staleTime: 5 * 60 * 1000,
+    // Keep showing the last indicator while the next loads; the result says which it is.
+    placeholderData: keepPreviousData,
+  });
