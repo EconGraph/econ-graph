@@ -961,6 +961,152 @@ async fn fred_vintages_first_and_incremental_fetch() {
     }
 }
 
+/// A `refetch_series` job reads FRED's full vintage history through the normal FRED fetch, even
+/// when `last_updated` is unchanged (a `fetch_series` job then skips the observations), and
+/// rewrites rounded vintage values in place: same series, same rows, a vintage FRED no longer
+/// serves left as stored.
+#[tokio::test]
+async fn fred_refetch_rewrites_rounded_vintages_in_place() {
+    let Some(db) = db().await else { return };
+    const ID: &str = "t5_fred_refetch";
+    let series = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/fred/series_gdp.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let mock = MockSource::start().await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/series"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(series))
+        .mount(mock.server())
+        .await;
+    // Every vintage, with more digits than DECIMAL(20,6) kept.
+    let observations = r#"{
+      "realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "count": 3, "offset": 0,
+      "limit": 100000,
+      "observations": [
+        {"realtime_start": "2025-07-30", "realtime_end": "2025-08-27", "date": "2025-04-01",
+         "value": "30331.1171234567"},
+        {"realtime_start": "2025-08-28", "realtime_end": "2025-09-24", "date": "2025-04-01",
+         "value": "30353.902"},
+        {"realtime_start": "2025-09-25", "realtime_end": "9999-12-31", "date": "2025-04-01",
+         "value": "123456789012345.6789012"}
+      ]
+    }"#;
+    mock.mount_expect(
+        &Route::get("/series/observations")
+            .query("series_id", ID)
+            .query(
+                "realtime_start",
+                crate::sources::fred::EARLIEST_REALTIME_START,
+            ),
+        Reply::json_str(observations),
+        1,
+    )
+    .await;
+    let adapter = Arc::new(crate::sources::fred::FredAdapter::new(mock.base_url()));
+    let mut registry = AdapterRegistry::new();
+    registry.register(adapter.clone());
+    let mut datasets = DatasetCatalog::empty();
+    datasets.load_adapter(&*adapter).unwrap();
+    persist::sync_datasets(&db.pool, &datasets).await.unwrap();
+    let w = Worker::new(ctx(&db.pool), registry, config("t5-worker")).with_datasets(datasets);
+
+    // What a DECIMAL(20,6) column kept of those vintages, plus a vintage FRED no longer serves,
+    // stored with the validator for FRED's current `last_updated`.
+    let stored = persist::persist_series(
+        &db.pool,
+        SourceId::Fred,
+        ID,
+        &FetchedSeries {
+            metadata: None,
+            dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+            points: vec![
+                revision("2025-04-01", "30331.117123", "2025-07-30", true),
+                revision("2025-04-01", "30340.5", "2025-08-01", false),
+                revision("2025-04-01", "30353.902", "2025-08-28", false),
+                revision("2025-04-01", "99999999.999999", "2025-09-25", false),
+            ],
+            validators: Some(crate::http::Validators {
+                version: Some(format!(
+                    "{}:2026-08-28 07:54:02-05",
+                    crate::sources::fred::PARSE_VERSION
+                )),
+                ..Default::default()
+            }),
+        },
+    )
+    .await
+    .unwrap();
+    let rows = |pool: DatabasePool| async move {
+        let mut conn = pool.get().await.unwrap();
+        data_points::table
+            .filter(data_points::series_id.eq(stored.series_id))
+            .order((data_points::revision_date, data_points::is_original_release))
+            .select((
+                data_points::id,
+                data_points::revision_date,
+                data_points::is_original_release,
+                data_points::value,
+            ))
+            .load::<(Uuid, NaiveDate, bool, Option<BigDecimal>)>(&mut conn)
+            .await
+            .unwrap()
+    };
+    let before = rows(db.pool.clone()).await;
+    let run = |kind: JobKind| {
+        let pool = db.pool.clone();
+        let w = &w;
+        async move {
+            enqueue(&pool, SourceId::Fred.as_str(), ID, kind, 5).await;
+            match w.run_once().await.expect("claimed") {
+                JobOutcome::Completed(stats) => stats,
+                other => panic!("expected Completed, got {other:?}"),
+            }
+        }
+    };
+
+    // A normal fetch: a known vintage and an unchanged last_updated skip the observations.
+    let stats = run(JobKind::FetchSeries).await;
+    assert_eq!(stats.points_written, 0);
+    assert_eq!(rows(db.pool.clone()).await, before);
+
+    // The re-fetch asks for every vintage and corrects the rounded ones in place.
+    let stats = run(JobKind::RefetchSeries).await;
+    assert_eq!((stats.points_written, stats.new_points), (2, 0));
+    assert_eq!(stats.series_id, Some(stored.series_id));
+    let after = rows(db.pool.clone()).await;
+    assert_eq!(
+        after.iter().map(|r| r.0).collect::<Vec<_>>(),
+        before.iter().map(|r| r.0).collect::<Vec<_>>(),
+        "same rows, no duplicates"
+    );
+    assert_eq!(
+        after
+            .iter()
+            .map(|r| (r.1, r.2, r.3.as_ref().unwrap().to_string()))
+            .collect::<Vec<_>>(),
+        vec![
+            (d("2025-07-30"), true, "30331.1171234567".to_string()),
+            (d("2025-08-01"), false, "30340.5".to_string()),
+            (d("2025-08-28"), false, "30353.902".to_string()),
+            (
+                d("2025-09-25"),
+                false,
+                "123456789012345.6789012".to_string()
+            ),
+        ]
+    );
+    mock.server().verify().await;
+    for r in mock.received_requests().await {
+        assert!(
+            !r.url.query_pairs().any(|(k, _)| k == "observation_start"),
+            "{}",
+            r.url
+        );
+    }
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };

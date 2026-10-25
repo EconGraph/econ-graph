@@ -23,6 +23,8 @@ Code: `backend/crates/econ-graph-crawler` (adapters, worker, CLI) and
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE   # fetch_series jobs
 crawler discover --source BLS                        # discover_catalog job (writes series metadata)
+crawler refetch  --all [--dry-run]                   # refetch_series jobs: forced full-history re-fetch
+crawler refetch-status --all [--failures N]          # per-source progress of those jobs
 crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
@@ -37,6 +39,11 @@ direct `fetch` calls.
 
 An item is enqueued only if no active (pending / processing / retrying) item exists for the
 same `(source, series_id, kind)`.
+
+A `refetch_series` job re-reads a series' whole history, ignoring stored validators and
+incremental bounds, and rewrites stored values in place; see
+[Observation precision and full-history re-fetch](OBSERVATION_PRECISION_REFETCH.md) and
+`scripts/deploy/refetch-full-history.sh`.
 
 ## Run the worker
 

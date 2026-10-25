@@ -78,10 +78,8 @@
 //! is `NotFound`.
 
 use std::collections::HashSet;
-use std::str::FromStr;
 
 use async_trait::async_trait;
-use bigdecimal::BigDecimal;
 use chrono::{Datelike, NaiveDate};
 use serde_json::Value;
 
@@ -92,6 +90,7 @@ use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
 use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// The real Census Data API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.census.gov/data";
@@ -621,7 +620,8 @@ fn parse_bds_rows(
             continue;
         }
         let raw = cell(&row[value_idx]);
-        let value = BigDecimal::from_str(raw.trim()).ok();
+        // Census writes a missing or suppressed cell as a non-numeric marker; it is no value.
+        let value = parse_observation_value(&raw).ok();
         points.push(FetchedPoint {
             date,
             value,

@@ -135,6 +135,36 @@ describe('useSeriesData paging', () => {
     expect(signals).toHaveLength(1);
   });
 
+  test('keeps the exact decimal string of each value next to its number', async () => {
+    const node = (date: string, value: string | null) => ({
+      date,
+      value,
+      revisionDate: '2026-07-01',
+      isOriginalRelease: true,
+    });
+    servePages({
+      first: page(
+        [
+          node('2022-01-01', '175000123456789.987654321'),
+          node('2023-01-01', '189543211876543.2109375'),
+          node('2024-01-01', null),
+        ],
+        3
+      ),
+    });
+
+    const points = await fetchAllSeriesData({
+      seriesId: UNRATE_ID,
+      filter: { latestRevisionOnly: true },
+      transformation: 'NONE',
+    });
+    expect(points.map(p => [p.value, p.exactValue])).toEqual([
+      [Number('175000123456789.987654321'), '175000123456789.987654321'],
+      [Number('189543211876543.2109375'), '189543211876543.2109375'],
+      [null, undefined],
+    ]);
+  });
+
   test('a missing page after the first is an error, not a short series', async () => {
     servePages({
       first: page(dailyPoints.slice(0, 3), 7, { hasNextPage: true, endCursor: '3' }),

@@ -103,7 +103,6 @@
 //!   (`Permanent`).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -123,6 +122,7 @@ use crate::persist::{self, StoredFetchState};
 use crate::policy::SourcePolicy;
 use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// FHFA's website root.
 pub const DEFAULT_BASE_URL: &str = "https://www.fhfa.gov";
@@ -386,8 +386,8 @@ fn parse_master(text: &str, def: &DatasetDef) -> Result<BTreeMap<String, HpiSeri
                 continue;
             }
             let point = date.clone().and_then(|date| {
-                let value = BigDecimal::from_str(raw)
-                    .map_err(|_| format!("invalid {column} {raw:?} on {date}"))?;
+                let value = parse_observation_value(raw)
+                    .map_err(|e| format!("invalid {column} {raw:?} on {date}: {e}"))?;
                 Ok((date, value))
             });
             match point {
@@ -710,12 +710,17 @@ impl SourceAdapter for FhfaAdapter {
         _since: Option<NaiveDate>,
     ) -> Result<BatchFetch, CrawlError> {
         let reservation = self.reserve()?;
-        let stored = persist::stored_fetch_state(&ctx.pool, SourceId::Fhfa, external_ids)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "FHFA: reading stored validators failed; full download");
-                HashMap::new()
-            });
+        // With `bypass_validators`, nothing stored counts: the master file is downloaded in full.
+        let stored = if ctx.bypass_validators {
+            HashMap::new()
+        } else {
+            persist::stored_fetch_state(&ctx.pool, SourceId::Fhfa, external_ids)
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "FHFA: reading stored validators failed; full download");
+                    HashMap::new()
+                })
+        };
         let known = shared_validators(external_ids, &stored);
         let (master, validators) = self
             .master_if_changed(ctx, &reservation, known.as_ref())
