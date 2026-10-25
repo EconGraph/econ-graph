@@ -118,7 +118,7 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   leaves flagged-off code out. It is one of two permanent build flags (see
   `static_catalogs` below), kept rather than removed because it's a standing
   check, not unfinished work.
-- `mcp` (build, off in release, on in dev, `remove_by: train 2`, owner ECO-123,
+- `mcp` (build, off in release, on in dev, `remove_by: train 3`, owner ECO-123,
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
   builds while MCP is unfinished. It becomes an ops flag when
   MCP ships.

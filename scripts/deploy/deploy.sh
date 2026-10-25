@@ -145,7 +145,7 @@ kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
 # admin-frontend-deployment/service and admin-ingress: not applied here (re-enabled
-# by ECO-242, train 2). See the note in build-images.sh for why. Delete any
+# by ECO-242, train 3). See the note in build-images.sh for why. Delete any
 # admin-frontend resources a previous deploy left running, so a stale, broken
 # (401-on-everything) admin frontend doesn't keep serving traffic.
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
@@ -192,7 +192,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/crawler-worker 
 echo "Waiting for frontend deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-frontend -n econ-graph
 
-# Admin frontend deployment: not waited on here (re-enabled by ECO-242, train 2).
+# Admin frontend deployment: not waited on here (re-enabled by ECO-242, train 3).
 
 # Wait for chart API service deployment
 echo "Waiting for chart API service deployment..."
@@ -331,7 +331,7 @@ echo ""
 echo "🌐 Application URLs:"
 # k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
 echo "  Frontend: http://localhost"
-# Admin UI: not deployed here (re-enabled by ECO-242, train 2).
+# Admin UI: not deployed here (re-enabled by ECO-242, train 3).
 echo "  Backend:  http://localhost/api"
 echo "  GraphQL:  http://localhost/graphql"
 echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"

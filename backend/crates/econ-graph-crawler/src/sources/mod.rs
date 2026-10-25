@@ -8,7 +8,7 @@
 //! line in each of [`default_registry`] and [`registry_at`].
 //!
 //! `SourceId::Imf` has no adapter (its series ids were made up); it is kept for the SDMX work
-//! in release train 3.
+//! in release train 4.
 
 use crate::adapter::AdapterRegistry;
 
