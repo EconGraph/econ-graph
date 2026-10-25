@@ -68,7 +68,7 @@ manifest_value() {
 
 name="econgraph-restore-drill-$$-$(date +%s)"
 password="$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
-cleanup() { docker rm -f "${name}" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f -v "${name}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 log "drill: restoring ${dump} into throwaway container ${name} (${PG_IMAGE})"
