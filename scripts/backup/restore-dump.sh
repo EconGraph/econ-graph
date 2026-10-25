@@ -53,19 +53,22 @@ archive_db="$(sed -nE 's/^;[[:space:]]+dbname: //p' <<<"${toc}" | head -n 1)"
 [[ "${archive_db}" == "${db}" ]] \
     || die "${file} is a dump of ${archive_db:-an unknown database}, not of ${db}; refusing"
 
-# Relations (tables, views, sequences; not those an extension owns) in the
-# target that the dump does not have: --clean drops only what is in the dump, so these survive the restore
-# and leave a mixed schema. Listed before the confirmation (and in a dry
-# run) so the operator decides with them in view; nothing here drops them.
+# Relations (tables, foreign tables, views, sequences; not those an
+# extension owns) in the target that the dump does not have. --clean drops
+# only what is in the dump, so these either survive the restore and leave a
+# mixed schema, or, when they sit in a schema the dump drops, make DROP
+# SCHEMA fail and the single-transaction restore change nothing. Listed
+# before the confirmation (and in a dry run) so the operator decides with
+# them in view; nothing here drops them.
 extra_relations() {
     local dumped live
     dumped="$(sed -E '/ (TABLE DATA|SEQUENCE SET|SEQUENCE OWNED BY) /d' <<<"${toc}" \
-        | sed -nE 's/^[0-9]+; [0-9]+ [0-9]+ (TABLE|VIEW|SEQUENCE|MATERIALIZED VIEW) ([^ ]+) ([^ ]+) .*/\2.\3/p' | sort -u)"
+        | sed -nE 's/^[0-9]+; [0-9]+ [0-9]+ (TABLE|FOREIGN TABLE|VIEW|SEQUENCE|MATERIALIZED VIEW) ([^ ]+) ([^ ]+) .*/\2.\3/p' | sort -u)"
     live="$(kube exec "${pod}" -- psql --username="${user}" --dbname="${db}" -Atc \
         "SELECT n.nspname || '.' || c.relname FROM pg_class c
            JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
-            AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+            AND c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S')
             AND NOT EXISTS (SELECT 1 FROM pg_depend d
                              WHERE d.classid = 'pg_class'::regclass
                                AND d.objid = c.oid AND d.deptype = 'e')" | sort -u)" || return 1
@@ -78,8 +81,10 @@ report_extra_relations() {
         return 0
     fi
     if [[ -n "${extra}" ]]; then
-        echo "warning: ${db} has $(wc -l <<<"${extra}") relation(s) that are not in the dump; --clean leaves them in place:"
+        echo "warning: ${db} has $(wc -l <<<"${extra}") relation(s) that are not in the dump:"
         while IFS= read -r rel; do echo "    ${rel}"; done <<<"${extra}"
+        echo "  --clean leaves them in place. One in a schema the dump drops makes DROP SCHEMA"
+        echo "  fail instead, and then the single-transaction restore changes nothing."
         echo "  For an exact copy of the dump, restore into an empty database instead."
     fi
 }
