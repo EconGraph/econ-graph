@@ -6,17 +6,24 @@
 # The tunnel is remotely managed: its public hostnames and their origin service
 # are set in the Cloudflare dashboard (Zero Trust > Networks > Tunnels), not here.
 # Each public hostname (econgraph.com, www.econgraph.com) points at
-#   http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
-# with no HTTP Host header override: cloudflared passes the visitor's Host
-# through, which is what the ingress rules match on. See "Public site" in
+#   https://ingress-nginx-controller.ingress-nginx.svc.cluster.local:443
+# with No TLS Verify on and no HTTP Host header override: cloudflared passes the
+# visitor's Host through, which is what the ingress rules match on.
+# The origin is https so that the scheme ingress-nginx sees, and passes on as
+# X-Forwarded-Proto, is the connection's own: no client header can claim https,
+# and the public host's Ingresses redirect plain http to https
+# (scripts/deploy/render-public-host.py). The certificate is ingress-nginx's
+# default one, hence No TLS Verify; this hop never leaves the cluster, and the
+# tunnel itself to Cloudflare is authenticated TLS. See "Public site" in
 # k8s/README.md.
 # When ingress-nginx is replaced by the Gateway API (ECO-433, train 2), that
 # origin service changes to the Gateway's Service; update the dashboard then.
 #
 # The tunnel token comes only from the Secret cloudflare-tunnel (key token),
-# written by scripts/deploy/create-secrets.sh from CLOUDFLARE_TUNNEL_TOKEN; it is
-# never committed. deploy.sh applies this Deployment with replicas: 0 while that
-# Secret is missing, so a cluster without a tunnel does not crash-loop.
+# written by scripts/deploy/create-secrets.sh --prompt-tunnel-token (hidden
+# input); it is never committed. deploy.sh applies this Deployment with
+# replicas: 0 while that Secret or a PUBLIC_HOST is missing, so a cluster
+# without a tunnel does not crash-loop.
 #
 # Metrics: GET /metrics on :2000, scraped by the annotation-based kubernetes-pods
 # job in k8s/monitoring/prometheus-config.yaml; alerts are in
@@ -66,9 +73,10 @@ spec:
       #       topologyKey: kubernetes.io/hostname
       containers:
       - name: cloudflared
-        # Pin an exact release; bump it deliberately (release notes:
+        # cloudflare/cloudflared:2026.10.0, pinned by its (multi-arch index)
+        # digest; bump the tag and digest together, deliberately (release notes:
         # https://github.com/cloudflare/cloudflared/releases).
-        image: cloudflare/cloudflared:2026.10.0
+        image: cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
         args:
         - tunnel
         - --no-autoupdate

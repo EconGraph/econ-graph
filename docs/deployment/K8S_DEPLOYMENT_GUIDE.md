@@ -120,10 +120,11 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 
 # Apply Let's Encrypt issuers
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
-
-# Apply SSL ingress with security features
-kubectl apply -f k8s/manifests/ssl-ingress.yaml
 ```
+
+The public site is no longer served by an SSL Ingress in the cluster (the old
+`k8s/manifests/ssl-ingress.yaml` is retired). TLS ends at Cloudflare, and the
+Cloudflare Tunnel reaches the cluster: see "Public site" in `k8s/README.md`.
 
 ## Service URLs
 

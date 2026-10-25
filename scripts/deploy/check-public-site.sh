@@ -1,24 +1,35 @@
 #!/usr/bin/env bash
 #
-# Smoke-check the public site (ECO-457): the frontend, a /graphql search, the
-# Keycloak discovery document (its issuer must be https://HOST/idp/realms/econ-graph),
-# the sign-in page for the web client (Keycloak accepts the public redirect URI and
-# does not refuse with "HTTPS required"), CORS for the public origin, and the
-# www.HOST redirect.
+# Smoke-check the public site (ECO-457).
 #
 # Usage:
 #   scripts/deploy/check-public-site.sh --host econgraph.com             # local ingress
 #   scripts/deploy/check-public-site.sh --host econgraph.com --via-cloudflare
 #
-# Default (local) mode needs no DNS and no tunnel: curl --resolve sends each request to
-# the kind ingress on this host (LOCAL_INGRESS_IP, default 127.0.0.1, port 80) with the
-# public Host header, and adds the headers Cloudflare's edge adds (X-Forwarded-Proto:
-# https, CF-Connecting-IP), so it checks the cluster's public-host config before the
-# tunnel is up. --via-cloudflare goes the way a visitor does: real DNS, https, through
-# Cloudflare and the cloudflared tunnel.
+# What it checks:
+#   - the frontend, and a /graphql search sent with the public Origin;
+#   - the Keycloak discovery document, whose issuer must be
+#     https://HOST/idp/realms/econ-graph;
+#   - the sign-in page for the web client: Keycloak accepts the public
+#     redirect URI and does not answer "HTTPS required";
+#   - CORS for the public origin, and the www.HOST redirect;
+#   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
+#     neither the issuer, the sign-in form, nor the redirect, and plain http
+#     is redirected to https;
+#   - not served on the public host: Keycloak's admin console and master
+#     realm, metrics, the GraphQL playground and the admin API, including
+#     encoded-traversal variants.
 #
-# Read-only: GET, HEAD and OPTIONS requests plus one GraphQL query. Exits non-zero if
-# any check fails.
+# Default (local) mode needs no DNS and no tunnel: curl --resolve sends each
+# request to the kind ingress on this host (LOCAL_INGRESS_IP, default
+# 127.0.0.1) with the public Host header, over https to port 443, as
+# cloudflared does (ingress-nginx's default certificate is not verified,
+# like the tunnel's No TLS Verify). Plain http goes to port 80.
+# --via-cloudflare goes the way a visitor does: real DNS, through Cloudflare
+# and the cloudflared tunnel.
+#
+# Read-only: GET, HEAD and OPTIONS requests plus one GraphQL query. Exits
+# non-zero if any check fails.
 set -euo pipefail
 
 HOST=""
@@ -26,6 +37,7 @@ VIA_CLOUDFLARE=false
 LOCAL_INGRESS_IP="${LOCAL_INGRESS_IP:-127.0.0.1}"
 REALM="econ-graph"
 CLIENT_ID="econ-graph-web"
+SPOOF_HOST="spoofed.invalid"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -42,7 +54,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h | --help)
-            sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -55,29 +67,28 @@ done
     echo "usage: $0 --host HOST [--via-cloudflare]" >&2
     exit 2
 }
-command -v curl >/dev/null || {
-    echo "curl not found" >&2
-    exit 2
-}
-command -v python3 >/dev/null || {
-    echo "python3 not found" >&2
-    exit 2
-}
+for tool in curl python3; do
+    command -v "$tool" >/dev/null || {
+        echo "$tool not found" >&2
+        exit 2
+    }
+done
 
 PUBLIC_URL="https://${HOST}"
 ISSUER="${PUBLIC_URL}/idp/realms/${REALM}"
+BASE="https://${HOST}"
+WWW_BASE="https://www.${HOST}"
+HTTP_BASE="http://${HOST}"
 CURL=(curl -sS --max-time 20)
 if [ "$VIA_CLOUDFLARE" = true ]; then
-    BASE="https://${HOST}"
-    WWW_BASE="https://www.${HOST}"
     echo "==> Checking ${BASE} through Cloudflare"
 else
-    BASE="http://${HOST}"
-    WWW_BASE="http://www.${HOST}"
-    CURL+=(--resolve "${HOST}:80:${LOCAL_INGRESS_IP}" --resolve "www.${HOST}:80:${LOCAL_INGRESS_IP}"
-        -H "X-Forwarded-Proto: https" -H "CF-Connecting-IP: 192.0.2.10")
-    echo "==> Checking ${HOST} on the local ingress (${LOCAL_INGRESS_IP}:80), as the tunnel would send it"
+    CURL+=(--insecure
+        --resolve "${HOST}:443:${LOCAL_INGRESS_IP}" --resolve "www.${HOST}:443:${LOCAL_INGRESS_IP}"
+        --resolve "${HOST}:80:${LOCAL_INGRESS_IP}")
+    echo "==> Checking ${HOST} on the local ingress (${LOCAL_INGRESS_IP}), as the tunnel would send it"
 fi
+SPOOF=(-H "X-Forwarded-Proto: http" -H "X-Forwarded-Host: ${SPOOF_HOST}" -H "X-Forwarded-Port: 8443")
 
 failures=0
 pass() { echo "  ok    $1"; }
@@ -108,6 +119,18 @@ header() {
         'BEGIN { FS = ": " } tolower($1) == h { v = substr($0, length($1) + 3) } END { print v }'
 }
 
+# json NAME KEY: a top-level string from the JSON body $tmp/NAME, or nothing.
+json() {
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' \
+        "$tmp/$1" "$2" 2>/dev/null || true
+}
+
+# A redirect target with the default https port dropped (ingress-nginx's www
+# redirect spells it out: https://HOST:443/path).
+normalize_location() {
+    printf '%s' "$1" | sed -E 's#^https://([^/:]+):443#https://\1#'
+}
+
 # 1. The frontend.
 status="$(fetch home "${BASE}/")"
 if [ "$status" = 200 ] && grep -q 'id="root"' "$tmp/home"; then
@@ -116,7 +139,7 @@ else
     fail "GET / returned ${status}, expected 200 with the app's HTML"
 fi
 
-# 2. A /graphql search.
+# 2. A /graphql search, with the Origin a browser on the public site sends.
 status="$(fetch search -X POST -H 'Content-Type: application/json' \
     -H "Origin: ${PUBLIC_URL}" --data '{"query":"{ searchSeries(query: \"gdp\", first: 1) { totalCount } }"}' \
     "${BASE}/graphql")"
@@ -125,19 +148,15 @@ import json, sys
 body = json.load(open(sys.argv[1]))
 sys.exit(0 if not body.get("errors") and isinstance(body["data"]["searchSeries"]["totalCount"], int) else 1)
 ' "$tmp/search" 2>/dev/null; then
-    pass "POST /graphql searchSeries answers ($(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["searchSeries"]["totalCount"])' "$tmp/search") results for gdp)"
+    pass "POST /graphql searchSeries answers"
 else
     fail "POST /graphql searchSeries returned ${status}: $(head -c 300 "$tmp/search" 2>/dev/null)"
 fi
 
 # 3. Keycloak discovery: the issuer the backend checks tokens against.
 status="$(fetch discovery "${BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
-issuer=""
-auth_endpoint=""
-if [ "$status" = 200 ]; then
-    issuer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("issuer",""))' "$tmp/discovery" 2>/dev/null || true)"
-    auth_endpoint="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("authorization_endpoint",""))' "$tmp/discovery" 2>/dev/null || true)"
-fi
+issuer="$(json discovery issuer)"
+auth_endpoint="$(json discovery authorization_endpoint)"
 if [ "$issuer" = "$ISSUER" ]; then
     pass "discovery issuer is ${ISSUER}"
 else
@@ -149,16 +168,16 @@ case "$auth_endpoint" in
 esac
 
 # 4. The sign-in page for the web client with the public redirect URI: Keycloak must
-# accept the redirect URI (realm import) and see https (no "HTTPS required").
+# accept the redirect URI (realm import) and not refuse with "HTTPS required".
 # The PKCE challenge is a fixed dummy; nothing is signed in.
 login_path="/idp/realms/${REALM}/protocol/openid-connect/auth?client_id=${CLIENT_ID}"
 login_path+="&redirect_uri=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${PUBLIC_URL}/auth/callback")"
 login_path+="&response_type=code&scope=openid&state=smoke&code_challenge_method=S256"
 login_path+="&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 status="$(fetch login "${BASE}${login_path}")"
-if [ "$status" = 200 ] && grep -q 'kc-form-login\|id="kc-' "$tmp/login" &&
+if [ "$status" = 200 ] && grep -q 'id="kc-' "$tmp/login" &&
     ! grep -qi 'HTTPS required\|Invalid parameter: redirect_uri' "$tmp/login"; then
-    pass "sign-in page accepts ${PUBLIC_URL}/auth/callback over https"
+    pass "sign-in page accepts ${PUBLIC_URL}/auth/callback"
     if grep -q "action=\"${PUBLIC_URL}/idp/" "$tmp/login"; then
         pass "sign-in form posts to ${PUBLIC_URL}"
     else
@@ -182,7 +201,7 @@ fi
 
 # 6. www redirects to the apex, keeping the path, on https.
 status="$(fetch www "${WWW_BASE}/series/smoke-check")"
-location="$(header www Location)"
+location="$(normalize_location "$(header www Location)")"
 case "$status" in
     301 | 308)
         if [ "$location" = "${PUBLIC_URL}/series/smoke-check" ]; then
@@ -193,6 +212,80 @@ case "$status" in
         ;;
     *) fail "www.${HOST} returned ${status}, expected a 301/308 redirect to ${PUBLIC_URL}" ;;
 esac
+
+# 7. Spoofing. A client's X-Forwarded-Proto/-Host/-Port must not reach anything
+# that builds URLs from them: ingress-nginx overwrites them with the connection's
+# own values (no use-forwarded-headers), and Keycloak uses its fixed KC_HOSTNAME.
+status="$(fetch spoof-discovery "${SPOOF[@]}" "${BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
+if [ "$(json spoof-discovery issuer)" = "$ISSUER" ] && ! grep -q "$SPOOF_HOST\|:8443" "$tmp/spoof-discovery"; then
+    pass "spoofed X-Forwarded-* headers leave the discovery document alone"
+else
+    fail "with spoofed X-Forwarded-* headers discovery returned ${status}, issuer '$(json spoof-discovery issuer)'"
+fi
+status="$(fetch spoof-login "${SPOOF[@]}" "${BASE}${login_path}")"
+if [ "$status" = 200 ] && grep -q "action=\"${PUBLIC_URL}/idp/" "$tmp/spoof-login" &&
+    ! grep -q "$SPOOF_HOST\|:8443" "$tmp/spoof-login"; then
+    pass "spoofed X-Forwarded-* headers leave the sign-in form alone"
+else
+    fail "with spoofed X-Forwarded-* headers the sign-in page returned ${status} or changed its form target"
+fi
+status="$(fetch spoof-www "${SPOOF[@]}" "${WWW_BASE}/series/smoke-check")"
+location="$(normalize_location "$(header spoof-www Location)")"
+if [ "$location" = "${PUBLIC_URL}/series/smoke-check" ]; then
+    pass "spoofed X-Forwarded-* headers leave the www redirect on ${PUBLIC_URL}"
+else
+    fail "with spoofed X-Forwarded-* headers www redirects (${status}) to '${location}'"
+fi
+# Plain http, claiming to be https: still redirected to https, never served.
+status="$(fetch plain -H "X-Forwarded-Proto: https" "${HTTP_BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
+location="$(normalize_location "$(header plain Location)")"
+case "$status" in
+    301 | 302 | 307 | 308)
+        case "$location" in
+            "${PUBLIC_URL}/"*) pass "plain http (even claiming https) is redirected to ${PUBLIC_URL}" ;;
+            *) fail "plain http redirects (${status}) to '${location}', not to ${PUBLIC_URL}" ;;
+        esac
+        ;;
+    *)
+        if [ "$VIA_CLOUDFLARE" = true ]; then
+            fail "plain http returned ${status}: turn on Cloudflare's Always Use HTTPS"
+        else
+            fail "plain http with X-Forwarded-Proto: https returned ${status}, expected a redirect to https"
+        fi
+        ;;
+esac
+
+# 8. Not served on the public host. An unrouted path falls through to the app,
+# which answers with its own HTML (id="root"); anything else that answers 2xx,
+# or any body that looks like Keycloak's admin or master realm, metrics or a
+# GraphQL playground, fails.
+for path in \
+    /idp/admin/ \
+    /idp/admin/master/console/ \
+    /idp/realms/master/.well-known/openid-configuration \
+    /idp/realms/master/protocol/openid-connect/auth \
+    /idp/realms/econ-graph/../master/.well-known/openid-configuration \
+    /idp/realms/econ-graph/%2e%2e/master/.well-known/openid-configuration \
+    /idp/realms/econ-graph/..%2fmaster/.well-known/openid-configuration \
+    /idp/realms/econ-graph/%2e%2e%2fmaster/.well-known/openid-configuration \
+    /idp/resources/..%2f..%2fadmin/master/console/ \
+    /idp/resources/%2e%2e/%2e%2e/admin/ \
+    /metrics \
+    /api/metrics \
+    /playground \
+    /api/admin \
+    /api/admin/users \
+    /admin \
+    /%2e%2e/playground; do
+    status="$(fetch neg --path-as-is "${BASE}${path}")"
+    if grep -qi 'realms/master\|"realm" *: *"master"\|^# HELP\|^# TYPE\|kc-form\|keycloak\|graphiql\|graphql-playground\|playground' "$tmp/neg"; then
+        fail "${path} is served on the public host (${status})"
+    elif [[ "$status" == 2* ]] && ! grep -q 'id="root"' "$tmp/neg"; then
+        fail "${path} answered ${status} with something other than the app"
+    else
+        pass "${path} not served (${status})"
+    fi
+done
 
 if [ "$failures" -gt 0 ]; then
     echo "==> ${failures} check(s) failed"

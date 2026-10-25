@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/deploy/render-public-host.py against the committed manifests:
-# every localhost Ingress rule gains the public host (and localhost stays), the main
+# every localhost Ingress gains a separate -public copy for the public host (https only,
+# without the admin and debug routes; localhost stays as it was), the main public
 # Ingress redirects www, Keycloak's hostname and the backend's issuer agree on
 # https://<host>/idp/realms/econ-graph, the JWKS stays in-cluster, the realm import
 # allows the public origin plus localhost, CORS gains the origin once, and bad host
@@ -34,6 +35,8 @@ def env(kind, name, container, var):
             return {e["name"]: e.get("value") for e in c.get("env", [])}[var]
 def hosts(name):
     return [r.get("host") for r in docs[("Ingress", name)]["spec"]["rules"]]
+def paths(name):
+    return [p["path"] for r in docs[("Ingress", name)]["spec"]["rules"] for p in r["http"]["paths"]]
 sys.exit(0 if eval(sys.argv[1]) else 1)
 ' "$expr" <<<"$rendered" || fail "$name"
 }
@@ -44,16 +47,29 @@ rendered="$("$render" econgraph.com \
   "$manifests/keycloak/realm-import-job.yaml" "$manifests/backend-deployment.yaml" \
   "$manifests/configmap.yaml" "$manifests/cloudflared.yaml")"
 
+A="nginx.ingress.kubernetes.io"
 for ingress in econ-graph-ingress econ-graph-graphql-ingress keycloak-ingress; do
-  check "$ingress serves localhost and econgraph.com" \
-    "hosts('$ingress') == ['localhost', 'econgraph.com']"
+  check "$ingress stays localhost-only" "hosts('$ingress') == ['localhost']"
+  check "$ingress-public serves econgraph.com only" "hosts('$ingress-public') == ['econgraph.com']"
+  check "$ingress-public is labelled for cleanup" \
+    "docs[('Ingress', '$ingress-public')]['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
+  check "$ingress-public redirects plain http to https" \
+    "docs[('Ingress', '$ingress-public')]['metadata']['annotations']['$A/force-ssl-redirect'] == 'true'"
+  check "$ingress-public keeps the original annotations" \
+    "all(docs[('Ingress', '$ingress-public')]['metadata']['annotations'][k] == v for k, v in docs[('Ingress', '$ingress')]['metadata'].get('annotations', {}).items())"
+  check "$ingress itself does not force https (http://localhost keeps working)" \
+    "'$A/force-ssl-redirect' not in docs[('Ingress', '$ingress')]['metadata'].get('annotations', {})"
 done
-check "the public rules route the same paths as localhost" \
-  "[r['http'] for r in docs[('Ingress', 'econ-graph-ingress')]['spec']['rules']][0] == [r['http'] for r in docs[('Ingress', 'econ-graph-ingress')]['spec']['rules']][1]"
-check "www redirects on the main Ingress" \
-  "docs[('Ingress', 'econ-graph-ingress')]['metadata']['annotations'].get('nginx.ingress.kubernetes.io/from-to-www-redirect') == 'true'"
-check "only the main Ingress redirects www" \
-  "'nginx.ingress.kubernetes.io/from-to-www-redirect' not in docs[('Ingress', 'keycloak-ingress')]['metadata']['annotations']"
+check "the graphql rate limits apply on the public host too" \
+  "docs[('Ingress', 'econ-graph-graphql-ingress-public')]['metadata']['annotations']['$A/limit-rps'] == '20'"
+check "the public host leaves out the admin and debug routes" \
+  "paths('econ-graph-ingress-public') == [p for p in paths('econ-graph-ingress') if p not in ('/admin', '/api/admin', '/playground')] and '/api' in paths('econ-graph-ingress-public')"
+check "the public Keycloak Ingress routes only the econ-graph realm and its resources" \
+  "paths('keycloak-ingress-public') == ['/idp/realms/econ-graph', '/idp/resources']"
+check "www redirects on the main public Ingress only" \
+  "[n for (k, n), d in docs.items() if k == 'Ingress' and d['metadata'].get('annotations', {}).get('$A/from-to-www-redirect') == 'true'] == ['econ-graph-ingress-public']"
+check "nothing trusts client forwarding headers" \
+  "not any('use-forwarded-headers' in str(d) or 'configuration-snippet' in str(d) or 'server-snippet' in str(d) for d in docs.values())"
 check "KC_HOSTNAME is the https public URL" \
   "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
 check "the admin console stays on the port-forward" \

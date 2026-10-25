@@ -129,10 +129,11 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 
 # Apply Let's Encrypt issuer
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
-
-# Apply SSL ingress with security features
-kubectl apply -f k8s/manifests/ssl-ingress.yaml
 ```
+
+The public site is no longer served by an SSL Ingress in the cluster (the old
+`k8s/manifests/ssl-ingress.yaml` is retired). TLS ends at Cloudflare, and the
+Cloudflare Tunnel reaches the cluster: see "Public site" in `k8s/README.md`.
 
 ## Service URLs
 
@@ -282,7 +283,7 @@ kubectl get certificate -n econ-graph
 kubectl logs -f deployment/cert-manager -n cert-manager
 
 # Check ingress status
-kubectl describe ingress econ-graph-ssl-ingress -n econ-graph
+kubectl describe ingress -n econ-graph -l econgraph.io/public-host=true
 ```
 
 #### Memory Issues

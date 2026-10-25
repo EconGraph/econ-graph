@@ -215,11 +215,26 @@ echo "📋 Applying updated Kubernetes manifests..."
 kubectl apply -f k8s/manifests/namespace.yaml
 # Credentials are not in the manifests; create or refresh the Secrets first.
 ./scripts/deploy/create-secrets.sh
+# Every manifest goes through the same public-host step as deploy.sh
+# (scripts/deploy/lib/public-host.sh): applied as committed, they would put
+# Keycloak's issuer and the backend back on localhost and drop the public host.
+# PUBLIC_HOST must therefore be given when the cluster serves one.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+public_host_init
 # ingress.yaml first: on clusters deployed before graphql-ingress.yaml existed it
 # still routes /graphql, and the admission webhook rejects a second Ingress for
-# the same host and path (kubectl applies the directory alphabetically).
-kubectl apply -f k8s/manifests/ingress.yaml
-kubectl apply -f k8s/manifests/
+# the same host and path (the loop below goes alphabetically).
+render_manifest k8s/manifests/ingress.yaml | kubectl apply -f -
+for f in k8s/manifests/*.yaml; do
+    case "$(basename "$f")" in
+        # Applied by apply_cloudflared below, with 0 replicas without its Secret.
+        cloudflared.yaml) continue ;;
+    esac
+    render_manifest "$f" | kubectl apply -f -
+done
+apply_public_edge
+apply_cloudflared
 
 # Apply security configurations
 echo "🔒 Applying security configurations..."
@@ -249,10 +264,6 @@ kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || tr
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
-
-# Apply SSL ingress for www.econ-graph.com
-echo "🌐 Configuring SSL ingress for www.econ-graph.com..."
-kubectl apply -f k8s/manifests/ssl-ingress.yaml
 
 # Apply monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."

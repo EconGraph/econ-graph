@@ -74,31 +74,14 @@ fi
 # Set kubectl context
 kubectl config use-context kind-econ-graph
 
-# Public host name (ECO-457). Unset or empty: the deployment answers on
-# http://localhost only, as before. PUBLIC_HOST=econgraph.com: it also serves
-# https://econgraph.com (TLS at Cloudflare, reaching the cluster through the
-# cloudflared tunnel below), and www.econgraph.com redirects there.
-# scripts/deploy/render-public-host.py adds the host to the committed
-# localhost-only manifests as they are applied (ingress hosts, Keycloak's
-# KC_HOSTNAME and realm redirect URIs, the backend's OIDC_ISSUER and CORS);
-# its header lists every change. The frontend image needs no rebuild for it:
-# it resolves its sign-in issuer against the page's origin.
-PUBLIC_HOST="${PUBLIC_HOST:-}"
-if [ -n "$PUBLIC_HOST" ]; then
-    # Validates the name before anything is applied.
-    ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" /dev/null >/dev/null
-    echo "🌐 Public host: https://${PUBLIC_HOST} (www.${PUBLIC_HOST} redirects to it)"
-else
-    echo "🌐 No PUBLIC_HOST: serving http://localhost only"
-fi
-# Print manifest(s) (or stdin, "-") with the public host applied, if any.
-render_manifest() {
-    if [ -n "$PUBLIC_HOST" ]; then
-        ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" "$@"
-    else
-        cat "$@"
-    fi
-}
+# Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
+# https://econgraph.com through the cloudflared tunnel; empty serves
+# http://localhost only. See scripts/deploy/lib/public-host.sh, shared with
+# restart-k8s-rollout.sh, for the rules and render_manifest. The frontend image
+# needs no rebuild for it: it resolves its sign-in issuer against the page's origin.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+public_host_init
 
 # Apply all manifests
 echo "📋 Applying Kubernetes manifests..."
@@ -175,45 +158,10 @@ yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph
 # (see the comment in ingress.yaml), so both manifests must be applied together.
 render_manifest k8s/manifests/graphql-ingress.yaml | kubectl apply -f -
 
-if [ -n "$PUBLIC_HOST" ]; then
-  # Behind the tunnel every request reaches ingress-nginx from the cloudflared
-  # pod. Take the visitor's address from CF-Connecting-IP, trusted only from
-  # pod addresses (the nodes' pod CIDRs), so graphql-ingress.yaml's per-client
-  # limits apply per visitor rather than to all of them as one; and take the
-  # scheme from X-Forwarded-Proto (https from Cloudflare), so Keycloak
-  # (KC_PROXY_HEADERS=xforwarded) and the www redirect see https.
-  # Requests from the host itself (http://localhost) keep their own address.
-  pod_cidrs="$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
-  if [ -z "$pod_cidrs" ]; then
-    echo "❌ Could not read the nodes' pod CIDRs for ingress-nginx's proxy-real-ip-cidr"
-    exit 1
-  fi
-  echo "🔧 ingress-nginx: client address from CF-Connecting-IP (trusted from ${pod_cidrs}), scheme from X-Forwarded-Proto"
-  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
-    "{\"data\":{\"use-forwarded-headers\":\"true\",\"forwarded-for-header\":\"CF-Connecting-IP\",\"proxy-real-ip-cidr\":\"${pod_cidrs}\"}}"
-fi
-
-# Cloudflare Tunnel connector (k8s/manifests/cloudflared.yaml). Its token is the
-# Secret cloudflare-tunnel, written by create-secrets.sh from
-# CLOUDFLARE_TUNNEL_TOKEN (entered with hidden input by set-crawler-keys.sh
-# --tunnel). Without it the Deployment is applied with no replicas, so nothing
-# crash-loops on a cluster that has no tunnel.
-CLOUDFLARED_DEPLOYED=false
-if kubectl -n econ-graph get secret cloudflare-tunnel >/dev/null 2>&1; then
-  echo "🚇 Deploying cloudflared (Cloudflare Tunnel)..."
-  kubectl apply -f k8s/manifests/cloudflared.yaml
-  CLOUDFLARED_DEPLOYED=true
-  if [ -z "$PUBLIC_HOST" ]; then
-    echo "⚠️  cloudflared runs but PUBLIC_HOST is not set: no ingress rule matches the"
-    echo "   tunnel's public hostnames, so the public site answers 404. Set PUBLIC_HOST."
-  fi
-else
-  echo "⚠️  Secret cloudflare-tunnel not found: cloudflared applied with 0 replicas,"
-  echo "   so the site is not served publicly. Enter the tunnel token with"
-  echo "   scripts/deploy/set-crawler-keys.sh --tunnel (or CLOUDFLARE_TUNNEL_TOKEN=... create-secrets.sh),"
-  echo "   then deploy again."
-  yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
-fi
+# ingress-nginx client-address settings and the public Ingresses, both ways,
+# then the tunnel connector (scripts/deploy/lib/public-host.sh).
+apply_public_edge
+apply_cloudflared
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -280,15 +228,7 @@ if [ "$KEYCLOAK_DEPLOYED" = true ]; then
   esac
 fi
 
-if [ "$CLOUDFLARED_DEPLOYED" = true ]; then
-  # Not fatal: the rest of the deployment works without the tunnel, and a
-  # rejected token or an edge outage is cloudflared's to report (its logs, and
-  # the CloudflareTunnel* alerts).
-  echo "Waiting for cloudflared to connect to Cloudflare..."
-  if ! kubectl -n econ-graph rollout status deployment/cloudflared --timeout=120s; then
-    echo "⚠️  cloudflared is not ready; check: kubectl -n econ-graph logs deployment/cloudflared"
-  fi
-fi
+wait_cloudflared
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true

@@ -1,6 +1,6 @@
-# Rate-limited ingress for the GraphQL endpoint (the local/kind deployment;
-# ssl-ingress.yaml, ingress-cloudflare-dns01.yaml and the Terraform ingress are
-# not covered). Apply it after ingress.yaml, which no longer routes /graphql.
+# Rate-limited ingress for the GraphQL endpoint (the local/kind deployment, and
+# its public host through the -public copy deploy.sh renders;
+# ingress-cloudflare-dns01.yaml and the Terraform ingress are not covered). Apply it after ingress.yaml, which no longer routes /graphql.
 # Two local routes to the backend skip the ingress and are not limited: the
 # backend NodePort 30080 (backend-service.yaml) and the admin frontend's
 # /admin/graphql proxy (admin-frontend-nginx-configmap.yaml).

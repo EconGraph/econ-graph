@@ -4,9 +4,12 @@
 # committed to the repository; this script is the only place they come from.
 #
 # Usage:
-#   [VAR=value ...] scripts/deploy/create-secrets.sh
+#   [VAR=value ...] scripts/deploy/create-secrets.sh [--prompt-tunnel-token]
 #
-# Every input is an environment variable. The script is idempotent: run it as
+# Every input is an environment variable, except that --prompt-tunnel-token
+# reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
+# piped input), so the token never lands in shell history, process arguments,
+# or the screen. Run that yourself; never paste the token into a command line. The script is idempotent: run it as
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
@@ -30,7 +33,7 @@
 #                                                            token, read by
 #                                                            k8s/manifests/cloudflared.yaml.
 #                                                            Enter it with
-#                                                            set-crawler-keys.sh --tunnel)
+#                                                            --prompt-tunnel-token)
 #
 # Rules:
 #   - A variable set to the empty string counts as unset, for every key.
@@ -76,6 +79,21 @@ set +x
 NAMESPACE="${NAMESPACE:-econ-graph}"
 KUBECTL="${KUBECTL:-kubectl}"
 
+PROMPT_TUNNEL_TOKEN=false
+for arg in "$@"; do
+    case "$arg" in
+        --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
+        -h | --help)
+            sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "create-secrets: error: unknown argument: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
 APP_DB_USER="econgraph"
 DB_HOST="postgres-service"
 DB_PORT="5432"
@@ -89,6 +107,18 @@ die() {
 log() {
     echo "create-secrets: $*"
 }
+
+if [[ "$PROMPT_TUNNEL_TOKEN" == true ]]; then
+    # Only from a terminal: a token piped in by another program (or an agent)
+    # would have passed through that program first.
+    [[ -t 0 ]] || die "--prompt-tunnel-token reads from a terminal only; run it yourself"
+    [[ -z "${CLOUDFLARE_TUNNEL_TOKEN-}" ]] ||
+        die "CLOUDFLARE_TUNNEL_TOKEN is already set in the environment; unset it first"
+    read -rs -p "Cloudflare Tunnel token (input hidden): " CLOUDFLARE_TUNNEL_TOKEN
+    echo >&2
+    [[ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]] || die "no token entered; nothing was written"
+    export CLOUDFLARE_TUNNEL_TOKEN
+fi
 
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 command -v openssl >/dev/null 2>&1 || die "openssl not found"

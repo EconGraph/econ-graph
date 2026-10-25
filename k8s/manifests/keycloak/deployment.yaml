@@ -4,10 +4,9 @@
 # is http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
 # KC_HOSTNAME and KC_WEB_BASE_URL below to https://<PUBLIC_HOST>, the backend's
 # OIDC_ISSUER and the ingress hosts with them (scripts/deploy/render-public-host.py),
-# so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Behind
-# Cloudflare -> cloudflared -> ingress-nginx, Keycloak learns the https scheme and the
-# visitor's address from X-Forwarded-* (KC_PROXY_HEADERS below; deploy.sh makes
-# ingress-nginx pass them on); its own URLs come from KC_HOSTNAME either way.
+# so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Keycloak
+# builds its URLs from the full KC_HOSTNAME, not from request headers, and the public
+# host is only served over https (plain http is redirected; scripts/deploy/render-public-host.py).
 #
 # Credentials come only from the Secret `econ-graph-keycloak`, written by
 # scripts/deploy/create-secrets.sh (never committed):
@@ -107,6 +106,9 @@ spec:
         # Plain HTTP behind the ingress; TLS, when configured, terminates at the ingress controller.
         - name: KC_HTTP_ENABLED
           value: "true"
+        # Only for the client address in Keycloak's events and brute-force detection:
+        # ingress-nginx overwrites X-Forwarded-For/-Proto/-Host with the connection's own
+        # values (it runs without use-forwarded-headers; see "Public site" in k8s/README.md).
         - name: KC_PROXY_HEADERS
           value: "xforwarded"
         - name: KC_HEALTH_ENABLED

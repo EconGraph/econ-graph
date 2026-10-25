@@ -239,7 +239,7 @@ kubectl get pods -n ingress-nginx
 
 # Check ingress configuration
 kubectl get ingress -n econ-graph
-kubectl describe ingress econ-graph-ssl-ingress -n econ-graph
+kubectl describe ingress -n econ-graph -l econgraph.io/public-host=true
 
 # Check if ingress controller is ready
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=controller -n ingress-nginx --timeout=180s
