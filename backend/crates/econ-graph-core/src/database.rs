@@ -962,14 +962,8 @@ mod tests {
         readiness_check(&pool)
             .await
             .expect("both sets should be current");
-        assert_eq!(
-            recorded_versions(&mut conn),
-            [
-                "00000000000000",
-                DATA_BASELINE_VERSION,
-                APP_BASELINE_VERSION
-            ]
-        );
+        let expected = embedded_versions(&[MigrationSet::Data, MigrationSet::App]);
+        assert_eq!(recorded_versions(&mut conn), expected);
         let mut all = DATA_TABLES.to_vec();
         all.extend(APP_TABLES);
         assert_eq!(public_tables(&mut conn), sorted(&all));
@@ -981,7 +975,7 @@ mod tests {
         run_migration_set(&db.url, MigrationSet::Data)
             .await
             .expect("the data set should be a no-op once current");
-        assert_eq!(recorded_versions(&mut conn).len(), 3);
+        assert_eq!(recorded_versions(&mut conn), expected);
     }
 
     /// Every column, constraint, index and trigger in `public`, one line each, sorted.
