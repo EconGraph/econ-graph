@@ -13,10 +13,16 @@ import React, {
   useLayoutEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { ErrorResponse, type User as OidcUser, type UserManager } from 'oidc-client-ts';
 
-import { setAccessTokenProvider } from '../auth/accessToken';
+import {
+  isAccountSuspended,
+  setAccessTokenProvider,
+  setAccountSuspended,
+  subscribeAccountSuspended,
+} from '../auth/accessToken';
 import { CALLBACK_PATH, getUserManager } from '../auth/oidcConfig';
 
 /** The signed-in user, taken from the ID token claims. */
@@ -38,19 +44,36 @@ export interface AuthState {
 interface AuthContextType extends AuthState {
   /** False when the build has no OIDC issuer configured; sign-in is then unavailable. */
   isConfigured: boolean;
+  /**
+   * True once the backend refused the signed-in user's token because the account is suspended.
+   * Public data is then read anonymously; signing out (or another user signing in) clears it.
+   */
+  isSuspended: boolean;
   /** Link to Keycloak's account console (`<issuer>/account`), when sign-in is configured. */
   accountUrl: string | null;
   /** Redirects to the identity provider, returning to `returnTo` (default: the current page). */
   signIn: (returnTo?: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  /**
+   * Signs out through the identity provider, returning to `returnTo` (default: the current page).
+   * A page that needs an account passes `/`, so sign-out lands on the dashboard instead.
+   */
+  signOut: (returnTo?: string) => Promise<void>;
   /** Finishes the redirect on the callback route and returns the path to go back to. */
   completeSignIn: () => Promise<string>;
+  /**
+   * Finishes the identity provider's redirect after sign-out and returns the path sign-out began
+   * on, or null when the page wasn't reached by that redirect.
+   */
+  completeSignOut: () => Promise<string | null>;
   clearError: () => void;
 }
 
 interface SignInState {
   returnTo?: string;
 }
+
+/** Where Keycloak sends the browser after sign-out (`post_logout_redirect_uri`). */
+const SIGNED_OUT_PATH = '/';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -174,6 +197,7 @@ interface Session {
   renewal: Promise<OidcUser | null> | null;
   restore: Promise<OidcUser | null> | null;
   codeExchange: Promise<OidcUser> | null;
+  signOutReturn: Promise<string | null> | null;
 }
 
 /** Key for the session of a provider without a manager (sign-in not configured). */
@@ -196,7 +220,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     const key = manager ?? NO_MANAGER;
     let existing = sessions.get(key);
     if (!existing) {
-      existing = { renewal: null, restore: null, codeExchange: null };
+      existing = { renewal: null, restore: null, codeExchange: null, signOutReturn: null };
       sessions.set(key, existing);
     }
     return existing;
@@ -294,6 +318,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     };
     const onUserUnloaded = () => {
       writeSignedInHint(false);
+      setAccountSuspended(false);
       if (active) setUser(null);
     };
     const onTokenExpiring = () => {
@@ -365,24 +390,49 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     [manager]
   );
 
-  const signOut = useCallback(async () => {
-    if (!manager) {
-      return;
+  const signOut = useCallback(
+    async (returnTo?: string) => {
+      if (!manager) {
+        return;
+      }
+      try {
+        // Forgets the tokens and ends the identity provider session. Keycloak only returns to the
+        // home page (the realm's one post-logout URI), with `state` naming the page to go back to.
+        const state: SignInState = { returnTo: safeReturnTo(returnTo ?? currentPath()) };
+        await manager.signoutRedirect({ state });
+      } catch {
+        // The provider is unreachable: at least forget the tokens held here (raises userUnloaded),
+        // and say that the Keycloak session may still be alive.
+        await manager.removeUser().catch(() => undefined);
+        setAuthState(prev => ({
+          ...prev,
+          error:
+            'Signed out of this page, but the sign-in service could not be reached. Close the browser to end your session.',
+        }));
+      }
+    },
+    [manager]
+  );
+
+  // Like the code exchange, the sign-out response can be consumed only once.
+  const completeSignOut = useCallback((): Promise<string | null> => {
+    if (
+      !manager ||
+      window.location.pathname !== SIGNED_OUT_PATH ||
+      !new URLSearchParams(window.location.search).has('state')
+    ) {
+      return Promise.resolve(null);
     }
-    try {
-      // Forgets the tokens and ends the identity provider session, then returns to the home page.
-      await manager.signoutRedirect();
-    } catch {
-      // The provider is unreachable: at least forget the tokens held here (raises userUnloaded),
-      // and say that the Keycloak session may still be alive.
-      await manager.removeUser().catch(() => undefined);
-      setAuthState(prev => ({
-        ...prev,
-        error:
-          'Signed out of this page, but the sign-in service could not be reached. Close the browser to end your session.',
-      }));
+    if (!session.signOutReturn) {
+      session.signOutReturn = manager.signoutRedirectCallback().then(
+        response => safeReturnTo((response.userState as SignInState | undefined)?.returnTo),
+        // No state stored for it in this browser's localStorage (an old, already-used or
+        // hand-made link): stay on the home page.
+        () => SIGNED_OUT_PATH
+      );
     }
-  }, [manager]);
+    return session.signOutReturn;
+  }, [manager, session]);
 
   const completeSignIn = useCallback(async (): Promise<string> => {
     try {
@@ -401,17 +451,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, userManage
     setAuthState(prev => ({ ...prev, error: null }));
   }, []);
 
+  const isSuspended = useSyncExternalStore(subscribeAccountSuspended, isAccountSuspended);
+
   const contextValue = useMemo<AuthContextType>(
     () => ({
       ...authState,
+      isSuspended,
       isConfigured: manager !== null,
       accountUrl: manager ? accountUrlFor(manager) : null,
       signIn,
       signOut,
       completeSignIn,
+      completeSignOut,
       clearError,
     }),
-    [authState, manager, signIn, signOut, completeSignIn, clearError]
+    [authState, isSuspended, manager, signIn, signOut, completeSignIn, completeSignOut, clearError]
   );
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;

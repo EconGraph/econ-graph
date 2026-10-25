@@ -395,11 +395,11 @@ export default App;
 Each component includes comprehensive tests:
 
 ```bash
-# Run component tests
-npm test -- --testPathPattern=financial
+# Run component tests (Vitest filters by file path)
+npm test -- financial
 
 # Run with coverage
-npm test -- --coverage --testPathPattern=financial
+npm run test:coverage -- financial
 ```
 
 ### E2E Testing
@@ -444,7 +444,7 @@ Visit `/financial-components-demo` to see all components in action with:
 
 ### Support
 
-- [GitHub Issues](https://github.com/jmalicki/econ-graph/issues)
+- [GitHub Issues](https://github.com/EconGraph/econ-graph/issues)
 - [Documentation Site](https://docs.econ-graph.com)
 - [Community Forum](https://community.econ-graph.com)
 

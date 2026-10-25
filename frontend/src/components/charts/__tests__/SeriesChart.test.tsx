@@ -124,6 +124,19 @@ describe('SeriesChart', () => {
     expect(screen.queryByText('Too few points for this transformation')).toBeNull();
   });
 
+  // ECO-415: an inverted range left red fields, an empty plot with a backwards axis and no word.
+  test('a start date after the end date says so instead of plotting', () => {
+    renderChart({
+      dateRange: { start: parseIsoDate('2024-03-01'), end: parseIsoDate('2024-01-01') },
+      onDateRangeChange: vi.fn(),
+    });
+    expect(screen.queryByTestId('series-chart')).toBeNull();
+    expect(
+      screen.getByText(/The start date \(Mar 1, 2024\) is after the end date \(Jan 1, 2024\)/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No observations in the chosen date range/)).toBeNull();
+  });
+
   test('a series with no values shows the empty message', () => {
     renderChart({
       data: [{ date: '2024-01-01', value: null, revisionDate: '2024-02-15' }],
@@ -207,7 +220,72 @@ describe('SeriesChart', () => {
     expect(title([{ raw }])).toBe('February 1, 2024');
     expect(
       label({ raw, parsed: { y: 101.5 }, dataset: { label: 'Test Series' } })
-    ).toEqual(['Test Series: 101.50 Index', 'Revised: Mar 15, 2024']);
+    ).toEqual(['Test Series: 101.5 Index', 'Revised: Mar 15, 2024']);
+  });
+
+  describe('quarterly and annual series (ECO-415)', () => {
+    const QUARTERLY = [
+      { date: '2024-01-01', value: 28_100_000_000_000 },
+      { date: '2024-04-01', value: 28_300_000_000_000 },
+      { date: '2024-07-01', value: 28_511_400_000_000 },
+      { date: '2024-10-01', value: 28_624_702_000_000 },
+    ];
+
+    test('the tooltip names the quarter and shows whole-dollar levels without decimals', () => {
+      renderChart({ data: QUARTERLY, frequency: 'Quarterly', units: 'Current Dollars' });
+      const { title, label } = lastLineProps().options.plugins.tooltip.callbacks;
+      const raw = lastLineProps().data.datasets[0].data[3];
+      expect(title([{ raw }])).toBe('2024 Q4');
+      expect(label({ raw, parsed: { y: 28_624_702_000_000 }, dataset: { label: 'GDP' } })).toEqual(
+        ['GDP: 28,624,702,000,000 Current Dollars']
+      );
+    });
+
+    test('a short quarterly axis ticks quarters, labelled as quarters', () => {
+      renderChart({ data: QUARTERLY, frequency: 'Quarterly' });
+      const { time } = lastLineProps().options.scales.x;
+      expect(time.unit).toBe('quarter');
+      expect(time.displayFormats.quarter).toBe("yyyy 'Q'q");
+    });
+
+    test('a long quarterly axis and an annual one tick years, never months', () => {
+      renderChart({
+        data: [
+          { date: '1947-01-01', value: 243 },
+          { date: '2024-10-01', value: 29_700 },
+        ],
+        frequency: 'Quarterly',
+      });
+      expect(lastLineProps().options.scales.x.time).toMatchObject({ minUnit: 'year' });
+      expect(lastLineProps().options.scales.x.time.unit).toBeUndefined();
+
+      renderChart({ frequency: 'Annual' });
+      expect(lastLineProps().options.scales.x.time).toMatchObject({ minUnit: 'year' });
+    });
+
+    test('a monthly axis is left to Chart.js', () => {
+      renderChart();
+      const { time } = lastLineProps().options.scales.x;
+      expect(time.unit).toBeUndefined();
+      expect(time.minUnit).toBeUndefined();
+    });
+
+    test('trillions of dollars on the y-axis are scaled, not written out', () => {
+      renderChart({ data: QUARTERLY, frequency: 'Quarterly' });
+      const { callback } = lastLineProps().options.scales.y.ticks;
+      const ticks = [28.0e12, 28.2e12, 28.4e12, 28.6e12].map(value => ({ value }));
+      expect(ticks.map(t => callback(t.value, 0, ticks))).toEqual([
+        '28.0T',
+        '28.2T',
+        '28.4T',
+        '28.6T',
+      ]);
+    });
+
+    test("small values keep Chart.js' own y-axis labels", () => {
+      renderChart();
+      expect(lastLineProps().options.scales.y.ticks.callback).toBeUndefined();
+    });
   });
 
   test('shows the transformation in the title and offers the backend transformations', async () => {
@@ -251,7 +329,7 @@ describe('SeriesChart', () => {
         parsed: { y: 101.5 },
         dataset: { label: 'Test Series' },
       })
-    ).toEqual(['Test Series: 101.50 Index', 'Revised: Mar 15, 2024']);
+    ).toEqual(['Test Series: 101.5 Index', 'Revised: Mar 15, 2024']);
   });
 
   test('labels log difference without a percent unit', () => {

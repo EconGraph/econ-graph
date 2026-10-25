@@ -103,6 +103,7 @@ function viewAs(viewer: Viewer) {
   mockUseAuth.mockReturnValue({
     user,
     isAuthenticated: user !== null,
+    isSuspended: false,
     isLoading: false,
     isConfigured: true,
     accountUrl: null,
@@ -110,6 +111,7 @@ function viewAs(viewer: Viewer) {
     signIn,
     signOut: vi.fn(),
     completeSignIn: vi.fn(),
+    completeSignOut: vi.fn(async () => null),
     clearError: vi.fn(),
   });
   return signIn;

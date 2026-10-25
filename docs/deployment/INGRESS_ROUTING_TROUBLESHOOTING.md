@@ -34,11 +34,9 @@ Internet/Client → Ingress Controller (nginx) → Kubernetes Services → Pods
 
 ## Common Issues and Solutions
 
-### Issue 1: Root Path Returns Wrong Service (RESOLVED)
+### Issue 1: Root Path Returns Wrong Service
 
-**Status: ✅ RESOLVED** - This issue has been fixed through configuration changes.
-
-**Previous Symptoms (Now Fixed):**
+**Symptoms:**
 - `curl http://localhost:8080/` returned admin interface instead of frontend
 - Test script showed "FAIL - Wrong content returned"
 - All other paths worked correctly (admin, health, api, etc.)
@@ -128,18 +126,9 @@ kubectl set image deployment/econ-graph-frontend frontend=econ-graph-frontend:la
 3. **Updated frontend image** to latest version
 4. **Applied ingress configuration** with proper path ordering
 
-**Current Status: ✅ ALL TESTS PASSING**
-- ✅ Frontend (root path `/`): Returns "EconGraph - Economic Data Visualization"
-- ✅ Admin UI (`/admin`): Returns "EconGraph Admin - System Administration"  
-- ✅ Backend Health (`/health`): Returns `{"service":"econ-graph-backend","status":"healthy"}`
-- ✅ GraphQL (`/graphql`): Returns GraphQL schema correctly
-- ✅ Backend API (`/api`): Returns expected error response
-
 **Verification:**
 ```bash
-# Run comprehensive test
 ./scripts/test-ingress-routing.sh
-# Result: 5/5 tests passed ✅
 ```
 
 ### Issue 2: NodePort Services Not Accessible via localhost

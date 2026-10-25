@@ -363,7 +363,7 @@ A: We use data from World Bank, IMF, OECD, and various central banks. Data quali
 A: Most economic indicators are updated annually, with some quarterly or monthly updates. Real-time data is available for certain indicators.
 
 **Q: Can I add my own data?**
-A: Currently, only pre-loaded data sources are available. Custom data import is planned for future releases.
+A: No. Only the pre-loaded data sources are available; custom data import isn't supported.
 
 **Q: Is the data free to use?**
 A: Yes, all data is freely available for analysis and export. Some advanced features may require a subscription.

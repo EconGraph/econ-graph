@@ -42,6 +42,8 @@ passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 | `bob` | `0199a0e0-0000-7000-8000-000000000b0b` | `bob-dev-password` |
 | `dave` | `0199a0e0-0000-7000-8000-00000000da7e` | `dave-dev-password` |
 | `carol` | `0199a0e0-0000-7000-8000-00000000ca01` | `carol-dev-password` |
+| `erin` | `0199a0e0-0000-7000-8000-0000000000e1` | `erin-dev-password` |
+| `frank` | `0199a0e0-0000-7000-8000-0000000000f1` | `frank-dev-password` |
 | `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
 
 Imported users get no default roles automatically, so each one lists
@@ -60,7 +62,7 @@ roles compose them:
 | `user` | `annotation:create`, `annotation:comment`, `chart:share`, `api:mcp`. In `default-roles-econ-graph`, so every account has it |
 | `support` | `user` plus `admin.users:read`, `admin.sessions:read`, `admin.system:read` |
 | `admin` | `support` plus every other `admin.*` role |
-| `super_admin` | `admin` (nothing extra yet) |
+| `super_admin` | `admin` (nothing extra) |
 
 A protocol mapper on `econ-graph-web` puts the flattened `econ-graph-api` roles in the
 access token's top-level `roles` claim; `dev-token.sh` prints it. Staff get their

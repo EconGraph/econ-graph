@@ -46,6 +46,7 @@ vi.mock('@/hooks/useAuth', () => ({
       name: 'Test User',
     },
     isAuthenticated: true,
+    isSuspended: false,
     isLoading: false,
     isConfigured: true,
     accountUrl: null,
@@ -53,6 +54,7 @@ vi.mock('@/hooks/useAuth', () => ({
     signIn: vi.fn(),
     signOut: vi.fn(),
     completeSignIn: vi.fn(),
+    completeSignOut: vi.fn(async () => null),
     clearError: vi.fn(),
   })),
 }));
