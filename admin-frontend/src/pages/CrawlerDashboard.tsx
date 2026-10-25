@@ -205,7 +205,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
 
       <Grid container spacing={3}>
         {/* Crawler Status Card */}
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card data-testid="crawler-status-card">
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
@@ -225,7 +230,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
               </Box>
 
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -238,7 +243,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {status.status?.active_workers || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -258,7 +263,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     )}
                   </Typography>
                 </Grid>
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -284,7 +289,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         </Grid>
 
         {/* Queue Statistics Card */}
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card data-testid="queue-statistics-card">
             <CardContent>
               <Typography
@@ -297,7 +307,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
               </Typography>
 
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -310,7 +320,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {queueStats.statistics?.total_items || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -328,7 +338,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {queueStats.statistics?.pending_items || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -346,7 +356,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {queueStats.statistics?.processing_items || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -364,7 +374,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {queueStats.statistics?.completed_items || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -382,7 +392,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {queueStats.statistics?.failed_items || 0}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -422,7 +432,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         </Grid>
 
         {/* Queue Progress */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card>
             <CardContent>
               <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
@@ -471,7 +481,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         </Grid>
 
         {/* Recent Activity */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card>
             <CardContent>
               <Typography variant="h6" component="h2" sx={{ mb: 2 }}>

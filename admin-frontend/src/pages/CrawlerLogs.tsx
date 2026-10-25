@@ -283,7 +283,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
       {/* Performance Metrics */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={3}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
           <Card>
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -302,7 +307,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={3}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
           <Card>
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -322,7 +332,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={3}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
           <Card>
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -349,7 +364,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={3}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
           <Card>
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -409,7 +429,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
           {/* Filters */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={12} md={4}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 4,
+              }}
+            >
               <TextField
                 label="Search logs..."
                 value={searchTerm}
@@ -425,7 +450,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 }}
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 3,
+              }}
+            >
               <FormControl fullWidth size="small">
                 <InputLabel>Level</InputLabel>
                 <Select
@@ -441,7 +471,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 3,
+              }}
+            >
               <FormControl fullWidth size="small">
                 <InputLabel>Source</InputLabel>
                 <Select
@@ -456,7 +491,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 2,
+              }}
+            >
               <Button
                 variant="outlined"
                 startIcon={<FilterList />}

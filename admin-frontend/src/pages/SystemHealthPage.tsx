@@ -308,7 +308,14 @@ export default function SystemHealthPage() {
         aria-label="System health metrics"
       >
         {healthMetrics.map((metric: any) => (
-          <Grid item xs={12} sm={6} md={4} key={metric.name}>
+          <Grid
+            key={metric.name}
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 4,
+            }}
+          >
             <Card
               data-testid={`health-metric-card-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
               role="article"
@@ -552,7 +559,13 @@ export default function SystemHealthPage() {
           role="group"
           aria-label="Grafana dashboard links"
         >
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Button
               fullWidth
               variant="outlined"
@@ -565,7 +578,13 @@ export default function SystemHealthPage() {
               Platform Overview
             </Button>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Button
               fullWidth
               variant="outlined"
@@ -578,7 +597,13 @@ export default function SystemHealthPage() {
               Performance Metrics
             </Button>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Button
               fullWidth
               variant="outlined"
@@ -591,7 +616,13 @@ export default function SystemHealthPage() {
               Crawler Status
             </Button>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Button
               fullWidth
               variant="outlined"
