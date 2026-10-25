@@ -3,8 +3,8 @@
 #
 # Envoy appends the client's address to an X-Forwarded-For header the client
 # sent, so "X-Forwarded-For: 1.2.3.4" would reach the services as
-# "1.2.3.4, <real address>". Keycloak (KC_PROXY_HEADERS=xforwarded) and the
-# backend read the leftmost entry. The client's forwarding headers are
+# "1.2.3.4, <real address>", and Keycloak (KC_PROXY_HEADERS=xforwarded) takes
+# the leftmost entry as the client. The client's forwarding headers are
 # therefore dropped before Envoy adds its own: X-Forwarded-For then holds
 # only the address the proxy saw, and X-Forwarded-Proto is set by Envoy from
 # the listener. X-Forwarded-Host, X-Forwarded-Port, Forwarded and X-Real-IP

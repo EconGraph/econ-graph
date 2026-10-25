@@ -294,7 +294,7 @@ if [ -n "$ROLLBACK_DIR" ]; then
     fi
 
     log "3/4 Ingresses and NetworkPolicies"
-    if [ -s "$ROLLBACK_DIR/ingresses.yaml" ]; then
+    if grep -q '^  kind: Ingress$' "$ROLLBACK_DIR/ingresses.yaml" 2>/dev/null; then
         # The admission webhook may take a moment after the controller is up.
         if [ "$DRY_RUN" = true ]; then
             echo "+ kubectl apply -f $ROLLBACK_DIR/ingresses.yaml"
@@ -417,15 +417,19 @@ else
         # service-account tokens.
         save_object "$STATE_DIR/ingress-nginx-objects/deployment-ingress-nginx-controller.yaml" \
             ingress-nginx deployment/ingress-nginx-controller
-        for cm in $(kc -n ingress-nginx get configmap -o name); do
+        # Lists in variables first: a failing command substitution in a for
+        # list would not stop the script.
+        cms="$(kc -n ingress-nginx get configmap -o name)"
+        for cm in $cms; do
             [ "$cm" = configmap/kube-root-ca.crt ] && continue
             save_object "$STATE_DIR/ingress-nginx-objects/configmap-${cm#*/}.yaml" ingress-nginx "$cm"
         done
-        for secret in $(kc -n ingress-nginx get secret -o name --field-selector type!=kubernetes.io/service-account-token); do
+        secrets="$(kc -n ingress-nginx get secret -o name --field-selector type!=kubernetes.io/service-account-token)"
+        for secret in $secrets; do
             [ "$secret" = secret/ingress-nginx-admission ] && continue
             save_object "$STATE_DIR/ingress-nginx-objects/secret-${secret#*/}.yaml" ingress-nginx "$secret"
         done
-    ) || exit 1
+    )
     echo "  ${STATE_DIR}"
     for f in "$STATE_DIR"/ingress-nginx-objects/*; do echo "    ingress-nginx-objects/${f##*/}"; done
     echo "  rollback: scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"
