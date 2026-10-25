@@ -103,6 +103,15 @@ fi
 ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
 
+# Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
+# https://econgraph.com through the cloudflared tunnel; empty serves
+# http://localhost only. See scripts/deploy/lib/public-host.sh, shared with
+# restart-k8s-rollout.sh, for the rules and render_manifest. The frontend image
+# needs no rebuild for it: it resolves its sign-in issuer against the page's origin.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+public_host_init
+
 # Apply all manifests
 echo "📋 Applying Kubernetes manifests..."
 
@@ -112,7 +121,7 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # before create-secrets.sh: it refuses to continue if a host data directory
 # already holds a database whose password Secret is missing.
 run_script ./scripts/deploy/apply-host-storage.sh
-kubectl apply -f k8s/manifests/configmap.yaml
+render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
 run_script ./scripts/deploy/create-secrets.sh
@@ -147,12 +156,12 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
-  kubectl apply -f k8s/manifests/keycloak/deployment.yaml
-  kubectl apply -f k8s/manifests/keycloak/ingress.yaml
+  render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
+  render_manifest k8s/manifests/keycloak/ingress.yaml | kubectl apply -f -
   # The realm-import Job applies the realm file on every deploy; a Job cannot be
   # re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
-  kubectl apply -f k8s/manifests/keycloak/realm-import-job.yaml
+  render_manifest k8s/manifests/keycloak/realm-import-job.yaml | kubectl apply -f -
   KEYCLOAK_DEPLOYED=true
 else
   echo "⚠️  Secret econ-graph-keycloak not found, skipping Keycloak."
@@ -200,7 +209,7 @@ else
 fi
 
 # Deploy application
-kubectl apply -f k8s/manifests/backend-deployment.yaml
+render_manifest k8s/manifests/backend-deployment.yaml | kubectl apply -f -
 kubectl apply -f k8s/manifests/backend-service.yaml
 # Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
 # written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
@@ -217,10 +226,15 @@ kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # above; apply it with that one path filtered out rather than pointing an ingress
 # rule at a nonexistent Service.
 yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
-  k8s/manifests/ingress.yaml | kubectl apply -f -
+  k8s/manifests/ingress.yaml | render_manifest - | kubectl apply -f -
 # graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
 # (see the comment in ingress.yaml), so both manifests must be applied together.
-kubectl apply -f k8s/manifests/graphql-ingress.yaml
+render_manifest k8s/manifests/graphql-ingress.yaml | kubectl apply -f -
+
+# ingress-nginx client-address settings and the public Ingresses, both ways,
+# then the tunnel connector (scripts/deploy/lib/public-host.sh).
+apply_public_edge
+apply_cloudflared
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -287,6 +301,8 @@ if [ "$KEYCLOAK_DEPLOYED" = true ] && [ "$DRY_RUN" = false ]; then
   esac
 fi
 
+wait_cloudflared
+
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
 
@@ -301,8 +317,10 @@ kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-ca
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
-# prometheus-rules-crawler.yaml is a plain ConfigMap consumed via prometheus-config.yaml's
-# rule_files, not a PrometheusRule CRD, so it applies like any other manifest here.
+# The prometheus-rules-*.yaml files are plain ConfigMaps consumed via prometheus-config.yaml's
+# rule_files, not PrometheusRule CRDs, so they apply like any other manifest here. The glob
+# applies them after prometheus-deployment.yaml; the pod waits for its projected rules
+# volume until they exist.
 #
 # letsencrypt-cloudflare-dns01.yaml is applied separately below, with a retry: the
 # cert-manager webhook can report "available" slightly before its CA bundle is
@@ -392,6 +410,10 @@ kubectl get pods -n econ-graph
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
+if [ -n "$PUBLIC_HOST" ]; then
+  echo "  Public:   https://${PUBLIC_HOST} (through the Cloudflare Tunnel; www redirects here)"
+  echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} [--via-cloudflare]"
+fi
 # k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
 echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (re-enabled by ECO-242, train 3).

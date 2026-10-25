@@ -222,6 +222,24 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+  deploy-manifests:
+    name: Deploy Manifest Rendering
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
+    # manifests through render-public-host.py and lib/public-host.sh; check the
+    # rendering against the manifests and the library against a stub kubectl.
+    - name: Check the public-host rendering
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-render-public-host.sh
+        scripts/deploy/test-public-host-lib.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
@@ -663,6 +681,24 @@ jobs:
           log="$RUNNER_TEMP/$test.log"
           cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
           # A renamed, ignored or empty filter must fail, even if cargo exits zero.
+          grep -Fq "test $name ... ok" "$log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+        done
+      working-directory: backend
+
+    # ECO-439: a retried createAnnotation stores one annotation, across replicas.
+    - name: Run annotation idempotency regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for annotation idempotency regressions}"
+        for test in \
+          a_retried_create_stores_one_annotation \
+          concurrent_attempts_with_one_key_store_one_annotation \
+          keys_are_scoped_per_user_and_optional; do
+          name="graphql::annotation_idempotency_tests::$test"
+          log="$RUNNER_TEMP/$test.log"
+          cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
           grep -Fq "test $name ... ok" "$log"
           grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
         done

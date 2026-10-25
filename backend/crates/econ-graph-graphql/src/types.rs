@@ -1144,6 +1144,11 @@ pub struct CreateAnnotationInput {
     pub color: Option<String>,
     /// Whether the annotation is public (visible to others)
     pub is_public: Option<bool>,
+    /// Client-chosen key, at most 128 characters, that makes retrying this create safe: a
+    /// repeat with the same key returns the annotation the first attempt created instead of
+    /// adding another. Keys are scoped to the signed-in user. Send a new key (e.g. a UUID)
+    /// for each new annotation, and reuse it only to retry that same create.
+    pub idempotency_key: Option<String>,
 }
 
 /// Input for adding a comment to an annotation
