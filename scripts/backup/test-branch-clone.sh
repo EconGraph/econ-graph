@@ -63,8 +63,26 @@ expect 1 "usage:" --force delete marked
 expect 1 "starts with '.'" --dry-run create ..
 expect 1 "no data-plane snapshots" --dry-run create my-branch
 expect 1 "is not a snapshot" --dry-run create my-branch data-plane.missing
+# Dangling symlinks at the clone or marker path: -e alone misses them.
+ln -s "${tmp}/nowhere/clone" "${branches}/dangling"
+ln -s "${tmp}/nowhere/marker" "${branches}/dangling2.source"
+expect 1 "already exists" --dry-run create dangling
+expect 1 "already exists" --dry-run create dangling2
+expect 1 "already exists" --dry-run create marked
+# The default snapshot is the newest correctly named data-plane snapshot
+# (here a plain directory, so the inode check then refuses it by name);
+# names without the timestamp and plain files are not candidates.
+mkdir "${tmp}/snapshots/data-plane.20261024T040000Z" \
+    "${tmp}/snapshots/data-plane.pre-20261024T044210Z-recrawl" \
+    "${tmp}/snapshots/data-plane.zzz" "${tmp}/snapshots/data-plane.20261024T0400"
+touch "${tmp}/snapshots/data-plane.20991231T000000Z"
+expect 1 "data-plane.pre-20261024T044210Z-recrawl is not a snapshot" --dry-run create my-branch
 expect 0 "marked  <- " list
 
+if [[ -e "${tmp}/nowhere" ]]; then
+    echo "FAIL: a create followed a dangling symlink"
+    failures=$((failures + 1))
+fi
 for f in "${tmp}/root/precious/file" "${branches}/unmarked/file" "${branches}/marked/file" \
     "${branches}/marked.source"; do
     if [[ ! -f "${f}" ]]; then

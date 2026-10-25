@@ -57,9 +57,12 @@ check_clone_name() {
 
 newest_data_plane_snapshot() {
     # Names sort chronologically within each naming scheme; compare the
-    # embedded timestamps across both (hourly and snapshot-now).
-    find "${SNAPSHOT_DIR}" -mindepth 1 -maxdepth 1 -name 'data-plane.*' -printf '%f\n' 2>/dev/null \
-        | sed -E 's/^data-plane\.(pre-)?([0-9]{8}T[0-9]{4,6}).*/\2 &/' | sort | tail -n 1 | cut -d' ' -f2
+    # embedded timestamps across both (hourly and snapshot-now). Only
+    # directories named data-plane.[pre-]YYYYMMDDTHHMM[SS]... are candidates;
+    # anything else under SNAPSHOT_DIR is ignored.
+    find "${SNAPSHOT_DIR}" -mindepth 1 -maxdepth 1 -type d -name 'data-plane.*' -printf '%f\n' 2>/dev/null \
+        | sed -nE 's/^data-plane\.(pre-)?([0-9]{8}T[0-9]{4,6})([^0-9].*)?$/\2 &/p' \
+        | sort | tail -n 1 | cut -d' ' -f2
 }
 
 DRY_RUN="false"
@@ -82,6 +85,11 @@ case "${cmd}" in
         [[ $# -ge 2 && $# -le 3 ]] || usage
         name="$(slug "$2")"
         check_clone_name "${name}"
+        dest="${BRANCH_CLONE_DIR}/${name}"
+        # -L as well as -e: a dangling symlink fails -e, and writing the
+        # marker through one would create a file outside BRANCH_CLONE_DIR.
+        [[ ! -e "${dest}" && ! -L "${dest}" && ! -e "${dest}.source" && ! -L "${dest}.source" ]] \
+            || die "${dest} (or ${dest}.source) already exists, possibly as a symlink"
         snap="${3:-}"
         if [[ -z "${snap}" ]]; then
             snap="$(newest_data_plane_snapshot)"
@@ -95,8 +103,6 @@ case "${cmd}" in
         [[ -d "${fs_probe}" ]] || fs_probe="$(dirname "${BRANCH_CLONE_DIR}")"
         [[ "$(findmnt -n -o UUID -T "${snap}")" == "$(findmnt -n -o UUID -T "${fs_probe}")" ]] \
             || die "${BRANCH_CLONE_DIR} is not on the same btrfs filesystem as ${snap}"
-        dest="${BRANCH_CLONE_DIR}/${name}"
-        [[ ! -e "${dest}" && ! -e "${dest}.source" ]] || die "${dest} (or ${dest}.source) already exists"
         if [[ "${DRY_RUN}" == "true" ]]; then
             [[ -d "${BRANCH_CLONE_DIR}" ]] || echo "+ mkdir -p ${BRANCH_CLONE_DIR}"
             echo "+ btrfs subvolume snapshot ${snap} ${dest}"
@@ -106,7 +112,9 @@ case "${cmd}" in
         fi
         mkdir -p "${BRANCH_CLONE_DIR}"
         btrfs subvolume snapshot "${snap}" "${dest}" >/dev/null
-        printf '%s\n' "${snap}" >"${dest}.source"
+        # noclobber: refuse to follow or overwrite anything that appeared
+        # at the marker path since the check above.
+        (set -o noclobber; printf '%s\n' "${snap}" >"${dest}.source")
         echo "clone: ${dest} (from ${snap})"
         echo "Postgres data directory: ${dest}/pg"
         ;;
