@@ -15,6 +15,58 @@ use testcontainers::{Container, ContainerAsync, GenericImage, ImageExt};
 /// Keep in sync with the `postgres_image` anchors in `.github/workflows/`.
 pub const POSTGRES_IMAGE_TAG: &str = "18";
 
+/// A database created for one test on `DATABASE_URL`'s server (the test Postgres), and dropped
+/// when it goes out of scope, for tests that need an empty database or several separate ones
+/// (an app database and a data database, say) without touching the shared one.
+pub struct ScratchDatabase {
+    admin_url: String,
+    name: String,
+    /// The scratch database's URL.
+    pub url: String,
+}
+
+impl ScratchDatabase {
+    /// Create an empty database whose name starts with `eg_scratch_<tag>_`.
+    pub fn create(tag: &str) -> Self {
+        use diesel::{Connection, RunQueryDsl};
+
+        let admin_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        let name = format!("eg_scratch_{tag}_{}", uuid::Uuid::new_v4().simple());
+        let mut conn =
+            diesel::PgConnection::establish(&admin_url).expect("Should connect to DATABASE_URL");
+        diesel::sql_query(format!("CREATE DATABASE {name}"))
+            .execute(&mut conn)
+            .expect("Should create a scratch database");
+        let mut url = url::Url::parse(&admin_url).expect("DATABASE_URL should be a URL");
+        url.set_path(&format!("/{name}"));
+        Self {
+            admin_url,
+            name,
+            url: url.to_string(),
+        }
+    }
+
+    /// A synchronous connection to the scratch database.
+    pub fn connect(&self) -> diesel::PgConnection {
+        use diesel::Connection;
+        diesel::PgConnection::establish(&self.url).expect("Should connect to the scratch database")
+    }
+}
+
+impl Drop for ScratchDatabase {
+    fn drop(&mut self) {
+        use diesel::{Connection, RunQueryDsl};
+        if let Ok(mut conn) = diesel::PgConnection::establish(&self.admin_url) {
+            let _ = diesel::sql_query(format!(
+                "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                self.name
+            ))
+            .execute(&mut conn);
+        }
+    }
+}
+
 /// Test container for database testing
 pub struct TestContainer {
     pool: DatabasePool,
