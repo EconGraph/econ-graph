@@ -27,6 +27,11 @@
 #                           unless another pod holds host port 80 or 443 (kind's
 #                           ingress-nginx until cutover-to-gateway.sh removes it,
 #                           or MicroK8s's ingress add-on).
+#   GATEWAY_POD_CIDRS       The pod address ranges, space-separated, whose
+#                           X-Forwarded-For the gateway trusts (the tunnel
+#                           connector runs there). Default: the nodes'
+#                           spec.podCIDRs, which kind sets; set it for a CNI
+#                           that does not (MicroK8s's Calico: 10.1.0.0/16).
 #
 # The routes, and for a public host the https listener, its certificate and
 # the public routes, are applied separately, by
@@ -326,8 +331,14 @@ ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gatewayclass.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gateway.yaml"
 # The client-address policy, trusting X-Forwarded-For from the nodes' pod
 # CIDRs only.
-pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDR}' 2>/dev/null || true)"
-[ -n "$pod_cidrs" ] || die "could not read the nodes' pod CIDRs (spec.podCIDR) for client-traffic-policy.yaml"
+# GATEWAY_POD_CIDRS overrides them, for a CNI that leaves the Node fields
+# empty (MicroK8s's Calico).
+pod_cidrs="${GATEWAY_POD_CIDRS:-}"
+if [ -z "$pod_cidrs" ]; then
+    pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDRs[*]}' 2>/dev/null || true)"
+fi
+[ -n "$pod_cidrs" ] ||
+    die "could not read the nodes' pod CIDRs (spec.podCIDRs) for client-traffic-policy.yaml; set GATEWAY_POD_CIDRS (space-separated)"
 awk -v cidrs="$pod_cidrs" '
     $0 == "      - __POD_CIDRS__" { n = split(cidrs, c, " "); for (i = 1; i <= n; i++) print "      - " c[i]; next }
     { print }' "$GATEWAY_DIR/client-traffic-policy.yaml" >"$WORK/client-traffic-policy.yaml"
