@@ -62,6 +62,37 @@ else
     echo "ok   test-monitoring.sh --lint-only called no kubectl, kind, docker, microk8s, curl, wget or nc"
 fi
 
+# expect_lint_failure NAME FILE CONTENT MESSAGE: a copy of the monitoring tree
+# with FILE (relative) set to CONTENT must fail the lint with MESSAGE.
+expect_lint_failure() {
+    local name="$1" file="$2" content="$3" message="$4" tree="$WORK/tree-$1"
+    mkdir -p "$tree/k8s" "$tree/grafana-dashboards"
+    cp -r "$PROJECT_ROOT/k8s/monitoring" "$tree/k8s/"
+    cp "$PROJECT_ROOT"/grafana-dashboards/*.json "$tree/grafana-dashboards/"
+    printf '%s\n' "$content" >"$tree/$file"
+    out="$(MONITORING_LINT_ROOT="$tree" run_isolated "$PROJECT_ROOT/scripts/test-monitoring.sh" --lint-only 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ] && grep -qF -- "$message" <<<"$out"; then
+        echo "ok   --lint-only rejects $name"
+    else
+        echo "FAIL --lint-only did not reject $name (exit $rc):"
+        printf '     %s\n' "$out"
+        failed=1
+    fi
+}
+expect_lint_failure "a duplicate YAML key" k8s/monitoring/dup.yaml \
+    $'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dup\ndata:\n  a: "1"\ndata:\n  b: "2"' \
+    "duplicate key 'data'"
+expect_lint_failure "a duplicate JSON key" grafana-dashboards/dup.json \
+    '{"title": "a", "title": "b"}' "duplicate key(s) 'title'"
+expect_lint_failure "invalid YAML" k8s/monitoring/bad.yaml \
+    $'kind: ConfigMap\nmetadata: [unclosed' "FAIL k8s/monitoring/bad.yaml"
+if [ -s "$CALLS" ]; then
+    echo "FAIL the negative lint runs called:"
+    sed 's/^/     /' "$CALLS"
+    failed=1
+fi
+
 if [ "$failed" -ne 0 ]; then
     echo "monitoring lint isolation checks failed"
     exit 1

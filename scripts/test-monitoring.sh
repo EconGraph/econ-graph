@@ -28,9 +28,11 @@ case "${1:-}" in
 esac
 
 # Static checks of the monitoring manifests and dashboards. Reads files only.
+# MONITORING_LINT_ROOT (default: the repository) is the tree to check; the
+# lint's own test points it at broken copies.
 lint_monitoring() {
     echo "🔎 Linting the monitoring manifests and dashboards (no cluster contact)"
-    python3 - "$PROJECT_ROOT" <<'PY'
+    python3 - "${MONITORING_LINT_ROOT:-$PROJECT_ROOT}" <<'PY'
 import glob, json, os, sys
 
 try:
@@ -38,13 +40,37 @@ try:
 except ImportError:
     sys.exit("python3-yaml is needed for --lint-only")
 
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that rejects a mapping key given twice (the stock loader
+    keeps the last one and silently drops the rest)."""
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    None, None, f"duplicate key {key!r}", key_node.start_mark)
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
+def unique_json_object(pairs):
+    keys = [k for k, _ in pairs]
+    dups = sorted({k for k in keys if keys.count(k) > 1})
+    if dups:
+        raise ValueError(f"duplicate key(s) {', '.join(map(repr, dups))}")
+    return dict(pairs)
+
+
 root = sys.argv[1]
 failed = False
 workloads = {}
 for path in sorted(glob.glob(os.path.join(root, "k8s/monitoring/*.yaml"))):
     try:
         with open(path) as f:
-            docs = [d for d in yaml.safe_load_all(f) if d]
+            docs = [d for d in yaml.load_all(f, Loader=UniqueKeyLoader) if d]
     except yaml.YAMLError as e:
         print(f"  FAIL {os.path.relpath(path, root)}: {e}")
         failed = True
@@ -62,7 +88,7 @@ for name in ("loki", "promtail", "grafana"):
 for path in sorted(glob.glob(os.path.join(root, "grafana-dashboards/*.json"))):
     try:
         with open(path) as f:
-            json.load(f)
+            json.load(f, object_pairs_hook=unique_json_object)
         print(f"  ok   {os.path.relpath(path, root)}")
     except ValueError as e:
         print(f"  FAIL {os.path.relpath(path, root)}: {e}")
