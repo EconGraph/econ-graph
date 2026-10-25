@@ -62,7 +62,7 @@ for arg in "$@"; do
         --no-backup) NO_BACKUP="true" ;;
         --include-data-plane) INCLUDE_DATA_PLANE="true" ;;
         --delete-cluster) DELETE_CLUSTER="true" ;;
-        -h|--help) sed -n '3,47p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,48p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
