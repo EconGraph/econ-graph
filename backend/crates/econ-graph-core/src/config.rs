@@ -250,9 +250,14 @@ pub struct DataGraphqlConfig {
 /// Why the data plane's GraphQL settings are unusable.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DataGraphqlConfigError {
-    /// `DATA_GRAPHQL_URL` is not an `http` or `https` URL with a host.
-    #[error("DATA_GRAPHQL_URL={0:?} is not an http(s) URL")]
-    InvalidUrl(String),
+    /// `DATA_GRAPHQL_URL` is not an `http` or `https` URL with a host. The value is not echoed:
+    /// a malformed URL may still hold a secret.
+    #[error("DATA_GRAPHQL_URL is not an http(s) URL with a host")]
+    InvalidUrl,
+    /// `DATA_GRAPHQL_URL` has a user name or password. The check sends no credentials, and the
+    /// URL is logged.
+    #[error("DATA_GRAPHQL_URL must not contain a user name or password")]
+    UrlWithCredentials,
     /// `DATA_GRAPHQL_HOST` is not a host name (with an optional port).
     #[error("DATA_GRAPHQL_HOST={0:?} is not a host name")]
     InvalidHost(String),
@@ -285,10 +290,12 @@ pub fn data_graphql_config_from(
         }
         return Ok(None);
     };
-    let parsed =
-        reqwest::Url::parse(&url).map_err(|_| DataGraphqlConfigError::InvalidUrl(url.clone()))?;
+    let parsed = reqwest::Url::parse(&url).map_err(|_| DataGraphqlConfigError::InvalidUrl)?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err(DataGraphqlConfigError::InvalidUrl(url));
+        return Err(DataGraphqlConfigError::InvalidUrl);
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(DataGraphqlConfigError::UrlWithCredentials);
     }
     if let Some(host) = &host {
         let valid = host
@@ -643,14 +650,26 @@ mod tests {
 
     #[test]
     fn data_graphql_config_refuses_unusable_settings() {
-        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 6] = [
+        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 9] = [
             (
                 &[(DATA_GRAPHQL_URL, "gw.example/data/graphql")],
-                DataGraphqlConfigError::InvalidUrl("gw.example/data/graphql".to_string()),
+                DataGraphqlConfigError::InvalidUrl,
             ),
             (
                 &[(DATA_GRAPHQL_URL, "ftp://gw.example/")],
-                DataGraphqlConfigError::InvalidUrl("ftp://gw.example/".to_string()),
+                DataGraphqlConfigError::InvalidUrl,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://user:s3cret@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://user@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://:s3cret@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
             ),
             (
                 &[(DATA_GRAPHQL_URL, "http://gw/"), (DATA_GRAPHQL_HOST, "a b")],
@@ -673,7 +692,10 @@ mod tests {
             ),
         ];
         for (pairs, expected) in cases {
-            assert_eq!(data_graphql_config_from(vars(pairs)), Err(expected));
+            let refused = data_graphql_config_from(vars(pairs));
+            assert_eq!(refused, Err(expected));
+            // The startup error never repeats a secret from the URL.
+            assert!(!refused.unwrap_err().to_string().contains("s3cret"));
         }
     }
 }
