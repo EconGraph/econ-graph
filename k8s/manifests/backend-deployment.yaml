@@ -81,11 +81,14 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: app-database-url
+        # Optional: a namespace without a data database has no data-database-url, and the
+        # backend then serves data fields as DATA_SERVED_REMOTELY (deploy.sh skips crawler-migrate).
         - name: DATA_DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: data-database-url
+              optional: true
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:

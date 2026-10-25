@@ -95,6 +95,8 @@ run_backend_tests() {
 
     # Set test environment variables
     export DATABASE_URL="postgresql://testuser:testpassword@localhost:5433/econ_graph_test"
+    # The backend reads its app and data databases from these; this one database holds both sets.
+    export APP_DATABASE_URL="$DATABASE_URL" DATA_DATABASE_URL="$DATABASE_URL"
     export RUST_LOG=info
     export TEST_ENV=true
 
