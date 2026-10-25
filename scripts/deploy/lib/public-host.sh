@@ -46,6 +46,11 @@ public_host_init() {
     else
         echo "🌐 No PUBLIC_HOST: serving http://localhost only"
     fi
+    # The retired ssl-ingress.yaml's Ingress served the public host names without
+    # the /graphql rate limits. It goes before any Ingress is applied: it holds
+    # econgraph.com /, and the admission webhook refuses a second Ingress for the
+    # same host and path. (No namespace yet on a new cluster: nothing to delete.)
+    kubectl -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found 2>/dev/null || true
 }
 
 # Print manifest(s) (or stdin, "-") with the public host applied, if any.
@@ -69,11 +74,8 @@ render_manifest() {
 # so addresses logged for in-cluster callers are not audit-grade.
 #
 # Without one, those settings and any public Ingress are removed again.
-# The retired ssl-ingress.yaml's Ingress (econ-graph-ssl-ingress) is removed
-# either way: it served the public host names without the rate limits.
 apply_public_edge() {
     local key patch pod_cidrs
-    kubectl -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found
     if [ -n "$PUBLIC_HOST" ]; then
         pod_cidrs="$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
         if [ -z "$pod_cidrs" ]; then

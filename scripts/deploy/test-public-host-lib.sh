@@ -6,7 +6,8 @@
 #   - PUBLIC_HOST unset on a cluster that serves a public host stops the deploy;
 #   - a public host sets only the real-ip settings in the ingress-nginx ConfigMap and
 #     removes use-forwarded-headers; no public host removes all of them again and
-#     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way;
+#     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way,
+#     before any Ingress is applied (in public_host_init);
 #   - cloudflared gets 0 replicas without its Secret or without a public host.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
@@ -55,6 +56,10 @@ fi
 if PUBLIC_HOST="not a host" run_lib public_host_init; then
   fail "a bad PUBLIC_HOST was accepted"
 fi
+
+# The retired Ingress goes in public_host_init, before anything applies an Ingress.
+PUBLIC_HOST=econgraph.com run_lib public_host_init
+grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public_host_init: econ-graph-ssl-ingress not deleted"
 
 # With a public host: real-ip settings only, use-forwarded-headers removed.
 PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge'
