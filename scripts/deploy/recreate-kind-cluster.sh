@@ -79,6 +79,13 @@ if [ -n "$mounts" ]; then
         check_host_storage_on_host || die "host subvolumes are not ready; nothing was deleted"
     fi
     for m in $mounts; do
+        # A scratch cluster may bind-mount only scratch storage.
+        if [ -n "${SCRATCH_STORAGE}" ]; then
+            case "$m" in
+                "${SCRATCH_STORAGE%/}"/*) ;;
+                *) die "$m is outside ${SCRATCH_STORAGE}; nothing was deleted" ;;
+            esac
+        fi
         bind_source_ok "$m" || die "$m is not mounted; nothing was deleted"
         echo "  ok: $m"
     done

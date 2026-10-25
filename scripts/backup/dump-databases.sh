@@ -12,7 +12,7 @@
 # with check-freshness.sh; remove old dumps by hand if ever needed.
 #
 # Exits non-zero if any database fails to dump or verify. A database whose
-# StatefulSet and data PVC both don't exist is skipped and noted in the
+# StatefulSet and data PVC both don't exist (never econ_graph) is skipped and noted in the
 # MANIFEST (<db>.skipped). Nothing in the cluster is modified.
 #
 # Usage: dump-databases.sh [--dry-run] [--target-dir DIR]
@@ -88,7 +88,8 @@ failures=0
 for entry in ${BACKUP_DATABASES}; do
     IFS=: read -r db pod user <<<"${entry}"
     out="${WORK}/${db}.dump"
-    if not_deployed "${pod}"; then
+    # The data database is never skipped: a run without its dump must fail.
+    if [[ "${db}" != "econ_graph" ]] && not_deployed "${pod}"; then
         # Neither its StatefulSet nor its data volume exists (e.g. a cluster
         # deployed before the app database): nothing to dump.
         log "${db}: pod ${pod} is not deployed (no StatefulSet, no PVC); skipped"
