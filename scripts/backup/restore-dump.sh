@@ -48,8 +48,10 @@ read -r -a RESTORE <<<"$(pg_restore_cmd "$(dirname "$(readlink -f "${file}")")")
 toc="$("${RESTORE[@]}" --list "$(readlink -f "${file}")")" || die "${file} is not a readable pg_dump archive"
 # The archive must be a dump of the database it is restored into: --clean
 # drops same-named objects, so keycloak.dump into econ_graph would wreck it.
-grep -qE "^;[[:space:]]+dbname: ${db}\$" <<<"${toc}" \
-    || die "${file} is a dump of $(sed -nE 's/^;[[:space:]]+dbname: //p' <<<"${toc}" | head -n 1), not of ${db}; refusing"
+# Compared as a string, not a pattern.
+archive_db="$(sed -nE 's/^;[[:space:]]+dbname: //p' <<<"${toc}" | head -n 1)"
+[[ "${archive_db}" == "${db}" ]] \
+    || die "${file} is a dump of ${archive_db:-an unknown database}, not of ${db}; refusing"
 
 if (( dry_run )); then
     check_docker_daemon
