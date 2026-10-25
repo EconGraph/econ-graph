@@ -37,7 +37,8 @@ like a scheduled `fetch_series` job (same queue, same per-source rate limits, co
 limits, retries and circuit breaker), except that it:
 
 - passes no `since` and no known vintage, so the adapter requests the series' whole history
-  (FRED: every ALFRED vintage from `realtime_start=1776-07-04`, through the normal FRED fetch;
+  (FRED: every ALFRED vintage, through the normal FRED fetch, which reads the vintage dates
+  and requests them in real-time windows of at most 1,000;
   BLS: the adapter's full window of 20 years);
 - sets `CrawlCtx::bypass_validators`, so the adapter ignores the validators stored with the
   series (FRED `last_updated`, World Bank `lastupdated`, FHFA `ETag`/`Last-Modified`/content

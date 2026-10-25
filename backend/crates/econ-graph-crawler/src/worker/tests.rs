@@ -980,6 +980,15 @@ async fn fred_refetch_rewrites_rounded_vintages_in_place() {
         .respond_with(ResponseTemplate::new(200).set_body_string(series))
         .mount(mock.server())
         .await;
+    mock.mount(
+        &Route::get("/series/vintagedates").query("series_id", ID),
+        Reply::json_str(
+            r#"{"realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "count": 3,
+                "offset": 0, "limit": 10000,
+                "vintage_dates": ["2025-07-30", "2025-08-28", "2025-09-25"]}"#,
+        ),
+    )
+    .await;
     // Every vintage, with more digits than DECIMAL(20,6) kept.
     let observations = r#"{
       "realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "count": 3, "offset": 0,
