@@ -28,7 +28,7 @@ Job kinds: `fetch_series` (download one series), `discover_catalog` (write a sou
 
 ## `crawler` CLI
 
-Reads `DATABASE_URL` (or `--database-url`) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
+Reads `DATA_DATABASE_URL` (or `--database-url`; `DATABASE_URL` is not read) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
 `BEA_API_KEY`, `CENSUS_API_KEY`.
 
 ```bash

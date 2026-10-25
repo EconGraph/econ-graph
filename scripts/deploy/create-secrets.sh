@@ -10,7 +10,9 @@
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
-#   econ-graph-secrets             database-url              built from app-password
+#   econ-graph-secrets             app-database-url          built from app-password
+#                                  data-database-url         built from app-password (the
+#                                                            same database as app-database-url)
 #   econ-graph-postgres            postgres-password         POSTGRES_PASSWORD (generated)
 #                                  app-password              APP_DB_PASSWORD (generated)
 #   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
@@ -394,9 +396,11 @@ esac
 
 # --- econ-graph-secrets ----------------------------------------------------
 begin_secret econ-graph-secrets
-put database-url \
-    "postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
-    "built for user $APP_DB_USER"
+# The app and data databases are one database here, so both URLs name it.
+DB_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+put app-database-url "$DB_URL" "built for user $APP_DB_USER"
+put data-database-url "$DB_URL" "built for user $APP_DB_USER"
+drop_obsolete database-url # replaced by app-database-url and data-database-url
 drop_obsolete database-password # written by the old k8s/manifests/secret.yaml
 # The in-house login (AUTH-6) is gone, so nothing reads these; sign-in is Keycloak's.
 for key in jwt-secret google-client-id google-client-secret facebook-app-id \

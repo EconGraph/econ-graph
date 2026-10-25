@@ -75,11 +75,24 @@ spec:
         # Credentials come from the econ-graph-secrets Secret, created out of band by
         # scripts/deploy/create-secrets.sh. OAuth keys are optional: the script omits
         # them when unset.
+        # The app and data databases. Both URLs name the one Postgres database.
+        - name: APP_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: app-database-url
+        - name: DATA_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: data-database-url
+        # The backend binary connects to and migrates DATABASE_URL, which holds both migration
+        # sets: the app database's URL.
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
-              key: database-url
+              key: app-database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:

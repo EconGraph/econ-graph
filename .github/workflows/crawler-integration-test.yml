@@ -62,7 +62,9 @@ jobs:
           - 5432:5432
 
     env:
+      # diesel and psql read DATABASE_URL; the crawler CLI and worker read DATA_DATABASE_URL.
       DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+      DATA_DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
 
     steps:
     - name: Checkout code

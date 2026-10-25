@@ -138,6 +138,13 @@ advisory lock (`MIGRATION_LOCK_KEY`) for the whole run, so two backends starting
 turns. The backend's readiness check requires, for each set, the newest migration embedded in
 the binary to be recorded; the table's highest version mixes the two sets, so it is not used.
 
+One set can be applied on its own with `run_migration_set(url, MigrationSet::App)` (or
+`MigrationSet::Data`), which takes the same lock. Advisory locks are scoped to a database, so
+runs against separate app and data databases never contend. `readiness_check_set` checks one
+set the same way, ignoring the other set's versions in a database that holds both. Applying the
+app set alone leaves a pending data set untouched, and the data set's readiness check fails
+until it is applied. `seed-fixtures` applies only the data set, to `DATA_DATABASE_URL`.
+
 With the diesel CLI, from `backend/`, on a new database:
 
 ```sh

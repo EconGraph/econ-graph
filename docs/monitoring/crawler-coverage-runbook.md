@@ -7,7 +7,7 @@ that reports both, the metrics and alerts behind them, and how QA forces each al
 ## `crawler coverage`
 
 The `crawler` CLI ships in the crawler-worker image, and it reads the pod's
-`DATABASE_URL`:
+`DATA_DATABASE_URL`:
 
 ```sh
 kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler coverage
@@ -89,7 +89,7 @@ delete it, or its alerts fire twice.
 
 The SQL below runs against the application database. The worker image has no `psql`, so run
 it from the Postgres pod (`kubectl -n econ-graph exec -it <postgres pod> -- psql -U <user>
-<database>`) or through `kubectl port-forward` with the `DATABASE_URL` from the
+<database>`) or through `kubectl port-forward` with the `DATA_DATABASE_URL` from the
 crawler-worker's Secret.
 
 ### Crawl failure

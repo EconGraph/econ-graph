@@ -10,8 +10,10 @@ data:
   ADMIN_FRONTEND_PORT: "3001"
   DATABASE_PORT: "5432"
 
-  # Backend configuration (credentials, including DATABASE_URL, live in the
-  # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh)
+  # Backend configuration. Credentials, including APP_DATABASE_URL and
+  # DATA_DATABASE_URL (both naming the one database), live in the
+  # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh, keys
+  # app-database-url and data-database-url.
   RUST_LOG: "info"
   CORS_ORIGIN: "http://localhost:3000"
 
