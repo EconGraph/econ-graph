@@ -19,3 +19,11 @@ missing observation (2025-10-01, value `.`, with no later vintage) and a new qua
 once and so never exercises the incremental path — it needs a fixture that already has every
 vintage in one response. It's kept separate from `observations_gdp.json` so the adapter's own
 full-fetch unit tests keep their original, smaller fixture.
+
+`series_multipage_e2e.json` and `observations_multipage_e2e.json` are a synthetic daily series
+(`EGE2EMULTIPAGE`, "Multi-Page Daily Test Series") for ECO-261's multi-page end-to-end spec
+(`frontend/tests/e2e/release/series-ui/multipage-series.spec.ts`): 22,000 daily observations, so
+the frontend reads it in three `seriesData` pages of 10,000, with missing values on both sides of
+each page boundary and revised dates on every page. `make_observations_multipage.py` writes the
+observations file and documents its shape; edit and re-run it rather than editing the JSON. The
+rows omit `realtime_end`, which the adapter doesn't read, to keep the file small.
