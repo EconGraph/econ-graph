@@ -473,7 +473,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
@@ -572,7 +572,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
@@ -996,7 +996,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: admin-frontend/package-lock.json
 
@@ -1042,7 +1042,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1115,7 +1115,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1179,7 +1179,7 @@ jobs:
     - name: Setup Node.js for npm audit
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1235,7 +1235,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1380,7 +1380,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 

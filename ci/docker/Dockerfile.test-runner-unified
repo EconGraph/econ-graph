@@ -2,8 +2,13 @@
 # Single Dockerfile that can run any test group via arguments
 # The tag matches the @playwright/test version resolved in
 # frontend/package-lock.json, so the browsers bundled in /ms-playwright are the
-# ones the tests expect. The image provides Ubuntu 24.04 and Node.js 24.
+# ones the tests expect. Keep Ubuntu 24.04 and replace its bundled Node.js runtime.
+FROM node:26-bookworm AS node-runtime
+
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
+
+COPY --from=node-runtime /usr/local/ /usr/local/
+RUN node --version && npm --version
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

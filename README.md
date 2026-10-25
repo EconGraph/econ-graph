@@ -198,7 +198,9 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 ### **🛠️ For Technical Teams**
 
 #### **Prerequisites**
-- Node.js 24 LTS and npm
+- Node.js 26 and npm (Active LTS from October 28, 2026; version in `.nvmrc`)
+  - With nvm: run `nvm install && nvm use` from the repository root.
+  - CI reads `.nvmrc`; `node scripts/check-node-version.mjs` checks package engines and Docker images against it.
 - Rust 1.98.1 and Cargo (pinned in `rust-toolchain.toml`; rustup installs it automatically)
 - PostgreSQL 18+ (recommended for production)
 - Docker (for containerized deployment)
