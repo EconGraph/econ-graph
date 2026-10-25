@@ -29,7 +29,8 @@ data:
     CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
     -- Create user for the application. It owns the public schema and the
-    -- objects it creates (the backend runs the migrations at startup);
+    -- objects the migrations create (the backend applies the app migrations at
+    -- startup; the crawler-migrate Job applies the data migrations);
     -- pgcrypto, which the migrations create, is a trusted extension, so no
     -- superuser is needed.
     CREATE USER econgraph WITH ENCRYPTED PASSWORD :'app_password';

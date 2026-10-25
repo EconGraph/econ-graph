@@ -133,7 +133,8 @@ docker exec econ-graph-db pg_isready -U postgres -d econ_graph
 
 cd backend
 export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
-cargo run --bin econ-graph-backend -- --migrate
+# The data migrations: only `crawler migrate` applies them, never a server at startup
+DATA_DATABASE_URL="$DATABASE_URL" cargo run -p econ-graph-crawler --bin crawler -- migrate
 
 # Or use diesel CLI on a new database: the data set, then the app set
 diesel migration run --migration-dir migrations/data
@@ -141,10 +142,11 @@ diesel migration run --migration-dir migrations/app
 ```
 
 On a database built by the single v4.0.0 baseline, start the backend instead
-of using the diesel CLI: the backend records the app baseline there, while the CLI stops at its
-guard.
+of using the diesel CLI for the app set: the backend records the app baseline there, while the
+CLI stops at its guard.
 
-Start the server with `cargo run -p econ-graph-backend --bin econ-graph-backend`. It listens on port
+Start the server with `cargo run -p econ-graph-backend --bin econ-graph-backend`. It applies the
+app migrations at startup ([database migrations](../docs/development/MIGRATIONS.md)). It listens on port
 **9876** unless `BACKEND_PORT` overrides it. Verify startup with
 `curl --fail "http://localhost:${BACKEND_PORT:-9876}/health"`. The database is initially empty;
 see the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
@@ -307,10 +309,14 @@ kubectl get pods -n econ-graph -l app=econ-graph-backend
 ### **Database Migrations**
 
 From `backend/`, with `DATABASE_URL` exported as above. Normal server startup applies
-pending migrations automatically; there is no `--migrate` server mode.
+pending app migrations automatically; there is no `--migrate` server mode. The data migrations
+are applied only by `crawler migrate`.
 
 ```bash
-# Apply pending migrations without starting the server (requires diesel CLI)
+# Apply pending data migrations (prints each version applied; --dry-run lists them)
+DATA_DATABASE_URL="$DATABASE_URL" cargo run -p econ-graph-crawler --bin crawler -- migrate
+
+# Apply pending app migrations without starting the server (requires diesel CLI)
 diesel migration run
 
 # Undo the latest migration (destructive; use only on disposable development data)

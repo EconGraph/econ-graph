@@ -134,10 +134,13 @@ setup_backend() {
 
     cd backend
 
-    # The backend applies both migration sets at startup (run_migrations). That also brings forward
-    # a demo database built by the single v4.0.0 baseline, which the diesel CLI would stop on at the
-    # app baseline's guard.
-    print_status "Backend will run database migrations on startup."
+    # `crawler migrate` applies the data migrations; the backend applies only the app migrations,
+    # at startup. That also brings forward a demo database built by the single v4.0.0 baseline,
+    # which the diesel CLI would stop on at the app baseline's guard.
+    print_status "Applying the data migrations..."
+    DATA_DATABASE_URL="${DATA_DATABASE_URL:-${DATABASE_URL:-}}" \
+        cargo run -p econ-graph-crawler --bin crawler -- migrate
+    print_status "Backend will run the app migrations on startup."
 
     # Start backend server
     print_status "Starting backend server on port $BACKEND_PORT..."

@@ -2,8 +2,8 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! `crawler`: enqueue crawl jobs, inspect the queue, list sources, or run one fetch for
-//! debugging. See [`econ_graph_crawler::cli`].
+//! `crawler`: enqueue crawl jobs, inspect the queue, list sources, run one fetch for debugging,
+//! or apply the data migrations. See [`econ_graph_crawler::cli`].
 
 use clap::Parser;
 use econ_graph_crawler::cli::Cli;

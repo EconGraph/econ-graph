@@ -8,13 +8,14 @@
 
 The old `populate_catalogs.sh` / `catalog_crawler` flow was removed. Catalogs are now
 discovered through the crawl queue. Run the commands below from `backend/` (use
-`cd backend` from the repository root). First start the backend once to apply
-migrations, following the [local setup](../README.md#development-workflow).
-The CLI and worker require `DATABASE_URL`; FRED jobs also require `FRED_API_KEY`.
-Neither the CLI nor the worker applies database migrations.
+`cd backend` from the repository root). First apply the data migrations with
+`crawler migrate`, following the [local setup](../README.md#development-workflow).
+The CLI and worker require `DATA_DATABASE_URL`; FRED jobs also require `FRED_API_KEY`.
+The worker applies no migrations.
 
 ```bash
-export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+export DATA_DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+cargo run -p econ-graph-crawler --bin crawler -- migrate
 # Export your provider-issued FRED_API_KEY before running the worker.
 # enqueue a discover_catalog job per source (writes series metadata when the worker runs it)
 cargo run -p econ-graph-crawler --bin crawler -- discover --source FRED

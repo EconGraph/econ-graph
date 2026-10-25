@@ -163,49 +163,134 @@ const APP_BASELINE_VERSION: &str = "20261021000200";
 ///
 /// Note: Migrations require a synchronous connection
 pub async fn run_migrations(database_url: &str) -> AppResult<()> {
-    run_migration_sets(database_url, &[MigrationSet::Data, MigrationSet::App]).await
+    run_migration_sets(database_url, &[MigrationSet::Data, MigrationSet::App])
+        .await
+        .map(|_| ())
 }
 
-/// Run one migration set against `database_url`, under [`MIGRATION_LOCK_KEY`].
+/// Run one migration set against `database_url`, under [`MIGRATION_LOCK_KEY`], and return the
+/// versions it applied, oldest first (empty when the set was already current).
 ///
 /// The app set still recognises a database built by the single v4.0.0 baseline and records the
-/// app baseline there without running it (see [`is_single_baseline_database`]). The database may
-/// hold the other set too; it is left as it is.
-pub async fn run_migration_set(database_url: &str, set: MigrationSet) -> AppResult<()> {
+/// app baseline there without running it (see [`is_single_baseline_database`]); that version is
+/// not in the returned list. The database may hold the other set too; it is left as it is.
+pub async fn run_migration_set(database_url: &str, set: MigrationSet) -> AppResult<Vec<String>> {
     run_migration_sets(database_url, &[set]).await
 }
 
-/// Runs `sets` in order against `database_url`, holding [`MIGRATION_LOCK_KEY`] for the whole run.
-pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]) -> AppResult<()> {
-    use diesel::{Connection, RunQueryDsl};
+/// The versions of `set` embedded in this binary and not yet recorded in `database_url`'s
+/// `__diesel_schema_migrations`, oldest first: what [`run_migration_set`] would apply. It only
+/// reads, and takes no lock, so it changes nothing, not even by creating the migrations table on
+/// an empty database. For the app set on a single-baseline database the app baseline is listed,
+/// although applying the set records it without running it.
+pub async fn pending_migration_versions(
+    database_url: &str,
+    set: MigrationSet,
+) -> AppResult<Vec<String>> {
+    let database_url = database_url.to_string();
+    tokio::task::spawn_blocking(move || -> AppResult<Vec<String>> {
+        use diesel::RunQueryDsl;
+
+        #[derive(diesel::QueryableByName)]
+        struct Exists {
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            exists: bool,
+        }
+        #[derive(diesel::QueryableByName)]
+        struct Version {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            version: String,
+        }
+        let err = |e: diesel::result::Error| {
+            AppError::InternalError(format!("Failed to read the applied migrations: {}", e))
+        };
+
+        let mut conn = establish_migration_connection(&database_url)?;
+        let has_table = diesel::sql_query(
+            "SELECT to_regclass('public.__diesel_schema_migrations') IS NOT NULL AS exists",
+        )
+        .get_result::<Exists>(&mut conn)
+        .map_err(err)?;
+        let recorded: std::collections::HashSet<String> = if has_table.exists {
+            diesel::sql_query("SELECT version FROM __diesel_schema_migrations")
+                .load::<Version>(&mut conn)
+                .map_err(err)?
+                .into_iter()
+                .map(|v| v.version)
+                .collect()
+        } else {
+            Default::default()
+        };
+        let mut pending: Vec<String> = embedded_versions(set)?
+            .into_iter()
+            .filter(|v| !recorded.contains(v))
+            .collect();
+        pending.sort();
+        Ok(pending)
+    })
+    .await
+    .map_err(|e| AppError::InternalError(format!("Migration task failed: {}", e)))?
+}
+
+/// The versions of every migration embedded in this binary for `set`.
+fn embedded_versions(set: MigrationSet) -> AppResult<Vec<String>> {
+    use diesel::migration::{Migration, MigrationSource};
+
+    let migrations =
+        MigrationSource::<diesel::pg::Pg>::migrations(&set.migrations()).map_err(|e| {
+            AppError::InternalError(format!(
+                "Failed to read the embedded {} migrations: {}",
+                set.name(),
+                e
+            ))
+        })?;
+    Ok(migrations
+        .iter()
+        .map(|m| m.name().version().to_string())
+        .collect())
+}
+
+/// A synchronous connection to `database_url`, which migrations need.
+fn establish_migration_connection(database_url: &str) -> AppResult<diesel::PgConnection> {
+    use diesel::Connection;
+
+    // Ensure the database URL is properly formatted
+    let formatted_url = if database_url.starts_with("postgresql://") {
+        database_url.to_string()
+    } else if database_url.starts_with("postgres://") {
+        database_url.replace("postgres://", "postgresql://")
+    } else {
+        format!("postgresql://{}", database_url)
+    };
+
+    info!(
+        "Attempting to connect to database for migrations: {}",
+        redact_database_url(&formatted_url)
+    );
+
+    diesel::PgConnection::establish(&formatted_url).map_err(|e| {
+        let error = AppError::InternalError(format!(
+            "Failed to establish sync connection for migrations: {}",
+            e
+        ));
+        error.log_with_context("Database migration connection attempt");
+        error
+    })
+}
+
+/// Runs `sets` in order against `database_url`, holding [`MIGRATION_LOCK_KEY`] for the whole run,
+/// and returns the versions applied, in the order they ran.
+pub(crate) async fn run_migration_sets(
+    database_url: &str,
+    sets: &[MigrationSet],
+) -> AppResult<Vec<String>> {
+    use diesel::RunQueryDsl;
 
     let sets = sets.to_vec();
     // Run migrations in a blocking task since migrations are sync
     let database_url = database_url.to_string();
-    tokio::task::spawn_blocking(move || -> AppResult<()> {
-        // Ensure the database URL is properly formatted
-        let formatted_url = if database_url.starts_with("postgresql://") {
-            database_url
-        } else if database_url.starts_with("postgres://") {
-            database_url.replace("postgres://", "postgresql://")
-        } else {
-            format!("postgresql://{}", database_url)
-        };
-
-        info!(
-            "Attempting to connect to database for migrations: {}",
-            redact_database_url(&formatted_url)
-        );
-
-        // Try to establish connection
-        let mut conn = diesel::PgConnection::establish(&formatted_url).map_err(|e| {
-            let error = AppError::InternalError(format!(
-                "Failed to establish sync connection for migrations: {}",
-                e
-            ));
-            error.log_with_context("Database migration connection attempt");
-            error
-        })?;
+    let applied = tokio::task::spawn_blocking(move || -> AppResult<Vec<String>> {
+        let mut conn = establish_migration_connection(&database_url)?;
 
         info!("Database connection established, waiting for migration lock...");
 
@@ -226,8 +311,10 @@ pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]
             Ok(false)
         })
         .and_then(|single_baseline| {
-            sets.iter()
-                .try_for_each(|&set| run_migration_set_locked(&mut conn, set, single_baseline))
+            sets.iter().try_fold(Vec::new(), |mut applied, &set| {
+                applied.extend(run_migration_set_locked(&mut conn, set, single_baseline)?);
+                Ok(applied)
+            })
         });
 
         if let Err(e) =
@@ -239,24 +326,25 @@ pub(crate) async fn run_migration_sets(database_url: &str, sets: &[MigrationSet]
             tracing::warn!("Failed to release migration lock explicitly: {}", e);
         }
 
-        migration_result?;
+        let applied = migration_result?;
         info!("Migrations completed successfully");
-        Ok(())
+        Ok(applied)
     })
     .await
     .map_err(|e| AppError::InternalError(format!("Migration task failed: {}", e)))??;
 
     info!("Database migrations completed successfully");
-    Ok(())
+    Ok(applied)
 }
 
-/// Applies one set's pending migrations on `conn`, which already holds [`MIGRATION_LOCK_KEY`].
-/// `single_baseline` is [`is_single_baseline_database`], read before any set ran.
+/// Applies one set's pending migrations on `conn`, which already holds [`MIGRATION_LOCK_KEY`],
+/// and returns their versions. `single_baseline` is [`is_single_baseline_database`], read before
+/// any set ran.
 fn run_migration_set_locked(
     conn: &mut diesel::PgConnection,
     set: MigrationSet,
     single_baseline: bool,
-) -> AppResult<()> {
+) -> AppResult<Vec<String>> {
     use diesel_migrations::MigrationHarness;
 
     if set == MigrationSet::App && single_baseline {
@@ -264,7 +352,7 @@ fn run_migration_set_locked(
     }
     info!("Running the {} migrations...", set.name());
     conn.run_pending_migrations(set.migrations())
-        .map(|_| ())
+        .map(|applied| applied.iter().map(|v| v.to_string()).collect())
         .map_err(|e| {
             AppError::InternalError(format!(
                 "Failed to run the {} migrations: {}",
@@ -398,23 +486,9 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
 /// newest migration embedded in this binary for `set`: the schema version of that set it requires
 /// at minimum to run correctly.
 fn minimum_schema_version(set: MigrationSet) -> AppResult<String> {
-    use diesel::migration::{Migration, MigrationSource};
-
-    let migrations =
-        MigrationSource::<diesel::pg::Pg>::migrations(&set.migrations()).map_err(|e| {
-            AppError::InternalError(format!(
-                "Failed to read the embedded {} migrations: {}",
-                set.name(),
-                e
-            ))
-        })?;
-    migrations
-        .iter()
-        .map(|m| m.name().version().to_string())
-        .max()
-        .ok_or_else(|| {
-            AppError::InternalError(format!("No embedded {} migrations found", set.name()))
-        })
+    embedded_versions(set)?.into_iter().max().ok_or_else(|| {
+        AppError::InternalError(format!("No embedded {} migrations found", set.name()))
+    })
 }
 
 #[derive(diesel::QueryableByName)]
