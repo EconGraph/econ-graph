@@ -13,7 +13,8 @@ use econ_graph_core::models::{
 use serde_json::{json, Value};
 use std::str::FromStr;
 
-// data_points.value is NUMERIC with scale 6, so values come back with six decimals.
+// data_points.value is unconstrained NUMERIC, so values come back with the scale they were
+// stored with.
 
 async fn db() -> Option<DatabasePool> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -180,7 +181,7 @@ async fn test_latest_observation_takes_newest_date_then_newest_revision() {
     let data = run(&pool, latest_query(&name, "CPI")).await;
     assert_eq!(
         data["seriesByExternalId"]["latestObservation"],
-        json!({ "date": "2026-07-01", "value": "101.500000", "revisionDate": "2026-09-10" })
+        json!({ "date": "2026-07-01", "value": "101.5", "revisionDate": "2026-09-10" })
     );
 }
 
@@ -195,7 +196,7 @@ async fn test_latest_observation_same_day_revision_beats_original() {
     let data = run(&pool, latest_query(&name, "PAYEMS")).await;
     assert_eq!(
         data["seriesByExternalId"]["latestObservation"]["value"],
-        json!("2.000000")
+        json!("2.0")
     );
 }
 
