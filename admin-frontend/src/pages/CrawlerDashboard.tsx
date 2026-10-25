@@ -135,10 +135,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
   if (loading) {
     return (
       <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="400px"
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "400px",
+        }}
       >
         <CircularProgress size={60} />
         <Typography variant="h6" sx={{ ml: 2 }}>
@@ -224,7 +226,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
 
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Active Workers
                   </Typography>
                   <Typography variant="h4">
@@ -232,7 +239,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Last Crawl
                   </Typography>
                   <Typography variant="body1">
@@ -247,7 +259,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Next Scheduled Crawl
                   </Typography>
                   <Typography variant="body1">
@@ -281,7 +298,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
 
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Total Items
                   </Typography>
                   <Typography variant="h4">
@@ -289,42 +311,92 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Pending
                   </Typography>
-                  <Typography variant="h4" color="warning.main">
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: "warning.main",
+                    }}
+                  >
                     {queueStats.statistics?.pending_items || 0}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Processing
                   </Typography>
-                  <Typography variant="h4" color="info.main">
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: "info.main",
+                    }}
+                  >
                     {queueStats.statistics?.processing_items || 0}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Completed
                   </Typography>
-                  <Typography variant="h4" color="success.main">
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: "success.main",
+                    }}
+                  >
                     {queueStats.statistics?.completed_items || 0}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Failed
                   </Typography>
-                  <Typography variant="h4" color="error.main">
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: "error.main",
+                    }}
+                  >
                     {queueStats.statistics?.failed_items || 0}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Retrying
                   </Typography>
-                  <Typography variant="h4" color="warning.main">
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: "warning.main",
+                    }}
+                  >
                     {queueStats.statistics?.retrying_items || 0}
                   </Typography>
                 </Grid>
@@ -332,7 +404,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
 
               {queueStats.statistics?.average_processing_time && (
                 <Box sx={{ mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                    }}
+                  >
                     Average Processing Time
                   </Typography>
                   <Typography variant="body1">
@@ -455,7 +532,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     {(!logs?.logs || logs.logs.length === 0) && (
                       <TableRow>
                         <TableCell colSpan={6} align="center">
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color: "text.secondary",
+                            }}
+                          >
                             No recent activity
                           </Typography>
                         </TableCell>
