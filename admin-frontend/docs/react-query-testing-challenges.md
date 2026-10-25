@@ -122,5 +122,3 @@ The React Query testing challenge is a well-documented issue affecting many deve
 ---
 
 *This analysis is based on current React Query v4+ and testing ecosystem as of 2024. The landscape continues to evolve as the React Query team addresses testing concerns.*
-
-*Last updated: January 2024*

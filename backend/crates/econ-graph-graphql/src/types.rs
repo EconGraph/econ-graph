@@ -1312,10 +1312,12 @@ pub struct SecurityEventType {
 pub struct AuditLogType {
     /// Log entry ID
     pub id: ID,
-    /// User ID who performed action
-    pub user_id: ID,
-    /// User name who performed action
+    /// User ID who performed action; null once that user has been deleted
+    pub user_id: Option<ID>,
+    /// User name who performed action, kept after the user is deleted
     pub user_name: String,
+    /// Whether the user who performed the action has since been deleted
+    pub user_deleted: bool,
     /// Action performed
     pub action: String,
     /// Type of resource affected
@@ -1352,14 +1354,15 @@ impl From<econ_graph_core::models::admin::AuditLog> for AuditLogType {
     fn from(log: econ_graph_core::models::admin::AuditLog) -> Self {
         Self {
             id: ID(log.id.to_string()),
-            user_id: ID(log.user_id.to_string()),
+            user_deleted: log.user_deleted(),
+            user_id: log.user_id.map(|id| ID::from(id.to_string())),
             user_name: log.user_name,
             action: log.action,
             resource_type: log.resource_type,
             resource_id: log.resource_id,
             ip_address: log.ip_address,
             user_agent: log.user_agent,
-            details: log.details.map(|details| details.to_string()),
+            details: log.details.map(|d| d.to_string()),
             created_at: log.created_at,
         }
     }

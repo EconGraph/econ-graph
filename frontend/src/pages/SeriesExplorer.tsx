@@ -34,15 +34,19 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSeriesSearch, useSeriesBrowse, useDataSources } from '../hooks/useSeriesData';
+import { buildSearchResultsCsv, buildSearchResultsJson } from '../utils/searchResultsExport';
 
 interface EconomicSeries {
   id: string;
+  /** The source's own series id, such as `GDP`. */
+  externalId?: string;
   title: string;
-  description: string;
+  description?: string;
   sourceId: string;
-  source: string;
+  /** Source name; missing when neither the result nor the source list names it. */
+  source?: string;
   frequency: string;
-  units: string;
+  units?: string;
   lastUpdated?: string;
   startDate?: string;
   endDate?: string;
@@ -76,19 +80,6 @@ const toTimestamp = (value?: string | null): string | undefined => {
   if (!value) return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-};
-
-/**
- * Quotes a value for a CSV cell when it contains a comma, quote or newline. A leading
- * =, +, -, @, tab or CR is prefixed with a quote first, so a spreadsheet app never runs
- * a cell pulled from search results (title, description, source, units) as a formula.
- * @param value - Cell value.
- * @returns The escaped cell.
- */
-const toCsvCell = (value: string | undefined): string => {
-  const raw = value ?? '';
-  const text = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
 /** The backend's SeriesFrequency GraphQL enum, keyed by the frequency string series carry. */
@@ -242,15 +233,14 @@ const SeriesExplorer: React.FC = () => {
 
     return searchResults.map((result: any) => ({
       id: result.id,
+      externalId: result.externalId || undefined,
       title: result.title,
-      description: result.description || '',
+      description: result.description || undefined,
       sourceId: result.sourceId,
       source:
-        result.source?.name ||
-        dataSources.find(ds => ds.id === result.sourceId)?.name ||
-        'Unknown Source',
+        result.source?.name || dataSources.find(ds => ds.id === result.sourceId)?.name || undefined,
       frequency: result.frequency,
-      units: result.units || '',
+      units: result.units || undefined,
       lastUpdated: toTimestamp(result.lastUpdated),
       startDate: toDateOnly(result.startDate),
       endDate: toDateOnly(result.endDate),
@@ -349,27 +339,13 @@ const SeriesExplorer: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Export functionality
+  // Export functionality. Rows carry the source and its own series id, so they can be
+  // matched back to the source.
   const handleExport = (format: string) => {
-    const data = filteredSeries.map(series => ({
-      id: series.id,
-      title: series.title,
-      description: series.description,
-      source: series.source,
-      frequency: series.frequency,
-      units: series.units,
-      lastUpdated: series.lastUpdated,
-      startDate: series.startDate,
-      endDate: series.endDate,
-    }));
+    const data = filteredSeries;
 
     if (format === 'csv') {
-      const csv = [
-        Object.keys(data[0] || {}).join(','),
-        ...data.map(row => Object.values(row).map(toCsvCell).join(',')),
-      ].join('\n');
-
-      const blob = new Blob([csv], { type: 'text/csv' });
+      const blob = new Blob([buildSearchResultsCsv(data)], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -377,7 +353,7 @@ const SeriesExplorer: React.FC = () => {
       a.click();
       URL.revokeObjectURL(url);
     } else if (format === 'json') {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([buildSearchResultsJson(data)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -405,73 +381,78 @@ const SeriesExplorer: React.FC = () => {
     return undefined;
   };
 
+  // Each card sits in a Grid item: a Card placed straight in the container took the container's
+  // negative margin (no gutter at the sidebar edge) and a width sized by its own text.
   const renderSeriesCard = (series: EconomicSeries) => (
-    <Card
-      key={series.id}
-      sx={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        '&:hover': {
-          transform: 'translateY(-2px)',
-          boxShadow: 4,
-        },
-      }}
-      onClick={() => navigate(`/series/${series.id}`)}
-    >
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-          <TrendingUpIcon color='primary' sx={{ mr: 1, mt: 0.5 }} />
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography
-              variant='h6'
-              component='div'
-              sx={{ fontSize: '1rem', lineHeight: 1.3, mb: 1 }}
-            >
-              {series.title}
-            </Typography>
-            <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-              {series.description}
-            </Typography>
+    <Grid item xs={12} sm={6} md={4} key={series.id}>
+      <Card
+        sx={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease-in-out',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: 4,
+          },
+        }}
+        onClick={() => navigate(`/series/${series.id}`)}
+      >
+        <CardContent sx={{ flexGrow: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+            <TrendingUpIcon color='primary' sx={{ mr: 1, mt: 0.5 }} />
+            <Box sx={{ flexGrow: 1 }}>
+              <Typography
+                variant='h6'
+                component='div'
+                sx={{ fontSize: '1rem', lineHeight: 1.3, mb: 1 }}
+              >
+                {series.title}
+              </Typography>
+              <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+                {series.description}
+              </Typography>
+            </Box>
           </Box>
-        </Box>
 
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          <Chip
-            label={series.source}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+            {series.source && (
+              <Chip
+                label={series.source}
+                size='small'
+                color='primary'
+                variant='outlined'
+                title={`Data Source: ${series.source}`}
+              />
+            )}
+            <Chip label={series.frequency} size='small' variant='outlined' />
+            {series.units && <Chip label={series.units} size='small' variant='outlined' />}
+          </Box>
+
+          {dateRange(series) && (
+            <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
+              <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
+              <Typography variant='caption' color='text.secondary'>
+                {dateRange(series)}
+              </Typography>
+            </Box>
+          )}
+        </CardContent>
+
+        <CardActions sx={{ pt: 0 }}>
+          <Button
             size='small'
-            color='primary'
-            variant='outlined'
-            title={`Data Source: ${series.source}`}
-          />
-          <Chip label={series.frequency} size='small' variant='outlined' />
-          {series.units && <Chip label={series.units} size='small' variant='outlined' />}
-        </Box>
-
-        {dateRange(series) && (
-          <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
-            <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
-            <Typography variant='caption' color='text.secondary'>
-              {dateRange(series)}
-            </Typography>
-          </Box>
-        )}
-      </CardContent>
-
-      <CardActions sx={{ pt: 0 }}>
-        <Button
-          size='small'
-          onClick={e => {
-            e.stopPropagation();
-            navigate(`/series/${series.id}`);
-          }}
-        >
-          View Details
-        </Button>
-      </CardActions>
-    </Card>
+            onClick={e => {
+              e.stopPropagation();
+              navigate(`/series/${series.id}`);
+            }}
+          >
+            View Details
+          </Button>
+        </CardActions>
+      </Card>
+    </Grid>
   );
 
   return (

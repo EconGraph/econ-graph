@@ -95,6 +95,9 @@ function mockUserManager(initialUser: OidcUser | null = null) {
       throw new Error('no callback response');
     }),
     signoutRedirect: vi.fn(async () => undefined),
+    signoutRedirectCallback: vi.fn(async (): Promise<{ userState?: unknown }> => {
+      throw new Error('No matching state found in storage');
+    }),
     removeUser: vi.fn(async () => {
       stored = null;
       listeners.unloaded.forEach(cb => cb());
@@ -158,6 +161,14 @@ const CallbackProbe: React.FC<{ onReturn: (path: string) => void }> = ({ onRetur
   React.useEffect(() => {
     completeSignIn().then(onReturn, () => undefined);
   }, [completeSignIn, onReturn]);
+  return null;
+};
+
+const SignOutProbe: React.FC<{ onReturn: (path: string | null) => void }> = ({ onReturn }) => {
+  const { completeSignOut } = useAuth();
+  React.useEffect(() => {
+    void completeSignOut().then(onReturn);
+  }, [completeSignOut, onReturn]);
   return null;
 };
 
@@ -752,8 +763,72 @@ describe('AuthContext with Keycloak (oidc-client-ts)', () => {
     );
     await userEvent.click(screen.getByRole('menuitem', { name: /sign out/i }));
 
+    // Keycloak returns to the home page; the state names the page to go back to (ECO-418).
     expect(manager.signoutRedirect).toHaveBeenCalledTimes(1);
+    expect(manager.signoutRedirect).toHaveBeenCalledWith({
+      state: { returnTo: '/series/gdp?range=10y' },
+    });
   });
+
+  it('returns to the page sign-out began on once Keycloak sends the browser home', async () => {
+    const { manager, userManager } = mockUserManager();
+    manager.signoutRedirectCallback.mockResolvedValue({
+      userState: { returnTo: '/series/gdp?range=10y' },
+    });
+    window.history.replaceState(null, '', '/?state=so-1');
+    const onReturn = vi.fn();
+    render(
+      <React.StrictMode>
+        <AuthProvider userManager={userManager}>
+          <SignOutProbe onReturn={onReturn} />
+        </AuthProvider>
+      </React.StrictMode>
+    );
+
+    await waitFor(() => expect(onReturn).toHaveBeenCalledWith('/series/gdp?range=10y'));
+    // The response can be read only once, so StrictMode's second effect shares the first read.
+    expect(manager.signoutRedirectCallback).toHaveBeenCalledTimes(1);
+    expect(onReturn).not.toHaveBeenCalledWith('/');
+  });
+
+  it.each([
+    ['an off-site return path', async () => ({ userState: { returnTo: '//evil.test/' } })],
+    [
+      'a state this tab never stored',
+      async () => {
+        throw new Error('No matching state found in storage');
+      },
+    ],
+  ])('stays on the home page after sign-out given %s', async (_, callback) => {
+    const { manager, userManager } = mockUserManager();
+    manager.signoutRedirectCallback.mockImplementation(callback);
+    window.history.replaceState(null, '', '/?state=so-1');
+    const onReturn = vi.fn();
+    render(
+      <AuthProvider userManager={userManager}>
+        <SignOutProbe onReturn={onReturn} />
+      </AuthProvider>
+    );
+
+    await waitFor(() => expect(onReturn).toHaveBeenCalledWith('/'));
+  });
+
+  it.each(['/', '/series/gdp?state=so-1'])(
+    'leaves %s alone when it is not the sign-out redirect',
+    async path => {
+      const { manager, userManager } = mockUserManager();
+      window.history.replaceState(null, '', path);
+      const onReturn = vi.fn();
+      render(
+        <AuthProvider userManager={userManager}>
+          <SignOutProbe onReturn={onReturn} />
+        </AuthProvider>
+      );
+
+      await waitFor(() => expect(onReturn).toHaveBeenCalledWith(null));
+      expect(manager.signoutRedirectCallback).not.toHaveBeenCalled();
+    }
+  );
 
   it('forgets local tokens when Keycloak cannot be reached on sign out', async () => {
     const { manager, userManager } = mockUserManager(makeUser());

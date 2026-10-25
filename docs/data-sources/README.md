@@ -61,7 +61,7 @@ the UN publish SDMX, so they would look like [imf.md](imf.md).
    World Bank WDI (several updates a year). WDI now appends a new vintage of every
    observation on each such release; the others still overwrite (see finding 1).
 3. **Flags are mostly still dropped.** BLS footnotes (`P` preliminary, `X` unavailable) are
-   now parsed and logged, but not yet stored as a column (`data_points` has no attribute
+   now parsed and logged, but not stored as a column (`data_points` has no attribute
    columns in train 1). World Bank `obs_status`, BEA `NoteRef` and SDMX `OBS_STATUS` are
    still not parsed. FRED has no per-observation flags (missing is `"."`). These become
    attributes.
@@ -93,7 +93,7 @@ prefix ECO), not here.
 | The ten static catalogs are gated off release builds by the `static_catalogs` build flag (dev builds only). The IMF adapter is deleted (its ids were made up); `SourceId::Imf` stays for a later SDMX adapter | Static catalogs, IMF | #217, #311 |
 | A Census key is required, and a missing key fails before any request | Census BDS | merged |
 | FRED discovery reads a curated list of series ids and records ALFRED vintages: `revision_date = realtime_start` | FRED | #214 |
-| The series list moved to a data file of 291 series (no discovery request), fetched 50 per request (25 keyless); footnotes are parsed and logged but not yet stored | BLS | #235 |
+| The series list moved to a data file of 291 series (no discovery request), fetched 50 per request (25 keyless); footnotes are parsed and logged but not stored | BLS | #235 |
 | The unverified API client was replaced by the HPI master CSV, with the file's columns as dimensions (dataset `fhfa_hpi`) | FHFA | #240 |
 | Real NIPA table and line ids, plus regional GDP by state; discovery and fetch both implemented | BEA | DATA-8 |
 | About 50 WDI indicators fetched for all countries: dataset `wdi` with dimensions `area` and `indicator`, `revision_date = lastupdated` | World Bank | DATA-9 |

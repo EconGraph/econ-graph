@@ -9,6 +9,7 @@ import { expect, test } from '@playwright/test';
 import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
+import { asShown, parseShown } from '../seriesPage';
 
 // Live QA: downloading CSV from a series page saves every point the chart shows, in its own
 // metadata-then-data format (src/utils/seriesCsv.ts): five `label,value` rows (Title, Source,
@@ -80,18 +81,14 @@ test.describe('download CSV', () => {
         .getByRole('table', { name: 'Recent observations' })
         .getByRole('row')
         .nth(1);
-      const expectedDate = new Date(`${latest.date}T00:00:00Z`).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        timeZone: 'UTC',
-      });
-      const expectedValue = latest.value.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-      await expect(latestRow.getByRole('cell').nth(0)).toHaveText(expectedDate);
-      await expect(latestRow.getByRole('cell').nth(1)).toHaveText(expectedValue);
+      // Quarterly GDP's date reads as its quarter ("2026 Q2"), and its value with the decimals
+      // the series carries, up to 2.
+      const dateCell = latestRow.getByRole('cell').nth(0);
+      const valueCell = latestRow.getByRole('cell').nth(1);
+      await expect(dateCell).toHaveText(/^\d{4} Q[1-4]$/);
+      const shownDate = await dateCell.innerText();
+      expect(asShown(latest.date, shownDate)).toBe(shownDate);
+      expect(Math.abs(parseShown(await valueCell.innerText()) - latest.value)).toBeLessThan(0.01);
     }
   });
 });

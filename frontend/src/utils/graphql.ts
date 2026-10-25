@@ -134,6 +134,7 @@ export const QUERIES = {
       seriesList(filter: $filter, pagination: $pagination) {
         nodes {
           id
+          externalId
           title
           description
           sourceId
@@ -262,6 +263,7 @@ export const QUERIES = {
       ) {
         series {
           id
+          externalId
           title
           description
           sourceId
@@ -469,6 +471,7 @@ export const MUTATIONS = {
 // Type definitions for better TypeScript support
 export interface SeriesListNode {
   id: string;
+  externalId: string;
   title: string;
   description: string;
   sourceId: string;

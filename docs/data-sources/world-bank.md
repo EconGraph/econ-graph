@@ -94,7 +94,7 @@ One dataset for WDI, already in effect (`data/datasets/world_bank.toml`):
 |---|---|
 | Dimensions | `indicator`, `area` |
 | Measures | `value` (decimal) |
-| Attributes | `obs_status` (string), `decimal` (small int) — declared, not yet populated |
+| Attributes | `obs_status` (string), `decimal` (small int) — declared, not populated |
 | Shape | long, `revision_date` = `lastupdated` of the edition |
 
 Covering all of WDI's roughly 1,400 indicators instead of the curated ~50 would multiply

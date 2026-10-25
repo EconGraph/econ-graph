@@ -1,8 +1,5 @@
 # Frontend Performance Optimization Roadmap
 
-**Base Branch:** `frontend/vitest-migration`  
-**Status:** Draft - Work in Progress
-
 ---
 
 ## 🎯 Performance Optimization Tasks

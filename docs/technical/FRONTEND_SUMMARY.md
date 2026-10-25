@@ -4,7 +4,7 @@
 
 The EconGraph frontend is a modern React application built with TypeScript and Material-UI that provides an intuitive interface for exploring economic time series data. It significantly improves upon FRED's user experience with modern design patterns and responsive interactions.
 
-## ✅ Completed Features
+## Features
 
 ### 🎨 Modern UI Components
 - **Material-UI Design System**: Consistent, professional styling with custom theme
@@ -82,7 +82,7 @@ frontend/
 ### Core Framework
 - **React 18**: Latest React with concurrent features
 - **TypeScript**: Full type safety and developer experience
-- **React Router 6**: Modern routing with hooks API
+- **React Router 7**: Modern routing with hooks API
 
 ### UI Framework  
 - **Material-UI 5**: Complete design system with theming
@@ -195,11 +195,11 @@ frontend/
 
 ### Component Testing
 - **React Testing Library**: User-focused testing approach
-- **Jest**: Comprehensive test runner with coverage
+- **Vitest**: Comprehensive test runner with coverage
 - **MSW**: Mock Service Worker for API testing
 
 ### Integration Testing
-- **Cypress**: End-to-end user workflows
+- **Playwright**: End-to-end user workflows
 - **Visual Regression**: Automated screenshot comparison
 - **Performance Testing**: Core Web Vitals monitoring
 

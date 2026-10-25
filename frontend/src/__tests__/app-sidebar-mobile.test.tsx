@@ -23,6 +23,7 @@ vi.mock('../contexts/AuthContext', () => ({
     signIn: vi.fn(),
     signOut: vi.fn(),
     completeSignIn: vi.fn(),
+    completeSignOut: vi.fn(async () => null),
     clearError: vi.fn(),
   }),
 }));
