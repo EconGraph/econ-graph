@@ -6,7 +6,7 @@
 # The pool (sda1, sdb1, sdc1; UUID a1e61098-087b-4403-8765-b714bf7b240b,
 # label home-temp, data RAID1 / metadata RAID1C3) is NOT empty: its top level
 # holds @home with nested snapshots @home/.final-snap and
-# @home/.final-snap2, an older copy of /home that Joe decides about
+# @home/.final-snap2, an older copy of /home that the maintainer decides about
 # separately. This script never touches them. It only:
 #
 #   - creates a NEW top-level subvolume @econgraph-backups (if absent)
@@ -27,6 +27,12 @@
 # The next hourly backup-snapshots.sh run starts copying to it by itself.
 #
 # Usage: sudo scripts/host/setup-backup-pool.sh [--dry-run]
+#
+# --dry-run (-n) writes nothing and mounts nothing: it prints every step and
+# runs only read-only checks (blkid, /etc/fstab, findmnt). The pool's
+# subvolumes are listed only if the pool is already mounted somewhere, via
+# `btrfs subvolume list` on that mount; otherwise the dry run says it cannot
+# tell whether @econgraph-backups exists yet.
 
 set -euo pipefail
 
@@ -65,31 +71,45 @@ if ! blkid -U "$FS_UUID" >/dev/null; then
     exit 1
 fi
 
-top="$(mktemp -d /mnt/econgraph-backups-top.XXXXXX)"
-cleanup() {
-    if mountpoint -q "$top"; then umount "$top"; fi
-    rmdir "$top"
-}
-trap cleanup EXIT
-
-# The top level is mounted even in a dry run, read-only, so the checks are real.
 if [ "$DRY_RUN" = "true" ]; then
-    mount -o ro,subvolid=5 "UUID=$FS_UUID" "$top"
-else
-    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
-fi
-
-echo "= existing top-level entries on the pool (left untouched):"
-find "$top" -mindepth 1 -maxdepth 1 -printf '    %f\n'
-
-if [ -e "$top/$SUBVOL" ]; then
-    if ! btrfs subvolume show "$top/$SUBVOL" >/dev/null 2>&1; then
-        echo "error: $SUBVOL exists on the pool but is not a subvolume" >&2
-        exit 1
+    # No temporary directory and no mount: inspect through an existing mount
+    # of the pool, if there is one.
+    echo "+ mount -o subvolid=5 UUID=$FS_UUID <temporary directory under /mnt>   (not in a dry run)"
+    seen="$(findmnt -n -o TARGET -S "UUID=$FS_UUID" | head -n 1 || true)"
+    if [ -n "$seen" ]; then
+        echo "= subvolumes on the pool, read through $seen (left untouched):"
+        subvols="$(btrfs subvolume list "$seen" | sed -nE 's/.* path (<FS_TREE>\/)?//p')"
+        while IFS= read -r sv; do echo "    $sv"; done <<<"$subvols"
+        if grep -qx "$SUBVOL" <<<"$subvols"; then
+            echo "= subvolume $SUBVOL already exists"
+        else
+            echo "+ btrfs subvolume create <top>/$SUBVOL"
+        fi
+    else
+        echo "= the pool is not mounted anywhere, so a dry run cannot list its subvolumes"
+        echo "+ btrfs subvolume create <top>/$SUBVOL   (if it does not exist yet)"
     fi
-    echo "= subvolume $SUBVOL already exists"
 else
-    run btrfs subvolume create "$top/$SUBVOL"
+    top="$(mktemp -d /mnt/econgraph-backups-top.XXXXXX)"
+    cleanup() {
+        if mountpoint -q "$top"; then umount "$top"; fi
+        rmdir "$top"
+    }
+    trap cleanup EXIT
+    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
+
+    echo "= existing top-level entries on the pool (left untouched):"
+    find "$top" -mindepth 1 -maxdepth 1 -printf '    %f\n'
+
+    if [ -e "$top/$SUBVOL" ]; then
+        if ! btrfs subvolume show "$top/$SUBVOL" >/dev/null 2>&1; then
+            echo "error: $SUBVOL exists on the pool but is not a subvolume" >&2
+            exit 1
+        fi
+        echo "= subvolume $SUBVOL already exists"
+    else
+        btrfs subvolume create "$top/$SUBVOL"
+    fi
 fi
 
 if [ ! -d "$TARGET" ]; then

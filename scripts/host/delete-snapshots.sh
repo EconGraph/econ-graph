@@ -21,6 +21,11 @@
 # snapshot of its series (the next hourly copy to the pool then has to fall
 # back to an older common parent, or a full send), and proceeds only after
 # you type "delete <count>".
+#
+# --dry-run (-n) writes nothing and mounts nothing: it checks each name and
+# prints what would be deleted. Set-aside @econgraph-* subvolumes are looked
+# up with `btrfs subvolume list` on the existing /srv/econgraph/snapshots
+# mount instead of mounting the filesystem top level.
 
 set -euo pipefail
 
@@ -86,13 +91,23 @@ paths=()
 for n in "${names[@]}"; do
     case "$n" in
         @econgraph-*)
+            if [ "$DRY_RUN" = "true" ]; then
+                # Top-level subvolumes, read through an existing mount.
+                if [ "$(findmnt -n -o UUID --mountpoint "$LOCAL_DIR" | tail -n 1)" != "$FS_UUID" ]; then
+                    echo "error: $LOCAL_DIR is not mounted from UUID=$FS_UUID; cannot look up $n" >&2
+                    exit 1
+                fi
+                if btrfs subvolume list "$LOCAL_DIR" | sed -nE 's/.* top level 5 path (<FS_TREE>\/)?//p' | grep -qxF "$n"; then
+                    echo "= $n: a top-level subvolume of UUID=$FS_UUID"
+                    paths+=("<top level of UUID=$FS_UUID>/$n")
+                else
+                    echo "= $n: not a subvolume here, skipped"
+                fi
+                continue
+            fi
             if [ -z "$top" ]; then
                 top="$(mktemp -d /mnt/econgraph-top.XXXXXX)"
-                if [ "$DRY_RUN" = "true" ]; then
-                    mount -o ro,subvolid=5 "UUID=$FS_UUID" "$top"
-                else
-                    mount -o subvolid=5 "UUID=$FS_UUID" "$top"
-                fi
+                mount -o subvolid=5 "UUID=$FS_UUID" "$top"
             fi
             path="$top/$n"
             ;;

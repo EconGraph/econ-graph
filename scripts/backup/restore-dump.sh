@@ -1,7 +1,7 @@
 #!/bin/bash
 # Restore a host-side logical dump into the live cluster database.
 # DESTRUCTIVE: pg_restore --clean drops and recreates every object in the
-# dump. This is a "critical" change under the repo's rules: get Joe's
+# dump. This is a "critical" change under the repo's rules: get the maintainer's
 # sign-off and take snapshot-now.sh + dump-databases.sh first.
 #
 # Usage: restore-dump.sh [--dry-run] [--yes] <database> <dump file>

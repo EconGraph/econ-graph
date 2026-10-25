@@ -32,7 +32,7 @@ The 870 pool is three Samsung 870 SATA SSDs (`/dev/sda1`, `/dev/sdb1`,
 `a1e61098-087b-4403-8765-b714bf7b240b`, label `home-temp`, data RAID1 /
 metadata RAID1C3. It is **not empty**: its top level holds `@home` (ID 256)
 with nested snapshots `@home/.final-snap` and `@home/.final-snap2`, an older
-copy of `/home` (about 1.57 TiB) that Joe decides about separately; about
+copy of `/home` (about 1.57 TiB) that the maintainer decides about separately; about
 2.59 TiB is free. The backup target is a new top-level subvolume
 `@econgraph-backups` beside it. Nothing here ever wipes, reformats or
 touches `@home` or its snapshots. Because the pool is a different filesystem
@@ -44,7 +44,7 @@ from `/home`, snapshots reach it only by `btrfs send`/`receive`
 The kind cluster runs on the **rootful** Docker daemon at
 `unix:///var/run/docker.sock`: kind can't start under rootless Docker on this
 host, whose rootless data root is on btrfs (see
-`docs/deployment/HOST_STORAGE.md`). Joe's login shell exports `DOCKER_HOST`
+`docs/deployment/HOST_STORAGE.md`). The operator's login shell exports `DOCKER_HOST`
 for the rootless daemon, so the backup scripts don't use that variable:
 `scripts/backup/lib.sh` sets `DOCKER_HOST=unix:///var/run/docker.sock` for
 itself and everything it runs, like `scripts/deploy/lib/kind-env.sh`.
@@ -54,7 +54,7 @@ user timers reach that socket without sudo. The scripts log the daemon they
 use and warn if it is a rootless one.
 
 The `docker` commands in this runbook are meant for that daemon too. From
-Joe's shell, run them with `DOCKER_HOST=unix:///var/run/docker.sock` (or
+the operator's shell, run them with `DOCKER_HOST=unix:///var/run/docker.sock` (or
 `docker -H unix:///var/run/docker.sock ...`); a plain `docker` there talks
 to the rootless daemon, which has no kind nodes.
 
@@ -109,7 +109,7 @@ dump or a backup copy. Everything only accumulates:
   `prune`, and refuses to pass them through).
 
 Space is watched instead: see [Space alerts](#space-alerts). Deleting is a
-manual step Joe takes, described in [Deleting by hand](#deleting-by-hand).
+manual step the operator takes, described in [Deleting by hand](#deleting-by-hand).
 
 The old in-cluster CronJob, which is not part of this setup, no longer
 deletes its dumps either: [#427](https://github.com/EconGraph/econ-graph/pull/427) removed its 14-day pruning (see
@@ -131,7 +131,7 @@ automatically.
 
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
-re-run. They are listed in order in [Needs sudo (Joe)](#needs-sudo-joe).
+re-run. They are listed in order in [Needs sudo](#needs-sudo).
 The root timer runs a root-owned copy at
 `/usr/local/sbin/econgraph-backup-snapshots`, never the checkout, so root
 never executes a file the jmalicki account can edit.
@@ -175,7 +175,7 @@ keeps its own copy of the old blocks.
 
 ## Deleting by hand
 
-Only Joe deletes, only by hand, with
+Only the operator deletes, only by hand, with
 `scripts/host/delete-snapshots.sh` (never from a timer: it refuses to run
 without a terminal):
 
@@ -227,7 +227,7 @@ root job with `systemctl list-timers econgraph-backup-snapshots.timer` and
 ## Pre-change snapshot
 
 Data migrations, deliberate recrawls, schema changes and restores are
-"critical" changes: they need Joe's sign-off and a dump first. Before one:
+"critical" changes: they need the maintainer's sign-off and a dump first. Before one:
 
 ```sh
 scripts/backup/snapshot-now.sh "recrawl BLS series after the parser fix"
@@ -238,7 +238,7 @@ scripts/backup/dump-databases.sh
 `app-prod` (or one, with `--only data-plane`) as `<name>.pre-<UTC stamp>-<reason>`, logs it to
 `~/.local/state/econgraph/snapshots.log`, and needs no sudo. Postgres keeps
 running. The next hourly run copies it to the backup pool with the others.
-Like every snapshot it is kept until Joe deletes it by hand.
+Like every snapshot it is kept until the operator deletes it by hand.
 
 ## Nightly dumps
 
@@ -383,7 +383,7 @@ is set aside, not deleted.
    skipping this starts Postgres on the old data. Wait for the node to be
    `Ready` (`k get nodes`) before the next step.
 5. Scale Postgres back to 1, check the data, then the backend and crawler.
-6. The set-aside subvolume stays until Joe deletes it by hand
+6. The set-aside subvolume stays until the operator deletes it by hand
    (`sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`).
    To undo the restore instead, it is the old data.
 
@@ -453,7 +453,7 @@ refusals are tested by `scripts/backup/test-branch-clone.sh` (in CI).
 `econ_graph` nightly at 08:00 UTC to the `postgres-backup-data` PVC and
 verifies each dump. Like everything in this runbook it deletes nothing:
 it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and
-[#427](https://github.com/EconGraph/econ-graph/pull/427) removed that, so its dumps stay until Joe removes them by hand
+[#427](https://github.com/EconGraph/econ-graph/pull/427) removed that, so its dumps stay until the operator removes them by hand
 (`POSTGRES_BACKUP_RESTORE.md` says how). It is kept for now as an
 independent second copy while the host-side dumps prove themselves. It is
 not pointed at the new layout because:
@@ -523,7 +523,7 @@ Consequences:
   (`/srv/econgraph-backups/snapshots`, root-only, mode 0700) and the
   off-site copy are the ones that account can't reach.
 
-## Needs sudo (Joe)
+## Needs sudo
 
 Each step is one checked-in script; run with `--dry-run` first. In order:
 
@@ -540,7 +540,7 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    `/etc/systemd/system/econgraph-backup-snapshots.service` and `.timer`
    (`ON_CALENDAR="hourly"` at the top of the installer), enables the timer,
    and with `--run-now` takes the first snapshots immediately. No packages
-   are installed. Running the installer is Joe's approval of the timer.
+   are installed. Running the installer is the maintainer's approval of the timer.
    Re-run it after merging changes to `backup-snapshots.sh`. Needs step 1.
 3. **Set up the backup subvolume on the 870 pool**:
    `sudo scripts/host/setup-backup-pool.sh --dry-run`, then without
