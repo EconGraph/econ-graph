@@ -277,11 +277,10 @@ CREATE TRIGGER update_data_sources_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Datasets: groups of related series that share a schema (SDMX-style dimensions, measures and
--- attributes). See the federation design record in Linear, "Data model: datasets and series":
--- https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d
+-- attributes). See docs/roadmap/federation.md, "Data model: datasets and series".
 --
--- Observations stay in data_points. Every dataset is stored long: each measure is its own
--- series, so default_measure is 'value'.
+-- Observations stay in data_points. In train 1 every dataset is stored long: each measure is
+-- its own series, so default_measure is 'value' until wide datasets arrive with Iceberg.
 CREATE TABLE datasets (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     source_id UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
