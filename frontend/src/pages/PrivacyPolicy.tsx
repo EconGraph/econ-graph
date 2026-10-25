@@ -359,7 +359,7 @@ const PrivacyPolicy: React.FC = () => {
         <Accordion key={section.title} defaultExpanded={index === 0} sx={{ mb: 2 }}>
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box component='span' sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              <Box component='span' sx={{ color: 'primary.main', mr: 2 }}>
+              <Box component='span' sx={{ display: 'flex', color: 'primary.main', mr: 2 }}>
                 {section.icon}
               </Box>
               <Typography component='span' variant='h6'>
