@@ -13,7 +13,10 @@ data:
   # Backend configuration (credentials, including DATABASE_URL, live in the
   # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh)
   RUST_LOG: "info"
-  CORS_ORIGIN: "http://localhost:3000"
+  # Browsers send Origin on same-origin POSTs too, and the backend refuses any origin not
+  # listed, so the origin the app is served from (http://localhost on the kind ingress) must
+  # be here. deploy.sh prepends https://<PUBLIC_HOST> when one is set.
+  CORS_ORIGIN: "http://localhost,http://localhost:3000"
 
   # Chart API Service configuration
   CHART_API_SERVICE_URL: "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart"

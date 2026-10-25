@@ -17,6 +17,13 @@ This script will:
 - ✅ Wait for rollout completion
 - ✅ Display deployment status
 
+On a cluster that serves the public site, give the same `PUBLIC_HOST` as
+`deploy.sh` (`PUBLIC_HOST=econgraph.com ./scripts/deploy/restart-k8s-rollout.sh`).
+Both scripts apply the manifests through `scripts/deploy/lib/public-host.sh`, and both
+stop when the cluster serves a public host and `PUBLIC_HOST` is unset, rather than
+putting Keycloak and the backend back on localhost. `PUBLIC_HOST=` (empty) removes the
+public host. See "Public site" in `k8s/README.md`.
+
 ---
 
 ## 🔄 **Manual Restart Commands**

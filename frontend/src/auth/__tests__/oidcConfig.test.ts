@@ -28,6 +28,26 @@ describe('readOidcConfig', () => {
     });
   });
 
+  it('resolves a path-only issuer against the page origin, so one build serves any host', () => {
+    expect(
+      readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph/' }, 'https://econgraph.com')
+    ).toEqual({ issuer: 'https://econgraph.com/idp/realms/econ-graph', clientId: 'econ-graph-web' });
+    expect(readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, 'http://localhost')).toEqual(
+      { issuer: 'http://localhost/idp/realms/econ-graph', clientId: 'econ-graph-web' }
+    );
+  });
+
+  it('leaves an absolute issuer alone whatever the origin', () => {
+    expect(
+      readOidcConfig({ VITE_OIDC_ISSUER: 'https://kc.test/realms/x' }, 'https://econgraph.com')
+    ).toEqual({ issuer: 'https://kc.test/realms/x', clientId: 'econ-graph-web' });
+  });
+
+  it('disables sign-in when a path-only issuer has no origin to resolve against', () => {
+    expect(readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, null)).toBeNull();
+    expect(readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, 'null')).toBeNull();
+  });
+
   it('uses a configured client id', () => {
     expect(
       readOidcConfig({ VITE_OIDC_ISSUER: 'https://kc.test/realms/x', VITE_OIDC_CLIENT_ID: 'web2' })
