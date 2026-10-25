@@ -57,7 +57,7 @@ const useFinancialDashboardData = (companyId: string) => {
       if (result.errors) {
         throw new Error(result.errors[0].message);
       }
-      return result.data.company ?? null;
+      return result.data.company;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes

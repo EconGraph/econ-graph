@@ -62,7 +62,7 @@ const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
         query: GET_PEER_COMPANIES,
         variables: { companyId: company.id },
       });
-      return result.data ?? null;
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });

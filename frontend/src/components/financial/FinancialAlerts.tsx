@@ -342,7 +342,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
         query: GET_FINANCIAL_ALERTS,
         variables: { companyId },
       });
-      return result.data ?? null;
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });

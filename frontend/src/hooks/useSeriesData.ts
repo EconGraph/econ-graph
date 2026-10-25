@@ -341,8 +341,6 @@ export const useCrawlerStatus = (enabled = true) => {
     },
     enabled,
     staleTime: 1 * 60 * 1000, // 1 minute
-
-    // Refetch every 30 seconds
-    refetchInterval: 30 * 1000,
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds
   });
 };

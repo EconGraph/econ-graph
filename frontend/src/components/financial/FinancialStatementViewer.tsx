@@ -46,7 +46,7 @@ const useFinancialStatementQuery = (statementId: string) => {
         query: GET_FINANCIAL_STATEMENT,
         variables: { statementId },
       });
-      return result.data ?? null;
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -65,7 +65,7 @@ const financialAnnotationsQuery = (statementId: string) =>
         query: GET_FINANCIAL_ANNOTATIONS,
         variables: { statementId },
       });
-      return result.data ?? null;
+      return result.data;
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -122,7 +122,7 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
         query: GET_FINANCIAL_RATIOS,
         variables: { statementId },
       });
-      return result.data ?? null;
+      return result.data;
     },
     enabled: showRatios,
     staleTime: 5 * 60 * 1000,

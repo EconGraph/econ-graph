@@ -60,7 +60,7 @@ const RatioAnalysisPanelContent: React.FC<RatioAnalysisPanelProps> = ({
         query: GET_FINANCIAL_RATIOS,
         variables: { statementId },
       });
-      return result.data ?? null;
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
