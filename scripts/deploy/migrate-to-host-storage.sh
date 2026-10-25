@@ -333,18 +333,25 @@ rollback() {
     else
         run git -C "${PROJECT_ROOT}" worktree add -q --detach "$src" "${REF}"
     fi
-    local config="$src/terraform/k8s/kind-config.yaml"
+    local config="$src/terraform/k8s/kind-config.yaml" config_from_ref="false"
     if [ "${DRY_RUN}" = "true" ] && [ ! -d "$src" ]; then
-        config="${ECONGRAPH_CACHE}/rollback-kind-config.yaml"
-        mkdir -p "${ECONGRAPH_CACHE}"
-        git -C "${PROJECT_ROOT}" show "${REF}:terraform/k8s/kind-config.yaml" >"$config"
+        # No worktree in a dry run: print the ref's kind config and hand it
+        # to recreate-kind-cluster.sh through a pipe, never through a file.
+        config_from_ref="true"
+        echo "  kind config of ${REF} (terraform/k8s/kind-config.yaml, not written to disk):"
+        git -C "${PROJECT_ROOT}" show "${REF}:terraform/k8s/kind-config.yaml" | sed 's/^/    | /'
     fi
     # A rollback always replaces the cluster; the backup above (or the one
     # given) is what gets restored.
     if kind_cluster_exists; then
         confirm "About to DELETE kind cluster '${KIND_CLUSTER}' for the rollback."
     fi
-    recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
+    if [ "$config_from_ref" = "true" ]; then
+        recreate_cluster --yes --no-backup \
+            --config <(git -C "${PROJECT_ROOT}" show "${REF}:terraform/k8s/kind-config.yaml") "${common_flags[@]}"
+    else
+        recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
+    fi
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
     load_local_images
     bootstrap_databases "$src" "${BACKUP_DIR}"

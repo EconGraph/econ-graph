@@ -56,7 +56,10 @@ while [ $# -gt 0 ]; do
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
-[ -f "$CONFIG" ] || die "kind config $CONFIG not found"
+# Read once, so --config may also be a pipe (a dry run passes the config of
+# another ref that way, without writing it to disk).
+[ -r "$CONFIG" ] || die "kind config $CONFIG not found"
+config_text="$(cat "$CONFIG")"
 KIND_KUBECONFIG="${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}"
 [ "${DRY_RUN}" = "true" ] && log "DRY RUN: checks run for real; nothing is changed"
 
@@ -67,7 +70,7 @@ check_docker_daemon
 # kind would fail half-way (or, for a missing mount under an existing
 # directory, bind an empty directory and Postgres would refuse to start).
 # (grep, not yq: this host's yq is the jq-based one, other machines have the Go one.)
-mounts="$(grep -E '"?hostPath"?:' "$CONFIG" | sed -E 's/.*hostPath"?:[[:blank:]]*"?([^"]*)"?.*/\1/' || true)"
+mounts="$(grep -E '"?hostPath"?:' <<<"$config_text" | sed -E 's/.*hostPath"?:[[:blank:]]*"?([^"]*)"?.*/\1/' || true)"
 if [ -n "$mounts" ]; then
     log "Checking the host directories the kind config bind-mounts"
     if [ "$CONFIG" = "${PROJECT_ROOT}/terraform/k8s/kind-config.yaml" ]; then
@@ -80,7 +83,7 @@ if [ -n "$mounts" ]; then
 fi
 
 # kind's node containers publish these host ports (extraPortMappings).
-host_ports="$(grep -E '"?hostPort"?:' "$CONFIG" | grep -oE '[0-9]+' || true)"
+host_ports="$(grep -E '"?hostPort"?:' <<<"$config_text" | grep -oE '[0-9]+' || true)"
 ports_in_use() {
     local p used=""
     for p in $host_ports; do
