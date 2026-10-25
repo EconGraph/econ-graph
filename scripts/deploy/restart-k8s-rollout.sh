@@ -38,22 +38,6 @@ else
     echo "⚠️  Grafana dashboard linter not found, skipping..."
 fi
 
-# Run monitoring stack linter (if available)
-if [ -f "scripts/test-monitoring.sh" ]; then
-    echo "🔧 Running monitoring stack linter..."
-    # Only run the linter part, not the full integration test
-    if ./scripts/test-monitoring.sh --lint-only 2>/dev/null || echo "⚠️  Monitoring linter not available, continuing..."; then
-        echo "✅ Monitoring stack linter passed"
-    else
-        echo "⚠️  Monitoring stack linter not available, continuing..."
-    fi
-    echo ""
-else
-    echo "⚠️  Monitoring stack linter not found, skipping..."
-fi
-
-echo "✅ All linter checks passed - proceeding with deployment"
-echo ""
 
 # Load port configuration
 if [ -f "ports.env" ]; then
@@ -109,6 +93,16 @@ if ! cluster_role_use_context microk8s; then
     exit 1
 fi
 kubectl() { kc "$@"; }
+
+# Monitoring stack linter: static checks only (--lint-only contacts no cluster),
+# run once the context is set. A failure stops the rollout.
+echo "🔧 Running monitoring stack linter..."
+if ! ./scripts/test-monitoring.sh --lint-only; then
+    echo "❌ Monitoring stack linter failed - aborting"
+    exit 1
+fi
+echo "✅ All linter checks passed - proceeding with deployment"
+echo ""
 
 # Rebuild Docker images with new version tag
 echo "🏗️  Building Docker images for ${VERSION}..."

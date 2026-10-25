@@ -1,11 +1,93 @@
 #!/bin/bash
 
-# Automated test for Loki/Grafana monitoring stack
-# This script tests the complete log collection and query pipeline
+# Automated test for the Loki/Grafana monitoring stack.
+#
+# Usage:
+#   scripts/test-monitoring.sh --lint-only
+#       Static checks only: the monitoring manifests in k8s/monitoring/ parse
+#       and define Loki, Promtail and Grafana, and the dashboards in
+#       grafana-dashboards/ are valid JSON. Contacts no cluster and no network;
+#       deploy.sh runs this.
+#   scripts/test-monitoring.sh
+#       The full test of the log collection and query pipeline against the
+#       kind cluster KIND_CLUSTER (default econ-graph): pods, Promtail and Loki
+#       metrics, Loki queries, Grafana dashboards. It may restart the Loki
+#       Deployment to force a flush. Every kubectl call uses the cluster's own
+#       kubectl (scripts/deploy/lib/kind-env.sh) with --context kind-<cluster>.
 
 set -e
 
-echo "🧪 Starting Loki/Grafana Monitoring Stack Test"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+MODE=full
+case "${1:-}" in
+    "") ;;
+    --lint-only) MODE=lint ;;
+    -h | --help) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "usage: $0 [--lint-only]" >&2; exit 2 ;;
+esac
+
+# Static checks of the monitoring manifests and dashboards. Reads files only.
+lint_monitoring() {
+    echo "🔎 Linting the monitoring manifests and dashboards (no cluster contact)"
+    python3 - "$PROJECT_ROOT" <<'PY'
+import glob, json, os, sys
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("python3-yaml is needed for --lint-only")
+
+root = sys.argv[1]
+failed = False
+workloads = {}
+for path in sorted(glob.glob(os.path.join(root, "k8s/monitoring/*.yaml"))):
+    try:
+        with open(path) as f:
+            docs = [d for d in yaml.safe_load_all(f) if d]
+    except yaml.YAMLError as e:
+        print(f"  FAIL {os.path.relpath(path, root)}: {e}")
+        failed = True
+        continue
+    for d in docs:
+        if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet"):
+            workloads[d["metadata"]["name"]] = d["kind"]
+    print(f"  ok   {os.path.relpath(path, root)} ({len(docs)} documents)")
+for name in ("loki", "promtail", "grafana"):
+    if name in workloads:
+        print(f"  ok   {name} is a {workloads[name]}")
+    else:
+        print(f"  FAIL no Deployment, StatefulSet or DaemonSet named {name} in k8s/monitoring/")
+        failed = True
+for path in sorted(glob.glob(os.path.join(root, "grafana-dashboards/*.json"))):
+    try:
+        with open(path) as f:
+            json.load(f)
+        print(f"  ok   {os.path.relpath(path, root)}")
+    except ValueError as e:
+        print(f"  FAIL {os.path.relpath(path, root)}: {e}")
+        failed = True
+sys.exit(1 if failed else 0)
+PY
+}
+
+if [ "$MODE" = lint ]; then
+    lint_monitoring
+    echo "✅ Monitoring lint passed"
+    exit 0
+fi
+
+# Full mode: the kind cluster's own kubectl and kubeconfig, and an explicit
+# context on every call, never whatever plain `kubectl` points at.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+ensure_kind_kubectl
+KIND_KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+KIND_CONTEXT="kind-${KIND_CLUSTER}"
+[ -x "$KIND_KUBECTL" ] || die "the kind cluster's kubectl is not at $KIND_KUBECTL"
+kube() { "$KIND_KUBECTL" --kubeconfig "$KUBECONFIG" --context "$KIND_CONTEXT" "$@"; }
+
+echo "🧪 Starting Loki/Grafana Monitoring Stack Test (context $KIND_CONTEXT)"
 echo "=============================================="
 
 # Colors for output
@@ -21,7 +103,7 @@ TEST_EMAIL="monitoring-test-$(date +%s)@example.com"
 TEST_NAME="Monitoring Test User"
 BACKEND_URL="http://localhost:30080"
 # Grafana is ClusterIP-only; run
-# `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
+# `kubectl --context kind-econ-graph port-forward service/grafana-service 3000:3000 -n econ-graph`
 # in another shell first, or set GRAFANA_URL to wherever you've forwarded it.
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 LOKI_URL="http://localhost:3100"
@@ -74,7 +156,7 @@ check_pod_status() {
 
     print_status "INFO" "Checking pod status for: $pod_pattern"
 
-    local pods=$(kubectl get pods -n $NAMESPACE | grep "$pod_pattern" | awk '{print $1 " " $3}')
+    local pods=$(kube get pods -n $NAMESPACE | grep "$pod_pattern" | awk '{print $1 " " $3}')
 
     if [ -z "$pods" ]; then
         print_status "ERROR" "No pods found matching pattern: $pod_pattern"
@@ -96,7 +178,7 @@ check_grafana_uniqueness() {
     print_status "INFO" "Checking Grafana instance uniqueness..."
 
     # Count Grafana pods
-    local grafana_pods=$(kubectl get pods -n $NAMESPACE -l app=grafana --no-headers | wc -l)
+    local grafana_pods=$(kube get pods -n $NAMESPACE -l app=grafana --no-headers | wc -l)
 
     if [ "$grafana_pods" -eq 0 ]; then
         print_status "ERROR" "No Grafana pods found"
@@ -136,7 +218,7 @@ check_promtail_metrics() {
     print_status "INFO" "Checking Promtail metrics..."
 
     # Get Promtail pod name
-    local promtail_pod=$(kubectl get pods -n $NAMESPACE | grep promtail | head -1 | awk '{print $1}')
+    local promtail_pod=$(kube get pods -n $NAMESPACE | grep promtail | head -1 | awk '{print $1}')
 
     if [ -z "$promtail_pod" ]; then
         print_status "ERROR" "No Promtail pod found"
@@ -144,7 +226,7 @@ check_promtail_metrics() {
     fi
 
     # Port forward to Promtail metrics
-    kubectl port-forward -n $NAMESPACE "$promtail_pod" 9080:9080 > /dev/null 2>&1 &
+    kube port-forward -n $NAMESPACE "$promtail_pod" 9080:9080 > /dev/null 2>&1 &
     local port_forward_pid=$!
     sleep 3
 
@@ -168,7 +250,7 @@ check_loki_metrics() {
     print_status "INFO" "Checking Loki metrics..."
 
     # Port forward to Loki metrics
-    kubectl port-forward -n $NAMESPACE deployment/loki 3100:3100 > /dev/null 2>&1 &
+    kube port-forward -n $NAMESPACE deployment/loki 3100:3100 > /dev/null 2>&1 &
     local port_forward_pid=$!
     sleep 3
 
@@ -196,7 +278,7 @@ test_loki_queries() {
     print_status "INFO" "Testing Loki queries..."
 
     # Port forward to Loki
-    kubectl port-forward -n $NAMESPACE deployment/loki 3100:3100 > /dev/null 2>&1 &
+    kube port-forward -n $NAMESPACE deployment/loki 3100:3100 > /dev/null 2>&1 &
     local port_forward_pid=$!
     sleep 3
 
@@ -289,7 +371,7 @@ authenticate_grafana() {
     local grafana_password="${GRAFANA_ADMIN_PASSWORD:-}"
     if [ -z "$grafana_password" ]; then
         local encoded_password
-        if ! encoded_password=$(kubectl -n econ-graph get secret grafana-admin \
+        if ! encoded_password=$(kube -n econ-graph get secret grafana-admin \
             -o jsonpath='{.data.admin-password}' 2>/dev/null); then
             print_status "ERROR" "Could not read Grafana admin password from Secret grafana-admin"
             return 1
@@ -651,7 +733,7 @@ test_grafana_dashboard_data() {
 force_loki_flush() {
     print_status "INFO" "Forcing Loki flush by restarting..."
 
-    kubectl rollout restart deployment/loki -n $NAMESPACE
+    kube rollout restart deployment/loki -n $NAMESPACE
     sleep 30
 
     print_status "SUCCESS" "Loki restart completed"
@@ -678,13 +760,13 @@ main() {
     # Step 2: Wait for services
     print_status "INFO" "Step 2: Waiting for services to be ready"
     # Only wait for Backend if the deployment exists (first run may not have backend yet)
-    if kubectl get deployment econ-graph-backend -n $NAMESPACE >/dev/null 2>&1; then
+    if kube get deployment econ-graph-backend -n $NAMESPACE >/dev/null 2>&1; then
         wait_for_service "Backend" "$BACKEND_URL" || exit 1
     else
         print_status "INFO" "Backend deployment not found yet; skipping backend readiness wait"
     fi
     # Grafana is ClusterIP-only; run
-    # `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
+    # `kubectl --context kind-econ-graph port-forward service/grafana-service 3000:3000 -n econ-graph`
     # in another shell before this script, or this wait will time out.
     wait_for_service "Grafana" "$GRAFANA_URL" || exit 1
     echo
