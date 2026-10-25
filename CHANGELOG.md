@@ -61,7 +61,7 @@ All notable changes to EconGraph are documented here. The format follows
 ## [4.0.0] - 2026-10-08
 
 Train 1: broad real data behind pages that work. See
-[the train 1 roadmap](docs/roadmap/releases.md) for the full scope and what was deliberately
+[the train 1 roadmap](https://linear.app/econgraph/document/release-trains-design-record-from-docsroadmapreleasesmd-9cdc19709b73) for the full scope and what was deliberately
 left for later trains.
 
 ### Added

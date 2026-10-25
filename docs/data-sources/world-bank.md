@@ -35,9 +35,9 @@ About 50 curated World Development Indicators, listed in
   aggregates into the `wdi` dataset's `area` dimension codes; the API prefers them to the
   shared list, so countries keep their ISO names. Series titles name an aggregate by the
   `country.value` its data rows carry. World Bank regions and income levels are in the same
-  response but not stored yet.
-- **Dropped**: `obs_status` and `decimal` — `data_points` has no attribute columns in train
-  1 (the dataset still declares them, for the schema). WDI leaves `obs_status` empty for
+  response but not stored.
+- **Dropped**: `obs_status` and `decimal` — `data_points` has no attribute columns
+  (the dataset still declares them, for the schema). WDI leaves `obs_status` empty for
   nearly every row. Rows for an area outside the shared country table (regional aggregates
   not in it, the Channel Islands) are skipped, with one warning per request.
 
@@ -96,7 +96,3 @@ One dataset for WDI, already in effect (`data/datasets/world_bank.toml`):
 | Measures | `value` (decimal) |
 | Attributes | `obs_status` (string), `decimal` (small int) — declared, not yet populated |
 | Shape | long, `revision_date` = `lastupdated` of the edition |
-
-Covering all of WDI's roughly 1,400 indicators instead of the curated ~50 would multiply
-series count toward 300,000 — the federation roadmap's "many small files" case, and a good
-test for partitioning by `identity(series_id)` if WDI's scope grows past train 1.

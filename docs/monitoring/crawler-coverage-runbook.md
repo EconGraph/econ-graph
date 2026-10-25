@@ -1,7 +1,8 @@
 # Crawler coverage and freshness runbook
 
-Release 1 exit criteria 2 and 3 say that each source has data for at least 95% of its
-series, and that scheduled refresh keeps the series fresh. This page covers the command
+The release checks require that each source has data for at least 95% of its series, and
+that scheduled refresh keeps the series fresh (exit criteria 2 and 3 in
+[ECO-5](https://linear.app/econgraph/issue/ECO-5)). This page covers the command
 that reports both, the metrics and alerts behind them, and how QA forces each alert.
 
 ## `crawler coverage`
@@ -58,10 +59,6 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 | `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes |
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
 | `CrawlerCoverageStale` | The worker runs but the coverage gauges haven't been refreshed for 15 minutes, for 30 minutes |
-
-Until the scheduler also fetches series that discovery found but nobody enqueued (release 1
-item DATA-13), those series count as discovered without data. `CrawlerCoverageLow` then
-fires even though nothing regressed; `crawler coverage` shows the gap.
 
 A series is overdue as soon as it misses twice its interval. The scheduler retries a failed
 series only after twice its interval, so a single failed refresh makes it overdue, and
@@ -129,8 +126,8 @@ If the scheduler keeps running, it re-crawls the backdated series on its next ti
 
 ### Low coverage
 
-FRED may already be under 95% (see the DATA-13 note above); check `crawler coverage` first.
-Otherwise insert catalog rows that are never fetched: `N` = a tenth of FRED's `DISCOVERED`
+Check `crawler coverage` first: a source already under 95% fires the alert without this
+step. Otherwise insert catalog rows that are never fetched: `N` = a tenth of FRED's `DISCOVERED`
 from `crawler coverage` (at least 1000), which takes a source at 100% below 95%:
 
 ```sh

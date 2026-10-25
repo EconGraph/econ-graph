@@ -172,20 +172,6 @@ The Storybook configuration includes Vite customization to handle:
 4. Test with `npm run build-storybook` first
 5. Check CI logs for specific error messages
 
-## Future Enhancements
-
-### Planned Features
-- **Visual Regression Testing**: Screenshot comparison
-- **Accessibility Testing**: Automated a11y checks
-- **Performance Testing**: Component performance metrics
-- **Cross-Browser Testing**: Multiple browser support
-
-### Integration Improvements
-- **E2E Test Integration**: Connect with Playwright E2E tests
-- **Component Documentation**: Auto-generated docs
-- **Design System**: Component library organization
-- **Testing Utilities**: Shared testing helpers
-
 ## Related Documentation
 
 - [Frontend Summary](../../docs/technical/FRONTEND_SUMMARY.md)

@@ -90,7 +90,7 @@
 //! `is_original_release` is `true`, as for the other sources without vintage history. `since` is
 //! ignored: the full history comes in the same single request, and returning all of it keeps
 //! revisions to old years. The row's `obs_status` and `decimal` are dropped: `data_points` has no
-//! attribute columns in train 1 (the dataset still declares them, for the schema). WDI leaves
+//! attribute columns (the dataset still declares them, for the schema). WDI leaves
 //! `obs_status` empty for nearly every row.
 //!
 //! # Re-crawls

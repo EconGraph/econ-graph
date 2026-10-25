@@ -315,7 +315,7 @@ impl diesel::Queryable<sql_types::AnnotationStatus, Pg> for AnnotationStatus {
 }
 
 /// Visibility of a chart annotation: public annotations are visible to everyone, private
-/// ones only to their author. Two values only in train 1; no "unlisted" or similar.
+/// ones only to their author. There are two values only; no "unlisted" or similar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
 #[diesel(sql_type = sql_types::AnnotationVisibility)]
 pub enum AnnotationVisibility {

@@ -290,24 +290,3 @@ Run tests with verbose output for debugging:
 cargo test -- --nocapture --test-threads=1
 npm test -- --verbose
 ```
-
-## Future Enhancements
-
-### Planned Test Additions
-- Multi-company comparison tests
-- Historical data trend analysis tests
-- Real-time data update tests
-- Cross-browser compatibility tests
-- Mobile responsiveness tests
-
-### Performance Testing
-- Load testing with large datasets
-- Stress testing with concurrent users
-- Memory leak detection
-- Database performance optimization
-
-### Security Testing
-- XBRL document validation
-- SQL injection prevention
-- XSS protection
-- API security validation

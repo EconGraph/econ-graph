@@ -1,5 +1,6 @@
 # World Development Indicators the World Bank adapter crawls: one request per indicator for all
-# countries and aggregates. Curated per docs/roadmap/global-analysis.md, decision 8.
+# countries and aggregates. Curated per decision 8 of the global analysis design record
+# (https://linear.app/econgraph/document/global-analysis-roadmap-design-record-from-docsroadmapglobal-d2b43004c9dd).
 # `unit` becomes each series' units (the API's own `unit` field is almost always empty).
 # Names and descriptions are not shipped here: the crawler fetches them from the World
 # Bank's own /indicator/{id} endpoint on each crawl (see sources/world_bank.rs).

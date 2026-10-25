@@ -2,15 +2,12 @@
 
 Welcome to the comprehensive documentation for EconGraph - the economic data visualization platform.
 
-## 🗺️ Roadmap
-
-**[Roadmap index](./roadmap/README.md)** - Current topic roadmaps, what is built today, open work, and the status of every older plan doc
+These docs describe the product as it is on this branch. Roadmaps, plans and their status
+live in [Linear](https://linear.app/econgraph).
 
 ## 📖 Documentation Structure
 
 ### 🏢 [Business Documentation](./business/)
-- **[Investor Pitch](./business/INVESTOR_PITCH.md)** - Complete investor presentation and business case
-- **[Product Roadmap](./business/ROADMAP.md)** - Product feature phases (see the [roadmap index](./roadmap/README.md) for current status)
 - **[Privacy Policy](./business/PRIVACY_POLICY.md)** - Data privacy and protection policies
 
 ### 🔧 [Technical Documentation](./technical/)
@@ -21,7 +18,6 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[MCP CI Pipeline](./technical/MCP_CI_PIPELINE.md)** - CI/CD pipeline for MCP server
 - **[Global Analysis Architecture](./technical/GLOBAL_ANALYSIS_ARCHITECTURE.md)** - Technical architecture for global analysis features
 - **[Global Analysis Features](./technical/GLOBAL_ANALYSIS_FEATURES.md)** - Comprehensive feature documentation for global analysis
-- **[Global Analysis API](./technical/GLOBAL_ANALYSIS_API.md)** - API documentation for global analysis endpoints
 
 #### Backend Technical Docs
 - **[BLS API Experimental Findings](./technical/BLS_API_EXPERIMENTAL_FINDINGS.md)** - Bureau of Labor Statistics API research
@@ -43,7 +39,6 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[Pre-commit Setup](./development/PRECOMMIT_SETUP.md)** - Pre-commit hooks configuration
 - **[CI/CD Pipeline](./development/CI_CD_PIPELINE.md)** - Continuous integration and deployment
 - **[CI Optimization Notes](./development/CI_OPTIMIZATION_NOTES.md)** - CI performance optimization
-- **[Global Analysis Roadmap](./development/GLOBAL_ANALYSIS_ROADMAP.md)** - Comprehensive global analysis feature roadmap
 
 ### 🔌 [API Documentation](./api/)
 - **[GraphQL API](./api/GRAPHQL_API.md)** - GraphQL API reference and schema
@@ -57,7 +52,7 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[Grafana Dashboards](./monitoring/README.md)** - Grafana dashboard documentation
 
 ### 👥 [User Guides](./user-guides/)
-- **[Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)** - Comprehensive user guide for global analysis features
+- **[Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)** - Using the world map
 
 ## 🎯 Quick Navigation
 
@@ -70,38 +65,23 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - See [Deployment Documentation](./deployment/) for deployment procedures
 - Check [Monitoring Documentation](./monitoring/) for observability setup
 
-### For Business/Investors
-- Review [Business Documentation](./business/) for business case and roadmap
-- Check [Investor Pitch](./business/INVESTOR_PITCH.md) for investment details
-
 ### For API Users
 - See [API Documentation](./api/) for GraphQL API reference
-- Check [Global Analysis API](./technical/GLOBAL_ANALYSIS_API.md) for global analysis endpoints
 
 ### For End Users
 - Start with [User Guides](./user-guides/) for feature usage
-- Check [Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md) for interactive map features
+- Check [Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md) for the world map
 
 ### For Security
 - Review the [Security Assessment Report](./security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md) for vulnerability analysis
-- See [Security Implementation Plan](./projects/SECURITY_IMPLEMENTATION_PLAN.md) for remediation strategy
 - Check [Admin Security](./technical/ADMIN_SECURITY.md) for admin interface security
 
 ## 🔐 Secrets Management
 
-> **Warning:** the setup below is planned, not in place. The `k8s/secrets` submodule is
-> not initialized, and the current Kubernetes manifests still contain plaintext
-> credentials. See [Security](./roadmap/README.md#security) in the roadmap index.
+Kubernetes credentials are Secrets created by `scripts/deploy/create-secrets.sh`, which
+`scripts/deploy/deploy.sh` runs on every deploy. No credential is committed to the repository.
 
-The planned secrets management approach:
-
-- **Secrets Repository**: Private repository at `https://github.com/jmalicki/econ-graph-secrets`
-- **Encryption Method**: Bitnami Sealed Secrets for Kubernetes
-- **Access Control**: Private repository with team-based permissions
-- **Integration**: Git submodule in `k8s/secrets/` directory
-- **Deployment**: To be integrated with the deployment scripts in `scripts/deploy/`
-
-For more details, see the [Security Implementation Plan](./projects/SECURITY_IMPLEMENTATION_PLAN.md).
+The `k8s/secrets` submodule is registered in `.gitmodules` but not initialized.
 
 ## 📝 Contributing to Documentation
 

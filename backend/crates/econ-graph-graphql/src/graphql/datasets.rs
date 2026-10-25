@@ -1,7 +1,8 @@
 //! # Dataset GraphQL types and loaders
 //!
 //! Datasets group series that share a schema (SDMX-style dimensions, measures and attributes).
-//! See `docs/roadmap/federation.md`, "Data model: datasets and series".
+//! See the federation design record, "Data model: datasets and series":
+//! <https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d>.
 //!
 //! Clients use these types to:
 //! - list a source's datasets and their dimension definitions, with code labels, for pickers
@@ -250,7 +251,7 @@ impl DatasetType {
         components(&self.0.dimensions.0)
     }
 
-    /// Observed values. In train 1 every dataset has the single measure `value`.
+    /// Observed values. Datasets the crawler writes have the single measure `value`.
     async fn measures(&self) -> Vec<DatasetComponentType> {
         components(&self.0.measures.0)
     }

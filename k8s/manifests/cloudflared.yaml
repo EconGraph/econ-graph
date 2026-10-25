@@ -41,7 +41,7 @@ metadata:
     component: tunnel
 spec:
   # One replica while the cluster has one worker node. Once it is multi-node
-  # (train 4, ECO-434), go to 2+ replicas with the pod anti-affinity below
+  # (ECO-434), go to 2+ replicas with the pod anti-affinity below
   # uncommented: every replica registers its own connections for the same
   # tunnel, so losing a node does not take the site down.
   replicas: 1
