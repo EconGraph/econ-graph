@@ -15,13 +15,17 @@ use warp::{Filter, Reply as _};
 // Import from our new crates
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
-    config::{backend_database_urls, backend_pool_sizes, BackendDatabaseUrls, BackendPoolSizes},
+    config::{
+        backend_database_urls, backend_pool_sizes, data_graphql_config, BackendDatabaseUrls,
+        BackendPoolSizes, DataGraphqlConfig,
+    },
     create_pool_with_size,
     database::{readiness_check_set, run_migration_set, MigrationSet},
     models::admin::{ClientInfo, NewSecurityEvent},
     redact_database_url, AppError, AppPool, AppResult, Config, DataPool,
 };
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
+use econ_graph_services::services::series_check::DataPlaneClient;
 
 #[cfg(test)]
 mod databases_tests;
@@ -126,8 +130,7 @@ impl Databases {
             }
             None => {
                 tracing::warn!(
-                    "DATA_DATABASE_URL is not set: data fields answer DATA_SERVED_REMOTELY, and \
-                     createAnnotation does not check that the series exists"
+                    "DATA_DATABASE_URL is not set: data fields answer DATA_SERVED_REMOTELY"
                 );
                 None
             }
@@ -170,6 +173,45 @@ impl Databases {
         tokio::time::timeout(READINESS_TIMEOUT, check)
             .await
             .unwrap_or(DataReadiness::Unreachable)
+    }
+}
+
+/// Where `createAnnotation` checks that a new annotation's series exists, logged in one line at
+/// startup: in the data database when the backend has one; otherwise through the data plane at
+/// `DATA_GRAPHQL_URL` (the returned client); otherwise not at all.
+fn data_plane_for_series_check(
+    has_data_database: bool,
+    config: Option<DataGraphqlConfig>,
+) -> AppResult<Option<Arc<DataPlaneClient>>> {
+    match (has_data_database, config) {
+        (true, config) => {
+            info!(
+                "🔎 createAnnotation checks series in the data database{}",
+                if config.is_some() {
+                    " (DATA_GRAPHQL_URL is not used)"
+                } else {
+                    ""
+                }
+            );
+            Ok(None)
+        }
+        (false, Some(config)) => {
+            let client = DataPlaneClient::new(&config)?;
+            info!(
+                "🔎 createAnnotation checks series through the data plane at {} (Host: {}, timeout {:?})",
+                client.log_url(),
+                client.host().unwrap_or("from the URL"),
+                client.timeout()
+            );
+            Ok(Some(Arc::new(client)))
+        }
+        (false, None) => {
+            tracing::warn!(
+                "Neither DATA_DATABASE_URL nor DATA_GRAPHQL_URL is set: createAnnotation does not \
+                 check that the series exists"
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -745,8 +787,12 @@ async fn graphql_body_too_large(
 /// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
 /// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
 /// the frontend, not this process).
+///
+/// `data_plane` is where `createAnnotation` checks series when there is no data database
+/// (see [`data_plane_for_series_check`]).
 fn build_routes(
     databases: Databases,
+    data_plane: Option<Arc<DataPlaneClient>>,
     schema: async_graphql::Schema<
         econ_graph_graphql::graphql::query::Query,
         econ_graph_graphql::graphql::mutation::Mutation,
@@ -760,6 +806,7 @@ fn build_routes(
 
     // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
     let databases_for_graphql = databases.clone();
+    let data_plane_for_graphql = data_plane;
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
         .and(warp::header::headers_cloned())
@@ -777,6 +824,7 @@ fn build_routes(
                 async_graphql::Request,
             )| {
                 let databases = databases_for_graphql.clone();
+                let data_plane = data_plane_for_graphql.clone();
                 let verifier = verifier_for_graphql.clone();
                 async move {
                     let client = client_info(peer, &headers);
@@ -796,11 +844,13 @@ fn build_routes(
                         econ_graph_graphql::graphql::context::GraphQLContext::new(caller)
                             .with_client(client),
                     );
-                    let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        databases.app,
-                        databases.data,
-                        auth_context,
-                    );
+                    let auth_schema =
+                        econ_graph_graphql::graphql::schema::create_schema_with_data_plane(
+                            databases.app,
+                            databases.data,
+                            data_plane,
+                            auth_context,
+                        );
 
                     Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
                 }
@@ -973,6 +1023,13 @@ async fn main() -> AppResult<()> {
         eprintln!("❌ {}", e);
         error
     })?;
+    // DATA_GRAPHQL_URL (with DATA_GRAPHQL_HOST and DATA_GRAPHQL_TIMEOUT_MS) is optional.
+    let data_graphql = data_graphql_config().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup data plane configuration");
+        eprintln!("❌ {}", e);
+        error
+    })?;
     let databases = Databases::open(&database_urls, pool_sizes)
         .await
         .map_err(|e| {
@@ -980,9 +1037,20 @@ async fn main() -> AppResult<()> {
             eprintln!("❌ {}", e);
             e
         })?;
+    let data_plane =
+        data_plane_for_series_check(databases.data.is_some(), data_graphql).map_err(|e| {
+            e.log_with_context("Application startup data plane client");
+            eprintln!("❌ {}", e);
+            e
+        })?;
 
     // Create GraphQL schema
-    let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
+    let schema = econ_graph_graphql::graphql::schema::create_schema_with_data_plane(
+        databases.app.clone(),
+        databases.data.clone(),
+        data_plane.clone(),
+        (),
+    );
     info!("🎯 GraphQL schema created");
 
     // Initialize metrics
@@ -1006,6 +1074,7 @@ async fn main() -> AppResult<()> {
     let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
     let routes = build_routes(
         databases.clone(),
+        data_plane,
         schema.clone(),
         verifier.clone(),
         &cors_origins,
@@ -1766,6 +1835,7 @@ mod mcp_flag_off_tests {
         let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
         let routes = build_routes(
             databases,
+            None,
             schema,
             None,
             &["http://localhost:3000".to_string()],
@@ -1825,6 +1895,7 @@ mod route_tests {
         let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
         build_routes(
             databases,
+            None,
             schema,
             None,
             &["http://localhost:3000".to_string()],
@@ -2032,5 +2103,88 @@ mod route_tests {
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 503);
+    }
+}
+
+#[cfg(test)]
+mod series_check_startup_tests {
+    use super::data_plane_for_series_check;
+    use econ_graph_core::config::DataGraphqlConfig;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// What `f` returns, and the lines it logs.
+    fn logged<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+        let buffer = Buffer(Arc::new(Mutex::new(Vec::new())));
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(move || writer.clone())
+            .finish();
+        let result = tracing::subscriber::with_default(subscriber, f);
+        let text = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        (result, text.lines().map(str::to_string).collect())
+    }
+
+    fn config() -> DataGraphqlConfig {
+        DataGraphqlConfig {
+            url: "http://gateway.example/data/graphql".to_string(),
+            host: Some("br-1.localhost".to_string()),
+            timeout: std::time::Duration::from_secs(2),
+        }
+    }
+
+    /// With neither a data database nor `DATA_GRAPHQL_URL`, the check is skipped and startup
+    /// says so in one line.
+    #[test]
+    fn neither_skips_the_check_with_one_log_line() {
+        let (data_plane, lines) = logged(|| data_plane_for_series_check(false, None));
+        assert!(data_plane.unwrap().is_none());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("WARN"), "{lines:?}");
+        assert!(
+            lines[0].contains("createAnnotation does not check that the series exists"),
+            "{lines:?}"
+        );
+    }
+
+    /// Without a data database, `DATA_GRAPHQL_URL` gives the data plane client, logged with
+    /// its URL and `Host`.
+    #[test]
+    fn a_data_plane_url_is_used_without_a_data_database() {
+        let (data_plane, lines) = logged(|| data_plane_for_series_check(false, Some(config())));
+        let data_plane = data_plane.unwrap().expect("a data plane client");
+        assert_eq!(data_plane.log_url(), "http://gateway.example/data/graphql");
+        assert_eq!(data_plane.host(), Some("br-1.localhost"));
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].contains("through the data plane at http://gateway.example/data/graphql"),
+            "{lines:?}"
+        );
+        assert!(lines[0].contains("br-1.localhost"), "{lines:?}");
+    }
+
+    /// A data database wins over `DATA_GRAPHQL_URL`.
+    #[test]
+    fn a_data_database_is_preferred() {
+        for config in [None, Some(config())] {
+            let (data_plane, lines) = logged(|| data_plane_for_series_check(true, config));
+            assert!(data_plane.unwrap().is_none());
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].contains("in the data database"), "{lines:?}");
+        }
     }
 }

@@ -11,6 +11,8 @@ use diesel_async::{AsyncConnection, RunQueryDsl};
 use std::fmt;
 use uuid::Uuid;
 
+use crate::services::series_check::SeriesCheck;
+
 use econ_graph_core::{
     database::DatabasePool,
     enums::AnnotationVisibility,
@@ -19,7 +21,7 @@ use econ_graph_core::{
         AnnotationComment, ChartAnnotation, ChartCollaborator, NewAnnotationComment,
         NewChartAnnotation, NewChartCollaborator, User,
     },
-    schema::{annotation_comments, chart_annotations, chart_collaborators, economic_series, users},
+    schema::{annotation_comments, chart_annotations, chart_collaborators, users},
 };
 
 /// Permission levels for collaboration
@@ -232,25 +234,28 @@ pub fn validate_comment(content: &str) -> AppResult<()> {
 pub struct CollaborationService {
     /// The app database: annotations, comments, collaborators, users.
     pool: DatabasePool,
-    /// The data database, where a new annotation's series must exist; `None` skips that check.
-    series_pool: Option<DatabasePool>,
+    /// How a new annotation's series is checked.
+    series_check: SeriesCheck,
 }
 
 impl CollaborationService {
     /// A service on the app database `pool` that does not check new annotations' series; see
-    /// [`Self::with_series_pool`] for one that does.
+    /// [`Self::with_series_check`] for one that does.
     pub fn new(pool: DatabasePool) -> Self {
-        Self {
-            pool,
-            series_pool: None,
-        }
+        Self::with_series_check(pool, SeriesCheck::Skip)
     }
 
     /// A service on the app database `pool` that checks new annotations' series in
     /// `series_pool` (the data database), or not at all when it is `None`. The data pool is
     /// always passed explicitly, never assumed to be `pool`.
     pub fn with_series_pool(pool: DatabasePool, series_pool: Option<DatabasePool>) -> Self {
-        Self { pool, series_pool }
+        Self::with_series_check(pool, SeriesCheck::from_pool(series_pool))
+    }
+
+    /// A service on the app database `pool` that checks new annotations' series with
+    /// `series_check`.
+    pub fn with_series_check(pool: DatabasePool, series_check: SeriesCheck) -> Self {
+        Self { pool, series_check }
     }
 
     /// Create a new chart annotation.
@@ -290,22 +295,10 @@ impl CollaborationService {
         )?;
         // `chart_annotations.series_id` is varchar with no foreign key (and the series may be
         // in another database), so nothing else stops an annotation on a series that doesn't
-        // exist.
-        if let Some(series_pool) = &self.series_pool {
-            let mut conn = series_pool.get().await.map_err(|e| {
-                AppError::DatabaseError(format!("Failed to get database connection: {}", e))
-            })?;
-            let series_exists = economic_series::table
-                .find(series_id)
-                .select(economic_series::id)
-                .first::<Uuid>(&mut conn)
-                .await
-                .optional()
-                .map_err(|e| AppError::DatabaseError(e.to_string()))?
-                .is_some();
-            if !series_exists {
-                return Err(AppError::SeriesNotFound(series_id.to_string()));
-            }
+        // exist. A data plane that can't answer refuses the annotation rather than skipping
+        // the check.
+        if !self.series_check.series_exists(series_id).await? {
+            return Err(AppError::SeriesNotFound(series_id.to_string()));
         }
 
         let mut conn = self.pool.get().await.map_err(|e| {

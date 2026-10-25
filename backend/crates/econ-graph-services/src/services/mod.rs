@@ -3,6 +3,7 @@ pub mod cross_section_service;
 pub mod global_analysis_service;
 pub mod queue_service;
 pub mod search_service;
+pub mod series_check;
 pub mod series_service;
 
 // #[cfg(test)]

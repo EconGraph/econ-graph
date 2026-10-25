@@ -221,6 +221,122 @@ pub fn backend_pool_sizes_from(
     })
 }
 
+/// In-cluster URL of the data plane's GraphQL endpoint, for the backend's server-side data
+/// checks when it has no [`DATA_DATABASE_URL`].
+pub const DATA_GRAPHQL_URL: &str = "DATA_GRAPHQL_URL";
+
+/// `Host` header sent with [`DATA_GRAPHQL_URL`] requests: the backend's own route hostname, so a
+/// request through the shared gateway takes the same route as the browser's.
+pub const DATA_GRAPHQL_HOST: &str = "DATA_GRAPHQL_HOST";
+
+/// How long, in milliseconds, a [`DATA_GRAPHQL_URL`] request may take in all.
+pub const DATA_GRAPHQL_TIMEOUT_MS: &str = "DATA_GRAPHQL_TIMEOUT_MS";
+
+/// Default for [`DATA_GRAPHQL_TIMEOUT_MS`]: long enough for a one-row lookup through the
+/// gateway, short enough that someone saving an annotation isn't left waiting on an outage.
+pub const DEFAULT_DATA_GRAPHQL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Where the backend asks the data plane over HTTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataGraphqlConfig {
+    /// `DATA_GRAPHQL_URL`: an `http` or `https` URL.
+    pub url: String,
+    /// `DATA_GRAPHQL_HOST`, or `None` to send the URL's own host.
+    pub host: Option<String>,
+    /// `DATA_GRAPHQL_TIMEOUT_MS`, default [`DEFAULT_DATA_GRAPHQL_TIMEOUT`].
+    pub timeout: std::time::Duration,
+}
+
+/// Why the data plane's GraphQL settings are unusable.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DataGraphqlConfigError {
+    /// `DATA_GRAPHQL_URL` is not an `http` or `https` URL with a host. The value is not echoed:
+    /// a malformed URL may still hold a secret.
+    #[error("DATA_GRAPHQL_URL is not an http(s) URL with a host")]
+    InvalidUrl,
+    /// `DATA_GRAPHQL_URL` has a user name or password. The check sends no credentials, and the
+    /// URL is logged.
+    #[error("DATA_GRAPHQL_URL must not contain a user name or password")]
+    UrlWithCredentials,
+    /// `DATA_GRAPHQL_URL` has a query string or fragment. The endpoint needs neither, and either
+    /// could carry a secret into the logs.
+    #[error("DATA_GRAPHQL_URL must not contain a query string or fragment")]
+    UrlWithQueryOrFragment,
+    /// `DATA_GRAPHQL_HOST` is not a host name (with an optional port).
+    #[error("DATA_GRAPHQL_HOST={0:?} is not a host name")]
+    InvalidHost(String),
+    /// `DATA_GRAPHQL_TIMEOUT_MS` is not a positive whole number of milliseconds.
+    #[error("DATA_GRAPHQL_TIMEOUT_MS={0:?} is not a positive number of milliseconds")]
+    InvalidTimeout(String),
+    /// `DATA_GRAPHQL_HOST` or `DATA_GRAPHQL_TIMEOUT_MS` is set without `DATA_GRAPHQL_URL`.
+    #[error("{0} is set but DATA_GRAPHQL_URL is not")]
+    WithoutUrl(&'static str),
+}
+
+/// `url` as it may be logged: `scheme://host[:port]/path`, without any user name, password,
+/// query string or fragment. A value that doesn't parse as a URL is replaced entirely.
+pub fn redacted_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => {
+            let host = parsed.host_str().unwrap_or_default();
+            match parsed.port() {
+                Some(port) => format!("{}://{host}:{port}{}", parsed.scheme(), parsed.path()),
+                None => format!("{}://{host}{}", parsed.scheme(), parsed.path()),
+            }
+        }
+        Err(_) => "<unparseable URL>".to_string(),
+    }
+}
+
+/// The data plane's GraphQL settings from the environment, or `None` when `DATA_GRAPHQL_URL`
+/// is unset. Empty values count as unset.
+pub fn data_graphql_config() -> Result<Option<DataGraphqlConfig>, DataGraphqlConfigError> {
+    data_graphql_config_from(|name| env::var(name).ok())
+}
+
+/// [`data_graphql_config`] with the environment read through `var`.
+pub fn data_graphql_config_from(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<Option<DataGraphqlConfig>, DataGraphqlConfigError> {
+    let host = non_empty(&var, DATA_GRAPHQL_HOST).map(|h| h.trim().to_string());
+    let timeout = non_empty(&var, DATA_GRAPHQL_TIMEOUT_MS);
+    let Some(url) = non_empty(&var, DATA_GRAPHQL_URL).map(|u| u.trim().to_string()) else {
+        if host.is_some() {
+            return Err(DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_HOST));
+        }
+        if timeout.is_some() {
+            return Err(DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_TIMEOUT_MS));
+        }
+        return Ok(None);
+    };
+    let parsed = reqwest::Url::parse(&url).map_err(|_| DataGraphqlConfigError::InvalidUrl)?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(DataGraphqlConfigError::InvalidUrl);
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(DataGraphqlConfigError::UrlWithCredentials);
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(DataGraphqlConfigError::UrlWithQueryOrFragment);
+    }
+    if let Some(host) = &host {
+        let valid = host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+        if !valid {
+            return Err(DataGraphqlConfigError::InvalidHost(host.clone()));
+        }
+    }
+    let timeout = match timeout {
+        None => DEFAULT_DATA_GRAPHQL_TIMEOUT,
+        Some(value) => match value.trim().parse::<u64>() {
+            Ok(ms) if ms > 0 => std::time::Duration::from_millis(ms),
+            _ => return Err(DataGraphqlConfigError::InvalidTimeout(value)),
+        },
+    };
+    Ok(Some(DataGraphqlConfig { url, host, timeout }))
+}
+
 fn non_empty(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     var(name).filter(|v| !v.trim().is_empty())
 }
@@ -514,5 +630,124 @@ mod tests {
             ))
         );
         assert_eq!(set.1.as_deref(), Ok("postgres://data/econ_graph"));
+    }
+
+    /// `var` for [`data_graphql_config_from`], reading `pairs`.
+    fn vars<'a>(pairs: &'a [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn data_graphql_config_reads_url_host_and_timeout() {
+        assert_eq!(data_graphql_config_from(vars(&[])), Ok(None));
+        assert_eq!(
+            data_graphql_config_from(vars(&[(DATA_GRAPHQL_URL, "  ")])),
+            Ok(None)
+        );
+        assert_eq!(
+            data_graphql_config_from(vars(&[
+                (DATA_GRAPHQL_URL, "http://gw.example/data/graphql"),
+                (DATA_GRAPHQL_HOST, "br-1.localhost"),
+            ])),
+            Ok(Some(DataGraphqlConfig {
+                url: "http://gw.example/data/graphql".to_string(),
+                host: Some("br-1.localhost".to_string()),
+                timeout: DEFAULT_DATA_GRAPHQL_TIMEOUT,
+            }))
+        );
+        assert_eq!(
+            data_graphql_config_from(vars(&[
+                (DATA_GRAPHQL_URL, "http://gw.example/data/graphql"),
+                (DATA_GRAPHQL_TIMEOUT_MS, "250"),
+            ]))
+            .map(|c| c.map(|c| (c.host, c.timeout))),
+            Ok(Some((None, std::time::Duration::from_millis(250))))
+        );
+    }
+
+    #[test]
+    fn data_graphql_config_refuses_unusable_settings() {
+        let cases: [(&[(&str, &str)], DataGraphqlConfigError); 12] = [
+            (
+                &[(DATA_GRAPHQL_URL, "gw.example/data/graphql")],
+                DataGraphqlConfigError::InvalidUrl,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "ftp://gw.example/")],
+                DataGraphqlConfigError::InvalidUrl,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://user:s3cret@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://user@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://:s3cret@gw/data/graphql")],
+                DataGraphqlConfigError::UrlWithCredentials,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql?api_key=s3cret")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql?")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "https://gw/data/graphql#s3cret")],
+                DataGraphqlConfigError::UrlWithQueryOrFragment,
+            ),
+            (
+                &[(DATA_GRAPHQL_URL, "http://gw/"), (DATA_GRAPHQL_HOST, "a b")],
+                DataGraphqlConfigError::InvalidHost("a b".to_string()),
+            ),
+            (
+                &[
+                    (DATA_GRAPHQL_URL, "http://gw/"),
+                    (DATA_GRAPHQL_TIMEOUT_MS, "0"),
+                ],
+                DataGraphqlConfigError::InvalidTimeout("0".to_string()),
+            ),
+            (
+                &[(DATA_GRAPHQL_HOST, "localhost")],
+                DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_HOST),
+            ),
+            (
+                &[(DATA_GRAPHQL_TIMEOUT_MS, "500")],
+                DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_TIMEOUT_MS),
+            ),
+        ];
+        for (pairs, expected) in cases {
+            let refused = data_graphql_config_from(vars(pairs));
+            assert_eq!(refused, Err(expected));
+            // The startup error never repeats a secret from the URL.
+            assert!(!refused.unwrap_err().to_string().contains("s3cret"));
+        }
+    }
+
+    #[test]
+    fn redacted_url_keeps_only_scheme_host_port_and_path() {
+        for (url, redacted) in [
+            (
+                "http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql",
+                "http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql",
+            ),
+            (
+                "https://user:s3cret@gw:8443/data/graphql?api_key=s3cret#s3cret",
+                "https://gw:8443/data/graphql",
+            ),
+            ("http://127.0.0.1:9/graphql?", "http://127.0.0.1:9/graphql"),
+            ("not a url s3cret", "<unparseable URL>"),
+        ] {
+            assert_eq!(redacted_url(url), redacted, "{url}");
+        }
     }
 }

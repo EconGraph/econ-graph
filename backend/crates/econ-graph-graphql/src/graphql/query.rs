@@ -40,6 +40,16 @@ impl Query {
         }
     }
 
+    /// Whether an economic series with this ID exists, observations or not
+    ///
+    /// Unlike `series`, a series with no data points counts. Backends without a data database
+    /// ask this before storing an annotation on the series.
+    async fn series_exists(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
+        let series_uuid = Uuid::parse_str(&id)?;
+        Ok(series_service::series_exists(pool, series_uuid).await?)
+    }
+
     /// Get an economic series by its source's name and the source's own id for it
     ///
     /// `sourceName` is the data source's `name` exactly as `dataSources` returns it (for

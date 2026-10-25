@@ -775,6 +775,13 @@ type Query {
 	"""
 	series(id: ID!): EconomicSeriesType
 	"""
+	Whether an economic series with this ID exists, observations or not
+	
+	Unlike `series`, a series with no data points counts. Backends without a data database
+	ask this before storing an annotation on the series.
+	"""
+	seriesExists(id: ID!): Boolean!
+	"""
 	Get an economic series by its source's name and the source's own id for it
 	
 	`sourceName` is the data source's `name` exactly as `dataSources` returns it (for

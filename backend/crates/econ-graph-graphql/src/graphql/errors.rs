@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_graphql::extensions::{Extension, ExtensionContext, ExtensionFactory, NextExecute};
 use async_graphql::{PathSegment, Response, ServerError};
-use econ_graph_core::error::AppError;
+use econ_graph_core::error::{AppError, DATA_PLANE_UNAVAILABLE};
 
 /// What the client sees in place of a server-side error's detail.
 pub const INTERNAL_ERROR_MESSAGE: &str = "Internal server error";
@@ -88,15 +88,34 @@ fn is_client_facing(error: &ServerError) -> bool {
                 | AppError::Forbidden(_)
                 | AppError::Conflict(_)
                 | AppError::UnprocessableEntity(_)
+                | AppError::DataPlaneUnavailable(_)
         )
     )
+}
+
+/// The `extensions.code` a client-facing error carries so clients can tell it apart without
+/// reading its message, when it has one.
+fn client_code(error: &ServerError) -> Option<&'static str> {
+    match error.source::<AppError>() {
+        Some(AppError::DataPlaneUnavailable(_)) => Some(DATA_PLANE_UNAVAILABLE),
+        _ => None,
+    }
 }
 
 /// Logs a server-side error with its detail and replaces its message with a generic one. Its
 /// extensions are replaced too, with only the generic `code`, since a resolver may have put
 /// server-side detail in them.
+///
+/// A client-facing error keeps its message and extensions, and gains its [`client_code`] when
+/// it has one.
 fn sanitize(error: &mut ServerError, operation_name: Option<&str>) {
     if is_client_facing(error) {
+        if let Some(code) = client_code(error) {
+            error
+                .extensions
+                .get_or_insert_with(Default::default)
+                .set("code", code);
+        }
         return;
     }
     let path = error
@@ -180,6 +199,12 @@ mod tests {
 
         async fn not_found(&self) -> Result<i32> {
             Err(AppError::NotFound("Series not found".to_string()))?
+        }
+
+        async fn data_plane_unavailable(&self) -> Result<i32> {
+            Err(AppError::DataPlaneUnavailable(
+                "request failed: connection refused to 10.0.0.7".to_string(),
+            ))?
         }
 
         /// An `AppError` variant that isn't on the client-facing list.
@@ -278,6 +303,19 @@ mod tests {
         assert_eq!(error.message, "Validation error: Title can't be empty");
         let error = first_error("{ notFound }").await;
         assert_eq!(error.message, "Not found: Series not found");
+    }
+
+    /// A data plane that couldn't be asked reaches the client with its own message and code,
+    /// and without the detail of what failed.
+    #[tokio::test]
+    async fn data_plane_unavailable_keeps_its_message_and_gets_its_code() {
+        let error = first_error("{ dataPlaneUnavailable }").await;
+        assert_eq!(
+            error.message,
+            econ_graph_core::error::DATA_PLANE_UNAVAILABLE_MESSAGE
+        );
+        let json = serde_json::to_value(error.extensions.expect("code extension")).unwrap();
+        assert_eq!(json, serde_json::json!({ "code": DATA_PLANE_UNAVAILABLE }));
     }
 
     /// Server-side `AppError` variants outside the allowlist are hidden too, not just the
