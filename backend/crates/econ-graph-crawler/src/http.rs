@@ -50,17 +50,19 @@ const REDACTED: &str = "REDACTED";
 pub struct HttpConfig {
     /// Total per-request timeout (connect + body).
     pub timeout: Duration,
-    /// `User-Agent` header sent on every request. SEC requires a contact address in it.
+    /// `User-Agent` header sent on every request. SEC requires a contact address in it, and
+    /// download.bls.gov answers 403 to a User-Agent that links to github.com, so the link is
+    /// the site's own.
     pub user_agent: String,
 }
 
 impl Default for HttpConfig {
-    /// 30s timeout; `User-Agent: EconGraph/<crate version> (+https://github.com/jmalicki/econ-graph; jmalicki+econgraph@gmail.com)`.
+    /// 30s timeout; `User-Agent: EconGraph/<crate version> (+https://econgraph.com; jmalicki@econgraph.com)`.
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(30),
             user_agent: format!(
-                "EconGraph/{} (+https://github.com/jmalicki/econ-graph; jmalicki+econgraph@gmail.com)",
+                "EconGraph/{} (+https://econgraph.com; jmalicki@econgraph.com)",
                 env!("CARGO_PKG_VERSION")
             ),
         }
@@ -760,6 +762,10 @@ mod tests {
         assert_eq!(c.timeout, Duration::from_secs(30));
         assert!(c.user_agent.starts_with("EconGraph/"));
         assert!(c.user_agent.contains('@'), "SEC requires a contact address");
+        assert!(
+            !c.user_agent.contains("github.com"),
+            "download.bls.gov refuses a User-Agent that links to github.com"
+        );
     }
 
     #[test]
