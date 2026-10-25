@@ -393,14 +393,30 @@ mod tests {
     use super::*;
     use crate::models::user::NewUser;
     use crate::schema::users;
-    use crate::test_utils::TestContainer;
+
+    static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+
+    /// Pool on `DATABASE_URL` with the embedded migrations applied (once per test binary).
+    async fn test_pool() -> DatabasePool {
+        let url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must point at a Postgres database for admin model tests");
+        MIGRATED
+            .get_or_init(|| async {
+                crate::database::run_migrations(&url)
+                    .await
+                    .expect("migrations failed");
+            })
+            .await;
+        crate::database::create_pool(&url)
+            .await
+            .expect("Failed to connect to test database")
+    }
 
     /// Deleting a user keeps their audit rows: `user_id` becomes NULL and `user_name`
     /// still names them (migration 2026-10-24-000100_audit_logs_keep_on_user_delete).
     #[tokio::test]
     async fn audit_logs_survive_user_deletion() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
+        let pool = &test_pool().await;
         let mut conn = pool.get().await.expect("connection");
 
         let email = format!("audit-delete-{}@example.com", Uuid::new_v4());
