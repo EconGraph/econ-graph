@@ -32,6 +32,8 @@ mod latest_observation_tests;
 #[cfg(test)]
 pub mod n_plus_one_tests;
 #[cfg(test)]
+mod split_databases_tests;
+#[cfg(test)]
 pub(crate) mod test_db;
 
 #[cfg(test)]

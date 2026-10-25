@@ -6,7 +6,7 @@
 //! account's `is_active` flag the same way.
 
 use econ_graph_core::models::User;
-use econ_graph_core::DatabasePool;
+use econ_graph_core::AppPool;
 use uuid::Uuid;
 
 use crate::oidc::{OidcVerifier, VerifyError};
@@ -63,12 +63,12 @@ pub fn bearer_token(authorization: Option<&str>) -> Result<Option<&str>, BearerE
 /// - Sign-in disabled (`verifier` is `None`, `OIDC_ISSUER` unset): `Ok(None)` whatever the
 ///   header says; no token is trusted.
 /// - Otherwise the token must verify, and the account must be active. The caller's `users`
-///   row is created the first time their `sub` is seen.
+///   row is created in the app database (`pool`) the first time their `sub` is seen.
 ///
 /// Nothing here contacts the identity provider for a request without a token, so an outage
 /// never affects anonymous requests.
 pub async fn authenticate(
-    pool: &DatabasePool,
+    pool: &AppPool,
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
 ) -> Result<Option<Caller>, BearerError> {

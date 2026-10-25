@@ -15,12 +15,16 @@ use warp::{Filter, Reply as _};
 // Import from our new crates
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
-    create_pool,
+    config::{backend_database_urls, backend_pool_sizes, BackendDatabaseUrls, BackendPoolSizes},
+    create_pool_with_size,
+    database::{readiness_check_set, run_migration_set, MigrationSet},
     models::admin::{ClientInfo, NewSecurityEvent},
-    redact_database_url, AppError, AppResult, Config, DatabasePool,
+    redact_database_url, AppError, AppPool, AppResult, Config, DataPool,
 };
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
+#[cfg(test)]
+mod databases_tests;
 mod integration_tests;
 #[cfg(flag_mcp)]
 mod mcp_routes;
@@ -29,14 +33,144 @@ mod metrics;
 #[cfg(flag_mcp)]
 use mcp_routes::mcp_filter;
 
+/// The backend's databases: the app database always, the data database when
+/// `DATA_DATABASE_URL` is set. Both may be the same database, and then share one pool.
 #[derive(Clone)]
-pub struct AppState {
-    pub pool: DatabasePool,
-    pub schema: async_graphql::Schema<
-        econ_graph_graphql::graphql::query::Query,
-        econ_graph_graphql::graphql::mutation::Mutation,
-        async_graphql::EmptySubscription,
-    >,
+pub(crate) struct Databases {
+    pub(crate) app: AppPool,
+    pub(crate) data: Option<DataPool>,
+}
+
+/// How long `/readyz` waits for each database. k8s's probe timeout (3s, see
+/// backend-deployment.yaml) is well under the pool's 30s connection timeout, so each check is
+/// bounded rather than letting a down database make the handler outlive the probe. The two
+/// databases are checked at the same time.
+const READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The data database's state, as `/readyz` reports it. None of them makes the backend unready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DataReadiness {
+    /// Reachable, with the newest data migration this binary embeds recorded.
+    Ok,
+    /// No connection within [`READINESS_TIMEOUT`], or the connection failed.
+    Unreachable,
+    /// Reachable, but the data set is behind this binary (`crawler migrate` has not run).
+    PendingMigrations,
+    /// This backend has no `DATA_DATABASE_URL`.
+    NotConfigured,
+}
+
+impl DataReadiness {
+    fn as_str(self) -> &'static str {
+        match self {
+            DataReadiness::Ok => "ok",
+            DataReadiness::Unreachable => "unreachable",
+            DataReadiness::PendingMigrations => "pending_migrations",
+            DataReadiness::NotConfigured => "not_configured",
+        }
+    }
+}
+
+impl Databases {
+    /// Connect to the app database and apply its migration set, then connect to the data
+    /// database when there is one.
+    ///
+    /// When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, one pool of
+    /// `sizes.app + sizes.data` connections serves both, so the database sees no more
+    /// connections than from a backend with one database URL. The data database is never
+    /// migrated here: `crawler migrate` applies the data set.
+    async fn open(urls: &BackendDatabaseUrls, sizes: BackendPoolSizes) -> AppResult<Self> {
+        let pool = |url: &str, size: u32, which: &'static str| {
+            let url = url.to_string();
+            async move {
+                create_pool_with_size(&url, size).await.map_err(|e| {
+                    AppError::DatabaseError(format!(
+                        "Failed to create the {which} database pool: {e}"
+                    ))
+                })
+            }
+        };
+
+        let shared = urls.data.as_deref() == Some(urls.app.as_str());
+        info!("🗄️  App database: {}", redact_database_url(&urls.app));
+        let app_size = if shared {
+            sizes.app + sizes.data
+        } else {
+            sizes.app
+        };
+        let app = AppPool(pool(&urls.app, app_size, "app").await?);
+
+        info!("🔄 Applying the app migration set...");
+        let applied = run_migration_set(&urls.app, MigrationSet::App)
+            .await
+            .map_err(|e| {
+                AppError::DatabaseError(format!("Failed to run the app migrations: {e}"))
+            })?;
+        info!(
+            "✅ App migrations are current (applied now: {})",
+            if applied.is_empty() {
+                "none".to_string()
+            } else {
+                applied.join(", ")
+            }
+        );
+
+        let data = match &urls.data {
+            Some(_) if shared => {
+                info!("🗄️  Data database: the app database, sharing its pool");
+                Some(DataPool(app.0.clone()))
+            }
+            Some(url) => {
+                info!("🗄️  Data database: {}", redact_database_url(url));
+                Some(DataPool(pool(url, sizes.data, "data").await?))
+            }
+            None => {
+                tracing::warn!(
+                    "DATA_DATABASE_URL is not set: data fields answer DATA_SERVED_REMOTELY, and \
+                     createAnnotation does not check that the series exists"
+                );
+                None
+            }
+        };
+        Ok(Self { app, data })
+    }
+
+    /// The app database's readiness: reachable within [`READINESS_TIMEOUT`] with its set
+    /// current. The error says why, naming the app database.
+    async fn app_readiness(&self) -> Result<(), String> {
+        match tokio::time::timeout(
+            READINESS_TIMEOUT,
+            readiness_check_set(&self.app, MigrationSet::App),
+        )
+        .await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(format!("app database: {e}")),
+            Err(_) => Err("app database: readiness check timed out".to_string()),
+        }
+    }
+
+    /// The data database's state; each step is bounded by [`READINESS_TIMEOUT`] in all.
+    async fn data_readiness(&self) -> DataReadiness {
+        let Some(data) = &self.data else {
+            return DataReadiness::NotConfigured;
+        };
+        let check = async {
+            if data.get().await.is_err() {
+                return DataReadiness::Unreachable;
+            }
+            match readiness_check_set(data, MigrationSet::Data).await {
+                Ok(()) => DataReadiness::Ok,
+                Err(e) => {
+                    tracing::warn!("data database readiness: {e}");
+                    DataReadiness::PendingMigrations
+                }
+            }
+        };
+        tokio::time::timeout(READINESS_TIMEOUT, check)
+            .await
+            .unwrap_or(DataReadiness::Unreachable)
+    }
 }
 
 async fn graphql_handler(
@@ -102,35 +236,29 @@ async fn livez_handler() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::json(&json!({ "status": "alive" })))
 }
 
-/// Readiness (and startup): the database must be reachable and its applied app migrations at
-/// least as new as this binary's minimum. Unlike `/health`, this can actually fail, so a pod
-/// whose database is down or mid-migration is taken out of rotation instead of serving errors.
-async fn readyz_handler(pool: DatabasePool) -> Result<impl warp::Reply, Infallible> {
+/// Readiness (and startup): ready when the app database is reachable and its app migrations
+/// are current ([`Databases::app_readiness`]). Unlike `/health`, this can fail, so a pod whose
+/// app database is down or behind is taken out of rotation instead of serving errors.
+///
+/// The data database's state (`ok`, `unreachable`, `pending_migrations` or `not_configured`) is
+/// reported as `data` in the body but never fails the check: sign-in and the other app
+/// operations keep working through a data outage, and data fields fail on their own until it
+/// is over.
+async fn readyz_handler(databases: Databases) -> Result<impl warp::Reply, Infallible> {
     use warp::http::StatusCode;
 
-    // k8s's probe timeout (3s, see backend-deployment.yaml) is well under the pool's 30s
-    // connection_timeout, so bound the check itself rather than let a down database make this
-    // handler outlive the probe that's waiting on it.
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        econ_graph_core::readiness_check_set(&pool, econ_graph_core::MigrationSet::App),
-    )
-    .await;
-
-    let (status, body) = match outcome {
-        Ok(Ok(())) => (StatusCode::OK, json!({ "status": "ready" })),
-        Ok(Err(e)) => {
-            tracing::warn!("readiness check failed: {e}");
+    let (app, data) = tokio::join!(databases.app_readiness(), databases.data_readiness());
+    let data = data.as_str();
+    let (status, body) = match app {
+        Ok(()) => (
+            StatusCode::OK,
+            json!({ "status": "ready", "app": "ok", "data": data }),
+        ),
+        Err(reason) => {
+            tracing::warn!("readiness check failed: {reason}");
             (
                 StatusCode::SERVICE_UNAVAILABLE,
-                json!({ "status": "not_ready", "reason": e.to_string() }),
-            )
-        }
-        Err(_) => {
-            tracing::warn!("readiness check timed out");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({ "status": "not_ready", "reason": "readiness check timed out" }),
+                json!({ "status": "not_ready", "reason": reason, "data": data }),
             )
         }
     };
@@ -469,7 +597,7 @@ impl GraphqlRefusal {
 /// were never fetched) is dropped and the request runs anonymously: it grants nothing, and
 /// public data stays browsable through an outage.
 async fn graphql_caller(
-    pool: &DatabasePool,
+    pool: &AppPool,
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
     client: &ClientInfo,
@@ -502,7 +630,7 @@ async fn graphql_caller(
 /// gets a 404, and none of the MCP route's code is compiled into this binary.
 #[cfg(not(flag_mcp))]
 fn mcp_filter(
-    _pool: DatabasePool,
+    _databases: Databases,
     _verifier: Option<Arc<OidcVerifier>>,
 ) -> warp::filters::BoxedFilter<(warp::reply::Response,)> {
     warp::any()
@@ -618,7 +746,7 @@ async fn graphql_body_too_large(
 /// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
 /// the frontend, not this process).
 fn build_routes(
-    pool: DatabasePool,
+    databases: Databases,
     schema: async_graphql::Schema<
         econ_graph_graphql::graphql::query::Query,
         econ_graph_graphql::graphql::mutation::Mutation,
@@ -631,7 +759,7 @@ fn build_routes(
     let cors = cors_filter(cors_origins);
 
     // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
-    let pool_for_graphql = pool.clone();
+    let databases_for_graphql = databases.clone();
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
         .and(warp::header::headers_cloned())
@@ -648,12 +776,12 @@ fn build_routes(
                 >,
                 async_graphql::Request,
             )| {
-                let pool_for_graphql = pool_for_graphql.clone();
+                let databases = databases_for_graphql.clone();
                 let verifier = verifier_for_graphql.clone();
                 async move {
                     let client = client_info(peer, &headers);
                     let caller = match graphql_caller(
-                        &pool_for_graphql,
+                        &databases.app,
                         verifier.as_deref(),
                         authorization_header(&headers),
                         &client,
@@ -669,7 +797,8 @@ fn build_routes(
                             .with_client(client),
                     );
                     let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        pool_for_graphql.clone(),
+                        databases.app,
+                        databases.data,
                         auth_context,
                     );
 
@@ -699,11 +828,11 @@ fn build_routes(
     // Liveness: process is up, no database access.
     let livez_filter = warp::path("livez").and(warp::get()).and_then(livez_handler);
 
-    // Readiness: database reachable and schema at least as new as this binary needs.
-    let pool_for_readyz = pool.clone();
+    // Readiness: each database reachable and its migration set current.
+    let databases_for_readyz = databases.clone();
     let readyz_filter = warp::path("readyz").and(warp::get()).and_then(move || {
-        let pool = pool_for_readyz.clone();
-        async move { readyz_handler(pool).await }
+        let databases = databases_for_readyz.clone();
+        async move { readyz_handler(databases).await }
     });
 
     // Metrics endpoint for Prometheus
@@ -719,7 +848,7 @@ fn build_routes(
     // MCP route, compiled in only with the `mcp` build flag (see mcp_routes.rs). It requires
     // a signed-in user's bearer token holding `api:mcp`; MCP OAuth (auth roadmap phase 6)
     // will replace this.
-    let mcp_filter = mcp_filter(pool, verifier);
+    let mcp_filter = mcp_filter(databases, verifier);
 
     root_filter
         .or(graphql_filter)
@@ -762,14 +891,13 @@ async fn main() -> AppResult<()> {
         "  - FRONTEND_PORT: {:?}",
         std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set".to_string())
     );
-    info!(
-        "  - DATABASE_URL: {:?}",
-        if std::env::var("DATABASE_URL").is_ok() {
-            "set"
-        } else {
-            "not set"
-        }
-    );
+    for name in [
+        econ_graph_core::config::APP_DATABASE_URL,
+        econ_graph_core::config::DATA_DATABASE_URL,
+    ] {
+        let set = std::env::var(name).is_ok_and(|v| !v.trim().is_empty());
+        info!("  - {name}: {}", if set { "set" } else { "not set" });
+    }
 
     // Load configuration
     info!("📋 Loading configuration from environment...");
@@ -830,42 +958,31 @@ async fn main() -> AppResult<()> {
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
     info!("  - CORS origins: {:?}", cors_origins);
-    info!(
-        "  - Database URL: {}",
-        redact_database_url(&config.database_url)
-    );
 
-    // Create database connection pool
-    info!("🗄️  Creating database connection pool...");
-    info!(
-        "  - Database URL: {}",
-        redact_database_url(&config.database_url)
-    );
-
-    let pool = create_pool(&config.database_url).await.map_err(|e| {
-        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
-        error.log_with_context("Application startup database pool creation");
-        eprintln!("❌ Failed to create database pool: {}", e);
+    // APP_DATABASE_URL is required and DATA_DATABASE_URL optional; DATABASE_URL alone is a
+    // startup error, never a fallback.
+    let database_urls = backend_database_urls().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup database configuration");
+        eprintln!("❌ {}", e);
         error
     })?;
-
-    info!("✅ Database connection pool created successfully");
-
-    // Run the app migrations. The data migrations are `crawler migrate`'s, never the backend's.
-    info!("🔄 Running database migrations...");
-    econ_graph_core::run_migration_set(&config.database_url, econ_graph_core::MigrationSet::App)
+    let pool_sizes = backend_pool_sizes().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup database configuration");
+        eprintln!("❌ {}", e);
+        error
+    })?;
+    let databases = Databases::open(&database_urls, pool_sizes)
         .await
         .map_err(|e| {
-            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
-            error.log_with_context("Application startup database migrations");
-            eprintln!("❌ Failed to run migrations: {}", e);
-            error
+            e.log_with_context("Application startup databases");
+            eprintln!("❌ {}", e);
+            e
         })?;
 
-    info!("✅ Database migrations completed successfully");
-
     // Create GraphQL schema
-    let schema = create_schema_with_data(pool.clone(), ());
+    let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
     info!("🎯 GraphQL schema created");
 
     // Initialize metrics
@@ -888,7 +1005,7 @@ async fn main() -> AppResult<()> {
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
     let routes = build_routes(
-        pool.clone(),
+        databases.clone(),
         schema.clone(),
         verifier.clone(),
         &cors_origins,
@@ -1284,34 +1401,36 @@ mod request_auth_tests {
     use econ_graph_auth::testkit::{now, sign_hs256, TestIssuer};
     use econ_graph_auth::{OidcConfig, OidcVerifier, Role};
     use econ_graph_core::models::admin::ClientInfo;
-    use econ_graph_core::DatabasePool;
+    use econ_graph_core::test_utils::ScratchDatabase;
+    use econ_graph_core::{AppPool, DatabasePool, MigrationSet};
     use uuid::Uuid;
     use warp::http::StatusCode;
 
     /// A pool that never connects: every case using it is decided before any database access.
-    fn unreachable_pool() -> DatabasePool {
+    fn unreachable_pool() -> AppPool {
         let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
             diesel_async::AsyncPgConnection,
         >::new("postgres://nobody@127.0.0.1:1/none");
-        DatabasePool::builder()
-            .connection_timeout(std::time::Duration::from_secs(1))
-            .build_unchecked(manager)
+        AppPool(
+            DatabasePool::builder()
+                .connection_timeout(std::time::Duration::from_secs(1))
+                .build_unchecked(manager),
+        )
     }
 
-    /// A pool on `DATABASE_URL` with migrations applied, or `None` to skip the test.
-    async fn database() -> Option<DatabasePool> {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
+    /// A new, empty app database on `DATABASE_URL`'s server with only the app migration set
+    /// applied, as the backend's own is, or `None` to skip the test.
+    async fn database() -> Option<(ScratchDatabase, AppPool)> {
+        if std::env::var("DATABASE_URL").is_err() {
             eprintln!("DATABASE_URL not set; skipping DB-backed request auth test");
             return None;
-        };
-        econ_graph_core::database::run_migrations(&url)
+        }
+        let db = ScratchDatabase::create("request_auth_app");
+        econ_graph_core::run_migration_set(&db.url, MigrationSet::App)
             .await
-            .expect("migrations");
-        Some(
-            econ_graph_core::database::create_pool(&url)
-                .await
-                .expect("pool"),
-        )
+            .expect("app migrations");
+        let pool = econ_graph_core::create_pool(&db.url).await.expect("pool");
+        Some((db, AppPool(pool)))
     }
 
     fn bearer(token: &str) -> String {
@@ -1418,12 +1537,12 @@ mod request_auth_tests {
     }
 
     /// A valid token signs the caller in with the token's roles, creating their `users` row
-    /// on first sight; a suspended account is refused with 403.
-    // Shares the database with `integration_tests`, which drop the schema.
+    /// on first sight in a new app database (one with only the app set); a suspended account is
+    /// refused with 403.
     #[tokio::test]
     #[serial_test::serial]
     async fn graphql_signs_in_a_valid_token_and_refuses_a_suspended_account() {
-        let Some(pool) = database().await else {
+        let Some((_db, pool)) = database().await else {
             return;
         };
         let issuer = TestIssuer::start().await;
@@ -1498,12 +1617,11 @@ mod request_auth_tests {
 
     /// The `users` row for a new subject: created once, with the token's email only when it
     /// is verified and free, and the same row for concurrent first requests.
-    // Shares the database with `integration_tests`, which drop the schema.
     #[tokio::test]
     #[serial_test::serial]
     async fn the_users_row_is_created_on_first_sight() {
         use econ_graph_core::models::User;
-        let Some(pool) = database().await else {
+        let Some((_db, pool)) = database().await else {
             return;
         };
         let placeholder = |user: &User| {
@@ -1624,8 +1742,8 @@ mod playground_tests {
 /// release build rather than a stand-in checked by hand.
 #[cfg(all(test, not(flag_mcp)))]
 mod mcp_flag_off_tests {
-    use super::build_routes;
-    use econ_graph_core::DatabasePool;
+    use super::{build_routes, Databases};
+    use econ_graph_core::{AppPool, DataPool, DatabasePool};
     use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
     fn unreachable_pool() -> DatabasePool {
@@ -1641,10 +1759,13 @@ mod mcp_flag_off_tests {
     /// and no MCP-specific code is compiled into this binary.
     #[tokio::test]
     async fn mcp_answers_404() {
-        let pool = unreachable_pool();
-        let schema = create_schema_with_data(pool.clone(), ());
+        let databases = Databases {
+            app: AppPool(unreachable_pool()),
+            data: Some(DataPool(unreachable_pool())),
+        };
+        let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
         let routes = build_routes(
-            pool,
+            databases,
             schema,
             None,
             &["http://localhost:3000".to_string()],
@@ -1678,8 +1799,10 @@ mod mcp_flag_off_tests {
 
 #[cfg(test)]
 mod route_tests {
-    use super::{build_routes, read_graphql_body, GraphqlBodyTooLarge, GRAPHQL_BODY_LIMIT};
-    use econ_graph_core::DatabasePool;
+    use super::{
+        build_routes, read_graphql_body, Databases, GraphqlBodyTooLarge, GRAPHQL_BODY_LIMIT,
+    };
+    use econ_graph_core::{AppPool, DataPool, DatabasePool};
     use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
     /// A pool that never connects: routes that answer without touching the database don't need it.
@@ -1695,10 +1818,13 @@ mod route_tests {
     fn routes(
         playground_enabled: bool,
     ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-        let pool = unreachable_pool();
-        let schema = create_schema_with_data(pool.clone(), ());
+        let databases = Databases {
+            app: AppPool(unreachable_pool()),
+            data: Some(DataPool(unreachable_pool())),
+        };
+        let schema = create_schema_with_data(databases.app.clone(), databases.data.clone(), ());
         build_routes(
-            pool,
+            databases,
             schema,
             None,
             &["http://localhost:3000".to_string()],

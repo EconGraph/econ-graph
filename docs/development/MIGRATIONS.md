@@ -1,8 +1,10 @@
 # Database migrations
 
-The backend's Diesel migrations are in two sets under `backend/migrations`. The backend applies
-the app set to its database when it starts. The data set is applied only by `crawler migrate`
-(see [Applying the data set](#applying-the-data-set-crawler-migrate)); no service applies it at
+The backend's Diesel migrations are in two sets under `backend/migrations`: the app set, for the
+app database (`APP_DATABASE_URL`), and the data set, for the data database (`DATA_DATABASE_URL`).
+The two URLs may name one database, which then holds both sets. The backend applies the app set
+to the app database when it starts. The data set is applied only by `crawler migrate` (see
+[Applying the data set](#applying-the-data-set-crawler-migrate)); no service applies it at
 startup, so redeploying a service never changes a data database. This page covers which set a
 migration belongs in, how migrations are written between releases, and how app migrations are
 squashed when a release is tagged.
@@ -166,10 +168,15 @@ data databases never contend, and two sets in one database run one after the oth
 the app set alone leaves a pending data set untouched. Tests use `run_migrations`, which applies
 the data set and then the app set to one database under the same lock.
 
-The backend's readiness check (`readiness_check_set(pool, MigrationSet::App)`) requires the
-newest app migration embedded in the binary to be recorded. `readiness_check_set` checks one set
-at a time, ignoring the other set's versions in a database that holds both; the table's highest
-version mixes the two sets, so it is not used.
+`readiness_check_set(pool, set)` requires the newest migration the binary embeds for that set to
+be recorded. It checks one set at a time, ignoring the other set's versions in a database that
+holds both; the table's highest version mixes the two sets, so it is not used.
+
+The backend's `/readyz` fails only when the app database is unreachable or its app set is not
+current. It also checks the data set on `DATA_DATABASE_URL` and reports the result in its response
+body (`ok`, `unreachable`, `pending_migrations` or `not_configured`) without failing, so an
+unreachable or unmigrated data database never takes sign-in and the other app operations out of
+rotation; data fields fail on their own until it is back.
 
 With the diesel CLI, from `backend/`, on a new database:
 

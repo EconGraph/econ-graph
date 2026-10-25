@@ -90,7 +90,12 @@ async fn point(
 }
 
 async fn run(pool: &DatabasePool, query: String) -> Value {
-    let resp = create_schema(pool.clone()).execute(query).await;
+    let resp = create_schema(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    )
+    .execute(query)
+    .await;
     assert!(resp.errors.is_empty(), "{:?}", resp.errors);
     resp.data.into_json().unwrap()
 }
@@ -253,7 +258,9 @@ async fn test_latest_observation_batches_across_series_in_a_list() {
     .await;
 
     // The loader answers every key in one batch, including series with no rows.
-    let loaders = crate::graphql::dataloaders::DataLoaders::new(pool.clone());
+    let loaders = crate::graphql::dataloaders::DataLoaders::new(
+        econ_graph_core::database::DataPool(pool.clone()),
+    );
     let got = loaders
         .latest_observation_loader
         .load_many(vec![with_data.id, empty.id])

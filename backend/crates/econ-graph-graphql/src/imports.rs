@@ -22,7 +22,7 @@
 
 // Core crate imports
 pub use econ_graph_core::{
-    database::DatabasePool,
+    database::{AppPool, DataPool, DatabasePool},
     error::{AppError, AppResult},
     // Additional imports for missing modules
     models as core_models,
@@ -94,7 +94,7 @@ pub use uuid::Uuid;
 
 // Re-export GraphQL context utilities
 pub use crate::graphql::context::{
-    current_user, current_user_id_opt, require_role, GraphQLContext,
+    app_pool, current_user, current_user_id_opt, data_pool, require_role, GraphQLContext,
 };
 pub use econ_graph_auth::{Principal, Role};
 pub use econ_graph_core::enums::AnnotationVisibility;

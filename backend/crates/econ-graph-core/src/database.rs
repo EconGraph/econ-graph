@@ -62,12 +62,20 @@ pub fn redact_database_url(database_url: &str) -> String {
     }
 }
 
-/// Create a database connection pool
+/// Connections a pool from [`create_pool`] opens at most.
+pub const DEFAULT_POOL_SIZE: u32 = 20;
+
+/// Create a database connection pool of at most [`DEFAULT_POOL_SIZE`] connections.
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
+    create_pool_with_size(database_url, DEFAULT_POOL_SIZE).await
+}
+
+/// Create a database connection pool of at most `max_size` connections.
+pub async fn create_pool_with_size(database_url: &str, max_size: u32) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
     let pool = Pool::builder()
-        .max_size(20)
+        .max_size(max_size)
         .connection_timeout(Duration::from_secs(30))
         .idle_timeout(Some(Duration::from_secs(300))) // 5 minutes idle timeout
         .build(config)
@@ -783,54 +791,7 @@ mod tests {
         assert_eq!(DATA_BASELINE_VERSION, "20261021000100");
     }
 
-    /// A database created for one test from `DATABASE_URL`'s server and dropped when the test
-    /// ends, so tests that need an empty database don't touch the shared one.
-    struct ScratchDatabase {
-        admin_url: String,
-        name: String,
-        url: String,
-    }
-
-    impl ScratchDatabase {
-        fn create(tag: &str) -> Self {
-            use diesel::{Connection, RunQueryDsl};
-
-            let admin_url = std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
-            let name = format!("eg_scratch_{tag}_{}", uuid::Uuid::new_v4().simple());
-            let mut conn = diesel::PgConnection::establish(&admin_url)
-                .expect("Should connect to DATABASE_URL");
-            diesel::sql_query(format!("CREATE DATABASE {name}"))
-                .execute(&mut conn)
-                .expect("Should create a scratch database");
-            let mut url = url::Url::parse(&admin_url).expect("DATABASE_URL should be a URL");
-            url.set_path(&format!("/{name}"));
-            Self {
-                admin_url,
-                name,
-                url: url.to_string(),
-            }
-        }
-
-        fn connect(&self) -> diesel::PgConnection {
-            use diesel::Connection;
-            diesel::PgConnection::establish(&self.url)
-                .expect("Should connect to the scratch database")
-        }
-    }
-
-    impl Drop for ScratchDatabase {
-        fn drop(&mut self) {
-            use diesel::{Connection, RunQueryDsl};
-            if let Ok(mut conn) = diesel::PgConnection::establish(&self.admin_url) {
-                let _ = diesel::sql_query(format!(
-                    "DROP DATABASE IF EXISTS {} WITH (FORCE)",
-                    self.name
-                ))
-                .execute(&mut conn);
-            }
-        }
-    }
+    use crate::test_utils::ScratchDatabase;
 
     #[derive(diesel::QueryableByName)]
     struct TextRow {

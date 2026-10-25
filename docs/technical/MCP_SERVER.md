@@ -339,7 +339,7 @@ Common error codes:
 
 `/mcp` is compiled in only when the `mcp` build flag is on, which it is in the `dev`
 flag profile and not in `release` (the default). From the repository root, with
-`DATABASE_URL` exported as in the [backend development setup](../../backend/README.md#development-workflow):
+`APP_DATABASE_URL` and `DATA_DATABASE_URL` exported, and the data migrations applied, as in the [backend development setup](../../backend/README.md#development-workflow):
 
 ```bash
 cd backend

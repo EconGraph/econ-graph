@@ -70,13 +70,15 @@ jobs:
       working-directory: ./backend
       run: cargo build --release
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        APP_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        DATA_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
 
     - name: Run database migrations
       working-directory: ./backend
-      run: cargo run --bin migrate
+      run: cargo run -p econ-graph-crawler --bin crawler -- migrate
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        APP_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        DATA_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
 
     - name: Start backend server
       working-directory: ./backend
@@ -84,7 +86,8 @@ jobs:
         cargo run --release &
         sleep 10
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        APP_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        DATA_DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
         BACKEND_PORT: 8080
         FRONTEND_PORT: 3000
 

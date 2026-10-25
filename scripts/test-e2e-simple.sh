@@ -94,6 +94,8 @@ done
 # Test database connection
 print_status "Testing database connection..."
 export DATABASE_URL="postgresql://postgres:password@localhost:$PORT/econ_graph_test"
+# The backend reads its app and data databases from these; this one database holds both sets.
+export APP_DATABASE_URL="$DATABASE_URL" DATA_DATABASE_URL="$DATABASE_URL"
 
 # Test with psql
 if docker-compose -f docker-compose.test.yml exec postgres psql -U postgres -d econ_graph_test -c "SELECT 1;" > /dev/null 2>&1; then

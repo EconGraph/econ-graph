@@ -20,9 +20,9 @@ pub mod test_utils;
 // Re-export commonly used types
 pub use config::Config;
 pub use database::{
-    create_pool, pending_migration_versions, readiness_check, readiness_check_set,
-    redact_database_url, run_migration_set, run_migrations, AppPool, DataPool, DatabasePool,
-    MigrationSet,
+    create_pool, create_pool_with_size, pending_migration_versions, readiness_check,
+    readiness_check_set, redact_database_url, run_migration_set, run_migrations, AppPool, DataPool,
+    DatabasePool, MigrationSet,
 };
 pub use error::{AppError, AppResult};
 

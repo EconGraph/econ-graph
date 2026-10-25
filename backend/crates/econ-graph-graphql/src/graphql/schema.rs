@@ -10,16 +10,15 @@ use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::errors::SanitizeErrors;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
-use econ_graph_core::database::DatabasePool;
+use econ_graph_core::database::{AppPool, DataPool};
 
 /// Shared resources every request of a schema sees (the per-request caller is
 /// [`crate::graphql::context::GraphQLContext`])
 #[derive(Clone)]
 pub struct SchemaResources {
-    /// Database connection pool
-    pub pool: Arc<DatabasePool>,
-    /// DataLoaders for efficient N+1 query prevention
-    pub data_loaders: Arc<DataLoaders>,
+    /// DataLoaders on the data database, for N+1 query prevention; `None` when this schema has
+    /// no data database (see [`crate::graphql::context::data_loaders`])
+    pub data_loaders: Option<Arc<DataLoaders>>,
     /// Security middleware
     pub security: Arc<SecurityMiddleware>,
 }
@@ -55,76 +54,60 @@ pub fn sdl() -> String {
     schema_builder().finish().sdl()
 }
 
-/// Create a new GraphQL schema with the provided context
+/// Create a GraphQL schema on the app database and, when this process has one, the data
+/// database.
 ///
-/// # Parameters
-/// - `pool`: Database connection pool for data access
-///
-/// # Returns
-/// Configured GraphQL schema ready for use
+/// Resolvers read the app pool as `ctx.data::<AppPool>()` and the data pool through
+/// [`crate::graphql::context::data_pool`]. With `data` `None`, every data field fails with
+/// `extensions.code = DATA_SERVED_REMOTELY`; the schema itself is the same either way.
 ///
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_graphql::graphql::schema::create_schema;
-/// use econ_graph_core::database::create_pool;
+/// use econ_graph_core::database::{create_pool, AppPool, DataPool};
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let pool = create_pool("postgres://localhost/econ_graph").await?;
-///     let schema = create_schema(pool);
+///     let app = AppPool(create_pool("postgres://localhost/econ_graph_app").await?);
+///     let data = DataPool(create_pool("postgres://localhost/econ_graph").await?);
+///     let schema = create_schema(app, Some(data));
 ///
 ///     // Use schema for GraphQL operations
 ///     Ok(())
 /// }
 /// ```
-pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscription> {
-    let pool_arc = Arc::new(pool.clone());
-    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
-    let security_config = SecurityConfig::default();
-    let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = SchemaResources {
-        pool: pool_arc,
-        data_loaders,
-        security,
-    };
-
-    schema_builder()
-        .limit_depth(MAX_QUERY_DEPTH)
-        .limit_complexity(MAX_QUERY_COMPLEXITY)
-        .data(context)
-        .data(pool) // Add pool as separate context data
-        .finish()
+pub fn create_schema(
+    app: AppPool,
+    data: Option<DataPool>,
+) -> Schema<Query, Mutation, EmptySubscription> {
+    create_schema_with_data(app, data, ())
 }
 
-/// Create a schema with additional data
-///
-/// # Parameters
-/// - `pool`: Database connection pool
-/// - `additional_data`: Additional data to include in the context
-///
-/// # Returns
-/// Configured GraphQL schema with additional context data
+/// Create a schema as [`create_schema`] does, with `additional_data` (the request's
+/// [`crate::graphql::context::GraphQLContext`], say) in its context as well.
 pub fn create_schema_with_data<T: Send + Sync + 'static>(
-    pool: DatabasePool,
+    app: AppPool,
+    data: Option<DataPool>,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
-    let pool_arc = Arc::new(pool.clone());
-    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
-    let security_config = SecurityConfig::default();
-    let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = SchemaResources {
-        pool: pool_arc,
-        data_loaders,
+    let security = Arc::new(SecurityMiddleware::new(SecurityConfig::default()));
+    let resources = SchemaResources {
+        data_loaders: data
+            .as_ref()
+            .map(|data| Arc::new(DataLoaders::new(data.clone()))),
         security,
     };
 
-    schema_builder()
+    let builder = schema_builder()
         .limit_depth(MAX_QUERY_DEPTH)
         .limit_complexity(MAX_QUERY_COMPLEXITY)
-        .data(context)
-        .data(pool) // Add pool as separate context data
-        .data(additional_data)
-        .finish()
+        .data(resources)
+        .data(app)
+        .data(additional_data);
+    match data {
+        Some(data) => builder.data(data).finish(),
+        None => builder.finish(),
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +122,10 @@ mod tests {
         // Create a test database container
         let container = econ_graph_core::test_utils::get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool);
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool)),
+        );
 
         // Verify schema is created successfully
         // Note: We can't easily test the schema structure without a real database
@@ -154,7 +140,11 @@ mod tests {
         let container = econ_graph_core::test_utils::get_test_db().await;
         let pool = container.pool().clone();
         let additional_data = "test_data".to_string();
-        let schema = create_schema_with_data(pool, additional_data);
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool)),
+            additional_data,
+        );
 
         // Verify schema is created successfully
         // Note: We can't easily test the schema structure without a real database
@@ -183,7 +173,11 @@ mod query_limit_tests {
 
     /// Run `query` and return its error messages (empty when it succeeded).
     async fn errors(query: &str) -> Vec<String> {
-        let schema = create_schema_with_data(unreachable_pool(), ());
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(unreachable_pool()),
+            Some(econ_graph_core::database::DataPool(unreachable_pool())),
+            (),
+        );
         schema
             .execute(query)
             .await

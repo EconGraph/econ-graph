@@ -55,7 +55,11 @@ fn caller_with(user: User, roles: impl IntoIterator<Item = Role>) -> GraphQLCont
 }
 
 async fn errors(ctx: GraphQLContext, query: &str) -> Vec<String> {
-    let schema = create_schema_with_data(unreachable_pool(), Arc::new(ctx));
+    let schema = create_schema_with_data(
+        econ_graph_core::database::AppPool(unreachable_pool()),
+        Some(econ_graph_core::database::DataPool(unreachable_pool())),
+        Arc::new(ctx),
+    );
     schema
         .execute(query)
         .await
@@ -402,7 +406,8 @@ async fn read_user(pool: &DatabasePool, id: Uuid) -> Option<User> {
 
 async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> Vec<String> {
     let schema = create_schema_with_data(
-        pool.clone(),
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
         Arc::new(caller_with(user(), roles.iter().copied())),
     );
     schema
@@ -542,7 +547,11 @@ async fn narrow_role_can_act_on_self() {
             ),
         ),
     ] {
-        let schema = create_schema_with_data(pool.clone(), Arc::new(caller_with(me, roles)));
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+            Arc::new(caller_with(me, roles)),
+        );
         let errs: Vec<String> = schema
             .execute(query.as_str())
             .await
@@ -581,7 +590,8 @@ async fn own_account_is_left_intact_by_suspend_and_delete() {
         format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
     ] {
         let schema = create_schema_with_data(
-            pool.clone(),
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
             Arc::new(caller_with(me.clone(), staff.clone())),
         );
         let errs: Vec<String> = schema
@@ -684,8 +694,11 @@ async fn self_access_still_requires_named_operation_roles() {
             ),
         ),
     ] {
-        let schema =
-            create_schema_with_data(pool.clone(), Arc::new(caller_with(me.clone(), roles)));
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+            Arc::new(caller_with(me.clone(), roles)),
+        );
         let errs: Vec<String> = schema
             .execute(query.as_str())
             .await

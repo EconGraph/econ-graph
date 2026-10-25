@@ -225,9 +225,11 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 3. **Launch the backend**
    ```bash
    cd backend
-   export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+   # One local database is both the app and the data database.
+   export APP_DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+   export DATA_DATABASE_URL=$APP_DATABASE_URL
    # Apply the data migrations (the backend applies only the app migrations).
-   DATA_DATABASE_URL="$DATABASE_URL" cargo run -p econ-graph-crawler --bin crawler -- migrate
+   cargo run -p econ-graph-crawler --bin crawler -- migrate
    cargo run -p econ-graph-backend --bin econ-graph-backend
    # Startup applies the app migrations; backend runs on http://localhost:9876
    ```

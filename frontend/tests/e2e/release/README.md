@@ -37,14 +37,17 @@ The script does five things:
 2. It starts a fresh Postgres 18 container from `docker-compose.release-e2e.yml`
    on port 5439, with data in tmpfs. It skips this when
    `RELEASE_E2E_DATABASE_URL` is set, which CI points at a service container.
-   The script and the Playwright config ignore `DATABASE_URL`, so neither
-   migrates or seeds your dev database.
+   The script and the Playwright config ignore the `DATABASE_URL`,
+   `APP_DATABASE_URL` and `DATA_DATABASE_URL` you export, so neither migrates
+   or seeds your dev database. The one database is both the app and the data
+   database.
 3. It builds `econ-graph-backend` and `seed-fixtures` in one cargo invocation,
    with `FLAGS_PROFILE=release`, so the backend has the build flags that ship
    (no `/mcp`, no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404.
 4. It runs `seed-fixtures`, which applies the data migrations and loads the series listed
    in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
-5. It runs Playwright. Playwright starts the backend on port 18080, pointed at
+5. It runs Playwright. Playwright starts the backend (which applies the app
+   migrations) on port 18080, pointed at
    Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend
    with `FLAGS_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
    `vite preview` on port 18081, which proxies `/graphql` and `/api` to the
