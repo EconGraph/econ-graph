@@ -19,6 +19,11 @@ kubectl wait --for=condition=Ready nodes --all --timeout=300s
 
 echo "✅ Kind cluster recreated successfully!"
 echo ""
+# The new cluster has a new kube-system UID, so an earlier production marker no
+# longer counts (scripts/deploy/lib/cluster-role.sh).
+echo "🚇 If this is the production cluster (the one serving econgraph.com), mark it again"
+echo "   before deploying with PUBLIC_HOST: ./scripts/deploy/mark-production-cluster.sh"
+echo ""
 echo "📋 Available ports:"
 echo "  - Frontend: http://localhost:3000"
 echo "  - Backend:  http://localhost:8080"

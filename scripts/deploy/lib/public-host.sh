@@ -20,6 +20,10 @@
 # scripts/deploy/mark-production-cluster.sh (see lib/cluster-role.sh): on any
 # other cluster a non-empty PUBLIC_HOST stops the deploy, and cloudflared is
 # kept at 0 replicas.
+#
+# Every kubectl call here goes through kc (lib/cluster-role.sh): the same
+# binary as the production check, ${KUBECTL:-kubectl}, on the context that
+# public_host_init pins, so the check and the applies hit the same cluster.
 
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
@@ -37,12 +41,12 @@ INGRESS_NGINX_PUBLIC_KEYS=(enable-real-ip forwarded-for-header proxy-real-ip-cid
 # like "no public host" and lead to the public routes being removed.
 public_host_in_cluster() {
     local ns hosts
-    ns="$(kubectl get namespace econ-graph --ignore-not-found -o name)" || return 1
+    ns="$(kc get namespace econ-graph --ignore-not-found -o name)" || return 1
     [ -n "$ns" ] || return 0
-    hosts="$(kubectl -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
+    hosts="$(kc -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
         -o jsonpath='{range .items[*]}{.spec.rules[0].host}{"\n"}{end}')" || return 1
     if [ -z "$hosts" ]; then
-        hosts="$(kubectl -n econ-graph get ingress econ-graph-ssl-ingress --ignore-not-found \
+        hosts="$(kc -n econ-graph get ingress econ-graph-ssl-ingress --ignore-not-found \
             -o jsonpath='{range .spec.rules[*]}{.host}{"\n"}{end}')" || return 1
     fi
     printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
@@ -53,6 +57,11 @@ public_host_in_cluster() {
 # public host.
 public_host_init() {
     local current
+    if ! cluster_role_pin_context; then
+        echo "❌ ${KUBECTL:-kubectl} has no current context"
+        exit 1
+    fi
+    echo "☸️  Context: ${CLUSTER_ROLE_CONTEXT} (${KUBECTL:-kubectl})"
     if ! current="$(public_host_in_cluster)"; then
         echo "❌ Could not read the cluster's Ingresses to see which public host it serves"
         exit 1
@@ -79,7 +88,7 @@ public_host_init() {
     # same host and path. --ignore-not-found also covers a new cluster without the
     # namespace; any other failure stops the deploy, since the old Ingress would
     # keep serving the public host names.
-    if ! kubectl -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found; then
+    if ! kc -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found; then
         echo "❌ Could not delete the retired Ingress econ-graph-ssl-ingress; it still serves the public host names"
         exit 1
     fi
@@ -109,22 +118,22 @@ render_manifest() {
 apply_public_edge() {
     local key patch pod_cidrs
     if [ -n "$PUBLIC_HOST" ]; then
-        pod_cidrs="$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
+        pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
         if [ -z "$pod_cidrs" ]; then
             echo "❌ Could not read the nodes' pod CIDRs for ingress-nginx's proxy-real-ip-cidr"
             exit 1
         fi
         echo "🔧 ingress-nginx: client address from CF-Connecting-IP, trusted from ${pod_cidrs}"
-        kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
+        kc -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
             "{\"data\":{\"enable-real-ip\":\"true\",\"forwarded-for-header\":\"CF-Connecting-IP\",\"proxy-real-ip-cidr\":\"${pod_cidrs}\",\"use-forwarded-headers\":null}}"
     else
         patch=""
         for key in "${INGRESS_NGINX_PUBLIC_KEYS[@]}"; do
             patch+="\"${key}\":null,"
         done
-        kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
+        kc -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
             "{\"data\":{${patch%,}}}"
-        kubectl -n econ-graph delete ingress -l "${PUBLIC_HOST_LABEL}=true" --ignore-not-found
+        kc -n econ-graph delete ingress -l "${PUBLIC_HOST_LABEL}=true" --ignore-not-found
     fi
 }
 
@@ -133,9 +142,10 @@ apply_public_edge() {
 refuse_public_host() {
     echo "❌ PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}."
     echo "   Only the production cluster serves the public host: a second tunnel connector"
-    echo "   would silently take a share of the site's traffic. On the production cluster,"
-    echo "   run scripts/deploy/mark-production-cluster.sh once (again after a recreate);"
-    echo "   on any other cluster, deploy with PUBLIC_HOST= (empty)."
+    echo "   would silently take a share of the site's traffic."
+    echo "   Only if this is the cluster serving ${PUBLIC_HOST}: run"
+    echo "   scripts/deploy/mark-production-cluster.sh once (again after a recreate)."
+    echo "   On any other cluster, deploy with PUBLIC_HOST= (empty)."
     exit 1
 }
 
@@ -166,13 +176,13 @@ apply_cloudflared() {
         exit 1
     elif [ "$role" != 0 ]; then
         echo "⚠️  cloudflared applied with 0 replicas: ${CLUSTER_ROLE_REASON}."
-        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
+        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kc apply -f -
         [ -z "$PUBLIC_HOST" ] || refuse_public_host
         return 0
     fi
     # A failed lookup (API error, access denied) must not look like a missing
     # Secret: that would scale the connector to 0 and take the site down.
-    if ! secret="$(kubectl -n econ-graph get secret cloudflare-tunnel --ignore-not-found -o name)"; then
+    if ! secret="$(kc -n econ-graph get secret cloudflare-tunnel --ignore-not-found -o name)"; then
         echo "❌ Could not look up the Secret cloudflare-tunnel; cloudflared was left as it is."
         exit 1
     fi
@@ -180,14 +190,14 @@ apply_cloudflared() {
         echo "⚠️  Secret cloudflare-tunnel not found: cloudflared applied with 0 replicas,"
         echo "   so the site is not served publicly. Enter the tunnel token with"
         echo "   scripts/deploy/create-secrets.sh --prompt-tunnel-token, then deploy again."
-        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
+        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kc apply -f -
     elif [ -z "$PUBLIC_HOST" ]; then
         echo "⚠️  No PUBLIC_HOST: cloudflared applied with 0 replicas (no Ingress serves"
         echo "   the tunnel's host names)."
-        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
+        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kc apply -f -
     else
         echo "🚇 Deploying cloudflared (Cloudflare Tunnel), ${CLOUDFLARED_REPLICAS} replica(s)..."
-        yq ".spec.replicas = ${CLOUDFLARED_REPLICAS}" k8s/manifests/cloudflared.yaml | kubectl apply -f -
+        yq ".spec.replicas = ${CLOUDFLARED_REPLICAS}" k8s/manifests/cloudflared.yaml | kc apply -f -
         CLOUDFLARED_DEPLOYED=true
     fi
 }
@@ -197,7 +207,7 @@ apply_cloudflared() {
 wait_cloudflared() {
     if [ "${CLOUDFLARED_DEPLOYED:-false}" = true ]; then
         echo "Waiting for cloudflared to connect to Cloudflare..."
-        if ! kubectl -n econ-graph rollout status deployment/cloudflared --timeout=120s; then
+        if ! kc -n econ-graph rollout status deployment/cloudflared --timeout=120s; then
             echo "⚠️  cloudflared is not ready; check: kubectl -n econ-graph logs deployment/cloudflared"
         fi
     fi

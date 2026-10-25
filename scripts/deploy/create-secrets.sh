@@ -116,6 +116,8 @@ log() {
     echo "create-secrets: $*"
 }
 
+# Every kubectl call below goes through kc: ${KUBECTL:-kubectl} on one pinned
+# context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
@@ -124,9 +126,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 require_production_for_token() {
     cluster_is_marked_production ||
         die "refusing to write the Cloudflare Tunnel token: ${CLUSTER_ROLE_REASON}." \
-            "Only the production cluster may hold it; there, run" \
-            "scripts/deploy/mark-production-cluster.sh once (again after a recreate)." \
-            "Nothing was written."
+            "Only the production cluster may hold it. Only if this is the cluster" \
+            "serving econgraph.com: run scripts/deploy/mark-production-cluster.sh" \
+            "once (again after a recreate). Nothing was written."
 }
 
 if [[ "$PROMPT_TUNNEL_TOKEN" == true ]]; then
@@ -145,6 +147,8 @@ fi
 
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 command -v openssl >/dev/null 2>&1 || die "openssl not found"
+cluster_role_pin_context || die "$KUBECTL has no current context"
+log "context $CLUSTER_ROLE_CONTEXT"
 
 WORKDIR="$(umask 077 && mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -180,7 +184,7 @@ check_input() {
 # A broken connection must never look like "no value" and trigger generation.
 existing() {
     local name="$1" key="$2" encoded
-    encoded="$("$KUBECTL" -n "$NAMESPACE" get secret "$name" --ignore-not-found \
+    encoded="$(kc -n "$NAMESPACE" get secret "$name" --ignore-not-found \
         -o "jsonpath={.data.$key}")" ||
         die "could not read Secret $name from the cluster; nothing more was written"
     [[ -n "$encoded" ]] || return 0
@@ -191,7 +195,7 @@ existing() {
 # True if Secret NAME exists. Exits the script if the query fails.
 secret_exists() {
     local out
-    out="$("$KUBECTL" -n "$NAMESPACE" get secret "$1" --ignore-not-found -o name)" ||
+    out="$(kc -n "$NAMESPACE" get secret "$1" --ignore-not-found -o name)" ||
         die "could not read Secret $1 from the cluster; nothing more was written"
     [[ -n "$out" ]]
 }
@@ -202,7 +206,7 @@ secret_exists() {
 # Exits the script if the query fails.
 pvc_exists() {
     local out
-    out="$("$KUBECTL" -n "$NAMESPACE" get pvc -o name)" ||
+    out="$(kc -n "$NAMESPACE" get pvc -o name)" ||
         die "could not list PersistentVolumeClaims; nothing was written"
     grep -q "^persistentvolumeclaim/$1" <<<"$out"
 }
@@ -213,7 +217,7 @@ pvc_exists() {
 # if the query fails.
 secret_from_manifest() {
     local out
-    out="$("$KUBECTL" -n "$NAMESPACE" get secret "$1" --ignore-not-found \
+    out="$(kc -n "$NAMESPACE" get secret "$1" --ignore-not-found \
         -o 'jsonpath={.metadata.annotations.kubectl\.kubernetes\.io/last-applied-configuration}')" ||
         die "could not read Secret $1 from the cluster; nothing was written"
     [[ -n "$out" ]]
@@ -331,7 +335,7 @@ apply_secret() {
         fi
         # Every key the cluster held was a placeholder: remove the Secret so
         # nothing keeps reading the placeholder values.
-        "$KUBECTL" -n "$NAMESPACE" delete secret "$name" --ignore-not-found >/dev/null
+        kc -n "$NAMESPACE" delete secret "$name" --ignore-not-found >/dev/null
         joined="$(printf '%s, ' "${SUMMARY[@]}")"
         log "$name: ${joined%, }, deleted"
         return
@@ -342,19 +346,19 @@ apply_secret() {
     # Whether it prunes keys another manager wrote (such as a client-side
     # apply of the old secret.yaml) depends on the kubectl version, so dropped
     # keys are removed explicitly below.
-    "$KUBECTL" -n "$NAMESPACE" create secret generic "$name" "${FILE_ARGS[@]}" \
+    kc -n "$NAMESPACE" create secret generic "$name" "${FILE_ARGS[@]}" \
         --dry-run=client -o yaml |
-        "$KUBECTL" -n "$NAMESPACE" apply --server-side --force-conflicts \
+        kc -n "$NAMESPACE" apply --server-side --force-conflicts \
             --field-manager=create-secrets -f - >/dev/null
     # Secrets written by an older client-side apply carry a copy of their data
     # in this annotation; drop it.
-    "$KUBECTL" -n "$NAMESPACE" annotate secret "$name" \
+    kc -n "$NAMESPACE" annotate secret "$name" \
         kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
     local key current
     for key in "${DROPPED_KEYS[@]}"; do
         current="$(existing "$name" "$key")" || exit 1
         if [[ -n "$current" ]]; then
-            "$KUBECTL" -n "$NAMESPACE" patch secret "$name" --type=json \
+            kc -n "$NAMESPACE" patch secret "$name" --type=json \
                 -p "[{\"op\":\"remove\",\"path\":\"/data/$key\"}]" >/dev/null ||
                 die "could not remove $key from $name"
         fi
@@ -363,7 +367,7 @@ apply_secret() {
     log "$name: ${joined%, }"
 }
 
-"$KUBECTL" get namespace "$NAMESPACE" >/dev/null 2>&1 ||
+kc get namespace "$NAMESPACE" >/dev/null 2>&1 ||
     die "namespace $NAMESPACE not found; apply k8s/manifests/namespace.yaml first"
 
 # Validate every supplied value before anything is written, so a bad input
@@ -507,8 +511,9 @@ apply_secret
 if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN-}" ]] && ((${#FILE_ARGS[@]} > 0)) &&
     ! cluster_is_marked_production; then
     log "warning: cloudflare-tunnel holds a tunnel token, but ${CLUSTER_ROLE_REASON}." \
-        "cloudflared is not run here; unless this is the production cluster, delete" \
-        "the Secret: kubectl -n $NAMESPACE delete secret cloudflare-tunnel"
+        "deploy.sh does not start cloudflared here. Unless this is the production" \
+        "cluster, run scripts/deploy/mark-production-cluster.sh --unmark, which offers" \
+        "to delete it."
 fi
 
 # --- grafana-admin ---------------------------------------------------------
@@ -525,7 +530,7 @@ elif secret_exists monitoring-auth; then
     if [[ -n "${keep_manifest_monitoring_auth-}" ]]; then
         # Drop the client-side-apply annotation (it holds a copy of the data) so
         # the guard above does not fire again on the next run.
-        "$KUBECTL" -n "$NAMESPACE" annotate secret monitoring-auth \
+        kc -n "$NAMESPACE" annotate secret monitoring-auth \
             kubectl.kubernetes.io/last-applied-configuration- >/dev/null ||
             die "could not remove the last-applied annotation from monitoring-auth"
     fi
