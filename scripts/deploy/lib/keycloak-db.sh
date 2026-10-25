@@ -27,7 +27,10 @@ KDB_COUNT_SQL="select table_name, (xpath('/row/c/text()', query_to_xml(format('s
 # Pin every kc call to context $1, which must exist. Unlike
 # cluster_role_use_context, the current context stays as it is.
 kdb_use_context() {
-    if ! command "${KUBECTL:-kubectl}" config get-contexts -o name | grep -qxF -- "$1"; then
+    local names
+    # Captured first: grep -q exiting early could SIGPIPE kubectl and fail the pipeline.
+    names="$(command "${KUBECTL:-kubectl}" config get-contexts -o name)" || return 1
+    if ! grep -qxF -- "$1" <<<"$names"; then
         echo "${KDB_SCRIPT}: error: ${KUBECTL:-kubectl} has no context $1" >&2
         return 1
     fi
