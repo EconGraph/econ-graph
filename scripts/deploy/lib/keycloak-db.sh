@@ -91,15 +91,34 @@ kdb_counts() {
     kdb_exec psql -U "$KDB_USER" -d "$1" -v ON_ERROR_STOP=1 -X -A -t -F $'\t' -c "$KDB_COUNT_SQL"
 }
 
-# Restore dump file $2 into the existing, empty database $1 and check that its
-# row counts equal the counts file $3. Prints the difference on a mismatch.
+# Restore dump file $2 into the existing, empty database $1 in one transaction,
+# stopping at the first error, and check that its row counts equal the counts
+# file $3. Prints the difference on a mismatch.
 kdb_restore_and_compare() {
     local db="$1" dump="$2" counts="$3" got
-    kdb_exec pg_restore -U "$KDB_USER" -d "$db" --no-owner --exit-on-error <"$dump" || return 1
+    kdb_exec pg_restore -U "$KDB_USER" -d "$db" --no-owner --exit-on-error --single-transaction \
+        <"$dump" || return 1
     got="$(kdb_counts "$db")" || return 1
     if [ "$got" != "$(cat "$counts")" ]; then
         echo "${KDB_SCRIPT}: error: row counts in ${db} differ from ${counts}:" >&2
         diff <(cat "$counts") <(printf '%s\n' "$got") >&2 || true
         return 1
     fi
+}
+
+# Drop scratch database $1. Refuses any name but keycloak_verify_* (backup) and
+# keycloak_restore_* (restore): these scripts never drop `keycloak` itself.
+kdb_drop_scratch() {
+    local db="$1"
+    if [[ "$db" != keycloak_verify_* && "$db" != keycloak_restore_* ]]; then
+        echo "${KDB_SCRIPT}: error: refusing to drop ${db}: not a scratch database" >&2
+        return 1
+    fi
+    kdb_exec dropdb -U "$KDB_USER" --if-exists "$db"
+}
+
+# The cluster's identity: the UID of its kube-system namespace (as in
+# lib/cluster-role.sh), new for every cluster.
+kdb_cluster_uid() {
+    kube_system_uid
 }

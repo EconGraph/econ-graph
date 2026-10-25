@@ -121,9 +121,10 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
   run on the result. Before a deploy that changes the Keycloak image, run
   `scripts/deploy/backup-keycloak-db.sh && scripts/deploy/deploy.sh`: the script takes a
   dump of the `keycloak` database, verified by a restore into a scratch database, into
-  `~/econgraph-backups/keycloak/`. `scripts/deploy/restore-keycloak-db.sh` puts one back.
-  The Deployment uses `Recreate`, and `deploy.sh` waits for the new Keycloak before
-  applying the realm.
+  `~/econgraph-backups/keycloak/`. `scripts/deploy/restore-keycloak-db.sh` puts one
+  back, and is the only way to downgrade Keycloak (never `kubectl rollout undo` or
+  `set image`); see the [v4.0.0 QA plan](../docs/release/v4.0.0-qa.md). The Deployment
+  uses `Recreate`, and `deploy.sh` waits for the new Keycloak before applying the realm.
 
 ## 🌐 Accessing the Application
 

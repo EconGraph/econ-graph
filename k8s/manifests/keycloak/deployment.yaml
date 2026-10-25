@@ -148,14 +148,16 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "1000m"
-        # The first start builds Keycloak's optimized image, which takes a while.
+        # The first start builds Keycloak's optimized image, and the first start of a new
+        # version migrates the database, which can take long on a big one. 180 x 5s = 900s,
+        # the same as deploy.sh's rollout wait, so a slow migration is not killed early.
         startupProbe:
           httpGet:
             path: /idp/health/started
             port: management
           periodSeconds: 5
           timeoutSeconds: 3
-          failureThreshold: 60
+          failureThreshold: 180
         livenessProbe:
           httpGet:
             path: /idp/health/live

@@ -20,8 +20,10 @@
 #   2. pg_dump --format=custom of the `keycloak` database from the pod
 #      keycloak-postgres-0 into ~/econgraph-backups/keycloak/<UTC time>/
 #      (KEYCLOAK_BACKUP_ROOT overrides the root), with exact row counts of
-#      every table, and the Keycloak image that wrote it. Directories are 0700
-#      and files 0600: the dump holds password hashes and client secrets.
+#      every table, the Keycloak image that wrote it and the cluster's identity
+#      (the kube-system namespace UID, as in lib/cluster-role.sh), which
+#      restore-keycloak-db.sh checks. Directories are 0700 and files 0600: the
+#      dump holds password hashes and client secrets.
 #   3. Restore the dump into a scratch database in the same Postgres
 #      (keycloak_verify_<time>), compare its row counts with the live ones,
 #      then drop the scratch database.
@@ -57,13 +59,14 @@ kdb_use_context "$CONTEXT"
 kdb_check_pod
 replicas="$(kdb_keycloak_replicas)"
 image="$(kdb_keycloak_image)"
+cluster_uid="$(kdb_cluster_uid)"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dest="${KDB_BACKUP_ROOT}/${stamp}"
 
 if [ "$DRY_RUN" = true ]; then
     echo "${KDB_SCRIPT}: dry run on context ${CONTEXT}, nothing changed:"
     echo "  would scale deployment/${KDB_DEPLOYMENT} in ${KDB_NAMESPACE} from ${replicas} to 0 and leave it there"
-    echo "  Keycloak image now: ${image}"
+    echo "  Keycloak image now: ${image}; cluster (kube-system UID): ${cluster_uid}"
     echo "  would dump database ${KDB_DATABASE} from ${KDB_POD} to ${dest}/${KDB_DATABASE}.dump"
     echo "  would verify it by restoring into keycloak_verify_${stamp,,} there and comparing row counts"
     exit 0
@@ -85,7 +88,7 @@ scratch_db=""
 on_exit() {
     local status=$?
     if [ -n "$scratch_db" ]; then
-        kdb_exec dropdb -U "$KDB_USER" --if-exists "$scratch_db" ||
+        kdb_drop_scratch "$scratch_db" ||
             echo "${KDB_SCRIPT}: warning: could not drop the scratch database ${scratch_db}" >&2
     fi
     if [ "$status" -ne 0 ] && [ -d "$work" ]; then
@@ -108,11 +111,12 @@ scratch_db="keycloak_verify_${stamp,,}"
 echo "${KDB_SCRIPT}: verifying by restoring into ${scratch_db}"
 kdb_exec createdb -U "$KDB_USER" "$scratch_db"
 kdb_restore_and_compare "$scratch_db" "${work}/${KDB_DATABASE}.dump" "${work}/counts.tsv"
-kdb_exec dropdb -U "$KDB_USER" "$scratch_db"
+kdb_drop_scratch "$scratch_db"
 scratch_db=""
 
 {
     echo "context=${CONTEXT}"
+    echo "cluster_uid=${cluster_uid}"
     echo "keycloak_image=${image}"
     echo "database=${KDB_DATABASE}"
     echo "tables=$(wc -l <"${work}/counts.tsv")"
@@ -120,4 +124,5 @@ scratch_db=""
 } >"${work}/VERIFIED"
 mv "$work" "$dest"
 echo "${KDB_SCRIPT}: verified dump in ${dest}"
+echo "${KDB_SCRIPT}: copy that directory to a second location, off this disk"
 echo "${KDB_SCRIPT}: deployment/${KDB_DEPLOYMENT} is at 0 replicas; scripts/deploy/deploy.sh starts it again"
