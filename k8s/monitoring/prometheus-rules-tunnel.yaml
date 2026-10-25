@@ -10,7 +10,7 @@
 #       edge (normally 4 per replica). Served by cloudflared on :2000/metrics; its pod
 #       template carries prometheus.io/scrape|port|path annotations, so the annotation-based
 #       'kubernetes-pods' job in prometheus-config.yaml scrapes it and maps the pod label
-#       app=cloudflared onto the series.
+#       app=cloudflared and the pod's namespace (kubernetes_namespace) onto the series.
 #
 # deploy.sh runs cloudflared with replicas: 0 unless the cluster is marked production
 # (scripts/deploy/mark-production-cluster.sh) and has a PUBLIC_HOST and the Secret
@@ -46,12 +46,13 @@ data:
             description: The cloudflared Deployment wants a replica but has had none available for 5 minutes, so nothing serves the public hostnames. Check `kubectl -n econ-graph describe deployment cloudflared` and the pod's events (a missing cloudflare-tunnel Secret shows as CreateContainerConfigError).
 
         # Also fires when the pod runs but its metrics are not scraped, since then no
-        # connection count is known either.
+        # connection count is known either. Only econ-graph's connector counts: a
+        # cloudflared in another namespace (another tunnel) must not hide this one's outage.
         - alert: CloudflareTunnelNoConnections
           expr: |
             (max(kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}) > 0)
             unless on()
-            (sum(cloudflared_tunnel_ha_connections{app="cloudflared"}) > 0)
+            (sum(cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared"}) > 0)
           for: 5m
           labels:
             severity: critical

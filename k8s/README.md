@@ -270,7 +270,9 @@ With the marker:
 - `create-secrets.sh` refuses to write `CLOUDFLARE_TUNNEL_TOKEN` (or
   `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not
-  production, and the scripts say so.
+  production, and the scripts say so. The deploy then stops with cloudflared left as it is,
+  as it does when the Secret `cloudflare-tunnel` cannot be looked up: a failed lookup never
+  starts the connector, and never scales a running one to 0 either.
 
 ## 📊 Monitoring
 

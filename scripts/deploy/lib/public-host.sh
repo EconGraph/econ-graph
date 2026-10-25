@@ -147,19 +147,36 @@ refuse_public_host() {
 # with `scripts/deploy/create-secrets.sh --prompt-tunnel-token`, hidden input).
 # Otherwise it is applied with 0 replicas, which also stops a connector already
 # running; on a cluster that is not production with a PUBLIC_HOST, the deploy
-# then stops. Sets CLOUDFLARED_DEPLOYED.
+# then stops. When the marker or the Secret cannot be looked up, the deploy
+# stops and cloudflared is left as it is: a failed lookup never starts the
+# connector, and never takes the site down either. Sets CLOUDFLARED_DEPLOYED.
 #
 # One replica while the cluster has one worker node. On several nodes, use 2+
 # with the pod anti-affinity in the manifest: every replica registers its own
 # connections for the same tunnel, so losing a node does not take the site down.
 CLOUDFLARED_REPLICAS=1
 apply_cloudflared() {
+    local secret role=0
     CLOUDFLARED_DEPLOYED=false
-    if ! cluster_is_marked_production; then
+    cluster_is_marked_production || role=$?
+    if [ "$role" = 2 ]; then
+        # Not known to be production, so never started; but not known not to be
+        # either, so a running connector is not stopped on a failed lookup.
+        echo "❌ ${CLUSTER_ROLE_REASON}; cloudflared was left as it is."
+        exit 1
+    elif [ "$role" != 0 ]; then
         echo "⚠️  cloudflared applied with 0 replicas: ${CLUSTER_ROLE_REASON}."
         yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
         [ -z "$PUBLIC_HOST" ] || refuse_public_host
-    elif ! kubectl -n econ-graph get secret cloudflare-tunnel >/dev/null 2>&1; then
+        return 0
+    fi
+    # A failed lookup (API error, access denied) must not look like a missing
+    # Secret: that would scale the connector to 0 and take the site down.
+    if ! secret="$(kubectl -n econ-graph get secret cloudflare-tunnel --ignore-not-found -o name)"; then
+        echo "❌ Could not look up the Secret cloudflare-tunnel; cloudflared was left as it is."
+        exit 1
+    fi
+    if [ -z "$secret" ]; then
         echo "⚠️  Secret cloudflare-tunnel not found: cloudflared applied with 0 replicas,"
         echo "   so the site is not served publicly. Enter the tunnel token with"
         echo "   scripts/deploy/create-secrets.sh --prompt-tunnel-token, then deploy again."

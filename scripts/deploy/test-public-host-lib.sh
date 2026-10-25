@@ -61,7 +61,8 @@ STUB
 source "$stub_dir/cluster-role-stub.sh"
 
 # run_lib SCRIPT: runs SCRIPT in a subshell with the library and a stub kubectl.
-# STUB_PUBLIC_HOST is what the cluster serves; STUB_SECRET=1 means cloudflare-tunnel exists.
+# STUB_PUBLIC_HOST is what the cluster serves; STUB_SECRET=1 means cloudflare-tunnel exists,
+# STUB_SECRET_FAILS=1 makes looking it up fail.
 # Every kubectl call (and stdin piped to apply) is appended to $log, the output to $out.
 run_lib() {
   : >"$log"
@@ -78,7 +79,9 @@ run_lib() {
         *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
         *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
         *"get nodes"*) printf '10.244.0.0/24 10.244.1.0/24' ;;
-        *"get secret cloudflare-tunnel"*) [ "${STUB_SECRET:-0}" = 1 ] ;;
+        *"get secret cloudflare-tunnel"*)
+          [ "${STUB_SECRET_FAILS:-0}" != 1 ] || return 1
+          [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
         *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] ;;
         *"apply -f -"*) sed 's/^/  stdin: /' >>"$log" ;;
       esac
@@ -154,13 +157,20 @@ PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib 'public_host_init; apply_cloudfl
 grep -q 'stdin: .*replicas: 1' "$log" || fail "marked, Secret and host: cloudflared not at 1 replica"
 grep -q 'apply -f k8s/manifests/cloudflared.yaml' "$log" &&
   fail "cloudflared.yaml applied as committed instead of with the replica count"
+# The Secret cannot be looked up: stop, and leave cloudflared as it is (a failed lookup
+# must not scale a running connector to 0).
+if PUBLIC_HOST=econgraph.com STUB_SECRET=1 STUB_SECRET_FAILS=1 run_lib apply_cloudflared; then
+  fail "a failed Secret lookup did not stop the deploy"
+fi
+grep -q 'apply' "$log" && fail "a failed Secret lookup changed cloudflared: $(grep apply "$log")"
+grep -q 'Could not look up the Secret cloudflare-tunnel' "$out" || fail "a failed Secret lookup was not reported"
 
 # The committed manifest never starts the connector by itself.
 grep -q '^  replicas: 0$' k8s/manifests/cloudflared.yaml || fail "cloudflared.yaml is not committed with replicas: 0"
 
 # Not production: 0 replicas even with the Secret, and a PUBLIC_HOST stops the deploy
 # before anything is applied.
-for marker in none copied other-role fails; do
+for marker in none copied other-role; do
   PUBLIC_HOST='' STUB_SECRET=1 STUB_MARKER=$marker run_lib 'public_host_init; apply_cloudflared; [ "$CLOUDFLARED_DEPLOYED" = false ]' ||
     fail "marker $marker, no public host: apply_cloudflared failed: $(cat "$out")"
   grep -q 'stdin: .*replicas: 0' "$log" || fail "marker $marker: cloudflared not at 0 replicas"
@@ -182,13 +192,23 @@ done
 PUBLIC_HOST=econgraph.com STUB_MARKER=copied run_lib public_host_init || true
 grep -q 'made on another cluster' "$out" || fail "copied marker: the refusal does not say it was made on another cluster"
 
-# The cluster cannot be asked for its identity: not production, and said so.
-if PUBLIC_HOST=econgraph.com STUB_SECRET=1 STUB_CLUSTER_FAILS=1 run_lib public_host_init; then
-  fail "a failed kube-system lookup counted as production"
-fi
-grep -q 'treated as not production' "$out" || fail "a failed kube-system lookup was not reported"
-PUBLIC_HOST='' STUB_SECRET=1 STUB_CLUSTER_FAILS=1 run_lib 'public_host_init; apply_cloudflared'
-grep -q 'stdin: .*replicas: 0' "$log" || fail "failed kube-system lookup: cloudflared not at 0 replicas"
+# The cluster cannot be asked for its identity or its marker: not production, and said
+# so. A PUBLIC_HOST stops the deploy before anything is applied, and apply_cloudflared
+# stops without touching cloudflared, so a failed lookup neither starts the connector nor
+# takes the site down.
+for case_env in STUB_CLUSTER_FAILS=1 STUB_MARKER=fails; do
+  if (export "${case_env?}"; PUBLIC_HOST=econgraph.com STUB_SECRET=1 run_lib public_host_init); then
+    fail "$case_env: a failed lookup counted as production"
+  fi
+  grep -q 'treated as not production' "$out" || fail "$case_env: a failed lookup was not reported"
+  grep -Eq 'apply|delete|patch' "$log" && fail "$case_env: the refused deploy changed the cluster"
+  for host in '' econgraph.com; do
+    if (export "${case_env?}"; PUBLIC_HOST=$host STUB_SECRET=1 run_lib apply_cloudflared); then
+      fail "$case_env, PUBLIC_HOST=$host: apply_cloudflared went on after a failed lookup"
+    fi
+    grep -q 'apply' "$log" && fail "$case_env, PUBLIC_HOST=$host: a failed lookup changed cloudflared"
+  done
+done
 
 # --- an executable stub kubectl, for the scripts below (passed as KUBECTL) -------
 # Every Secret is absent, except that STUB_TUNNEL_SECRET=1 gives cloudflare-tunnel a

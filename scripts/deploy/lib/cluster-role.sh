@@ -37,18 +37,19 @@ cluster_role_marker() {
 
 # True only when the current cluster carries a production marker made on this
 # very cluster. Anything else, including a failure to ask the cluster, is "not
-# production" (fail closed); CLUSTER_ROLE_REASON then says why.
+# production" (fail closed); CLUSTER_ROLE_REASON then says why. Returns 1 when
+# the cluster answered and is not production, 2 when it could not be asked.
 # shellcheck disable=SC2034 # CLUSTER_ROLE_REASON is read by the callers.
 cluster_is_marked_production() {
     local uid marker role marker_uid
     CLUSTER_ROLE_REASON=""
     if ! uid="$(kube_system_uid)"; then
         CLUSTER_ROLE_REASON="could not read the ${CLUSTER_ROLE_NAMESPACE} namespace UID from the cluster, so it is treated as not production"
-        return 1
+        return 2
     fi
     if ! marker="$(cluster_role_marker)"; then
         CLUSTER_ROLE_REASON="could not read ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP} from the cluster, so it is treated as not production"
-        return 1
+        return 2
     fi
     read -r role marker_uid <<<"$marker" || true
     if [ -z "$role" ] && [ -z "$marker_uid" ]; then
