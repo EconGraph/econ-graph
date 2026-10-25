@@ -7,7 +7,7 @@ Every outbound crawler request goes through one `HttpFetcher`
   for a permit rather than dropping requests.
 - **Concurrency limit**: at most `max_concurrency` in-flight requests.
 - **Timeout**: 30 s per request (`CRAWLER_HTTP_TIMEOUT_SECS` on the worker).
-- **User-Agent**: `EconGraph/<version> (+https://github.com/jmalicki/econ-graph; <contact>)`.
+- **User-Agent**: `EconGraph/<version> (+https://econgraph.com; <contact>)`. download.bls.gov refuses a User-Agent that links to github.com.
 - **In-process retries**: up to 2 extra attempts for rate-limit and transient errors, jittered
   exponential backoff, honouring `Retry-After`. After that the queue reschedules the job
   (see [CRAWLER_DEPLOYMENT_GUIDE.md](./CRAWLER_DEPLOYMENT_GUIDE.md#retries)).
