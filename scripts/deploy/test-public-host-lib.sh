@@ -35,6 +35,7 @@ run_lib() {
         *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
         *"get nodes"*) printf '10.244.0.0/24 10.244.1.0/24' ;;
         *"get secret cloudflare-tunnel"*) [ "${STUB_SECRET:-0}" = 1 ] ;;
+        *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] ;;
         *"apply -f -"*) sed 's/^/  stdin: /' >>"$log" ;;
       esac
     }
@@ -60,6 +61,11 @@ fi
 # The retired Ingress goes in public_host_init, before anything applies an Ingress.
 PUBLIC_HOST=econgraph.com run_lib public_host_init
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public_host_init: econ-graph-ssl-ingress not deleted"
+
+# A failed delete stops: the old Ingress would keep serving the public names.
+if PUBLIC_HOST='' STUB_DELETE_FAILS=1 run_lib public_host_init; then
+  fail "public_host_init went on after failing to delete econ-graph-ssl-ingress"
+fi
 
 # With a public host: real-ip settings only, use-forwarded-headers removed.
 PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge'

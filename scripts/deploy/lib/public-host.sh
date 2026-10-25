@@ -49,8 +49,13 @@ public_host_init() {
     # The retired ssl-ingress.yaml's Ingress served the public host names without
     # the /graphql rate limits. It goes before any Ingress is applied: it holds
     # econgraph.com /, and the admission webhook refuses a second Ingress for the
-    # same host and path. (No namespace yet on a new cluster: nothing to delete.)
-    kubectl -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found 2>/dev/null || true
+    # same host and path. --ignore-not-found also covers a new cluster without the
+    # namespace; any other failure stops the deploy, since the old Ingress would
+    # keep serving the public host names.
+    if ! kubectl -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found; then
+        echo "❌ Could not delete the retired Ingress econ-graph-ssl-ingress; it still serves the public host names"
+        exit 1
+    fi
 }
 
 # Print manifest(s) (or stdin, "-") with the public host applied, if any.
