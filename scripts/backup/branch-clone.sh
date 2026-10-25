@@ -24,9 +24,9 @@
 # that has that marker, is a writable btrfs subvolume, and whose name you
 # typed back.
 #
-# No root needed: creating works because jmalicki owns the snapshot roots;
+# No root needed: creating works because the operator owns the snapshot roots;
 # deleting empties the clone from inside a container on the rootful daemon
-# (the Postgres files belong to UID 999, which jmalicki cannot remove
+# (the Postgres files belong to UID 999, which the operator cannot remove
 # directly; root in that container is host root) and then removes the empty
 # subvolume with rmdir, which the kernel allows for an empty subvolume's
 # owner. lib.sh points docker at that daemon.

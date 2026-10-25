@@ -8,7 +8,7 @@
 #
 # then enables the timer. The script is copied (root-owned, 0755) rather
 # than run from the checkout, so root never executes a file that the
-# jmalicki account can change; re-run this installer after merging changes
+# the operator account can change; re-run this installer after merging changes
 # to backup-snapshots.sh. Safe to re-run. Nothing it installs deletes
 # anything.
 #
@@ -48,7 +48,7 @@ fi
 [ -f "$SRC" ] || { echo "error: $SRC not found" >&2; exit 1; }
 
 # True when <path> is a regular file (not a symlink) owned by root:root with
-# exactly <mode>: content alone is not enough, since a file the jmalicki
+# exactly <mode>: content alone is not enough, since a file the operator
 # account could write would let it change what root runs.
 root_owned() {
     local path="$1" mode="$2"

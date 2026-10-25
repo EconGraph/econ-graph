@@ -25,6 +25,9 @@
 # Safe to run by hand at any time; concurrent runs are serialised.
 #
 # Usage: sudo scripts/host/backup-snapshots.sh [--dry-run]
+#
+# --dry-run (-n) prints every snapshot and copy it would make and writes
+# nothing: no snapshot, no lock file, no status file.
 
 set -euo pipefail
 
@@ -56,10 +59,13 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-exec 9>/run/econgraph-backup-snapshots.lock
-if ! flock -n 9; then
-    echo "error: another backup-snapshots run is in progress" >&2
-    exit 1
+# A dry run takes no lock: opening the lock file would create it.
+if [ "$DRY_RUN" = "false" ]; then
+    exec 9>/run/econgraph-backup-snapshots.lock
+    if ! flock -n 9; then
+        echo "error: another backup-snapshots run is in progress" >&2
+        exit 1
+    fi
 fi
 
 # "20261024T051500Z" -> epoch, or empty.
@@ -73,7 +79,7 @@ stamp_epoch() {
 # Snapshot names of <name> in <dir>, oldest first, one per line. Covers both
 # the hourly <name>.<stamp> and snapshot-now's <name>.pre-<stamp>-<reason>.
 # Names outside a safe character set are ignored (the local snapshot
-# directory is writable by jmalicki).
+# directory is writable by the operator).
 list_snapshots() {
     local dir="$1" name="$2"
     find "$dir" -mindepth 1 -maxdepth 1 -type d -name "$name.*" -printf '%f\n' 2>/dev/null \

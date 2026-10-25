@@ -15,7 +15,7 @@ All production data lives on btrfs subvolumes at the top level of the
 `/home` filesystem (btrfs RAID10 on 4x Samsung 990 PRO NVMe, label `home`,
 UUID `03ee0fcb-5f19-4f44-8596-e227f1fb647c`), next to `@home`, so a snapshot
 of one never contains the other. `scripts/host/setup-subvolumes.sh` creates
-them, adds their fstab lines and makes jmalicki the owner of each subvolume
+them, adds their fstab lines and makes the operator the owner of each subvolume
 root.
 
 | Mount point                  | Subvolume               | Contents                                                        |
@@ -49,7 +49,7 @@ for the rootless daemon, so the backup scripts don't use that variable:
 `scripts/backup/lib.sh` sets `DOCKER_HOST=unix:///var/run/docker.sock` for
 itself and everything it runs, like `scripts/deploy/lib/kind-env.sh`.
 Override it with `ECONGRAPH_DOCKER_HOST` (in the environment or in
-`~/.config/econgraph/backup.env`). jmalicki is in the `docker` group, so the
+`~/.config/econgraph/backup.env`). The operator is in the `docker` group, so the
 user timers reach that socket without sudo. The scripts log the daemon they
 use and warn if it is a rootless one.
 
@@ -64,7 +64,7 @@ The Postgres data directories (`data-plane/pg/`, `app-prod/keycloak-pg/`)
 are owned by host UID **999**, mode 0700: the `postgres` user of the
 `postgres:18` image (`uid=999(postgres) gid=999(postgres)`), which the
 manifests run as (`runAsUser: 999`). Rootful Docker uses no user namespace,
-so UID 999 in the pod is UID 999 on the host. jmalicki cannot read them
+so UID 999 in the pod is UID 999 on the host. the operator cannot read them
 directly. Any copy has to preserve that ownership and mode, or Postgres
 refuses to start on it. btrfs snapshots and `btrfs send`/`receive` preserve
 it. A file-level copy has to be made as root with ownership kept
@@ -121,12 +121,12 @@ automatically.
 | When | What | Runs as | Unit |
 |---|---|---|---|
 | hourly, on the hour | `scripts/host/backup-snapshots.sh`: read-only snapshots of `data-plane` and `app-prod` into `/srv/econgraph/snapshots/<name>.<UTC stamp>`, then incremental `btrfs send`/`receive` of every snapshot not yet on the backup pool into `/srv/econgraph-backups/snapshots` (skipped with a message while the pool is not mounted) | root | `econgraph-backup-snapshots.timer` (system; installed by `scripts/host/install-backup-timer.sh`) |
-| hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | jmalicki | `econgraph-backup-freshness.timer` (user) |
-| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph` and `keycloak` | jmalicki | `econgraph-dump.timer` (user) |
-| daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (**not configured yet**; the unit does nothing until `restic.env` exists) | jmalicki | `econgraph-offsite.timer` (user) |
-| Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | jmalicki | `econgraph-restore-drill.timer` (user) |
-| before a risky change | `scripts/backup/snapshot-now.sh <reason>` | jmalicki | by hand |
-| when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | jmalicki | by hand |
+| hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | operator | `econgraph-backup-freshness.timer` (user) |
+| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph` and `keycloak` | operator | `econgraph-dump.timer` (user) |
+| daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
+| Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | operator | `econgraph-restore-drill.timer` (user) |
+| before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
+| when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
 Everything that needs root is a script under `scripts/host/`; each refuses
@@ -134,7 +134,7 @@ to run without sudo, takes `--dry-run`, prints every action, and is safe to
 re-run. They are listed in order in [Needs sudo](#needs-sudo).
 The root timer runs a root-owned copy at
 `/usr/local/sbin/econgraph-backup-snapshots`, never the checkout, so root
-never executes a file the jmalicki account can edit.
+never executes a file the operator account can edit.
 
 The user scripts read optional overrides from
 `~/.config/econgraph/backup.env` (plain `KEY=value`): `BACKUP_ROOT`, the
@@ -162,7 +162,7 @@ space drops below a threshold, and reports how big the backups are:
 | size of `/srv/econgraph/snapshots`, of the dumps directory and of `/srv/econgraph-backups/snapshots` | reported (`SIZE` lines and metrics), no threshold | |
 
 Free space comes from `df` (an estimate on btrfs, fine for a threshold). The
-snapshot directories' contents are not readable by jmalicki, so their sizes
+snapshot directories' contents are not readable by the operator, so their sizes
 come from `/var/lib/econgraph/backup-sizes.env`, which the root hourly job
 rewrites at most once a day with `btrfs filesystem du -s` (shared extents
 counted once, so the number is the space really used). The dumps directory
@@ -196,7 +196,7 @@ sides so the hourly copy stays incremental. `*.incomplete-*` leftovers on the
 pool (from a receive that failed and was set aside) can be deleted the same
 way with `--pool`.
 
-Dumps are plain directories owned by jmalicki: remove old ones with `rm -r`
+Dumps are plain directories owned by the operator: remove old ones with `rm -r`
 if ever needed. Never remove the newest `VERIFIED` one.
 
 ## Timers and installation
@@ -212,8 +212,8 @@ It copies the scripts to `~/.local/lib/econgraph-backup/` (the timers run
 that reviewed copy, not whatever branch the checkout has), installs the
 units into `~/.config/systemd/user/`, and enables the dump, drill and
 freshness timers; the off-site timer only once `restic.env` exists. User
-timers need lingering to run while jmalicki is logged out; on threadripper
-`loginctl show-user jmalicki -p Linger` already reports `Linger=yes`.
+timers need lingering to run while the operator is logged out; on threadripper
+`loginctl show-user "$USER" -p Linger` already reports `Linger=yes`.
 
 Until the root hourly timer is installed, put `FRESHNESS_SKIP_SNAPSHOTS=1`
 in `~/.config/econgraph/backup.env`, or the hourly freshness check fails on
@@ -475,10 +475,10 @@ copy off anything worth keeping first, by hand.
 
 ## Unprivileged btrfs: what works without root
 
-Tested on threadripper (kernel 7.0, btrfs-progs 6.17.1) as jmalicki, first
+Tested on threadripper (kernel 7.0, btrfs-progs 6.17.1) as the operator, first
 in a scratch directory on `/home`, then on the real layout
 (`snapshot-now.sh` from `/srv/econgraph/data-plane` and `app-prod`, both
-owned by jmalicki and holding only a test directory owned by UID 100998,
+owned by the operator and holding only a test directory owned by UID 100998,
 the rootless-Docker mapping of UID 999 in use at the time,
 into `/srv/econgraph/snapshots`; `/home` is not mounted with
 `user_subvol_rm_allowed`):
@@ -500,7 +500,7 @@ into `/srv/econgraph/snapshots`; `/home` is not mounted with
 Not tested, from the kernel source: snapshotting a subvolume someone else
 owns fails with `EPERM` (snapshots are limited to the caller's own
 subvolumes), which is why `setup-subvolumes.sh` chowns the subvolume roots
-to jmalicki.
+to the operator.
 
 The test snapshots on the real layout were removed without root (clear `ro`,
 empty from a container, `rmdir`); none were left behind.
@@ -508,16 +508,16 @@ empty from a container, `rmdir`); none were left behind.
 Consequences:
 
 - `snapshot-now.sh` and `branch-clone.sh` need no sudo. The hourly job
-  could take its snapshots as jmalicki, but the copy to the backup pool
+  could take its snapshots as the operator, but the copy to the backup pool
   needs `btrfs send`/`receive`, so it runs as a root system timer.
 - **`user_subvol_rm_allowed` is not needed and should stay off.** Nothing
-  run as jmalicki needs `btrfs subvolume delete`: nothing is deleted
+  run as the operator needs `btrfs subvolume delete`: nothing is deleted
   automatically, branch clones are removed with `rmdir`, and manual
   deletion goes through `scripts/host/delete-snapshots.sh`. Turning it on would let any process
-  running as jmalicki delete a whole subvolume, including a live one, with
+  running as the operator delete a whole subvolume, including a live one, with
   one command.
-- Local snapshots are not protected from jmalicki: anything running as
-  jmalicki can flip a snapshot writable and empty it through a container.
+- Local snapshots are not protected from the operator: anything running as
+  the operator can flip a snapshot writable and empty it through a container.
   They guard against bad changes, not against a hostile or runaway process
   in this account. The copies on the 870 pool
   (`/srv/econgraph-backups/snapshots`, root-only, mode 0700) and the
@@ -531,7 +531,7 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    branch; already done on 2026-10-24): `sudo scripts/host/setup-subvolumes.sh`. Creates
    `@econgraph-data-plane`, `@econgraph-app-prod` and
    `@econgraph-snapshots`, adds their `/etc/fstab` lines, mounts them and
-   chowns each subvolume root to jmalicki (required for `snapshot-now.sh`).
+   chowns each subvolume root to the operator (required for `snapshot-now.sh`).
 2. **Install the hourly snapshot and copy job**:
    `sudo scripts/host/install-backup-timer.sh --dry-run`, then
    `sudo scripts/host/install-backup-timer.sh --run-now`. Installs a
@@ -550,7 +550,7 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    (`UUID=a1e61098-... /srv/econgraph-backups btrfs subvol=/@econgraph-backups,compress=zstd:3,ssd,discard=async,space_cache=v2,noatime,nofail,x-systemd.device-timeout=30s 0 0`;
    `nofail` so a missing disk never blocks boot), mounts it, keeps the
    subvolume root root-owned (0755), and creates `snapshots/` (root, 0700)
-   and `dumps/` (jmalicki, 0700), resetting their owner and mode on a
+   and `dumps/` (the operator, 0700), resetting their owner and mode on a
    rerun. It refuses an existing `/etc/fstab` entry or mount at
    `/srv/econgraph-backups` that is not this pool's `@econgraph-backups`. `scripts/host/inspect-sata-pool.sh` (same branch as
    step 1) shows the pool read-only beforehand. From the next hourly run on,
@@ -563,10 +563,10 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
 
 Not needed:
 
-- `loginctl enable-linger jmalicki`: already `Linger=yes`.
+- `loginctl enable-linger "$USER"`: already `Linger=yes`.
 - `user_subvol_rm_allowed`: see above; leave it off.
 - Anything for the dumps, drill, freshness check, off-site copy or branch
-  clones: they run as jmalicki.
-- Anything for pre-change snapshots: `snapshot-now.sh` runs as jmalicki.
+  clones: they run as the operator.
+- Anything for pre-change snapshots: `snapshot-now.sh` runs as the operator.
 - Any package: everything uses `btrfs-progs`, Docker and restic, which are
   already installed.
