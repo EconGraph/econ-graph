@@ -860,7 +860,6 @@ The EconGraph platform has numerous critical security vulnerabilities across all
 For questions about this security assessment or to discuss remediation strategies, please contact the security team.
 
 **Security Team**: support@econgraph.com  
-**Emergency Contact**: +1-555-SECURITY  
 **Incident Response**: Follow established incident response procedures
 
 ---

@@ -470,7 +470,6 @@ let config = SecurityConfig {
 ### Emergency Contacts
 
 - **Security Team**: support@econgraph.com
-- **On-Call Engineer**: +1-555-0123
 - **Management**: support@econgraph.com
 
 ## Best Practices

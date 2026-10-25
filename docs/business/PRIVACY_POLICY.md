@@ -347,7 +347,7 @@ You have the right to lodge a complaint with your local data protection authorit
 ## 16. Business Contact Information
 
 **Company:** EconGraph  
-**Website:** https://econ-graph.com  
+**Website:** https://econgraph.com  
 **Email:** support@econgraph.com
 
 ---
