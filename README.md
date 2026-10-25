@@ -333,7 +333,8 @@ newgrp microk8s
 
 #### **Kind (Alternative for Docker-based Development)**
 ```bash
-# Install kind and kubectl
+# kind v0.33.0, which the deploy scripts run (once; no sudo), and kubectl
+./scripts/deploy/install-kind.sh
 # Deploy application
 ./scripts/deploy/restart-k8s-rollout.sh
 ```

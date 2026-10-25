@@ -147,8 +147,68 @@ check_docker_daemon() {
     fi
 }
 
+# --- the kind CLI ---------------------------------------------------------------
+
+# Every kind command in these scripts runs the kind that
+# scripts/deploy/install-kind.sh installs (KIND_PINNED_BIN, see
+# scripts/deploy/lib/kind-version.sh), not whatever `kind` is on PATH.
+# shellcheck source=scripts/deploy/lib/kind-version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/kind-version.sh"
+
+# kind_bin [SUBCOMMAND]: print the path of the kind to run SUBCOMMAND with.
+# The pinned binary when it is installed. Otherwise only the read-only
+# `kind get` may use another kind from PATH, with a warning: listing clusters,
+# nodes or a kubeconfig works with older kind, but creating a cluster or
+# loading images into one from the pinned node image does not. Anything else
+# fails, saying to run install-kind.sh.
+kind_bin() {
+    local other
+    if [ -x "${KIND_PINNED_BIN}" ]; then
+        echo "${KIND_PINNED_BIN}"
+        return 0
+    fi
+    other="$(type -P kind)" || other=""
+    if [ "${1:-}" = "get" ] && [ -n "$other" ]; then
+        if [ "${KIND_FALLBACK_WARNED:-}" != "true" ]; then
+            warn "kind ${KIND_VERSION} is not installed at ${KIND_PINNED_BIN}; using ${other} for the read-only 'kind get'. Install it with scripts/deploy/install-kind.sh"
+        fi
+        echo "$other"
+        return 0
+    fi
+    echo "error: kind ${KIND_VERSION} is not installed at ${KIND_PINNED_BIN}; run scripts/deploy/install-kind.sh (once, no sudo)${other:+. ${other} is not used for kind ${1:-}}" >&2
+    return 1
+}
+
+# `kind ...` in these scripts and everything they source runs kind_bin's
+# choice. A caller that defines its own kind() first (deploy.sh --dry-run's
+# stub) keeps it.
+if ! declare -F kind >/dev/null; then
+    kind() {
+        local bin
+        bin="$(kind_bin "${1:-}")" || exit 1
+        "$bin" "$@"
+    }
+fi
+
+# Stop unless the pinned kind is installed and reports at least
+# KIND_MIN_VERSION. Scripts that create clusters, load images or delete
+# clusters call it before they change anything.
+require_kind_version() {
+    local bin have
+    bin="$(kind_bin)" || exit 1
+    have="$("$bin" version 2>/dev/null | awk '{print $2}')"
+    [ -n "$have" ] || die "${bin} does not run; reinstall it with scripts/deploy/install-kind.sh"
+    if [ "$(printf '%s\n%s\n' "${KIND_MIN_VERSION#v}" "${have#v}" | sort -V | head -1)" != "${KIND_MIN_VERSION#v}" ]; then
+        die "${bin} is kind ${have}, older than ${KIND_MIN_VERSION}; run scripts/deploy/install-kind.sh"
+    fi
+}
+
 kind_cluster_exists() {
     local clusters
+    # Resolved here rather than inside $(...) below, whose stderr is
+    # discarded, so a missing pinned kind is reported; warned about once.
+    kind_bin get >/dev/null || exit 1
+    KIND_FALLBACK_WARNED=true
     clusters="$(kind get clusters 2>/dev/null)" || die "kind get clusters failed against ${DOCKER_HOST}"
     grep -qx "${KIND_CLUSTER}" <<<"$clusters"
 }
