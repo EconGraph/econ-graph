@@ -158,10 +158,20 @@ export default function AdminLayout() {
     <Box>
       {/* Security Warning */}
       <Alert severity="warning" sx={{ m: 2, mb: 1 }}>
-        <Typography variant="caption" display="block">
+        <Typography
+          variant="caption"
+          sx={{
+            display: "block",
+          }}
+        >
           <strong>🔒 ADMIN INTERFACE</strong>
         </Typography>
-        <Typography variant="caption" display="block">
+        <Typography
+          variant="caption"
+          sx={{
+            display: "block",
+          }}
+        >
           All actions are logged and monitored
         </Typography>
       </Alert>
@@ -184,7 +194,12 @@ export default function AdminLayout() {
             />
           </Box>
         </Box>
-        <Typography variant="caption" color="text.secondary">
+        <Typography
+          variant="caption"
+          sx={{
+            color: "text.secondary",
+          }}
+        >
           Session: {formatSessionTime(sessionRemainingTime)}
         </Typography>
       </Box>
@@ -238,7 +253,13 @@ export default function AdminLayout() {
       {/* Security Events Summary */}
       {securityEvents.length > 0 && (
         <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
-          <Typography variant="caption" color="error" display="block">
+          <Typography
+            variant="caption"
+            color="error"
+            sx={{
+              display: "block",
+            }}
+          >
             <Warning
               fontSize="small"
               sx={{ mr: 0.5, verticalAlign: "middle" }}
@@ -304,29 +325,31 @@ export default function AdminLayout() {
         open={Boolean(anchorEl)}
         onClose={handleProfileMenuClose}
         onClick={handleProfileMenuClose}
-        PaperProps={{
-          elevation: 0,
-          sx: {
-            overflow: "visible",
-            filter: "drop-shadow(0px 2px 8px rgba(0,0,0,0.32))",
-            mt: 1.5,
-            "& .MuiAvatar-root": {
-              width: 32,
-              height: 32,
-              ml: -0.5,
-              mr: 1,
-            },
-            "&:before": {
-              content: '""',
-              display: "block",
-              position: "absolute",
-              top: 0,
-              right: 14,
-              width: 10,
-              height: 10,
-              bgcolor: "background.paper",
-              transform: "translateY(-50%) rotate(45deg)",
-              zIndex: 0,
+        slotProps={{
+          paper: {
+            elevation: 0,
+            sx: {
+              overflow: "visible",
+              filter: "drop-shadow(0px 2px 8px rgba(0,0,0,0.32))",
+              mt: 1.5,
+              "& .MuiAvatar-root": {
+                width: 32,
+                height: 32,
+                ml: -0.5,
+                mr: 1,
+              },
+              "&:before": {
+                content: '""',
+                display: "block",
+                position: "absolute",
+                top: 0,
+                right: 14,
+                width: 10,
+                height: 10,
+                bgcolor: "background.paper",
+                transform: "translateY(-50%) rotate(45deg)",
+                zIndex: 0,
+              },
             },
           },
         }}

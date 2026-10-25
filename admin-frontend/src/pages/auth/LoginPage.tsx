@@ -55,7 +55,12 @@ function LoginPage() {
           <Typography variant="h4" component="h1" gutterBottom>
             🔒 Admin Login
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography
+            variant="body2"
+            sx={{
+              color: "text.secondary",
+            }}
+          >
             EconGraph Administrative Interface
           </Typography>
         </Box>
@@ -97,7 +102,12 @@ function LoginPage() {
         </form>
 
         <Box sx={{ mt: 2, textAlign: "center" }}>
-          <Typography variant="caption" color="text.secondary">
+          <Typography
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+            }}
+          >
             All login attempts are logged and monitored
           </Typography>
         </Box>

@@ -169,6 +169,6 @@ The PVC is `ReadWriteOnce`, so delete from a short-lived pod that mounts it whil
 backup Job is running, naming each dump explicitly:
 
 ```bash
-kubectl -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.36 \
-  --overrides='{"spec":{"containers":[{"name":"cleanup","image":"busybox:1.36","stdin":true,"command":["rm","-v","/backups/econ_graph-20260101-080000.dump"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
+kubectl -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.38 \
+  --overrides='{"spec":{"containers":[{"name":"cleanup","image":"busybox:1.38","stdin":true,"command":["rm","-v","/backups/econ_graph-20260101-080000.dump"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
 ```

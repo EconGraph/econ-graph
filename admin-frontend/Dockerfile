@@ -17,7 +17,7 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:1.30-alpine
 
 # Copy Vite build output
 COPY --from=builder /app/build /usr/share/nginx/html

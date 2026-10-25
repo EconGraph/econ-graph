@@ -71,7 +71,7 @@ spec:
                 type: RuntimeDefault
           containers:
           - name: backup-sync
-            image: amazon/aws-cli:2.17.62
+            image: amazon/aws-cli:2.38.5
             command: ["/scripts/sync.sh"]
             env:
             - name: BACKUP_DIR

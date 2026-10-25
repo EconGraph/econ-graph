@@ -298,7 +298,13 @@ export default function UserManagementPage() {
       <Typography variant="h4" gutterBottom>
         User Management
       </Typography>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
+      <Typography
+        variant="subtitle1"
+        sx={{
+          color: "text.secondary",
+          mb: 3,
+        }}
+      >
         Manage registered users, active sessions, and access controls
       </Typography>
 
@@ -388,11 +394,15 @@ export default function UserManagementPage() {
           placeholder="Enter name or email..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: <Search sx={{ mr: 1, color: "text.secondary" }} />,
-          }}
           sx={{ minWidth: 200 }}
           aria-label="Search users by name or email"
+          slotProps={{
+            input: {
+              startAdornment: (
+                <Search sx={{ mr: 1, color: "text.secondary" }} />
+              ),
+            },
+          }}
         />
         <FormControl sx={{ minWidth: 120 }}>
           <InputLabel>Role Filter</InputLabel>
@@ -453,12 +463,19 @@ export default function UserManagementPage() {
                             {user.name.charAt(0)}
                           </Avatar>
                           <Box>
-                            <Typography variant="body2" fontWeight="medium">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: "medium",
+                              }}
+                            >
                               {user.name}
                             </Typography>
                             <Typography
                               variant="caption"
-                              color="text.secondary"
+                              sx={{
+                                color: "text.secondary",
+                              }}
                             >
                               {user.email}
                             </Typography>
@@ -543,7 +560,11 @@ export default function UserManagementPage() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={6} align="center">
-                      <Typography color="text.secondary">
+                      <Typography
+                        sx={{
+                          color: "text.secondary",
+                        }}
+                      >
                         {usersError ? "Failed to load users" : "No users found"}
                       </Typography>
                     </TableCell>
@@ -596,12 +617,19 @@ export default function UserManagementPage() {
                             </Avatar>
                           </Badge>
                           <Box>
-                            <Typography variant="body2" fontWeight="medium">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: "medium",
+                              }}
+                            >
                               {user.name}
                             </Typography>
                             <Typography
                               variant="caption"
-                              color="text.secondary"
+                              sx={{
+                                color: "text.secondary",
+                              }}
                             >
                               {user.email}
                             </Typography>
@@ -616,12 +644,22 @@ export default function UserManagementPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Typography variant="caption" fontFamily="monospace">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            fontFamily: "monospace",
+                          }}
+                        >
                           {user.sessionId}
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="caption" fontFamily="monospace">
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            fontFamily: "monospace",
+                          }}
+                        >
                           {user.ipAddress}
                         </Typography>
                       </TableCell>
@@ -629,8 +667,8 @@ export default function UserManagementPage() {
                         <Tooltip title={user.userAgent} placement="top">
                           <Typography
                             variant="caption"
-                            fontFamily="monospace"
                             sx={{
+                              fontFamily: "monospace",
                               maxWidth: 200,
                               overflow: "hidden",
                               textOverflow: "ellipsis",
@@ -661,7 +699,11 @@ export default function UserManagementPage() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={7} align="center">
-                      <Typography color="text.secondary">
+                      <Typography
+                        sx={{
+                          color: "text.secondary",
+                        }}
+                      >
                         No online users found
                       </Typography>
                     </TableCell>

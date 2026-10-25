@@ -23,7 +23,7 @@ spec:
     spec:
       initContainers:
       - name: wait-for-postgres
-        image: busybox:1.35
+        image: busybox:1.38
         command: ['sh', '-c']
         args:
         - |

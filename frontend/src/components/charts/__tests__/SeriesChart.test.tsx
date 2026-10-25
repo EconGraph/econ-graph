@@ -153,7 +153,10 @@ describe('SeriesChart', () => {
     expect(options.scales.x.max).toBe(at('2024-03-01'));
     const fromChip = screen.getByText(/^From:/).closest('.MuiChip-root') as HTMLElement;
     expect(within(fromChip).queryByTestId('CancelIcon')).toBeNull();
-    expect(screen.getByTestId('date-picker-start')).toHaveAttribute('readonly');
+    const startSections = within(screen.getByRole('group', { name: 'Start Date' })).getAllByRole(
+      'spinbutton'
+    );
+    for (const section of startSections) expect(section).toHaveAttribute('aria-readonly', 'true');
   });
 
   test('draws no annotations when none are given', () => {
@@ -202,9 +205,9 @@ describe('SeriesChart', () => {
     renderChart();
     expect(lastLineProps().options.scales.x.min).toBeUndefined();
 
-    const start = screen.getByTestId('date-picker-start');
-    await userEvent.click(start);
-    await userEvent.keyboard('02/01/2024');
+    const start = screen.getByRole('group', { name: 'Start Date' });
+    await userEvent.click(within(start).getByRole('spinbutton', { name: 'Month' }));
+    await userEvent.keyboard('02012024');
 
     expect(lastLineProps().data.datasets[0].data.map((p: any) => p.x)).toEqual(
       ['2024-02-01', '2024-03-01'].map(at)

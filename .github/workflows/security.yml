@@ -13,13 +13,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
     - name: Cache Rust dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -36,13 +36,13 @@ jobs:
       continue-on-error: true
 
     - name: Upload Rust audit results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: rust-security-audit
         path: backend/rust-audit.json
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version-file: '.nvmrc'
 
@@ -56,7 +56,7 @@ jobs:
       continue-on-error: true
 
     - name: Upload npm audit results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: npm-security-audit
         path: frontend/npm-audit.json
@@ -71,10 +71,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         scan-type: 'fs'
         scan-ref: '.'
@@ -82,7 +82,7 @@ jobs:
         output: 'trivy-results.sarif'
 
     - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
@@ -97,7 +97,7 @@ jobs:
 
   #   steps:
   #   - name: Checkout code
-  #     uses: actions/checkout@v4
+  #     uses: actions/checkout@v7
   #     with:
   #       token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -105,7 +105,7 @@ jobs:
   #     uses: dtolnay/rust-toolchain@stable
 
   #   - name: Setup Node.js
-  #     uses: actions/setup-node@v4
+  #     uses: actions/setup-node@v7
   #     with:
   #       node-version-file: '.nvmrc'
 
@@ -122,7 +122,7 @@ jobs:
   #     working-directory: frontend
 
   #   - name: Create Pull Request for dependency updates
-  #     uses: peter-evans/create-pull-request@v5
+  #     uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
   #     with:
   #       token: ${{ secrets.GITHUB_TOKEN }}
   #       commit-message: 'chore: update dependencies'
@@ -161,15 +161,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -184,7 +184,7 @@ jobs:
       working-directory: frontend
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
 
   license-check:
     name: License Compliance Check
@@ -192,7 +192,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
@@ -208,7 +208,7 @@ jobs:
       working-directory: backend
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version-file: '.nvmrc'
 
@@ -233,7 +233,7 @@ jobs:
       working-directory: frontend
 
     - name: Upload license reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: license-reports
         path: |
@@ -251,13 +251,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Build backend image for scanning
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v7
       with:
         context: ./backend
         file: ./backend/Dockerfile
@@ -266,7 +266,7 @@ jobs:
         cache-from: type=gha
 
     - name: Build frontend image for scanning
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v7
       with:
         context: ./frontend
         file: ./frontend/Dockerfile
@@ -275,28 +275,28 @@ jobs:
         cache-from: type=gha
 
     - name: Scan backend image with Trivy
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         image-ref: 'econ-graph-backend:scan'
         format: 'sarif'
         output: 'backend-trivy.sarif'
 
     - name: Scan frontend image with Trivy
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         image-ref: 'econ-graph-frontend:scan'
         format: 'sarif'
         output: 'frontend-trivy.sarif'
 
     - name: Upload backend scan results
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'backend-trivy.sarif'
         category: 'backend-docker'
 
     - name: Upload frontend scan results
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'frontend-trivy.sarif'
