@@ -166,7 +166,23 @@ if mountpoint -q "$target"; then
     run umount "$target"
 fi
 run mv "$top/$subvol" "$top/$subvol.replaced-$stamp"
-run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvol"
+if ! run btrfs subvolume snapshot "$top/@econgraph-snapshots/$snap" "$top/$subvol"; then
+    # Put the original back under its name so $target can be mounted again.
+    echo "error: creating $subvol from $snap failed; renaming $subvol.replaced-$stamp back to $subvol" >&2
+    if [ -e "$top/$subvol" ] || ! mv "$top/$subvol.replaced-$stamp" "$top/$subvol"; then
+        echo "error: could not rename it back. The data is intact in $subvol.replaced-$stamp" >&2
+        echo "  at the top level of UUID=$FS_UUID. To put it back by hand:" >&2
+        echo "    sudo mount -o subvolid=5 UUID=$FS_UUID /mnt" >&2
+        echo "    sudo mv /mnt/$subvol.replaced-$stamp /mnt/$subvol   (after checking /mnt/$subvol does not exist)" >&2
+        echo "    sudo umount /mnt && sudo mount $target" >&2
+        exit 1
+    fi
+    if ! mount "$target"; then
+        echo "error: $subvol is back under its name but mounting $target failed; run: sudo mount $target" >&2
+    fi
+    echo "Nothing was restored; $target holds the data it had before." >&2
+    exit 1
+fi
 run mount "$target"
 
 if [ "$DRY_RUN" = "false" ]; then

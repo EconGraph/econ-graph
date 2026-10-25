@@ -119,8 +119,11 @@ for name in "${NAMES[@]}"; do
     dest="$SNAPSHOT_DIR/$name.$stamp"
     if [ -e "$dest" ]; then
         echo "= $dest already exists"
-    else
-        run btrfs subvolume snapshot -r "$src" "$dest"
+    elif ! run btrfs subvolume snapshot -r "$src" "$dest"; then
+        # Count it and carry on, so the other name, the pool copy and the
+        # status file still happen.
+        echo "error: snapshot of $src failed" >&2
+        failures=$((failures + 1))
     fi
 done
 
