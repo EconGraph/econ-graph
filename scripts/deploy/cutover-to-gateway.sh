@@ -21,8 +21,10 @@
 #      controller and the Ingresses it serves.
 #   2. Save what a rollback needs to
 #      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/:
-#      the Ingress objects and NetworkPolicies of namespace econ-graph and
-#      the ingress-nginx controller's version. No Secrets, no data.
+#      the Ingress objects and NetworkPolicies of namespace econ-graph, the
+#      ingress-nginx controller's version and that version's upstream kind
+#      manifest. No Secrets, no data. If the manifest can't be downloaded,
+#      stop before changing anything.
 #   3. Label namespace econ-graph for the gateway (namespace.yaml), then
 #      install the gateway next to ingress-nginx with install-gateway.sh,
 #      GATEWAY_HOST_PORTS=false: ingress-nginx keeps host ports 80/443, the
@@ -31,7 +33,8 @@
 #      test-gateway-routes.sh, rate limits included). If a check fails, stop
 #      here: nothing has been removed and the site is still on ingress-nginx.
 #   5. Ask for a typed "yes" (or --yes).
-#   6. Delete the Ingresses in econ-graph, then ingress-nginx itself: its
+#   6. Delete the Ingresses in econ-graph, then ingress-nginx itself (from
+#      here on a failure prints the rollback command): its
 #      namespace (controller and admission webhook) and its cluster-wide
 #      objects (IngressClass nginx, webhook configuration, RBAC).
 #   7. Re-run install-gateway.sh with host ports: the proxy restarts on the
@@ -43,8 +46,8 @@
 #   1. Move the gateway proxy off host ports 80/443 (install-gateway.sh with
 #      GATEWAY_HOST_PORTS=false); the gateway objects stay, so a later
 #      cut-over starts again from step 3.
-#   2. Install ingress-nginx again from the upstream kind manifest of the
-#      version saved in DIR, pinned to the control-plane node.
+#   2. Install ingress-nginx again from the kind manifest saved in DIR,
+#      pinned to the control-plane node.
 #   3. Re-create the saved Ingresses, and put back the saved NetworkPolicies
 #      (k8s/manifests/network-policy.yaml admits only the gateway's proxy, so
 #      one applied after the cut-over would block ingress-nginx; a policy
@@ -52,7 +55,7 @@
 #   4. Check that --host-url serves the frontend again.
 #   The same steps by hand, if this script is not usable:
 #     GATEWAY_HOST_PORTS=false scripts/deploy/install-gateway.sh --context kind-econ-graph
-#     kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-<version>/deploy/static/provider/kind/deploy.yaml
+#     kubectl apply -f DIR/ingress-nginx.yaml
 #     kubectl -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
 #       -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
 #     kubectl apply -f DIR/ingresses.yaml
@@ -172,6 +175,10 @@ wait_host_url() {
     return 1
 }
 
+nginx_manifest_url() {
+    echo "https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-$1/deploy/static/provider/kind/deploy.yaml"
+}
+
 server_reachable() {
     kc version --request-timeout=15s >/dev/null 2>&1 ||
         die "cannot reach the API server of context ${KUBE_CONTEXT}"
@@ -183,7 +190,10 @@ if [ -n "$ROLLBACK_DIR" ]; then
     [ -s "$ROLLBACK_DIR/ingress-nginx-version" ] || die "$ROLLBACK_DIR/ingress-nginx-version is missing"
     version="$(cat "$ROLLBACK_DIR/ingress-nginx-version")"
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bad ingress-nginx version '$version' in $ROLLBACK_DIR"
-    manifest="https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-${version}/deploy/static/provider/kind/deploy.yaml"
+    # The manifest saved at the cut-over; the upstream URL only for state saved
+    # without one.
+    manifest="$ROLLBACK_DIR/ingress-nginx.yaml"
+    [ -s "$manifest" ] || manifest="$(nginx_manifest_url "$version")"
     server_reachable
     log "Rollback to ingress-nginx ${version} on context ${KUBE_CONTEXT}"
     confirm "Move the gateway off ports 80/443 and reinstall ingress-nginx?"
@@ -286,10 +296,13 @@ if [ -z "$nginx_image" ]; then
     STATE_DIR=""
     echo "  ingress-nginx is not installed; no rollback state saved"
 elif [ "$DRY_RUN" = true ]; then
-    echo "+ save the Ingresses and NetworkPolicies of ${NAMESPACE} and the ingress-nginx version to ${STATE_DIR}/"
+    echo "+ save the Ingresses and NetworkPolicies of ${NAMESPACE}, the ingress-nginx version and its kind manifest ($(nginx_manifest_url "$nginx_version")) to ${STATE_DIR}/"
 else
     (umask 077 && mkdir -p "$STATE_DIR")
     echo "${nginx_version}" >"$STATE_DIR/ingress-nginx-version"
+    # The rollback reinstalls from this copy; without it, stop before changing anything.
+    curl -fsSL --retry 3 -o "$STATE_DIR/ingress-nginx.yaml" "$(nginx_manifest_url "$nginx_version")" ||
+        die "cannot download the ingress-nginx ${nginx_version} kind manifest for the rollback; nothing was changed"
     # Server-set fields removed, so the file re-creates the objects.
     kc -n "$NAMESPACE" get ingress -o yaml |
         sed -E '/^    (resourceVersion|uid|creationTimestamp|generation): /d' >"$STATE_DIR/ingresses.yaml"
@@ -326,8 +339,12 @@ log "5/8 Confirm"
 confirm "All routes answer on the gateway. Delete the Ingresses and ingress-nginx, and give ports 80/443 to the gateway?"
 
 log "6/8 Removing the Ingresses and ingress-nginx"
-run kc -n "$NAMESPACE" delete ingress --all --wait=true
+# From here on, a failure leaves the site between the two; say how to go back.
+if [ "$DRY_RUN" != true ] && [ -n "$STATE_DIR" ]; then
+    trap 'status=$?; if [ "$status" -ne 0 ]; then echo; echo "The cut-over stopped after ingress-nginx was removed. To go back to ingress-nginx:"; echo "  scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"; fi' EXIT
+fi
 if [ -n "$nginx_image" ]; then
+    run kc -n "$NAMESPACE" delete ingress --all --wait=true
     run kc delete namespace ingress-nginx --wait=true --timeout=300s
     run kc delete ingressclass,validatingwebhookconfiguration,clusterrole,clusterrolebinding \
         -l app.kubernetes.io/name=ingress-nginx --ignore-not-found
@@ -342,11 +359,7 @@ if [ "$DRY_RUN" = true ]; then
 else
     wait_host_url || warn "${HOST_URL}/ is not answering yet"
     if ! "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_URL"; then
-        echo
-        if [ -n "$STATE_DIR" ]; then
-            echo "A route check failed after the switch. To go back to ingress-nginx:"
-            echo "  scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"
-        fi
+        echo "A route check failed after the switch."
         exit 1
     fi
 fi

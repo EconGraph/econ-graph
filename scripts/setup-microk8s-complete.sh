@@ -48,8 +48,11 @@ microk8s kubectl config view --raw > ~/.kube/config
 kubectl config use-context microk8s
 
 # The cluster's HTTP entry point: the Gateway API gateway (Envoy Gateway,
-# k8s/manifests/gateway/). The app's routes are applied with the app.
+# k8s/manifests/gateway/). The app's routes are applied with the app. The
+# proxy runs on the node labelled ingress-ready=true and takes its host ports
+# 80/443; on single-node MicroK8s that is this node.
 echo "🌐 Installing the gateway..."
+kubectl label nodes --all ingress-ready=true --overwrite
 "$(dirname "${BASH_SOURCE[0]}")/deploy/install-gateway.sh"
 
 # Create namespace

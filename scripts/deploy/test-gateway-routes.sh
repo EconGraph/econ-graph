@@ -67,12 +67,20 @@ fail() {
 req() {
     local name="$1" method="$2" path="$3"
     shift 3
+    : >"$WORK/$name.body"
+    : >"$WORK/$name.headers"
+    # On a connection failure curl still prints 000 as the code.
     curl -sS -o "$WORK/$name.body" -D "$WORK/$name.headers" -w '%{http_code}' \
-        --max-time 20 -X "$method" -H "Host: ${ROUTE_HOST}" "$@" "${BASE_URL}${path}" 2>"$WORK/$name.err" ||
-        echo "000"
+        --max-time 20 -X "$method" -H "Host: ${ROUTE_HOST}" "$@" "${BASE_URL}${path}" 2>"$WORK/$name.err" || true
 }
 header() { grep -i "^$2:" "$WORK/$1.headers" | tail -1 | cut -d: -f2- | sed 's/^ *//; s/\r$//'; }
 is_html() { grep -qi '^content-type: *text/html' "$WORK/$1.headers"; }
+# NAME CODE: the response is the frontend's single-page app, exactly as served
+# for / (fetched first): 200, HTML, no redirect, same body.
+is_frontend_page() {
+    [ "$2" = 200 ] && is_html "$1" && [ -z "$(header "$1" Location)" ] &&
+        cmp -s "$WORK/$1.body" "$WORK/root.body"
+}
 
 GQL=(-H 'Content-Type: application/json' --data '{"query":"{ __typename }"}')
 
@@ -110,7 +118,7 @@ if [ "$code" = 404 ] && ! is_html api; then pass "/api/... -> backend (404 from 
 code="$(req auth GET /auth/login)"
 if [ "$code" = 404 ] && ! is_html auth; then pass "/auth/... -> backend (404 from the backend)"; else fail "/auth/... -> backend: got $code"; fi
 code="$(req playground GET /playground)"
-if ! grep -qi 'graphql playground\|graphiql' "$WORK/playground.body"; then pass "/playground is not routed to the backend ($code)"; else fail "/playground reached the GraphQL playground"; fi
+if is_frontend_page playground "$code"; then pass "/playground -> the frontend's page, not the backend"; else fail "/playground: expected the frontend's page, got $code"; fi
 
 # econ-graph-graphql
 code="$(req gql POST /graphql "${GQL[@]}")"
@@ -141,12 +149,11 @@ else
     fi
     for path in /idp/admin/ /idp/admin/master/console/ /idp/realms/master/.well-known/openid-configuration /idp/realms/econ-graph-x/.well-known/openid-configuration; do
         code="$(req notkc GET "$path")"
-        if grep -q '"issuer"\|keycloak' "$WORK/notkc.body" && ! is_html notkc; then
-            fail "$path reached Keycloak ($code)"
-        elif grep -qi 'kc-\|keycloak.v2\|/idp/resources/' "$WORK/notkc.body"; then
-            fail "$path reached Keycloak ($code)"
+        # Not routed to Keycloak, so the frontend's catch-all route answers.
+        if is_frontend_page notkc "$code"; then
+            pass "$path -> the frontend's page, not Keycloak"
         else
-            pass "$path does not reach Keycloak ($code)"
+            fail "$path: expected the frontend's page, got $code $(header notkc Location)"
         fi
     done
 fi
@@ -164,7 +171,7 @@ if [ "$RATE_LIMIT" = true ]; then
         # Let the bucket refill after the requests above.
         sleep 6
         below="$(burst "$path" 90)"
-        if ! grep -q ' 429' <<<" $below"; then pass "$path: 90 requests at once, none limited ($below)"; else fail "$path: 90 requests at once were limited: $below"; fi
+        if [ "$(tr -s ' ' <<<" $below")" = " 90 200 " ]; then pass "$path: 90 requests at once, none limited ($below)"; else fail "$path: 90 requests at once were limited: $below"; fi
         sleep 6
         above="$(burst "$path" 250)"
         if grep -q ' 429' <<<" $above" && grep -q ' 200' <<<" $above"; then pass "$path: 250 requests at once, the excess limited ($above)"; else fail "$path: 250 requests at once: $above"; fi

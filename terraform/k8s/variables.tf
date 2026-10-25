@@ -15,13 +15,7 @@ variable "node_count" {
 variable "node_image" {
   description = "Kubernetes node image"
   type        = string
-  default     = "kindest/node:v1.28.0"
-}
-
-variable "enable_ingress" {
-  description = "Enable NGINX ingress controller"
-  type        = bool
-  default     = true
+  default     = "kindest/node:v1.34.0"
 }
 
 variable "enable_metrics" {

@@ -130,7 +130,13 @@ fi
 
 command -v kubectl >/dev/null || die "kubectl not found on PATH"
 command -v curl >/dev/null || die "curl not found on PATH"
-command -v sha256sum >/dev/null || die "sha256sum not found on PATH"
+if command -v sha256sum >/dev/null; then
+    SHA256=(sha256sum)
+elif command -v shasum >/dev/null; then
+    SHA256=(shasum -a 256)
+else
+    die "neither sha256sum nor shasum found on PATH"
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -138,7 +144,7 @@ trap 'rm -rf "$WORK"' EXIT
 fetch() {
     local url="$1" sum="$2" out="$3"
     curl -fsSL --retry 3 -o "$out" "$url" || die "download failed: $url"
-    echo "${sum}  ${out}" | sha256sum -c --quiet - || die "checksum mismatch for $url"
+    [ "$("${SHA256[@]}" "$out" | cut -d' ' -f1)" = "$sum" ] || die "checksum mismatch for $url"
 }
 
 log "Gateway API ${GATEWAY_API_VERSION} (standard channel), Envoy Gateway ${ENVOY_GATEWAY_VERSION}"
@@ -205,7 +211,9 @@ grep -q '^kind: Deployment' "$WORK/envoy-gateway-controller.yaml" ||
     die "the filtered install.yaml has no Deployment; its layout changed"
 # Envoy Gateway's own configuration (ConfigMap envoy-gateway-config): allow
 # EnvoyPatchPolicy, which k8s/manifests/gateway/ratelimit-burst.yaml needs.
-sed -i 's/^    extensionApis: {}$/    extensionApis:\n      enableEnvoyPatchPolicy: true/' "$WORK/envoy-gateway-controller.yaml"
+awk '$0 == "    extensionApis: {}" { print "    extensionApis:"; print "      enableEnvoyPatchPolicy: true"; next } { print }' \
+    "$WORK/envoy-gateway-controller.yaml" >"$WORK/envoy-gateway-controller.yaml.new"
+mv "$WORK/envoy-gateway-controller.yaml.new" "$WORK/envoy-gateway-controller.yaml"
 grep -q '^      enableEnvoyPatchPolicy: true$' "$WORK/envoy-gateway-controller.yaml" ||
     die "could not enable EnvoyPatchPolicy in envoy-gateway-config; install.yaml's layout changed"
 

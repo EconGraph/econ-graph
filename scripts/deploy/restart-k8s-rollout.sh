@@ -446,11 +446,11 @@ fi
 # Test SSL Certificate Status
 echo ""
 echo "🔐 Checking SSL certificate status..."
-if kubectl get secret econ-graph-tls -n econ-graph >/dev/null 2>&1; then
+if kubectl get secret econ-graph-tls -n econ-graph-gateway >/dev/null 2>&1; then
     echo "  ✅ SSL Certificate: econ-graph-tls secret exists"
     
     # Check certificate expiry
-    CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
+    CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph-gateway -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
     if [[ "$CERT_INFO" != "Unable to parse certificate" ]]; then
         echo "  📋 Certificate Info: $CERT_INFO"
     fi
