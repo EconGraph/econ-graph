@@ -10,7 +10,7 @@
 # The Docker daemon the kind cluster runs on: the rootful system daemon
 # (data on ext4). kind can't start under rootless Docker on this host, whose
 # data root is on btrfs (kind then bind-mounts /dev/mapper into the nodes).
-# Joe's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
+# The operator's login shell exports DOCKER_HOST=<rootless socket> for everyday use, so
 # that variable is deliberately not the override; ECONGRAPH_DOCKER_HOST is.
 # Exported, so kind, docker and every script run from here use the same daemon.
 CALLER_DOCKER_HOST="${DOCKER_HOST:-}"
@@ -131,6 +131,12 @@ kind_cluster_exists() {
 # the cluster's own kubectl binary out of the control-plane node (always the
 # matching version) and point KUBECONFIG at `kind get kubeconfig`. Nothing in
 # ~/.kube is changed. Call again after the cluster is recreated (new certs).
+#
+# They live in ${ECONGRAPH_CACHE}. Under DRY_RUN=true nothing is written
+# there: a cached copy that still reaches the API server is used as it is,
+# and otherwise fresh copies go to a private temporary directory that is
+# removed when the script exits. ECONGRAPH_KUBE_DIR (exported) says which
+# directory is in use, so child scripts reuse it.
 use_kind_kubectl() {
     try_use_kind_kubectl || die "cannot reach the API server of kind cluster '${KIND_CLUSTER}' on ${DOCKER_HOST}"
 }
@@ -142,17 +148,43 @@ try_use_kind_kubectl() {
         warn "kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}"
         return 1
     }
-    mkdir -p "${ECONGRAPH_CACHE}/bin"
-    docker cp -q -L "${KIND_CONTROL_PLANE}:/usr/bin/kubectl" "${ECONGRAPH_CACHE}/bin/kubectl.new" || return 1
-    chmod 0755 "${ECONGRAPH_CACHE}/bin/kubectl.new" || return 1
-    mv -f "${ECONGRAPH_CACHE}/bin/kubectl.new" "${ECONGRAPH_CACHE}/bin/kubectl" || return 1
-    (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}") || return 1
-    export KUBECONFIG="${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}"
-    case ":${PATH}:" in
-        *":${ECONGRAPH_CACHE}/bin:"*) ;;
-        *) export PATH="${ECONGRAPH_CACHE}/bin:${PATH}" ;;
-    esac
+    local dir="${ECONGRAPH_CACHE}"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+        if [ -x "${dir}/bin/kubectl" ] && [ -s "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
+            KUBECONFIG="${dir}/kubeconfig-${KIND_CLUSTER}" "${dir}/bin/kubectl" \
+                version --request-timeout=15s >/dev/null 2>&1; then
+            point_kubectl_at "${dir}"
+            return 0
+        fi
+        dir="$(mktemp -d "${TMPDIR:-/tmp}/econgraph-kube.XXXXXX")" || return 1
+        add_exit_cleanup "rm -rf '${dir}'"
+    fi
+    mkdir -p "${dir}/bin"
+    docker cp -q -L "${KIND_CONTROL_PLANE}:/usr/bin/kubectl" "${dir}/bin/kubectl.new" || return 1
+    chmod 0755 "${dir}/bin/kubectl.new" || return 1
+    mv -f "${dir}/bin/kubectl.new" "${dir}/bin/kubectl" || return 1
+    (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${dir}/kubeconfig-${KIND_CLUSTER}") || return 1
+    point_kubectl_at "${dir}"
     kubectl version --request-timeout=15s >/dev/null 2>&1
+}
+
+# point_kubectl_at DIR: use DIR/bin/kubectl and DIR/kubeconfig-<cluster>.
+point_kubectl_at() {
+    export ECONGRAPH_KUBE_DIR="$1"
+    export KUBECONFIG="$1/kubeconfig-${KIND_CLUSTER}"
+    case ":${PATH}:" in
+        *":$1/bin:"*) ;;
+        *) export PATH="$1/bin:${PATH}" ;;
+    esac
+}
+
+# add_exit_cleanup CMD: run CMD on exit as well as whatever EXIT trap is
+# already set. A caller that sets its own EXIT trap later must chain it.
+add_exit_cleanup() {
+    local prev
+    prev="$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\1/")"
+    # shellcheck disable=SC2064  # expand now: the trap keeps this exact command
+    trap "${prev:+${prev}; }$1" EXIT
 }
 
 # use_kind_kubectl, unless a parent script already did.
@@ -163,8 +195,9 @@ ensure_kind_kubectl() {
 
 # ensure_kind_kubectl, but return non-zero instead of exiting.
 ensure_kind_kubectl_quietly() {
-    if [ "${KUBECONFIG:-}" = "${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}" ] &&
-        [ "$(command -v kubectl)" = "${ECONGRAPH_CACHE}/bin/kubectl" ]; then
+    local dir="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}"
+    if [ "${KUBECONFIG:-}" = "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
+        [ "$(command -v kubectl)" = "${dir}/bin/kubectl" ] && [ -x "${dir}/bin/kubectl" ]; then
         return 0
     fi
     try_use_kind_kubectl

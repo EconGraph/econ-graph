@@ -61,7 +61,7 @@ them to `/etc/fstab` and mounts them, with the subvolume roots owned by
 
 The cluster runs on the **rootful** Docker daemon. kind cannot start under
 rootless Docker on this host: rootless Docker keeps its data on btrfs, and kind
-then bind-mounts `/dev/mapper` into its nodes, which fails (ECO-432). Joe's
+then bind-mounts `/dev/mapper` into its nodes, which fails (ECO-432). The operator's
 login shell exports `DOCKER_HOST` for the rootless daemon, so the deploy
 scripts don't use that variable: `scripts/deploy/lib/kind-env.sh` sets
 `DOCKER_HOST=unix:///var/run/docker.sock` for themselves and everything they
@@ -157,9 +157,9 @@ checks for real and changes nothing.
 
 | Step | Who | sudo | Destructive |
 |---|---|---|---|
-| 1. `sudo scripts/host/setup-subvolumes.sh` | Joe | **yes** | no |
+| 1. `sudo scripts/host/setup-subvolumes.sh` | the operator | **yes** | no |
 | 2. `scripts/deploy/migrate-to-host-storage.sh --dry-run` | anyone | no | no |
-| 3. `scripts/deploy/migrate-to-host-storage.sh` | **needs Joe's go-ahead** | no | **yes**: downtime, then the kind cluster is deleted and recreated |
+| 3. `scripts/deploy/migrate-to-host-storage.sh` | **needs the maintainer's go-ahead** | no | **yes**: downtime, then the kind cluster is deleted and recreated |
 
 Step 3 asks for a typed `yes` before stopping anything (`--yes` skips the
 prompt). It then does the following:
@@ -204,7 +204,7 @@ subvolumes. Fix the cause and re-run the migration script, or run `deploy.sh`.
 ### Rollback
 
 `scripts/deploy/migrate-to-host-storage.sh --rollback` (add `--dry-run` first).
-It needs **Joe's go-ahead**, because it deletes and recreates the cluster.
+It needs **the maintainer's go-ahead**, because it deletes and recreates the cluster.
 
 1. It stops the writers and takes a fresh backup of the current databases, so
    writes made since the migration are kept. Use `--resume-from DIR` to restore
@@ -285,8 +285,9 @@ before then.
   the cluster's own `kubectl` out of `econ-graph-control-plane` into
   `~/.cache/econgraph/bin` and use `kind get kubeconfig`. They don't change
   `~/.kube`: `kind create/delete cluster` get `--kubeconfig` pointing at
-  `~/.cache/econgraph/kubeconfig-econ-graph`. A `--dry-run` refreshes those
-  two cached files too; it changes nothing else.
+  `~/.cache/econgraph/kubeconfig-econ-graph`. A `--dry-run` writes neither:
+  it uses the cached pair if it still reaches the cluster, and otherwise
+  copies fresh ones into a temporary directory that is removed on exit.
 - The in-cluster nightly `postgres-backup` CronJob and its
   `postgres-backup-data` PVC, and Grafana's data, are still node-local. They
   are lost when the cluster is deleted, which is one reason
