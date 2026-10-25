@@ -42,19 +42,21 @@
 # checked against pinned SHA-256 sums; bump all three together.
 #
 # Version matrix (https://gateway.envoyproxy.io/news/releases/matrix/):
-#   Envoy Gateway v1.8.5: Gateway API v1.5.1, Envoy Proxy 1.38.x,
-#   Kubernetes v1.32 to v1.35. Envoy Gateway v1.9 needs Kubernetes 1.33+.
+#   Envoy Gateway v1.9.2: built with Gateway API v1.6.1, Envoy Proxy 1.39.x,
+#   Kubernetes v1.33 to v1.36, supported until 2027-02-14. The Gateway API
+#   CRDs are the newest v1.6 patch, v1.6.3 (patch releases of a Gateway API
+#   minor only fix the CRDs).
 
 set -euo pipefail
 
-GATEWAY_API_VERSION="v1.5.1"
-ENVOY_GATEWAY_VERSION="v1.8.5"
+GATEWAY_API_VERSION="v1.6.3"
+ENVOY_GATEWAY_VERSION="v1.9.2"
 GATEWAY_API_URL="https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
-GATEWAY_API_SHA256="751002b3b91a87f7ae3bd2517c79a47a8d7ed6702901808a1cf9bd97d284f9b8"
+GATEWAY_API_SHA256="356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5"
 EG_CRDS_URL="https://github.com/envoyproxy/gateway/releases/download/${ENVOY_GATEWAY_VERSION}/envoy-gateway-crds.yaml"
-EG_CRDS_SHA256="c15e31a987284601b980f5de43ed240a389ad6af961c4e265b10c814b01b35d6"
+EG_CRDS_SHA256="b339119f8f3a4046688fc96837b4129553f42c9998976913ef9dff25694d85cc"
 EG_INSTALL_URL="https://github.com/envoyproxy/gateway/releases/download/${ENVOY_GATEWAY_VERSION}/install.yaml"
-EG_INSTALL_SHA256="0639894d98328025b9626e5169fc11a19d107ed99bc1dd7054983978110369c9"
+EG_INSTALL_SHA256="0412a72907e57ff9b73c56a7bf6df5190bf0f6e4f8bb4bba34e38630bbab5778"
 
 FIELD_MANAGER="econ-graph-install-gateway"
 
@@ -197,8 +199,8 @@ server_version="$(kc version -o json 2>/dev/null |
 [ -n "$server_version" ] || die "cannot reach the Kubernetes API server${KUBE_CONTEXT:+ (context ${KUBE_CONTEXT})}"
 minor="$(echo "$server_version" | cut -d. -f2)"
 echo "  Kubernetes ${server_version}"
-if [ "$minor" -lt 32 ] || [ "$minor" -gt 35 ]; then
-    die "Envoy Gateway ${ENVOY_GATEWAY_VERSION} supports Kubernetes v1.32 to v1.35, not ${server_version}"
+if [ "$minor" -lt 33 ] || [ "$minor" -gt 36 ]; then
+    die "Envoy Gateway ${ENVOY_GATEWAY_VERSION} supports Kubernetes v1.33 to v1.36, not ${server_version}"
 fi
 
 # Pods other than this gateway's proxy that hold host port 80 or 443 on a node

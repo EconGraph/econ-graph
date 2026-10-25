@@ -19,6 +19,11 @@ export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST}"
 unset DOCKER_CONTEXT
 
 KIND_CLUSTER="${KIND_CLUSTER:-econ-graph}"
+# New clusters run Kubernetes 1.36: terraform/k8s/kind-config.yaml pins every
+# node's image by digest (from kind v0.33.0's image list). That image's
+# containerd config needs kind v0.33.0 or newer: older kind creates the
+# cluster but cannot `kind load` images into it.
+KIND_MIN_VERSION="v0.33.0"
 KIND_CONTROL_PLANE="${KIND_CLUSTER}-control-plane"
 # The worker that bind-mounts the host subvolumes (terraform/k8s/kind-config.yaml).
 KIND_STORAGE_NODE="${KIND_CLUSTER}-worker"
@@ -451,6 +456,16 @@ bootstrap_databases() {
         kubectl apply -f "$src/k8s/manifests/keycloak/postgres.yaml"
         k rollout status statefulset/keycloak-postgres --timeout=600s
         wait_postgres_settled keycloak-postgres-0 postgres
+    fi
+}
+
+# Stop unless the kind CLI is at least KIND_MIN_VERSION (see above).
+require_kind_version() {
+    local have
+    have="$(kind version 2>/dev/null | awk '{print $2}')"
+    [ -n "$have" ] || die "kind not found"
+    if [ "$(printf '%s\n%s\n' "${KIND_MIN_VERSION#v}" "${have#v}" | sort -V | head -1)" != "${KIND_MIN_VERSION#v}" ]; then
+        die "kind ${have} is too old for the Kubernetes 1.36 node image in terraform/k8s/kind-config.yaml: install kind ${KIND_MIN_VERSION} or newer (https://kind.sigs.k8s.io/docs/user/quick-start/#installation)"
     fi
 }
 

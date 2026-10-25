@@ -67,6 +67,7 @@ KIND_KUBECONFIG="${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}"
 
 log "Docker daemon"
 check_docker_daemon
+require_kind_version
 
 # Every bind-mounted host directory must already exist as a real mount, or
 # kind would fail half-way (or, for a missing mount under an existing

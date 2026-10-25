@@ -254,14 +254,18 @@ check_routes_in_cluster() {
 check_pod_reaches_proxy() {
     local url="$1" host="$2" out
     if [ "$DRY_RUN" = true ]; then
-        echo "+ kubectl -n ${NAMESPACE} run gateway-preflight --rm -i --restart=Never --image=${PREFLIGHT_IMAGE} -- curl -k -H 'Host: ${host}' ${url}/health"
+        echo "+ kubectl -n ${NAMESPACE} run gateway-preflight --image=${PREFLIGHT_IMAGE} (sleeping); kubectl exec gateway-preflight -- curl -k -H 'Host: ${host}' ${url}/health; delete it"
         return 0
     fi
-    kc -n "$NAMESPACE" delete pod gateway-preflight --ignore-not-found >/dev/null
-    out="$(kc -n "$NAMESPACE" run gateway-preflight --rm -i --quiet --restart=Never \
-        --image="$PREFLIGHT_IMAGE" --labels=app=gateway-preflight --pod-running-timeout=180s -- \
-        curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: ${host}" \
-        "${url}/health" 2>&1 || true)"
+    # A pod that waits, then curl through kubectl exec: the output of
+    # `kubectl run --rm -i` can be lost when the container exits first.
+    kc -n "$NAMESPACE" delete pod gateway-preflight --ignore-not-found --wait=true >/dev/null
+    kc -n "$NAMESPACE" run gateway-preflight --restart=Never --image="$PREFLIGHT_IMAGE" \
+        --labels=app=gateway-preflight --command -- sleep 600 >/dev/null
+    out="$(kc -n "$NAMESPACE" wait --for=condition=Ready --timeout=180s pod/gateway-preflight >/dev/null 2>&1 &&
+        kc -n "$NAMESPACE" exec gateway-preflight -- \
+            curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: ${host}" "${url}/health" 2>&1 || true)"
+    kc -n "$NAMESPACE" delete pod gateway-preflight --ignore-not-found --wait=false >/dev/null
     if [ "${out: -3}" = 200 ]; then
         echo "  ok    a pod in ${NAMESPACE} reaches ${url} for ${host} (200)"
     else

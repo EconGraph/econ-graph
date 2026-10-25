@@ -306,7 +306,7 @@ kill $MONITOR_PID 2>/dev/null || true
 echo "🔐 Installing cert-manager (provides the CRDs used by k8s/monitoring/)..."
 cert_manager_manifest="$(mktemp)"
 curl -fsSL --retry 3 -o "$cert_manager_manifest" \
-  https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+  https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
 awk '{ print } /^ *- --acme-http01-solver-image=/ { sub(/-.*/, "- --enable-gateway-api"); print }' \
   "$cert_manager_manifest" > "${cert_manager_manifest}.patched"
 grep -q -- '- --enable-gateway-api$' "${cert_manager_manifest}.patched" || {

@@ -303,7 +303,9 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 2. **Configure Kind with Extra Port Mappings**:
 ```bash
 # Create kind cluster with port mappings
-kind create cluster --name econ-graph --config - <<EOF
+kind create cluster --name econ-graph \
+  --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed \
+  --config - <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:

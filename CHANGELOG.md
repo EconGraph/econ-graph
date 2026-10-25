@@ -31,8 +31,8 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Changed
 
-- The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.8.5, Gateway
-  API v1.5.1 standard channel) instead of ingress-nginx, which no longer gets security fixes.
+- The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.9.2, Gateway
+  API v1.6.3 standard channel) instead of ingress-nginx, which no longer gets security fixes.
   `deploy.sh` installs it with `scripts/deploy/install-gateway.sh` (pinned, checksummed release
   manifests; no Helm). The routes and paths are unchanged, except that `/playground` is no
   longer routed to the backend.
@@ -60,6 +60,10 @@ All notable changes to EconGraph are documented here. The format follows
 - The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
   next to `database-url`, all three naming the one database. The backend and crawler-worker
   manifests read the new keys.
+
+- New kind clusters (`recreate-kind-cluster.sh`, `terraform/k8s`) run Kubernetes 1.36
+  (`kindest/node:v1.36.4`, pinned by digest in `kind-config.yaml`), which needs kind v0.33.0 or
+  newer. cert-manager is v1.21.3.
 
 ### Removed
 

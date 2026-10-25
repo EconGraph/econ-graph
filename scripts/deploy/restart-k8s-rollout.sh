@@ -131,7 +131,7 @@ fi
 echo "🔒 Installing cert-manager for SSL certificates..."
 if ! kubectl get namespace cert-manager >/dev/null 2>&1; then
     echo "Installing cert-manager..."
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
     
     echo "Waiting for cert-manager namespace to be created..."
     kubectl wait --for=condition=ready namespace cert-manager --timeout=30s || true
