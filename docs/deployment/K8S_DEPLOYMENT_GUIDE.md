@@ -120,13 +120,12 @@ kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 
 # The gateway, with listener https for the public host name, and the routes
 GATEWAY_HTTPS_HOSTNAME=econgraph.com ./scripts/deploy/install-gateway.sh
-sed 's/^  - localhost$/  - localhost\n  - econgraph.com/' k8s/manifests/gateway/routes/httproutes.yaml | kubectl apply -f -
-kubectl apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml
+./scripts/deploy/apply-gateway-routes.sh
 ```
 
 cert-manager issues the https listener's certificate only with its Gateway API support on
-(`--enable-gateway-api`); `scripts/deploy/deploy.sh` turns it on when `GATEWAY_HTTPS_HOSTNAME`
-is set.
+(`--enable-gateway-api`), which `scripts/deploy/deploy.sh` adds to the cert-manager manifest it
+applies.
 
 ## Service URLs
 

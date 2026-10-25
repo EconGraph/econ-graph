@@ -12,11 +12,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-K8S_DIR="${PROJECT_ROOT}/k8s"
-
 # Default values
 NAMESPACE="econ-graph"
 DOMAIN="econgraph.example.com"

@@ -7,25 +7,39 @@
 # applied by deploy.sh with the rest of the app.
 #
 # Usage: scripts/deploy/install-gateway.sh [--dry-run] [--context NAME]
+#            [--manifests-dir DIR] [--fetch-only]
 #
-#   --dry-run       Print what would be applied; change nothing. Still
-#                   downloads and checksums the pinned release manifests.
-#   --context NAME  kubectl context to use (default: the current context).
+#   --dry-run            Print what would be applied; change nothing. Still
+#                        downloads and checksums the pinned release manifests.
+#   --context NAME       kubectl context to use (default: the current context).
+#   --manifests-dir DIR  Keep the release manifests in DIR: use the copies
+#                        there when their checksums match, download (and
+#                        store) them otherwise. With all three in DIR, the
+#                        script needs no network.
+#   --fetch-only         Only download and check the manifests (into
+#                        --manifests-dir); touch no cluster.
 #
 # Environment:
-#   GATEWAY_HTTPS_HOSTNAME  Adds listener `https` (port 443) for this host name,
+#   GATEWAY_HTTPS_HOSTNAME  A host name: listener `https` (port 443) for it,
 #                           with a cert-manager certificate in Secret
 #                           econ-graph-tls (k8s/manifests/gateway/gateway-https.yaml).
-#                           Empty (the default): no https listener, and one
-#                           added by an earlier run is removed.
-#   GATEWAY_TLS_ISSUER      ClusterIssuer for that certificate (default
-#                           letsencrypt-staging, k8s/manifests/letsencrypt-issuer.yaml).
+#                           `none`: no https listener; one configured earlier
+#                           is removed. Unset or empty (the default): keep
+#                           whatever the Gateway has, host name and issuer
+#                           included.
+#   GATEWAY_TLS_ISSUER      ClusterIssuer for that certificate (default: the
+#                           Gateway's current one, else letsencrypt-staging,
+#                           k8s/manifests/letsencrypt-issuer.yaml).
 #   GATEWAY_HOST_PORTS      true: the proxy takes host ports 80/443. false: it
 #                           doesn't, and is reachable only through its Service
 #                           (cutover-to-gateway.sh uses this while ingress-nginx
 #                           still holds the ports). auto (the default): true,
-#                           unless an ingress-nginx controller is installed, which
-#                           holds those ports until cutover-to-gateway.sh removes it.
+#                           unless another pod holds host port 80 or 443 (kind's
+#                           ingress-nginx until cutover-to-gateway.sh removes it,
+#                           or MicroK8s's ingress add-on).
+#
+# The routes are applied separately, by scripts/deploy/apply-gateway-routes.sh,
+# which adds the https listener's host name to them.
 #
 # Idempotent: everything is applied with server-side apply, so a re-run with
 # the same versions changes nothing. Versions are exact and the downloads are
@@ -54,9 +68,17 @@ GATEWAY_DIR="${PROJECT_ROOT}/k8s/manifests/gateway"
 
 DRY_RUN=false
 KUBE_CONTEXT=""
+MANIFESTS_DIR=""
+FETCH_ONLY=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=true ;;
+        --fetch-only) FETCH_ONLY=true ;;
+        --manifests-dir)
+            [ $# -ge 2 ] || { echo "error: --manifests-dir needs a value" >&2; exit 2; }
+            MANIFESTS_DIR="$2"
+            shift
+            ;;
         --context)
             [ $# -ge 2 ] || { echo "error: --context needs a value" >&2; exit 2; }
             KUBE_CONTEXT="$2"
@@ -76,7 +98,11 @@ while [ $# -gt 0 ]; do
 done
 
 GATEWAY_HTTPS_HOSTNAME="${GATEWAY_HTTPS_HOSTNAME:-}"
-GATEWAY_TLS_ISSUER="${GATEWAY_TLS_ISSUER:-letsencrypt-staging}"
+GATEWAY_TLS_ISSUER="${GATEWAY_TLS_ISSUER:-}"
+if [ "$FETCH_ONLY" = true ] && [ -z "$MANIFESTS_DIR" ]; then
+    echo "error: --fetch-only needs --manifests-dir" >&2
+    exit 2
+fi
 GATEWAY_HOST_PORTS="${GATEWAY_HOST_PORTS:-auto}"
 case "$GATEWAY_HOST_PORTS" in
     true | false | auto) ;;
@@ -120,10 +146,12 @@ ssa() {
     kc apply --server-side --force-conflicts --field-manager="$manager" "$@" -f "$file"
 }
 
-if [ -n "$GATEWAY_HTTPS_HOSTNAME" ]; then
+if [ -n "$GATEWAY_HTTPS_HOSTNAME" ] && [ "$GATEWAY_HTTPS_HOSTNAME" != none ]; then
     # One DNS name, lower case, at least one dot; no wildcards.
     [[ "$GATEWAY_HTTPS_HOSTNAME" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
-        die "GATEWAY_HTTPS_HOSTNAME='${GATEWAY_HTTPS_HOSTNAME}' is not a DNS host name"
+        die "GATEWAY_HTTPS_HOSTNAME='${GATEWAY_HTTPS_HOSTNAME}' is not a DNS host name (or 'none')"
+fi
+if [ -n "$GATEWAY_TLS_ISSUER" ]; then
     [[ "$GATEWAY_TLS_ISSUER" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
         die "GATEWAY_TLS_ISSUER='${GATEWAY_TLS_ISSUER}' is not a resource name"
 fi
@@ -141,11 +169,38 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+sum_ok() { [ -s "$1" ] && [ "$("${SHA256[@]}" "$1" | cut -d' ' -f1)" = "$2" ]; }
+
+# fetch URL SHA256 FILE: FILE checked against SHA256; from --manifests-dir when
+# a matching copy is there, else downloaded (and stored there).
 fetch() {
-    local url="$1" sum="$2" out="$3"
+    local url="$1" sum="$2" out="$3" cached=""
+    if [ -n "$MANIFESTS_DIR" ]; then
+        cached="$MANIFESTS_DIR/$(basename "$out")"
+        if sum_ok "$cached" "$sum"; then
+            cp "$cached" "$out"
+            return 0
+        fi
+    fi
     curl -fsSL --retry 3 -o "$out" "$url" || die "download failed: $url"
-    [ "$("${SHA256[@]}" "$out" | cut -d' ' -f1)" = "$sum" ] || die "checksum mismatch for $url"
+    sum_ok "$out" "$sum" || die "checksum mismatch for $url"
+    if [ -n "$cached" ]; then
+        mkdir -p "$MANIFESTS_DIR"
+        cp "$out" "$cached"
+    fi
 }
+
+fetch_all() {
+    fetch "$GATEWAY_API_URL" "$GATEWAY_API_SHA256" "$WORK/gateway-api-standard.yaml"
+    fetch "$EG_CRDS_URL" "$EG_CRDS_SHA256" "$WORK/envoy-gateway-crds.yaml"
+    fetch "$EG_INSTALL_URL" "$EG_INSTALL_SHA256" "$WORK/envoy-gateway-install.yaml"
+}
+
+if [ "$FETCH_ONLY" = true ]; then
+    fetch_all
+    echo "Gateway API ${GATEWAY_API_VERSION} and Envoy Gateway ${ENVOY_GATEWAY_VERSION} manifests checked in ${MANIFESTS_DIR}"
+    exit 0
+fi
 
 log "Gateway API ${GATEWAY_API_VERSION} (standard channel), Envoy Gateway ${ENVOY_GATEWAY_VERSION}"
 if [ "$DRY_RUN" = true ]; then
@@ -163,31 +218,50 @@ if [ "$minor" -lt 32 ] || [ "$minor" -gt 35 ]; then
     die "Envoy Gateway ${ENVOY_GATEWAY_VERSION} supports Kubernetes v1.32 to v1.35, not ${server_version}"
 fi
 
-# Host ports 80/443 are held by ingress-nginx's controller while it is
-# installed; a proxy asking for them would never be scheduled.
-nginx_present=false
-if [ -n "$(kc -n ingress-nginx get deployment ingress-nginx-controller -o name --ignore-not-found 2>/dev/null)" ]; then
-    nginx_present=true
-fi
+# Pods other than this gateway's proxy that hold host port 80 or 443 on a node
+# labelled ingress-ready=true (where the proxy runs): kind's ingress-nginx
+# until the cut-over, MicroK8s's ingress add-on (DaemonSet
+# nginx-ingress-microk8s-controller in namespace ingress), or anything else. A
+# proxy asking for those ports would never be scheduled.
+ingress_nodes="$(kc get nodes -l ingress-ready=true -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+port_holders="$(kc get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" node="}{.spec.nodeName}{" owner="}{.metadata.labels.gateway\.envoyproxy\.io/owning-gateway-name}{" ports"}{range .spec.containers[*].ports[*]}{" "}{.hostPort}{end}{"\n"}{end}' 2>/dev/null |
+    awk -v nodes=" ${ingress_nodes} " '
+        $3 != "owner=econ-graph-gateway" && / (80|443)( |$)/ {
+            node = substr($2, 6)
+            if (index(nodes, " " node " ") > 0) printf "%s ", $1
+        }' || true)"
+port_holders="${port_holders% }"
+port_advice="move the cluster to the gateway with scripts/deploy/cutover-to-gateway.sh"
+case " $port_holders" in
+    *" ingress/nginx-ingress-microk8s-controller"*) port_advice="run 'microk8s disable ingress', then this script again" ;;
+esac
 if [ "$GATEWAY_HOST_PORTS" = auto ]; then
-    if [ "$nginx_present" = true ]; then
+    if [ -n "$port_holders" ]; then
         GATEWAY_HOST_PORTS=false
-        echo "warning: ingress-nginx is installed and holds host ports 80/443; the gateway proxy runs without them. Move the cluster to the gateway with scripts/deploy/cutover-to-gateway.sh." >&2
+        echo "warning: ${port_holders} hold(s) host port 80/443; the gateway proxy runs without them. To give the ports to the gateway, ${port_advice}." >&2
     else
         GATEWAY_HOST_PORTS=true
     fi
-elif [ "$GATEWAY_HOST_PORTS" = true ] && [ "$nginx_present" = true ]; then
+elif [ "$GATEWAY_HOST_PORTS" = true ] && [ -n "$port_holders" ]; then
     if [ "$DRY_RUN" = true ]; then
         # A dry run of a cut-over gets here before ingress-nginx is gone.
-        echo "  (dry run) ingress-nginx is installed now; the proxy can take host ports 80/443 only once it is removed"
+        echo "  (dry run) ${port_holders} hold(s) host port 80/443 now; the proxy can take them only once they are gone"
     else
-        die "ingress-nginx is installed and holds host ports 80/443; remove it first (scripts/deploy/cutover-to-gateway.sh)"
+        die "${port_holders} hold(s) host port 80/443; ${port_advice}"
     fi
 fi
 
-fetch "$GATEWAY_API_URL" "$GATEWAY_API_SHA256" "$WORK/gateway-api-standard.yaml"
-fetch "$EG_CRDS_URL" "$EG_CRDS_SHA256" "$WORK/envoy-gateway-crds.yaml"
-fetch "$EG_INSTALL_URL" "$EG_INSTALL_SHA256" "$WORK/envoy-gateway-install.yaml"
+# The https listener: keep what the Gateway has unless told otherwise.
+current_https_host="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
+    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null || true)"
+current_issuer="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
+    -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}' 2>/dev/null || true)"
+if [ -z "$GATEWAY_HTTPS_HOSTNAME" ]; then
+    GATEWAY_HTTPS_HOSTNAME="${current_https_host:-none}"
+fi
+GATEWAY_TLS_ISSUER="${GATEWAY_TLS_ISSUER:-${current_issuer:-letsencrypt-staging}}"
+
+fetch_all
 
 # install.yaml bundles the Gateway API CRDs from the experimental channel, plus
 # Envoy Gateway's own CRDs. Drop every CRD (and the Gateway API's
@@ -244,6 +318,17 @@ if [ "$DRY_RUN" != true ]; then
     config_before="$(kc -n envoy-gateway-system get configmap envoy-gateway-config \
         -o jsonpath='{.data.envoy-gateway\.yaml}' --ignore-not-found 2>/dev/null || true)"
 fi
+# The certgen Job's template is immutable: one left from another Envoy
+# Gateway version has to go before this version's can be applied.
+certgen_image="$(kc -n envoy-gateway-system get job eg-gateway-helm-certgen \
+    -o jsonpath='{.spec.template.spec.containers[0].image}' --ignore-not-found 2>/dev/null || true)"
+if [ -n "$certgen_image" ] && [ "$certgen_image" != "envoyproxy/gateway:${ENVOY_GATEWAY_VERSION}" ]; then
+    if [ "$DRY_RUN" = true ]; then
+        echo "+ kubectl -n envoy-gateway-system delete job eg-gateway-helm-certgen (image ${certgen_image})"
+    else
+        kc -n envoy-gateway-system delete job eg-gateway-helm-certgen --wait=true
+    fi
+fi
 ssa "$FIELD_MANAGER" "$WORK/envoy-gateway-controller.yaml"
 if [ "$DRY_RUN" != true ]; then
     config_after="$(kc -n envoy-gateway-system get configmap envoy-gateway-config -o jsonpath='{.data.envoy-gateway\.yaml}')"
@@ -255,7 +340,7 @@ if [ "$DRY_RUN" != true ]; then
     kc -n envoy-gateway-system rollout status deployment/envoy-gateway --timeout=300s
 fi
 
-log "EnvoyProxy, GatewayClass, Gateway and the rate-limit burst patch"
+log "EnvoyProxy, GatewayClass, Gateway, client headers and the rate-limit burst patch"
 if [ "$GATEWAY_HOST_PORTS" = true ]; then
     ssa "$FIELD_MANAGER" "$GATEWAY_DIR/envoy-proxy.yaml"
 else
@@ -271,12 +356,13 @@ else
 fi
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gatewayclass.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gateway.yaml"
+ssa "$FIELD_MANAGER" "$GATEWAY_DIR/client-traffic-policy.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/ratelimit-burst.yaml"
 
 # The https listener is a second field manager's part of the same Gateway:
 # server-side apply merges listeners by name, so gateway.yaml never removes
 # it, and applying the manager's empty part removes it again.
-if [ -n "$GATEWAY_HTTPS_HOSTNAME" ]; then
+if [ "$GATEWAY_HTTPS_HOSTNAME" != none ]; then
     log "Listener https for ${GATEWAY_HTTPS_HOSTNAME} (certificate from ClusterIssuer ${GATEWAY_TLS_ISSUER})"
     sed -e "s/__GATEWAY_HTTPS_HOSTNAME__/${GATEWAY_HTTPS_HOSTNAME}/g" \
         -e "s/__GATEWAY_TLS_ISSUER__/${GATEWAY_TLS_ISSUER}/g" \
@@ -286,7 +372,11 @@ if [ -n "$GATEWAY_HTTPS_HOSTNAME" ]; then
     fi
     ssa "$HTTPS_FIELD_MANAGER" "$WORK/gateway-https.yaml"
 else
-    log "No GATEWAY_HTTPS_HOSTNAME: listener https not configured"
+    if [ -n "$current_https_host" ]; then
+        log "GATEWAY_HTTPS_HOSTNAME=none: removing listener https (${current_https_host})"
+    else
+        log "No listener https"
+    fi
     cat >"$WORK/gateway-https-none.yaml" <<'EOF'
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway

@@ -217,7 +217,7 @@ kubectl apply -f k8s/manifests/namespace.yaml
 kubectl apply -f k8s/manifests/
 # The gateway (k8s/manifests/gateway/, idempotent), then this namespace's routes.
 ./scripts/deploy/install-gateway.sh
-kubectl apply -f k8s/manifests/gateway/routes/
+./scripts/deploy/apply-gateway-routes.sh
 
 # Apply security configurations
 echo "🔒 Applying security configurations..."

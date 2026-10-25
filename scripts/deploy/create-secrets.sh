@@ -361,9 +361,9 @@ if [[ -z "${GRAFANA_ADMIN_PASSWORD-}" ]] &&
 fi
 
 # --- monitoring-auth guard ---------------------------------------------------
-# Deploys before these Secrets applied monitoring-auth from
-# ingress-cloudflare-dns01.yaml with a committed htpasswd entry. Such a Secret
-# still has the client-side-apply annotation; this script never leaves one.
+# Deploys before these Secrets applied monitoring-auth from a committed
+# manifest with an htpasswd entry. Such a Secret still has the
+# client-side-apply annotation; this script never leaves one.
 if [[ -z "${MONITORING_BASIC_AUTH-}" ]] && secret_from_manifest monitoring-auth; then
     if [[ "${ALLOW_MANIFEST_MONITORING_AUTH-}" == 1 ]]; then
         log "warning: keeping monitoring-auth created from a manifest" \
@@ -434,7 +434,7 @@ begin_secret grafana-admin
 add_required GRAFANA_ADMIN_PASSWORD admin-password
 apply_secret
 
-# --- monitoring-auth (basic auth for the monitoring ingress) ----------------
+# --- monitoring-auth (basic auth for a monitoring host; no manifest reads it) --
 if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     begin_secret monitoring-auth
     put auth "$MONITORING_BASIC_AUTH" "from MONITORING_BASIC_AUTH"
@@ -449,9 +449,7 @@ elif secret_exists monitoring-auth; then
     fi
     log "monitoring-auth: MONITORING_BASIC_AUTH not set, kept as is"
 else
-    log "warning: monitoring-auth not created (MONITORING_BASIC_AUTH not set)." \
-        "If k8s/manifests/ingress-cloudflare-dns01.yaml is applied, the monitoring" \
-        "host returns 503 until this Secret exists."
+    log "monitoring-auth not created (MONITORING_BASIC_AUTH not set)."
 fi
 
 log "done. Pods read Secrets at start: restart deployments to pick up changes."

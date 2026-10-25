@@ -56,3 +56,10 @@ spec:
       jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
       path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/0/token_bucket/max_tokens
       value: 100
+  - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: econ-graph-gateway/econ-graph-gateway/https
+    operation:
+      op: replace
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/1/token_bucket/max_tokens
+      value: 100

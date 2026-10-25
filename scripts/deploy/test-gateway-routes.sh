@@ -110,6 +110,11 @@ fi
 code="$(req health GET /health)"
 if [ "$code" = 200 ] && ! is_html health && grep -qi 'status' "$WORK/health.body"; then
     pass "/health -> backend (200)"
+    if [ "$(header health X-Content-Type-Options)" = nosniff ] && [ "$(header health X-Frame-Options)" = DENY ]; then
+        pass "/health has X-Content-Type-Options nosniff and X-Frame-Options DENY"
+    else
+        fail "/health headers: X-Content-Type-Options='$(header health X-Content-Type-Options)' X-Frame-Options='$(header health X-Frame-Options)'"
+    fi
 else
     fail "/health -> backend: got $code"
 fi

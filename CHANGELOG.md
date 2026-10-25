@@ -15,8 +15,8 @@ All notable changes to EconGraph are documented here. The format follows
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
 - The kind cluster serves `/data/graphql`: the backend's `/graphql` with `Authorization` and
   `Cookie` removed, rate-limited like `/graphql`.
-- An optional HTTPS listener on the gateway (`GATEWAY_HTTPS_HOSTNAME`), with a cert-manager
-  certificate.
+- An optional HTTPS listener on the gateway (`GATEWAY_HTTPS_HOSTNAME=<host>`, removed again
+  with `none`), with a cert-manager certificate; the routes then also serve that host name.
 - `scripts/deploy/test-gateway-routes.sh` checks every route on the gateway, and
   `scripts/deploy/cutover-to-gateway.sh` moves a running cluster from ingress-nginx to the
   gateway (with `--dry-run` and `--rollback`).
@@ -29,9 +29,12 @@ All notable changes to EconGraph are documented here. The format follows
   manifests; no Helm). The routes and paths are unchanged, except that `/playground` is no
   longer routed to the backend.
 - The `/graphql` rate limit (20 requests a second per client address, bursts of 100) now
-  answers 429 instead of 503 when exceeded.
+  answers 429 instead of 503 when exceeded, and counts IPv6 clients too.
+- The services see only the client address and scheme the gateway sets: forwarding headers a
+  client sends (`X-Forwarded-For` and the like) are dropped.
 - The frontend's security headers (CSP, HSTS, frame options) are sent on every frontend
-  response through the gateway, on plain HTTP too. The CSP no longer allows connections to
+  response through the gateway, on plain HTTP too, and the API responses get
+  `X-Content-Type-Options`, `X-Frame-Options` and HSTS. The CSP no longer allows connections to
   `https://api.econ-graph.com`.
 
 ### Removed

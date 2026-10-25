@@ -6,7 +6,8 @@
 # A BackendTrafficPolicy rate limit is a token bucket that holds as many
 # tokens as it refills per unit, so "20 a second" alone allows bursts of only
 # 20. This patch raises the bucket size of those routes' per-client
-# descriptor to 100, keeping the refill at 20 a second: a client may send 100
+# descriptors (0: IPv4 clients, 1: IPv6 clients) to 100, keeping the refill
+# at 20 a second: a client may send 100
 # requests at once, then 20 a second. Envoy Gateway applies it to the
 # generated Envoy configuration; it needs extensionApis.enableEnvoyPatchPolicy
 # in Envoy Gateway's own configuration, which scripts/deploy/install-gateway.sh
@@ -36,4 +37,11 @@ spec:
       op: replace
       jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
       path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/0/token_bucket/max_tokens
+      value: 100
+  - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: econ-graph-gateway/econ-graph-gateway/http
+    operation:
+      op: replace
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/1/token_bucket/max_tokens
       value: 100

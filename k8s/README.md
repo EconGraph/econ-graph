@@ -39,6 +39,7 @@ k8s/
 │   └── gateway/         # The gateway (Envoy Gateway): see "Gateway" below
 │       ├── envoy-proxy.yaml, gatewayclass.yaml, gateway.yaml
 │       ├── gateway-https.yaml   # optional listener https
+│       ├── client-traffic-policy.yaml # drops client-sent forwarding headers
 │       ├── ratelimit-burst.yaml # bursts of 100 for the GraphQL rate limits
 │       └── routes/          # this namespace's HTTPRoutes and rate limits
 └── README.md           # This file
@@ -53,6 +54,7 @@ scripts/deploy/         # Deployment scripts
 ├── build-images.sh    # Build Docker images
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── install-gateway.sh # Install the gateway (run by deploy.sh)
+├── apply-gateway-routes.sh # Apply the routes, with the https host name (run by deploy.sh)
 ├── test-gateway-routes.sh # Check every route on the gateway
 ├── cutover-to-gateway.sh  # Move a cluster from ingress-nginx to the gateway
 ├── deploy.sh          # Deploy to K8s
@@ -137,17 +139,18 @@ would apply) installs pinned versions from the upstream release manifests, with 
 
 | Object | Name | Where |
 | --- | --- | --- |
-| EnvoyProxy | `econ-graph-proxy` | `envoy-gateway-system`: one proxy replica on the control-plane node (`ingress-ready=true`), holding host ports 80/443 as hostPorts; Service `econ-graph-gateway-proxy` (ClusterIP) |
+| EnvoyProxy | `econ-graph-proxy` | `envoy-gateway-system`: one proxy replica on the node labelled `ingress-ready=true` (kind's control-plane node; the MicroK8s setup scripts label their node), holding host ports 80/443 as hostPorts; Service `econ-graph-gateway-proxy` (ClusterIP) |
 | GatewayClass | `econ-graph` | cluster |
-| Gateway | `econ-graph-gateway` | namespace `econ-graph-gateway`. Listener `http` (port 80) admits routes from namespaces labelled `econgraph.io/gateway-access: "true"`; listener `https` (port 443) exists only with `GATEWAY_HTTPS_HOSTNAME` |
+| Gateway | `econ-graph-gateway` | namespace `econ-graph-gateway`. Listener `http` (port 80) admits routes from namespaces labelled `econgraph.io/gateway-access: "true"`; listener `https` (port 443) exists only once `GATEWAY_HTTPS_HOSTNAME` has set it |
+| ClientTrafficPolicy | `econ-graph-client-headers` | drops the forwarding headers a client sends (`X-Forwarded-For` and the like), so the services see only the address and scheme the proxy sets |
 
 Routes in `econ-graph` (`k8s/manifests/gateway/routes/`), on host `localhost`:
 
 | HTTPRoute | Paths | Backend |
 | --- | --- | --- |
 | `econ-graph-frontend` | `/`, `/auth/callback`, `/silent-callback.html` | frontend; sets the security headers (CSP, HSTS, X-Frame-Options; only `/silent-callback.html` may be framed, by this origin) |
-| `econ-graph-backend` | `/api`, `/auth`, `/health` | backend |
-| `econ-graph-graphql` | `/graphql` | backend; 20 requests a second per client address, bursts of 100, then 429 |
+| `econ-graph-backend` | `/api`, `/auth`, `/health` | backend; sets `X-Content-Type-Options`, `X-Frame-Options` and HSTS, as do the two GraphQL routes |
+| `econ-graph-graphql` | `/graphql` | backend; 20 requests a second per client address (IPv4 and IPv6), bursts of 100, then 429 |
 | `econ-graph-data-graphql` | `/data/graphql` | backend `/graphql`, with `Authorization` and `Cookie` removed; same rate limit |
 | `econ-graph-idp` | `/idp/realms/econ-graph`, `/idp/resources` | Keycloak |
 
@@ -155,23 +158,33 @@ The rate limit counts per client address as the proxy sees it: through the hostP
 client's own address, except that requests from the host itself all arrive from the Docker bridge
 gateway. In-cluster callers reach the gateway at
 `http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/` with a `Host` header
-that one of the routes matches; a NetworkPolicy admitting them must allow the proxy pod's port
-10080 (listener `http`), not the Service port 80.
+that one of the routes matches. NetworkPolicies match the proxy pod's ports (10080 for listener
+`http`, 10443 for `https`), not the Service port 80; `k8s/manifests/network-policy.yaml` lets
+every pod in `econ-graph` reach them, and admits the proxy only to the frontend, backend and
+Keycloak ports.
 
 Check every route with `./scripts/deploy/test-gateway-routes.sh [--rate-limit] [BASE_URL]`.
+Apply the routes with `./scripts/deploy/apply-gateway-routes.sh` (as `deploy.sh` does), not
+with `kubectl apply` on the directory: it adds the https listener's host name to them.
+
+While another pod holds host port 80 or 443 (kind's ingress-nginx, or MicroK8s's ingress
+add-on), `install-gateway.sh` runs the proxy without host ports and says how to free them.
 
 **HTTPS.** `GATEWAY_HTTPS_HOSTNAME=<host> ./scripts/deploy/deploy.sh` adds listener `https` for
 that host name, with a certificate in Secret `econ-graph-tls` (namespace `econ-graph-gateway`)
 issued by cert-manager from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `letsencrypt-staging`,
-`k8s/manifests/letsencrypt-issuer.yaml`, HTTP-01 through listener `http`). `deploy.sh` then turns
-on cert-manager's Gateway API support and adds the host name to the routes. Without the variable
-there is no `https` listener.
+`k8s/manifests/letsencrypt-issuer.yaml`, HTTP-01 through listener `http`; cert-manager runs with
+its Gateway API support on). The routes then also serve that host name. Later runs without the
+variable keep the listener, its host name and issuer; `GATEWAY_HTTPS_HOSTNAME=none` removes it.
 
 **Moving a cluster from ingress-nginx.** `./scripts/deploy/cutover-to-gateway.sh --dry-run`
 prints the steps; without `--dry-run` it installs the gateway next to ingress-nginx, checks every
-route through the proxy Service, asks for confirmation, removes the Ingresses and ingress-nginx,
-moves the proxy onto ports 80/443 and checks the routes again. It saves the Ingresses first;
-`--rollback <dir>` restores ingress-nginx and them. Its header lists every step.
+route through the proxy Service and that a pod in `econ-graph` reaches the proxy, asks for
+confirmation, removes the Ingresses and ingress-nginx, moves the proxy onto ports 80/443 and
+checks the routes again. First it saves everything a rollback needs, including ingress-nginx's
+manifest, ConfigMaps, Deployment and Secrets and the gateway's release manifests, so neither
+direction needs the network once ingress-nginx is gone; `--rollback <dir>` restores
+ingress-nginx and the Ingresses. Its header lists every step.
 
 ## 📊 Monitoring
 

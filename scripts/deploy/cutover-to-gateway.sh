@@ -18,25 +18,32 @@
 # Steps:
 #   1. Read-only checks: the API server answers, namespace econ-graph and the
 #      frontend and backend Services exist; report the ingress-nginx
-#      controller and the Ingresses it serves.
+#      controller, the Ingresses it serves and what else to look out for.
 #   2. Save what a rollback needs to
-#      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/:
-#      the Ingress objects and NetworkPolicies of namespace econ-graph, the
-#      ingress-nginx controller's version and that version's upstream kind
-#      manifest. No Secrets, no data. If the manifest can't be downloaded,
-#      stop before changing anything.
+#      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/
+#      (mode 700; the files 600): the Ingresses and NetworkPolicies of
+#      namespace econ-graph; the ingress-nginx controller's version, its
+#      upstream kind manifest, and its namespace's ConfigMaps, controller
+#      Deployment and Secrets (a default TLS certificate, for one), which
+#      deleting the namespace removes; and the gateway's release manifests,
+#      so steps 3 and 7 and the rollback need no network. If any download
+#      fails, stop before changing anything.
 #   3. Label namespace econ-graph for the gateway (namespace.yaml), then
 #      install the gateway next to ingress-nginx with install-gateway.sh,
 #      GATEWAY_HOST_PORTS=false: ingress-nginx keeps host ports 80/443, the
-#      proxy is reachable only through its Service. Apply the routes.
+#      proxy is reachable only through its Service. Apply the routes
+#      (apply-gateway-routes.sh).
 #   4. Check every route through that Service (kubectl port-forward and
-#      test-gateway-routes.sh, rate limits included). If a check fails, stop
-#      here: nothing has been removed and the site is still on ingress-nginx.
+#      test-gateway-routes.sh, rate limits included), and that a pod in
+#      econ-graph reaches the proxy Service (a short-lived curl pod, image
+#      curlimages/curl, which the NetworkPolicies must let through). If a
+#      check fails, stop here: nothing has been removed and the site is still
+#      on ingress-nginx.
 #   5. Ask for a typed "yes" (or --yes).
-#   6. Delete the Ingresses in econ-graph, then ingress-nginx itself (from
-#      here on a failure prints the rollback command): its
-#      namespace (controller and admission webhook) and its cluster-wide
-#      objects (IngressClass nginx, webhook configuration, RBAC).
+#   6. Delete the Ingresses in econ-graph, then ingress-nginx itself: its
+#      namespace (controller, admission webhook, ConfigMaps and Secrets) and
+#      its cluster-wide objects (IngressClass nginx, webhook configuration,
+#      RBAC). From here on a failure prints the rollback command.
 #   7. Re-run install-gateway.sh with host ports: the proxy restarts on the
 #      control-plane node holding ports 80/443 (a few seconds without a
 #      proxy, plus the time ingress-nginx takes to stop).
@@ -44,25 +51,31 @@
 #
 # Rollback (--rollback DIR, with the DIR that step 2 printed):
 #   1. Move the gateway proxy off host ports 80/443 (install-gateway.sh with
-#      GATEWAY_HOST_PORTS=false); the gateway objects stay, so a later
-#      cut-over starts again from step 3.
-#   2. Install ingress-nginx again from the kind manifest saved in DIR,
-#      pinned to the control-plane node.
+#      GATEWAY_HOST_PORTS=false, from the manifests saved in DIR); the
+#      gateway objects stay, so a later cut-over starts again from step 3.
+#   2. Wait for a terminating ingress-nginx namespace to be gone, install
+#      ingress-nginx from the kind manifest saved in DIR, then put back its
+#      saved ConfigMaps, controller Deployment (its arguments and node
+#      selector included) and Secrets. The admission webhook's certificate
+#      Secret is the exception: the manifest's own Job issues a new one that
+#      matches the new webhook configuration.
 #   3. Re-create the saved Ingresses, and put back the saved NetworkPolicies
 #      (k8s/manifests/network-policy.yaml admits only the gateway's proxy, so
 #      one applied after the cut-over would block ingress-nginx; a policy
 #      that did not exist at the cut-over is reported, not deleted).
 #   4. Check that --host-url serves the frontend again.
 #   The same steps by hand, if this script is not usable:
-#     GATEWAY_HOST_PORTS=false scripts/deploy/install-gateway.sh --context kind-econ-graph
+#     GATEWAY_HOST_PORTS=false scripts/deploy/install-gateway.sh --context kind-econ-graph --manifests-dir DIR/gateway-manifests
 #     kubectl apply -f DIR/ingress-nginx.yaml
-#     kubectl -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
-#       -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
+#     kubectl apply -f DIR/ingress-nginx-objects/<the configmap-* and deployment-* files>
+#     kubectl create -f DIR/ingress-nginx-objects/<each secret-* file>
 #     kubectl apply -f DIR/ingresses.yaml
-#     kubectl apply -f DIR/networkpolicies.yaml   # if it lists any
+#     kubectl apply -f DIR/networkpolicies.yaml       # if it lists any
 #
-# Never touches PersistentVolumes, Secrets or databases. A Cloudflare Tunnel
-# whose origin is ingress-nginx's Service must be pointed at
+# Never touches PersistentVolumes, databases or the Secrets of econ-graph;
+# the only Secrets it deletes are those in namespace ingress-nginx, after
+# saving them. A Cloudflare Tunnel whose origin is ingress-nginx's Service
+# must be pointed at
 # http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:80
 # (the tunnel's public-hostname settings) when step 6 runs; the script
 # reminds you if it finds a cloudflared Deployment.
@@ -71,6 +84,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="econ-graph"
+PREFLIGHT_IMAGE="curlimages/curl:8.11.1"
 
 DRY_RUN=false
 ASSUME_YES=false
@@ -138,11 +152,19 @@ confirm() {
     [ "$reply" = "yes" ] || die "aborted; nothing more was changed"
 }
 
+# install_gateway HOST_PORTS [MANIFESTS_DIR]
 install_gateway() {
-    local host_ports="$1" args=(--context "$KUBE_CONTEXT")
+    local host_ports="$1" manifests="${2:-}" args=(--context "$KUBE_CONTEXT")
+    [ -n "$manifests" ] && args+=(--manifests-dir "$manifests")
     [ "$DRY_RUN" = true ] && args+=(--dry-run)
     echo "+ GATEWAY_HOST_PORTS=${host_ports} scripts/deploy/install-gateway.sh ${args[*]}"
     GATEWAY_HOST_PORTS="$host_ports" "$PROJECT_ROOT/scripts/deploy/install-gateway.sh" "${args[@]}"
+}
+
+apply_routes() {
+    local args=(--context "$KUBE_CONTEXT")
+    [ "$DRY_RUN" = true ] && args+=(--dry-run)
+    "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" "${args[@]}"
 }
 
 # Check the routes through the proxy Service, before the proxy has host ports.
@@ -166,6 +188,28 @@ check_routes_in_cluster() {
     return "$status"
 }
 
+# A pod in econ-graph (only the namespace-wide NetworkPolicy applies to it,
+# as to an in-cluster tunnel connector) reaches the gateway through its
+# Service.
+check_pod_reaches_proxy() {
+    local out
+    if [ "$DRY_RUN" = true ]; then
+        echo "+ kubectl -n ${NAMESPACE} run gateway-preflight --rm -i --restart=Never --image=${PREFLIGHT_IMAGE} -- curl http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/health"
+        return 0
+    fi
+    kc -n "$NAMESPACE" delete pod gateway-preflight --ignore-not-found >/dev/null
+    out="$(kc -n "$NAMESPACE" run gateway-preflight --rm -i --quiet --restart=Never \
+        --image="$PREFLIGHT_IMAGE" --labels=app=gateway-preflight --pod-running-timeout=180s -- \
+        curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: localhost' \
+        http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/health 2>&1 || true)"
+    if [ "${out: -3}" = 200 ]; then
+        echo "  ok    a pod in ${NAMESPACE} reaches econ-graph-gateway-proxy (200)"
+    else
+        echo "  FAIL  a pod in ${NAMESPACE} does not reach econ-graph-gateway-proxy: ${out}"
+        return 1
+    fi
+}
+
 wait_host_url() {
     [ "$DRY_RUN" = true ] && return 0
     for _ in $(seq 1 60); do
@@ -184,6 +228,16 @@ server_reachable() {
         die "cannot reach the API server of context ${KUBE_CONTEXT}"
 }
 
+# save_object FILE NAMESPACE KIND/NAME: the object as YAML without the fields
+# the server sets, so the file re-creates it. Fails unless the file holds it.
+save_object() {
+    local file="$1" ns="$2" obj="$3"
+    kc -n "$ns" get "$obj" -o yaml |
+        sed -E '/^  (resourceVersion|uid|creationTimestamp|generation): /d; /^status:/,$d' >"$file" ||
+        die "could not save ${ns}/${obj}"
+    grep -q "^  name: ${obj#*/}$" "$file" || die "saving ${ns}/${obj} to ${file} failed"
+}
+
 # --- rollback --------------------------------------------------------------------
 
 if [ -n "$ROLLBACK_DIR" ]; then
@@ -194,23 +248,52 @@ if [ -n "$ROLLBACK_DIR" ]; then
     # without one.
     manifest="$ROLLBACK_DIR/ingress-nginx.yaml"
     [ -s "$manifest" ] || manifest="$(nginx_manifest_url "$version")"
+    gateway_manifests=""
+    [ -d "$ROLLBACK_DIR/gateway-manifests" ] && gateway_manifests="$ROLLBACK_DIR/gateway-manifests"
+    # Every saved object must be readable before anything is changed.
+    for f in "$ROLLBACK_DIR"/ingress-nginx-objects/*.yaml; do
+        [ -e "$f" ] || continue
+        grep -q '^kind: ' "$f" || die "$f holds no object; not rolling back from $ROLLBACK_DIR"
+    done
     server_reachable
     log "Rollback to ingress-nginx ${version} on context ${KUBE_CONTEXT}"
     confirm "Move the gateway off ports 80/443 and reinstall ingress-nginx?"
 
     log "1/4 Gateway proxy off the host ports"
-    install_gateway false
+    install_gateway false "$gateway_manifests"
 
     log "2/4 ingress-nginx ${version}"
+    if [ "$DRY_RUN" != true ] && [ "$(kc get namespace ingress-nginx -o jsonpath='{.status.phase}' 2>/dev/null)" = Terminating ]; then
+        echo "  waiting for namespace ingress-nginx to finish terminating"
+        kc wait --for=delete namespace/ingress-nginx --timeout=600s
+    fi
     run kc apply -f "$manifest"
-    run kc -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
+    if [ -d "$ROLLBACK_DIR/ingress-nginx-objects" ]; then
+        for f in "$ROLLBACK_DIR"/ingress-nginx-objects/*.yaml; do
+            [ -e "$f" ] || continue
+            case "${f##*/}" in
+                # `create`, not `apply`: no last-applied annotation holding the
+                # values. One the manifest already created is left alone.
+                secret-*)
+                    if [ "$DRY_RUN" = true ]; then
+                        echo "+ kubectl --context ${KUBE_CONTEXT} create -f $f"
+                    elif ! kc -n ingress-nginx get secret "$(basename "$f" .yaml | sed 's/^secret-//')" >/dev/null 2>&1; then
+                        kc create -f "$f"
+                    fi
+                    ;;
+                *) run kc apply -f "$f" ;;
+            esac
+        done
+    else
+        run kc -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
+            -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
+    fi
     if [ "$DRY_RUN" != true ]; then
         kc -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
         kc -n ingress-nginx wait --for=condition=Complete --timeout=120s job --all >/dev/null 2>&1 || true
     fi
 
-    log "3/4 Ingresses"
+    log "3/4 Ingresses and NetworkPolicies"
     if [ -s "$ROLLBACK_DIR/ingresses.yaml" ]; then
         # The admission webhook may take a moment after the controller is up.
         if [ "$DRY_RUN" = true ]; then
@@ -262,17 +345,28 @@ if [ -n "$nginx_image" ]; then
 else
     echo "  ingress-nginx: not installed"
 fi
+if kc -n ingress get daemonset nginx-ingress-microk8s-controller >/dev/null 2>&1; then
+    die "MicroK8s's ingress add-on holds host ports 80/443; this script removes kind's ingress-nginx only. Run 'microk8s disable ingress', then scripts/deploy/install-gateway.sh"
+fi
 echo "  Ingresses in ${NAMESPACE}:"
 kc -n "$NAMESPACE" get ingress 2>/dev/null | sed 's/^/    /' || true
 # Host names the Ingresses serve that the HTTPRoutes don't: after step 6 the
 # gateway answers them with 404.
-route_hosts="$(sed -n '/^  hostnames:$/,/^  [a-z]/s/^  - //p' "$PROJECT_ROOT/k8s/manifests/gateway/routes/httproutes.yaml" | sort -u)"
+https_host="$(kc -n econ-graph-gateway get gateway econ-graph-gateway \
+    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null || true)"
+route_hosts="$(printf 'localhost\n%s\n' "$https_host")"
 unserved=""
 for host in $(kc -n "$NAMESPACE" get ingress -o jsonpath='{.items[*].spec.rules[*].host}' 2>/dev/null | tr ' ' '\n' | sort -u); do
     grep -qx "$host" <<<"$route_hosts" || unserved="${unserved} ${host}"
 done
 if [ -n "$unserved" ]; then
     warn "the Ingresses also serve${unserved}, which the HTTPRoutes do not; the gateway will not answer for those host names"
+fi
+if [ -n "$nginx_image" ]; then
+    custom="$(kc -n ingress-nginx get configmap ingress-nginx-controller -o jsonpath='{.data}' 2>/dev/null || true)"
+    if [ -n "$custom" ] && [ "$custom" != "{}" ] && [ "$custom" != '{"allow-snippet-annotations":"false"}' ]; then
+        warn "ingress-nginx's ConfigMap has settings (${custom}); the gateway does not take them over (they are saved for a rollback)"
+    fi
 fi
 if [ -z "${EXPECTED_ISSUER:-}" ]; then
     kc_hostname="$(kc -n "$NAMESPACE" get deployment keycloak \
@@ -283,7 +377,7 @@ if [ -z "${EXPECTED_ISSUER:-}" ]; then
     fi
 fi
 if [ -n "$(kc -n "$NAMESPACE" get networkpolicy -o name 2>/dev/null)" ]; then
-    warn "NetworkPolicies exist in ${NAMESPACE}; they must admit the Envoy proxy pods (k8s/manifests/network-policy.yaml does), or the route checks in step 4 fail"
+    warn "NetworkPolicies exist in ${NAMESPACE}; they must admit the Envoy proxy pods and let pods reach them (k8s/manifests/network-policy.yaml does), or the checks in step 4 fail"
 fi
 if kc -n "$NAMESPACE" get deployment cloudflared >/dev/null 2>&1; then
     warn "a cloudflared Deployment runs in ${NAMESPACE}: after step 6, point the tunnel's public hostnames at http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:80"
@@ -291,31 +385,56 @@ fi
 
 log "2/8 Saving rollback state"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/econgraph/gateway-cutover/$(date -u +%Y%m%dT%H%M%SZ)"
+GATEWAY_MANIFESTS=""
 if [ -z "$nginx_image" ]; then
     # Nothing to go back to: the run only (re)applies the gateway.
     STATE_DIR=""
     echo "  ingress-nginx is not installed; no rollback state saved"
 elif [ "$DRY_RUN" = true ]; then
-    echo "+ save the Ingresses and NetworkPolicies of ${NAMESPACE}, the ingress-nginx version and its kind manifest ($(nginx_manifest_url "$nginx_version")) to ${STATE_DIR}/"
+    echo "+ save to ${STATE_DIR}/: the Ingresses and NetworkPolicies of ${NAMESPACE}; ingress-nginx's version,"
+    echo "  kind manifest ($(nginx_manifest_url "$nginx_version")), ConfigMaps, controller Deployment and Secrets;"
+    echo "  the gateway's release manifests"
 else
-    (umask 077 && mkdir -p "$STATE_DIR")
-    echo "${nginx_version}" >"$STATE_DIR/ingress-nginx-version"
-    # The rollback reinstalls from this copy; without it, stop before changing anything.
-    curl -fsSL --retry 3 -o "$STATE_DIR/ingress-nginx.yaml" "$(nginx_manifest_url "$nginx_version")" ||
-        die "cannot download the ingress-nginx ${nginx_version} kind manifest for the rollback; nothing was changed"
-    # Server-set fields removed, so the file re-creates the objects.
-    kc -n "$NAMESPACE" get ingress -o yaml |
-        sed -E '/^    (resourceVersion|uid|creationTimestamp|generation): /d' >"$STATE_DIR/ingresses.yaml"
-    kc -n "$NAMESPACE" get networkpolicy -o yaml |
-        sed -E '/^    (resourceVersion|uid|creationTimestamp|generation): /d' >"$STATE_DIR/networkpolicies.yaml"
+    (umask 077 && mkdir -p "$STATE_DIR/ingress-nginx-objects")
+    GATEWAY_MANIFESTS="$STATE_DIR/gateway-manifests"
+    (
+        umask 077
+        echo "${nginx_version}" >"$STATE_DIR/ingress-nginx-version"
+        # The downloads first: without them there is no way back, so stop
+        # before anything changes.
+        curl -fsSL --retry 3 -o "$STATE_DIR/ingress-nginx.yaml" "$(nginx_manifest_url "$nginx_version")" ||
+            die "cannot download the ingress-nginx ${nginx_version} kind manifest for the rollback; nothing was changed"
+        "$PROJECT_ROOT/scripts/deploy/install-gateway.sh" --fetch-only --manifests-dir "$GATEWAY_MANIFESTS" ||
+            die "cannot download the gateway's release manifests; nothing was changed"
+        # Server-set fields removed, so the files re-create the objects.
+        kc -n "$NAMESPACE" get ingress -o yaml |
+            sed -E '/^    (resourceVersion|uid|creationTimestamp|generation): /d' >"$STATE_DIR/ingresses.yaml"
+        kc -n "$NAMESPACE" get networkpolicy -o yaml |
+            sed -E '/^    (resourceVersion|uid|creationTimestamp|generation): /d' >"$STATE_DIR/networkpolicies.yaml"
+        # What deleting the ingress-nginx namespace removes and the stock
+        # manifest does not bring back. Not the admission certificate (the
+        # manifest's Job issues one matching the new webhook) and not
+        # service-account tokens.
+        save_object "$STATE_DIR/ingress-nginx-objects/deployment-ingress-nginx-controller.yaml" \
+            ingress-nginx deployment/ingress-nginx-controller
+        for cm in $(kc -n ingress-nginx get configmap -o name); do
+            [ "$cm" = configmap/kube-root-ca.crt ] && continue
+            save_object "$STATE_DIR/ingress-nginx-objects/configmap-${cm#*/}.yaml" ingress-nginx "$cm"
+        done
+        for secret in $(kc -n ingress-nginx get secret -o name --field-selector type!=kubernetes.io/service-account-token); do
+            [ "$secret" = secret/ingress-nginx-admission ] && continue
+            save_object "$STATE_DIR/ingress-nginx-objects/secret-${secret#*/}.yaml" ingress-nginx "$secret"
+        done
+    ) || exit 1
     echo "  ${STATE_DIR}"
+    for f in "$STATE_DIR"/ingress-nginx-objects/*; do echo "    ingress-nginx-objects/${f##*/}"; done
     echo "  rollback: scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"
 fi
 
 log "3/8 Gateway next to ingress-nginx (no host ports yet)"
 run kc label namespace "$NAMESPACE" --overwrite econgraph.io/gateway-access=true econgraph.io/env=production
-install_gateway false
-run kc apply -f "$PROJECT_ROOT/k8s/manifests/gateway/routes/"
+install_gateway false "$GATEWAY_MANIFESTS"
+apply_routes
 if [ "$DRY_RUN" != true ]; then
     for route in econ-graph-frontend econ-graph-backend econ-graph-graphql econ-graph-data-graphql econ-graph-idp; do
         accepted=""
@@ -330,8 +449,8 @@ if [ "$DRY_RUN" != true ]; then
 fi
 
 log "4/8 Checking every route through the proxy Service"
-if ! check_routes_in_cluster; then
-    die "a route check failed; ingress-nginx is untouched and still serves the site. The gateway can stay installed (it holds no host ports)."
+if ! check_routes_in_cluster || ! check_pod_reaches_proxy; then
+    die "a check failed; ingress-nginx is untouched and still serves the site. The gateway can stay installed (it holds no host ports)."
 fi
 
 log "5/8 Confirm"
@@ -351,7 +470,7 @@ if [ -n "$nginx_image" ]; then
 fi
 
 log "7/8 Gateway proxy onto host ports 80/443"
-install_gateway true
+install_gateway true "$GATEWAY_MANIFESTS"
 
 log "8/8 Checking every route at ${HOST_URL}"
 if [ "$DRY_RUN" = true ]; then

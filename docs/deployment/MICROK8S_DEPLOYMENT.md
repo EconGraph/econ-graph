@@ -132,8 +132,7 @@ kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 # The gateway, with listener https for the public host name, and the routes
 # (see the "Gateway" section of k8s/README.md)
 GATEWAY_HTTPS_HOSTNAME=econgraph.com ./scripts/deploy/install-gateway.sh
-sed 's/^  - localhost$/  - localhost\n  - econgraph.com/' k8s/manifests/gateway/routes/httproutes.yaml | kubectl apply -f -
-kubectl apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml
+./scripts/deploy/apply-gateway-routes.sh
 ```
 
 ## Service URLs

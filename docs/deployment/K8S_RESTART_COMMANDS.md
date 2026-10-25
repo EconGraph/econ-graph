@@ -66,7 +66,7 @@ cd ..
 ### Step 4: Apply Updated Manifests
 ```bash
 kubectl apply -f k8s/manifests/
-kubectl apply -f k8s/manifests/gateway/routes/
+./scripts/deploy/apply-gateway-routes.sh
 kubectl apply -f k8s/monitoring/
 ```
 

@@ -141,16 +141,11 @@ kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-foun
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
 # 80/443 (k8s/manifests/gateway/; idempotent). Then this namespace's
-# HTTPRoutes and rate limits. GATEWAY_HTTPS_HOSTNAME (empty by default) adds
-# listener https for that host name, which the routes then also serve.
+# HTTPRoutes and rate limits. GATEWAY_HTTPS_HOSTNAME=<host> adds listener
+# https for that host name, which the routes then also serve; =none removes
+# it; unset keeps what the Gateway has (see install-gateway.sh).
 ./scripts/deploy/install-gateway.sh
-if [ -n "${GATEWAY_HTTPS_HOSTNAME:-}" ]; then
-  sed "s/^  - localhost$/  - localhost\n  - ${GATEWAY_HTTPS_HOSTNAME}/" \
-    k8s/manifests/gateway/routes/httproutes.yaml | kubectl apply -f -
-  kubectl apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml
-else
-  kubectl apply -f k8s/manifests/gateway/routes/
-fi
+./scripts/deploy/apply-gateway-routes.sh
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -222,22 +217,29 @@ kill $MONITOR_PID 2>/dev/null || true
 
 # Install cert-manager first: k8s/monitoring/letsencrypt-cloudflare-dns01.yaml
 # defines ClusterIssuer/Certificate resources whose CRDs cert-manager provides.
+# Its Gateway API support (--enable-gateway-api, needed for the gateway's https
+# listener certificate) is switched on in the manifest before it is applied, so
+# the controller starts once with it.
 echo "🔐 Installing cert-manager (provides the CRDs used by k8s/monitoring/)..."
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+cert_manager_manifest="$(mktemp)"
+curl -fsSL --retry 3 -o "$cert_manager_manifest" \
+  https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+awk '{ print } /^ *- --acme-http01-solver-image=/ { sub(/-.*/, "- --enable-gateway-api"); print }' \
+  "$cert_manager_manifest" > "${cert_manager_manifest}.patched"
+grep -q -- '- --enable-gateway-api$' "${cert_manager_manifest}.patched" || {
+  echo "❌ Could not add --enable-gateway-api to the cert-manager manifest"
+  exit 1
+}
+kubectl apply -f "${cert_manager_manifest}.patched"
+rm -f "$cert_manager_manifest" "${cert_manager_manifest}.patched"
 echo "⏳ Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
-# The gateway's https listener (GATEWAY_HTTPS_HOSTNAME) gets its certificate
-# from cert-manager's Gateway API support, which is off by default, and from
-# the ClusterIssuers in letsencrypt-issuer.yaml (HTTP-01 through the gateway).
-if [ -n "${GATEWAY_HTTPS_HOSTNAME:-}" ]; then
-  if ! kubectl -n cert-manager get deployment cert-manager \
-      -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- '--enable-gateway-api'; then
-    kubectl -n cert-manager patch deployment cert-manager --type=json \
-      -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--enable-gateway-api"}]'
-    kubectl -n cert-manager rollout status deployment/cert-manager --timeout=180s
-  fi
+# The gateway's https listener, when it has one, gets its certificate from the
+# ClusterIssuers in letsencrypt-issuer.yaml (HTTP-01 through the gateway).
+if [ -n "$(kubectl -n econ-graph-gateway get gateway econ-graph-gateway \
+    -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}' 2>/dev/null)" ]; then
   kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 fi
 

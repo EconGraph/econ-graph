@@ -5,7 +5,8 @@
 # bursts of up to 100 (ECO-147); above that Envoy answers 429. The backend's
 # query depth and complexity limits count fields, not rows, so a seriesData
 # page can still return thousands of points; this caps how often one client
-# can ask. The two routes have separate buckets.
+# can ask. The two routes have separate buckets. One rule counts IPv4
+# clients and one IPv6 clients (a source matches only its own family).
 #
 # The limit is local: each proxy replica counts on its own, which is exact
 # while the proxy runs as one replica (k8s/manifests/gateway/envoy-proxy.yaml).
@@ -39,6 +40,13 @@ spec:
         limit:
           requests: 20
           unit: Second
+      - clientSelectors:
+        - sourceCIDR:
+            type: Distinct
+            value: ::/0
+        limit:
+          requests: 20
+          unit: Second
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
@@ -58,6 +66,13 @@ spec:
         - sourceCIDR:
             type: Distinct
             value: 0.0.0.0/0
+        limit:
+          requests: 20
+          unit: Second
+      - clientSelectors:
+        - sourceCIDR:
+            type: Distinct
+            value: ::/0
         limit:
           requests: 20
           unit: Second

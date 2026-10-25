@@ -16,12 +16,15 @@
 #
 # Not routed: the admin frontend (/admin), /playground (the backend serves it
 # only with ENABLE_GRAPHQL_PLAYGROUND=true), Keycloak's admin console
-# (/idp/admin) and master realm (/idp/realms/master). The name
-# econ-graph-mcp is reserved for the /mcp and
-# /.well-known/oauth-protected-resource routes (ECO-292).
+# (/idp/admin) and master realm (/idp/realms/master).
 #
 # The rate limits on econ-graph-graphql and econ-graph-data-graphql are in
-# ratelimit-policies.yaml.
+# ratelimit-policies.yaml. The backend and GraphQL routes set
+# X-Content-Type-Options, X-Frame-Options and Strict-Transport-Security on
+# their responses, like the frontend route.
+#
+# scripts/deploy/apply-gateway-routes.sh applies this file, adding the https
+# listener's host name after each "- localhost".
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -119,6 +122,16 @@ spec:
     - path:
         type: PathPrefix
         value: /health
+    filters:
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
     timeouts:
       request: 30s
     backendRefs:
@@ -141,6 +154,16 @@ spec:
     - path:
         type: PathPrefix
         value: /graphql
+    filters:
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
     timeouts:
       request: 30s
     backendRefs:
@@ -178,6 +201,15 @@ spec:
         remove:
         - Authorization
         - Cookie
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
     timeouts:
       request: 30s
     backendRefs:

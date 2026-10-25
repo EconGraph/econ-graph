@@ -62,7 +62,7 @@ kubectl config use-context kind-econ-graph
 
 # Apply all manifests (includes updated image tags), then the gateway's routes
 kubectl apply -f k8s/manifests/
-kubectl apply -f k8s/manifests/gateway/routes/
+./scripts/deploy/apply-gateway-routes.sh
 ```
 
 ### 4. **Restart Rollouts**
