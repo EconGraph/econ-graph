@@ -142,25 +142,30 @@ test.describe('annotation save and delete failures', () => {
     async ({ page }) => {
       await signIn(page);
       const title = uniqueTitle('Lost-response annotation');
-      let dropped = 0;
-      await page.route('**/graphql', async route => {
-        if (dropped > 0 || graphqlOperation(route.request()) !== 'CreateAnnotation') {
-          await route.fallback();
-          return;
-        }
-        dropped += 1;
-        await route.fetch(); // the backend commits it
-        await route.abort('connectionreset');
-      });
+      try {
+        let dropped = 0;
+        await page.route('**/graphql', async route => {
+          if (dropped > 0 || graphqlOperation(route.request()) !== 'CreateAnnotation') {
+            await route.fallback();
+            return;
+          }
+          dropped += 1;
+          await route.fetch(); // the backend commits it
+          await route.abort('connectionreset');
+        });
 
-      const dialog = await fillAndSave(page, title);
-      await expect(dialog.getByRole('alert')).toBeVisible();
-      await dialog.getByRole('button', { name: 'Save' }).click();
-      await expect(dialog).toBeHidden();
+        const dialog = await fillAndSave(page, title);
+        await expect(dialog.getByRole('alert')).toBeVisible();
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
 
-      // Clean up every copy before failing on the count.
-      const stored = await deleteAllTitled(page, title);
-      expect(stored).toBe(1);
+        // Clean up every copy before failing on the count.
+        const stored = await deleteAllTitled(page, title);
+        expect(stored).toBe(1);
+      } finally {
+        // erin's annotation must not outlive a failure part way through.
+        await cleanUp(page, title);
+      }
     }
   );
 
