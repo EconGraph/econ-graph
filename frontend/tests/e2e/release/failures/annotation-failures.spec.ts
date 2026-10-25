@@ -133,35 +133,47 @@ test.describe('annotation save and delete failures', () => {
     await expect(rowsTitled(page, title)).toHaveCount(0);
   });
 
-  // enable after #426 (ECO-439) merges
   // The request reaches the backend, which stores the annotation, but the response is lost (a
   // dropped connection, a proxy timeout). The page reports a failure and keeps the form open, so
-  // the user saves again, and the backend stores a second copy: CreateAnnotation has no
-  // idempotency key and the page doesn't refetch the list after a failed save.
-  test.fixme(
-    'saving again after a lost response does not add a duplicate (ECO-264: CreateAnnotation is not idempotent)',
+  // the user saves again. The retry sends the same idempotency key, so the backend returns the
+  // stored annotation instead of inserting a second copy.
+  test(
+    'saving again after a lost response does not add a duplicate',
     async ({ page }) => {
       await signIn(page);
       const title = uniqueTitle('Lost-response annotation');
-      let dropped = 0;
-      await page.route('**/graphql', async route => {
-        if (dropped > 0 || graphqlOperation(route.request()) !== 'CreateAnnotation') {
-          await route.fallback();
-          return;
-        }
-        dropped += 1;
-        await route.fetch(); // the backend commits it
-        await route.abort('connectionreset');
-      });
+      try {
+        let dropped = 0;
+        // The id the backend returned for the first create, whose response the page never sees.
+        let firstCreatedId: unknown;
+        await page.route('**/graphql', async route => {
+          if (dropped > 0 || graphqlOperation(route.request()) !== 'CreateAnnotation') {
+            await route.fallback();
+            return;
+          }
+          dropped += 1;
+          const response = await route.fetch(); // the backend commits it
+          const body = await response.json().catch(() => null);
+          firstCreatedId = body?.data?.createAnnotation?.id;
+          await route.abort('connectionreset');
+        });
 
-      const dialog = await fillAndSave(page, title);
-      await expect(dialog.getByRole('alert')).toBeVisible();
-      await dialog.getByRole('button', { name: 'Save' }).click();
-      await expect(dialog).toBeHidden();
+        const dialog = await fillAndSave(page, title);
+        await expect(dialog.getByRole('alert')).toBeVisible();
+        // Otherwise the retry would store the only copy and the count below would prove nothing.
+        expect(firstCreatedId, 'the first create was stored before its response was lost').toEqual(
+          expect.any(String)
+        );
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
 
-      // Clean up every copy before failing on the count.
-      const stored = await deleteAllTitled(page, title);
-      expect(stored).toBe(1);
+        // Clean up every copy before failing on the count.
+        const stored = await deleteAllTitled(page, title);
+        expect(stored).toBe(1);
+      } finally {
+        // erin's annotation must not outlive a failure part way through.
+        await cleanUp(page, title);
+      }
     }
   );
 
