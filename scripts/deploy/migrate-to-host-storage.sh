@@ -70,9 +70,23 @@ check_docker_daemon
 # recreate-kind-cluster.sh has its own --dry-run, so it runs (and checks the
 # kind config and host mounts) even in a dry run; common_flags passes it on.
 recreate_cluster() {
+    # A new cluster holds none of the restored data, so forget any earlier
+    # restore before the old cluster can be deleted; otherwise a resumed run
+    # would skip the restore into the new, empty databases. Cleared first,
+    # not on success, so a recreate that fails part-way also forgets it.
+    # (restore-kind-databases.sh leaves a database alone when its counts
+    # already match the backup, so restoring into the old cluster again is
+    # harmless.)
+    forget_restore
     echo "+ scripts/deploy/recreate-kind-cluster.sh $*"
     "${PROJECT_ROOT}/scripts/deploy/recreate-kind-cluster.sh" "$@" 2>&1 | sed 's/^/    /'
     return "${PIPESTATUS[0]}"
+}
+
+forget_restore() {
+    if [ "${DRY_RUN}" != "true" ] && [ -f "${STATE_FILE}" ]; then
+        sed -i '/^RESTORED=/d' "${STATE_FILE}"
+    fi
 }
 
 remember_backup() {
