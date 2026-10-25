@@ -57,8 +57,6 @@ spec:
               value: "econ_graph"
             - name: BACKUP_DIR
               value: "/backups"
-            - name: BACKUP_RETENTION_DAYS
-              value: "14"
             volumeMounts:
             - name: scripts
               mountPath: /scripts

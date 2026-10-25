@@ -2,7 +2,7 @@
 
 Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Curated tables:
 `backend/crates/econ-graph-crawler/data/bea_tables.csv`. Fixtures: `tests/fixtures/bea/`
-(`GetData` for every curated NIPA table and frequency, SAGDP2N line codes, areas and line 1,
+(`GetData` for every curated NIPA table and frequency, SAGDP2 line codes, areas and line 1,
 and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
 any request.
 
@@ -10,7 +10,7 @@ any request.
 
 - **Ids** are BEA's own codes: `bea_nipa/{table}.{line_number}.{frequency}` (for example
   `bea_nipa/T10105.1.Q`, GDP quarterly) and `bea_regional/{table}.{line_code}.{geo_fips}`
-  (for example `bea_regional/SAGDP2N.1.06000`, California GDP).
+  (for example `bea_regional/SAGDP2.1.06000`, California GDP).
 - **Discovery**: for each NIPA table and frequency in `bea_tables.csv`, `GetData` for the last
   three years lists its lines (a table's line list isn't a `GetParameterValuesFiltered`
   parameter). For Regional, `GetParameterValuesFiltered` lists the table's `LineCode`s and
@@ -22,9 +22,13 @@ any request.
   lists which tables and frequencies we crawl. Titles are kept in an in-process cache the worker
   fills from this call (so `discover`/`fetch` stay DB-free); until a worker process has run it at
   least once, every table's title is unknown. `fetch` on an unknown title still fetches real
-  points but omits metadata so a previously stored good title isn't overwritten; `discover`
-  fails outright on an unknown title, rather than persisting the bare table name as every one of
-  that table's series' titles.
+  points but omits metadata so a previously stored good title isn't overwritten. `discover`
+  never persists the bare table name as every one of that table's series' titles: after a
+  successful title refresh, a curated table missing from BEA's `TableName` list (renamed or
+  dropped upstream) is skipped with a warning naming it, and the other tables are still
+  discovered. The worker counts it in `crawler_curated_missing{source="BEA"}` and retires
+  nothing for that discovery, so the skipped table's stored series are kept. If the refresh
+  failed or returned nothing, an unknown title fails discovery as `Transient` so it retries.
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the
   requested areas comma-separated, batched up to 64 series. Always the whole history (`Year`
   `X` or `ALL`), since revisions reach back years. Values are scaled by `UNIT_MULT`;
@@ -56,7 +60,7 @@ NIPA data (`nipa_t10105_q.json`, shaped from public docs; values illustrative):
 }}}
 ```
 
-Regional data (`DataSetName=Regional&TableName=SAGDP2N&LineCode=1&GeoFips=STATE`) returns
+Regional data (`DataSetName=Regional&TableName=SAGDP2&LineCode=1&GeoFips=STATE`) returns
 rows with `GeoFips`, `GeoName`, `TimePeriod`, `DataValue`, `CL_UNIT`, `UNIT_MULT` and
 `NoteRef` (from public docs).
 

@@ -3526,6 +3526,118 @@ async fn unchanged_discovery_writes_and_retires_nothing() {
         .unwrap();
 }
 
+/// A complete discovery whose adapter reports curated entries it had to skip.
+struct CuratedAdapter {
+    catalog: std::sync::Mutex<Vec<&'static str>>,
+    missing: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl SourceAdapter for CuratedAdapter {
+    fn id(&self) -> SourceId {
+        SRC
+    }
+
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        Some("t5_curated_")
+    }
+
+    fn curated_missing(&self) -> Vec<String> {
+        self.missing.lock().unwrap().clone()
+    }
+
+    fn datasets(&self) -> &[&str] {
+        &[DATASET, FLAT]
+    }
+
+    async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        Ok(self
+            .catalog
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|id| DiscoveredSeries {
+                dataset: flat(),
+                data_url: None,
+                external_id: (*id).to_string(),
+                title: format!("Series {id}"),
+                description: None,
+                units: None,
+                frequency: Some("Monthly".into()),
+            })
+            .collect())
+    }
+
+    async fn fetch_series(
+        &self,
+        _: &CrawlCtx,
+        _: &str,
+        _: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        Err(CrawlError::Permanent("not used".into()))
+    }
+}
+
+/// A discovery that skipped curated entries the source no longer lists retires nothing, so the
+/// skipped entry's stored series stay active; a later discovery with nothing missing retires
+/// as usual.
+#[tokio::test]
+async fn discovery_with_curated_entries_missing_retires_nothing() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(CuratedAdapter {
+        catalog: std::sync::Mutex::new(vec!["t5_curated_a", "t5_curated_b"]),
+        missing: std::sync::Mutex::new(Vec::new()),
+    });
+    let mut r = AdapterRegistry::new();
+    r.register(adapter.clone());
+    let w = Worker::new(ctx(&db.pool), r, config("t5-worker")).with_datasets(test_catalog());
+    let discover = || async {
+        enqueue(
+            &db.pool,
+            SRC.as_str(),
+            "catalog",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
+        match w.run_once().await {
+            Some(JobOutcome::Completed(stats)) => stats,
+            other => panic!("discovery did not complete: {other:?}"),
+        }
+    };
+    let active = |id: &'static str| {
+        let pool = db.pool.clone();
+        async move {
+            let mut conn = pool.get().await.unwrap();
+            series_metadata::table
+                .filter(series_metadata::external_id.eq(id))
+                .select(series_metadata::is_active)
+                .first::<bool>(&mut conn)
+                .await
+                .unwrap()
+        }
+    };
+
+    assert_eq!(discover().await.metadata_written, 2);
+    assert!(active("t5_curated_a").await && active("t5_curated_b").await);
+
+    // b's curated entry is gone upstream: skipped, so b is not listed, but it stays active.
+    *adapter.catalog.lock().unwrap() = vec!["t5_curated_a"];
+    *adapter.missing.lock().unwrap() = vec!["t5_curated_b".to_string()];
+    discover().await;
+    assert!(active("t5_curated_a").await && active("t5_curated_b").await);
+
+    // Nothing missing: a complete discovery retires what it no longer lists.
+    adapter.missing.lock().unwrap().clear();
+    discover().await;
+    assert!(active("t5_curated_a").await);
+    assert!(!active("t5_curated_b").await);
+}
+
 #[tokio::test]
 async fn unchanged_fetch_marks_the_series_crawled_and_keeps_its_points() {
     let Some(db) = db().await else { return };

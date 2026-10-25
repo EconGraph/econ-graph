@@ -1,0 +1,49 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETPARAMETERVALUESFILTERED"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "REGIONAL"},
+    {"ParameterName": "TARGETPARAMETER", "ParameterValue": "LINECODE"},
+    {"ParameterName": "TABLENAME", "ParameterValue": "SAGDP2"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "ParamValue": [
+    {"Key": "1", "Desc": "[SAGDP2] All industry total"},
+    {"Key": "2", "Desc": "[SAGDP2] Private industries"},
+    {"Key": "3", "Desc": "[SAGDP2] Agriculture, forestry, fishing and hunting"},
+    {"Key": "6", "Desc": "[SAGDP2] Mining, quarrying, and oil and gas extraction"},
+    {"Key": "10", "Desc": "[SAGDP2] Utilities"},
+    {"Key": "11", "Desc": "[SAGDP2] Construction"},
+    {"Key": "12", "Desc": "[SAGDP2] Manufacturing"},
+    {"Key": "13", "Desc": "[SAGDP2] Durable goods manufacturing"},
+    {"Key": "25", "Desc": "[SAGDP2] Nondurable goods manufacturing"},
+    {"Key": "34", "Desc": "[SAGDP2] Wholesale trade"},
+    {"Key": "35", "Desc": "[SAGDP2] Retail trade"},
+    {"Key": "36", "Desc": "[SAGDP2] Transportation and warehousing"},
+    {"Key": "45", "Desc": "[SAGDP2] Information"},
+    {"Key": "50", "Desc": "[SAGDP2] Finance, insurance, real estate, rental, and leasing"},
+    {"Key": "51", "Desc": "[SAGDP2] Finance and insurance"},
+    {"Key": "56", "Desc": "[SAGDP2] Real estate and rental and leasing"},
+    {"Key": "59", "Desc": "[SAGDP2] Professional and business services"},
+    {"Key": "60", "Desc": "[SAGDP2] Professional, scientific, and technical services"},
+    {"Key": "64", "Desc": "[SAGDP2] Management of companies and enterprises"},
+    {"Key": "65", "Desc": "[SAGDP2] Administrative and support and waste management and remediation services"},
+    {"Key": "68", "Desc": "[SAGDP2] Educational services, health care, and social assistance"},
+    {"Key": "69", "Desc": "[SAGDP2] Educational services"},
+    {"Key": "70", "Desc": "[SAGDP2] Health care and social assistance"},
+    {"Key": "75", "Desc": "[SAGDP2] Arts, entertainment, recreation, accommodation, and food services"},
+    {"Key": "76", "Desc": "[SAGDP2] Arts, entertainment, and recreation"},
+    {"Key": "79", "Desc": "[SAGDP2] Accommodation and food services"},
+    {"Key": "82", "Desc": "[SAGDP2] Other services (except government and government enterprises)"},
+    {"Key": "83", "Desc": "[SAGDP2] Government and government enterprises"},
+    {"Key": "84", "Desc": "[SAGDP2] Federal civilian"},
+    {"Key": "85", "Desc": "[SAGDP2] Military"},
+    {"Key": "86", "Desc": "[SAGDP2] State and local"}
+   ]
+  }
+ }
+}

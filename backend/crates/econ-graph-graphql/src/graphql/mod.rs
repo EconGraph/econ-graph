@@ -4,10 +4,12 @@
 //! This module provides the GraphQL API layer that bridges the core domain
 //! models with the external API consumers.
 
+pub(crate) mod audit;
 pub mod context;
 pub mod cross_section;
 pub mod dataloaders;
 pub mod datasets;
+pub mod errors;
 pub mod global_analysis;
 pub mod mutation;
 pub mod query;
@@ -21,6 +23,8 @@ pub(crate) static TEST_DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::con
 mod annotation_visibility_tests;
 #[cfg(test)]
 mod authorization_tests;
+#[cfg(test)]
+mod error_sanitizing_db_tests;
 #[cfg(test)]
 mod latest_observation_tests;
 #[cfg(test)]

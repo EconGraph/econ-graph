@@ -104,9 +104,9 @@ impl<'a> CodeSource<'a> {
     fn of(component: &'a DatasetComponent) -> Result<Self> {
         match (&component.codes, &component.codelist) {
             (_, Some(name)) if name == COUNTRIES_CODELIST => {
-                let areas = reference::areas().map_err(|e| {
-                    async_graphql::Error::new(format!("code list {name:?} unavailable: {e}"))
-                })?;
+                // The reference error stays the source, so it is logged once by
+                // `of_or_uncoded` and hidden by `SanitizeErrors` if it ever reaches a client.
+                let areas = reference::areas().map_err(async_graphql::Error::new_with_source)?;
                 Ok(Self::Areas(areas, component))
             }
             // An unknown code list with codes of its own still shows those labels.
