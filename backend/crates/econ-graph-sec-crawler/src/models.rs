@@ -330,7 +330,7 @@ impl Default for CrawlConfig {
             form_types: None,
             exclude_amended: false,
             exclude_restated: false,
-            user_agent: "EconGraph jmalicki@econgraph.com".to_string(),
+            user_agent: "EconGraph support@econgraph.com".to_string(),
             max_concurrent_requests: Some(3),
         }
     }

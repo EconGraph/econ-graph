@@ -184,9 +184,9 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 ### **💼 For Business Users**
 
 #### **Live Demo Access**
-- **🌐 Web Demo**: Access the live demo at [demo.econ-graph.com](https://demo.econ-graph.com)
+- **🌐 Web**: [econgraph.com](https://econgraph.com)
 - **📱 Mobile Demo**: Responsive design works on all devices
-- **🔐 Enterprise Trial**: Contact sales for extended trial access
+- **✉️ Contact**: support@econgraph.com
 
 #### **Quick Evaluation**
 1. **Explore Features**: Browse economic data and test visualization tools
@@ -321,9 +321,8 @@ newgrp microk8s
 ```
 
 **Access URLs:**
-- Frontend: https://www.econ-graph.com
-- Backend: https://www.econ-graph.com/api
-- Admin: https://www.econ-graph.com/admin
+- Frontend: http://localhost, and https://econgraph.com when deployed with `PUBLIC_HOST=econgraph.com`
+- Backend: the same host, under `/api`
 - Grafana: not on the public ingress; `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
 
 #### **Kind (Alternative for Docker-based Development)**
@@ -365,7 +364,7 @@ This project is licensed under the **Microsoft Reference Source License (MS-RSL)
 - ❌ **Copying**: You may not copy the source code except for viewing purposes
 
 ### **Commercial Licensing**
-For commercial use, enterprise licensing, or any questions about usage rights, please contact: **licensing@econ-graph.com**
+For commercial use, enterprise licensing, or any questions about usage rights, please contact: **support@econgraph.com**
 
 ---
 
