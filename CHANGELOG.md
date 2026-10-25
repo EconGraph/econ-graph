@@ -58,6 +58,14 @@ All notable changes to EconGraph are documented here. The format follows
   backends wait for.
 - The backend pod no longer gets `DATABASE_URL`.
 
+### Fixed
+
+- `searchSeries`'s `totalCount` is the number of series that match the query and filters, the
+  same on every page, instead of the length of the page returned (ECO-508).
+- A `source` on `searchSeries`, or a `filter.sourceId` on `seriesList`, that isn't a UUID
+  (including an empty string) fails with a `BAD_USER_INPUT` error naming the argument, instead
+  of being ignored and returning every source's series (ECO-509).
+
 ## [4.0.0] - 2026-10-08
 
 Train 1: broad real data behind pages that work. See
