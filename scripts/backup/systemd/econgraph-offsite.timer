@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily econ-graph off-site backup
+
+[Timer]
+# After the nightly dump.
+OnCalendar=*-*-* 10:45:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

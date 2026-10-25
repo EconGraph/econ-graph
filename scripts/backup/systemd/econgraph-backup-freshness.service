@@ -1,0 +1,7 @@
+[Unit]
+Description=econ-graph backup freshness check (snapshots, dumps, restore drill)
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/lib/econgraph-backup/check-freshness.sh --textfile %h/.local/state/econgraph/backup-freshness.prom
