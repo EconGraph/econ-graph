@@ -208,9 +208,13 @@ It works on the kind cluster through its own kubectl (`scripts/deploy/lib/kind-e
 reads from the terminal only, refuses piped input, refuses a cluster that is not marked
 production before it asks, and then starts cloudflared through `apply_cloudflared`, for
 the public host the cluster serves. `scripts/deploy/create-secrets.sh --prompt-tunnel-token`
-writes the token only, with `${KUBECTL:-kubectl}` on its current context, so give it
-`KUBECTL` for any cluster other than that kubectl's own (on a host where `kubectl` is the
-microk8s snap wrapper, that is another cluster). Don't put the token on a command line
+writes the token only, with `${KUBECTL:-kubectl}` on its current context. Run by hand
+with neither `KUBECTL` nor `KUBECONFIG` set, it uses the kind cluster's own kubectl and
+kubeconfig when copies are kept at `~/.cache/econgraph/bin/kubectl` and
+`~/.cache/econgraph/kubeconfig-econ-graph`, and says so; plain `kubectl` may be another
+cluster's (the microk8s snap wrapper ignores `~/.kube/config`). An exported `KUBECONFIG`
+(some runbooks export one) turns that off, which it says, and with only one of the two
+files it warns which is missing and uses plain `kubectl`. Don't put the token on a command line
 (`CLOUDFLARE_TUNNEL_TOKEN=...`), where shell history keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0
 replicas and says so. If a cluster that is not marked already holds the Secret,
 `create-secrets.sh` keeps it and warns; delete it there with
@@ -265,7 +269,11 @@ A cluster is production while it carries the marker written by:
 
 Run bare, it works on the kind cluster `econ-graph` through that cluster's own kubectl and
 kubeconfig (`scripts/deploy/lib/kind-env.sh`), context `kind-econ-graph`. For another
-cluster, give its kubectl and context: `KUBECTL=/path/to/kubectl` (its current context).
+cluster, give its kubectl: `KUBECTL=/path/to/kubectl` (its current context). An exported
+`KUBECONFIG` other than the kind cluster's (some runbooks export one) also selects plain
+`kubectl` with it, and the script says so; unset it to reach the kind cluster. Every run,
+dry runs included, shows the kubectl, `KUBECONFIG`, context, API server, nodes and
+kube-system UID it reached.
 
 The marker is the ConfigMap `kube-system/econgraph-cluster-role`, with `role: production`
 and the UID of the cluster's `kube-system` namespace when it was marked. It counts only

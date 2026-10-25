@@ -101,14 +101,17 @@
 # --dry-run runs every check against the cluster and prints, per Secret, the
 # keys it would write and how each value was resolved; it writes nothing.
 #
-# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl).
+# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
+# and its KUBECONFIG, on that kubectl's current context. Run by hand with none
+# of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
+# kubeconfig when copies are kept in ~/.cache/econgraph, and says so
+# (cluster_role_default_kubectl in lib/cluster-role.sh).
 
 set -euo pipefail
 # Never trace: the values handled below are credentials.
 set +x
 
 NAMESPACE="${NAMESPACE:-econ-graph}"
-KUBECTL="${KUBECTL:-kubectl}"
 
 PROMPT_TUNNEL_TOKEN=false
 DRY_RUN=false
@@ -156,6 +159,8 @@ log() {
 # context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+cluster_role_default_kubectl
+KUBECTL="${KUBECTL:-kubectl}"
 
 # A CLUSTER_ROLE_CONTEXT from the environment is followed only while it is the
 # current context of $KUBECTL, as when deploy.sh, restart-k8s-rollout.sh or
