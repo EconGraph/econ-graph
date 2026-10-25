@@ -108,7 +108,9 @@ fetch() {
     : >"$tmp/$name.h"
     if ! code="$("${CURL[@]}" -o "$tmp/$name" -D "$tmp/$name.h" -w '%{http_code}' "$@" 2>"$tmp/$name.err")"; then
         sed 's/^/        /' "$tmp/$name.err" >&2
-        code=000
+        # curl still prints the status when the transfer fails after the
+        # response line arrived (a timeout or reset mid-body); 000 means none did.
+        [ -n "$code" ] || code=000
     fi
     printf '%s' "$code"
 }
