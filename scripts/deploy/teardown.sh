@@ -11,7 +11,8 @@
 #   1. pg_dump the data, app and Keycloak databases to
 #      ~/econgraph-backups/<UTC timestamp>/ (backup-kind-databases.sh). If
 #      postgresql-0 is not running no backup can be taken, and the script
-#      refuses unless --no-backup is given.
+#      refuses unless --no-backup is given. The backup comes before the
+#      confirmations below, so a run you abort still leaves it.
 #   2. Set the PostgreSQL and backup PVs to Retain (protect-postgres-pv.sh).
 #   3. Delete the app plane, after you type the namespace name (--yes answers
 #      this one): the cloudflared tunnel connector, the routes (ingresses),
@@ -61,7 +62,7 @@ for arg in "$@"; do
         --no-backup) NO_BACKUP="true" ;;
         --include-data-plane) INCLUDE_DATA_PLANE="true" ;;
         --delete-cluster) DELETE_CLUSTER="true" ;;
-        -h|--help) sed -n '3,46p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,47p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
@@ -99,7 +100,7 @@ typed_confirm() {
         echo "(dry run: would ask you to type '${expected}' here)"
         return 0
     fi
-    read -r -p "${prompt} Type '${expected}' to continue: " answer
+    read -r -p "${prompt} Type '${expected}' to continue: " answer || die "aborted; nothing was deleted"
     [ "${answer}" = "${expected}" ] || die "aborted; nothing was deleted"
 }
 
@@ -139,7 +140,7 @@ if [ "${ASSUME_YES}" = "true" ]; then
 elif [ "${DRY_RUN}" = "true" ]; then
     echo "(dry run: would ask you to type '${NAMESPACE}' here)"
 else
-    read -r -p "Type the namespace name (${NAMESPACE}) to delete the app plane: " answer
+    read -r -p "Type the namespace name (${NAMESPACE}) to delete the app plane: " answer || die "aborted; nothing was deleted"
     [ "${answer}" = "${NAMESPACE}" ] || die "aborted; nothing was deleted"
 fi
 

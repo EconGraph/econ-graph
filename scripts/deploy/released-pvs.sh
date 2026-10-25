@@ -87,7 +87,13 @@ echo "Its data stays where it is: ${path}"
 if [ "${DRY_RUN}" = "true" ]; then
     echo "(dry run: would ask you to type '${name}' here)"
 else
-    read -r -p "Type the PV name (${name}) to delete it: " answer
+    read -r -p "Type the PV name (${name}) to delete it: " answer || die "aborted; nothing was deleted"
     [ "${answer}" = "${name}" ] || die "aborted; nothing was deleted"
+    # Look again: the PV may have been re-armed, re-labelled or bound while
+    # the prompt waited.
+    now="$(kubectl get pv "${name}" -o go-template="{{.status.phase}} {{.spec.persistentVolumeReclaimPolicy}} {{with .metadata.labels}}{{or (index . \"econgraph.io/protected\") \"-\"}}{{else}}-{{end}}")" ||
+        die "could not read PV ${name} again; nothing was deleted"
+    [ "${now}" = "Released Retain ${protected}" ] ||
+        die "PV ${name} changed while waiting (now: ${now}); nothing was deleted"
 fi
 run kubectl delete pv "${name}"

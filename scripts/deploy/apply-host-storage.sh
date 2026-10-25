@@ -79,8 +79,15 @@ done
 # from inside the node.
 # refuse_without_secret VERSION_FILE HOST_DIR SECRET
 refuse_without_secret() {
-    if docker exec "${KIND_STORAGE_NODE}" test -e "$1" &&
-        [ -z "$(k get secret "$3" -o name --ignore-not-found)" ]; then
+    local rc=0
+    docker exec "${KIND_STORAGE_NODE}" test -e "$1" || rc=$?
+    # test exits 1 when the file is absent; anything else is a failed check.
+    case "$rc" in
+        0) ;;
+        1) return 0 ;;
+        *) die "could not check ${KIND_STORAGE_NODE}:$1 (exit $rc); nothing was applied" ;;
+    esac
+    if [ -z "$(k get secret "$3" -o name --ignore-not-found)" ]; then
         die "$2 already holds a database, but Secret $3 is missing.
   Restore the Secrets saved with the last backup first (secrets/ in
   ${BACKUP_ROOT}/<timestamp>/; restore-kind-databases.sh does this)."

@@ -44,6 +44,11 @@ if [ -n "${SCRATCH_STORAGE}" ]; then
     HOST_DATA_PLANE="${SCRATCH_STORAGE}/data-plane"
     HOST_APP_PROD="${SCRATCH_STORAGE}/app-prod"
 else
+    # Only the production cluster may use the production host directories.
+    if [ "${KIND_CLUSTER}" != "econ-graph" ]; then
+        echo "error: KIND_CLUSTER=${KIND_CLUSTER} needs ECONGRAPH_SCRATCH_STORAGE; /srv/econgraph belongs to econ-graph" >&2
+        exit 1
+    fi
     HOST_DATA_PLANE="${NODE_DATA_PLANE}"
     HOST_APP_PROD="${NODE_APP_PROD}"
 fi
@@ -318,14 +323,23 @@ backup_databases() {
     local dir="$1" name
     [ ! -e "$dir" ] || die "$dir already exists; refusing to overwrite a backup"
     log "Backing up to $dir"
+    pod_running postgresql-0 || die "postgresql-0 is not running; cannot take a backup"
     if [ "${DRY_RUN}" = "true" ]; then
+        # The same read-only checks as a real run, so a dry run fails where it would.
         echo "+ pg_dump -Fc econ_graph (postgresql-0) > $dir/econ_graph.dump"
-        echo "+ pg_dump -Fc econ_graph_app (app-postgres-0) > $dir/econ_graph_app.dump"
-        echo "+ pg_dump -Fc keycloak (keycloak-postgres-0) > $dir/keycloak.dump"
+        if pod_running app-postgres-0; then
+            echo "+ pg_dump -Fc econ_graph_app (app-postgres-0) > $dir/econ_graph_app.dump"
+        else
+            require_not_deployed app-postgres "the app database" ALLOW_MISSING_APP_DUMP
+        fi
+        if pod_running keycloak-postgres-0; then
+            echo "+ pg_dump -Fc keycloak (keycloak-postgres-0) > $dir/keycloak.dump"
+        else
+            require_not_deployed keycloak-postgres "Keycloak's database" ALLOW_MISSING_KEYCLOAK_DUMP
+        fi
         echo "+ save row counts to $dir/counts.env and Secrets to $dir/secrets/"
         return 0
     fi
-    pod_running postgresql-0 || die "postgresql-0 is not running; cannot take a backup"
     (umask 077 && mkdir -p "$dir")
 
     dump_one postgresql-0 postgresql postgres econ_graph "$dir/econ_graph.dump"

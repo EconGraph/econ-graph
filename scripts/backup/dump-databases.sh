@@ -144,6 +144,11 @@ for entry in ${BACKUP_DATABASES}; do
         if [[ "${counts}" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
             echo "econ_graph_app.users=${BASH_REMATCH[1]}" >>"${WORK}/MANIFEST"
             echo "econ_graph_app.chart_annotations=${BASH_REMATCH[2]}" >>"${WORK}/MANIFEST"
+        elif [[ "${counts}" == "none" ]]; then
+            echo "econ_graph_app.counts=no tables" >>"${WORK}/MANIFEST"
+        else
+            log "WARNING: could not count rows in ${db}; the restore drill will not compare them"
+            echo "econ_graph_app.counts=unavailable" >>"${WORK}/MANIFEST"
         fi
     fi
     log "${db}: OK (${size} bytes, ${entries} TOC entries)"
