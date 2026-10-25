@@ -226,10 +226,14 @@ jobs:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the

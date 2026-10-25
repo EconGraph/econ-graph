@@ -258,7 +258,8 @@ esac
 # 8. Not served on the public host. An unrouted path falls through to the app,
 # which answers with its own HTML (id="root"); anything else that answers 2xx,
 # or any body that looks like Keycloak's admin or master realm, metrics or a
-# GraphQL playground, fails.
+# GraphQL playground, fails. So does no response at all (000: timeout, reset):
+# that shows nothing about whether the path is blocked.
 for path in \
     /idp/admin/ \
     /idp/admin/master/console/ \
@@ -278,7 +279,9 @@ for path in \
     /admin \
     /%2e%2e/playground; do
     status="$(fetch neg --path-as-is "${BASE}${path}")"
-    if grep -qi 'realms/master\|"realm" *: *"master"\|^# HELP\|^# TYPE\|kc-form\|keycloak\|graphiql\|graphql-playground\|playground' "$tmp/neg"; then
+    if [ "$status" = 000 ]; then
+        fail "${path} got no HTTP response, so whether it is blocked is unknown"
+    elif grep -qi 'realms/master\|"realm" *: *"master"\|^# HELP\|^# TYPE\|kc-form\|keycloak\|graphiql\|graphql-playground\|playground' "$tmp/neg"; then
         fail "${path} is served on the public host (${status})"
     elif [[ "$status" == 2* ]] && ! grep -q 'id="root"' "$tmp/neg"; then
         fail "${path} answered ${status} with something other than the app"
