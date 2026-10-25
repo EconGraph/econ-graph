@@ -253,7 +253,8 @@ impl Cli {
             )
             .await;
         }
-        let url = match self.database_url {
+        // A blank value (an empty `DATA_DATABASE_URL`) counts as unset, as in `data_database_url`.
+        let url = match self.database_url.filter(|u| !u.trim().is_empty()) {
             Some(url) => url,
             None => econ_graph_core::config::data_database_url()
                 .map_err(|e| anyhow!("{e} (or pass --database-url)"))?,

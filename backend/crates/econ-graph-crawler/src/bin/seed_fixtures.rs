@@ -144,7 +144,8 @@ async fn run(args: Args) -> anyhow::Result<()> {
         .parent()
         .ok_or_else(|| anyhow!("manifest path has no directory"))?;
 
-    let database_url = match args.database_url {
+    // A blank value (an empty `DATA_DATABASE_URL`) counts as unset, as in `data_database_url`.
+    let database_url = match args.database_url.filter(|u| !u.trim().is_empty()) {
         Some(url) => url,
         None => econ_graph_core::config::data_database_url()
             .map_err(|e| anyhow!("{e} (or pass --database-url)"))?,
