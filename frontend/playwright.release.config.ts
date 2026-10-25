@@ -46,7 +46,8 @@ if (DEPLOYED && !SKIP_AUTH) checkDeployedAuthEnv();
 
 const webServer: PlaywrightTestConfig['webServer'] = [
   {
-    // Built by scripts/release-e2e.sh. It runs migrations on start; the seed has already run.
+    // Built by scripts/release-e2e.sh. It applies the app migrations on start; the seed has
+    // already applied the data migrations and loaded the fixtures.
     command: backendBin,
     url: `${backendUrl}/health`,
     reuseExistingServer: !process.env.CI,
