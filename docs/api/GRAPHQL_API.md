@@ -233,4 +233,7 @@ query GetMultipleSeries($sourceId: ID!) {
 
 ## Migration from REST
 
-The GraphQL API provides all functionality previously available through REST endpoints with improved efficiency and flexibility. Legacy REST endpoints are maintained for backward compatibility during the transition period.
+Economic series queries use `POST /graphql`. The current server does not expose
+legacy `/api/v1/series` or `/auth/login` endpoints; authentication uses
+identity-provider access tokens. See the [backend API documentation](../../backend/README.md#api-documentation)
+for the server's health, metrics, and optional playground routes.
