@@ -101,7 +101,23 @@ if ! kind_cluster_exists; then
     exit 1
 fi
 ensure_kind_kubectl
-kubectl config use-context "kind-${KIND_CLUSTER}"
+
+# One kubectl, one cluster for the whole deploy: the kind kubectl that
+# ensure_kind_kubectl put first on PATH (exported as KUBECTL, so a KUBECTL from
+# the environment cannot point elsewhere), switched to kind-econ-graph and
+# pinned (replacing any CLUSTER_ROLE_CONTEXT from the environment). Every
+# kubectl call below, including kind-env.sh's, then goes through kc, the same
+# binary and context the production check uses (scripts/deploy/lib/cluster-role.sh).
+# Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
+# public routes and stop its tunnel connector.
+export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
+    echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
+    exit 1
+fi
+kubectl() { kc "$@"; }
 
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves

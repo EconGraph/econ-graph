@@ -165,3 +165,7 @@ log "Kind cluster recreated"
 echo "  Frontend: http://localhost:3000   Backend: http://localhost:8080"
 echo "  HTTP: http://localhost:80          HTTPS: https://localhost:443"
 echo "  Next: scripts/deploy/load-kind-images.sh, restore-kind-databases.sh, deploy.sh"
+# The new cluster has a new kube-system UID, so an earlier production marker no
+# longer counts (scripts/deploy/lib/cluster-role.sh).
+echo "  If this is the production cluster (the one serving econgraph.com), mark it again"
+echo "  before deploying with PUBLIC_HOST: scripts/deploy/mark-production-cluster.sh"
