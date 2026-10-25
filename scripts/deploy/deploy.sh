@@ -304,8 +304,10 @@ kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-ca
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
-# prometheus-rules-crawler.yaml is a plain ConfigMap consumed via prometheus-config.yaml's
-# rule_files, not a PrometheusRule CRD, so it applies like any other manifest here.
+# The prometheus-rules-*.yaml files are plain ConfigMaps consumed via prometheus-config.yaml's
+# rule_files, not PrometheusRule CRDs, so they apply like any other manifest here. The glob
+# applies them after prometheus-deployment.yaml; the pod waits for its projected rules
+# volume until they exist.
 #
 # letsencrypt-cloudflare-dns01.yaml is applied separately below, with a retry: the
 # cert-manager webhook can report "available" slightly before its CA bundle is
