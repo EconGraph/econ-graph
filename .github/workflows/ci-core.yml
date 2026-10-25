@@ -437,6 +437,9 @@ jobs:
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh
 
+    - name: Check the backup and restore scripts against fake btrfs (no root)
+      run: scripts/host/test-backup-scripts.sh
+
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest

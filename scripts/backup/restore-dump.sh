@@ -35,8 +35,10 @@ for a in "$@"; do
 done
 [[ ${#args[@]} -eq 2 ]] || die "usage: $(basename "$0") [--dry-run] [--yes] <database> <dump file>"
 db="${args[0]}"
-file="${args[1]}"
-[[ -s "${file}" ]] || die "dump not found or empty: ${file}"
+# Resolved once: the archive checked below is the one restored, even if a
+# symlink on the way is changed in between.
+file="$(readlink -e -- "${args[1]}")" || die "dump not found: ${args[1]}"
+[[ -f "${file}" && -s "${file}" ]] || die "dump not found or empty: ${file}"
 
 pod="" user=""
 for entry in ${BACKUP_DATABASES}; do
@@ -45,8 +47,8 @@ for entry in ${BACKUP_DATABASES}; do
 done
 [[ -n "${pod}" ]] || die "unknown database ${db} (known: ${BACKUP_DATABASES})"
 
-read -r -a RESTORE <<<"$(pg_restore_cmd "$(dirname "$(readlink -f "${file}")")")"
-toc="$("${RESTORE[@]}" --list "$(readlink -f "${file}")")" || die "${file} is not a readable pg_dump archive"
+read -r -a RESTORE <<<"$(pg_restore_cmd "$(dirname "${file}")")"
+toc="$("${RESTORE[@]}" --list "${file}")" || die "${file} is not a readable pg_dump archive"
 # The archive must be a dump of the database it is restored into: --clean
 # drops same-named objects, so keycloak.dump into econ_graph would wreck it.
 # Compared as a string, not a pattern.
@@ -105,6 +107,10 @@ if (( dry_run )); then
 fi
 
 echo "About to OVERWRITE database ${db} in pod ${pod} (${K8S_NAMESPACE}) from ${file}."
+# A pod that is starting or restarting would fail the listing below and the
+# restore part-way through its setup; wait for it, or stop.
+kube wait --for=condition=Ready "pod/${pod}" --timeout=120s >/dev/null \
+    || die "pod ${pod} is not Ready (kubectl wait timed out or failed); nothing restored"
 report_extra_relations
 if (( ! yes )); then
     # Typed on a terminal only: a piped answer must not start a --clean restore.
