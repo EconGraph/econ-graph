@@ -211,7 +211,13 @@ export default function MonitoringPage() {
       {/* System Status Overview */}
       {systemStatus && (
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Card>
               <CardContent>
                 <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -228,7 +234,13 @@ export default function MonitoringPage() {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -238,7 +250,13 @@ export default function MonitoringPage() {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -250,7 +268,13 @@ export default function MonitoringPage() {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid
+            size={{
+              xs: 12,
+              sm: 6,
+              md: 3,
+            }}
+          >
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -280,7 +304,14 @@ export default function MonitoringPage() {
             aria-label="List of system services"
           >
             {Object.entries(systemStatus.services).map(([service, status]) => (
-              <Grid item xs={6} sm={3} key={service} role="listitem">
+              <Grid
+                key={service}
+                role="listitem"
+                size={{
+                  xs: 6,
+                  sm: 3,
+                }}
+              >
                 <Box
                   sx={{ display: "flex", alignItems: "center" }}
                   aria-label={`${service} service status: ${status}`}
@@ -325,7 +356,14 @@ export default function MonitoringPage() {
           </Typography>
           <Grid container spacing={3}>
             {dashboards.map((dashboard) => (
-              <Grid item xs={12} md={6} lg={4} key={dashboard.id}>
+              <Grid
+                key={dashboard.id}
+                size={{
+                  xs: 12,
+                  md: 6,
+                  lg: 4,
+                }}
+              >
                 <Card
                   sx={{
                     height: "100%",
@@ -372,7 +410,7 @@ export default function MonitoringPage() {
                     </Typography>
 
                     <Grid container spacing={1} sx={{ mb: 2 }}>
-                      <Grid item xs={6}>
+                      <Grid size={6}>
                         <Typography
                           variant="caption"
                           sx={{
@@ -390,7 +428,7 @@ export default function MonitoringPage() {
                           {formatNumber(dashboard.metrics.totalSeries)}
                         </Typography>
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid size={6}>
                         <Typography
                           variant="caption"
                           sx={{
@@ -408,7 +446,7 @@ export default function MonitoringPage() {
                           {dashboard.metrics.activeCrawlers}
                         </Typography>
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid size={6}>
                         <Typography
                           variant="caption"
                           sx={{
@@ -426,7 +464,7 @@ export default function MonitoringPage() {
                           {formatNumber(dashboard.metrics.dataPoints)}
                         </Typography>
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid size={6}>
                         <Typography
                           variant="caption"
                           sx={{
@@ -490,7 +528,13 @@ export default function MonitoringPage() {
 
         <TabPanel value={tabValue} index={1}>
           <Grid container spacing={3}>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                sm: 6,
+                md: 3,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -514,7 +558,13 @@ export default function MonitoringPage() {
               </Card>
             </Grid>
 
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                sm: 6,
+                md: 3,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -538,7 +588,13 @@ export default function MonitoringPage() {
               </Card>
             </Grid>
 
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                sm: 6,
+                md: 3,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -562,7 +618,13 @@ export default function MonitoringPage() {
               </Card>
             </Grid>
 
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                sm: 6,
+                md: 3,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
@@ -611,7 +673,12 @@ export default function MonitoringPage() {
             Click the fullscreen icon to open in Grafana
           </Typography>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 4,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
@@ -647,7 +714,12 @@ export default function MonitoringPage() {
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 4,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
@@ -683,7 +755,12 @@ export default function MonitoringPage() {
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 4,
+              }}
+            >
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>

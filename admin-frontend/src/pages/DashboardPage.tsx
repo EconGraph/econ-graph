@@ -29,7 +29,12 @@ function DashboardPage() {
       </Alert>
 
       <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card>
             <CardHeader title="System Status" />
             <CardContent>
@@ -51,7 +56,12 @@ function DashboardPage() {
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card>
             <CardHeader title="Quick Actions" />
             <CardContent>
@@ -68,7 +78,7 @@ function DashboardPage() {
           </Card>
         </Grid>
 
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card>
             <CardHeader title="Admin Interface Status" />
             <CardContent>

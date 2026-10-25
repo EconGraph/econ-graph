@@ -352,7 +352,12 @@ const CrawlerConfig: React.FC = () => {
 
       <Grid container spacing={3}>
         {/* Global Configuration */}
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card>
             <CardContent>
               <Typography
@@ -366,7 +371,7 @@ const CrawlerConfig: React.FC = () => {
               </Typography>
 
               <Grid container spacing={2}>
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <FormControlLabel
                     control={
                       <Switch
@@ -380,7 +385,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <FormControlLabel
                     control={
                       <Switch
@@ -397,7 +402,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Max Workers"
                     type="number"
@@ -417,7 +422,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Queue Size Limit"
                     type="number"
@@ -437,7 +442,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Default Timeout (seconds)"
                     type="number"
@@ -453,7 +458,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Default Retry Attempts"
                     type="number"
@@ -469,7 +474,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -498,7 +503,7 @@ const CrawlerConfig: React.FC = () => {
                   />
                 </Grid>
 
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <FormControl fullWidth size="small">
                     <InputLabel>Schedule Frequency</InputLabel>
                     <Select
@@ -528,7 +533,12 @@ const CrawlerConfig: React.FC = () => {
         </Grid>
 
         {/* Data Sources Configuration */}
-        <Grid item xs={12} md={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 6,
+          }}
+        >
           <Card>
             <CardContent>
               <Box
@@ -631,7 +641,7 @@ const CrawlerConfig: React.FC = () => {
         </Grid>
 
         {/* Data Source Details */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card>
             <CardContent>
               <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
@@ -771,7 +781,7 @@ const CrawlerConfig: React.FC = () => {
         <DialogContent>
           {editingSource && (
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
+              <Grid size={12}>
                 <TextField
                   label="Source Name"
                   value={editingSource.name}
@@ -783,7 +793,7 @@ const CrawlerConfig: React.FC = () => {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <TextField
                   label="Priority"
                   type="number"
@@ -797,7 +807,7 @@ const CrawlerConfig: React.FC = () => {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <TextField
                   label="Rate Limit (requests/min)"
                   type="number"
@@ -811,7 +821,7 @@ const CrawlerConfig: React.FC = () => {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <TextField
                   label="Retry Attempts"
                   type="number"
@@ -825,7 +835,7 @@ const CrawlerConfig: React.FC = () => {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <TextField
                   label="Timeout (seconds)"
                   type="number"
