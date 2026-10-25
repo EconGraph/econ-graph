@@ -89,6 +89,28 @@ esac
 target="$SRV_ROOT/$name"
 subvol="@econgraph-$name"
 
+# mounted_subvol <mountpoint>: "<uuid> <subvolume path>" of the mount there.
+mounted_subvol() {
+    findmnt -n -o UUID,FSROOT --mountpoint "$1" | tail -n 1
+}
+# Dry run or not, before anything else: the checks below read
+# $SNAPSHOT_DIR/$snap and the restore uses @econgraph-snapshots/$snap at the
+# top level, so $SNAPSHOT_DIR must be that subvolume (and $target, if
+# mounted, the one being replaced).
+if [ "$(mounted_subvol "$SNAPSHOT_DIR")" != "$FS_UUID /@econgraph-snapshots" ]; then
+    echo "error: $SNAPSHOT_DIR is not @econgraph-snapshots on UUID=$FS_UUID" >&2
+    exit 1
+fi
+if mountpoint -q "$target"; then
+    if [ "$(mounted_subvol "$target")" != "$FS_UUID /$subvol" ]; then
+        echo "error: $target is not $subvol on UUID=$FS_UUID" >&2
+        exit 1
+    fi
+    echo "= $target is $subvol on UUID=$FS_UUID"
+elif [ "$DRY_RUN" = "true" ]; then
+    echo "= $target is not mounted, so a dry run cannot confirm $subvol exists"
+fi
+
 if [ "$FROM_POOL" = "true" ]; then
     if ! mountpoint -q /srv/econgraph-backups; then
         echo "error: the backup pool is not mounted at /srv/econgraph-backups" >&2
@@ -159,26 +181,8 @@ if [ "$YES" = "false" ] && [ "$DRY_RUN" = "false" ]; then
     fi
 fi
 
-# mounted_subvol <mountpoint>: "<uuid> <subvolume path>" of the mount there.
-mounted_subvol() {
-    findmnt -n -o UUID,FSROOT --mountpoint "$1" | tail -n 1
-}
 if [ "$DRY_RUN" = "true" ]; then
-    # No temporary directory and no top-level mount: check through the
-    # mounts that already exist.
-    if [ "$(mounted_subvol "$SNAPSHOT_DIR")" != "$FS_UUID /@econgraph-snapshots" ]; then
-        echo "error: $SNAPSHOT_DIR is not @econgraph-snapshots on UUID=$FS_UUID" >&2
-        exit 1
-    fi
-    if mountpoint -q "$target"; then
-        if [ "$(mounted_subvol "$target")" != "$FS_UUID /$subvol" ]; then
-            echo "error: $target is not $subvol on UUID=$FS_UUID" >&2
-            exit 1
-        fi
-        echo "= $target is $subvol on UUID=$FS_UUID"
-    else
-        echo "= $target is not mounted, so a dry run cannot confirm $subvol exists"
-    fi
+    # No temporary directory and no top-level mount in a dry run.
     echo "+ mount -o subvolid=5 UUID=$FS_UUID <temporary directory under /mnt>   (not in a dry run)"
     top="<top>"
 else
