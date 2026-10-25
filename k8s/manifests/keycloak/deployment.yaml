@@ -57,6 +57,11 @@ metadata:
 spec:
   # One replica: several need Keycloak's distributed cache configured first.
   replicas: 1
+  # Recreate, not RollingUpdate: a new Keycloak version migrates the database schema on
+  # first start, and Keycloak supports old and new pods sharing a database only within
+  # one version stream. Recreate stops the old pod before the new one starts.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: keycloak

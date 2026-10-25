@@ -136,6 +136,16 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
   render_manifest k8s/manifests/keycloak/ingress.yaml | kubectl apply -f -
+  # Wait for the new Keycloak pod, so the realm import below talks to the server this
+  # deploy just applied, after any schema migration it ran on start. The Deployment
+  # uses Recreate, so no old pod stays ready meanwhile.
+  echo "⏳ Waiting for the Keycloak rollout..."
+  if ! kubectl -n econ-graph rollout status deployment/keycloak --timeout=900s; then
+    echo "❌ Keycloak did not become ready; not applying the realm. Its pods:"
+    kubectl -n econ-graph get pods -l app=keycloak || true
+    kubectl -n econ-graph logs deployment/keycloak --tail=100 || true
+    exit 1
+  fi
   # The realm-import Job applies the realm file on every deploy; a Job cannot be
   # re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
@@ -214,8 +224,6 @@ echo "Waiting for chart API service deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/chart-api-service -n econ-graph
 
 if [ "$KEYCLOAK_DEPLOYED" = true ]; then
-  echo "Waiting for Keycloak deployment..."
-  kubectl wait --for=condition=available --timeout=600s deployment/keycloak -n econ-graph
   echo "Waiting for the Keycloak realm import..."
   # `kubectl wait --for=condition=complete` alone would sit out its whole timeout on
   # a failed Job, so poll for either terminal condition.
