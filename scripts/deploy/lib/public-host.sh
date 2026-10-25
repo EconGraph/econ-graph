@@ -119,6 +119,10 @@ apply_public_edge() {
     local key patch pod_cidrs
     if [ -n "$PUBLIC_HOST" ]; then
         pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
+        # A dry run (lib/cluster-role.sh) asks no cluster, so it has no CIDRs to show.
+        if [ -z "$pod_cidrs" ] && [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+            pod_cidrs="<pod-cidrs>"
+        fi
         if [ -z "$pod_cidrs" ]; then
             echo "❌ Could not read the nodes' pod CIDRs for ingress-nginx's proxy-real-ip-cidr"
             exit 1

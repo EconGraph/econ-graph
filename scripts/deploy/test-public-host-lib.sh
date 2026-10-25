@@ -467,11 +467,11 @@ offenders="$(grep -rnE '\bapply\b' scripts --include='*.sh' |
 # as it is. set-crawler-keys.sh runs create-secrets.sh with a scrubbed environment, so that
 # kubectl reads the stub settings from $stub_dir/stub.env rather than the environment.
 kind_dir="$stub_dir/cache/econgraph"
-mkdir -p "$kind_dir/bin"
-: >"$kind_dir/kubeconfig-econ-graph"
+mkdir -p "$kind_dir/bin" "$stub_dir/yqbin"
+echo "apiVersion: v1" >"$kind_dir/kubeconfig-econ-graph"
 printf '#!/usr/bin/env bash\nset -a\n. %q\nset +a\nexec %q "$@"\n' "$stub_dir/stub.env" "$stub_dir/kubectl" >"$kind_dir/bin/kubectl"
 printf '#!/usr/bin/env bash\necho "27.0 /var/lib/docker [name=seccomp]"\n' >"$kind_dir/bin/docker"
-cat >"$kind_dir/bin/yq" <<'STUB'
+cat >"$stub_dir/yqbin/yq" <<'STUB'
 #!/usr/bin/env python3
 # Only the '.spec.replicas = N' form apply_cloudflared uses.
 import re, sys, yaml
@@ -479,7 +479,7 @@ d = yaml.safe_load(open(sys.argv[2]))
 d["spec"]["replicas"] = int(re.fullmatch(r"\.spec\.replicas = (\d+)", sys.argv[1])[1])
 print(yaml.safe_dump(d))
 STUB
-chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$kind_dir/bin/yq"
+chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$stub_dir/yqbin/yq"
 keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
@@ -487,7 +487,7 @@ run_keys() {
   printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
   : >"$log"
   printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
-    PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
+    PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     script -qec "$keys $2" /dev/null >"$out" 2>&1
 }
 if [ "$have_script" = true ]; then
@@ -522,6 +522,70 @@ if [ "$have_script" = true ]; then
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
+fi
+
+# --- mark-production-cluster.sh run bare: the kind cluster, through its own kubectl --------
+printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
+: >"$log"
+env -u KUBECTL XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+  PATH="$kind_dir/bin:$PATH" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
+  "$mark" --dry-run </dev/null >"$out" 2>&1 || fail "mark (bare) --dry-run failed: $(cat "$out")"
+grep -q 'would write ConfigMap kube-system/econgraph-cluster-role' "$out" || fail "mark (bare) --dry-run: no plan shown: $(cat "$out")"
+grep -q '^kubectl config use-context kind-econ-graph' "$log" || fail "mark (bare): did not switch to kind-econ-graph"
+grep '^kubectl ' "$log" | grep -v 'config use-context' | grep -v -- '--context kind-econ-graph' &&
+  fail "mark (bare): a call did not use the kind context"
+[ ! -s "$path_log" ] || fail "mark (bare): called the kubectl on PATH instead of the kind one: $(cat "$path_log")"
+
+# --- kind-env.sh restore_secrets: the saved tunnel token only into a marked cluster --------
+backup="$stub_dir/backup"
+mkdir -p "$backup/secrets"
+for s in grafana-admin cloudflare-tunnel; do
+  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n' "$s" >"$backup/secrets/$s.yaml"
+done
+for marker in none copied fails production; do
+  printf 'STUB_LOG=%q\nSTUB_MARKER=%s\n' "$log" "$marker" >"$stub_dir/stub.env"
+  : >"$log"
+  env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+    PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
+    bash -c 'source scripts/deploy/lib/kind-env.sh; DRY_RUN=false; restore_secrets "$1"' _ "$backup" >"$out" 2>&1 ||
+    fail "restore_secrets (marker $marker) failed: $(cat "$out")"
+  grep -q "create -f $backup/secrets/grafana-admin.yaml" "$log" || fail "restore_secrets (marker $marker): grafana-admin not restored"
+  if [ "$marker" = production ]; then
+    grep -q "create -f $backup/secrets/cloudflare-tunnel.yaml" "$log" ||
+      fail "restore_secrets: the token was not restored into the production cluster"
+  else
+    grep -q "create -f $backup/secrets/cloudflare-tunnel.yaml" "$log" &&
+      fail "restore_secrets (marker $marker): restored the token into a cluster that is not production"
+    grep -q 'secret cloudflare-tunnel skipped' "$out" || fail "restore_secrets (marker $marker): the skip was not reported"
+  fi
+  grep -E 'get (namespace kube-system|configmap econgraph-cluster-role)' "$log" | grep -v -- '--context kind-econ-graph' &&
+    fail "restore_secrets (marker $marker): the production check did not use the kind context"
+  [ ! -s "$path_log" ] || fail "restore_secrets: called another kubectl: $(cat "$path_log")"
+done
+
+# --- deploy.sh --dry-run reaches no cluster --------------------------------------------
+# With the kind kubectl layout above (and the real yq, which deploy.sh needs for more than
+# the replica count), a dry run writes nothing through $KUBECTL, the kind kubectl or the
+# kubectl on PATH, with or without a public host, and reports the production check.
+if command -v yq >/dev/null 2>&1; then
+  writes_re='(^| )(apply|delete|patch|scale|create|label|annotate|replace|edit|set|cordon|drain|taint)( |$)|rollout restart'
+  for host in '' econgraph.com; do
+    printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
+    : >"$log"
+    if ! env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+      PATH="$kind_dir/bin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
+      PUBLIC_HOST="$host" scripts/deploy/deploy.sh --dry-run </dev/null >"$out" 2>&1; then
+      fail "deploy.sh --dry-run (PUBLIC_HOST=$host) failed: $(tail -5 "$out")"
+    fi
+    grep -E "$writes_re" "$log" && fail "deploy.sh --dry-run (PUBLIC_HOST=$host) wrote through the kind kubectl"
+    [ ! -s "$path_log" ] || fail "deploy.sh --dry-run (PUBLIC_HOST=$host) called another kubectl: $(cat "$path_log")"
+    grep -q '\[dry-run\] kubectl --context kind-econ-graph apply -f -' "$out" ||
+      fail "deploy.sh --dry-run (PUBLIC_HOST=$host): the cloudflared apply was not printed on the pinned context"
+    if [ -n "$host" ]; then
+      grep -q '\[dry-run\] check that context kind-econ-graph is marked production' "$out" ||
+        fail "deploy.sh --dry-run: the production check was not reported"
+    fi
+  done
 fi
 
 if [ "$failures" -gt 0 ]; then

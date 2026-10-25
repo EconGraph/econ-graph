@@ -29,7 +29,8 @@
 # does), since that Job is what puts the Google client into the realm.
 #
 # --dry-run prints which keys are currently set (names only) and what would
-# happen; it prompts for nothing and writes no key. It may create a temporary
+# happen (with --tunnel, whether the cluster is marked production: these reads
+# are real, unlike deploy.sh --dry-run); it prompts for nothing and writes no key. It may create a temporary
 # directory under $TMPDIR (a copy of the cluster's kubectl and kubeconfig),
 # removed on exit; it changes nothing else.
 #
@@ -53,7 +54,7 @@ for arg in "$@"; do
         --tunnel) TUNNEL=true ;;
         --no-start-crawler) START_CRAWLER=false ;;
         -h | --help)
-            sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)

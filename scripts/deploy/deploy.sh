@@ -110,14 +110,21 @@ ensure_kind_kubectl
 # binary and context the production check uses (scripts/deploy/lib/cluster-role.sh).
 # Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
 # public routes and stop its tunnel connector.
+# In a dry run, kc only prints (CLUSTER_ROLE_DRY_RUN) and kubectl stays the
+# printing stub above: the dry run reaches no cluster through either.
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+if [ "$DRY_RUN" = true ]; then
+    CLUSTER_ROLE_DRY_RUN=true
+fi
 if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
     echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
     exit 1
 fi
-kubectl() { kc "$@"; }
+if [ "$DRY_RUN" != true ]; then
+    kubectl() { kc "$@"; }
+fi
 
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves

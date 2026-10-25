@@ -17,6 +17,12 @@
 # allows, goes through kc: one binary, ${KUBECTL:-kubectl}, and one context,
 # pinned on the first check (cluster_role_pin_context), so the check and the
 # write cannot reach different clusters.
+#
+# CLUSTER_ROLE_DRY_RUN=true (set by deploy.sh --dry-run, which contacts no
+# cluster) makes kc print each call instead of running it, reads as well as
+# writes, and makes the production check report that it would run instead of
+# asking the cluster: a dry run never changes a cluster and never decides
+# whether one is production.
 
 CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
@@ -25,6 +31,12 @@ CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
 # `command` runs the binary even where a script wraps kubectl in a function
 # that calls kc (deploy.sh, restart-k8s-rollout.sh).
 kc() {
+    if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+        echo "[dry-run] kubectl${CLUSTER_ROLE_CONTEXT:+ --context ${CLUSTER_ROLE_CONTEXT}} $*" >&2
+        # What a real apply would read from a pipe is read and dropped.
+        case " $* " in *" -f - "*) cat >/dev/null ;; esac
+        return 0
+    fi
     if [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
         command "${KUBECTL:-kubectl}" --context "$CLUSTER_ROLE_CONTEXT" "$@"
     else
@@ -37,6 +49,11 @@ kc() {
 # deploy.sh, stay on it). Fails when there is no current context.
 cluster_role_pin_context() {
     [ -z "${CLUSTER_ROLE_CONTEXT:-}" ] || return 0
+    if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+        echo "[dry-run] kubectl config current-context (pinned)" >&2
+        CLUSTER_ROLE_CONTEXT="current-context"
+        return 0
+    fi
     CLUSTER_ROLE_CONTEXT="$(command "${KUBECTL:-kubectl}" config current-context)" || return 1
     [ -n "$CLUSTER_ROLE_CONTEXT" ] || return 1
     export CLUSTER_ROLE_CONTEXT
@@ -47,7 +64,11 @@ cluster_role_pin_context() {
 # inherited from the environment is replaced, never followed: it must not send
 # the check and the writes to another cluster than the one the script deploys.
 cluster_role_use_context() {
-    command "${KUBECTL:-kubectl}" config use-context "$1" >/dev/null || return 1
+    if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+        echo "[dry-run] kubectl config use-context $1 (pinned)" >&2
+    else
+        command "${KUBECTL:-kubectl}" config use-context "$1" >/dev/null || return 1
+    fi
     CLUSTER_ROLE_CONTEXT="$1"
     export CLUSTER_ROLE_CONTEXT
 }
@@ -77,6 +98,13 @@ cluster_role_marker() {
 cluster_is_marked_production() {
     local uid marker role marker_uid
     CLUSTER_ROLE_REASON=""
+    if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+        cluster_role_pin_context
+        echo "[dry-run] check that context ${CLUSTER_ROLE_CONTEXT} is marked production" \
+            "(ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP}); a real run stops or" \
+            "keeps cloudflared at 0 replicas if it is not" >&2
+        return 0
+    fi
     if ! cluster_role_pin_context; then
         CLUSTER_ROLE_REASON="kubectl has no current context, so the cluster is treated as not production"
         return 2

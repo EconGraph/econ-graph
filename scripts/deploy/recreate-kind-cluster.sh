@@ -32,7 +32,9 @@
 #       [--no-backup]           only for callers that took a backup just before
 #                               (migrate-to-host-storage.sh); still asks unless --yes
 #
-# Afterwards: load-kind-images.sh, restore-kind-databases.sh, deploy.sh
+# Afterwards: on production only, mark-production-cluster.sh first (before the
+# restore, so the tunnel token is restored too); then load-kind-images.sh,
+# restore-kind-databases.sh, deploy.sh
 # (docs/deployment/HOST_STORAGE.md, "Recovering production").
 
 set -euo pipefail
@@ -164,8 +166,9 @@ check_restart_on_boot
 log "Kind cluster recreated"
 echo "  Frontend: http://localhost:3000   Backend: http://localhost:8080"
 echo "  HTTP: http://localhost:80          HTTPS: https://localhost:443"
-echo "  Next: scripts/deploy/load-kind-images.sh, restore-kind-databases.sh, deploy.sh"
 # The new cluster has a new kube-system UID, so an earlier production marker no
-# longer counts (scripts/deploy/lib/cluster-role.sh).
-echo "  If this is the production cluster (the one serving econgraph.com), mark it again"
-echo "  before deploying with PUBLIC_HOST: scripts/deploy/mark-production-cluster.sh"
+# longer counts (scripts/deploy/lib/cluster-role.sh), and the restore only
+# brings the tunnel token back into a marked cluster.
+echo "  Next: on the production cluster (the one serving econgraph.com) only, first"
+echo "  scripts/deploy/mark-production-cluster.sh; then scripts/deploy/load-kind-images.sh,"
+echo "  restore-kind-databases.sh, deploy.sh (PUBLIC_HOST=econgraph.com on production)"

@@ -26,10 +26,20 @@
 # token) is left as it is. It deletes no data, volumes or clusters: --unmark
 # removes the marker and, only if you confirm, the token.
 #
-# Other environment: KUBECTL (default kubectl).
+# Which cluster: without KUBECTL, the kind cluster econ-graph, through its own
+# kubectl and kubeconfig (scripts/deploy/lib/kind-env.sh) on context
+# kind-econ-graph; on this host plain kubectl is the microk8s snap wrapper,
+# another cluster. With KUBECTL=/path/to/kubectl, that kubectl's current context.
 
 set -euo pipefail
 
+# Sourced before this script's own die/log/confirm, which replace kind-env.sh's.
+USE_KIND=false
+if [ -z "${KUBECTL:-}" ]; then
+    USE_KIND=true
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/kind-env.sh"
+fi
 KUBECTL="${KUBECTL:-kubectl}"
 # Where cloudflared and its token live; fixed, like in lib/public-host.sh.
 TUNNEL_NAMESPACE=econ-graph
@@ -40,7 +50,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=true ;;
         --unmark) UNMARK=true ;;
         -h | --help)
-            sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -62,12 +72,19 @@ log() {
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
-command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
-
-# Every call below goes through kc, on this one context: the current one, never
-# a CLUSTER_ROLE_CONTEXT inherited from the environment.
+# Every call below goes through kc, on this one context, never a
+# CLUSTER_ROLE_CONTEXT inherited from the environment: kind-econ-graph with the
+# kind kubectl, or the current context of an explicit KUBECTL.
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_pin_context || die "$KUBECTL has no current context"
+if [[ "$USE_KIND" == true ]]; then
+    check_docker_daemon
+    ensure_kind_kubectl
+    KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+    cluster_role_use_context "kind-${KIND_CLUSTER}" || die "$KUBECTL has no context kind-${KIND_CLUSTER}"
+else
+    command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
+    cluster_role_pin_context || die "$KUBECTL has no current context"
+fi
 context="$CLUSTER_ROLE_CONTEXT"
 uid="$(kube_system_uid)" || die "could not read the kube-system namespace UID of context $context"
 marker="$(cluster_role_marker)" ||
