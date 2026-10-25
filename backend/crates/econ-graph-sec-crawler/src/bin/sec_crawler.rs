@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use econ_graph_core::database::DatabasePool;
+use econ_graph_core::database::DataPool;
 use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
 #[cfg(feature = "xbrl-parser")]
 use std::path::PathBuf;
@@ -106,10 +106,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize database connection
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
+    let database_url = econ_graph_core::config::data_database_url()?;
 
-    let pool = econ_graph_core::database::create_pool(&database_url).await?;
+    let pool = DataPool(econ_graph_core::database::create_pool(&database_url).await?);
 
     if let Commands::Enqueue { cik, priority } = &cli.command {
         let (enqueued, active) =
@@ -121,7 +120,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let crawler = SecEdgarCrawler::new(pool).await?;
+    let crawler = SecEdgarCrawler::new(pool.0).await?;
 
     match cli.command {
         Commands::Enqueue { .. } => unreachable!("handled above"),
@@ -219,10 +218,9 @@ async fn crawl_company_command(
     };
 
     // Create crawler with custom config
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
-    let pool = econ_graph_core::database::create_pool(&database_url).await?;
-    let crawler = SecEdgarCrawler::with_config(pool, config).await?;
+    let database_url = econ_graph_core::config::data_database_url()?;
+    let pool = DataPool(econ_graph_core::database::create_pool(&database_url).await?);
+    let crawler = SecEdgarCrawler::with_config(pool.0, config).await?;
 
     // Execute crawl
     let result = crawler.crawl_company_filings(&cik).await?;

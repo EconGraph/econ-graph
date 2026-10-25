@@ -1,7 +1,8 @@
 # Postgres and Keycloak for the release end-to-end suite (scripts/release-e2e.sh). The backend
 # and the frontend release build run on the host, from the checkout under test. Data lives in
 # tmpfs or a container-local dev store, and the script recreates both containers on every run,
-# so each run starts empty.
+# so each run starts empty. Its one Postgres database, econ_graph_e2e, is both the app and the data
+# database: the script points APP_DATABASE_URL and DATA_DATABASE_URL at it.
 #
 # Named so this stays its own compose project: without this, both this file and docker-compose.yml
 # (the dev stack) fall back to the directory name, and `up --force-recreate` here would tear down

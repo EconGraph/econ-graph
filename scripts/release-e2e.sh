@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Runs the release end-to-end suite (frontend/playwright.release.config.ts):
 #   1. Postgres 18: a fresh docker-compose.release-e2e.yml container, unless
-#      RELEASE_E2E_DATABASE_URL is set (CI sets it to its service container). A DATABASE_URL
-#      you export for development is ignored, so the seed never writes to your dev database.
+#      RELEASE_E2E_DATABASE_URL is set (CI sets it to its service container). APP_DATABASE_URL
+#      and DATA_DATABASE_URL are both set to it, and a DATABASE_URL, APP_DATABASE_URL or
+#      DATA_DATABASE_URL you export for development is ignored, so the seed never writes to your
+#      dev database.
 #   2. Keycloak, with the dev realm from config/keycloak/, always via docker-compose.release-e2e.yml
 #      (CI has no equivalent service container for it: the realm and users files must be mounted
 #      from the checkout under test).
@@ -24,6 +26,9 @@ if [[ -z "${RELEASE_E2E_DATABASE_URL:-}" ]]; then
   docker compose -f "$repo/docker-compose.release-e2e.yml" up -d --wait --force-recreate postgres
   export RELEASE_E2E_DATABASE_URL=postgres://postgres:password@localhost:5439/econ_graph_e2e
 fi
+# The app and data databases are this one database, for the seed and the backend alike.
+export APP_DATABASE_URL="$RELEASE_E2E_DATABASE_URL"
+export DATA_DATABASE_URL="$RELEASE_E2E_DATABASE_URL"
 
 # Cargo resolves a relative CARGO_TARGET_DIR against backend/, where it runs.
 target="$(cd "$repo/backend" && realpath -m "${CARGO_TARGET_DIR:-target}")"
@@ -41,7 +46,7 @@ no_network_proxy=http://127.0.0.1:9
 env -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
   HTTP_PROXY="$no_network_proxy" HTTPS_PROXY="$no_network_proxy" ALL_PROXY="$no_network_proxy" \
   NO_PROXY=127.0.0.1,localhost \
-  DATABASE_URL="$RELEASE_E2E_DATABASE_URL" "$target/debug/seed-fixtures"
+  "$target/debug/seed-fixtures"
 export RELEASE_BACKEND_BIN="${RELEASE_BACKEND_BIN:-$target/debug/econ-graph-backend}"
 
 cd "$repo/frontend"

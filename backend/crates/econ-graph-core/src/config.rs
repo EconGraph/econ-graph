@@ -94,6 +94,94 @@ impl Config {
     }
 }
 
+/// The app database's URL variable: users and everything they create.
+pub const APP_DATABASE_URL: &str = "APP_DATABASE_URL";
+
+/// The data database's URL variable: sources, series, observations, crawl state, SEC data.
+pub const DATA_DATABASE_URL: &str = "DATA_DATABASE_URL";
+
+/// The single-database URL variable, which the binaries that read [`APP_DATABASE_URL`] and
+/// [`DATA_DATABASE_URL`] refuse to fall back to.
+pub const LEGACY_DATABASE_URL: &str = "DATABASE_URL";
+
+/// Why a binary could not find its database URL.
+#[derive(Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DatabaseUrlError {
+    /// `DATABASE_URL` is set and the binary's own variable is not: the configuration predates the
+    /// separate app and data databases, and guessing which one it names could write data into the
+    /// wrong database.
+    #[error("DATABASE_URL is no longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL")]
+    LegacyDatabaseUrl,
+    /// The binary's variable is unset and so is `DATABASE_URL`.
+    #[error("{0} is not set")]
+    Missing(&'static str),
+}
+
+/// The message itself, so a `main` that returns this error prints the documented startup error
+/// rather than a variant name.
+impl std::fmt::Debug for DatabaseUrlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
+/// The database URLs the backend reads: the app database always, the data database where the
+/// deployment has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendDatabaseUrls {
+    /// `APP_DATABASE_URL`.
+    pub app: String,
+    /// `DATA_DATABASE_URL`, or `None` when unset.
+    pub data: Option<String>,
+}
+
+/// The backend's database URLs from the environment. `APP_DATABASE_URL` is required and
+/// `DATA_DATABASE_URL` optional; both may name the same database. Empty values count as unset.
+pub fn backend_database_urls() -> Result<BackendDatabaseUrls, DatabaseUrlError> {
+    backend_database_urls_from(|name| env::var(name).ok())
+}
+
+/// The data database's URL from the environment, for the binaries that use only the data
+/// database (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`, `sec-company-crawler`).
+/// Empty values count as unset.
+pub fn data_database_url() -> Result<String, DatabaseUrlError> {
+    data_database_url_from(|name| env::var(name).ok())
+}
+
+/// [`backend_database_urls`] with the environment read through `var`.
+pub fn backend_database_urls_from(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<BackendDatabaseUrls, DatabaseUrlError> {
+    Ok(BackendDatabaseUrls {
+        app: required_url(&var, APP_DATABASE_URL)?,
+        data: non_empty(&var, DATA_DATABASE_URL),
+    })
+}
+
+/// [`data_database_url`] with the environment read through `var`.
+pub fn data_database_url_from(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<String, DatabaseUrlError> {
+    required_url(&var, DATA_DATABASE_URL)
+}
+
+fn non_empty(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    var(name).filter(|v| !v.trim().is_empty())
+}
+
+fn required_url(
+    var: &impl Fn(&str) -> Option<String>,
+    name: &'static str,
+) -> Result<String, DatabaseUrlError> {
+    match non_empty(var, name) {
+        Some(url) => Ok(url),
+        None if non_empty(var, LEGACY_DATABASE_URL).is_some() => {
+            Err(DatabaseUrlError::LegacyDatabaseUrl)
+        }
+        None => Err(DatabaseUrlError::Missing(name)),
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -231,5 +319,142 @@ mod tests {
         } else {
             env::remove_var("FRONTEND_PORT");
         }
+    }
+
+    /// An environment of exactly `vars`.
+    fn env_of<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    /// Every binary's database URLs: the backend's (app required, data optional) and the
+    /// data-only binaries' (data required), including the startup error when only `DATABASE_URL`
+    /// is set.
+    #[test]
+    fn database_urls_come_only_from_the_app_and_data_variables() {
+        let legacy =
+            "DATABASE_URL is no longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL";
+        let only_legacy = [("DATABASE_URL", "postgres://db/econ_graph")];
+
+        // Both set, to different databases or to the same one.
+        let both = [
+            ("APP_DATABASE_URL", "postgres://app/econ_graph_app"),
+            ("DATA_DATABASE_URL", "postgres://data/econ_graph"),
+            ("DATABASE_URL", "postgres://db/ignored"),
+        ];
+        assert_eq!(
+            backend_database_urls_from(env_of(&both)),
+            Ok(BackendDatabaseUrls {
+                app: "postgres://app/econ_graph_app".into(),
+                data: Some("postgres://data/econ_graph".into()),
+            })
+        );
+        assert_eq!(
+            data_database_url_from(env_of(&both)).as_deref(),
+            Ok("postgres://data/econ_graph")
+        );
+        let same = [
+            ("APP_DATABASE_URL", "postgres://db/econ_graph"),
+            ("DATA_DATABASE_URL", "postgres://db/econ_graph"),
+        ];
+        let urls = backend_database_urls_from(env_of(&same)).unwrap();
+        assert_eq!(urls.data.as_deref(), Some(urls.app.as_str()));
+
+        // The backend runs without a data database; the data-only binaries do not.
+        let app_only = [("APP_DATABASE_URL", "postgres://app/econ_graph_app")];
+        assert_eq!(
+            backend_database_urls_from(env_of(&app_only)),
+            Ok(BackendDatabaseUrls {
+                app: "postgres://app/econ_graph_app".into(),
+                data: None,
+            })
+        );
+        assert_eq!(
+            data_database_url_from(env_of(&app_only)),
+            Err(DatabaseUrlError::Missing("DATA_DATABASE_URL"))
+        );
+
+        // The backend needs an app database even when it has a data one.
+        let data_only = [("DATA_DATABASE_URL", "postgres://data/econ_graph")];
+        assert_eq!(
+            backend_database_urls_from(env_of(&data_only)),
+            Err(DatabaseUrlError::Missing("APP_DATABASE_URL"))
+        );
+
+        // DATABASE_URL alone is never used, and says what to set instead.
+        for err in [
+            backend_database_urls_from(env_of(&only_legacy)).unwrap_err(),
+            data_database_url_from(env_of(&only_legacy)).unwrap_err(),
+        ] {
+            assert_eq!(err, DatabaseUrlError::LegacyDatabaseUrl);
+            assert_eq!(err.to_string(), legacy);
+        }
+        let data_with_legacy = [
+            ("DATA_DATABASE_URL", "postgres://data/econ_graph"),
+            ("DATABASE_URL", "postgres://db/econ_graph"),
+        ];
+        assert_eq!(
+            backend_database_urls_from(env_of(&data_with_legacy)),
+            Err(DatabaseUrlError::LegacyDatabaseUrl)
+        );
+
+        // Nothing set at all; empty values count as unset.
+        assert_eq!(
+            data_database_url_from(env_of(&[])).unwrap_err().to_string(),
+            "DATA_DATABASE_URL is not set"
+        );
+        assert_eq!(
+            backend_database_urls_from(env_of(&[]))
+                .unwrap_err()
+                .to_string(),
+            "APP_DATABASE_URL is not set"
+        );
+        let empty = [
+            ("APP_DATABASE_URL", "postgres://app/econ_graph_app"),
+            ("DATA_DATABASE_URL", ""),
+            ("DATABASE_URL", "postgres://db/econ_graph"),
+        ];
+        assert_eq!(
+            backend_database_urls_from(env_of(&empty)).unwrap().data,
+            None
+        );
+        assert_eq!(
+            data_database_url_from(env_of(&empty)),
+            Err(DatabaseUrlError::LegacyDatabaseUrl)
+        );
+    }
+
+    /// The process-environment entry points read the same variables. `DATABASE_URL` is left
+    /// alone: other tests in this binary connect through it.
+    #[serial_test::serial]
+    #[test]
+    fn database_urls_read_the_process_environment() {
+        let saved: Vec<_> = [APP_DATABASE_URL, DATA_DATABASE_URL]
+            .into_iter()
+            .map(|k| (k, env::var(k).ok()))
+            .collect();
+
+        env::set_var(APP_DATABASE_URL, "postgres://app/econ_graph_app");
+        env::set_var(DATA_DATABASE_URL, "postgres://data/econ_graph");
+        let set = (backend_database_urls(), data_database_url());
+
+        for (k, v) in saved {
+            match v {
+                Some(v) => env::set_var(k, v),
+                None => env::remove_var(k),
+            }
+        }
+
+        assert_eq!(
+            set.0.map(|u| (u.app, u.data)),
+            Ok((
+                "postgres://app/econ_graph_app".to_string(),
+                Some("postgres://data/econ_graph".to_string())
+            ))
+        );
+        assert_eq!(set.1.as_deref(), Ok("postgres://data/econ_graph"));
     }
 }

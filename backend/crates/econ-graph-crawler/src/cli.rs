@@ -31,7 +31,7 @@ use anyhow::{anyhow, bail, Context as _};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use econ_graph_core::models::{CrawlQueueItem, JobKind, NewCrawlQueueItem};
-use econ_graph_core::DatabasePool;
+use econ_graph_core::{DataPool, DatabasePool};
 
 use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx, SourceAdapter};
 use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
@@ -58,8 +58,8 @@ pub const DEFAULT_PRIORITY: i32 = 5;
     about = "Enqueue crawl jobs and inspect the crawl queue"
 )]
 pub struct Cli {
-    /// Postgres connection string.
-    #[arg(long, env = "DATABASE_URL", global = true, hide_env_values = true)]
+    /// The data database's Postgres connection string. `DATABASE_URL` is not read.
+    #[arg(long, env = "DATA_DATABASE_URL", global = true, hide_env_values = true)]
     pub database_url: Option<String>,
 
     /// What to do.
@@ -253,12 +253,17 @@ impl Cli {
             )
             .await;
         }
-        let url = self
-            .database_url
-            .ok_or_else(|| anyhow!("DATABASE_URL is not set (or pass --database-url)"))?;
-        let pool = econ_graph_core::create_pool(&url)
-            .await
-            .context("connecting to the database")?;
+        // A blank value (an empty `DATA_DATABASE_URL`) counts as unset, as in `data_database_url`.
+        let url = match self.database_url.filter(|u| !u.trim().is_empty()) {
+            Some(url) => url,
+            None => econ_graph_core::config::data_database_url()
+                .map_err(|e| anyhow!("{e} (or pass --database-url)"))?,
+        };
+        let pool = DataPool(
+            econ_graph_core::create_pool(&url)
+                .await
+                .context("connecting to the data database")?,
+        );
 
         match self.command {
             Command::Enqueue {
@@ -324,7 +329,7 @@ impl Cli {
                 source,
                 series,
                 full,
-            } => fetch_one(pool, source, series.trim(), full).await,
+            } => fetch_one(pool.0, source, series.trim(), full).await,
             Command::Sources | Command::RecordReferenceSeeds { .. } => {
                 unreachable!("handled above")
             }

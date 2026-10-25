@@ -14,6 +14,17 @@ All notable changes to EconGraph are documented here. The format follows
   token. Unset, every request goes where it went before. The dev server and `vite preview`
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
 
+### Changed
+
+- The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
+  `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read
+  `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
+  longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. `seed-fixtures` applies only the
+  data migrations. The SEC crawlers no longer fall back to a local default database.
+- The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
+  next to `database-url`, all three naming the one database. The backend and crawler-worker
+  manifests read the new keys.
+
 ## [4.0.0] - 2026-10-08
 
 Train 1: broad real data behind pages that work. See
