@@ -64,14 +64,20 @@ else
     FRONTEND_NODEPORT=30000
 fi
 
+# The kind cluster runs on the rootful Docker daemon, and its own kubectl and
+# kubeconfig are used (on this host `kubectl` is the microk8s snap wrapper);
+# see scripts/deploy/lib/kind-env.sh. Sourced first: it sets DOCKER_HOST.
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+check_docker_daemon
+
 # Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found. Please run terraform first."
-    echo "   cd terraform/k8s && terraform init && terraform apply"
+if ! kind_cluster_exists; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
+    echo "   Create it with scripts/deploy/recreate-kind-cluster.sh --if-missing"
     exit 1
 fi
-
-# Set kubectl context
+ensure_kind_kubectl
 kubectl config use-context kind-econ-graph
 
 # Apply all manifests
@@ -79,6 +85,10 @@ echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
+# Static PVs on the host btrfs subvolumes for both Postgres databases. Runs
+# before create-secrets.sh: it refuses to continue if a host data directory
+# already holds a database whose password Secret is missing.
+./scripts/deploy/apply-host-storage.sh
 kubectl apply -f k8s/manifests/configmap.yaml
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
@@ -282,7 +292,7 @@ cat >> /tmp/grafana-dashboards.yaml << 'EOF'
 EOF
 
 # Extract and append the JSON content from the YAML file
-yq eval '.data.dashboard' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
 
 # Apply the ConfigMap
 kubectl apply -f /tmp/grafana-dashboards.yaml
