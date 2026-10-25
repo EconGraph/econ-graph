@@ -127,6 +127,22 @@ test.describe('sign-in and annotation privacy', () => {
     await expect(page.getByRole('button', { name: `Delete ${publicTitle}` })).toHaveCount(0);
   });
 
+  // ECO-418: sign-out used to land on the dashboard. Keycloak sends the browser home, and the app
+  // goes back to the series page sign-out began on, signed out.
+  test('bob signs out and stays on the series page', async ({ page }) => {
+    await openSeriesAs(page, bob);
+
+    await page.getByRole('button', { name: 'user menu' }).click();
+    await page.getByRole('menuitem', { name: /sign out/i }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${seriesPath}$`), AFTER_SIGN_IN);
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible(
+      AFTER_SIGN_IN
+    );
+    await expect(page.getByRole('button', { name: 'Sign in to annotate' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'user menu' })).toHaveCount(0);
+  });
+
   // Cleans up this run's annotations on the seeded series when the earlier tests pass.
   test('alice deletes both annotations', async ({ page }) => {
     await openSeriesAs(page, alice);

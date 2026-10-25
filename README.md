@@ -2,9 +2,9 @@
 
 > **Democratizing economic intelligence through modern, affordable, open-source technology that delivers 90% cost savings vs. Bloomberg Terminal**
 
-[![Tests](https://img.shields.io/badge/Tests-Unit%20%7C%20Integration%20%7C%20E2E-blue)](https://github.com/jmalicki/econ-graph/actions)
-[![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Warp-orange)](https://github.com/jmalicki/econ-graph/tree/main/backend)
-[![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/jmalicki/econ-graph/tree/main/frontend)
+[![Tests](https://img.shields.io/badge/Tests-Unit%20%7C%20Integration%20%7C%20E2E-blue)](https://github.com/EconGraph/econ-graph/actions)
+[![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Warp-orange)](https://github.com/EconGraph/econ-graph/tree/main/backend)
+[![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/EconGraph/econ-graph/tree/main/frontend)
 [![License](https://img.shields.io/badge/License-MS--RSL-red.svg)](LICENSE)
 
 ## 🎯 **What EconGraph Does**
@@ -388,7 +388,7 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 
 ### 🎯 **Explore the economic data visualization platform**
 
-**[🚀 Try the Live Demo](#getting-started)** • **[📚 Read the Code](https://github.com/jmalicki/econ-graph)**
+**[🚀 Try the Live Demo](#getting-started)** • **[📚 Read the Code](https://github.com/EconGraph/econ-graph)**
 
 ---
 

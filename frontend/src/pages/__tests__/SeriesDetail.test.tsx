@@ -15,11 +15,15 @@ import { executeGraphQL, GraphQLRequest, QUERIES } from '../../utils/graphql';
 import SeriesDetail from '../SeriesDetail';
 import {
   EMPTY_ID,
+  ESTAB_ID,
+  GDP_Q_ID,
   UNKNOWN_ID,
   UNRATE_ID,
   allNullTransformed,
   dailyPages,
   dailyPoints,
+  estabLevels,
+  gdpQuarterlyLevels,
   noObservations,
   page,
   seriesResponses,
@@ -158,9 +162,61 @@ describe('SeriesDetail', () => {
       'row'
     );
     expect(rows[1]).toHaveTextContent('Mar 1, 2024');
-    expect(rows[1]).toHaveTextContent('3.80');
+    // The series carries one decimal, so it shows one rather than a padded 3.80.
+    expect(within(rows[1]).getByText('3.8')).toBeInTheDocument();
     expect(rows[1]).toHaveTextContent('Original');
     expect(rows[3]).toHaveTextContent('Jan 1, 2024');
+  });
+
+  // ECO-415: quarterly and annual dates read as their period, counts without .00.
+  test('shows a quarterly series by quarter and whole-dollar levels without decimals', async () => {
+    serve({ NONE: gdpQuarterlyLevels });
+    renderPage(GDP_Q_ID);
+    await screen.findByTestId('line-chart');
+
+    const rows = within(screen.getByRole('table', { name: 'Recent observations' })).getAllByRole(
+      'row'
+    );
+    expect(within(rows[1]).getByText('2024 Q4')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('28,624,702,000,000')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('2024 Q3')).toBeInTheDocument();
+    expect(screen.getByText('2024 Q1 to 2024 Q4')).toBeInTheDocument();
+  });
+
+  test('shows an annual series by year and counts without decimals', async () => {
+    serve({ NONE: estabLevels });
+    renderPage(ESTAB_ID);
+    await screen.findByTestId('line-chart');
+
+    const rows = within(screen.getByRole('table', { name: 'Recent observations' })).getAllByRole(
+      'row'
+    );
+    expect(within(rows[1]).getByText('2022')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('7,324,017')).toBeInTheDocument();
+    expect(screen.getByText('2019 to 2022')).toBeInTheDocument();
+  });
+
+  test('says the date it shows is when the series was last fetched', async () => {
+    serve();
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    expect(screen.getByText('Last Fetched')).toBeInTheDocument();
+    expect(screen.queryByText('Last Updated')).not.toBeInTheDocument();
+    expect(screen.getByTitle('When EconGraph last fetched this series from FRED')).toHaveTextContent(
+      'Apr 5, 2024'
+    );
+  });
+
+  test('marks an original release in a neutral colour, not the red accent', async () => {
+    serve();
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    const table = screen.getByRole('table', { name: 'Recent observations' });
+    const original = within(table).getByText('Original').closest('.MuiChip-root');
+    expect(original).toHaveClass('MuiChip-colorDefault');
+    expect(original).not.toHaveClass('MuiChip-colorSecondary');
   });
 
   test('asks the backend for the latest revision of each date, untransformed', async () => {

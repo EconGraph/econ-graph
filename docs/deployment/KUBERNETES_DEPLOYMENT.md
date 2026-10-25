@@ -108,7 +108,7 @@ Grafana is not exposed on the public ingress; use port forwarding (below).
 ### Kind Deployment (Alternative)
 
 ```bash
-cd /Users/josephmalicki/src/econ-graph5
+cd econ-graph  # the repository root
 ./scripts/deploy/restart-k8s-rollout.sh
 ```
 
@@ -127,7 +127,7 @@ This script will:
 ### Step 1: Environment Setup
 
 ```bash
-cd /Users/josephmalicki/src/econ-graph5
+cd econ-graph  # the repository root
 export KUBECONFIG=~/.kube/config
 
 # Load port configuration

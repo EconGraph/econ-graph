@@ -4,7 +4,7 @@
 
 The EconGraph frontend is a modern React application built with TypeScript and Material-UI that provides an intuitive interface for exploring economic time series data. It significantly improves upon FRED's user experience with modern design patterns and responsive interactions.
 
-## ✅ Completed Features
+## Features
 
 ### 🎨 Modern UI Components
 - **Material-UI Design System**: Consistent, professional styling with custom theme

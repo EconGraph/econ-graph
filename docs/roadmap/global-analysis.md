@@ -1,8 +1,8 @@
 # Roadmap: global analysis (world map and cross-country data)
 
-Status: proposed (2026-09-26). Replaces the plan in
+This roadmap replaces the plan in
 [GLOBAL_ANALYSIS_ROADMAP.md](../development/GLOBAL_ANALYSIS_ROADMAP.md) and the UI plans
-that copy it. Reviews open PR #154.
+that copy it, and reviews PR #154.
 
 ## Goal
 
@@ -13,9 +13,9 @@ comes from a crawled source. Nothing on the page is sample data.
 The older plan aimed for "Bloomberg Terminal-level" analysis in 16 weekly phases: news-fed
 events, machine-learning impact prediction, real-time updates, collaboration, a REST API,
 Redis and a mobile mode. This roadmap drops most of that (see [Not planned](#not-planned)).
-None of it is useful before the map shows real data, and today it shows none.
+None of it is useful before the map shows real data, and before train 1 it showed none.
 
-## Where things stand today (main at `140fadf`)
+## Where things stood before train 1 (main at `140fadf`)
 
 | Area | State |
 |---|---|
@@ -60,7 +60,7 @@ Assessment:
 
 ## Decisions
 
-Each decision lists the options and a recommendation. Joe decides.
+Each decision lists the options and a recommendation.
 
 ### 1. Where cross-country data lives
 
@@ -90,14 +90,14 @@ the storage work in federation phases 3 to 5. The observations go wherever
 ### 2. Country reference data
 
 The map needs ISO 3166 alpha-2, alpha-3 and numeric codes (the world outline is keyed by
-numeric code), a name, a region and an income group. Today it is 20 rows in a migration.
+numeric code), a name, a region and an income group. Before train 1 it was 20 rows in a migration.
 
 Recommendation: a shared reference data file (`countries.csv` in `econ-graph-core`'s data
 directory, added by MAP-2, #205) loaded at runtime, like the state list from PR #175. It is built from ISO 3166
 and carries codes and ISO names only, plus the keys of the World Bank aggregates we crawl ("World", "Euro area",
 "High income" and so on). The aggregates' names are the World Bank's: the World Bank crawl fetches its country
 list (`/v2/country`) and stores them as the `wdi` dataset's own labels for its `area` dimension (ECO-398).
-World Bank regions and income groups are in that same list but not stored yet (ECO-399).
+World Bank regions and income groups are in that same list but not stored (ECO-399).
 Aggregates are valid series but never map cells.
 
 The file is the one place any source's area code is resolved, so it is shared with the
@@ -139,7 +139,7 @@ legend says so.
 
 ### 4. Correlations
 
-Today's design precomputes a correlation for every pair of countries per indicator
+The original design precomputes a correlation for every pair of countries per indicator
 category and stores it. Apart from being mocked, that has two problems:
 
 - **Correlating levels is misleading.** Most macro series trend, so almost any two
@@ -222,7 +222,7 @@ Each numbered item is one small PR, stacked where it depends on the one before.
    (the `countries` codelist, keyed by the reference file's `key`); measure `value`;
    attributes `obs_status`, `decimal`. Vintages wait for train 3.
 5. **`crossSection` query** with `latest`, and tests on a seeded dataset. The filter pins
-   every dimension other than `across`. `asOf` follows once the SQL `asOf` work (#184) merges.
+   every dimension other than `across`, plus `asOf` (on the SQL `asOf` work, #184).
    Indicator names and units come from the datasets GraphQL API (`DatasetDimension.codes`).
    `GlobalAnalysisQuery` stays unregistered and goes with the legacy tables in phase 9.
 6. **Map on real data.** Point the map at `crossSection`; bundle `world-atlas`; delete
@@ -242,23 +242,22 @@ Each numbered item is one small PR, stacked where it depends on the one before.
 11. **Later.** US state maps for Census BDS (PR #175) on the same `crossSection` query
     with a US states outline; IMF WEO; trade (decision 6); a correlation network.
 
-Phases 1 and 2 can start now. Phase 4 onward depends on phase 3.
+Phase 4 onward depends on phase 3.
 
 ## Release 1 (train 1)
 
 Train 1 ([releases.md](./releases.md)) ships phases 1, 2, 5 and 6, with phase 3 and 4 from
-the datasets and data areas. The PR map with branches and dependencies is kept in the
-project's release-1 notes; this table is updated as the PRs move.
+the datasets and data areas. Progress is tracked in Linear.
 
-| Id | Phase | PR | Depends on | State |
-|---|---|---|---|---|
-| MAP-1 | 1: delete the fake correlations | #216 | none | In review |
-| MAP-2 | 2: country reference file (`econ_graph_core::reference`) | #205 | none | In review |
-| MAP-3 | 6: bundle `world-atlas` 2.x | #202 | none | In review |
-| MAP-4 | 5: `crossSection` query | #239 | MAP-2, datasets table (#220) | Draft |
-| MAP-5 | 6: compile out the other tabs | not open yet | build flags (#215) | Not started |
-| MAP-6 | 6: map on real data, close #154 | not open yet | MAP-3, MAP-4, MAP-5, datasets GraphQL | Not started |
-| MAP-7 | release spec: the map shows a value for every seeded country | not open yet | MAP-6, WDI fixture | Not started |
+| Id | Phase | PR | Depends on |
+|---|---|---|---|
+| MAP-1 | 1: delete the fake correlations | #216 | none |
+| MAP-2 | 2: country reference file (`econ_graph_core::reference`) | #205 | none |
+| MAP-3 | 6: bundle `world-atlas` 2.x | #202 | none |
+| MAP-4 | 5: `crossSection` query | #239 | MAP-2, datasets table (#220) |
+| MAP-5 | 6: compile out the other tabs | | build flags (#215) |
+| MAP-6 | 6: map on real data, port #154's tests | | MAP-3, MAP-4, MAP-5, datasets GraphQL |
+| MAP-7 | release spec: the map shows a value for every seeded country | | MAP-6, WDI fixture |
 
 The datasets GraphQL API and the crawler's codelist resolution also read the countries file
 through MAP-2's loader, so its `key` column stays stable.
@@ -275,10 +274,8 @@ through MAP-2's loader, so its `key` column stays stable.
 - **A mobile-specific version.** The map should stay usable on a phone, but not as its own
   project.
 
-## Open questions
+## Decisions for release 1
 
-1. Keep global events at all (decision 5, option B), or drop them (option C)? Not needed
-   before train 3.
-
-Settled for release 1 (2026-09-26): PR #154 is closed once MAP-6 ports its tests; the
-`datasets` metadata lands in train 1; the data area picks the curated WDI indicators.
+PR #154 is closed without merging, and MAP-6 ports its useful tests; the `datasets` metadata
+is in train 1; the data area picks the curated WDI indicators. Whether to keep global events
+at all (decision 5, option B, or option C) is decided before train 3.
