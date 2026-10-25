@@ -8,7 +8,7 @@
 #   <database> is econ_graph or keycloak (see BACKUP_DATABASES in lib.sh).
 #   --dry-run checks the dump (pg_restore --list) and the pod, prints the
 #   plan and changes nothing. Without it you are asked to type the
-#   database name; --yes skips that.
+#   database name on a terminal (refused without one); --yes skips that.
 #
 # Scale the backend, crawler and (for keycloak) Keycloak to 0 first: a live
 # connection holding a lock stalls --clean, and a crawler writing mid-restore
@@ -106,6 +106,8 @@ fi
 echo "About to OVERWRITE database ${db} in pod ${pod} (${K8S_NAMESPACE}) from ${file}."
 report_extra_relations
 if (( ! yes )); then
+    # Typed on a terminal only: a piped answer must not start a --clean restore.
+    [[ -t 0 ]] || die "no terminal to confirm on; refusing (pass --yes only if you mean it)"
     read -r -p "Type the database name to proceed: " answer
     [[ "${answer}" == "${db}" ]] || die "aborted"
 fi
