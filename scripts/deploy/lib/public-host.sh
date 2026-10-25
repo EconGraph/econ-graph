@@ -23,17 +23,32 @@ PUBLIC_HOST_LABEL="econgraph.io/public-host"
 # makes ingress-nginx take the scheme, host and port from client headers).
 INGRESS_NGINX_PUBLIC_KEYS=(enable-real-ip forwarded-for-header proxy-real-ip-cidr use-forwarded-headers)
 
-# The host the cluster serves now (from the public Ingresses), or nothing.
+# The public host the cluster serves now, from the public Ingresses or the
+# retired econ-graph-ssl-ingress, or nothing (also when the namespace does not
+# exist yet). Fails when the cluster cannot be asked: an error must not look
+# like "no public host" and lead to the public routes being removed.
 public_host_in_cluster() {
-    kubectl -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
-        -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || true
+    local ns hosts
+    ns="$(kubectl get namespace econ-graph --ignore-not-found -o name)" || return 1
+    [ -n "$ns" ] || return 0
+    hosts="$(kubectl -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
+        -o jsonpath='{range .items[*]}{.spec.rules[0].host}{"\n"}{end}')" || return 1
+    if [ -z "$hosts" ]; then
+        hosts="$(kubectl -n econ-graph get ingress econ-graph-ssl-ingress --ignore-not-found \
+            -o jsonpath='{range .spec.rules[*]}{.host}{"\n"}{end}')" || return 1
+    fi
+    printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
 }
 
-# Decide PUBLIC_HOST (see above) and validate it. Exits on a bad name, or when
-# it is unset while the cluster serves a public host.
+# Decide PUBLIC_HOST (see above) and validate it. Exits on a bad name, when the
+# cluster cannot be asked, or when it is unset while the cluster serves a
+# public host.
 public_host_init() {
     local current
-    current="$(public_host_in_cluster)"
+    if ! current="$(public_host_in_cluster)"; then
+        echo "❌ Could not read the cluster's Ingresses to see which public host it serves"
+        exit 1
+    fi
     if [ -z "${PUBLIC_HOST+x}" ] && [ -n "$current" ]; then
         echo "❌ The cluster serves https://${current}, but PUBLIC_HOST is not set."
         echo "   Rerun with PUBLIC_HOST=${current} to keep it, or PUBLIC_HOST= to serve localhost only."

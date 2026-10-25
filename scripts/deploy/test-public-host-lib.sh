@@ -3,7 +3,8 @@
 # expanded there, not here.
 # shellcheck disable=SC2329,SC2016
 # Tests for scripts/deploy/lib/public-host.sh against a stub kubectl, no cluster:
-#   - PUBLIC_HOST unset on a cluster that serves a public host stops the deploy;
+#   - PUBLIC_HOST unset on a cluster that serves a public host (public Ingresses, or the
+#     retired econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
 #   - a public host sets only the real-ip settings in the ingress-nginx ConfigMap and
 #     removes use-forwarded-headers; no public host removes all of them again and
 #     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way,
@@ -32,7 +33,11 @@ run_lib() {
     kubectl() {
       echo "kubectl $*" >>"$log"
       case "$*" in
+        *"get namespace econ-graph"*)
+          [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || return 1
+          [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
         *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
+        *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
         *"get nodes"*) printf '10.244.0.0/24 10.244.1.0/24' ;;
         *"get secret cloudflare-tunnel"*) [ "${STUB_SECRET:-0}" = 1 ] ;;
         *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] ;;
@@ -50,6 +55,17 @@ run_lib() {
 if (unset PUBLIC_HOST; STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a public cluster did not stop"
 fi
+# Unset on a legacy cluster whose retired econ-graph-ssl-ingress serves the public host: stop.
+if (unset PUBLIC_HOST; STUB_SSL_HOSTS=$'www.econgraph.com\necongraph.com' run_lib public_host_init); then
+  fail "PUBLIC_HOST unset on a cluster with econ-graph-ssl-ingress did not stop"
+fi
+# The cluster cannot be asked: stop, even with PUBLIC_HOST set to empty.
+if PUBLIC_HOST='' STUB_LOOKUP_FAILS=1 run_lib public_host_init; then
+  fail "a failed Ingress lookup did not stop"
+fi
+# A new cluster without the namespace: localhost only is fine.
+(unset PUBLIC_HOST; STUB_NO_NAMESPACE=1 run_lib 'public_host_init; [ -z "$PUBLIC_HOST" ]') ||
+  fail "a new cluster without the namespace did not mean localhost-only"
 # Unset on a localhost-only cluster: fine, localhost only.
 (unset PUBLIC_HOST; run_lib 'public_host_init; [ -z "$PUBLIC_HOST" ]') ||
   fail "PUBLIC_HOST unset on a localhost cluster did not mean localhost-only"
