@@ -499,7 +499,7 @@ type Dataset {
 	"""
 	dimensions: [DatasetComponent!]!
 	"""
-	Observed values. Every dataset has the single measure `value`.
+	Observed values. Datasets the crawler writes have the single measure `value`.
 	"""
 	measures: [DatasetComponent!]!
 	"""
