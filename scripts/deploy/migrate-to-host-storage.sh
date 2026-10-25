@@ -107,10 +107,20 @@ remember_backup() {
 # marked before anything is restored into it.
 WAS_PRODUCTION="false"
 note_production() {
-    if kind_cluster_is_production; then
-        WAS_PRODUCTION="true"
-        log "The cluster is marked production; the new one will be marked before the restore"
-    fi
+    local rc=0
+    kind_cluster_is_production || rc=$?
+    case "$rc" in
+        0)
+            WAS_PRODUCTION="true"
+            log "The cluster is marked production; the new one will be marked before the restore"
+            ;;
+        1) ;;
+        *)
+            # Unknown is not "not production": the new cluster would then not be
+            # marked, and production's tunnel token would be left out of it.
+            die "could not tell whether kind cluster '${KIND_CLUSTER}' is production: ${CLUSTER_ROLE_REASON}. Nothing was deleted."
+            ;;
+    esac
 }
 
 remember_production() {

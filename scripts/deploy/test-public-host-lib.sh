@@ -91,7 +91,8 @@ case "$*" in
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
-  *"apply"*"-f -"*) sed 's/^/  stdin: /' >>"$STUB_LOG" ;;
+  *"apply"*) [ "${STUB_APPLY_FAILS:-0}" != 1 ] || exit 1
+    case "$*" in *"-f -"*) sed 's/^/  stdin: /' >>"$STUB_LOG" ;; esac ;;
 esac
 exit 0
 STUB
@@ -585,18 +586,32 @@ for marker in none copied fails production; do
   [ ! -s "$path_log" ] || fail "restore_secrets: called another kubectl: $(cat "$path_log")"
 done
 
-# --- deploy.sh --dry-run reaches no cluster --------------------------------------------
+# --- deploy.sh --dry-run writes nothing ------------------------------------------------
 # With the kind kubectl layout above (and the real yq, which deploy.sh needs for more than
 # the replica count), a dry run writes nothing through $KUBECTL, the kind kubectl or the
 # kubectl on PATH, with or without a public host, and reports the production check. It
 # runs from a copy of scripts/deploy and k8s only, so deploy.sh skips the dashboard and
-# monitoring linters (scripts/test-*.sh), which check other things with other tools.
-if command -v yq >/dev/null 2>&1; then
+# monitoring linters (scripts/test-*.sh), which check other things with other tools. In the
+# copy every helper script deploy.sh runs (apply-host-storage.sh, create-secrets.sh, ...)
+# is a stub that only logs, so not even a broken deploy.sh can touch the host from here.
+if ! command -v yq >/dev/null 2>&1; then
+  fail "yq is not installed: the deploy.sh runs below need it (as deploy.sh does)"
+else
   writes_re='(^| )(apply|delete|patch|scale|create|label|annotate|replace|edit|set|cordon|drain|taint)( |$)|rollout restart'
   deploy_root="$stub_dir/deploy-root"
   mkdir -p "$deploy_root/scripts"
   cp -r scripts/deploy "$deploy_root/scripts/"
   cp -r k8s "$deploy_root/"
+  for helper in "$deploy_root"/scripts/deploy/*.sh; do
+    [ "${helper##*/}" = deploy.sh ] && continue
+    printf '#!/usr/bin/env bash
+echo "helper ran: %s $*" >>"$STUB_LOG"
+' "${helper##*/}" >"$helper"
+  done
+  printf '#!/usr/bin/env bash
+echo econ-graph
+' >"$kind_dir/bin/kind"
+  chmod +x "$kind_dir/bin/kind"
   for host in '' econgraph.com; do
     printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
     : >"$log"; rm -f "$log.ctx"
@@ -614,7 +629,106 @@ if command -v yq >/dev/null 2>&1; then
         fail "deploy.sh --dry-run: the production check was not reported"
     fi
   done
+
+  # A stray CLUSTER_ROLE_DRY_RUN=true in the environment does not turn a real deploy into a
+  # half dry run (kc printing while helper scripts run): kc runs for real from the start.
+  # Every apply fails here, so the deploy stops at its first write.
+  printf 'STUB_LOG=%q\nSTUB_MARKER=none\nSTUB_APPLY_FAILS=1\n' "$log" >"$stub_dir/stub.env"
+  : >"$log"; rm -f "$log.ctx"
+  if timeout 120 env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+    PATH="$kind_dir/bin:$PATH" CLUSTER_ROLE_DRY_RUN=true PUBLIC_HOST='' \
+    "$deploy_root/scripts/deploy/deploy.sh" </dev/null >"$out" 2>&1; then
+    fail "deploy.sh with a stray CLUSTER_ROLE_DRY_RUN went on past a failed apply"
+  fi
+  grep -q '\[dry-run\]' "$out" && fail "deploy.sh with a stray CLUSTER_ROLE_DRY_RUN printed instead of running: $(grep -m3 '\[dry-run\]' "$out")"
+  grep -q -- '--context kind-econ-graph -n econ-graph delete ingress econ-graph-ssl-ingress' "$log" ||
+    fail "deploy.sh with a stray CLUSTER_ROLE_DRY_RUN: kc did not run for real"
+  grep -q -- '--context kind-econ-graph apply -f k8s/manifests/namespace.yaml' "$log" ||
+    fail "deploy.sh with a stray CLUSTER_ROLE_DRY_RUN: the first apply did not run"
+  grep -q 'helper ran' "$log" && fail "deploy.sh with a stray CLUSTER_ROLE_DRY_RUN ran helpers after a failed apply"
 fi
+
+# --- a stray CLUSTER_ROLE_DRY_RUN changes nothing outside deploy.sh --dry-run ------------
+# The marker check still asks the cluster: the token stays out of an unmarked cluster...
+printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
+: >"$log"; rm -f "$log.ctx"
+env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" PATH="$kind_dir/bin:$PATH" \
+  CLUSTER_ROLE_DRY_RUN=true bash -c 'source scripts/deploy/lib/kind-env.sh; DRY_RUN=false; restore_secrets "$1"' _ "$backup" >"$out" 2>&1 ||
+  fail "restore_secrets with a stray CLUSTER_ROLE_DRY_RUN failed: $(cat "$out")"
+grep -q "create -f $backup/secrets/cloudflare-tunnel.yaml" "$log" &&
+  fail "restore_secrets with a stray CLUSTER_ROLE_DRY_RUN restored the token into an unmarked cluster"
+# ...kind_cluster_is_production asks for real even inside deploy.sh --dry-run's process...
+: >"$log"; rm -f "$log.ctx"
+if env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" PATH="$kind_dir/bin:$PATH" \
+  bash -c 'source scripts/deploy/lib/kind-env.sh; CLUSTER_ROLE_DRY_RUN=true; kind_cluster_is_production' >"$out" 2>&1; then
+  fail "kind_cluster_is_production called an unmarked cluster production in dry-run mode"
+fi
+# ...mark-production-cluster.sh does not take an unmarked cluster for marked...
+run_stubbed CLUSTER_ROLE_DRY_RUN=true STUB_MARKER=none "$mark" --dry-run || fail "mark with a stray CLUSTER_ROLE_DRY_RUN failed: $(cat "$out")"
+grep -q 'already marked' "$out" && fail "mark with a stray CLUSTER_ROLE_DRY_RUN: took an unmarked cluster for marked"
+grep -q 'would write ConfigMap' "$out" || fail "mark with a stray CLUSTER_ROLE_DRY_RUN: no plan shown: $(cat "$out")"
+# ...and create-secrets.sh still refuses the token there.
+if run_stubbed CLUSTER_ROLE_DRY_RUN=true STUB_MARKER=none CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts/deploy/create-secrets.sh; then
+  fail "create-secrets with a stray CLUSTER_ROLE_DRY_RUN wrote the token into an unmarked cluster"
+fi
+grep -q 'create secret' "$log" && fail "create-secrets with a stray CLUSTER_ROLE_DRY_RUN wrote Secrets"
+
+# --- migrate-to-host-storage.sh: carrying the production marker over -----------------
+# Its helpers, taken out of the script, against stubs: the marker check, the state file and
+# the mark script.
+migrate_src="$(sed -n '/^WAS_PRODUCTION="false"$/,/^recalled_backup() {$/p' scripts/deploy/migrate-to-host-storage.sh | sed '$d')"
+[ -n "$migrate_src" ] || fail "migrate-to-host-storage.sh: the production carry-over helpers were not found"
+mkdir -p "$stub_dir/mig/scripts/deploy"
+printf '#!/usr/bin/env bash
+echo "mark ran" >>%q
+exit "${STUB_MARK_RC:-0}"
+' "$log" >"$stub_dir/mig/scripts/deploy/mark-production-cluster.sh"
+chmod +x "$stub_dir/mig/scripts/deploy/mark-production-cluster.sh"
+# run_migrate SCRIPT [VAR=value ...]: SCRIPT with the helpers, kind_cluster_is_production
+# returning STUB_RC, and a fresh state file.
+run_migrate() {
+  local script="$1"
+  shift
+  : >"$log"; rm -f "$stub_dir/mig/state.env"
+  env "$@" bash -c '
+    log() { echo "==> $*"; }
+    die() { echo "error: $*" >&2; exit 1; }
+    kind_cluster_is_production() { CLUSTER_ROLE_REASON="stub reason"; return "$STUB_RC"; }
+    KIND_CLUSTER=econ-graph PROJECT_ROOT="$MIG_ROOT" STATE_FILE="$MIG_ROOT/state.env" DRY_RUN="${DRY_RUN:-false}"
+    eval "$MIGRATE_SRC"
+    eval "$1"' _ "$script" >"$out" 2>&1
+}
+export MIGRATE_SRC="$migrate_src" MIG_ROOT="$stub_dir/mig"
+run_migrate 'note_production; [ "$WAS_PRODUCTION" = true ]' STUB_RC=0 ||
+  fail "note_production: a production cluster was not noted"
+run_migrate 'note_production; [ "$WAS_PRODUCTION" = false ]' STUB_RC=1 ||
+  fail "note_production: a cluster that is not production was noted as production"
+if run_migrate 'note_production; echo went on' STUB_RC=2; then
+  fail "note_production: went on when the marker could not be read"
+fi
+grep -q 'could not tell whether' "$out" || fail "note_production: the failed lookup was not reported: $(cat "$out")"
+grep -q 'went on' "$out" && fail "note_production: went on after a failed lookup"
+run_migrate 'WAS_PRODUCTION=true; remember_production; cat "$STATE_FILE"' STUB_RC=0 ||
+  fail "remember_production failed: $(cat "$out")"
+grep -qx 'WAS_PRODUCTION=true' "$out" || fail "remember_production: not kept in the state file"
+run_migrate 'WAS_PRODUCTION=true; remember_production; [ ! -s "$STATE_FILE" ]' STUB_RC=0 DRY_RUN=true ||
+  fail "remember_production: wrote the state file in a dry run"
+# mark_if_was_production: marks the new cluster only when the old one was production (also
+# when only the state file says so, on a resumed run) and it is not marked yet.
+run_migrate 'echo WAS_PRODUCTION=true >"$STATE_FILE"; mark_if_was_production' STUB_RC=1 ||
+  fail "mark_if_was_production failed: $(cat "$out")"
+grep -q 'mark ran' "$log" || fail "mark_if_was_production: did not mark the new cluster on a resumed run"
+run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=0 || fail "mark_if_was_production (already marked) failed"
+grep -q 'mark ran' "$log" && fail "mark_if_was_production: marked a cluster that is marked already"
+run_migrate 'mark_if_was_production' STUB_RC=1 || fail "mark_if_was_production (not production) failed"
+grep -q 'mark ran' "$log" && fail "mark_if_was_production: marked although the old cluster was not production"
+if run_migrate 'WAS_PRODUCTION=true; mark_if_was_production; echo went on' STUB_RC=1 STUB_MARK_RC=1; then
+  fail "mark_if_was_production: went on after marking failed"
+fi
+grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore without a marker"
+run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
+grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
+grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached

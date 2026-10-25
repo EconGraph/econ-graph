@@ -111,13 +111,20 @@ ensure_kind_kubectl
 # Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
 # public routes and stop its tunnel connector.
 # In a dry run, kc only prints (CLUSTER_ROLE_DRY_RUN) and kubectl stays the
-# printing stub above: the dry run reaches no cluster through either.
+# printing stub above: neither reaches the cluster in a dry run. The
+# libraries are sourced first: sourcing lib/cluster-role.sh resets
+# CLUSTER_ROLE_DRY_RUN to false, so only --dry-run, below, turns it on, never
+# a value from the environment.
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
-if [ "$DRY_RUN" = true ]; then
-    CLUSTER_ROLE_DRY_RUN=true
-fi
+# Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
+# https://econgraph.com through the cloudflared tunnel; empty serves
+# http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
+# lib/cluster-role.sh), shared with restart-k8s-rollout.sh, for the rules and
+# render_manifest. The frontend image needs no rebuild for it: it resolves its
+# sign-in issuer against the page's origin.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+CLUSTER_ROLE_DRY_RUN="$DRY_RUN"
 if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
     echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
     exit 1
@@ -126,13 +133,6 @@ if [ "$DRY_RUN" != true ]; then
     kubectl() { kc "$@"; }
 fi
 
-# Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
-# https://econgraph.com through the cloudflared tunnel; empty serves
-# http://localhost only. See scripts/deploy/lib/public-host.sh, shared with
-# restart-k8s-rollout.sh, for the rules and render_manifest. The frontend image
-# needs no rebuild for it: it resolves its sign-in issuer against the page's origin.
-# shellcheck source=scripts/deploy/lib/public-host.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 public_host_init
 
 # Apply all manifests

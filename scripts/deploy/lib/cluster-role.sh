@@ -18,14 +18,19 @@
 # pinned on the first check (cluster_role_pin_context), so the check and the
 # write cannot reach different clusters.
 #
-# CLUSTER_ROLE_DRY_RUN=true (set by deploy.sh --dry-run, which contacts no
-# cluster) makes kc print each call instead of running it, reads as well as
-# writes, and makes the production check report that it would run instead of
-# asking the cluster: a dry run never changes a cluster and never decides
-# whether one is production.
+# CLUSTER_ROLE_DRY_RUN=true, set only by deploy.sh --dry-run after sourcing this
+# file (which resets it to false), makes kc print each call instead of running
+# it, reads as well as writes, and makes the production check report that it
+# would run instead of asking the cluster: a dry run never changes a cluster
+# and never decides whether one is production. (deploy.sh --dry-run still runs
+# docker info and kind-env.sh's read-only kubectl version check.)
 
 CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
+# Never taken from the environment: a stray CLUSTER_ROLE_DRY_RUN=true would make
+# kc print instead of run while child scripts run for real, and make every
+# cluster look production. Only deploy.sh --dry-run sets it, after sourcing.
+CLUSTER_ROLE_DRY_RUN=false
 
 # kubectl, as ${KUBECTL:-kubectl}, on the pinned context once there is one.
 # `command` runs the binary even where a script wraps kubectl in a function
