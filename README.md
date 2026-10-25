@@ -365,7 +365,7 @@ This project is licensed under the **Microsoft Reference Source License (MS-RSL)
 - ❌ **Copying**: You may not copy the source code except for viewing purposes
 
 ### **Commercial Licensing**
-For commercial use, enterprise licensing, or any questions about usage rights, please contact: **licensing@econ-graph.com**
+For commercial use, enterprise licensing, or any questions about usage rights, please contact: **support@econgraph.com**
 
 ---
 

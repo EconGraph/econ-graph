@@ -469,9 +469,9 @@ let config = SecurityConfig {
 
 ### Emergency Contacts
 
-- **Security Team**: security@example.com
+- **Security Team**: support@econgraph.com
 - **On-Call Engineer**: +1-555-0123
-- **Management**: management@example.com
+- **Management**: support@econgraph.com
 
 ## Best Practices
 
@@ -550,4 +550,4 @@ This security guide provides comprehensive coverage of GraphQL API security for 
 
 Remember that security is an ongoing process, not a one-time implementation. Regular monitoring, updates, and improvements are essential to maintaining a secure system.
 
-For questions or concerns about security, please contact the security team at security@example.com.
+For questions or concerns about security, please contact the security team at support@econgraph.com.

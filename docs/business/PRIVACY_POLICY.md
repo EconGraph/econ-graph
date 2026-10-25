@@ -219,7 +219,7 @@ In the event of a data breach that may affect your personal information, we will
 
 ### 7.5 How to Exercise Your Rights
 
-Contact us at privacy@econ-graph.com with:
+Contact us at support@econgraph.com with:
 - Your request type
 - Verification of your identity
 - Specific information about your request
@@ -329,7 +329,7 @@ Your continued use of our Service after changes become effective constitutes acc
 
 For questions about this Privacy Policy or our data practices:
 
-**Email:** privacy@econ-graph.com  
+**Email:** support@econgraph.com  
 **Address:** EconGraph Privacy Team  
 **Response Time:** Within 30 days
 
@@ -337,7 +337,7 @@ For questions about this Privacy Policy or our data practices:
 
 For EU users and complex privacy matters:
 
-**Email:** dpo@econ-graph.com  
+**Email:** support@econgraph.com  
 **Response Time:** Within 72 hours for urgent matters
 
 ### 15.3 Regulatory Complaints
@@ -348,7 +348,7 @@ You have the right to lodge a complaint with your local data protection authorit
 
 **Company:** EconGraph  
 **Website:** https://econ-graph.com  
-**Email:** contact@econ-graph.com
+**Email:** support@econgraph.com
 
 ---
 
