@@ -4,10 +4,10 @@ The comprehensive backend system for the EconGraph economic data platform, provi
 
 ## Architecture Overview
 
-The EconGraph backend is built as a modular Rust workspace with 9 specialized crates, each serving a specific domain within the economic data ecosystem:
+The EconGraph backend is built as a modular Rust workspace with 11 specialized crates, each serving a specific domain within the economic data ecosystem:
 
 ```
-econ-graph-backend/
+backend/crates/
 ├── econ-graph-core/          # Core data models and database schema
 ├── econ-graph-auth/          # Authentication and authorization
 ├── econ-graph-metrics/       # Metrics collection and monitoring
@@ -17,7 +17,8 @@ econ-graph-backend/
 ├── econ-graph-crawler-worker/ # Deployed `crawler-worker` binary (worker + SEC handler)
 ├── econ-graph-sec-crawler/   # SEC EDGAR XBRL financial data crawling
 ├── econ-graph-mcp/           # Model Context Protocol for AI integration
-└── econ-graph-backend/       # Main application server and orchestration
+├── econ-graph-backend/       # Main application server and orchestration
+└── econ-graph-flags-build/   # Compile-time feature flag support
 ```
 
 ## Core Components
@@ -81,7 +82,8 @@ All data collection goes through the Postgres `crawl_queue`: jobs are enqueued (
 - Queue worker with retry/fail by error kind and per-source pause
 - `crawler discover|enqueue|status|sources|fetch` operator CLI
 
-See `crates/econ-graph-crawler/README.md` and `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`.
+See the [crawler README](crates/econ-graph-crawler/README.md) and
+[crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md).
 
 ### **econ-graph-sec-crawler**
 Specialized SEC EDGAR XBRL crawler for financial data acquisition with advanced parsing and analysis capabilities.
@@ -115,31 +117,22 @@ Main backend application providing server infrastructure, metrics collection, an
 
 ## Development Workflow
 
-### **Getting Started**
+### **Local database and server**
+
+Run these commands from the repository root. Docker must be running.
 
 ```bash
-# Install dependencies
-cargo build
+docker run -d --name econ-graph-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=econ_graph \
+  -p 127.0.0.1:5432:5432 postgres:18
 
-# Run tests
-cargo test
+# Wait until this reports "accepting connections" before starting the server.
+docker exec econ-graph-db pg_isready -U postgres -d econ_graph
 
-# Run specific crate tests
-cargo test -p econ-graph-core
-cargo test -p econ-graph-services
-
-# Run integration tests
-cargo test --test integration
-```
-
-### **Database Setup**
-
-```bash
-# Start PostgreSQL (using Docker)
-docker run -d --name econ-graph-db -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:18
-
-# Run migrations
 cd backend
+export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
 cargo run --bin econ-graph-backend -- --migrate
 
 # Or use diesel CLI on a new database: the data set, then the app set
@@ -151,19 +144,62 @@ On a database built by the single v4.0.0 baseline, start the backend instead
 of using the diesel CLI: the backend records the app baseline there, while the CLI stops at its
 guard.
 
-### **Environment Configuration**
+Start the server with `cargo run -p econ-graph-backend --bin econ-graph-backend`. It listens on port
+**9876** unless `BACKEND_PORT` overrides it. Verify startup with
+`curl --fail "http://localhost:${BACKEND_PORT:-9876}/health"`. The database is initially empty;
+see the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
+for data loading.
+
+For the public frontend, open a second terminal at the repository root:
 
 ```bash
-# Copy environment template
-cp .env.example .env
+cd frontend
+npm ci
+BACKEND_URL=http://localhost:9876 npm run dev
+```
 
-# Configure database connection
-DATABASE_URL=postgresql://username:password@localhost/econ_graph
+Vite serves the frontend at `http://localhost:3000`. Its explicit `BACKEND_URL`
+override aligns the proxy with the backend's default port.
 
-# Configure authentication: the backend verifies Keycloak access tokens, it doesn't issue its own
-OIDC_ISSUER=http://localhost/idp/realms/econ-graph
-OIDC_AUDIENCE=econ-graph-api
-OIDC_JWKS_URL=http://localhost/idp/realms/econ-graph/protocol/openid-connect/certs
+### **Environment Configuration**
+
+The backend reads exported variables and optionally loads a `.env` file.
+There is no checked-in `.env.example`; the exported `DATABASE_URL` above is sufficient
+for the local anonymous server.
+
+To enable sign-in, start the repository's development Keycloak realm using the
+[Keycloak local-stack instructions](../config/keycloak/README.md#local-stack), or
+configure another reachable realm and API audience. Then export these settings
+before starting the backend:
+
+```bash
+export OIDC_ISSUER=http://localhost:8081/realms/econ-graph
+export OIDC_AUDIENCE=econ-graph-api
+export OIDC_JWKS_URL=http://localhost:8081/realms/econ-graph/protocol/openid-connect/certs
+```
+
+These URLs are example identity-provider settings, not a Keycloak installation.
+The backend verifies provider access tokens and does not issue its own.
+With `OIDC_ISSUER` unset, callers are anonymous and protected operations remain
+unavailable.
+
+### **Build and test**
+
+Run from `backend/` with the `econ-graph-db` container above running and Docker
+available. Create a separate, disposable test database once. Database-backed tests
+**drop and recreate its public schema**, so never point them at application data.
+The subshell below keeps the application's exported `DATABASE_URL` unchanged.
+
+```bash
+cargo build --workspace
+# One-time creation; skip this command if econ_graph_test already exists.
+docker exec econ-graph-db createdb -U postgres econ_graph_test
+(
+  export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test
+  cargo test --workspace
+  cargo test -p econ-graph-core
+  cargo test -p econ-graph-services
+)
 ```
 
 ## Testing Strategy
@@ -188,36 +224,28 @@ The backend employs a comprehensive testing strategy across all crates:
 ### **GraphQL API**
 The primary API is exposed through GraphQL with comprehensive schema documentation:
 
-```graphql
-# Query economic data
-query GetEconomicSeries($symbol: String!) {
-  economicSeries(symbol: $symbol) {
-    id
-    name
-    dataPoints {
-      date
-      value
-    }
-  }
-}
+Enable the explorer with `ENABLE_GRAPHQL_PLAYGROUND=true` when starting the server,
+then visit `http://localhost:9876/playground` to inspect the current schema.
 
-# Search for companies
-query SearchCompanies($query: String!) {
-  searchCompanies(query: $query) {
-    id
-    name
-    ticker
-  }
+A minimal connectivity query:
+
+```graphql
+query {
+  __typename
 }
 ```
+
+See the [GraphQL API reference](../docs/api/GRAPHQL_API.md) for data queries.
 
 ### **REST Endpoints**
 Additional REST endpoints for specific functionality:
 
 - `GET /health` - System health check
 - `GET /metrics` - Prometheus metrics
-- `POST /auth/login` - User authentication
-- `GET /api/v1/series` - Economic data series
+- `GET /playground` - GraphQL explorer, only when `ENABLE_GRAPHQL_PLAYGROUND=true`
+
+Economic series queries use `POST /graphql`; authentication uses identity-provider
+access tokens. This server does not expose `/auth/login` or `/api/v1/series`.
 
 ## Monitoring and Observability
 
@@ -254,30 +282,39 @@ Additional REST endpoints for specific functionality:
 ## Deployment and Operations
 
 ### **Docker Support**
+Run the image build from `backend/`:
+
 ```bash
 # Build backend image
 docker build -t econ-graph-backend .
-
-# Run with Docker Compose
-docker-compose up -d
 ```
+
+For a local server and frontend, use the [development workflow](#development-workflow).
+The repository's `docker-compose.yml` maps and health-checks the backend on port
+8000, and the backend listens on `BACKEND_PORT` (9876 by default), so its `backend` and
+`frontend` services do not run a working stack. Starting only its Keycloak service,
+as documented above, does not start a backend.
 
 ### **Kubernetes Deployment**
 ```bash
-# Deploy to Kubernetes
-kubectl apply -f k8s/manifests/
+# Deploy to Kubernetes (from backend/)
+kubectl apply -f ../k8s/manifests/
 
 # Monitor deployment
-kubectl get pods -l app=econ-graph-backend
+kubectl get pods -n econ-graph -l app=econ-graph-backend
 ```
 
 ### **Database Migrations**
-```bash
-# Run migrations
-cargo run --bin econ-graph-backend -- --migrate
 
-# Rollback migrations
-diesel migration redo
+From `backend/`, with `DATABASE_URL` exported as above. Normal server startup applies
+pending migrations automatically; there is no `--migrate` server mode.
+
+```bash
+# Apply pending migrations without starting the server (requires diesel CLI)
+diesel migration run
+
+# Undo the latest migration (destructive; use only on disposable development data)
+diesel migration revert
 ```
 
 ## Contributing

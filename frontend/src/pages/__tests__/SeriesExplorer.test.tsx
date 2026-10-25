@@ -1132,6 +1132,124 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       URL.revokeObjectURL = originalRevokeObjectURL;
     }
   });
+
+  test.each(['csv', 'json'])(
+    'exports the source and its series id with each result as %s (ECO-417)',
+    async format => {
+      const originalCreateObjectURL = URL.createObjectURL;
+      const originalRevokeObjectURL = URL.revokeObjectURL;
+      let blobText = '';
+      URL.createObjectURL = vi.fn((blob: Blob) => {
+        void blob.text().then(text => {
+          blobText = text;
+        });
+        return 'blob:mock';
+      });
+      URL.revokeObjectURL = vi.fn();
+      try {
+        searchHook.mockImplementation(() =>
+          searchReturning([
+            {
+              id: 'wb-uuid',
+              externalId: 'NY.GDP.PCAP.CD',
+              title: 'GDP per capita (current US$)',
+              description: '',
+              sourceId: 'wb',
+              source: { name: 'World Bank' },
+              frequency: 'Annual',
+              units: 'current US$',
+            },
+          ])
+        );
+        const user = userEvent.setup();
+        renderSeriesExplorer();
+        await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
+        await screen.findByText('GDP per capita (current US$)');
+
+        await user.click(screen.getByRole('button', { name: /export results/i }));
+        await user.click(
+          await screen.findByRole('menuitem', { name: new RegExp(`export as ${format}`, 'i') })
+        );
+
+        await waitFor(() => expect(blobText).not.toBe(''));
+        if (format === 'csv') {
+          const [header, row] = blobText.split('\r\n');
+          expect(header.split(',').slice(0, 2)).toEqual(['source', 'externalId']);
+          expect(row.startsWith('World Bank,NY.GDP.PCAP.CD,')).toBe(true);
+          expect(header).toContain('frequency,units');
+          expect(row).toContain('Annual,current US$');
+        } else {
+          expect(JSON.parse(blobText)[0]).toMatchObject({
+            source: 'World Bank',
+            externalId: 'NY.GDP.PCAP.CD',
+            frequency: 'Annual',
+            units: 'current US$',
+            id: 'wb-uuid',
+          });
+        }
+      } finally {
+        URL.createObjectURL = originalCreateObjectURL;
+        URL.revokeObjectURL = originalRevokeObjectURL;
+      }
+    }
+  );
+
+  test.each(['csv', 'json'])(
+    'exports missing description, units and source as empty in %s, never made up',
+    async format => {
+      const originalCreateObjectURL = URL.createObjectURL;
+      const originalRevokeObjectURL = URL.revokeObjectURL;
+      let blobText = '';
+      URL.createObjectURL = vi.fn((blob: Blob) => {
+        void blob.text().then(text => {
+          blobText = text;
+        });
+        return 'blob:mock';
+      });
+      URL.revokeObjectURL = vi.fn();
+      try {
+        searchHook.mockImplementation(() =>
+          searchReturning([
+            {
+              id: 'bare-uuid',
+              externalId: 'BARE',
+              title: 'Bare series',
+              description: '',
+              sourceId: 'not-a-listed-source',
+              frequency: 'Monthly',
+            },
+          ])
+        );
+        const user = userEvent.setup();
+        renderSeriesExplorer();
+        await user.type(screen.getByPlaceholderText(/search economic series/i), 'bare');
+        await screen.findByText('Bare series');
+        expect(screen.queryByText('Unknown Source')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /export results/i }));
+        await user.click(
+          await screen.findByRole('menuitem', { name: new RegExp(`export as ${format}`, 'i') })
+        );
+
+        await waitFor(() => expect(blobText).not.toBe(''));
+        if (format === 'csv') {
+          const [, row] = blobText.split('\r\n');
+          expect(row).toBe(',BARE,Bare series,,Monthly,,,,,bare-uuid');
+        } else {
+          expect(JSON.parse(blobText)[0]).toMatchObject({
+            source: null,
+            externalId: 'BARE',
+            description: null,
+            units: null,
+            id: 'bare-uuid',
+          });
+        }
+      } finally {
+        URL.createObjectURL = originalCreateObjectURL;
+        URL.revokeObjectURL = originalRevokeObjectURL;
+      }
+    }
+  );
 });
 
 describe('resolveSourceId', () => {

@@ -39,8 +39,15 @@ crawler sources                                                        # sources
 crawler fetch    --source FRED --series GDP [--full]                   # one fetch now, bypassing the queue
 ```
 
-From the repo: `cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
+Run from `backend/` (use `cd backend` from the repository root):
+`cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
+
+Before queue commands or worker startup, apply migrations by starting the backend with
+`DATABASE_URL`, as shown in the [local setup](../../README.md#development-workflow), and export
+`DATA_DATABASE_URL` naming the same database.
+The worker does not apply migrations. Export the relevant provider API keys in the
+worker's environment as well as in the CLI's environment for direct `fetch` calls.
 
 ## Development-only static catalogs
 

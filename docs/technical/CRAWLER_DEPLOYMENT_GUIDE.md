@@ -28,14 +28,21 @@ crawler sources                                      # known sources, policies, 
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
 ```
 
-From a checkout: `cargo run -p econ-graph-crawler --bin crawler -- <command>`.
+From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
+root): `cargo run -p econ-graph-crawler --bin crawler -- <command>`. First start the backend
+once with `DATABASE_URL` to apply migrations, following the
+[local setup](../../backend/README.md#development-workflow), and export `DATA_DATABASE_URL`
+naming the same database for the CLI and worker. Export any required
+provider API keys in the worker's environment and in the CLI's environment for
+direct `fetch` calls.
 
 An item is enqueued only if no active (pending / processing / retrying) item exists for the
 same `(source, series_id, kind)`.
 
 ## Run the worker
 
-Locally: `DATA_DATABASE_URL=... cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
+Locally, from `backend/` with `DATA_DATABASE_URL` and provider API keys exported:
+`cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
 
 Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `econ-graph-crawler-worker:<version>` built from `backend/Dockerfile --target crawler-worker`).
