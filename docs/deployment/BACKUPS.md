@@ -548,9 +548,11 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    (never touching `@home` or its snapshots; it lists them so you can see
    they are left alone), adds its `/etc/fstab` line
    (`UUID=a1e61098-... /srv/econgraph-backups btrfs subvol=/@econgraph-backups,compress=zstd:3,ssd,discard=async,space_cache=v2,noatime,nofail,x-systemd.device-timeout=30s 0 0`;
-   `nofail` so a missing disk never blocks boot), mounts it, chowns the
-   subvolume root to jmalicki, and creates `snapshots/` (root, 0700) and
-   `dumps/` (jmalicki). `scripts/host/inspect-sata-pool.sh` (same branch as
+   `nofail` so a missing disk never blocks boot), mounts it, keeps the
+   subvolume root root-owned (0755), and creates `snapshots/` (root, 0700)
+   and `dumps/` (jmalicki, 0700), resetting their owner and mode on a
+   rerun. It refuses an existing `/etc/fstab` entry or mount at
+   `/srv/econgraph-backups` that is not this pool's `@econgraph-backups`. `scripts/host/inspect-sata-pool.sh` (same branch as
    step 1) shows the pool read-only beforehand. From the next hourly run on,
    every snapshot is copied there, and the nightly dumps go to
    `/srv/econgraph-backups/dumps`, with nothing else to change.
