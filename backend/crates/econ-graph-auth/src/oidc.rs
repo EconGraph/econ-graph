@@ -1017,6 +1017,42 @@ mod verify_tests {
         verifier.verify(&token).await.unwrap();
     }
 
+    /// Production behind the Cloudflare Tunnel (ECO-457): tokens name the public https issuer,
+    /// which the API never fetches (it is reached through Cloudflare); the keys come from the
+    /// in-cluster Keycloak Service. Tokens naming any other issuer, the in-cluster URL
+    /// included, are refused.
+    #[tokio::test]
+    async fn a_public_issuer_is_checked_while_keys_come_from_the_cluster() {
+        let in_cluster = TestIssuer::start().await;
+        let public_issuer = "https://econgraph.com/idp/realms/econ-graph";
+        let verifier = OidcVerifier::with_client(
+            OidcConfig {
+                issuer: public_issuer.to_string(),
+                jwks_url: Some(format!(
+                    "{}/protocol/openid-connect/certs",
+                    in_cluster.issuer()
+                )),
+                ..in_cluster.config()
+            },
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        );
+
+        let mut claims = in_cluster.claims(Uuid::new_v4(), &[]);
+        claims["iss"] = json!(public_issuer);
+        verifier.verify(&in_cluster.sign(&claims)).await.unwrap();
+
+        for other in [
+            in_cluster.issuer(),
+            "http://econgraph.com/idp/realms/econ-graph",
+        ] {
+            claims["iss"] = json!(other);
+            assert!(
+                verifier.verify(&in_cluster.sign(&claims)).await.is_err(),
+                "a token from {other} was accepted"
+            );
+        }
+    }
+
     #[test]
     fn encryption_and_non_rsa_keys_are_not_signing_keys() {
         let sig = SigningKey::generate("sig");
