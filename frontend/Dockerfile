@@ -40,7 +40,7 @@ ENV FLAGS_PROFILE=$FLAGS_PROFILE
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:1.30-alpine
 
 # Copy built application from builder stage (Vite outputs to dist)
 COPY --from=builder /app/dist /usr/share/nginx/html

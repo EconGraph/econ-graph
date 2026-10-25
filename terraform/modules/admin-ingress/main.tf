@@ -367,7 +367,7 @@ resource "kubernetes_deployment" "admin_error_pages" {
       spec {
         container {
           name  = "error-pages"
-          image = "nginx:alpine"
+          image = "nginx:1.30-alpine"
 
           port {
             container_port = 80
