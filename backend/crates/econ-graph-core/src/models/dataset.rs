@@ -26,7 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::reference::Area;
 use crate::schema::datasets;
 
-/// Name of the single measure every dataset has.
+/// Name of the single measure of every dataset the crawler writes.
 pub const VALUE_MEASURE: &str = "value";
 
 /// Shared code list of countries and areas (ISO 3166 alpha-3 plus World Bank aggregate codes).

@@ -251,7 +251,7 @@ impl DatasetType {
         components(&self.0.dimensions.0)
     }
 
-    /// Observed values. Every dataset has the single measure `value`.
+    /// Observed values. Datasets the crawler writes have the single measure `value`.
     async fn measures(&self) -> Vec<DatasetComponentType> {
         components(&self.0.measures.0)
     }
