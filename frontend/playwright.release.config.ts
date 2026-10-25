@@ -34,8 +34,9 @@ const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/debug/e
 // RELEASE_FRONTEND_PORT (default 18081) from that same compose file, so it tracks frontendPort.
 // OIDC_ISSUER (env.ts) is that realm in fixture mode.
 
-// Deliberately not DATABASE_URL, which often points at a dev database: the backend migrates
-// whatever database it is given. Deployed mode has no local backend, so needs none.
+// Deliberately not APP_DATABASE_URL or DATA_DATABASE_URL, which often point at a dev database:
+// the backend migrates the app database it is given. The one release E2E database is both the
+// app and the data database. Deployed mode has no local backend, so needs none.
 const databaseUrl = process.env.RELEASE_E2E_DATABASE_URL;
 if (!DEPLOYED && !databaseUrl) {
   throw new Error(
@@ -54,7 +55,9 @@ const webServer: PlaywrightTestConfig['webServer'] = [
     timeout: 60 * 1000,
     stdout: 'pipe',
     env: {
-      DATABASE_URL: databaseUrl ?? '', // set: checked above whenever this runs
+      // Set: checked above whenever this runs.
+      APP_DATABASE_URL: databaseUrl ?? '',
+      DATA_DATABASE_URL: databaseUrl ?? '',
       BACKEND_PORT: String(backendPort),
       CORS_ALLOWED_ORIGINS: frontendUrl,
       // The dev realm from docker-compose.release-e2e.yml's keycloak service.

@@ -271,10 +271,14 @@ The application is configured via ConfigMap and Secrets:
 
 PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
 `econgraph` user. `create-secrets.sh` builds the URL and stores it in the `econ-graph-secrets`
-Secret as `app-database-url`, `data-database-url` and `database-url`, since the app and data
-databases are one database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend gets
-`APP_DATABASE_URL` and `DATA_DATABASE_URL`, and connects through `DATABASE_URL`, set from
-`app-database-url`. That one database holds both migration sets, data and app
+Secret as `app-database-url` and `data-database-url`, since the app and data databases are one
+database here. The crawler-worker reads `DATA_DATABASE_URL`; the backend reads
+`APP_DATABASE_URL` and `DATA_DATABASE_URL`. No binary reads `DATABASE_URL`; the Secret's
+`database-url` key, the same URL, is still written for manifests of earlier versions, which read
+it.
+
+That one database holds both migration sets, data and app. The backend applies the app set when
+it starts and never the data set
 ([database migrations](../docs/development/MIGRATIONS.md)).
 
 ### Migrations

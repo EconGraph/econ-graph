@@ -581,7 +581,9 @@ jobs:
         sleep 15
         curl -f http://localhost:9877/health || exit 1
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
+        # The test database holds both migration sets: it is the app and the data database.
+        APP_DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
+        DATA_DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         BACKEND_PORT: 9877
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
 
@@ -2031,7 +2033,8 @@ jobs:
         echo "Testing backend Docker image..."
         docker run -d --name backend-smoke-test \
           --network host \
-          -e DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
+          -e APP_DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
+          -e DATA_DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
           -e BACKEND_PORT=19876 \
           -e JWT_SECRET=ci-only-jwt-secret \
           econ-graph-backend:test

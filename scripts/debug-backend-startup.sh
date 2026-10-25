@@ -73,11 +73,14 @@ echo "  - Binary path: ./backend/econ-graph-backend"
 # Start the backend container
 echo "🚀 Starting backend container..."
 echo "  - Using host networking (no port publishing)"
-# Ensure DATABASE_URL targets localhost since we are sharing the host network namespace
+# Ensure DATABASE_URL targets localhost since we are sharing the host network namespace.
+# DATABASE_URL names the CI test database, which holds both migration sets, so the backend gets
+# it as both its app and its data database.
 LOCAL_DATABASE_URL=$(echo "${DATABASE_URL}" | sed 's/host\.docker\.internal/localhost/g')
-echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
+echo "  - Using APP_DATABASE_URL and DATA_DATABASE_URL: $LOCAL_DATABASE_URL"
 docker run --rm -d --name backend-server \
-  -e DATABASE_URL="$LOCAL_DATABASE_URL" \
+  -e APP_DATABASE_URL="$LOCAL_DATABASE_URL" \
+  -e DATA_DATABASE_URL="$LOCAL_DATABASE_URL" \
   -e BACKEND_PORT="$BACKEND_PORT" \
   -e FRONTEND_PORT="$FRONTEND_PORT" \
   -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \

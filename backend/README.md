@@ -132,13 +132,11 @@ docker run -d --name econ-graph-db \
 docker exec econ-graph-db pg_isready -U postgres -d econ_graph
 
 cd backend
-export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+# One local database is both the app and the data database.
+export APP_DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+export DATA_DATABASE_URL=$APP_DATABASE_URL
 # The data migrations: only `crawler migrate` applies them, never a server at startup
-DATA_DATABASE_URL="$DATABASE_URL" cargo run -p econ-graph-crawler --bin crawler -- migrate
-
-# Or use diesel CLI on a new database: the data set, then the app set
-diesel migration run --migration-dir migrations/data
-diesel migration run --migration-dir migrations/app
+cargo run -p econ-graph-crawler --bin crawler -- migrate
 ```
 
 On a database built by the single v4.0.0 baseline, start the backend instead
@@ -166,8 +164,18 @@ override aligns the proxy with the backend's default port.
 ### **Environment Configuration**
 
 The backend reads exported variables and optionally loads a `.env` file.
-There is no checked-in `.env.example`; the exported `DATABASE_URL` above is sufficient
+There is no checked-in `.env.example`; the exported database URLs above are sufficient
 for the local anonymous server.
+
+| Variable | Meaning |
+|----------|---------|
+| `APP_DATABASE_URL` | Required. The app database: users and everything they create. The backend applies the app migration set to it at startup. |
+| `DATA_DATABASE_URL` | Optional. The data database: sources, series, observations, crawl state. Never migrated by the backend. Without it, every data field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` (message `Data is served by the data plane at /data/graphql`), `systemHealth`'s `queueItems` is null, `createAnnotation` does not check that its series exists, and `/readyz` checks only the app database. |
+
+Both may name the same database. `DATABASE_URL` is not read: with it set and `APP_DATABASE_URL`
+unset, the backend exits at startup with
+`DATABASE_URL is no longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. Tests still read
+`DATABASE_URL`, as one database holding both sets.
 
 To enable sign-in, start the repository's development Keycloak realm using the
 [Keycloak local-stack instructions](../config/keycloak/README.md#local-stack), or
@@ -308,19 +316,20 @@ kubectl get pods -n econ-graph -l app=econ-graph-backend
 
 ### **Database Migrations**
 
-From `backend/`, with `DATABASE_URL` exported as above. Normal server startup applies
-pending app migrations automatically; there is no `--migrate` server mode. The data migrations
-are applied only by `crawler migrate`.
+From `backend/`, with the database URLs exported as above. Server startup applies pending app
+migrations to `APP_DATABASE_URL`; there is no `--migrate` server mode. The data migrations are
+applied only by `crawler migrate`, to `DATA_DATABASE_URL`
+([database migrations](../docs/development/MIGRATIONS.md)).
 
 ```bash
 # Apply pending data migrations (prints each version applied; --dry-run lists them)
-DATA_DATABASE_URL="$DATABASE_URL" cargo run -p econ-graph-crawler --bin crawler -- migrate
+cargo run -p econ-graph-crawler --bin crawler -- migrate
 
 # Apply pending app migrations without starting the server (requires diesel CLI)
-diesel migration run
+diesel migration run --database-url "$APP_DATABASE_URL" --migration-dir migrations/app
 
-# Undo the latest migration (destructive; use only on disposable development data)
-diesel migration revert
+# Undo the latest app migration (destructive; use only on disposable development data)
+diesel migration revert --database-url "$APP_DATABASE_URL" --migration-dir migrations/app
 ```
 
 ## Contributing

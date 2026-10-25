@@ -35,6 +35,19 @@ All notable changes to EconGraph are documented here. The format follows
 - The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
   next to `database-url`, all three naming the one database. The backend and crawler-worker
   manifests read the new keys.
+- The backend reads `APP_DATABASE_URL` (required) and `DATA_DATABASE_URL` (optional) instead of
+  `DATABASE_URL`, and exits at startup with the same message when only `DATABASE_URL` is set.
+  Users, annotations, comments, collaborators, audit logs and security events use the app
+  database; series, observations, sources, datasets, search and the crawl queue use the data
+  database. Both may be the same database.
+- The backend applies only the app migrations when it starts. It never migrates the data
+  database, and `/readyz` fails until the data database's migrations are current.
+- With no `DATA_DATABASE_URL`, app operations work as before and every data field fails with
+  `extensions.code = DATA_SERVED_REMOTELY` (`Data is served by the data plane at /data/graphql`);
+  `/readyz` checks only the app database, `createAnnotation` does not check that its series
+  exists, and `systemHealth`'s `queueItems` is null. `queueItems` is nullable in the schema for
+  this.
+- The backend pod no longer gets `DATABASE_URL`.
 
 ## [4.0.0] - 2026-10-08
 

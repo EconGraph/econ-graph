@@ -86,14 +86,6 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: data-database-url
-        # The backend binary connects to DATABASE_URL, the app database's URL, and applies the
-        # app migrations to it at startup. It never applies the data migrations: the Job
-        # crawler-migrate (crawler-migrate-job.yaml) does, before deploy.sh applies this.
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: app-database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:

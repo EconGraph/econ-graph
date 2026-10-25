@@ -5,7 +5,8 @@ services:
   backend:
     image: econ-graph-backend:latest
     environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+      - APP_DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+      - DATA_DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
       - RUST_LOG=info
     ports:
       - "9876:9876"
