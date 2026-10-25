@@ -283,6 +283,40 @@ pub async fn test_dataset_id(
     .id
 }
 
+/// Inserts a series with no observations (no start or end date) under the first data source,
+/// in its [`TEST_DATASET`], and returns its id: the shape of a discovered series whose data has
+/// not been fetched.
+///
+/// Panics if the data database has no data source or a query fails.
+pub async fn insert_series_without_observations(
+    conn: &mut diesel_async::AsyncPgConnection,
+) -> uuid::Uuid {
+    use diesel_async::RunQueryDsl;
+
+    #[derive(diesel::QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = diesel::sql_types::Uuid)]
+        id: uuid::Uuid,
+    }
+    let source = diesel::sql_query("SELECT id FROM data_sources ORDER BY name LIMIT 1")
+        .get_result::<Row>(conn)
+        .await
+        .expect("the data baseline seeds data sources")
+        .id;
+    let dataset = test_dataset_id(conn, source).await;
+    diesel::sql_query(
+        "INSERT INTO economic_series (source_id, external_id, title, frequency, is_active, dataset_id) \
+         VALUES ($1, $2, 'Series without observations', 'Monthly', TRUE, $3) RETURNING id",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source)
+    .bind::<diesel::sql_types::Text, _>(format!("empty-{}", uuid::Uuid::new_v4()))
+    .bind::<diesel::sql_types::Uuid, _>(dataset)
+    .get_result::<Row>(conn)
+    .await
+    .expect("creating a series without observations")
+    .id
+}
+
 /// Global test database instance
 static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
 

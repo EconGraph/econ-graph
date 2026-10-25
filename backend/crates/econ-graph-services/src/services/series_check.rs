@@ -10,20 +10,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use diesel::prelude::*;
-use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use econ_graph_core::{
     config::DataGraphqlConfig,
     database::DatabasePool,
     error::{AppError, AppResult},
-    schema::economic_series,
 };
 
-/// The cheapest data-plane query for "does this series exist": the `series` field, one row
-/// by primary key, selecting only its id.
-const SERIES_EXISTS_QUERY: &str = "query SeriesExists($id: ID!) { series(id: $id) { id } }";
+/// The data-plane query for "does this series exist". `seriesExists` answers from the
+/// `economic_series` row alone, as [`SeriesCheck::Database`] does; `series(id)` would not do,
+/// since it hides a series with no observations.
+const SERIES_EXISTS_QUERY: &str = "query SeriesExists($id: ID!) { seriesExists(id: $id) }";
 
 /// How [`SeriesCheck::series_exists`] finds out whether a series exists.
 #[derive(Clone)]
@@ -50,17 +48,7 @@ impl SeriesCheck {
     pub async fn series_exists(&self, id: Uuid) -> AppResult<bool> {
         match self {
             SeriesCheck::Database(pool) => {
-                let mut conn = pool.get().await.map_err(|e| {
-                    AppError::DatabaseError(format!("Failed to get database connection: {e}"))
-                })?;
-                Ok(economic_series::table
-                    .find(id)
-                    .select(economic_series::id)
-                    .first::<Uuid>(&mut conn)
-                    .await
-                    .optional()
-                    .map_err(|e| AppError::DatabaseError(e.to_string()))?
-                    .is_some())
+                crate::services::series_service::series_exists(pool, id).await
             }
             SeriesCheck::DataPlane(client) => client.series_exists(id).await,
             SeriesCheck::Skip => Ok(true),
@@ -118,7 +106,8 @@ impl DataPlaneClient {
     ///
     /// # Errors
     /// [`AppError::DataPlaneUnavailable`] when the request fails or times out, the answer is
-    /// not a success, or it is not a GraphQL response with `data.series` and no errors.
+    /// not a success, or it is not a GraphQL response with a boolean `data.seriesExists` and no
+    /// errors.
     pub async fn series_exists(&self, id: Uuid) -> AppResult<bool> {
         let unavailable = |detail: String| {
             tracing::warn!(series_id = %id, url = %self.url, "series check failed: {detail}");
@@ -150,11 +139,8 @@ impl DataPlaneClient {
         if let Some(errors) = body.get("errors").filter(|e| !e.is_null()) {
             return Err(unavailable(format!("GraphQL errors: {errors}")));
         }
-        match body.pointer("/data/series") {
-            Some(serde_json::Value::Null) => Ok(false),
-            Some(series) if series.get("id").and_then(|v| v.as_str()) == Some(&id.to_string()) => {
-                Ok(true)
-            }
+        match body.pointer("/data/seriesExists") {
+            Some(serde_json::Value::Bool(exists)) => Ok(*exists),
             _ => Err(unavailable(format!("unexpected answer: {body}"))),
         }
     }
@@ -193,9 +179,10 @@ mod tests {
                 "operationName": "SeriesExists",
                 "variables": { "id": id.to_string() },
             })))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "data": { "series": { "id": id.to_string() } } }),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "data": { "seriesExists": true } })),
+            )
             .mount(&server)
             .await;
         let client = client(
@@ -215,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unknown_series_does_not_exist() {
-        let server = answering(serde_json::json!({ "data": { "series": null } })).await;
+        let server = answering(serde_json::json!({ "data": { "seriesExists": false } })).await;
         let client = client(server.uri(), None, Duration::from_secs(2));
         assert!(!client.series_exists(Uuid::new_v4()).await.unwrap());
     }
@@ -235,9 +222,10 @@ mod tests {
                 "errors": [{ "message": "Data is served by the data plane at /data/graphql" }]
             })),
             ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })),
-            ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "data": { "series": { "id": Uuid::new_v4() } } }),
-            ),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "data": { "seriesExists": null } })),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "data": { "seriesExists": "yes" } })),
         ] {
             let server = MockServer::start().await;
             Mock::given(method("POST"))
@@ -263,7 +251,7 @@ mod tests {
         Mock::given(method("POST"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "data": { "series": null } }))
+                    .set_body_json(serde_json::json!({ "data": { "seriesExists": false } }))
                     .set_delay(Duration::from_secs(5)),
             )
             .mount(&server)

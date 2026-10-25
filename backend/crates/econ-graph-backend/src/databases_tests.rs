@@ -313,3 +313,93 @@ async fn equal_urls_share_one_pool() {
     );
     drop(held);
 }
+
+/// An app-only backend checks series by asking a real data-plane backend over HTTP, and agrees
+/// with the data-database check: a series row with no observations exists.
+#[tokio::test]
+#[serial_test::serial]
+async fn the_data_plane_check_agrees_with_the_database_check() {
+    use econ_graph_core::config::DataGraphqlConfig;
+    use econ_graph_services::services::collaboration_service::CollaborationService;
+    use econ_graph_services::services::series_check::{DataPlaneClient, SeriesCheck};
+    use std::sync::Arc;
+
+    if !have_database() {
+        return;
+    }
+    // The data plane: a backend with a data database, served on a local port.
+    let plane_app = ScratchDatabase::create("plane_app");
+    let plane_data = ScratchDatabase::create("plane_data");
+    run_migration_set(&plane_data.url, MigrationSet::Data)
+        .await
+        .expect("data migrations");
+    let plane = open(&plane_app.url, Some(&plane_data.url)).await;
+    let schema = create_schema_with_data(plane.app.clone(), plane.data.clone(), ());
+    let routes = build_routes(
+        plane.clone(),
+        None,
+        schema,
+        None,
+        &["http://localhost:3000".to_string()],
+        false,
+    );
+    let (addr, server) = warp::serve(routes).bind_ephemeral(([127, 0, 0, 1], 0));
+    tokio::spawn(server);
+
+    let data = plane.data.clone().unwrap();
+    let empty = {
+        let mut conn = data.get().await.unwrap();
+        econ_graph_core::test_utils::insert_series_without_observations(&mut conn).await
+    };
+    let unknown = uuid::Uuid::new_v4();
+
+    // The gateway rewrites /data/graphql to the backend's /graphql.
+    let client = Arc::new(
+        DataPlaneClient::new(&DataGraphqlConfig {
+            url: format!("http://{addr}/graphql"),
+            host: Some("br-check.localhost".to_string()),
+            timeout: std::time::Duration::from_secs(5),
+        })
+        .unwrap(),
+    );
+    let remote = SeriesCheck::DataPlane(client);
+    let local = SeriesCheck::Database(data.0.clone());
+    for (id, exists) in [(empty, true), (unknown, false)] {
+        assert_eq!(local.series_exists(id).await.unwrap(), exists, "{id}");
+        assert_eq!(remote.series_exists(id).await.unwrap(), exists, "{id}");
+    }
+
+    // An app-only backend's annotation on the series without observations is stored.
+    let branch_app = ScratchDatabase::create("branch_app");
+    let branch = open(&branch_app.url, None).await;
+    let user = econ_graph_core::models::User::get_or_create_for_subject(
+        &branch.app,
+        uuid::Uuid::new_v4(),
+        Some("author@branch.test"),
+        true,
+        Some("author"),
+    )
+    .await
+    .unwrap();
+    let service = CollaborationService::with_series_check(branch.app.0.clone(), remote);
+    let create = |series| {
+        service.create_annotation(
+            user.id,
+            series,
+            chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            None,
+            "Note".to_string(),
+            "On an empty series".to_string(),
+            "note".to_string(),
+            None,
+            false,
+            None,
+        )
+    };
+    let annotation = create(empty)
+        .await
+        .expect("annotation on an existing series");
+    assert_eq!(annotation.series_id, Some(empty.to_string()));
+    let refused = create(unknown).await.unwrap_err();
+    assert_eq!(refused.to_string(), format!("Series not found: {unknown}"));
+}

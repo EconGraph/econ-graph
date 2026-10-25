@@ -29,6 +29,9 @@ All notable changes to EconGraph are documented here. The format follows
   the annotation form stays open with what was typed and shows that message. With neither
   `DATA_DATABASE_URL` nor `DATA_GRAPHQL_URL`, the check is skipped and the backend logs that once
   at startup.
+- GraphQL query field `seriesExists(id: ID!): Boolean!`: whether a series exists, counting a
+  series with no observations (which `series(id)` returns as null). The remote annotation check
+  above asks it, so both checks accept the same series.
 
 ### Changed
 

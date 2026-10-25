@@ -183,13 +183,9 @@ struct StubDataPlane {
 impl wiremock::Respond for StubDataPlane {
     fn respond(&self, request: &wiremock::Request) -> wiremock::ResponseTemplate {
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
-        let id = body["variables"]["id"].as_str().unwrap_or_default();
-        let series = if id == self.known {
-            json!({ "id": id })
-        } else {
-            Value::Null
-        };
-        wiremock::ResponseTemplate::new(200).set_body_json(json!({ "data": { "series": series } }))
+        let exists = body["variables"]["id"].as_str() == Some(self.known.as_str());
+        wiremock::ResponseTemplate::new(200)
+            .set_body_json(json!({ "data": { "seriesExists": exists } }))
     }
 }
 
@@ -535,7 +531,7 @@ async fn an_unavailable_data_plane_refuses_the_annotation() {
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .respond_with(
             wiremock::ResponseTemplate::new(200)
-                .set_body_json(json!({ "data": { "series": { "id": series_id } } }))
+                .set_body_json(json!({ "data": { "seriesExists": true } }))
                 .set_delay(std::time::Duration::from_secs(5)),
         )
         .mount(&slow)
@@ -580,4 +576,54 @@ async fn an_unavailable_data_plane_refuses_the_annotation() {
             json!([{ "title": "Split" }])
         );
     }
+}
+
+/// A series row with no observations exists for annotations, as for `seriesExists`, though
+/// `series(id)` hides it.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_series_without_observations_can_be_annotated() {
+    let Some(db) = split_databases().await else {
+        return;
+    };
+    let (app, data) = (&db.app, &db.data);
+    let user = make_user(app, "author").await;
+    let empty = {
+        let mut conn = data.get().await.unwrap();
+        econ_graph_core::test_utils::insert_series_without_observations(&mut conn)
+            .await
+            .to_string()
+    };
+    let unknown = uuid::Uuid::new_v4().to_string();
+
+    let body = ok(run(
+        app,
+        Some(data),
+        &user,
+        false,
+        &format!(
+            r#"{{ empty: seriesExists(id: "{empty}") unknown: seriesExists(id: "{unknown}")
+                series(id: "{empty}") {{ id }} }}"#
+        ),
+    )
+    .await);
+    assert_eq!(
+        body,
+        json!({ "empty": true, "unknown": false, "series": null })
+    );
+
+    let created = ok(run(app, Some(data), &user, false, &create_annotation(&empty)).await);
+    assert_eq!(created["createAnnotation"]["seriesId"], empty.as_str());
+
+    // Without a data database, `seriesExists` is a data field like the rest.
+    assert_served_remotely(
+        &run(
+            app,
+            None,
+            &user,
+            false,
+            &format!(r#"{{ seriesExists(id: "{empty}") }}"#),
+        )
+        .await,
+    );
 }

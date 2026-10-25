@@ -222,6 +222,23 @@ pub async fn get_series_by_id(
     Ok(series)
 }
 
+/// Whether `economic_series` has a row with this id, whether or not it has observations.
+pub async fn series_exists(pool: &DatabasePool, series_id: uuid::Uuid) -> AppResult<bool> {
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {e}"
+        ))
+    })?;
+    Ok(economic_series::table
+        .find(series_id)
+        .select(economic_series::id)
+        .first::<uuid::Uuid>(&mut *conn)
+        .await
+        .optional()
+        .map_err(|e| econ_graph_core::error::AppError::DatabaseError(e.to_string()))?
+        .is_some())
+}
+
 /// **Get Data Points for Economic Series**
 ///
 /// Retrieves time series data points for a specific economic series with comprehensive
