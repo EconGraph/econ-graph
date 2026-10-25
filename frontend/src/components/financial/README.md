@@ -395,11 +395,11 @@ export default App;
 Each component includes comprehensive tests:
 
 ```bash
-# Run component tests
-npm test -- --testPathPattern=financial
+# Run component tests (Vitest filters by file path)
+npm test -- financial
 
 # Run with coverage
-npm test -- --coverage --testPathPattern=financial
+npm run test:coverage -- financial
 ```
 
 ### E2E Testing
