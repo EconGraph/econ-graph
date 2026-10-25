@@ -1,4 +1,4 @@
-//! Integration tests for AUTH-8: annotation visibility.
+//! Integration tests for AUTH-8: annotation visibility (and ECO-410: annotation input checks).
 //!
 //! Real Postgres, real rows: alice and bob are actual `users` rows (annotations have a
 //! `user_id` foreign key), and every case runs the GraphQL schema end to end rather than
@@ -40,6 +40,10 @@ async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
         .execute(&mut conn)
         .await
         .unwrap();
+    diesel::sql_query("DELETE FROM economic_series WHERE external_id LIKE 'auth8-%'")
+        .execute(&mut conn)
+        .await
+        .unwrap();
     drop(conn);
     Some((pool, guard))
 }
@@ -55,6 +59,37 @@ async fn make_user(pool: &DatabasePool, name: &str) -> User {
     )
     .await
     .expect("create test user")
+}
+
+/// Creates a real `economic_series` row (annotations must be on an existing series) and
+/// returns its id.
+async fn make_series(pool: &DatabasePool) -> String {
+    use diesel::sql_types::{Text, Uuid as SqlUuid};
+    use diesel_async::RunQueryDsl;
+    #[derive(diesel::QueryableByName)]
+    struct Id {
+        #[diesel(sql_type = SqlUuid)]
+        id: uuid::Uuid,
+    }
+    let mut conn = pool.get().await.unwrap();
+    let source = diesel::sql_query("SELECT id FROM data_sources ORDER BY name LIMIT 1")
+        .get_result::<Id>(&mut conn)
+        .await
+        .expect("the baseline migration seeds data sources")
+        .id;
+    let dataset = econ_graph_core::test_utils::test_dataset_id(&mut conn, source).await;
+    diesel::sql_query(
+        "INSERT INTO economic_series (source_id, external_id, title, frequency, is_active, dataset_id) \
+         VALUES ($1, $2, 'Annotated series', 'Monthly', TRUE, $3) RETURNING id",
+    )
+    .bind::<SqlUuid, _>(source)
+    .bind::<Text, _>(format!("auth8-{}", uuid::Uuid::new_v4()))
+    .bind::<SqlUuid, _>(dataset)
+    .get_result::<Id>(&mut conn)
+    .await
+    .expect("create test series")
+    .id
+    .to_string()
 }
 
 /// Runs `query` against the real schema, as `user` (or anonymous when `None`); never staff.
@@ -117,7 +152,7 @@ async fn bob_sees_alice_public_but_not_private() {
     };
     let alice = make_user(&pool, "alice").await;
     let bob = make_user(&pool, "bob").await;
-    let series_id = uuid::Uuid::new_v4().to_string();
+    let series_id = make_series(&pool).await;
 
     let pub_resp = run_as(
         &pool,
@@ -175,7 +210,7 @@ async fn bob_cannot_comment_edit_or_delete_alices_annotation() {
     };
     let alice = make_user(&pool, "alice").await;
     let bob = make_user(&pool, "bob").await;
-    let series_id = uuid::Uuid::new_v4().to_string();
+    let series_id = make_series(&pool).await;
 
     let pub_resp = run_as(
         &pool,
@@ -275,7 +310,7 @@ async fn alice_can_update_her_own_annotation() {
     };
     let alice = make_user(&pool, "alice").await;
     let bob = make_user(&pool, "bob").await;
-    let series_id = uuid::Uuid::new_v4().to_string();
+    let series_id = make_series(&pool).await;
 
     let create_resp = run_as(
         &pool,
@@ -321,7 +356,7 @@ async fn comments_on_a_private_annotation_are_hidden_from_others() {
     };
     let alice = make_user(&pool, "alice").await;
     let bob = make_user(&pool, "bob").await;
-    let series_id = uuid::Uuid::new_v4().to_string();
+    let series_id = make_series(&pool).await;
 
     let priv_resp = run_as(
         &pool,
@@ -360,4 +395,68 @@ async fn comments_on_a_private_annotation_are_hidden_from_others() {
     let resp = run_as(&pool, None, &query).await;
     assert_eq!(resp.errors.len(), 1, "{:?}", resp.errors);
     assert!(resp.errors[0].message.to_lowercase().contains("not found"));
+}
+
+/// ECO-410: an annotation must be on a series that exists, on a sane date, with a value that
+/// fits the column. A refused one gets a clear message, not a database error, and isn't written.
+#[tokio::test]
+async fn annotations_on_unknown_series_or_absurd_dates_are_refused() {
+    use diesel::QueryDsl;
+    use diesel_async::RunQueryDsl;
+    let Some((pool, _guard)) = db().await else {
+        return;
+    };
+    let alice = make_user(&pool, "alice").await;
+    let series_id = make_series(&pool).await;
+    let create = |series: &str, date: &str, value: &str| {
+        format!(
+            r#"mutation {{ createAnnotation(input: {{ seriesId: "{series}", annotationDate: "{date}", annotationValue: "{value}", title: "t", content: "c", annotationType: "note" }}) {{ id }} }}"#
+        )
+    };
+
+    let unknown = uuid::Uuid::new_v4();
+    for (query, expected) in [
+        (
+            create(&unknown.to_string(), "2024-01-01", "1"),
+            format!("Series not found: {unknown}"),
+        ),
+        (
+            create(&series_id, "0001-01-01", "1"),
+            "Date 0001-01-01 is outside".to_string(),
+        ),
+        (
+            create(&series_id, "2099-12-31", "1"),
+            "Date 2099-12-31 is outside".to_string(),
+        ),
+        (
+            create(&series_id, "2024-01-01", "1e20"),
+            "is too large".to_string(),
+        ),
+        (
+            // Below 1e14, but Postgres would round it up to 1e14 and overflow DECIMAL(20, 6).
+            create(&series_id, "2024-01-01", "99999999999999.9999999"),
+            "is too large".to_string(),
+        ),
+    ] {
+        let resp = run_as(&pool, Some(alice.clone()), &query).await;
+        assert_eq!(resp.errors.len(), 1, "{query}: {:?}", resp.errors);
+        assert!(
+            resp.errors[0].message.contains(&expected),
+            "{query}: {}",
+            resp.errors[0].message
+        );
+    }
+
+    let mut conn = pool.get().await.unwrap();
+    let written: i64 = econ_graph_core::schema::chart_annotations::table
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(written, 0);
+    drop(conn);
+
+    // The same request on the real series, a sane date and a value that fits is accepted.
+    let resp = run_as(&pool, Some(alice), &create(&series_id, "2024-01-01", "1.5")).await;
+    assert!(resp.errors.is_empty(), "{:?}", resp.errors);
 }
