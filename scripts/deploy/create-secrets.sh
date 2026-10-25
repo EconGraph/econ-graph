@@ -78,14 +78,17 @@
 # temporary directory, not the command line, and are applied with server-side
 # apply, so no copy lands in the last-applied-configuration annotation.
 #
-# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl).
+# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
+# and its KUBECONFIG, on that kubectl's current context. Run by hand with none
+# of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
+# kubeconfig when copies are kept in ~/.cache/econgraph, and says so
+# (cluster_role_default_kubectl in lib/cluster-role.sh).
 
 set -euo pipefail
 # Never trace: the values handled below are credentials.
 set +x
 
 NAMESPACE="${NAMESPACE:-econ-graph}"
-KUBECTL="${KUBECTL:-kubectl}"
 
 PROMPT_TUNNEL_TOKEN=false
 for arg in "$@"; do
@@ -120,6 +123,8 @@ log() {
 # context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+cluster_role_default_kubectl
+KUBECTL="${KUBECTL:-kubectl}"
 
 # The tunnel token goes only into the production cluster (ECO-468). Checked
 # before the prompt, so the token is never typed for a cluster that refuses it.

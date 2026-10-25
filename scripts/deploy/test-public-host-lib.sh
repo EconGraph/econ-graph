@@ -22,7 +22,11 @@
 #   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
-#     cloudflared before removing the marker and deletes the token only when told to.
+#     cloudflared before removing the marker and deletes the token only when told to;
+#     every run shows which cluster it reached (kubectl, KUBECONFIG, context, ...);
+#   - run by hand with no KUBECTL or KUBECONFIG, both scripts use the kind cluster's
+#     kubectl and kubeconfig kept in ~/.cache/econgraph, and say so; an explicit KUBECTL,
+#     KUBECONFIG or a context pinned by deploy.sh wins.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -448,6 +452,48 @@ offenders="$(grep -rnE '\bapply\b' scripts --include='*.sh' |
     -e '(-f|--filename)[[:space:]=]"?[^[:space:]"]*(cloudflared\.yaml|k8s/?|manifests/?)("|[[:space:]]|$)' |
   grep -v -e '^scripts/deploy/lib/public-host.sh:' -e '^scripts/deploy/test-' || true)"
 [ -z "$offenders" ] || fail "scripts apply cloudflared.yaml or k8s/manifests wholesale: $offenders"
+
+# --- which cluster: shown on every run, and the kind cluster's kubectl by default --------
+# Dry runs and "nothing to do" show the same identity as the confirmation.
+run_stubbed STUB_MARKER=copied "$mark" --dry-run || fail "mark --dry-run failed: $(cat "$out")"
+for shown in "kubectl +$stub_dir/kubectl" 'KUBECONFIG ' 'context +kind-test' 'API server .*https://127.0.0.1:6443' \
+  'nodes .*node-a node-b' 'kube-system UID uid-this-cluster'; do
+  grep -Eq "$shown" "$out" || fail "mark --dry-run does not show '$shown': $(cat "$out")"
+done
+run_stubbed STUB_MARKER=none STUB_CLOUDFLARED_REPLICAS=0 "$mark" --unmark || fail "mark --unmark (nothing to do) failed"
+if ! { grep -q 'nothing to do' "$out" && grep -Eq 'API server .*https://127.0.0.1:6443' "$out"; }; then
+  fail "mark --unmark with nothing to do does not show the cluster: $(cat "$out")"
+fi
+
+# The kind cluster's own kubectl and kubeconfig, kept in ${XDG_CACHE_HOME}/econgraph.
+kind_cache="$stub_dir/cache/econgraph"
+mkdir -p "$kind_cache/bin"
+cp "$stub_dir/kubectl" "$kind_cache/bin/kubectl"
+echo "apiVersion: v1" >"$kind_cache/kubeconfig-econ-graph"
+detected="Using the kind cluster's kubectl $kind_cache/bin/kubectl and KUBECONFIG=$kind_cache/kubeconfig-econ-graph"
+# run_bare [VAR=value ...] COMMAND...: with no KUBECTL, KUBECONFIG or pinned context.
+run_bare() {
+  : >"$log"
+  : >"$path_log"
+  env -u KUBECTL -u KUBECONFIG -u CLUSTER_ROLE_CONTEXT XDG_CACHE_HOME="$stub_dir/cache" "$@" </dev/null >"$out" 2>&1
+}
+run_bare STUB_MARKER=none "$mark" --dry-run || fail "mark (bare) --dry-run failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "mark (bare): did not say it uses the kind kubectl: $(cat "$out")"
+grep -qE "KUBECONFIG +$kind_cache/kubeconfig-econ-graph" "$out" || fail "mark (bare): the kubeconfig in use is not shown"
+grep -q '^kubectl ' "$log" || fail "mark (bare): the kind kubectl was not used"
+[ ! -s "$path_log" ] || fail "mark (bare): called the kubectl on PATH: $(cat "$path_log")"
+run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (bare) failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "create-secrets (bare): did not say it uses the kind kubectl: $(cat "$out")"
+grep -q 'create secret generic econ-graph-postgres' "$log" || fail "create-secrets (bare): the kind kubectl was not used"
+[ ! -s "$path_log" ] || fail "create-secrets (bare): called the kubectl on PATH: $(cat "$path_log")"
+# An explicit KUBECTL, an explicit KUBECONFIG, or a context pinned by deploy.sh wins.
+run_bare KUBECTL="$stub_dir/kubectl" STUB_MARKER=none "$mark" --dry-run || fail "mark with KUBECTL failed: $(cat "$out")"
+grep -q "Using the kind cluster" "$out" && fail "mark: detection overrode an explicit KUBECTL"
+run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || true
+grep -q "Using the kind cluster" "$out" && fail "mark: detection overrode an explicit KUBECONFIG"
+run_bare CLUSTER_ROLE_CONTEXT=kind-econ-graph STUB_MARKER=none scripts/deploy/create-secrets.sh || true
+grep -q "Using the kind cluster" "$out" && fail "create-secrets: detection overrode the kubectl of the deploy that started it"
+: >"$path_log"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"

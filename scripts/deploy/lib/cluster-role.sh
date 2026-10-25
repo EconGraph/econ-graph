@@ -32,6 +32,26 @@ kc() {
     fi
 }
 
+# For a script run by hand (mark-production-cluster.sh, create-secrets.sh): when
+# none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT is set, use the kind
+# cluster's own kubectl and kubeconfig if copies are kept in
+# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph).
+# Plain kubectl may be another cluster's: the microk8s snap wrapper ignores
+# ~/.kube/config. Says what it chose. An explicit KUBECTL or KUBECONFIG, or a
+# context pinned by the calling script (deploy.sh), always wins.
+cluster_role_default_kubectl() {
+    local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
+    if [ -n "${KUBECTL:-}" ] || [ -n "${KUBECONFIG:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
+        return 0
+    fi
+    [ -x "$dir/bin/kubectl" ] && [ -s "$dir/kubeconfig-econ-graph" ] || return 0
+    KUBECTL="$dir/bin/kubectl"
+    KUBECONFIG="$dir/kubeconfig-econ-graph"
+    export KUBECTL KUBECONFIG
+    echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
+        "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
+}
+
 # Pin CLUSTER_ROLE_CONTEXT to the current context, unless it is set already
 # (exported, so scripts started from here, like create-secrets.sh from
 # deploy.sh, stay on it). Fails when there is no current context.

@@ -252,18 +252,28 @@ A cluster is production while it carries the marker written by:
 ./scripts/deploy/mark-production-cluster.sh --unmark   # stop cloudflared, remove the marker, offer to delete the token
 ```
 
-It works on the current context of `${KUBECTL:-kubectl}`, like `deploy.sh` and
-`create-secrets.sh`. Where plain `kubectl` reaches another cluster (on a host with the
-microk8s snap, `kubectl` is microk8s's own wrapper and ignores `~/.kube/config`), give the
-production cluster's kubectl and kubeconfig to all three:
+Which cluster it reaches:
+
+- `mark-production-cluster.sh` and `create-secrets.sh` work on the current context of
+  `${KUBECTL:-kubectl}` and its `KUBECONFIG`. Run by hand with neither variable set, they
+  use the kind cluster's own kubectl and kubeconfig when copies are kept at
+  `~/.cache/econgraph/bin/kubectl` and `~/.cache/econgraph/kubeconfig-econ-graph`, and
+  say so. Plain `kubectl` may be another cluster's: the microk8s snap wrapper ignores
+  `~/.kube/config`.
+- `deploy.sh` switches the current context of `${KUBECTL:-kubectl}`'s kubeconfig to
+  `kind-econ-graph` and pins it (`create-secrets.sh`, run from it, stays on it). So
+  `KUBECONFIG` has to be the production cluster's for that reason too: the context is
+  switched in whichever kubeconfig is in effect.
+
+To choose the cluster explicitly, set both, for example:
 
 ```bash
-KUBECTL=/path/to/that/clusters/kubectl KUBECONFIG=/path/to/its/kubeconfig \
+KUBECTL=~/.cache/econgraph/bin/kubectl KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph \
   ./scripts/deploy/mark-production-cluster.sh
 ```
 
-Before it changes anything it shows the context, API server and nodes it reached; check
-them before typing the UID.
+Every run of the mark script, dry runs included, shows the kubectl, `KUBECONFIG`, context,
+API server, nodes and kube-system UID it reached; check them before typing the UID.
 
 The marker is the ConfigMap `kube-system/econgraph-cluster-role`, with `role: production`
 and the UID of the cluster's `kube-system` namespace when it was marked. It counts only
