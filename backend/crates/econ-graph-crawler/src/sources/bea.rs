@@ -629,24 +629,8 @@ impl BeaAdapter {
                         .record_response_error(SourceId::Bea, list.request_url(), e);
                 }
             });
-        let dataset_code = dataset.code();
-        // Reload from the database either way, even on a failed refresh (BEA down, rate
-        // limited, a bad body): a prior process instance's merge, or this process's own earlier
-        // one, may already be there, and skipping the reload would otherwise blank the
-        // in-process cache (and so fail every subsequent `discover`) on a single transient BEA
-        // error. After a successful merge this is the dataset's canonical (sorted, deduplicated)
-        // code list rather than just this fetch's rows; after a no-op (304, or nothing to merge
-        // into), it's the best available titles. Keep whatever this process already has only if
-        // the database truly has nothing yet.
-        let from_db =
-            persist::dataset_dimension_labels(&ctx.pool, SourceId::Bea, dataset_code, "table_name")
-                .await
-                .map_err(db_err)?;
-        let titles = if from_db.is_empty() {
-            self.table_titles(dataset).await
-        } else {
-            from_db
-        };
+        // Updated before the database reload below, which can return early: a stale set kept
+        // past a refresh that parsed a new list would survive later `304`s.
         let parsed = parsed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -666,6 +650,24 @@ impl BeaAdapter {
                 None => listed.remove(&dataset),
             };
         }
+        let dataset_code = dataset.code();
+        // Reload from the database either way, even on a failed refresh (BEA down, rate
+        // limited, a bad body): a prior process instance's merge, or this process's own earlier
+        // one, may already be there, and skipping the reload would otherwise blank the
+        // in-process cache (and so fail every subsequent `discover`) on a single transient BEA
+        // error. After a successful merge this is the dataset's canonical (sorted, deduplicated)
+        // code list rather than just this fetch's rows; after a no-op (304, or nothing to merge
+        // into), it's the best available titles. Keep whatever this process already has only if
+        // the database truly has nothing yet.
+        let from_db =
+            persist::dataset_dimension_labels(&ctx.pool, SourceId::Bea, dataset_code, "table_name")
+                .await
+                .map_err(db_err)?;
+        let titles = if from_db.is_empty() {
+            self.table_titles(dataset).await
+        } else {
+            from_db
+        };
         self.titles.write().await.insert(dataset, titles);
         refreshed?;
         Ok(())
