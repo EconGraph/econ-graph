@@ -32,6 +32,8 @@
 # The script refuses to run without a terminal on stdin, so values cannot be
 # piped in by another program.
 set -euo pipefail
+# Never trace: under bash -x the export of each entered key would print it.
+set +x
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="${NAMESPACE:-econ-graph}"
