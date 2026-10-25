@@ -59,9 +59,8 @@ const useFinancialDashboardData = (companyId: string) => {
       }
       return result.data.company;
     },
-    suspense: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
-    cacheTime: 10 * 60 * 1000, // 10 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 };
 
@@ -71,7 +70,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   showEducationalContent: _showEducationalContent = true,
   showCollaborativeFeatures: _showCollaborativeFeatures = true,
 }) => {
-  const { data, isLoading, isError, error } = useFinancialDashboardData(companyId);
+  const { data, isPending, isError, error } = useFinancialDashboardData(companyId);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, _setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
@@ -86,7 +85,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     setActiveTab(newValue);
   };
 
-  if (isLoading) {
+  if (isPending) {
     return (
       <Box
         sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}

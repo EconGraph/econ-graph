@@ -43,10 +43,10 @@ export type NewSeriesAnnotation = Omit<CreateAnnotationInput, 'seriesId' | 'anno
  */
 export function useAnnotationMutations(seriesId: string) {
   const queryClient = useQueryClient();
-  const refresh = () => queryClient.invalidateQueries(seriesAnnotationsKey(seriesId));
+  const refresh = () => queryClient.invalidateQueries({ queryKey: seriesAnnotationsKey(seriesId) });
 
-  const create = useMutation(
-    async (input: NewSeriesAnnotation) => {
+  const create = useMutation({
+    mutationFn: async (input: NewSeriesAnnotation) => {
       const payload: CreateAnnotationInput = {
         ...input,
         seriesId,
@@ -58,22 +58,22 @@ export function useAnnotationMutations(seriesId: string) {
       });
       return result.data?.createAnnotation;
     },
-    { onSuccess: refresh }
-  );
+    onSuccess: refresh,
+  });
 
-  const update = useMutation(
-    async (input: UpdateAnnotationInput) => {
+  const update = useMutation({
+    mutationFn: async (input: UpdateAnnotationInput) => {
       const result = await executeGraphQL<UpdateAnnotationResponse>({
         query: MUTATIONS.UPDATE_ANNOTATION,
         variables: { input },
       });
       return result.data?.updateAnnotation;
     },
-    { onSuccess: refresh }
-  );
+    onSuccess: refresh,
+  });
 
-  const remove = useMutation(
-    async (annotationId: string) => {
+  const remove = useMutation({
+    mutationFn: async (annotationId: string) => {
       const result = await executeGraphQL<DeleteAnnotationResponse>({
         query: MUTATIONS.DELETE_ANNOTATION,
         variables: { input: { annotationId } },
@@ -84,8 +84,8 @@ export function useAnnotationMutations(seriesId: string) {
       }
       return true;
     },
-    { onSuccess: refresh }
-  );
+    onSuccess: refresh,
+  });
 
   return { create, update, remove };
 }
@@ -96,16 +96,16 @@ export function useAnnotationMutations(seriesId: string) {
  * @returns The react-query result.
  */
 export function useAnnotationComments(annotationId: string) {
-  return useQuery(
-    annotationCommentsKey(annotationId),
-    async (): Promise<AnnotationCommentType[]> => {
+  return useQuery({
+    queryKey: annotationCommentsKey(annotationId),
+    queryFn: async (): Promise<AnnotationCommentType[]> => {
       const result = await executeGraphQL<CommentsForAnnotationResponse>({
         query: QUERIES.GET_COMMENTS_FOR_ANNOTATION,
         variables: { annotationId },
       });
       return result.data?.commentsForAnnotation ?? [];
-    }
-  );
+    },
+  });
 }
 
 /**
@@ -115,8 +115,8 @@ export function useAnnotationComments(annotationId: string) {
  */
 export function useAddComment(annotationId: string) {
   const queryClient = useQueryClient();
-  return useMutation(
-    async (content: string) => {
+  return useMutation({
+    mutationFn: async (content: string) => {
       const input: AddCommentInput = { annotationId, content };
       const result = await executeGraphQL<AddCommentResponse>({
         query: MUTATIONS.ADD_COMMENT,
@@ -124,6 +124,7 @@ export function useAddComment(annotationId: string) {
       });
       return result.data?.addComment;
     },
-    { onSuccess: () => queryClient.invalidateQueries(annotationCommentsKey(annotationId)) }
-  );
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: annotationCommentsKey(annotationId) }),
+  });
 }

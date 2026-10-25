@@ -27,7 +27,6 @@ describe('InteractiveWorldMap atlas load failure', () => {
   it('shows an error instead of the map', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, retryDelay: 0 } },
-      logger: { log: () => {}, warn: () => {}, error: () => {} },
     });
     render(
       <QueryClientProvider client={queryClient}>

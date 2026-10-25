@@ -41,7 +41,7 @@ const getDataSourceIcon = (name: string): React.ReactElement => {
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
-  const { data: backendDataSources, isLoading, error } = useDataSources();
+  const { data: backendDataSources, isPending, error } = useDataSources();
   const dataSources: DataSource[] = useMemo(() => backendDataSources ?? [], [backendDataSources]);
 
   const totalSeries = useMemo(
@@ -51,7 +51,7 @@ const DataSourcesContent: React.FC = () => {
 
   // A blocking spinner only while there is nothing to show yet; once sources have loaded
   // once, a later refetch error stays a nonblocking banner and the cached list stays up
-  if (isLoading && !backendDataSources) {
+  if (isPending && !backendDataSources) {
     return (
       <Box
         sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}

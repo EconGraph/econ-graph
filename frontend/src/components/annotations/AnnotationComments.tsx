@@ -65,12 +65,12 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || draftTooLong || addComment.isLoading) return;
+    if (!content || draftTooLong || addComment.isPending) return;
     addComment.mutate(content, { onSuccess: () => setDraft('') });
   };
 
   let body: React.ReactNode;
-  if (comments.isLoading) {
+  if (comments.isPending) {
     body = <Skeleton variant='rectangular' height={32} data-testid='comments-loading' />;
   } else if (comments.isError) {
     body = (
@@ -139,10 +139,10 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
               type='submit'
               size='small'
               variant='contained'
-              disabled={!draft.trim() || draftTooLong || addComment.isLoading}
-              aria-label={`${addComment.isLoading ? 'Posting' : 'Post comment'} on ${title}`}
+              disabled={!draft.trim() || draftTooLong || addComment.isPending}
+              aria-label={`${addComment.isPending ? 'Posting' : 'Post comment'} on ${title}`}
             >
-              {addComment.isLoading ? 'Posting…' : 'Post comment'}
+              {addComment.isPending ? 'Posting…' : 'Post comment'}
             </Button>
           </Box>
         </Box>

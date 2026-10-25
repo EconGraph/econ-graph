@@ -298,14 +298,14 @@ export function useSeriesAnnotationEditor({
         initialValues={
           form?.values ?? { date: defaultDate, title: '', description: '', isPublic: false }
         }
-        saving={activeMutation.isLoading}
+        saving={activeMutation.isPending}
         error={activeMutation.isError ? errorText(activeMutation.error) : null}
         onSubmit={submitForm}
         onClose={() => setFormOpen(false)}
       />
       <Dialog
         open={deleteOpen}
-        onClose={remove.isLoading ? undefined : () => setDeleteOpen(false)}
+        onClose={remove.isPending ? undefined : () => setDeleteOpen(false)}
         aria-labelledby='delete-annotation-title'
       >
         <DialogTitle id='delete-annotation-title'>Delete annotation?</DialogTitle>
@@ -320,11 +320,11 @@ export function useSeriesAnnotationEditor({
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteOpen(false)} disabled={remove.isLoading}>
+          <Button onClick={() => setDeleteOpen(false)} disabled={remove.isPending}>
             Cancel
           </Button>
-          <Button color='error' onClick={confirmDelete} disabled={remove.isLoading}>
-            {remove.isLoading ? 'Deleting…' : 'Delete'}
+          <Button color='error' onClick={confirmDelete} disabled={remove.isPending}>
+            {remove.isPending ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

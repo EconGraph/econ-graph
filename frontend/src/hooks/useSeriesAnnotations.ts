@@ -61,9 +61,9 @@ export const seriesAnnotationsKey = (seriesId: string) => ['seriesAnnotations', 
  * @returns The react-query result.
  */
 export function useSeriesAnnotations(seriesId: string, { enabled = true } = {}) {
-  return useQuery(
-    seriesAnnotationsKey(seriesId),
-    async (): Promise<SeriesAnnotation[]> => {
+  return useQuery({
+    queryKey: seriesAnnotationsKey(seriesId),
+    queryFn: async (): Promise<SeriesAnnotation[]> => {
       if (!isSeriesId(seriesId)) return [];
 
       const result = await executeGraphQL<AnnotationsForSeriesResponse>({
@@ -74,9 +74,7 @@ export function useSeriesAnnotations(seriesId: string, { enabled = true } = {}) 
         .map(toSeriesAnnotation)
         .sort((a, b) => b.date.localeCompare(a.date));
     },
-    {
-      enabled: enabled && !!seriesId,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    enabled: enabled && !!seriesId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 }

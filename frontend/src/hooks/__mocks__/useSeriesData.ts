@@ -64,6 +64,7 @@ export const mockSearchResults = [
 export const useDataSources = vi.fn(() => ({
   data: mockDataSources,
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,
@@ -72,6 +73,7 @@ export const useDataSources = vi.fn(() => ({
 export const useSeriesSearch = vi.fn(() => ({
   data: mockSearchResults,
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,
@@ -79,7 +81,8 @@ export const useSeriesSearch = vi.fn(() => ({
 
 export const useSeriesBrowse = vi.fn(() => ({
   data: undefined,
-  isInitialLoading: false,
+  isPending: true,
+  isLoading: false,
   isFetching: false,
   error: null,
 }));
@@ -100,6 +103,7 @@ export const useSeriesDetail = vi.fn(() => ({
     isActive: true,
   },
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,
@@ -115,6 +119,7 @@ export const useSeriesData = vi.fn(() => ({
     ],
   },
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,
@@ -123,6 +128,7 @@ export const useSeriesData = vi.fn(() => ({
 export const useSearchSuggestions = vi.fn(() => ({
   data: ['GDP', 'unemployment', 'inflation', 'federal funds rate'],
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,
@@ -139,6 +145,7 @@ export const useCrawlerStatus = vi.fn(() => ({
     ],
   },
   isLoading: false,
+  isPending: false,
   error: null,
   isError: false,
   isSuccess: true,

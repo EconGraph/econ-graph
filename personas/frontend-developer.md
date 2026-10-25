@@ -1095,10 +1095,9 @@ const Component = () => {
 
 // ✅ GOOD: React Query + Suspense for declarative loading
 const useComponentData = () => {
-  return useQuery({
+  return useSuspenseQuery({
     queryKey: ['component-data'],
     queryFn: fetchData,
-    suspense: true, // Enable Suspense integration
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 };
@@ -1129,24 +1128,14 @@ const Component = () => (
 ```typescript
 // ✅ GOOD: Multiple queries with Suspense
 const useFinancialData = (companyId: string) => {
-  const statements = useQuery({
-    queryKey: ['statements', companyId],
-    queryFn: () => fetchStatements(companyId),
-    suspense: true,
+  const [statements, ratios, annotations] = useSuspenseQueries({
+    queries: [
+      { queryKey: ['statements', companyId], queryFn: () => fetchStatements(companyId) },
+      { queryKey: ['ratios', companyId], queryFn: () => fetchRatios(companyId) },
+      { queryKey: ['annotations', companyId], queryFn: () => fetchAnnotations(companyId) },
+    ],
   });
-  
-  const ratios = useQuery({
-    queryKey: ['ratios', companyId],
-    queryFn: () => fetchRatios(companyId),
-    suspense: true,
-  });
-  
-  const annotations = useQuery({
-    queryKey: ['annotations', companyId],
-    queryFn: () => fetchAnnotations(companyId),
-    suspense: true,
-  });
-  
+
   return { statements: statements.data, ratios: ratios.data, annotations: annotations.data };
 };
 
@@ -1162,15 +1151,14 @@ const FinancialDashboard = ({ companyId }: Props) => {
 ```typescript
 // For data that never changes (world atlas, static configs)
 const useWorldAtlasData = () => {
-  return useQuery({
+  return useSuspenseQuery({
     queryKey: ['world-atlas'],
     queryFn: async () => {
       const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
       return response.json();
     },
-    suspense: true,
     staleTime: Infinity, // Never refetch
-    cacheTime: Infinity, // Never garbage collect
+    gcTime: Infinity, // Never garbage collect
   });
 };
 ```

@@ -138,7 +138,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     onDeleted: id => setSelectedAnnotationId(selected => (selected === id ? null : selected)),
   });
 
-  if (detail.isLoading) {
+  if (detail.isPending) {
     return <PageSkeleton />;
   }
 
@@ -187,7 +187,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const levelDigits = levelFractionDigits(points?.map(p => p.value) ?? []);
 
   let chart: React.ReactNode;
-  if (data.isLoading) {
+  if (data.isPending) {
     chart = <Skeleton variant='rectangular' height={500} data-testid='series-chart-loading' />;
   } else if (data.isError) {
     chart = (
@@ -228,13 +228,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     };
     chart = (
       <Box>
-        {data.isPreviousData && <LinearProgress aria-label='Loading transformation' />}
+        {data.isPlaceholderData && <LinearProgress aria-label='Loading transformation' />}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
           <Button
             size='small'
             startIcon={<DownloadIcon />}
             onClick={downloadShownPoints}
-            disabled={data.isPreviousData || !exportedPoints.some(p => p.value !== null)}
+            disabled={data.isPlaceholderData || !exportedPoints.some(p => p.value !== null)}
           >
             Download CSV
           </Button>
@@ -320,7 +320,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           <Box sx={{ mb: 3 }}>
             <SeriesAnnotationsPanel
               annotations={annotations.data ?? []}
-              isLoading={annotations.isLoading}
+              isLoading={annotations.isPending}
               error={annotations.isError ? (annotations.error as Error | null) : null}
               onRetry={() => annotations.refetch()}
               selectedId={selectedAnnotationId}
