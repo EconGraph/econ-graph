@@ -96,7 +96,6 @@ const FormattedTimestamp = React.memo(
 );
 
 const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
-  const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [performanceMetrics, setPerformanceMetrics] =
     useState<PerformanceMetrics>({
       cpu_usage: 0,
@@ -136,11 +135,20 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
     searchTerm.length > 0,
   );
 
-  // Filter logs based on search term and filters
-  useEffect(() => {
-    const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
+  const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
 
-    const filtered = (logsToFilter || []).filter((log: any) => {
+  // "Clear" hides the logs currently shown until the next fetch replaces them
+  const [clearedLogs, setClearedLogs] = useState<typeof logsToFilter | null>(
+    null,
+  );
+
+  // Filter logs based on search term and filters
+  const filteredLogs = useMemo<LogEntry[]>(() => {
+    if (logsToFilter === clearedLogs) {
+      return [];
+    }
+
+    return (logsToFilter || []).filter((log: any) => {
       const matchesLevel = levelFilter === "all" || log.level === levelFilter;
       const matchesSource =
         sourceFilter === "all" || log.source === sourceFilter;
@@ -151,9 +159,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
       return matchesLevel && matchesSource && matchesSearch;
     });
-
-    setFilteredLogs(filtered);
-  }, [logs, searchResults, levelFilter, sourceFilter, searchTerm]);
+  }, [logsToFilter, clearedLogs, levelFilter, sourceFilter, searchTerm]);
 
   // Mock performance metrics - KEPT for UI demonstration purposes
   // NOTE: This component is disabled due to missing backend implementation (see GitHub issue)
@@ -191,8 +197,8 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   }, []);
 
   const handleClearLogs = useCallback(() => {
-    setFilteredLogs([]);
-  }, []);
+    setClearedLogs(logsToFilter);
+  }, [logsToFilter]);
 
   const getLevelColor = useCallback((level: string) => {
     switch (level) {

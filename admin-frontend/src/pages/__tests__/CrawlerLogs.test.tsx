@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi } from "vitest";
@@ -316,6 +316,43 @@ describe("CrawlerLogs", () => {
       expect(
         screen.getByText("📊 Crawler Logs & Monitoring"),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("Log filtering", () => {
+    it("renders while the hooks return a new empty array on every render", async () => {
+      const { useCrawlerLogs, useLogSearch } =
+        await import("../../hooks/useCrawlerLogs");
+      (useCrawlerLogs as any).mockImplementation(() => ({
+        logs: [],
+        loading: true,
+        error: null,
+        refresh: vi.fn(),
+      }));
+      (useLogSearch as any).mockImplementation(() => ({
+        searchResults: [],
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      }));
+
+      renderWithTheme(<CrawlerLogs />);
+
+      expect(
+        screen.getByText("📊 Crawler Logs & Monitoring"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("success")).not.toBeInTheDocument();
+    });
+
+    it("hides the shown logs when Clear is clicked", () => {
+      renderWithTheme(<CrawlerLogs />);
+
+      expect(screen.getAllByText("success")).toHaveLength(3);
+
+      fireEvent.click(screen.getByText("Clear"));
+
+      expect(screen.queryByText("success")).not.toBeInTheDocument();
+      expect(screen.queryByText("failed")).not.toBeInTheDocument();
     });
   });
 
