@@ -60,7 +60,10 @@ async fn create_test_database_pool() -> econ_graph_core::database::DatabasePool 
 async fn test_mcp_server_integration_basic_functionality() {
     // Test basic MCP server functionality with real database
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test that we can get available tools
     let tools = EconGraphMcpServer::get_available_tools();
@@ -90,7 +93,10 @@ async fn test_mcp_server_integration_basic_functionality() {
 async fn test_mcp_server_error_handling_integration() {
     // Test error handling in integration context
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test error handling for missing required parameters
     let invalid_args = json!({});
@@ -118,7 +124,10 @@ async fn test_mcp_server_error_handling_integration() {
 async fn test_mcp_server_concurrent_requests_integration() {
     // Test concurrent requests in integration context
     let pool = create_test_database_pool().await;
-    let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+    let server = Arc::new(EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    ));
 
     // Test concurrent search requests
     let mut handles = vec![];
@@ -150,7 +159,10 @@ async fn test_mcp_server_concurrent_requests_integration() {
 async fn test_mcp_server_chart_api_integration() {
     // Test chart API integration
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test visualization creation with mock data
     let viz_args = json!({
@@ -190,7 +202,10 @@ async fn test_mcp_server_chart_api_integration() {
 async fn test_mcp_server_database_integration() {
     // Test database integration
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test database connectivity by performing a simple query
     let search_args = json!({
@@ -234,7 +249,10 @@ async fn test_mcp_server_database_integration() {
 async fn test_mcp_server_end_to_end_integration() {
     // Test complete end-to-end integration
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test the complete MCP workflow
     // 1. Get available tools
@@ -287,7 +305,10 @@ async fn test_mcp_server_create_data_visualization_tool_integration() {
     // This test requires the chart API service to be running
     // It should be run as part of the integration test suite that starts all services
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test the visualization tool with mock data
     let viz_args = json!({
@@ -315,7 +336,10 @@ async fn test_mcp_server_create_data_visualization_tool_integration() {
 async fn test_mcp_server_call_private_chart_api_success_integration() {
     // This test requires the chart API service to be running
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test successful chart API call with mock data
     let chart_request = json!({
@@ -347,7 +371,10 @@ async fn test_mcp_server_call_private_chart_api_success_integration() {
 async fn test_mcp_server_call_private_chart_api_failure_integration() {
     // This test requires the chart API service to be running
     let pool = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+    let server = EconGraphMcpServer::new(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
 
     // Test chart API call with invalid data
     let invalid_request = json!({

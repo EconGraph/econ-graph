@@ -23,6 +23,7 @@ use crate::types::LatestObservationType;
 use dataloader::cached::Loader;
 use dataloader::non_cached::Loader as NonCachedLoader;
 use dataloader::BatchFn;
+use econ_graph_core::database::DataPool;
 use econ_graph_core::models::Dataset;
 use std::collections::HashMap;
 
@@ -303,58 +304,6 @@ impl BatchFn<Uuid, i32> for SeriesCountBatcher {
     }
 }
 
-/// DataLoader batcher for efficiently loading users by ID
-pub struct UserBatcher {
-    pub pool: DatabasePool,
-}
-
-impl BatchFn<Uuid, Option<User>> for UserBatcher {
-    fn load(
-        &mut self,
-        keys: &[Uuid],
-    ) -> impl std::future::Future<Output = HashMap<Uuid, Option<User>>> {
-        let pool = self.pool.clone();
-        let keys = keys.to_vec();
-        async move {
-            use diesel::prelude::*;
-            use diesel_async::RunQueryDsl;
-            use econ_graph_core::schema::users::dsl;
-
-            let mut conn = match pool.get().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    eprintln!("Failed to get database connection: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            let users = match dsl::users
-                .filter(dsl::id.eq_any(&keys))
-                .load::<User>(&mut conn)
-                .await
-            {
-                Ok(users) => users,
-                Err(e) => {
-                    eprintln!("Failed to load users: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            let mut result = HashMap::new();
-
-            // Create a map of found users
-            let found_users: HashMap<Uuid, User> = users.into_iter().map(|u| (u.id, u)).collect();
-
-            // Ensure all requested keys are in the result
-            for key in keys {
-                result.insert(key, found_users.get(&key).cloned());
-            }
-
-            result
-        }
-    }
-}
-
 /// One row of the latest-observation query
 #[derive(diesel::QueryableByName)]
 struct LatestObservationRow {
@@ -445,7 +394,6 @@ pub struct DataLoaders {
     pub data_point_count_loader: Loader<Uuid, i32, DataPointCountBatcher>,
     pub series_by_source_loader: Loader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
     pub series_count_loader: Loader<Uuid, i32, SeriesCountBatcher>,
-    pub user_loader: Loader<Uuid, Option<User>, UserBatcher>,
     /// Non-caching, so dataset edits show on the next request.
     pub dataset_loader: NonCachedLoader<Uuid, Option<Dataset>, DatasetBatcher>,
     /// Non-caching, so series moving between datasets show on the next request.
@@ -469,14 +417,14 @@ pub struct DataLoaders {
 
 impl DataLoaders {
     /// Create a new set of data loaders with all specialized loaders
-    pub fn new(pool: DatabasePool) -> Self {
+    pub fn new(pool: DataPool) -> Self {
+        let pool: DatabasePool = pool.0;
         let data_source_loader = Loader::new(DataSourceBatcher { pool: pool.clone() });
         let data_points_by_series_loader =
             Loader::new(DataPointsBySeriesBatcher { pool: pool.clone() });
         let data_point_count_loader = Loader::new(DataPointCountBatcher { pool: pool.clone() });
         let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
         let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
-        let user_loader = Loader::new(UserBatcher { pool: pool.clone() });
         // A page of datasets or search results can ask for `dataset`, `dimensions` and
         // `defaultMeasure` on many series at once; each is a separate load, so raise the batch
         // size well past the dataloader crate's default of 200 pending *requests* (not unique
@@ -500,7 +448,6 @@ impl DataLoaders {
             data_point_count_loader,
             series_by_source_loader,
             series_count_loader,
-            user_loader,
             dataset_loader,
             series_dataset_fields_loader,
             dataset_source_loader,
@@ -524,7 +471,7 @@ mod tests {
 
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let _loaders = DataLoaders::new(pool);
+        let _loaders = DataLoaders::new(DataPool(pool));
 
         // Basic creation test - more functionality will be added when DataLoader is re-enabled
     }
@@ -556,7 +503,7 @@ mod tests {
 
         // Test DataSourceLoader - for now just test that we can create the loader
         // The actual DataLoader implementation will be added when the DataLoader pattern is re-enabled
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual loading functionality
         // This test will be expanded to include:
@@ -593,7 +540,7 @@ mod tests {
         let pool = container.pool().clone();
 
         // Test DataPointsBySeriesLoader - for now just test that we can create the loader
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual loading functionality
         // This test will be expanded to include:
@@ -630,7 +577,7 @@ mod tests {
         let pool = container.pool().clone();
 
         // Test DataPointCountLoader - for now just test that we can create the loader
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual loading functionality
         // This test will be expanded to include:
@@ -667,7 +614,7 @@ mod tests {
         let pool = container.pool().clone();
 
         // Test SeriesBySourceLoader - for now just test that we can create the loader
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual loading functionality
         // This test will be expanded to include:
@@ -704,7 +651,7 @@ mod tests {
         let pool = container.pool().clone();
 
         // Test SeriesCountLoader - for now just test that we can create the loader
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual loading functionality
         // This test will be expanded to include:
@@ -713,43 +660,6 @@ mod tests {
         // - Verifying correct counts are returned
         // - Testing handling of missing series
         // - Verifying count accuracy
-    }
-
-    /// Test UserLoader with real database operations
-    ///
-    /// # Test Scenario
-    /// - Create test users in database
-    /// - Use UserLoader to batch load users
-    /// - Verify correct users are returned
-    ///
-    /// # Expected Behavior
-    /// - UserLoader returns correct users by ID
-    /// - Batch loading works efficiently
-    /// - Handles missing users gracefully
-    ///
-    /// # Test Data
-    /// - Multiple test users with different attributes
-    ///
-    /// # Dependencies
-    /// - Test database with users table
-    #[tokio::test]
-    async fn test_user_loader_with_real_data() {
-        // REQUIREMENT: DataLoader should efficiently batch database queries for users
-        // PURPOSE: Verify that UserLoader can load users by ID with real database operations
-
-        let container = get_test_db().await;
-        let pool = container.pool().clone();
-
-        // Test UserLoader - for now just test that we can create the loader
-        let _loader = DataLoaders::new(pool.clone());
-
-        // TODO: When DataLoader is re-enabled, test the actual loading functionality
-        // This test will be expanded to include:
-        // - Creating test users in the database
-        // - Testing batch loading with multiple IDs
-        // - Verifying correct users are returned
-        // - Testing handling of missing users
-        // - Verifying data integrity
     }
 
     /// Test N+1 query prevention with integration tests
@@ -779,7 +689,7 @@ mod tests {
         let pool = container.pool().clone();
 
         // Test N+1 query prevention - for now just test that we can create the loaders
-        let _loader = DataLoaders::new(pool.clone());
+        let _loader = DataLoaders::new(DataPool(pool.clone()));
 
         // TODO: When DataLoader is re-enabled, test the actual N+1 prevention
         // This test will be expanded to include:

@@ -147,7 +147,10 @@ fn state_dims(state: &str) -> SeriesDimensions {
 }
 
 async fn execute(pool: &DatabasePool, query: &str) -> Value {
-    let schema = create_schema(pool.clone());
+    let schema = create_schema(
+        econ_graph_core::database::AppPool(pool.clone()),
+        Some(econ_graph_core::database::DataPool(pool.clone())),
+    );
     let response = schema.execute(Request::new(query)).await;
     assert!(
         response.errors.is_empty(),
@@ -490,8 +493,9 @@ async fn search_results_load_dataset_fields_by_series_id() {
     }
 
     let context = SchemaResources {
-        pool: Arc::new(pool.clone()),
-        data_loaders: Arc::new(DataLoaders::new(pool.clone())),
+        data_loaders: Some(Arc::new(DataLoaders::new(
+            econ_graph_core::database::DataPool(pool.clone()),
+        ))),
         security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
     };
     let schema = Schema::build(
@@ -500,7 +504,7 @@ async fn search_results_load_dataset_fields_by_series_id() {
         EmptySubscription,
     )
     .data(context)
-    .data(pool.clone())
+    .data(econ_graph_core::database::DataPool(pool.clone()))
     .finish();
     let response = schema
         .execute("{ found { dataset { code } dimensions { name valueLabel } defaultMeasure } }")

@@ -29,7 +29,7 @@ pub struct Query;
 impl Query {
     /// Get a specific economic series by ID
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
 
         match series_service::get_series_by_id(&pool, series_uuid).await? {
@@ -51,7 +51,7 @@ impl Query {
         source_name: String,
         external_id: String,
     ) -> Result<Option<EconomicSeriesType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -77,7 +77,7 @@ impl Query {
         filter: Option<SeriesFilterInput>,
         pagination: Option<PaginationInput>,
     ) -> Result<SeriesConnection> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         // The page is fetched with LIMIT/OFFSET, and the total counted separately, so a
         // source's whole catalog can be paged through and its size reported.
@@ -110,7 +110,7 @@ impl Query {
 
     /// Get a specific data source by ID
     async fn data_source(&self, ctx: &Context<'_>, id: ID) -> Result<Option<DataSourceType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&id)?;
 
         use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
@@ -161,7 +161,7 @@ impl Query {
 
     /// List all data sources
     async fn data_sources(&self, ctx: &Context<'_>) -> Result<Vec<DataSourceType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         use diesel::dsl::exists;
         use diesel::prelude::*;
@@ -199,7 +199,7 @@ impl Query {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::datasets;
 
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let mut query = datasets::table.into_boxed();
         if let Some(source_id) = source_id {
             let source_id = Uuid::parse_str(&source_id)
@@ -226,7 +226,7 @@ impl Query {
         ctx: &Context<'_>,
         id: ID,
     ) -> Result<Option<crate::graphql::datasets::DatasetType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let id =
             Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
@@ -254,7 +254,7 @@ impl Query {
         )]
         after: Option<String>,
     ) -> Result<DataPointConnection> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&series_id)?;
 
         if first.is_some_and(|first| first < 0) {
@@ -346,7 +346,7 @@ impl Query {
     /// `admin.system:read`).
     async fn crawler_status(&self, ctx: &Context<'_>) -> Result<CrawlerStatusType> {
         require_role(ctx, Role::AdminSystemRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         Ok(CrawlerStatusType::from_snapshot(snapshot))
     }
@@ -354,7 +354,7 @@ impl Query {
     /// Get queue statistics (requires `admin.system:read`)
     async fn queue_statistics(&self, ctx: &Context<'_>) -> Result<QueueStatisticsType> {
         require_role(ctx, Role::AdminSystemRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         let stats = queue_service::get_queue_statistics(&pool).await?;
 
@@ -384,7 +384,7 @@ impl Query {
         // PURPOSE: Provide comprehensive search capabilities for economic time series
 
         let start_time = std::time::Instant::now();
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let search_service = SearchService::new(Arc::new(pool.clone()));
 
         // Convert GraphQL input to internal search parameters
@@ -418,7 +418,7 @@ impl Query {
         partial_query: String,
         limit: Option<i32>,
     ) -> Result<Vec<SearchSuggestionType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let search_service = SearchService::new(Arc::new(pool.clone()));
 
         let suggestions = search_service
@@ -439,7 +439,7 @@ impl Query {
     ) -> Result<Vec<ChartAnnotationType>> {
         let _ = user_id;
         let viewer = current_user_id_opt(ctx)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotations = collaboration_service
@@ -458,7 +458,7 @@ impl Query {
         annotation_id: ID,
     ) -> Result<Vec<AnnotationCommentType>> {
         let viewer = current_user_id_opt(ctx)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
@@ -479,7 +479,7 @@ impl Query {
         chart_id: ID,
     ) -> Result<Vec<ChartCollaboratorType>> {
         let viewer = current_user(ctx)?.id;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let chart_uuid = uuid::Uuid::parse_str(&chart_id)?;
@@ -503,7 +503,7 @@ impl Query {
             require_role(ctx, Role::AdminUsersRead)?;
         }
 
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -531,7 +531,7 @@ impl Query {
         pagination: Option<PaginationInput>,
     ) -> Result<UserConnection> {
         require_role(ctx, Role::AdminUsersRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -635,25 +635,30 @@ impl Query {
     /// Get system health metrics (requires `admin.system:read`)
     async fn system_health(&self, ctx: &Context<'_>) -> Result<SystemHealthType> {
         require_role(ctx, Role::AdminSystemRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::{crawl_queue, users};
 
-        let mut conn = pool.get().await?;
-
-        // Get user counts
+        // Users are in the app database.
+        let mut conn = app_pool(ctx)?.get().await?;
         let total_users: i64 = users::table.count().get_result(&mut conn).await?;
-
         let active_users: i64 = users::table
             .filter(users::last_login_at.gt(Utc::now() - chrono::Duration::hours(24)))
             .count()
             .get_result(&mut conn)
             .await?;
+        drop(conn);
 
-        // Get queue items count
-        let queue_items: i64 = crawl_queue::table.count().get_result(&mut conn).await?;
+        // The crawl queue is in the data database, which this backend may not have.
+        let queue_items = match ctx.data_opt::<DataPool>() {
+            Some(data) => {
+                let mut conn = data.get().await?;
+                let count: i64 = crawl_queue::table.count().get_result(&mut conn).await?;
+                Some(count as i32)
+            }
+            None => None,
+        };
 
         // Basic service status
         Ok(SystemHealthType {
@@ -662,7 +667,7 @@ impl Query {
                 total_users: total_users as i32,
                 active_users: active_users as i32,
                 database_size_mb: 0.0, // Would need special query for this
-                queue_items: queue_items as i32,
+                queue_items,
                 api_requests_per_minute: 0.0, // Would need metrics collection
                 average_response_time_ms: 0.0, // Would need metrics collection
             },
@@ -677,7 +682,7 @@ impl Query {
         limit: Option<i32>,
     ) -> Result<Vec<SecurityEventType>> {
         require_role(ctx, Role::AdminSecurityRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
 
         let limit = limit.unwrap_or(50).clamp(1, 100) as i64;
         let events =
@@ -695,7 +700,7 @@ impl Query {
         use core_models::admin::{AuditLog, AuditLogFilter};
 
         require_role(ctx, Role::AdminAuditRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
 
         let filter = match filter {
             Some(f) => AuditLogFilter {
@@ -1021,7 +1026,8 @@ mod tests {
         ] {
             let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
-                unreachable_pool(),
+                econ_graph_core::database::AppPool(unreachable_pool()),
+                Some(econ_graph_core::database::DataPool(unreachable_pool())),
                 std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                     u, false,
                 )),
@@ -1044,7 +1050,8 @@ mod tests {
     #[tokio::test]
     async fn test_user_query_requires_authentication_before_parsing_the_id() {
         let schema = crate::graphql::schema::create_schema_with_data(
-            unreachable_pool(),
+            econ_graph_core::database::AppPool(unreachable_pool()),
+            Some(econ_graph_core::database::DataPool(unreachable_pool())),
             std::sync::Arc::new(crate::graphql::context::GraphQLContext::anonymous()),
         );
         let resp = schema
@@ -1069,7 +1076,8 @@ mod tests {
         ] {
             let label = u.name.clone();
             let schema = crate::graphql::schema::create_schema_with_data(
-                unreachable_pool(),
+                econ_graph_core::database::AppPool(unreachable_pool()),
+                Some(econ_graph_core::database::DataPool(unreachable_pool())),
                 std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                     Some(u),
                     staff,
@@ -1260,7 +1268,10 @@ mod empty_series_tests {
     async fn search_series_excludes_series_with_no_data() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         let (_source, with_data, without_data) = seed(&pool, "Zyxquartile").await;
 
@@ -1284,7 +1295,10 @@ mod empty_series_tests {
     async fn series_list_excludes_series_with_no_data() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         let (source, with_data, without_data) = seed(&pool, "Wavequotient").await;
 
@@ -1313,7 +1327,10 @@ mod empty_series_tests {
     async fn series_list_pages_a_source_and_counts_all_of_it() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         let (source, with_data, _without_data) = seed(&pool, "Pagequintile").await;
         let dataset_id =
@@ -1408,7 +1425,10 @@ mod empty_series_tests {
     async fn data_sources_excludes_source_with_no_series_that_has_data() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         // A source whose only series has data.
         let (source_with_data, _with_data, _without_data) = seed(&pool, "Rhoultimeter").await;
@@ -1481,7 +1501,10 @@ mod empty_series_tests {
     async fn data_source_series_and_series_count_exclude_series_with_no_data() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         // One source with a populated series and an empty one, mirroring a source whose
         // adapter was removed after discovering (but never crawling) some of its series.
@@ -1516,7 +1539,10 @@ mod empty_series_tests {
     async fn series_returns_a_clean_404_for_a_series_with_no_data() {
         let container = get_test_db().await;
         let pool = container.pool().clone();
-        let schema = create_schema(pool.clone());
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
 
         let (_source, with_data, without_data) = seed(&pool, "Sigmajitter").await;
 

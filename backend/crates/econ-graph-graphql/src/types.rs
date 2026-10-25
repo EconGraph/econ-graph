@@ -154,7 +154,7 @@ impl EconomicSeriesType {
 
     /// Fetch the data source using direct database query
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.source_id)?;
 
         use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
@@ -178,7 +178,7 @@ impl EconomicSeriesType {
         ctx: &Context<'_>,
         #[graphql(default = 100)] limit: i32,
     ) -> Result<Vec<DataPointType>> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         use diesel::{ExpressionMethods, QueryDsl};
@@ -201,7 +201,7 @@ impl EconomicSeriesType {
 
     /// Get data point count using direct database query
     async fn data_point_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         use diesel::{ExpressionMethods, QueryDsl};
@@ -225,9 +225,7 @@ impl EconomicSeriesType {
     /// series costs one query per batch of up to 200 series.
     async fn latest_observation(&self, ctx: &Context<'_>) -> Result<Option<LatestObservationType>> {
         let series_uuid = Uuid::parse_str(&self.id)?;
-        let loaders = &ctx
-            .data::<crate::graphql::schema::SchemaResources>()?
-            .data_loaders;
+        let loaders = crate::graphql::context::data_loaders(ctx)?;
         loaders
             .latest_observation_loader
             .try_load(series_uuid)
@@ -244,7 +242,7 @@ impl EconomicSeriesType {
     ) -> Result<Vec<DataPointType>> {
         use econ_graph_core::database::DatabasePool;
 
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         // As in `seriesData`: a transformation reads the latest revisions unless the filter
@@ -457,7 +455,7 @@ impl DataSourceType {
         #[graphql(default = 50)] first: i32,
         after: Option<String>,
     ) -> Result<SeriesConnection> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
         use diesel::{ExpressionMethods, QueryDsl};
@@ -509,7 +507,7 @@ impl DataSourceType {
 
     /// Get count of active series for this data source
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
         use diesel::{ExpressionMethods, QueryDsl};
@@ -1281,8 +1279,8 @@ pub struct SystemMetricsType {
     pub active_users: i32,
     /// Database size in MB
     pub database_size_mb: f64,
-    /// Number of queue items
-    pub queue_items: i32,
+    /// Number of crawl queue items; null on a backend with no data database
+    pub queue_items: Option<i32>,
     /// API requests per minute
     pub api_requests_per_minute: f64,
     /// Average response time in milliseconds

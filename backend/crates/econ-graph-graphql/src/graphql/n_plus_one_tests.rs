@@ -4,6 +4,7 @@ use crate::{Mutation, Query};
 use async_graphql::{EmptySubscription, Request, Schema};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use econ_graph_core::database::{AppPool, DataPool};
 use econ_graph_core::{
     models::{DataSource, EconomicSeries, NewDataSource, NewEconomicSeries},
     schema::{data_sources, economic_series},
@@ -16,10 +17,10 @@ use uuid::Uuid;
 async fn test_dataloader_batching_for_n_plus_one_prevention() {
     let container = get_test_db().await;
     let pool = container.pool().clone();
-    let _schema = create_schema(pool.clone());
+    let _schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
     // Create DataLoaders with the pool
-    let data_loaders = DataLoaders::new(pool.clone());
+    let data_loaders = DataLoaders::new(DataPool(pool.clone()));
 
     // Generate a list of IDs that may or may not exist in the database
     let test_ids = vec![
@@ -44,11 +45,6 @@ async fn test_dataloader_batching_for_n_plus_one_prevention() {
                     dataloader::cached::Loader::load(&data_loaders.data_point_count_loader, id)
                         .await;
                 assert_eq!(count_result, 0);
-
-                // Test user loader
-                let user_result =
-                    dataloader::cached::Loader::load(&data_loaders.user_loader, id).await;
-                assert!(user_result.is_none());
             }
         })
         .collect();
@@ -66,10 +62,10 @@ async fn test_dataloader_batching_for_n_plus_one_prevention() {
 async fn test_comprehensive_n_plus_one_prevention() {
     let container = get_test_db().await;
     let pool = container.pool().clone();
-    let _schema = create_schema(pool.clone());
+    let _schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
     // Create DataLoaders with the pool
-    let data_loaders = DataLoaders::new(pool.clone());
+    let data_loaders = DataLoaders::new(DataPool(pool.clone()));
 
     // Test all DataLoader types to ensure comprehensive N+1 prevention
     let test_ids = vec![Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
@@ -80,12 +76,10 @@ async fn test_comprehensive_n_plus_one_prevention() {
             dataloader::cached::Loader::load(&data_loaders.data_source_loader, id).await;
         let count_result =
             dataloader::cached::Loader::load(&data_loaders.data_point_count_loader, id).await;
-        let user_result = dataloader::cached::Loader::load(&data_loaders.user_loader, id).await;
 
         // DataLoaders now correctly return Options for missing entities
         assert!(source_result.is_none());
         assert_eq!(count_result, 0);
-        assert!(user_result.is_none());
     }
 
     println!("✅ Comprehensive N+1 prevention test passed");
@@ -99,13 +93,14 @@ async fn test_comprehensive_n_plus_one_prevention() {
 async fn test_graphql_query_level_n_plus_one_prevention() {
     let container = get_test_db().await;
     let pool = container.pool().clone();
-    let _data_loaders = DataLoaders::new(pool.clone());
+    let _data_loaders = DataLoaders::new(DataPool(pool.clone()));
 
     // Skip complex test data creation to avoid connection issues
     // This test focuses on GraphQL schema execution with DataLoaders
 
     // Use the proper schema creation function
-    let schema = crate::graphql::schema::create_schema(pool.clone());
+    let schema =
+        crate::graphql::schema::create_schema(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
     // Test a simple GraphQL query that would typically cause N+1 problems
     let query = r#"

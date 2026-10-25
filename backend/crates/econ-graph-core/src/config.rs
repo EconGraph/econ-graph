@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
-/// Application configuration
+/// Application configuration. The database URLs are read separately: [`backend_database_urls`]
+/// and [`data_database_url`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub database_url: String,
     pub server: ServerConfig,
     pub cors: CorsConfig,
     pub crawler: CrawlerConfig,
@@ -43,9 +43,6 @@ impl Config {
         dotenvy::dotenv().ok();
 
         Ok(Config {
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgresql://localhost:5432/econ_graph".to_string()),
-
             server: ServerConfig {
                 host: env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
                 port: env::var("BACKEND_PORT")
@@ -185,7 +182,6 @@ fn required_url(
 impl Default for Config {
     fn default() -> Self {
         Config {
-            database_url: "postgresql://localhost:5432/econ_graph_test".to_string(),
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
                 port: env::var("BACKEND_PORT")
@@ -225,13 +221,11 @@ mod tests {
         // This ensures developers can run the app without extensive configuration setup
 
         // Store original values to restore later
-        let original_database_url = env::var("DATABASE_URL").ok();
         let original_backend_port = env::var("BACKEND_PORT").ok();
         let original_frontend_port = env::var("FRONTEND_PORT").ok();
         let original_cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS").ok();
 
         // Clear environment variables to test true defaults
-        env::remove_var("DATABASE_URL");
         env::remove_var("BACKEND_PORT");
         env::remove_var("FRONTEND_PORT");
         env::remove_var("CORS_ALLOWED_ORIGINS");
@@ -246,11 +240,6 @@ mod tests {
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
 
         // Restore original environment variables
-        if let Some(val) = original_database_url {
-            env::set_var("DATABASE_URL", val);
-        } else {
-            env::remove_var("DATABASE_URL");
-        }
         if let Some(val) = original_backend_port {
             env::set_var("BACKEND_PORT", val);
         } else {
@@ -276,39 +265,24 @@ mod tests {
         // This is essential for containerized deployments and different environments
 
         // Store original values to restore later
-        let original_database_url = env::var("DATABASE_URL").ok();
         let original_backend_port = env::var("BACKEND_PORT").ok();
         let original_frontend_port = env::var("FRONTEND_PORT").ok();
 
         // Clear any existing environment variables first to ensure clean test state
-        env::remove_var("DATABASE_URL");
         env::remove_var("BACKEND_PORT");
         env::remove_var("FRONTEND_PORT");
 
         // Set test environment variables
-        env::set_var(
-            "DATABASE_URL",
-            "postgresql://test:test@localhost:5432/test_db",
-        );
         env::set_var("BACKEND_PORT", "9000");
         env::set_var("FRONTEND_PORT", "4000");
 
         let config = Config::from_env().unwrap();
 
         // Verify environment variables override defaults - required for deployment flexibility
-        assert_eq!(
-            config.database_url,
-            "postgresql://test:test@localhost:5432/test_db"
-        );
         assert_eq!(config.server.port, 9000);
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
 
         // Restore original environment variables
-        if let Some(val) = original_database_url {
-            env::set_var("DATABASE_URL", val);
-        } else {
-            env::remove_var("DATABASE_URL");
-        }
         if let Some(val) = original_backend_port {
             env::set_var("BACKEND_PORT", val);
         } else {

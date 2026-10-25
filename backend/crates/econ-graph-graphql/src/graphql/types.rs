@@ -89,8 +89,7 @@ impl EconomicSeriesType {
 
     /// Fetch the data source using DataLoader for efficient batching
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
-        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
-        let data_loaders = &context.data_loaders;
+        let data_loaders = crate::graphql::context::data_loaders(ctx)?;
         let source_uuid = Uuid::parse_str(&self.source_id)?;
 
         let source = data_loaders.data_source_loader.load(source_uuid).await;
@@ -103,8 +102,7 @@ impl EconomicSeriesType {
         ctx: &Context<'_>,
         #[graphql(default = 100)] limit: i32,
     ) -> Result<Vec<DataPointType>> {
-        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
-        let data_loaders = &context.data_loaders;
+        let data_loaders = crate::graphql::context::data_loaders(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         let data_points = data_loaders.data_points_by_series_loader.load(series_uuid).await;
@@ -119,8 +117,7 @@ impl EconomicSeriesType {
 
     /// Get data point count using DataLoader for efficient batching
     async fn data_point_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
-        let data_loaders = &context.data_loaders;
+        let data_loaders = crate::graphql::context::data_loaders(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         let count = data_loaders.data_point_count_loader.load(series_uuid).await;
@@ -136,7 +133,7 @@ impl EconomicSeriesType {
     ) -> Result<Vec<DataPointType>> {
         use econ_graph_core::database::DatabasePool;
 
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         let filter = filter.unwrap_or_default();
@@ -308,8 +305,7 @@ impl DataSourceType {
         #[graphql(default = 50)] first: i32,
         after: Option<String>,
     ) -> Result<SeriesConnection> {
-        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
-        let data_loaders = &context.data_loaders;
+        let data_loaders = crate::graphql::context::data_loaders(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
         let all_series = data_loaders.series_by_source_loader.load(source_uuid).await;
@@ -350,8 +346,7 @@ impl DataSourceType {
 
     /// Get count of active series for this data source
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
-        let data_loaders = &context.data_loaders;
+        let data_loaders = crate::graphql::context::data_loaders(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
         let count = data_loaders.series_count_loader.load(source_uuid).await;

@@ -39,7 +39,7 @@ impl Mutation {
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
         let caller = require_role(ctx, Role::AdminCrawlersManage)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
         let mut details = serde_json::json!({
             "source": input.source,
@@ -86,8 +86,12 @@ impl Mutation {
     ) -> Result<ChartAnnotationType> {
         // The author is the signed-in caller, never an id from the request.
         let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
-        let pool = ctx.data::<DatabasePool>()?;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
+        // The series is checked in the data database; with none, the check is skipped (the
+        // backend logs that at startup).
+        let series_pool = ctx.data_opt::<DataPool>().map(|data| data.0.clone());
+        let collaboration_service =
+            CollaborationService::with_series_pool(pool.clone(), series_pool);
 
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
         let is_public = input.is_public.unwrap_or(false);
@@ -117,7 +121,7 @@ impl Mutation {
         input: AddCommentInput,
     ) -> Result<AnnotationCommentType> {
         let user_id = require_role(ctx, Role::AnnotationComment)?.user_id;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
@@ -137,7 +141,7 @@ impl Mutation {
     ) -> Result<ChartCollaboratorType> {
         // The sharer is the signed-in caller, who must already be an admin on the chart.
         let owner_user_id = require_role(ctx, Role::ChartShare)?.user_id;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let target_user_id = uuid::Uuid::parse_str(&input.target_user_id)?;
@@ -167,7 +171,7 @@ impl Mutation {
         // Same role as creating one: updating can publish new (or newly public) content,
         // unlike delete, which only removes it.
         let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
@@ -195,7 +199,7 @@ impl Mutation {
         input: DeleteAnnotationInput,
     ) -> Result<bool> {
         let user_id = current_user(ctx)?.id;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
@@ -218,7 +222,7 @@ impl Mutation {
         input: UpdateUserInput,
     ) -> Result<UserType> {
         let caller = require_role(ctx, Role::AdminUsersUpdate)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let user_id = uuid::Uuid::parse_str(&id).ok();
 
         use diesel::prelude::*;
@@ -285,7 +289,7 @@ impl Mutation {
     /// Delete a user (requires `admin.users:delete`); never the caller's own account
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let caller = require_role(ctx, Role::AdminUsersDelete)?;
-        let pool = ctx.data::<DatabasePool>()?;
+        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
         let user_id = uuid::Uuid::parse_str(&id).ok();
 
         use diesel::prelude::*;
@@ -344,7 +348,7 @@ async fn set_user_active(
     use diesel_async::RunQueryDsl;
     use econ_graph_core::schema::users;
 
-    let pool = ctx.data::<DatabasePool>()?;
+    let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
     let user_id = uuid::Uuid::parse_str(id).ok();
     let attempt = async {
         let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
@@ -744,7 +748,8 @@ mod tests {
     ) -> async_graphql::Response {
         let staff = user.as_ref().is_some_and(|u| is_staff_label(&u.name));
         let schema = crate::graphql::schema::create_schema_with_data(
-            pool.clone(),
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
             Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                 user, staff,
             )),
@@ -893,7 +898,8 @@ mod tests {
         ] {
             let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
-                unreachable_pool(),
+                econ_graph_core::database::AppPool(unreachable_pool()),
+                Some(econ_graph_core::database::DataPool(unreachable_pool())),
                 Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                     u, false,
                 )),
@@ -950,8 +956,11 @@ mod collaboration_auth_tests {
             format!(r#"mutation {{ deleteAnnotation(input: {{ annotationId: "{id}" }}) }}"#),
             format!(r#"{{ chartCollaborators(chartId: "{id}") {{ id }} }}"#),
         ];
-        let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(unreachable_pool()),
+            Some(econ_graph_core::database::DataPool(unreachable_pool())),
+            Arc::new(GraphQLContext::anonymous()),
+        );
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert_eq!(resp.errors.len(), 1, "{mutation}: {:?}", resp.errors);
@@ -981,8 +990,11 @@ mod collaboration_auth_tests {
                 r#"mutation {{ deleteAnnotation(input: {{ userId: "{id}", annotationId: "{id}" }}) }}"#
             ),
         ];
-        let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
+        let schema = create_schema_with_data(
+            econ_graph_core::database::AppPool(unreachable_pool()),
+            Some(econ_graph_core::database::DataPool(unreachable_pool())),
+            Arc::new(GraphQLContext::anonymous()),
+        );
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert!(

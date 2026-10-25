@@ -114,10 +114,7 @@ async fn record_admin_action(
     resource_id: Option<String>,
     mut details: Value,
 ) {
-    let (Ok(pool), Ok(context)) = (
-        ctx.data::<DatabasePool>(),
-        ctx.data::<Arc<GraphQLContext>>(),
-    ) else {
+    let (Ok(pool), Ok(context)) = (ctx.data::<AppPool>(), ctx.data::<Arc<GraphQLContext>>()) else {
         return;
     };
     let Some(user) = context.user.as_ref() else {
@@ -203,7 +200,7 @@ impl Extension for AuditWrites {
     ) -> async_graphql::Response {
         let response = next.run(ctx, operation_name).await;
         if let (Some(pool), Some(context)) = (
-            ctx.data_opt::<DatabasePool>(),
+            ctx.data_opt::<AppPool>(),
             ctx.data_opt::<Arc<GraphQLContext>>(),
         ) {
             let events = std::mem::take(
@@ -288,7 +285,8 @@ mod tests {
         async_graphql::EmptySubscription,
     > {
         create_schema_with_data(
-            pool.clone(),
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
             Arc::new(GraphQLContext::signed_in(caller.clone(), roles)),
         )
     }
@@ -679,7 +677,8 @@ mod tests {
         let client = ClientInfo::new(Some("203.0.113.7".into()), Some("AuditTest/1.0"));
         let schema = |user: &User, roles| {
             create_schema_with_data(
-                pool.clone(),
+                econ_graph_core::database::AppPool(pool.clone()),
+                Some(econ_graph_core::database::DataPool(pool.clone())),
                 Arc::new(
                     GraphQLContext::signed_in(user.clone(), roles).with_client(client.clone()),
                 ),

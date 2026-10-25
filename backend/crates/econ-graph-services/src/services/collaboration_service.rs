@@ -230,12 +230,26 @@ pub fn validate_comment(content: &str) -> AppResult<()> {
 
 /// Collaboration service for managing annotations and sharing
 pub struct CollaborationService {
+    /// The app database: annotations, comments, collaborators, users.
     pool: DatabasePool,
+    /// The data database, where a new annotation's series must exist; `None` skips that check.
+    series_pool: Option<DatabasePool>,
 }
 
 impl CollaborationService {
+    /// A service on one database holding both the app and data tables: new annotations' series
+    /// are checked in `pool` too.
     pub fn new(pool: DatabasePool) -> Self {
-        Self { pool }
+        Self {
+            series_pool: Some(pool.clone()),
+            pool,
+        }
+    }
+
+    /// A service on the app database `pool` that checks new annotations' series in
+    /// `series_pool` (the data database), or not at all when it is `None`.
+    pub fn with_series_pool(pool: DatabasePool, series_pool: Option<DatabasePool>) -> Self {
+        Self { pool, series_pool }
     }
 
     /// Create a new chart annotation.
@@ -273,26 +287,32 @@ impl CollaborationService {
             annotation_value.as_ref(),
             chrono::Utc::now().date_naive(),
         )?;
+        // `chart_annotations.series_id` is varchar with no foreign key (and the series may be
+        // in another database), so nothing else stops an annotation on a series that doesn't
+        // exist.
+        if let Some(series_pool) = &self.series_pool {
+            let mut conn = series_pool.get().await.map_err(|e| {
+                AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+            })?;
+            let series_exists = economic_series::table
+                .find(series_id)
+                .select(economic_series::id)
+                .first::<Uuid>(&mut conn)
+                .await
+                .optional()
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?
+                .is_some();
+            if !series_exists {
+                return Err(AppError::SeriesNotFound(series_id.to_string()));
+            }
+        }
+
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
                 e
             ))
         })?;
-
-        // `chart_annotations.series_id` is varchar with no foreign key, so nothing else stops
-        // an annotation on a series that doesn't exist.
-        let series_exists = economic_series::table
-            .find(series_id)
-            .select(economic_series::id)
-            .first::<Uuid>(&mut conn)
-            .await
-            .optional()
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?
-            .is_some();
-        if !series_exists {
-            return Err(AppError::SeriesNotFound(series_id.to_string()));
-        }
 
         // Check if user has permission to annotate this series
         if !self.check_annotation_permission(user_id, series_id).await? {
