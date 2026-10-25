@@ -15,6 +15,14 @@
 #                              public host; on one that does, the script stops
 #                              rather than silently taking the site down.
 # scripts/deploy/render-public-host.py lists what the host changes.
+#
+# A public host is served only from a cluster marked production with
+# scripts/deploy/mark-production-cluster.sh (see lib/cluster-role.sh): on any
+# other cluster a non-empty PUBLIC_HOST stops the deploy, and cloudflared is
+# kept at 0 replicas.
+
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
 
 PUBLIC_HOST_LABEL="econgraph.io/public-host"
 # Settings this file owns in the ingress-nginx controller ConfigMap. Listed so
@@ -57,6 +65,10 @@ public_host_init() {
     PUBLIC_HOST="${PUBLIC_HOST:-}"
     if [ -n "$PUBLIC_HOST" ]; then
         ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" /dev/null >/dev/null || exit 1
+        # Checked before anything is applied, so a refused deploy changes nothing.
+        if ! cluster_is_marked_production; then
+            refuse_public_host
+        fi
         echo "🌐 Public host: https://${PUBLIC_HOST} (www.${PUBLIC_HOST} redirects to it)"
     else
         echo "🌐 No PUBLIC_HOST: serving http://localhost only"
@@ -116,14 +128,38 @@ apply_public_edge() {
     fi
 }
 
-# The Cloudflare Tunnel connector (k8s/manifests/cloudflared.yaml). Its token is
-# the Secret cloudflare-tunnel, written by create-secrets.sh (enter it with
-# `scripts/deploy/create-secrets.sh --prompt-tunnel-token`, hidden input).
-# Without the Secret, or without a public host for it to serve, it is applied
-# with 0 replicas, so nothing crash-loops. Sets CLOUDFLARED_DEPLOYED.
+# Stop the deploy: PUBLIC_HOST is set on a cluster that is not production
+# (CLUSTER_ROLE_REASON says why).
+refuse_public_host() {
+    echo "❌ PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}."
+    echo "   Only the production cluster serves the public host: a second tunnel connector"
+    echo "   would silently take a share of the site's traffic. On the production cluster,"
+    echo "   run scripts/deploy/mark-production-cluster.sh once (again after a recreate);"
+    echo "   on any other cluster, deploy with PUBLIC_HOST= (empty)."
+    exit 1
+}
+
+# The Cloudflare Tunnel connector (k8s/manifests/cloudflared.yaml), which is
+# committed with replicas: 0, so applying k8s/manifests wholesale never starts
+# it. This is the one place that scales it up, to CLOUDFLARED_REPLICAS, and only
+# on a cluster marked production that has a public host and the token. The
+# token is the Secret cloudflare-tunnel, written by create-secrets.sh (enter it
+# with `scripts/deploy/create-secrets.sh --prompt-tunnel-token`, hidden input).
+# Otherwise it is applied with 0 replicas, which also stops a connector already
+# running; on a cluster that is not production with a PUBLIC_HOST, the deploy
+# then stops. Sets CLOUDFLARED_DEPLOYED.
+#
+# One replica while the cluster has one worker node. On several nodes, use 2+
+# with the pod anti-affinity in the manifest: every replica registers its own
+# connections for the same tunnel, so losing a node does not take the site down.
+CLOUDFLARED_REPLICAS=1
 apply_cloudflared() {
     CLOUDFLARED_DEPLOYED=false
-    if ! kubectl -n econ-graph get secret cloudflare-tunnel >/dev/null 2>&1; then
+    if ! cluster_is_marked_production; then
+        echo "⚠️  cloudflared applied with 0 replicas: ${CLUSTER_ROLE_REASON}."
+        yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
+        [ -z "$PUBLIC_HOST" ] || refuse_public_host
+    elif ! kubectl -n econ-graph get secret cloudflare-tunnel >/dev/null 2>&1; then
         echo "⚠️  Secret cloudflare-tunnel not found: cloudflared applied with 0 replicas,"
         echo "   so the site is not served publicly. Enter the tunnel token with"
         echo "   scripts/deploy/create-secrets.sh --prompt-tunnel-token, then deploy again."
@@ -133,8 +169,8 @@ apply_cloudflared() {
         echo "   the tunnel's host names)."
         yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kubectl apply -f -
     else
-        echo "🚇 Deploying cloudflared (Cloudflare Tunnel)..."
-        kubectl apply -f k8s/manifests/cloudflared.yaml
+        echo "🚇 Deploying cloudflared (Cloudflare Tunnel), ${CLOUDFLARED_REPLICAS} replica(s)..."
+        yq ".spec.replicas = ${CLOUDFLARED_REPLICAS}" k8s/manifests/cloudflared.yaml | kubectl apply -f -
         CLOUDFLARED_DEPLOYED=true
     fi
 }

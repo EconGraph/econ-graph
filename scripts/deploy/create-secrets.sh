@@ -9,7 +9,9 @@
 # Every input is an environment variable, except that --prompt-tunnel-token
 # reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
 # piped input), so the token never lands in shell history, process arguments,
-# or the screen. Run that yourself; never paste the token into a command line. The script is idempotent: run it as
+# or the screen. Run that yourself; never paste the token into a command line.
+# The token is written only into a cluster marked production with
+# scripts/deploy/mark-production-cluster.sh. The script is idempotent: run it as
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
@@ -59,6 +61,12 @@
 #     kubectl last-applied-configuration annotation, as the old committed one
 #     does) and MONITORING_BASIC_AUTH is unset, the script stops unless
 #     ALLOW_MANIFEST_MONITORING_AUTH=1.
+#   - CLOUDFLARE_TUNNEL_TOKEN (or --prompt-tunnel-token) is refused, before
+#     the prompt and before anything is written, unless the cluster is marked
+#     production (scripts/deploy/lib/cluster-role.sh): any cloudflared that
+#     runs with the token takes a share of the public site's traffic. A token
+#     already in an unmarked cluster is kept, with a warning; deploy.sh does not
+#     run cloudflared there.
 #   - If the cluster cannot be queried, the script stops before writing
 #     anything rather than generating new passwords.
 #   - Postgres and Grafana only read their passwords when their data volume is
@@ -84,7 +92,7 @@ for arg in "$@"; do
     case "$arg" in
         --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
         -h | --help)
-            sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -108,12 +116,27 @@ log() {
     echo "create-secrets: $*"
 }
 
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+
+# The tunnel token goes only into the production cluster (ECO-468). Checked
+# before the prompt, so the token is never typed for a cluster that refuses it.
+require_production_for_token() {
+    cluster_is_marked_production ||
+        die "refusing to write the Cloudflare Tunnel token: ${CLUSTER_ROLE_REASON}." \
+            "Only the production cluster may hold it; there, run" \
+            "scripts/deploy/mark-production-cluster.sh once (again after a recreate)." \
+            "Nothing was written."
+}
+
 if [[ "$PROMPT_TUNNEL_TOKEN" == true ]]; then
     # Only from a terminal: a token piped in by another program (or an agent)
     # would have passed through that program first.
     [[ -t 0 ]] || die "--prompt-tunnel-token reads from a terminal only; run it yourself"
     [[ -z "${CLOUDFLARE_TUNNEL_TOKEN-}" ]] ||
         die "CLOUDFLARE_TUNNEL_TOKEN is already set in the environment; unset it first"
+    command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
+    require_production_for_token
     read -rs -p "Cloudflare Tunnel token (input hidden): " CLOUDFLARE_TUNNEL_TOKEN
     echo >&2
     [[ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]] || die "no token entered; nothing was written"
@@ -359,6 +382,7 @@ if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN-}" ]]; then
     [[ "$CLOUDFLARE_TUNNEL_TOKEN" =~ ^[A-Za-z0-9+/_=-]{40,}$ ]] ||
         die "CLOUDFLARE_TUNNEL_TOKEN must be the bare tunnel token (one base64 string," \
             "no spaces, not the whole 'cloudflared ... --token' command)"
+    require_production_for_token
 fi
 if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     [[ "$MONITORING_BASIC_AUTH" =~ ^[^:[:space:]]+:[^[:space:]]+$ ]] ||
@@ -475,10 +499,17 @@ add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
 apply_secret
 
 # --- cloudflare-tunnel (token for the cloudflared connector) -----------------
-# Optional: without it, deploy.sh runs cloudflared with no replicas.
+# Optional: without it, deploy.sh runs cloudflared with no replicas. A new token
+# was only let through above on a cluster marked production.
 begin_secret cloudflare-tunnel
 add_optional CLOUDFLARE_TUNNEL_TOKEN token
 apply_secret
+if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN-}" ]] && ((${#FILE_ARGS[@]} > 0)) &&
+    ! cluster_is_marked_production; then
+    log "warning: cloudflare-tunnel holds a tunnel token, but ${CLUSTER_ROLE_REASON}." \
+        "cloudflared is not run here; unless this is the production cluster, delete" \
+        "the Secret: kubectl -n $NAMESPACE delete secret cloudflare-tunnel"
+fi
 
 # --- grafana-admin ---------------------------------------------------------
 begin_secret grafana-admin

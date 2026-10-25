@@ -228,7 +228,8 @@ public_host_init
 render_manifest k8s/manifests/ingress.yaml | kubectl apply -f -
 for f in k8s/manifests/*.yaml; do
     case "$(basename "$f")" in
-        # Applied by apply_cloudflared below, with 0 replicas without its Secret.
+        # Applied by apply_cloudflared below, which runs it only on a cluster marked
+        # production (scripts/deploy/mark-production-cluster.sh).
         cloudflared.yaml) continue ;;
     esac
     render_manifest "$f" | kubectl apply -f -

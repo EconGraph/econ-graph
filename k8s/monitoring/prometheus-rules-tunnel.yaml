@@ -12,9 +12,10 @@
 #       'kubernetes-pods' job in prometheus-config.yaml scrapes it and maps the pod label
 #       app=cloudflared onto the series.
 #
-# deploy.sh runs cloudflared with replicas: 0 while the Secret cloudflare-tunnel is missing
-# (no tunnel configured); both alerts stay quiet then, since they only fire when the
-# Deployment asks for a replica.
+# deploy.sh runs cloudflared with replicas: 0 unless the cluster is marked production
+# (scripts/deploy/mark-production-cluster.sh) and has a PUBLIC_HOST and the Secret
+# cloudflare-tunnel; both alerts stay quiet then, since they only fire when the Deployment
+# asks for a replica.
 #
 # Loading: like prometheus-rules-crawler.yaml, a plain ConfigMap projected into
 # /etc/prometheus/rules by prometheus-deployment.yaml. Tests: tests/tunnel.test.yaml, run by
