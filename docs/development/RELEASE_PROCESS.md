@@ -1,27 +1,27 @@
 # Release process
 
-How a release train goes from `main` to a tag. The trains and what each contains are in
-[release trains](../roadmap/releases.md).
+How a release goes from `main` to a tag. What each release contains is tracked in
+[Linear](https://linear.app/econgraph/project/releases-and-release-engineering-ee56b60d9c7a).
 
 ## Branches
 
-- **`main`** holds all development until a train reaches QA, and is open to experimental work and
-  the next trains after that.
-- **`release/vX.Y`** (for example `release/v4.0`) is cut from `main` when a train reaches QA. The
+- **`main`** holds all development until a release reaches QA, and is open to experimental work
+  and later releases after that.
+- **`release/vX.Y`** (for example `release/v4.0`) is cut from `main` when a release reaches QA. The
   QA cycle runs on it, and the release tag is made on it. Patch releases (`vX.Y.1`, ...) come
   from the same branch.
 
 ## Cutting the branch
 
-Cut when all of the train's items are merged on `main` and CI is green. For train 1 these are the
-"Before QA starts" conditions in the [v4.0.0 QA plan](../release/v4.0.0-qa.md).
+Cut when all of the release's items are merged on `main` and CI is green. For `v4.0.0` these are
+the "Before QA starts" conditions in the [v4.0.0 QA plan](../release/v4.0.0-qa.md).
 
 ```sh
 git fetch origin main
 git push origin origin/main:refs/heads/release/v4.0
 ```
 
-After the cut, `main` can take work for the next train, including flag and experimental
+After the cut, `main` can take work for later releases, including flag and experimental
 changes the release must not ship.
 
 ## During QA
@@ -56,12 +56,13 @@ migration for the release, and checked against the chain they replace with
 is a PR into the release branch like any fix, forward-ported to `main`. No squash is needed when
 the release added no migrations, or exactly one.
 
-When QA passes and the maintainer agrees, tag the tested commit on the release branch, `vX.Y.0` plus the
-train tag (`train-N`, which the feature flag `remove_by` check reads). Before pushing `train-N`
+When QA passes and the maintainer agrees, tag the tested commit on the release branch with
+`scripts/release/tag.sh`: `vX.Y.0` plus the marker tag `train-N`, which the feature flag
+`remove_by` check reads. Before pushing `train-N`
 the flags `remove_by` check runs with that tag, so a flag that is due for removal blocks the tag.
 The tag workflow reuses the tested image digests instead of rebuilding.
 
-## Next train
+## Scoping the next release
 
-Once a release branch is cut, the area threads start scoping the next release cut on `main`, and
-a separate Fable review agent reviews each scope until it converges.
+Once a release branch is cut, scoping of the next release starts on `main`, and a separate
+review agent reviews each scope until it converges.

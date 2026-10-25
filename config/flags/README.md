@@ -66,9 +66,9 @@ same pattern with two `#[cfg]`-gated `MergedObject` roots instead of one.
    | Key | Required for | Value |
    |---|---|---|
    | `kind` | every flag | `build` (unfinished code compiled out of release builds), `preview` (works end to end, shown to some people first), `ops` (kill switch), or `experiment` |
-   | `owner` | every flag | The Linear issue that owns it, such as `ECO-NNN`, or for a flag the roadmap itself owns, the Linear project URL |
+   | `owner` | every flag | The Linear issue that owns it, such as `ECO-NNN`, or a Linear project URL |
    | `stage` | `preview` only | `alpha` or `beta` |
-   | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once tag `train-N` (or a later train's) exists and the flag is still here |
+   | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once tag `train-N` (or one with a higher N) exists and the flag is still here |
 
    No other metadata keys are allowed, so a typo fails the check. `ops` flags
    are long-lived and take no `remove_by`; an `experiment` flag may carry one.
@@ -100,11 +100,11 @@ Example:
 }
 ```
 
-When train N ships, its release pushes the marker tag with the version tag:
-`git tag train-N <release commit> && git push origin train-N`. From then on the
-check fails for every flag still marked `remove_by: "train N"` or earlier.
-Before pushing the tag, `node scripts/check-flags --shipped-train N` lists
-the flags that release has to delete first.
+Each release pushes a `train-N` marker tag with its version tag; `scripts/release/tag.sh`
+takes the number and pushes both. From then on the check fails for every flag still
+marked `remove_by: "train N"` or lower. Before pushing the tag,
+`node scripts/check-flags --shipped-train N` lists the flags that release has to
+delete first.
 
 ## Removing a flag
 
@@ -126,7 +126,7 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   owner ECO-142) registers `econ-graph-crawler`'s ten hardcoded dev-only source
   catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). Unlike the
   other seeded flags it is meant to stay: these catalogs are a development
-  convenience, not unfinished work, so there is no release train to remove it by.
+  convenience, not unfinished work, so there is no release to remove it by.
 
 ## Updating the vendored schema
 

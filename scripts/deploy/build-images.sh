@@ -67,9 +67,9 @@ cd ../chart-api-service
 docker build -t econ-graph-chart-api:v1.0.0 -t econ-graph-chart-api:latest .
 echo "Chart API service image built successfully"
 
-# Admin frontend image: not built here (re-enabled by ECO-242, train 2). It still
-# signs in through the retired in-house login and sends `role` on createUser/
-# updateUser (see #261/AUTH-5), so it gets 401 on every GraphQL call as of that PR.
+# Admin frontend image: not built here (ECO-242). It signs in through the retired
+# in-house login and sends `role` on createUser/updateUser (see #261/AUTH-5), so
+# it gets 401 on every GraphQL call.
 
 # Load images into the kind cluster (nodes can't pull local-only images from
 # a registry, and the manifests set imagePullPolicy: Never for these)
@@ -79,7 +79,7 @@ kind load docker-image econ-graph-backend:${VERSION} --name "${KIND_CLUSTER_NAME
 kind load docker-image econ-graph-crawler-worker:${VERSION} --name "${KIND_CLUSTER_NAME}"
 kind load docker-image econ-graph-frontend:${VERSION} --name "${KIND_CLUSTER_NAME}"
 kind load docker-image econ-graph-chart-api:v1.0.0 --name "${KIND_CLUSTER_NAME}"
-# econ-graph-admin-frontend: not loaded (re-enabled by ECO-242, train 2).
+# econ-graph-admin-frontend: not loaded (ECO-242).
 
 echo "All images built and loaded successfully!"
 echo ""

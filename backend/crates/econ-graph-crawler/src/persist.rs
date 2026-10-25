@@ -17,9 +17,9 @@
 //! - [`latest_revision_date`]: the known-vintage bound for sources that track vintages.
 //!
 //! Every series is written with its dataset's ([`SeriesDataset`]) id and its dimension values.
-//! `default_measure` on a series is an override of the dataset's and is not written: train 1
-//! datasets have the single measure `value`. Callers check the series against the
-//! [`DatasetCatalog`] first; persistence only resolves the synced row.
+//! `default_measure` on a series is an override of the dataset's and is not written: every
+//! dataset the crawler writes has the single measure `value`. Callers check the series
+//! against the [`DatasetCatalog`] first; persistence only resolves the synced row.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;

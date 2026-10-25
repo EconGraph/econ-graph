@@ -3,7 +3,7 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-// REL-3 "nothing fake" check (exit criterion 4): the release bundle must not ship
+// Nothing-fake check: the release bundle must not ship
 // placeholder/demo content as if it were real. Two complementary checks, because a build-time
 // flag that fails to gate code the way `build-flags.md` describes still ends up in the bundle:
 //
@@ -17,7 +17,8 @@
 //    check doesn't otherwise flag.
 //
 // Known offenders are allowed via nothing-fake-allowlist.json, each entry with a reason and
-// which PR removes it. REL-5 requires the allowlist to be empty before the version tag.
+// which PR removes it. The allowlist must be empty before a release is tagged (see
+// docs/release/v4.0.0-qa.md).
 
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';

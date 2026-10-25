@@ -7,16 +7,15 @@
  * now validates, or no longer exists, so the entry has to be removed in the PR
  * that fixes or deletes the operation.
  *
- * Keys are `<path under src/>#<OperationName>`. Values say which release 1 area
- * owns the fix. Nothing new may be added here for code on a reachable route;
- * the "Reachable today" group at the end must be empty before v4.0.0 (train 1) ships.
- * That is checked by hand against the train 1 exit criteria in
- * `docs/roadmap/releases.md`; no automated test enforces it.
+ * Keys are `<path under src/>#<OperationName>`. Values say which area owns the
+ * fix. Nothing new may be added here for code on a reachable route, and the
+ * "Reachable today" group at the end must be empty in a release build. That is
+ * checked by hand; no automated test enforces it.
  */
 export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
-  // Financial statements UI: compiled out of release 1 (sec area). No SEC
-  // financial GraphQL API exists yet; these mocks and queries were written
-  // ahead of it.
+  // Financial statements UI: compiled out of release builds (sec area). No SEC
+  // financial GraphQL API exists; these mocks and queries were written
+  // ahead of one.
   'graphql/financial.ts#GetFinancialStatements': 'sec: compiled out',
   'graphql/financial.ts#GetFinancialLineItems': 'sec: compiled out',
   'graphql/financial.ts#GetFinancialRatios': 'sec: compiled out',

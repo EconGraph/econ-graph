@@ -203,18 +203,4 @@ frontend/
 - **Visual Regression**: Automated screenshot comparison
 - **Performance Testing**: Core Web Vitals monitoring
 
-## 📈 Future Enhancements
-
-### Advanced Features
-- **Data Annotations**: Add contextual notes to charts
-- **Custom Dashboards**: User-created dashboard layouts
-- **Export Options**: PDF, PNG, SVG chart exports
-- **Collaboration**: Share charts and analysis
-
-### Technical Improvements
-- **PWA Features**: Full offline support and sync
-- **WebSockets**: Real-time data updates
-- **Web Workers**: Heavy computations in background
-- **CDN Integration**: Global content delivery
-
 The React frontend successfully delivers a modern, intuitive interface that significantly improves upon FRED's user experience while maintaining the comprehensive data access that makes FRED valuable for economic analysis.

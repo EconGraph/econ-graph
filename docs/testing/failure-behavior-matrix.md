@@ -1,6 +1,6 @@
-# Failure-behavior coverage matrix (train 1)
+# Failure-behavior coverage matrix
 
-ECO-264's release gate: every backend integration point reachable in train 1, the failure cases
+ECO-264's release gate: every backend integration point reachable in the release build, the failure cases
 that apply to it, and the test that shows each is handled (or why a case doesn't apply). The
 sampled browser checks are at the end. Test names are `file::test`; backend paths are under
 `backend/crates/`, frontend paths under `frontend/`.
@@ -15,7 +15,7 @@ Status: **covered** (a test exercises it), **n/a** (with the reason), **gap** (k
 ## 1. Source HTTP client (`econ-graph-crawler/src/http.rs`)
 
 Every source adapter fetches through `HttpFetcher`, so its classification and retry rules hold
-for all six train 1 sources.
+for all six sources.
 
 | Case | Status | Evidence |
 |---|---|---|
@@ -93,7 +93,7 @@ batches, paging).
 | Suspended account refused | covered | `main.rs::graphql_signs_in_a_valid_token_and_refuses_a_suspended_account` |
 | Authorization fails closed per resolver | covered | `authorization_tests.rs` (14 tests: missing role denied, anonymous asked to sign in, denial before any DB access, no target-existence leak) |
 | Annotation privacy | covered | `annotation_visibility_tests.rs` |
-| GraphQL request rate limit (429) and per-request timeout | n/a | `security/rate_limit.rs` and `security/timeout.rs` are not on the train 1 request path (not wired in `econ-graph-backend`); their unit tests cover the components only |
+| GraphQL request rate limit (429) and per-request timeout | n/a | `security/rate_limit.rs` and `security/timeout.rs` are not on the request path (not wired in `econ-graph-backend`); their unit tests cover the components only |
 
 ## 6. Keycloak: discovery, JWKS, token verification (`econ-graph-auth/src/oidc.rs`)
 
@@ -116,7 +116,7 @@ batches, paging).
 | Metrics endpoint and gauges | covered | `econ-graph-crawler-worker/src/metrics.rs` (`healthz_follows_alive_flag_and_unknown_path_is_404`, `queue_gauges_from_seeded_rows`, `coverage_gauges_set_and_removed`) |
 | Coverage alerts (low, not refreshed, crawl failed, stale) | covered | `k8s/monitoring/tests/crawler-coverage.test.yaml` (promtool) |
 | Failure alerts (worker down, metrics missing, no completions, source failing, error rate) | covered | `k8s/monitoring/tests/crawler-failures.test.yaml` (promtool) |
-| Alert routing | n/a | no Alertmanager is deployed in train 1 (`prometheus-rules-crawler.yaml`, KNOWN GAP) |
+| Alert routing | n/a | no Alertmanager is deployed (`prometheus-rules-crawler.yaml`, KNOWN GAP) |
 
 ## 8. Sampled browser checks (release e2e, `tests/e2e/release/failures/`)
 

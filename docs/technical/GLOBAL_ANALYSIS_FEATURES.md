@@ -69,12 +69,6 @@ The Global Analysis feature provides comprehensive tools for visualizing and ana
 - **Inflation Rate**: Annual percentage change in consumer prices
 - **Unemployment Rate**: Percentage of labor force unemployed
 
-#### Future Indicators (Phase 2)
-- **Trade Balance**: Exports minus imports
-- **Government Debt**: Public debt as percentage of GDP
-- **Foreign Direct Investment**: Inward FDI flows
-- **Human Development Index**: Composite development measure
-
 ### Data Visualization Methods
 
 #### Color-Coded Mapping

@@ -32,12 +32,11 @@ years, without one 10. Background: [BLS API experimental findings](../technical/
   title and units discovery stored from the series files. Each
   observation's `footnotes` (`{code, text}`) are parsed and logged — a `P` (preliminary)
   footnote and an `X` ("data unavailable") footnote are recognised — but not stored:
-  `data_points` has no footnote column in train 1.
+  `data_points` has no footnote column.
 - **Dropped**: `latest`, `periodName`, the catalog's `area` and `item`; annual averages
   `M13`, `Q05` and `S03` are skipped.
-- Until the scheduler picked up discovered-but-never-fetched series (#228, now merged),
-  a newly listed series needed a manual `crawler enqueue --source BLS --series <ids>`; the
-  scheduler now does this on its own.
+- The scheduler fetches a newly listed series on its own once discovery has found it
+  (#228); no manual `crawler enqueue` is needed.
 
 ## Sample (recorded)
 

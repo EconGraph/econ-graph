@@ -17,7 +17,7 @@ import {
   searchAndOpen,
 } from '../seriesPage';
 
-// Live QA: REL-QA check 3's per-source sweep on the deployed build. For each train 1 source
+// Live QA: REL-QA check 3's per-source sweep on the deployed build. For each release source
 // (FRED, BLS, Census BDS, BEA, FHFA, WDI), search for one of its series, open it, check the
 // chart's newest point, apply every transformation, and download the CSV. In fixture mode every
 // value is the seeded one; deployed, the newest point must be within the source's publication

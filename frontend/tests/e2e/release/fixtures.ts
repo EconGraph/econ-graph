@@ -119,7 +119,7 @@ export const SEEDED_MULTIPAGE = {
 } as const;
 
 /**
- * World Development Indicators seeded for the world map (MAP-7) and REL-4: three indicators for
+ * World Development Indicators seeded for the world map specs: three indicators for
  * the countries below, from backend/crates/econ-graph-crawler/tests/fixtures/world_bank/. Series
  * ids are `wdi/{indicator}.{area}` and titles `{indicator name}: {country name}`. `latest`
  * is each country's latest non-null value (India has no 2023 inflation value in the fixture).
@@ -178,7 +178,7 @@ export const SEEDED_WDI = {
   ],
 } as const;
 
-/** One train 1 source's series as the six-source sweep (sources/six-source-sweep.spec.ts) checks it. */
+/** One release source's series as the six-source sweep (sources/six-source-sweep.spec.ts) checks it. */
 export interface SweptSeries {
   source: string;
   sourceName: string;
@@ -197,7 +197,8 @@ export interface SweptSeries {
   transformations: Record<string, { date: string; value: string } | null>;
   /**
    * Deployed mode: the most days its newest observation may lag today, from the source's
-   * publication cadence (REL-QA check 3). Observations are dated at the period's start.
+   * publication cadence (check 3 in docs/release/v4.0.0-qa.md). Observations are dated at the
+   * period's start.
    */
   liveMaxAgeDays: number;
 }
@@ -211,7 +212,7 @@ export interface SweptSeries {
 const shown = (date: string, value: string) => ({ date, value });
 
 /**
- * One series per train 1 source, for the six-source sweep. Values are what the series page shows
+ * One series per release source, for the six-source sweep. Values are what the series page shows
  * for the seeded fixtures: levels with the decimals the series carries, up to 2 (none for counts
  * and whole dollars), changes to 2 decimal places and log differences to 4 significant digits.
  * Quarterly and annual dates read as their period ("2024 Q4", "2022"). The comments say where

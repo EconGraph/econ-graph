@@ -69,9 +69,8 @@
 //! requests per batch without a key instead of one (one with a key). An unrecognised
 //! not-processed error retries the whole batch up to the policy's `max_retries` times.
 //!
-//! Discovery writes only `series_metadata`. Until the scheduler also fetches discovered series
-//! (DATA-13, #228), the first fetch of a newly listed series needs `crawler enqueue --source BLS
-//! --series <ids>`.
+//! Discovery writes only `series_metadata`. The scheduler enqueues the first fetch of a newly
+//! listed series itself, alongside refreshes (see `crate::scheduler`, #228).
 //!
 //! # Errors
 //!

@@ -2,8 +2,9 @@
 """Check that the Keycloak realm's econ-graph-api client roles match the role catalog.
 
 The backend's fine-grained roles are the `Role` enum in econ-graph-auth; the realm
-export defines the same set as client roles on `econ-graph-api` (see
-docs/roadmap/auth-plans-permissions.md). This fails when a role is in one and not
+export defines the same set as client roles on `econ-graph-api` (see the auth,
+plans and permissions design record in Linear:
+https://linear.app/econgraph/document/auth-plans-and-permissions-roadmap-design-record-from-pr-176-eae73ef9ee81). This fails when a role is in one and not
 the other, when the realm defines a client role twice, when a composite role
 refers to an econ-graph-api role that the realm does not define, when the
 `admin` or `super_admin` composite lacks a catalog role, or when the `user`
