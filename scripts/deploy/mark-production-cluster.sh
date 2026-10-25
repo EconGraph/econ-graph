@@ -26,11 +26,14 @@
 # token) is left as it is. It deletes no data, volumes or clusters: --unmark
 # removes the marker and, only if you confirm, the token.
 #
-# Other environment: KUBECTL (default kubectl).
+# Other environment: KUBECTL (default kubectl) and its KUBECONFIG; it works on
+# that kubectl's current context. With neither set, it uses the kind cluster's
+# own kubectl and kubeconfig when copies are kept in ~/.cache/econgraph
+# (bin/kubectl, kubeconfig-econ-graph), and says so: plain kubectl may be
+# another cluster's (the microk8s snap wrapper ignores ~/.kube/config).
 
 set -euo pipefail
 
-KUBECTL="${KUBECTL:-kubectl}"
 # Where cloudflared and its token live; fixed, like in lib/public-host.sh.
 TUNNEL_NAMESPACE=econ-graph
 DRY_RUN=false
@@ -40,7 +43,7 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=true ;;
         --unmark) UNMARK=true ;;
         -h | --help)
-            sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -62,11 +65,12 @@ log() {
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
-command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
-
 # Every call below goes through kc, on this one context: the current one, never
 # a CLUSTER_ROLE_CONTEXT inherited from the environment.
 unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl
+KUBECTL="${KUBECTL:-kubectl}"
+command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 cluster_role_pin_context || die "$KUBECTL has no current context"
 context="$CLUSTER_ROLE_CONTEXT"
 uid="$(kube_system_uid)" || die "could not read the kube-system namespace UID of context $context"
@@ -74,21 +78,26 @@ marker="$(cluster_role_marker)" ||
     die "could not read ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_CONFIGMAP of context $context"
 code="${uid:0:8}"
 
-# Show what this cluster is, then ask for the first 8 characters of its
-# kube-system UID, typed at a terminal: a change that decides whether a cluster
-# serves the public site is never made by a pipe or a script.
+# What this cluster is, shown on every run (dry runs and "nothing to do"
+# included), so the output always says which cluster it looked at.
+nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || nodes="(unknown)"
+server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
+    server="(unknown)"
+echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
+echo "  kubectl         $KUBECTL"
+echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"
+echo "  context         $context"
+echo "  API server      ${server:-(unknown)}"
+echo "  nodes           ${nodes:-(none)}"
+echo "  kube-system UID $uid"
+echo "  If that is not the cluster you mean, stop here: KUBECTL and KUBECONFIG select it."
+
+# Ask, at a terminal, for the first 8 characters of the kube-system UID shown
+# above: a change that decides whether a cluster serves the public site is
+# never made by a pipe or a script.
 confirm() {
-    local answer nodes server
+    local answer
     [[ -t 0 ]] || die "the confirmation is read from a terminal only; run it yourself"
-    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || nodes="(unknown)"
-    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
-        server="(unknown)"
-    echo
-    echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
-    echo "  context         $context ($KUBECTL)"
-    echo "  API server      ${server:-(unknown)}"
-    echo "  nodes           ${nodes:-(none)}"
-    echo "  kube-system UID $uid"
     echo
     echo "$1"
     read -r -p "Type the first 8 characters of the kube-system UID above to continue: " answer
