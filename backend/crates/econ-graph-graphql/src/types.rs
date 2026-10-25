@@ -1334,10 +1334,26 @@ pub struct AuditLogType {
     pub created_at: DateTime<Utc>,
 }
 
+impl From<econ_graph_core::models::admin::SecurityEvent> for SecurityEventType {
+    fn from(event: econ_graph_core::models::admin::SecurityEvent) -> Self {
+        Self {
+            id: ID(event.id.to_string()),
+            event_type: event.event_type,
+            user_id: event.user_id.map(|id| ID(id.to_string())),
+            user_email: event.user_email,
+            ip_address: event.ip_address,
+            user_agent: event.user_agent,
+            description: event.description,
+            severity: event.severity,
+            created_at: event.created_at,
+        }
+    }
+}
+
 impl From<econ_graph_core::models::admin::AuditLog> for AuditLogType {
     fn from(log: econ_graph_core::models::admin::AuditLog) -> Self {
         Self {
-            id: ID::from(log.id.to_string()),
+            id: ID(log.id.to_string()),
             user_deleted: log.user_deleted(),
             user_id: log.user_id.map(|id| ID::from(id.to_string())),
             user_name: log.user_name,
