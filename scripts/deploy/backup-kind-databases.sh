@@ -12,6 +12,8 @@
 # (changing nothing) if the cluster's API server can't be reached.
 #
 # Usage: scripts/deploy/backup-kind-databases.sh [--dry-run] [--out DIR]
+# A dry run may create a temporary directory under $TMPDIR (a copy of the
+# cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 
 set -euo pipefail
 

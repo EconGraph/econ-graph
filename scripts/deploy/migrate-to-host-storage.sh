@@ -31,6 +31,8 @@
 #   scripts/deploy/migrate-to-host-storage.sh --rollback [--ref REF] [--resume-from DIR] [--dry-run] [--yes]
 #
 # --dry-run runs every check and prints every step without changing anything.
+# A dry run may create a temporary directory under $TMPDIR (a copy of the
+# cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 # --yes answers the confirmation prompts (downtime, cluster delete).
 
 set -euo pipefail
@@ -49,7 +51,7 @@ while [ $# -gt 0 ]; do
         --resume-from) RESUME_FROM="$2"; shift 2 ;;
         --rollback) MODE="rollback"; shift ;;
         --ref) REF="$2"; shift 2 ;;
-        -h|--help) sed -n '3,36p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,38p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done

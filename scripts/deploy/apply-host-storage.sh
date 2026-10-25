@@ -19,6 +19,8 @@
 #      the same directory. The data is never touched.
 #
 # Usage: scripts/deploy/apply-host-storage.sh [--dry-run]
+# A dry run may create a temporary directory under $TMPDIR (a copy of the
+# cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 #
 # Never deletes a PV, a PVC or a directory.
 

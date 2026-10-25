@@ -21,6 +21,8 @@
 #
 # Usage:
 #   scripts/deploy/recreate-kind-cluster.sh [--yes] [--dry-run] [--config FILE]
+# A dry run may create a temporary directory under $TMPDIR (a copy of the
+# cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 #       [--if-missing]          keep a cluster that exists and answers (only
 #                               make sure ingress-nginx is installed); create
 #                               one if there is none. Safe to re-run.

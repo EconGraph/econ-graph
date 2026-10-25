@@ -27,6 +27,8 @@
 #   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/<ts> \
 #       [--expect-series N] [--expect-data-points N] \
 #       [--only econ_graph|keycloak] [--replace] [--no-bootstrap] [--yes] [--dry-run]
+# A dry run may create a temporary directory under $TMPDIR (a copy of the
+# cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 #
 # For restoring a nightly in-cluster backup (postgres-backup-data PVC) instead,
 # use restore-postgres-backup.sh.
