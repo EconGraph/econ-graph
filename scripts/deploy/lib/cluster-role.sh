@@ -37,19 +37,31 @@ kc() {
 # cluster's own kubectl and kubeconfig if copies are kept in
 # ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph).
 # Plain kubectl may be another cluster's: the microk8s snap wrapper ignores
-# ~/.kube/config. Says what it chose. An explicit KUBECTL or KUBECONFIG, or a
-# context pinned by the calling script (deploy.sh), always wins.
+# ~/.kube/config. Says what it chose, that an exported KUBECONFIG kept it from
+# looking, or which of the two files is missing. An explicit KUBECTL or
+# KUBECONFIG, or a context pinned by the calling script (deploy.sh), always wins.
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
-    if [ -n "${KUBECTL:-}" ] || [ -n "${KUBECONFIG:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
+    local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
+    if [ -n "${KUBECTL:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
         return 0
     fi
-    [ -x "$dir/bin/kubectl" ] && [ -s "$dir/kubeconfig-econ-graph" ] || return 0
-    KUBECTL="$dir/bin/kubectl"
-    KUBECONFIG="$dir/kubeconfig-econ-graph"
-    export KUBECTL KUBECONFIG
-    echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
-        "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
+    if [ -n "${KUBECONFIG:-}" ]; then
+        echo "KUBECONFIG is set (${KUBECONFIG}): using kubectl with it, not the kind cluster's" \
+            "kubectl in ${dir} (unset KUBECONFIG to use that one)" >&2
+        return 0
+    fi
+    if [ -x "$bin" ] && [ -s "$config" ]; then
+        KUBECTL="$bin"
+        KUBECONFIG="$config"
+        export KUBECTL KUBECONFIG
+        echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
+            "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
+    elif [ -x "$bin" ]; then
+        echo "warning: found ${bin} but not ${config}: using plain kubectl" >&2
+    elif [ -s "$config" ]; then
+        echo "warning: found ${config} but not ${bin}: using plain kubectl" >&2
+    fi
 }
 
 # Pin CLUSTER_ROLE_CONTEXT to the current context, unless it is set already

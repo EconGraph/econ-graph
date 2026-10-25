@@ -259,7 +259,10 @@ Which cluster it reaches:
   use the kind cluster's own kubectl and kubeconfig when copies are kept at
   `~/.cache/econgraph/bin/kubectl` and `~/.cache/econgraph/kubeconfig-econ-graph`, and
   say so. Plain `kubectl` may be another cluster's: the microk8s snap wrapper ignores
-  `~/.kube/config`.
+  `~/.kube/config`. An exported `KUBECONFIG` (some runbooks export one) turns that off:
+  they then use plain `kubectl` with it and say so, so unset it to get the kind cluster's.
+  If only one of the two files is there, they warn which one is missing and use plain
+  `kubectl`.
 - `deploy.sh` switches the current context of `${KUBECTL:-kubectl}`'s kubeconfig to
   `kind-econ-graph` and pins it (`create-secrets.sh`, run from it, stays on it). So
   `KUBECONFIG` has to be the production cluster's for that reason too: the context is

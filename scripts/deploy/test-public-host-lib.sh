@@ -465,35 +465,86 @@ if ! { grep -q 'nothing to do' "$out" && grep -Eq 'API server .*https://127.0.0.
   fail "mark --unmark with nothing to do does not show the cluster: $(cat "$out")"
 fi
 
-# The kind cluster's own kubectl and kubeconfig, kept in ${XDG_CACHE_HOME}/econgraph.
+# The kind cluster's own kubectl and kubeconfig, kept in ${XDG_CACHE_HOME}/econgraph, and
+# a working plain kubectl (first on PATH for these tests): both are the stub cluster and
+# tag their calls in the log, so the tests see which one ran.
 kind_cache="$stub_dir/cache/econgraph"
-mkdir -p "$kind_cache/bin"
-cp "$stub_dir/kubectl" "$kind_cache/bin/kubectl"
+mkdir -p "$kind_cache/bin" "$stub_dir/plain"
+printf '#!/usr/bin/env bash\necho "[cache kubectl] KUBECONFIG=${KUBECONFIG:-}" >>"$STUB_LOG"\nexec %q "$@"\n' "$stub_dir/kubectl" >"$kind_cache/bin/kubectl"
+printf '#!/usr/bin/env bash\necho "[plain kubectl] KUBECONFIG=${KUBECONFIG:-}" >>"$STUB_LOG"\nexec %q "$@"\n' "$stub_dir/kubectl" >"$stub_dir/plain/kubectl"
+chmod +x "$kind_cache/bin/kubectl" "$stub_dir/plain/kubectl"
 echo "apiVersion: v1" >"$kind_cache/kubeconfig-econ-graph"
+echo "apiVersion: v1" >"$stub_dir/other-kubeconfig"
 detected="Using the kind cluster's kubectl $kind_cache/bin/kubectl and KUBECONFIG=$kind_cache/kubeconfig-econ-graph"
-# run_bare [VAR=value ...] COMMAND...: with no KUBECTL, KUBECONFIG or pinned context.
+# run_bare [VAR=value ...] COMMAND...: no KUBECTL, KUBECONFIG or pinned context, and the
+# working plain kubectl first on PATH.
 run_bare() {
   : >"$log"
-  : >"$path_log"
-  env -u KUBECTL -u KUBECONFIG -u CLUSTER_ROLE_CONTEXT XDG_CACHE_HOME="$stub_dir/cache" "$@" </dev/null >"$out" 2>&1
+  env -u KUBECTL -u KUBECONFIG -u CLUSTER_ROLE_CONTEXT XDG_CACHE_HOME="$stub_dir/cache" \
+    PATH="$stub_dir/plain:$PATH" "$@" </dev/null >"$out" 2>&1
 }
+# used_only WHO KUBECONFIG LABEL: every call went to WHO ("cache" or "plain") with KUBECONFIG.
+used_only() {
+  local other=plain
+  [ "$1" = plain ] && other=cache
+  if ! grep -q "^\[$1 kubectl\] KUBECONFIG=$2\$" "$log"; then
+    fail "$3: did not run the $1 kubectl with KUBECONFIG=$2: $(head -3 "$log")"
+  fi
+  if grep -v "^\[$1 kubectl\] KUBECONFIG=$2\$" "$log" | grep -q '^\['; then
+    fail "$3: also ran another kubectl or kubeconfig: $(grep '^\[' "$log" | sort -u)"
+  fi
+  if grep -q "^\[$other kubectl\]" "$log"; then
+    fail "$3: ran the $other kubectl"
+  fi
+}
+
+# Bare: the kind cluster's kubectl and kubeconfig, said so and shown.
 run_bare STUB_MARKER=none "$mark" --dry-run || fail "mark (bare) --dry-run failed: $(cat "$out")"
 grep -qF "$detected" "$out" || fail "mark (bare): did not say it uses the kind kubectl: $(cat "$out")"
 grep -qE "KUBECONFIG +$kind_cache/kubeconfig-econ-graph" "$out" || fail "mark (bare): the kubeconfig in use is not shown"
-grep -q '^kubectl ' "$log" || fail "mark (bare): the kind kubectl was not used"
-[ ! -s "$path_log" ] || fail "mark (bare): called the kubectl on PATH: $(cat "$path_log")"
+used_only cache "$kind_cache/kubeconfig-econ-graph" "mark (bare)"
 run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (bare) failed: $(cat "$out")"
 grep -qF "$detected" "$out" || fail "create-secrets (bare): did not say it uses the kind kubectl: $(cat "$out")"
-grep -q 'create secret generic econ-graph-postgres' "$log" || fail "create-secrets (bare): the kind kubectl was not used"
-[ ! -s "$path_log" ] || fail "create-secrets (bare): called the kubectl on PATH: $(cat "$path_log")"
-# An explicit KUBECTL, an explicit KUBECONFIG, or a context pinned by deploy.sh wins.
-run_bare KUBECTL="$stub_dir/kubectl" STUB_MARKER=none "$mark" --dry-run || fail "mark with KUBECTL failed: $(cat "$out")"
-grep -q "Using the kind cluster" "$out" && fail "mark: detection overrode an explicit KUBECTL"
-run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || true
-grep -q "Using the kind cluster" "$out" && fail "mark: detection overrode an explicit KUBECONFIG"
-run_bare CLUSTER_ROLE_CONTEXT=kind-econ-graph STUB_MARKER=none scripts/deploy/create-secrets.sh || true
-grep -q "Using the kind cluster" "$out" && fail "create-secrets: detection overrode the kubectl of the deploy that started it"
-: >"$path_log"
+grep -q -- '--context kind-test -n econ-graph create secret generic econ-graph-postgres' "$log" ||
+  fail "create-secrets (bare): did not write on the kind kubectl's context"
+used_only cache "$kind_cache/kubeconfig-econ-graph" "create-secrets (bare)"
+
+# An explicit KUBECTL wins, silently.
+run_bare KUBECTL="$stub_dir/plain/kubectl" STUB_MARKER=none "$mark" --dry-run || fail "mark with KUBECTL failed: $(cat "$out")"
+grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "mark with KUBECTL: detection spoke: $(cat "$out")"
+grep -qE "kubectl +$stub_dir/plain/kubectl" "$out" || fail "mark with KUBECTL: the kubectl in use is not shown"
+grep -qE "context +kind-test" "$out" || fail "mark with KUBECTL: the context in use is not shown"
+used_only plain "" "mark with KUBECTL"
+
+# An exported KUBECONFIG wins too, and says that detection was skipped.
+run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run ||
+  fail "mark with KUBECONFIG failed: $(cat "$out")"
+grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark with KUBECONFIG: skipping detection was not said: $(cat "$out")"
+grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
+used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
+
+# A context pinned by deploy.sh: create-secrets.sh stays on deploy.sh's kubectl and context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-econ-graph STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with a pinned context failed: $(cat "$out")"
+grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
+grep -q -- '--context kind-econ-graph -n econ-graph create secret generic econ-graph-postgres' "$log" ||
+  fail "create-secrets with a pinned context: did not write on it"
+used_only plain "" "create-secrets with a pinned context"
+
+# Only one of the two files: plain kubectl, with a warning naming what is missing.
+mv "$kind_cache/kubeconfig-econ-graph" "$kind_cache/kubeconfig-econ-graph.away"
+run_bare STUB_MARKER=none "$mark" --dry-run || fail "mark (kubectl only) failed: $(cat "$out")"
+grep -qF "warning: found $kind_cache/bin/kubectl but not $kind_cache/kubeconfig-econ-graph: using plain kubectl" "$out" ||
+  fail "mark (kubectl only): no warning: $(cat "$out")"
+used_only plain "" "mark (kubectl only)"
+mv "$kind_cache/kubeconfig-econ-graph.away" "$kind_cache/kubeconfig-econ-graph"
+mv "$kind_cache/bin/kubectl" "$kind_cache/bin/kubectl.away"
+run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubeconfig only) failed: $(cat "$out")"
+grep -qF "warning: found $kind_cache/kubeconfig-econ-graph but not $kind_cache/bin/kubectl: using plain kubectl" "$out" ||
+  fail "create-secrets (kubeconfig only): no warning: $(cat "$out")"
+used_only plain "" "create-secrets (kubeconfig only)"
+mv "$kind_cache/bin/kubectl.away" "$kind_cache/bin/kubectl"
+[ ! -s "$path_log" ] || fail "detection tests: called the failing kubectl on PATH: $(cat "$path_log")"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"
