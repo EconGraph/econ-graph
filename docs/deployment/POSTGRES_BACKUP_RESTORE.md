@@ -10,8 +10,8 @@ shipped to object storage.
 ## What's in place
 
 - **`postgres-backup-cronjob.yaml`**: a nightly (`0 8 * * *` UTC) `CronJob`
-  whose `pg-dump` container `pg_dump`s `econ_graph`, and `keycloak` when
-  Keycloak is deployed, to `/backups` on the **`postgres-backup-data`** PVC:
+  whose `pg-dump` container `pg_dump`s `econ_graph` and `keycloak` to
+  `/backups` on the **`postgres-backup-data`** PVC:
   a separate volume from both databases' own PVCs, so losing/recreating a
   primary volume doesn't take the backups with it. Its `backup-sync`
   container then optionally syncs `/backups` to S3 (or an S3-compatible
@@ -56,17 +56,30 @@ Each run takes one UTC timestamp and writes, on the backup PVC:
 | `latest.dump` | symlink to the newest good `econ_graph` dump |
 | `latest-keycloak.dump` | symlink to the newest good `keycloak` dump |
 
-Both dumps use `--no-owner --no-privileges`. Each is written as
+Both dumps use `--no-owner --no-privileges` and `--lock-wait-timeout=600s`:
+`pg_dump` waits at most 10 minutes for its share lock on the tables (only an
+exclusive lock, such as a migration's `ALTER TABLE` or a `VACUUM FULL`,
+blocks it), then fails that dump instead of waiting until the Job deadline.
+`PG_DUMP_LOCK_WAIT_TIMEOUT` overrides it. Each is written as
 `<name>.partial` and only renamed once it passes every check: it is not
 empty, `pg_restore --file=/dev/null` reads the whole archive back, and
 `pg_restore --list` shows at least one table. A dump that fails a check is
 removed, and the `latest` link keeps pointing at the previous good one.
 
-Keycloak is optional (`deploy.sh` deploys it only when the Secret
-`econ-graph-keycloak` exists). The CronJob reads the Keycloak password from
-that Secret with `optional: true`; without it, the run logs that Keycloak is
-skipped and backs up `econ_graph` alone. When the Secret exists, a Keycloak
-dump that fails fails the run.
+The CronJob reads the Keycloak password from the Secret
+`econ-graph-keycloak` (key `db-password`) with `optional: true`, so a
+missing Secret doesn't stop the pod or the `econ_graph` dump. The manifest
+sets `KEYCLOAK_REQUIRED=true`, which makes a missing or empty password a
+failed Keycloak dump. `deploy.sh` deploys Keycloak only when that Secret
+exists; on a cluster deployed without it, set the variable to `false` and the
+run logs that Keycloak is skipped and backs up `econ_graph` alone:
+
+```sh
+kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
+```
+
+`deploy.sh` re-applies the manifest, so this is needed again after each
+deploy on such a cluster.
 
 ### When one dump fails
 
@@ -82,9 +95,24 @@ kubectl -n econ-graph get jobs -l app=postgres-backup
 kubectl -n econ-graph logs job/<job-name> --all-containers=true --prefix=true
 ```
 
-A failed pod is retried twice (`backoffLimit: 2`); each retry is a full run
-with its own timestamp. Run outside the CronJob without `BACKUP_STATUS_FILE`,
-`backup.sh` itself exits 1 when a dump fails.
+A container that exits non-zero fails the Job at once, without a retry
+(`podFailurePolicy`: `FailJob` on any non-zero exit code). A retry is a full
+run with its own timestamp: it would most likely fail the same way, and would
+write another full `econ_graph` dump each time, which nothing prunes. Only a
+pod ended by a disruption (eviction, node loss), which has no container exit
+code, is retried, up to twice (`backoffLimit: 2`). So a night where a dump
+fails costs one extra dump of the other database at most, and the next try
+is the next night's run.
+
+Each run has a 4-hour deadline (`activeDeadlineSeconds: 14400`), so a hung
+run can't hold the CronJob's `concurrencyPolicy: Forbid` and block later
+nights. `econ_graph`'s volume is 50Gi; `pg_dump --format=custom` runs at
+about 25MB/s of database on one core, so a full 50GiB database takes about
+40 minutes to dump and check, and the deadline leaves room for the lock
+waits and the sync.
+
+Run outside the CronJob without `BACKUP_STATUS_FILE`, `backup.sh` itself
+exits 1 when a dump fails.
 
 ### Monitoring
 
@@ -172,7 +200,8 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
 
    ```sh
    kubectl -n econ-graph scale deployment/keycloak --replicas=0
-   kubectl -n econ-graph wait --for=delete pod -l app=keycloak --timeout=180s
+   # Until no Keycloak pod is left (returns at once if there was none)
+   while kubectl -n econ-graph get pods -l app=keycloak -o name | grep -q .; do sleep 2; done
    ```
 
 3. Recreate the database and restore the dump into it:
@@ -203,9 +232,11 @@ written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in step 3 above) and sync
 without the `latest` links; that `restore.sh` puts `econ_graph` back and
 refuses a Keycloak dump; that a failure of either dump (server down, wrong
-password, no tables) keeps and syncs the other and fails the Job; that a run
-without the Keycloak Secret backs up `econ_graph` alone; that no run deletes
-a dump; and that no output contains a password. It needs Docker and
+password, no tables, a table locked past the lock wait) keeps and syncs the
+other and fails the Job; that a missing Keycloak password is a failure with
+`KEYCLOAK_REQUIRED=true` and a skip with `false`; that the Job has a
+deadline and a `podFailurePolicy` that doesn't retry a failed container;
+that no run deletes a dump; and that no output contains a password. It needs Docker and
 python3 with PyYAML, and runs in CI ("PostgreSQL Backup Scripts").
 
 It does not cover the in-cluster wiring (the PVC mounts, the Secrets, the

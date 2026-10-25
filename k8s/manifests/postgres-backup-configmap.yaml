@@ -10,9 +10,10 @@ metadata:
 data:
   backup.sh: |
     #!/bin/sh
-    # Dumps econ_graph (PG* env) and, when KEYCLOAK_PGPASSWORD is set,
-    # Keycloak's database (KEYCLOAK_PG* env) to ${BACKUP_DIR} as
-    # <name>-<UTC stamp>.dump, with one stamp per run.
+    # Dumps econ_graph (PG* env) and Keycloak's database (KEYCLOAK_PG* env)
+    # to ${BACKUP_DIR} as <name>-<UTC stamp>.dump, with one stamp per run.
+    # Keycloak is skipped when KEYCLOAK_PGPASSWORD is unset or empty, unless
+    # KEYCLOAK_REQUIRED=true, which makes that a failed dump.
     #
     # Each dump is attempted even if the other fails, and a dump that fails
     # leaves nothing under a final name. Exit status: 1 if any dump failed,
@@ -25,6 +26,11 @@ data:
     STAMP="$(date -u +%Y%m%d-%H%M%S)"
     # Fail on an unreachable server in seconds instead of hanging the Job.
     export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-30}"
+    # pg_dump waits this long for its ACCESS SHARE lock on each table, then
+    # fails that dump. Only an ACCESS EXCLUSIVE lock blocks it (a migration's
+    # ALTER/DROP, VACUUM FULL, an explicit LOCK TABLE); none of those should
+    # hold for 10 minutes, and failing beats waiting until the Job deadline.
+    LOCK_WAIT_TIMEOUT="${PG_DUMP_LOCK_WAIT_TIMEOUT:-600s}"
     trap 'rm -f "${BACKUP_DIR}"/*-"${STAMP}".dump.partial' EXIT
 
     # dump_database NAME LATEST_LINK: dump the database the PG* env names to
@@ -37,7 +43,8 @@ data:
       partial="${dest}.partial"
 
       echo "[${name}] Dumping database '${PGDATABASE}' from ${PGHOST}:${PGPORT} as ${PGUSER}"
-      pg_dump --format=custom --no-owner --no-privileges --file="${partial}" ||
+      pg_dump --format=custom --no-owner --no-privileges \
+        --lock-wait-timeout="${LOCK_WAIT_TIMEOUT}" --file="${partial}" ||
         { echo "[${name}] pg_dump failed" >&2; return 1; }
 
       if [ ! -s "${partial}" ]; then
@@ -83,8 +90,11 @@ data:
       ); then
         FAILED="${FAILED} keycloak"
       fi
+    elif [ "${KEYCLOAK_REQUIRED:-false}" = "true" ]; then
+      echo "[keycloak] KEYCLOAK_PGPASSWORD is empty but KEYCLOAK_REQUIRED=true (Secret econ-graph-keycloak or its key db-password is missing)" >&2
+      FAILED="${FAILED} keycloak"
     else
-      echo "[keycloak] KEYCLOAK_PGPASSWORD is not set (no Secret econ-graph-keycloak, so Keycloak is not deployed); skipping"
+      echo "[keycloak] KEYCLOAK_PGPASSWORD is empty and KEYCLOAK_REQUIRED is not true (a cluster without Keycloak); skipping"
     fi
 
     # Backups are never deleted automatically. Old dumps are removed by hand

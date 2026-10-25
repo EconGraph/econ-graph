@@ -1,13 +1,19 @@
 # Nightly PostgreSQL backup.
 #
-# Writes a pg_dump of econ_graph, and of Keycloak's database when Keycloak is
-# deployed, to postgres-backup-data (a PVC separate from both databases' own
+# Writes a pg_dump of econ_graph and of Keycloak's database to
+# postgres-backup-data (a PVC separate from both databases' own
 # volumes, see postgres-backup-pvc.yaml), so a lost/corrupted/torn-down
 # primary volume doesn't take the backups with it.
 #
 # If one database's dump fails, the other is still taken and kept: pg-dump
 # (backup.sh) records the failure in the status emptyDir and exits 0, and
-# backup-sync (sync.sh) syncs what was written, then exits 1 so the Job fails.
+# backup-sync (sync.sh) syncs what was written, then exits 1 so the Job fails
+# (without a retry, see podFailurePolicy).
+#
+# KEYCLOAK_REQUIRED is true: a missing Secret econ-graph-keycloak (or key
+# db-password) fails the run. On a cluster deployed without Keycloak, set it
+# to "false" and backup.sh skips Keycloak:
+#   kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 #
 # To also ship backups to object storage, set BACKUP_DESTINATION=s3 and the
 # BACKUP_S3_* env vars below (and provide AWS credentials, e.g. via a
@@ -30,7 +36,27 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # A deadline, so a hung run can't hold the Forbid concurrency policy and
+      # block every later night. 4 hours: econ_graph's volume is 50Gi
+      # (postgres-deployment.yaml); pg_dump --format=custom runs at about
+      # 25MB/s of database on a single core (measured with postgres:18 on a
+      # synthetic 1.5GB data_points-like table) and the
+      # read-back check is several times faster, so a full 50GiB database
+      # takes about 40 minutes. The Keycloak dump is small. backup.sh's
+      # 10-minute lock wait per dump fits as well, with room for the sync.
+      activeDeadlineSeconds: 14400
+      # Retries only for pod disruptions (eviction, node loss), which end the
+      # pod without a container exit code. A container that exits non-zero
+      # fails the Job at once: a dump that failed (pg-dump recorded it, then
+      # backup-sync exits 1) would fail again, and each retry writes another
+      # full dump of every database that did succeed, which nothing prunes.
       backoffLimit: 2
+      podFailurePolicy:
+        rules:
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
       template:
         metadata:
           labels:
@@ -61,10 +87,11 @@ spec:
             - name: PGDATABASE
               value: "econ_graph"
             # Keycloak's database (k8s/manifests/keycloak/postgres.yaml). The
-            # Secret exists only where Keycloak is deployed (deploy.sh skips
-            # Keycloak without it); optional, so econ_graph is still backed up
-            # where it doesn't, and backup.sh skips Keycloak when the password
-            # is unset.
+            # Secret is optional so that the pod still starts, and econ_graph
+            # is still dumped, when it is missing; KEYCLOAK_REQUIRED decides
+            # whether that is a failure (see the top).
+            - name: KEYCLOAK_REQUIRED
+              value: "true"
             - name: KEYCLOAK_PGHOST
               value: "keycloak-postgres-service"
             - name: KEYCLOAK_PGPORT

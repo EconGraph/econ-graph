@@ -16,8 +16,12 @@
 #   - when either database's dump fails (server down, wrong password, no
 #     tables) the other dump is still written and synced, and sync.sh fails
 #     the Job; without BACKUP_STATUS_FILE, backup.sh itself exits 1;
-#   - without the Keycloak password (no Keycloak deployed) econ_graph alone
-#     is backed up and the run succeeds;
+#   - without the Keycloak password, Keycloak is a failed dump when
+#     KEYCLOAK_REQUIRED=true (the manifest's value) and skipped when it is
+#     false, with econ_graph backed up either way;
+#   - a table locked past PG_DUMP_LOCK_WAIT_TIMEOUT fails that dump promptly
+#     and keeps the other;
+#   - the Job has a deadline and does not retry a pod whose container failed;
 #   - no run deletes a dump, and no output shows either password.
 #
 # Needs docker (DOCKER_HOST is honoured) and python3 with PyYAML.
@@ -89,6 +93,24 @@ for env in container["env"]:
     else:
         ref = env["valueFrom"]["secretKeyRef"]
         print(f"{env['name']}={secrets[(ref['name'], ref['key'])]}")
+PY
+
+# The Job settings that bound a run: a deadline, and no retry after a container
+# exits non-zero (each retry would write another full dump).
+check "the Job has an activeDeadlineSeconds" python3 - "$CRONJOB" <<'PY'
+import sys, yaml
+job = yaml.safe_load(open(sys.argv[1]))["spec"]["jobTemplate"]["spec"]
+sys.exit(0 if int(job.get("activeDeadlineSeconds", 0)) > 0 else 1)
+PY
+check "the Job fails at once on any non-zero container exit" python3 - "$CRONJOB" <<'PY'
+import sys, yaml
+job = yaml.safe_load(open(sys.argv[1]))["spec"]["jobTemplate"]["spec"]
+rules = job.get("podFailurePolicy", {}).get("rules", [])
+ok = any(r.get("action") == "FailJob"
+         and "containerName" not in r.get("onExitCodes", {})
+         and r.get("onExitCodes", {}).get("operator") == "NotIn"
+         and r["onExitCodes"].get("values") == [0] for r in rules)
+sys.exit(0 if ok and job["template"]["spec"]["restartPolicy"] == "Never" else 1)
 PY
 
 # The S3 mock wants path-style requests; the bucket host name wouldn't resolve.
@@ -350,25 +372,80 @@ check "  and no keycloak dump of it kept" [ "$(newest keycloak)" = "$new_kc" ]
 check "no .partial left behind" [ -z "$(partials)" ]
 check "no dump deleted" nothing_deleted
 
-# --- 6. Keycloak not deployed --------------------------------------------------------
+# --- 6. no Keycloak password (Secret or key missing) -----------------------------------
 
-echo "# no Keycloak Secret"
+echo "# no Keycloak password, KEYCLOAK_REQUIRED=true (the manifest's value)"
+check "the manifest sets KEYCLOAK_REQUIRED=true" grep -qx 'KEYCLOAK_REQUIRED=true' "$tmp/dump.env"
+# Without the Secret, the optional secretKeyRef leaves the variable unset.
+grep -v '^KEYCLOAK_PGPASSWORD=' "$tmp/dump.env" >"$tmp/dump-no-kc.env"
 sleep 1
 new_status
-grep -v '^KEYCLOAK_PGPASSWORD=' "$tmp/dump.env" >"$tmp/dump-no-kc.env"
+before_econ="$(newest econ_graph)"
 rc=0
 docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
     --env-file "$tmp/dump-no-kc.env" \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
     "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
 cat "$tmp/out" >>"$LOG"
+check "backup.sh exits 0 with a status file" [ "$rc" = 0 ]
+check "keycloak recorded as failed" [ "$(status)" = "keycloak" ]
+check "  and says the Secret is missing" grep -q "KEYCLOAK_REQUIRED=true (Secret econ-graph-keycloak" "$tmp/out"
+check "a new econ_graph dump is kept" [ "$(newest econ_graph)" != "$before_econ" ]
+check "keycloak dump unchanged" [ "$(newest keycloak)" = "$new_kc" ]
+rc="$(run_sync run6a)"
+check "sync.sh fails the Job" [ "$rc" = 1 ]
+check "no dump deleted" nothing_deleted
+
+sleep 1
+new_status
+rc="$(run_backup -e KEYCLOAK_PGPASSWORD=)"
+check "empty password with KEYCLOAK_REQUIRED=true: keycloak recorded as failed" [ "$(status)" = "keycloak" ]
+check "no dump deleted" nothing_deleted
+
+echo "# no Keycloak password, KEYCLOAK_REQUIRED=false (a cluster without Keycloak)"
+sleep 1
+new_status
+rc=0
+docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    --env-file "$tmp/dump-no-kc.env" -e KEYCLOAK_REQUIRED=false \
+    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
+    "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
+cat "$tmp/out" >>"$LOG"
 check "backup.sh exits 0" [ "$rc" = 0 ]
 check "nothing recorded as failed" [ "$(status)" = "" ]
-check "says Keycloak is skipped" grep -q "\[keycloak\] KEYCLOAK_PGPASSWORD is not set" "$tmp/out"
+check "says Keycloak is skipped" grep -q "\[keycloak\] KEYCLOAK_PGPASSWORD is empty and KEYCLOAK_REQUIRED is not true" "$tmp/out"
 check "keycloak dump unchanged" [ "$(newest keycloak)" = "$new_kc" ]
-rc="$(run_sync run6)"
+rc="$(run_sync run6b)"
 check "sync.sh exits 0" [ "$rc" = 0 ]
 check "no dump deleted" nothing_deleted
+
+# --- 6b. a lock held past the lock wait ------------------------------------------------
+
+echo "# econ_graph table locked longer than PG_DUMP_LOCK_WAIT_TIMEOUT"
+docker exec -d "$ECON" psql -U postgres -d econ_graph \
+    -c "BEGIN; LOCK TABLE audit.events IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60); COMMIT;"
+for _ in $(seq 1 20); do
+    locks="$(psql_in "$ECON" postgres econ_graph \
+        "SELECT count(*) FROM pg_locks WHERE mode = 'AccessExclusiveLock' AND relation = 'audit.events'::regclass")"
+    [ "$locks" = 1 ] && break
+    sleep 0.5
+done
+sleep 1
+new_status
+before_econ="$(newest econ_graph)"
+before_kc="$(newest keycloak)"
+started="$(date +%s)"
+rc="$(run_backup -e PG_DUMP_LOCK_WAIT_TIMEOUT=2s)"
+took=$(($(date +%s) - started))
+check "backup.sh returns well before the lock is released (${took}s)" [ "$took" -lt 40 ]
+check "econ_graph recorded as failed" [ "$(status)" = "econ_graph" ]
+check "  with pg_dump's lock timeout" grep -q "Query was: LOCK TABLE .* IN ACCESS SHARE MODE" "$LOG"
+check "no new econ_graph dump" [ "$(newest econ_graph)" = "$before_econ" ]
+check "a new keycloak dump is kept" [ "$(newest keycloak)" != "$before_kc" ]
+check "no .partial left behind" [ -z "$(partials)" ]
+check "no dump deleted" nothing_deleted
+psql_in "$ECON" postgres econ_graph \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(60)%' AND pid <> pg_backend_pid()" >/dev/null
 
 # --- 7. sync.sh without a status from backup.sh ---------------------------------------
 
