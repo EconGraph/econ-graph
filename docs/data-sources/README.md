@@ -90,8 +90,8 @@ Each page above describes the adapter as it is after these changes.
 | FRED discovery reads a curated list of series ids and records ALFRED vintages: `revision_date = realtime_start` | FRED | #214 |
 | The series list moved to a data file of 291 series (no discovery request), fetched 50 per request (25 keyless); footnotes are parsed and logged but not stored | BLS | #235 |
 | The unverified API client was replaced by the HPI master CSV, with the file's columns as dimensions (dataset `fhfa_hpi`) | FHFA | #240 |
-| Real NIPA table and line ids, plus regional GDP by state; discovery and fetch both implemented | BEA | DATA-8 |
-| About 50 WDI indicators fetched for all countries: dataset `wdi` with dimensions `area` and `indicator`, `revision_date = lastupdated` | World Bank | DATA-9 |
+| Real NIPA table and line ids, plus regional GDP by state; discovery and fetch both implemented | BEA | c07aa490 |
+| About 50 WDI indicators fetched for all countries: dataset `wdi` with dimensions `area` and `indicator`, `revision_date = lastupdated` | World Bank | a4c93d50 |
 | The scheduler fetches series that were discovered but never fetched | All | #228 |
 
 Together these address finding 1 above for FRED and WDI, the two sources that now publish a

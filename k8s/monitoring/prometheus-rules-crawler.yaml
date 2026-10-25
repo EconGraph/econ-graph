@@ -210,7 +210,8 @@ data:
             summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
             description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
 
-      # Release exit criteria 2 (coverage) and 3 (freshness), plus crawl failures.
+      # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
+      # keeps series current), and crawl failures.
       # `max by (source)` drops the pod labels the kubernetes-pods scrape job adds.
       - name: crawler.coverage
         rules:

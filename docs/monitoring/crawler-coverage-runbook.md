@@ -126,8 +126,8 @@ If the scheduler keeps running, it re-crawls the backdated series on its next ti
 
 ### Low coverage
 
-FRED may already be under 95% (see the DATA-13 note above); check `crawler coverage` first.
-Otherwise insert catalog rows that are never fetched: `N` = a tenth of FRED's `DISCOVERED`
+Check `crawler coverage` first: a source already under 95% fires the alert without this
+step. Otherwise insert catalog rows that are never fetched: `N` = a tenth of FRED's `DISCOVERED`
 from `crawler coverage` (at least 1000), which takes a source at 100% below 95%:
 
 ```sh

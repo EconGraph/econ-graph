@@ -4,8 +4,8 @@
 
 //! Per-source data coverage and freshness, read from `series_metadata` and `economic_series`.
 //!
-//! Release exit criteria: at least 95% of each source's series have data, and scheduled refresh
-//! keeps every series fresh. [`crawl_coverage`] computes both for each **covered source**: a
+//! The two checks: at least 95% of each source's series have data, and scheduled refresh keeps
+//! every series fresh. [`crawl_coverage`] computes both for each **covered source**: a
 //! registry source the [refresh scheduler](crate::scheduler) refreshes
 //! ([`supports_fetch`]) whose `data_sources` row is enabled
 //! (or doesn't exist yet: discovery creates it).
@@ -52,7 +52,7 @@ use crate::persist::data_source_template;
 use crate::scheduler::{frequency_days_sql, supports_fetch};
 use crate::source::SourceId;
 
-/// Release exit criterion: minimum percentage of a source's discovered series that have data.
+/// Minimum percentage of a source's discovered series that must have data.
 pub const COVERAGE_TARGET_PERCENT: f64 = 95.0;
 
 /// Coverage and freshness of one source. See the [module docs](self).

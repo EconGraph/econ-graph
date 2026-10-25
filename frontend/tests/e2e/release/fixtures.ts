@@ -119,7 +119,7 @@ export const SEEDED_MULTIPAGE = {
 } as const;
 
 /**
- * World Development Indicators seeded for the world map (MAP-7) and REL-4: three indicators for
+ * World Development Indicators seeded for the world map specs: three indicators for
  * the countries below, from backend/crates/econ-graph-crawler/tests/fixtures/world_bank/. Series
  * ids are `wdi/{indicator}.{area}` and titles `{indicator name}: {country name}`. `latest`
  * is each country's latest non-null value (India has no 2023 inflation value in the fixture).
@@ -197,7 +197,8 @@ export interface SweptSeries {
   transformations: Record<string, { date: string; value: string } | null>;
   /**
    * Deployed mode: the most days its newest observation may lag today, from the source's
-   * publication cadence (REL-QA check 3). Observations are dated at the period's start.
+   * publication cadence (check 3 in docs/release/v4.0.0-qa.md). Observations are dated at the
+   * period's start.
    */
   liveMaxAgeDays: number;
 }
