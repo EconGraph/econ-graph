@@ -1,0 +1,34 @@
+# The cluster's Gateway. It lives in its own namespace, so deleting an app
+# namespace never removes it.
+#
+# Listener http (port 80, any host name) accepts HTTPRoutes from namespaces
+# labelled econgraph.io/gateway-access: "true" (k8s/manifests/namespace.yaml).
+# Listener https is added by scripts/deploy/install-gateway.sh from
+# gateway-https.yaml when GATEWAY_HTTPS_HOSTNAME is set.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: econ-graph-gateway
+  labels:
+    name: econ-graph-gateway
+    # cert-manager's HTTP-01 challenge routes for the https listener's
+    # certificate are created here and must attach to listener http.
+    econgraph.io/gateway-access: "true"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: econ-graph-gateway
+  namespace: econ-graph-gateway
+spec:
+  gatewayClassName: econ-graph
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            econgraph.io/gateway-access: "true"

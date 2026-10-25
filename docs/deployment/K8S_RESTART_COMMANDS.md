@@ -65,10 +65,8 @@ cd ..
 
 ### Step 4: Apply Updated Manifests
 ```bash
-# ingress.yaml first: graphql-ingress.yaml sorts before it and would clash with
-# an older ingress.yaml that still routes /graphql
-kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
+kubectl apply -f k8s/manifests/gateway/routes/
 kubectl apply -f k8s/monitoring/
 ```
 
@@ -101,8 +99,8 @@ kubectl get deployments -n econ-graph
 # Check services
 kubectl get services -n econ-graph
 
-# Check ingress
-kubectl get ingress -n econ-graph
+# Check routes
+kubectl get httproute -n econ-graph
 ```
 
 ---

@@ -115,7 +115,6 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   kubectl apply -f k8s/manifests/keycloak/deployment.yaml
-  kubectl apply -f k8s/manifests/keycloak/ingress.yaml
   # The realm-import Job applies the realm file on every deploy; a Job cannot be
   # re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
@@ -140,14 +139,18 @@ kubectl apply -f k8s/manifests/frontend-service.yaml
 # (401-on-everything) admin frontend doesn't keep serving traffic.
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
-# ingress.yaml routes /admin to the admin-frontend Service, which isn't deployed
-# above; apply it with that one path filtered out rather than pointing an ingress
-# rule at a nonexistent Service.
-yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
-  k8s/manifests/ingress.yaml | kubectl apply -f -
-# graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
-# (see the comment in ingress.yaml), so both manifests must be applied together.
-kubectl apply -f k8s/manifests/graphql-ingress.yaml
+# The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
+# 80/443 (k8s/manifests/gateway/; idempotent). Then this namespace's
+# HTTPRoutes and rate limits. GATEWAY_HTTPS_HOSTNAME (empty by default) adds
+# listener https for that host name, which the routes then also serve.
+./scripts/deploy/install-gateway.sh
+if [ -n "${GATEWAY_HTTPS_HOSTNAME:-}" ]; then
+  sed "s/^  - localhost$/  - localhost\n  - ${GATEWAY_HTTPS_HOSTNAME}/" \
+    k8s/manifests/gateway/routes/httproutes.yaml | kubectl apply -f -
+  kubectl apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml
+else
+  kubectl apply -f k8s/manifests/gateway/routes/
+fi
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -225,6 +228,18 @@ echo "⏳ Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
+# The gateway's https listener (GATEWAY_HTTPS_HOSTNAME) gets its certificate
+# from cert-manager's Gateway API support, which is off by default, and from
+# the ClusterIssuers in letsencrypt-issuer.yaml (HTTP-01 through the gateway).
+if [ -n "${GATEWAY_HTTPS_HOSTNAME:-}" ]; then
+  if ! kubectl -n cert-manager get deployment cert-manager \
+      -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- '--enable-gateway-api'; then
+    kubectl -n cert-manager patch deployment cert-manager --type=json \
+      -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--enable-gateway-api"}]'
+    kubectl -n cert-manager rollout status deployment/cert-manager --timeout=180s
+  fi
+  kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
+fi
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
@@ -319,7 +334,7 @@ kubectl get pods -n econ-graph
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
-# k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
+# The gateway's routes (k8s/manifests/gateway/routes/) answer on host localhost.
 echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (re-enabled by ECO-242, train 3).
 echo "  Backend:  http://localhost/api"

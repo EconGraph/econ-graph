@@ -229,12 +229,6 @@ else
     exit 1
 fi
 
-# Deploy updated ingress with DNS-01 support
-print_status "Deploying updated ingress configuration with Cloudflare DNS-01 support..."
-kubectl apply -f "${K8S_DIR}/manifests/ingress-cloudflare-dns01.yaml"
-
-print_success "Ingress configuration updated"
-
 # Display final status
 print_status "Setup completed successfully!"
 echo ""

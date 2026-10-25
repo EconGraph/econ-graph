@@ -76,7 +76,7 @@ kubectl config current-context
 
 #### Problem
 ```bash
-microk8s enable ingress
+microk8s enable storage
 # Fails or hangs
 ```
 
@@ -88,7 +88,6 @@ microk8s status --wait-ready
 # Enable addons one by one
 microk8s enable dns
 microk8s enable storage
-microk8s enable ingress
 microk8s enable metrics-server
 
 # Wait for each addon to be ready
@@ -224,26 +223,28 @@ kubectl get pods -A | grep kubeflow
 kubectl delete namespace kubeflow
 ```
 
-### 10. Ingress Not Working
+### 10. Gateway Not Answering
 
 #### Problem
 ```bash
-curl https://www.econ-graph.com
+curl http://localhost/
 # Connection refused or timeout
 ```
 
 #### Solution
 ```bash
-# Check ingress controller status
-kubectl get pods -n ingress-nginx
+# Controller and proxy pods
+kubectl get pods -n envoy-gateway-system
 
-# Check ingress configuration
-kubectl get ingress -n econ-graph
-kubectl describe ingress econ-graph-ssl-ingress -n econ-graph
+# Gateway and route status
+kubectl -n econ-graph-gateway get gateway econ-graph-gateway
+kubectl get httproute -n econ-graph
 
-# Check if ingress controller is ready
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=controller -n ingress-nginx --timeout=180s
+# Every route at once
+./scripts/deploy/test-gateway-routes.sh
 ```
+
+See [Gateway routing troubleshooting](GATEWAY_ROUTING_TROUBLESHOOTING.md).
 
 ### 11. Pod Limit Exceeded
 
@@ -299,7 +300,7 @@ kubectl get events -n econ-graph --sort-by='.metadata.creationTimestamp'
 ```bash
 # Service status
 kubectl get services -n econ-graph
-kubectl get ingress -n econ-graph
+kubectl get httproute -n econ-graph
 
 # Pod logs
 kubectl logs -f deployment/econ-graph-backend -n econ-graph
@@ -343,7 +344,7 @@ microk8s start
 microk8s status --wait-ready
 
 # Re-enable addons
-microk8s enable dns ingress storage metrics-server
+microk8s enable dns storage metrics-server
 ```
 
 ### Application Reset

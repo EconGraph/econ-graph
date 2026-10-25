@@ -81,20 +81,9 @@ resource "helm_release" "prometheus" {
 
       grafana = {
         adminPassword = var.grafana_admin_password
+        # Not exposed: reach Grafana with kubectl port-forward.
         ingress = {
-          enabled = true
-          hosts   = ["grafana.${var.domain}"]
-          annotations = {
-            "kubernetes.io/ingress.class"                = "nginx"
-            "cert-manager.io/cluster-issuer"             = "letsencrypt-prod"
-            "nginx.ingress.kubernetes.io/rewrite-target" = "/"
-          }
-          tls = [
-            {
-              secretName = "grafana-tls"
-              hosts      = ["grafana.${var.domain}"]
-            }
-          ]
+          enabled = false
         }
 
         # Grafana configuration

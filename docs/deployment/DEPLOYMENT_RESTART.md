@@ -60,11 +60,9 @@ kind load docker-image econ-graph-frontend:latest --name econ-graph
 # Set kubectl context
 kubectl config use-context kind-econ-graph
 
-# Apply all manifests (includes updated image tags). ingress.yaml goes first:
-# graphql-ingress.yaml sorts before it and would clash with an older
-# ingress.yaml that still routes /graphql
-kubectl apply -f k8s/manifests/ingress.yaml
+# Apply all manifests (includes updated image tags), then the gateway's routes
 kubectl apply -f k8s/manifests/
+kubectl apply -f k8s/manifests/gateway/routes/
 ```
 
 ### 4. **Restart Rollouts**
@@ -148,8 +146,8 @@ kubectl logs -f deployment/econ-graph-backend -n econ-graph
 # Live frontend logs  
 kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
-# Check ingress status
-kubectl get ingress -n econ-graph
+# Check route status
+kubectl get httproute -n econ-graph
 
 # Performance monitoring
 kubectl top pods -n econ-graph

@@ -1,0 +1,63 @@
+# Per-client rate limits on the GraphQL routes (httproutes.yaml), applied by
+# scripts/deploy/deploy.sh with the routes.
+#
+# Each client address may make 20 requests a second on each route, with
+# bursts of up to 100 (ECO-147); above that Envoy answers 429. The backend's
+# query depth and complexity limits count fields, not rows, so a seriesData
+# page can still return thousands of points; this caps how often one client
+# can ask. The two routes have separate buckets.
+#
+# The limit is local: each proxy replica counts on its own, which is exact
+# while the proxy runs as one replica (k8s/manifests/gateway/envoy-proxy.yaml).
+# Envoy Gateway sizes the token bucket at the requests per unit, so the burst
+# of 100 comes from EnvoyPatchPolicy econ-graph-ratelimit-burst
+# (k8s/manifests/gateway/ratelimit-burst.yaml), which raises the bucket size.
+#
+# "Client address" is the TCP peer the proxy sees. Through the hostPorts that
+# is the client's own address; requests from the host itself (curl
+# http://localhost) all come from the Docker bridge gateway and share one
+# bucket, and so do pods calling the proxy Service from one node, and everyone
+# behind one NAT.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: econ-graph-graphql-ratelimit
+  namespace: econ-graph
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: econ-graph-graphql
+  rateLimit:
+    type: Local
+    local:
+      rules:
+      - clientSelectors:
+        - sourceCIDR:
+            type: Distinct
+            value: 0.0.0.0/0
+        limit:
+          requests: 20
+          unit: Second
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: econ-graph-data-graphql-ratelimit
+  namespace: econ-graph
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: econ-graph-data-graphql
+  rateLimit:
+    type: Local
+    local:
+      rules:
+      - clientSelectors:
+        - sourceCIDR:
+            type: Distinct
+            value: 0.0.0.0/0
+        limit:
+          requests: 20
+          unit: Second

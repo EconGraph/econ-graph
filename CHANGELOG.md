@@ -13,6 +13,33 @@ All notable changes to EconGraph are documented here. The format follows
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
   token. Unset, every request goes where it went before. The dev server and `vite preview`
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
+- The kind cluster serves `/data/graphql`: the backend's `/graphql` with `Authorization` and
+  `Cookie` removed, rate-limited like `/graphql`.
+- An optional HTTPS listener on the gateway (`GATEWAY_HTTPS_HOSTNAME`), with a cert-manager
+  certificate.
+- `scripts/deploy/test-gateway-routes.sh` checks every route on the gateway, and
+  `scripts/deploy/cutover-to-gateway.sh` moves a running cluster from ingress-nginx to the
+  gateway (with `--dry-run` and `--rollback`).
+
+### Changed
+
+- The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.8.5, Gateway
+  API v1.5.1 standard channel) instead of ingress-nginx, which no longer gets security fixes.
+  `deploy.sh` installs it with `scripts/deploy/install-gateway.sh` (pinned, checksummed release
+  manifests; no Helm). The routes and paths are unchanged, except that `/playground` is no
+  longer routed to the backend.
+- The `/graphql` rate limit (20 requests a second per client address, bursts of 100) now
+  answers 429 instead of 503 when exceeded.
+- The frontend's security headers (CSP, HSTS, frame options) are sent on every frontend
+  response through the gateway, on plain HTTP too. The CSP no longer allows connections to
+  `https://api.econ-graph.com`.
+
+### Removed
+
+- ingress-nginx, its Ingress manifests (`ingress.yaml`, `graphql-ingress.yaml`,
+  `keycloak/ingress.yaml`, `ssl-ingress.yaml`, `frontend-ingress.yaml`,
+  `ingress-cloudflare-dns01.yaml`), the unused `security-configmap.yaml`, the Terraform
+  `ingress` and `admin-ingress` modules and the kind ingress-nginx installers.
 
 ## [4.0.0] - 2026-10-08
 

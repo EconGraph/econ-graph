@@ -79,7 +79,6 @@ if ! microk8s status | grep -q "microk8s is running"; then
     fi
     echo "Enabling required addons..."
     microk8s enable dns
-    microk8s enable ingress
     microk8s enable storage
 fi
 
@@ -215,15 +214,13 @@ echo "📋 Applying updated Kubernetes manifests..."
 kubectl apply -f k8s/manifests/namespace.yaml
 # Credentials are not in the manifests; create or refresh the Secrets first.
 ./scripts/deploy/create-secrets.sh
-# ingress.yaml first: on clusters deployed before graphql-ingress.yaml existed it
-# still routes /graphql, and the admission webhook rejects a second Ingress for
-# the same host and path (kubectl applies the directory alphabetically).
-kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
+# The gateway (k8s/manifests/gateway/, idempotent), then this namespace's routes.
+./scripts/deploy/install-gateway.sh
+kubectl apply -f k8s/manifests/gateway/routes/
 
 # Apply security configurations
 echo "🔒 Applying security configurations..."
-kubectl apply -f k8s/manifests/security-configmap.yaml
 kubectl apply -f k8s/manifests/network-policy.yaml
 kubectl apply -f k8s/manifests/pod-security-policy.yaml
 
@@ -249,10 +246,6 @@ kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || tr
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
-
-# Apply SSL ingress for www.econ-graph.com
-echo "🌐 Configuring SSL ingress for www.econ-graph.com..."
-kubectl apply -f k8s/manifests/ssl-ingress.yaml
 
 # Apply monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
@@ -431,7 +424,7 @@ sleep 5
 if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -q "200\|302"; then
     echo "  ✅ Main Entry Point: http://localhost - Accessible"
 else
-    echo "  ❌ Main Entry Point: http://localhost - Not accessible (ingress controller may be missing)"
+    echo "  ❌ Main Entry Point: http://localhost - Not accessible (the gateway may be missing: scripts/deploy/install-gateway.sh)"
 fi
 
 # Test HTTPS Termination (www.econgraph.com)

@@ -47,9 +47,10 @@ kubectl config use-context kind-econ-graph
 
 # Remove application resources
 echo "📋 Removing application resources..."
-kubectl delete -f k8s/manifests/admin-ingress.yaml --ignore-not-found=true
-kubectl delete -f k8s/manifests/graphql-ingress.yaml --ignore-not-found=true
-kubectl delete -f k8s/manifests/ingress.yaml --ignore-not-found=true
+# This namespace's routes and rate limits on the gateway. The gateway itself
+# (k8s/manifests/gateway/, its own namespaces) serves the whole cluster and
+# stays; the cluster deletion below removes it.
+kubectl delete -f k8s/manifests/gateway/routes/ --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found=true

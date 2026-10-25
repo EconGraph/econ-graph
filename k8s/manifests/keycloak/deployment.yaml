@@ -1,8 +1,9 @@
 # keycloak: OIDC identity provider for EconGraph (realm `econ-graph`).
 #
-# Public URL: http://localhost/idp on the kind ingress (ingress.yaml), so the issuer
-# is http://localhost/idp/realms/econ-graph. For a real domain, change KC_HOSTNAME,
-# KC_WEB_BASE_URL and the ingress host together.
+# Public URL: http://localhost/idp through the gateway (HTTPRoute econ-graph-idp,
+# k8s/manifests/gateway/routes/httproutes.yaml), so the issuer is
+# http://localhost/idp/realms/econ-graph. For a real domain, change KC_HOSTNAME,
+# KC_WEB_BASE_URL and the routes' host names together.
 #
 # Credentials come only from the Secret `econ-graph-keycloak`, written by
 # scripts/deploy/create-secrets.sh (never committed):
@@ -22,7 +23,7 @@
 # keycloak-config-cli does not then own, so removing one from the file later would
 # leave it behind in the cluster.
 #
-# The admin console is not exposed on the ingress. Reach it with
+# The admin console is not routed by the gateway. Reach it with
 #   kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080
 # and open http://localhost:18080/idp/admin (KC_HOSTNAME_ADMIN below).
 apiVersion: v1
@@ -99,7 +100,7 @@ spec:
           value: "http://localhost:18080/idp"
         - name: KC_HTTP_RELATIVE_PATH
           value: "/idp"
-        # Plain HTTP behind the ingress; TLS, when configured, terminates at the ingress controller.
+        # Plain HTTP behind the gateway; TLS, when configured, terminates at the gateway.
         - name: KC_HTTP_ENABLED
           value: "true"
         - name: KC_PROXY_HEADERS

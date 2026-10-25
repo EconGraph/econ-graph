@@ -9,14 +9,15 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow ingress from nginx-ingress controller
+  # Allow ingress from the gateway's Envoy proxy (k8s/manifests/gateway/)
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: ingress
-    - podSelector:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
         matchLabels:
-          app.kubernetes.io/name: ingress-nginx
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
   # Allow ingress from same namespace
   - from:
     - namespaceSelector:
@@ -70,11 +71,15 @@ spec:
     - podSelector:
         matchLabels:
           app: chart-api-service
-  # Allow ingress from nginx-ingress
+  # Allow ingress from the gateway's Envoy proxy
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: ingress
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
   egress:
   # Allow egress to PostgreSQL (both pod and service)
   - to:
@@ -92,6 +97,21 @@ spec:
     ports:
     - protocol: TCP
       port: 5432
+  # Allow egress to the gateway's Envoy proxy, for in-cluster calls through
+  # econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local. The
+  # policy sees the proxy's pod port (listener http: 10080), not the Service
+  # port 80.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 10080
   # Allow egress to Keycloak, for the signing keys that verify access tokens
   - to:
     - podSelector:
@@ -121,11 +141,15 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow ingress from nginx-ingress
+  # Allow ingress from the gateway's Envoy proxy
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: ingress
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
   egress:
   # Allow egress to backend
   - to:

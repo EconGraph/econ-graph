@@ -52,7 +52,7 @@ sudo usermod -aG microk8s $USER
 newgrp microk8s
 
 # Enable required addons
-microk8s enable dns ingress storage metrics-server
+microk8s enable dns storage metrics-server
 
 # Configure kubectl
 # Keep the existing kubeconfig intact; use a dedicated file for this shell.
@@ -118,9 +118,15 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 # Apply Let's Encrypt issuers
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 
-# Apply SSL ingress with security features
-kubectl apply -f k8s/manifests/ssl-ingress.yaml
+# The gateway, with listener https for the public host name, and the routes
+GATEWAY_HTTPS_HOSTNAME=econgraph.com ./scripts/deploy/install-gateway.sh
+sed 's/^  - localhost$/  - localhost\n  - econgraph.com/' k8s/manifests/gateway/routes/httproutes.yaml | kubectl apply -f -
+kubectl apply -f k8s/manifests/gateway/routes/ratelimit-policies.yaml
 ```
+
+cert-manager issues the https listener's certificate only with its Gateway API support on
+(`--enable-gateway-api`); `scripts/deploy/deploy.sh` turns it on when `GATEWAY_HTTPS_HOSTNAME`
+is set.
 
 ## Service URLs
 
@@ -130,7 +136,7 @@ kubectl apply -f k8s/manifests/ssl-ingress.yaml
 - **GraphQL**: https://www.econgraph.com/graphql
 - **Admin UI**: https://www.econgraph.com/admin
 
-Grafana is not exposed on the public ingress; see the port-forwarding section below.
+Grafana is not routed by the gateway; see the port-forwarding section below.
 
 ### Local Development Setup
 Add to `/etc/hosts`:
@@ -165,13 +171,13 @@ Application manifests use security contexts; inspect each container for exceptio
 
 ### Network Policies
 Restrictive pod-to-pod communication:
-- **Ingress controller access**: Only from `ingress` namespace
+- **Gateway access**: Only from the Envoy proxy pods in `envoy-gateway-system`
 - **Inter-pod communication**: Only within `econ-graph` namespace
 - **External access**: Only through defined services
 
 ### SSL/TLS Configuration
 - **Let's Encrypt**: Automatic SSL certificate generation and renewal
-- **TLS Termination**: SSL termination at ingress level
+- **TLS Termination**: at the gateway's https listener
 - **Certificate Management**: Automated certificate lifecycle management
 - **Staging Environment**: `letsencrypt-staging` issuer for testing
 
@@ -281,16 +287,16 @@ delete every policy in the namespace to test connectivity.
 # Check network policies
 kubectl get networkpolicies -n econ-graph
 
-# Test connectivity from ingress controller
-kubectl exec -n ingress nginx-ingress-microk8s-controller-xxx -- wget -O- http://10.1.26.89:8089/.well-known/acme-challenge/test
+# Check every route through the gateway
+./scripts/deploy/test-gateway-routes.sh
 ```
 
-**Solution**: Network policies are configured to allow ingress controller access. If issues persist:
+**Solution**: The network policies admit the gateway's Envoy proxy pods. If issues persist:
 ```bash
-# Check ingress namespace label
-kubectl get namespace ingress -o yaml | grep -A5 labels
+# The proxy pods' labels, which the policies select on
+kubectl -n envoy-gateway-system get pods --show-labels
 
-# Verify network policy allows ingress namespace
+# Verify the network policy admits them
 kubectl describe networkpolicy econ-graph-network-policy -n econ-graph
 ```
 
@@ -348,8 +354,8 @@ kubectl top pods -n econ-graph
 # View all events
 kubectl get events -n econ-graph --sort-by='.metadata.creationTimestamp'
 
-# Check ingress status
-kubectl get ingress -n econ-graph
+# Check route status
+kubectl get httproute -n econ-graph
 
 # Check certificate status
 kubectl get certificates -n econ-graph

@@ -22,7 +22,7 @@ This script will:
 1. Create a local Kubernetes cluster using Terraform
 2. Build Docker images for frontend and backend
 3. Deploy the application to the cluster
-4. Set up ingress and services
+4. Install the gateway and the app's routes on it
 
 ## 📁 Directory Structure
 
@@ -36,8 +36,11 @@ k8s/
 │   ├── frontend-deployment.yaml # Frontend deployment
 │   ├── admin-frontend-deployment.yaml # Admin UI deployment
 │   ├── admin-frontend-service.yaml    # Admin UI service
-│   ├── ingress.yaml     # Ingress configuration
-│   └── graphql-ingress.yaml # /graphql, rate-limited per client IP
+│   └── gateway/         # The gateway (Envoy Gateway): see "Gateway" below
+│       ├── envoy-proxy.yaml, gatewayclass.yaml, gateway.yaml
+│       ├── gateway-https.yaml   # optional listener https
+│       ├── ratelimit-burst.yaml # bursts of 100 for the GraphQL rate limits
+│       └── routes/          # this namespace's HTTPRoutes and rate limits
 └── README.md           # This file
 
 terraform/k8s/          # Terraform configuration
@@ -49,6 +52,9 @@ scripts/deploy/         # Deployment scripts
 ├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
+├── install-gateway.sh # Install the gateway (run by deploy.sh)
+├── test-gateway-routes.sh # Check every route on the gateway
+├── cutover-to-gateway.sh  # Move a cluster from ingress-nginx to the gateway
 ├── deploy.sh          # Deploy to K8s
 └── teardown.sh        # Cleanup
 ```
@@ -95,8 +101,8 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 ```
 
 - Issuer: `http://localhost/idp/realms/econ-graph`. Only `/idp/realms/econ-graph`
-  and `/idp/resources` are routed by the ingress; the master realm is not reachable
-  from outside the cluster.
+  and `/idp/resources` are routed by the gateway; the master realm and the admin
+  console are not reachable from outside the cluster.
 - Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
   then <http://localhost:18080/idp/admin>. The password is in the Secret:
   `kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d`
@@ -115,10 +121,57 @@ After deployment, the application will be available at:
 - **GraphQL**: <http://localhost/graphql>
 - **Health Check**: <http://localhost/health>
 
-**Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
-`host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
-`deploy.sh`: `ingress.yaml` routes `/admin` to `econ-graph-admin-frontend-service`, which
-`deploy.sh` doesn't create, so it removes that route before applying the ingress.
+**Note**: the routes match host name `localhost`, so no `/etc/hosts` entry is needed. The admin
+frontend isn't deployed by `deploy.sh`, and `/admin` is not routed.
+
+## 🚪 Gateway
+
+The cluster's HTTP entry point is a Gateway API gateway run by Envoy Gateway.
+`scripts/deploy/install-gateway.sh` (run by `deploy.sh`; `--dry-run` prints what it
+would apply) installs pinned versions from the upstream release manifests, with no Helm:
+
+| Component | Version | Notes |
+| --- | --- | --- |
+| Gateway API CRDs | v1.5.1, standard channel | |
+| Envoy Gateway | v1.8.5 (Envoy Proxy 1.38) | supports Kubernetes v1.32 to v1.35 |
+
+| Object | Name | Where |
+| --- | --- | --- |
+| EnvoyProxy | `econ-graph-proxy` | `envoy-gateway-system`: one proxy replica on the control-plane node (`ingress-ready=true`), holding host ports 80/443 as hostPorts; Service `econ-graph-gateway-proxy` (ClusterIP) |
+| GatewayClass | `econ-graph` | cluster |
+| Gateway | `econ-graph-gateway` | namespace `econ-graph-gateway`. Listener `http` (port 80) admits routes from namespaces labelled `econgraph.io/gateway-access: "true"`; listener `https` (port 443) exists only with `GATEWAY_HTTPS_HOSTNAME` |
+
+Routes in `econ-graph` (`k8s/manifests/gateway/routes/`), on host `localhost`:
+
+| HTTPRoute | Paths | Backend |
+| --- | --- | --- |
+| `econ-graph-frontend` | `/`, `/auth/callback`, `/silent-callback.html` | frontend; sets the security headers (CSP, HSTS, X-Frame-Options; only `/silent-callback.html` may be framed, by this origin) |
+| `econ-graph-backend` | `/api`, `/auth`, `/health` | backend |
+| `econ-graph-graphql` | `/graphql` | backend; 20 requests a second per client address, bursts of 100, then 429 |
+| `econ-graph-data-graphql` | `/data/graphql` | backend `/graphql`, with `Authorization` and `Cookie` removed; same rate limit |
+| `econ-graph-idp` | `/idp/realms/econ-graph`, `/idp/resources` | Keycloak |
+
+The rate limit counts per client address as the proxy sees it: through the hostPorts that is the
+client's own address, except that requests from the host itself all arrive from the Docker bridge
+gateway. In-cluster callers reach the gateway at
+`http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/` with a `Host` header
+that one of the routes matches; a NetworkPolicy admitting them must allow the proxy pod's port
+10080 (listener `http`), not the Service port 80.
+
+Check every route with `./scripts/deploy/test-gateway-routes.sh [--rate-limit] [BASE_URL]`.
+
+**HTTPS.** `GATEWAY_HTTPS_HOSTNAME=<host> ./scripts/deploy/deploy.sh` adds listener `https` for
+that host name, with a certificate in Secret `econ-graph-tls` (namespace `econ-graph-gateway`)
+issued by cert-manager from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `letsencrypt-staging`,
+`k8s/manifests/letsencrypt-issuer.yaml`, HTTP-01 through listener `http`). `deploy.sh` then turns
+on cert-manager's Gateway API support and adds the host name to the routes. Without the variable
+there is no `https` listener.
+
+**Moving a cluster from ingress-nginx.** `./scripts/deploy/cutover-to-gateway.sh --dry-run`
+prints the steps; without `--dry-run` it installs the gateway next to ingress-nginx, checks every
+route through the proxy Service, asks for confirmation, removes the Ingresses and ingress-nginx,
+moves the proxy onto ports 80/443 and checks the routes again. It saves the Ingresses first;
+`--rollback <dir>` restores ingress-nginx and them. Its header lists every step.
 
 ## 📊 Monitoring
 
@@ -195,7 +248,7 @@ kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/c
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
-| `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
+| `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 
 Read a value back with, for example:
 
@@ -234,10 +287,6 @@ If you already replaced them another way, run the script once with
 `ALLOW_EXISTING_GRAFANA_VOLUME=1` or `ALLOW_MANIFEST_MONITORING_AUTH=1` to skip the check;
 later runs don't need them.
 
-Without `monitoring-auth`, the monitoring host in `ingress-cloudflare-dns01.yaml` returns 503
-until the Secret exists; `create-secrets.sh` warns when `MONITORING_BASIC_AUTH` is unset and the
-Secret is missing.
-
 ## 🗑️ Cleanup
 
 ### Remove Application Only
@@ -262,10 +311,13 @@ kind delete cluster --name econ-graph
 
 3. **Pods not starting**: Check logs with `kubectl logs <pod-name> -n econ-graph`
 
-4. **Ingress not working**: Verify NGINX ingress controller is running:
+4. **Routes not answering**: check the gateway, its proxy and the routes' status:
 
    ```bash
-   kubectl get pods -n ingress-nginx
+   kubectl -n econ-graph-gateway get gateway econ-graph-gateway
+   kubectl -n envoy-gateway-system get pods
+   kubectl -n econ-graph get httproute -o wide
+   ./scripts/deploy/test-gateway-routes.sh
    ```
 
 ### Debug Commands
@@ -280,8 +332,8 @@ kubectl cluster-info
 # Check node status
 kubectl get nodes
 
-# Check ingress status
-kubectl get ingress -n econ-graph
+# Check route status
+kubectl -n econ-graph describe httproute
 ```
 
 ## 📈 Performance Tuning
@@ -330,4 +382,4 @@ For production use, consider:
 - [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [kind Documentation](https://kind.sigs.k8s.io/)
 - [Terraform Documentation](https://www.terraform.io/docs/)
-- [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+- [Envoy Gateway](https://gateway.envoyproxy.io/) and the [Gateway API](https://gateway-api.sigs.k8s.io/)

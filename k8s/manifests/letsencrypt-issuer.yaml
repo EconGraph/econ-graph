@@ -11,11 +11,15 @@ spec:
     # Name of a secret used to store the ACME account private key
     privateKeySecretRef:
       name: letsencrypt-staging
-    # Enable the HTTP-01 challenge provider
+    # HTTP-01 challenges answered through the gateway's http listener
+    # (k8s/manifests/gateway/); cert-manager runs with --enable-gateway-api.
     solvers:
     - http01:
-        ingress:
-          class: nginx
+        gatewayHTTPRoute:
+          parentRefs:
+          - name: econ-graph-gateway
+            namespace: econ-graph-gateway
+            sectionName: http
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -30,8 +34,12 @@ spec:
     # Name of a secret used to store the ACME account private key
     privateKeySecretRef:
       name: letsencrypt-prod
-    # Enable the HTTP-01 challenge provider
+    # HTTP-01 challenges answered through the gateway's http listener
+    # (k8s/manifests/gateway/); cert-manager runs with --enable-gateway-api.
     solvers:
     - http01:
-        ingress:
-          class: nginx
+        gatewayHTTPRoute:
+          parentRefs:
+          - name: econ-graph-gateway
+            namespace: econ-graph-gateway
+            sectionName: http

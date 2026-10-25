@@ -39,21 +39,18 @@ microk8s status --wait-ready
 # Enable required addons
 echo "🔧 Enabling required addons..."
 microk8s enable dns
-microk8s enable ingress
 microk8s enable storage
 microk8s enable metrics-server
-
-# Wait for ingress controller to be ready
-echo "⏳ Waiting for ingress controller to be ready..."
-microk8s kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=90s || echo "⚠️  Ingress controller may still be starting..."
 
 # Configure kubectl
 echo "🔧 Configuring kubectl..."
 microk8s kubectl config view --raw > ~/.kube/config
 kubectl config use-context microk8s
+
+# The cluster's HTTP entry point: the Gateway API gateway (Envoy Gateway,
+# k8s/manifests/gateway/). The app's routes are applied with the app.
+echo "🌐 Installing the gateway..."
+"$(dirname "${BASH_SOURCE[0]}")/deploy/install-gateway.sh"
 
 # Create namespace
 echo "📋 Creating econ-graph namespace..."
@@ -74,10 +71,10 @@ echo "🌐 Production URLs (with SSL):"
 echo "  - Frontend: https://www.econ-graph.com"
 echo "  - Backend:  https://www.econ-graph.com/api"
 echo "  - Admin UI: https://www.econ-graph.com/admin"
-echo "  - Grafana:  not on the public ingress; kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
+echo "  - Grafana:  not routed by the gateway; kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo ""
 echo "🔧 For local development:"
-echo "  - Check ingress status: kubectl get ingress -n econ-graph"
+echo "  - Check route status: kubectl get httproute -n econ-graph"
 echo "  - Check services: kubectl get svc -n econ-graph"
 echo "  - Check pods: kubectl get pods -n econ-graph"
 echo ""
