@@ -105,16 +105,24 @@ case "${cmd}" in
             || die "${BRANCH_CLONE_DIR} is not on the same btrfs filesystem as ${snap}"
         if [[ "${DRY_RUN}" == "true" ]]; then
             [[ -d "${BRANCH_CLONE_DIR}" ]] || echo "+ mkdir -p ${BRANCH_CLONE_DIR}"
-            echo "+ btrfs subvolume snapshot ${snap} ${dest}"
             echo "+ write ${dest}.source"
+            echo "+ btrfs subvolume snapshot ${snap} ${dest}"
             echo "(dry run: nothing created)"
             exit 0
         fi
         mkdir -p "${BRANCH_CLONE_DIR}"
-        btrfs subvolume snapshot "${snap}" "${dest}" >/dev/null
-        # noclobber: refuse to follow or overwrite anything that appeared
-        # at the marker path since the check above.
-        (set -o noclobber; printf '%s\n' "${snap}" >"${dest}.source")
+        # The marker goes first, so a clone never exists without one (delete
+        # refuses an unmarked clone, and nothing here removes a subvolume).
+        # noclobber: refuse to follow or overwrite anything that appeared at
+        # the marker path since the check above.
+        (set -o noclobber; printf '%s\n' "${snap}" >"${dest}.source") \
+            || die "could not write ${dest}.source; nothing created"
+        if ! btrfs subvolume snapshot "${snap}" "${dest}" >/dev/null; then
+            # Only the marker just written is removed; the snapshot failed,
+            # so there is no clone.
+            rm -f "${dest}.source"
+            die "btrfs subvolume snapshot ${snap} ${dest} failed; nothing created"
+        fi
         echo "clone: ${dest} (from ${snap})"
         echo "Postgres data directory: ${dest}/pg"
         ;;
