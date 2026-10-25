@@ -34,15 +34,16 @@ This document covers what was added to fix that, and how to use it.
   up and again before teardown. A backup PVC using delayed binding may not
   have a PV until the first backup job; teardown protects it once bound.
   Deleting either PVC leaves its PV `Released` for manual reattachment.
-- **`scripts/deploy/teardown.sh`**: now prompts before deleting the
-  `econ-graph` namespace (which owns both the PostgreSQL and backup PVCs).
-  Before removing resources, it sets both bound PVs to Retain and stops if
-  that step fails.
-  Pass `--yes`/`-y` to skip that prompt non-interactively (e.g. in CI).
-  This does **not** also delete the kind cluster: on kind, the cluster's
-  node is what actually stores every PV's data (Retain policy included), so
-  deleting it destroys the database and its backups regardless. That still
-  needs its own confirmation, or an explicit `--delete-cluster` flag.
+- **`scripts/deploy/teardown.sh`**: dumps both databases first and refuses
+  when `postgresql-0` is not running unless `--no-backup` is given. It sets
+  both bound PVs to Retain and stops if that step fails. Deleting the
+  application, its Secrets and the `econ-graph` namespace (which owns the
+  PostgreSQL and backup PVCs) needs the namespace name typed on a terminal,
+  or `--yes`; without either it refuses before changing anything.
+  `--dry-run` prints every step and changes nothing.
+  It does **not** delete the kind cluster unless `--delete-cluster` is given
+  or the cluster name is typed when asked: the cluster's nodes hold the
+  in-cluster backup volume and Grafana's data. `--yes` never implies it.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: runs the restore.
