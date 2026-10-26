@@ -39,7 +39,20 @@ fail() {
 }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+ram="$(mktemp -d /dev/shm/econgraph-keycloak-test.XXXXXXXX)"
+trap 'rm -rf "$tmp" "$ram"' EXIT
+age-keygen -o "$tmp/identity" 2>/dev/null
+BACKUP_AGE_RECIPIENT="$(age-keygen -y "$tmp/identity")"
+export BACKUP_AGE_RECIPIENT
+export BACKUP_PLAINTEXT_ROOT="$ram"
+# These are synthetic test identities and dumps, never operator credentials.
+open_test_bundle() {
+    local out
+    out="$(mktemp -d "$ram/opened.XXXXXXXX")"
+    age -d -i "$tmp/identity" "$1/backup.tar.age" |
+        python3 scripts/backup/unpack-backup.py "$out"
+    printf '%s\n' "$out"
+}
 stub="$tmp/kubectl"
 export STUB_LOG="$tmp/log"
 
@@ -153,6 +166,11 @@ run "$backup" --dry-run
 [ -z "$(writes)" ] || fail "backup --dry-run changed something: $(writes)"
 [ ! -e "$tmp/backups" ] || fail "backup --dry-run wrote $tmp/backups"
 
+# Encryption setup fails before any context access or downtime.
+run env -u BACKUP_AGE_RECIPIENT "$backup"
+[ "$status" != 0 ] || fail "backup without a public recipient succeeded"
+[ ! -s "$STUB_LOG" ] || fail "backup without encryption setup contacted the cluster"
+
 # Unknown context, pod not ready.
 run "$backup" --context kind-missing
 [ "$status" != 0 ] || fail "backup on an unknown context succeeded"
@@ -169,6 +187,9 @@ if [ -z "$dir" ]; then
   fail "backup left no directory: $(ls -la "$tmp/backups" 2>&1)"
 else
   [ -f "$dir/VERIFIED" ] || fail "backup has no VERIFIED marker"
+  [ -f "$dir/backup.tar.age" ] || fail "backup is not encrypted"
+  [ ! -f "$dir/keycloak.dump" ] || fail "backup persisted plaintext"
+  dir="$(open_test_bundle "$dir")"
   grep -qx 'keycloak_image=quay.io/keycloak/keycloak:26.7.4' "$dir/VERIFIED" || fail "VERIFIED does not name the image"
   grep -qx 'cluster_uid=uid-this-cluster' "$dir/VERIFIED" || fail "VERIFIED does not name the cluster"
   [ "$(stat -c %a "$dir")" = 700 ] || fail "dump directory mode is $(stat -c %a "$dir")"
@@ -191,7 +212,7 @@ rm -rf "$tmp/backups"
 STUB_MISMATCH=1 run "$backup"
 [ "$status" != 0 ] || fail "backup with mismatched row counts succeeded"
 [ -z "$(find "$tmp/backups" -name VERIFIED)" ] || fail "a mismatched backup was marked VERIFIED"
-[ -n "$(find "$tmp/backups" -maxdepth 1 -name '*.failed')" ] || fail "a mismatched backup left no .failed directory"
+[ -z "$(find "$tmp/backups" -name '*.dump')" ] || fail "a mismatched backup persisted plaintext"
 grep -q -- '-- dropdb -U keycloak --if-exists keycloak_verify_' "$STUB_LOG" || fail "a failed backup left the scratch database"
 [ -z "$(touched_keycloak)" ] || fail "a failed backup touched keycloak: $(touched_keycloak)"
 
@@ -199,6 +220,11 @@ grep -q -- '-- dropdb -U keycloak --if-exists keycloak_verify_' "$STUB_LOG" || f
 rm -rf "$tmp/backups"
 run "$backup"
 dir="$(find "$tmp/backups" -mindepth 1 -maxdepth 1 -type d -name '*Z' | head -n 1)"
+encrypted_dir="$dir"
+run "$restore" "$encrypted_dir" --yes
+[ "$status" != 0 ] || fail "encrypted restore without operator terminal succeeded"
+[ ! -s "$STUB_LOG" ] || fail "encrypted unattended restore contacted cluster"
+dir="$(open_test_bundle "$dir")"
 mkdir -p "$tmp/unverified"
 cp "$dir/keycloak.dump" "$dir/counts.tsv" "$tmp/unverified/"
 run "$restore" "$tmp/unverified" --yes

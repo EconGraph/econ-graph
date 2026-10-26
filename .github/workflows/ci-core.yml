@@ -277,7 +277,10 @@ jobs:
 
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
-      run: scripts/deploy/test-keycloak-db-scripts.sh
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y age
+        scripts/deploy/test-keycloak-db-scripts.sh
 
     - name: Check backup snapshots against concurrent PostgreSQL writers
       run: python3 scripts/backup/test-snapshot-counts.py
