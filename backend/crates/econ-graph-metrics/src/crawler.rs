@@ -597,6 +597,7 @@ pub static CRAWLER_SCHEDULER_METRICS: Lazy<CrawlerSchedulerMetrics> = Lazy::new(
 mod queue_metrics_tests {
     use super::*;
 
+    /// Registers queue families and verifies that a completed job can be recorded.
     #[test]
     fn queue_metrics_register_and_record() {
         let registry = Registry::new();
@@ -612,6 +613,7 @@ mod queue_metrics_tests {
         assert!(names.contains(&"crawler_queue_items".to_string()));
     }
 
+    /// Registers each per-source coverage family exposed by the worker.
     #[test]
     fn coverage_metrics_register() {
         let registry = Registry::new();
@@ -639,6 +641,7 @@ mod queue_metrics_tests {
         }
     }
 
+    /// Verifies both scheduler modes are scrapeable before any jobs or scheduler ticks.
     #[test]
     fn scheduler_mode_is_exposed_when_no_jobs_have_run() {
         use prometheus::Encoder;
@@ -657,6 +660,7 @@ mod queue_metrics_tests {
         }
     }
 
+    /// Registers the upstream catalog-drift gauge for a source.
     #[test]
     fn discovery_metrics_register() {
         let registry = Registry::new();

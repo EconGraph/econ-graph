@@ -126,6 +126,7 @@ struct Args {
     scheduler_interval_secs: u64,
 }
 
+/// Configures the worker, publishes its operating mode, and drains jobs until shutdown.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
