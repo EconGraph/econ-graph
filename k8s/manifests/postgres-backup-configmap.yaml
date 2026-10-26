@@ -38,6 +38,7 @@ data:
     # empty line if none) are written there and the exit status is 0, so that
     # sync.sh still ships the dumps that succeeded before it fails the Job.
     set -eu
+    umask 077
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
     STAMP="$(date -u +%Y%m%d-%H%M%S)"
@@ -242,6 +243,87 @@ data:
     fi
     echo "Done."
 
+  install-age.sh: |
+    #!/bin/sh
+    set -eu
+    umask 077
+    # Official release archives, pinned by digest from the upstream release API.
+    case "$(uname -m)" in
+      x86_64) arch=amd64; sha=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 ;;
+      aarch64) arch=arm64; sha=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4 ;;
+      *) echo "Unsupported age architecture" >&2; exit 1 ;;
+    esac
+    cd "${AGE_TOOLS_DIR:-/tools}"
+    curl --fail --silent --show-error --location --retry 3 --max-time 180 \
+      "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-${arch}.tar.gz" \
+      --output age.tar.gz
+    printf '%s  age.tar.gz\n' "$sha" | sha256sum -c -
+    tar -xzf age.tar.gz age/age age/age-keygen
+    chmod 0555 age/age age/age-keygen
+    # Only these public-recipient binaries go to the dump/encryption stages.
+
+  encrypt.sh: |
+    #!/bin/sh
+    set -eu
+    umask 077
+    SOURCE="${BACKUP_PLAINTEXT_DIR:-/plaintext}"
+    DEST="${BACKUP_DIR:-/backups}"
+    AGE="${AGE_BIN:-/tools/age/age}"
+    [ "$(stat -f -c %T "$SOURCE")" = tmpfs ] || {
+      echo "Plaintext staging must be a memory-backed tmpfs" >&2; exit 1;
+    }
+    # Use only a native public recipient. Never mount an identity into this pod.
+    case "${BACKUP_AGE_RECIPIENT:-}" in
+      age1*) ;;
+      *) echo "Set BACKUP_AGE_RECIPIENT to the maintainer's public age1 recipient" >&2; exit 1 ;;
+    esac
+    # Let age validate the entire recipient before creating any backup output.
+    printf '' | "$AGE" -r "$BACKUP_AGE_RECIPIENT" >/dev/null
+    [ -f "${BACKUP_STATUS_FILE:?Missing backup status path}" ] || {
+      echo "Dump stage wrote no completion status" >&2; exit 1;
+    }
+    partial=''
+    trap 'if [ -n "$partial" ]; then rm -f "$partial"; fi' EXIT
+    for file in "$SOURCE"/*-*.dump; do
+      [ -f "$file" ] && [ ! -L "$file" ] || continue
+      name="${file##*/}"
+      target="$DEST/$name.age"
+      partial="$target.partial"
+      # Refuse collisions and symlinks: no existing backup is ever overwritten.
+      if [ -e "$target" ] || [ -L "$target" ] || [ -e "$partial" ] || [ -L "$partial" ]; then
+        echo "Refusing existing encrypted output for $name" >&2
+        printf ' encryption:%s\n' "$name" >>"$BACKUP_STATUS_FILE"
+        partial=''
+        continue
+      fi
+      if ! partial="$(mktemp "$target.partial.XXXXXX")"; then
+        printf ' encryption:%s\n' "$name" >>"$BACKUP_STATUS_FILE"
+        continue
+      fi
+      if "$AGE" -r "$BACKUP_AGE_RECIPIENT" <"$file" >"$partial" &&
+         [ -s "$partial" ] && ln "$partial" "$target"; then
+        rm -f "$partial"
+        partial=''
+        echo "Encrypted $name"
+        # Update a latest link only for a ciphertext published in this success
+        # branch. A collision or failed encryption must preserve prior links.
+        for link in "$SOURCE"/latest*.dump; do
+          [ -L "$link" ] || continue
+          source_target="$(readlink "$link")"
+          [ "${source_target##*/}" = "$name" ] || continue
+          ln -sf "$name.age" "$DEST/${link##*/}.age"
+        done
+        # Release only this pod's temporary plaintext after sealing it. Old
+        # plaintext or encrypted files on the PVC are never removed.
+        rm -f "$file"
+      else
+        echo "Encryption failed for $name" >&2
+        printf ' encryption:%s\n' "$name" >>"$BACKUP_STATUS_FILE"
+        rm -f "$partial"
+        partial=''
+      fi
+    done
+
   sync.sh: |
     #!/bin/sh
     # Ships ${BACKUP_DIR} to S3 when BACKUP_DESTINATION=s3. Then, when
@@ -267,14 +349,15 @@ data:
       fi
 
       echo "Syncing ${BACKUP_DIR} to s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}"
-      # The latest*.dump symlinks (latest.dump, latest-econ_graph_app.dump,
+      # Only completed age ciphertext may leave the PVC. Legacy plaintext dumps,
+      # partials and all symlinks are excluded. The latest*.dump symlinks (latest.dump, latest-econ_graph_app.dump,
       # latest-keycloak.dump) point at dumps already being synced, and
       # `aws s3 sync` follows symlinks by default, which would upload the same
       # content twice under two keys. A *.partial is a dump that never
       # finished (its pod was killed mid-dump).
       # shellcheck disable=SC2086
       aws s3 sync "${BACKUP_DIR}" "s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}" \
-        --exclude "latest*.dump" --exclude "*.partial" \
+        --exclude "*" --include "*.dump.age" --exclude "latest*.dump.age" --no-follow-symlinks \
         ${ENDPOINT_ARGS} --only-show-errors
       echo "Sync complete."
     fi
@@ -314,6 +397,27 @@ data:
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
     FILE="${BACKUP_FILE:-${BACKUP_DIR}/latest.dump}"
+    encrypted_backup_present() {
+      # Check archives as well as latest metadata. A lost link, or its brief
+      # replacement window, must not select a retained stale plaintext dump.
+      if [ -e "$BACKUP_DIR/latest.dump.age" ] || [ -L "$BACKUP_DIR/latest.dump.age" ]; then
+        return 0
+      fi
+      for archive in "$BACKUP_DIR/${PGDATABASE:-econ_graph}-"*.dump.age; do
+        if [ -e "$archive" ] || [ -L "$archive" ]; then
+          return 0
+        fi
+      done
+      return 1
+    }
+    if [ -z "${BACKUP_FILE:-}" ] && encrypted_backup_present; then
+      echo "Encrypted backups require operator-host recovery; refusing default plaintext restore." >&2
+      exit 1
+    fi
+
+    case "$FILE" in
+      *.age) echo "Decrypt backups on the operator host; never put private age keys in the cluster. See POSTGRES_BACKUP_RESTORE.md." >&2; exit 1 ;;
+    esac
     OWNER="${RESTORE_OWNER:-econgraph}"
 
     if [ ! -e "${FILE}" ]; then
