@@ -72,13 +72,31 @@ For both public hostname routes in the Cloudflare dashboard, set:
 | Origin Server Name (`originServerName`) | `econgraph.com` |
 | CA Pool (`caPool`) | `/etc/cloudflared/origin-ca/ca.crt` |
 | No TLS Verify (`noTLSVerify`) | **off / false** |
+| Match SNI to host (`matchSNItoHost`) | false |
 | HTTP Host header override | unset |
 
 These settings are remotely managed; changing the Kubernetes Deployment alone does not
-turn on verification. See Cloudflare's [origin parameters](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)
+turn on verification. CA Pool is a path inside each connector container, not a file
+uploaded to Cloudflare. Cloudflare documents that remote route settings accept this
+connector-local `.crt`/PEM bundle. Keep Match SNI to host false so it does not override
+Origin Server Name. See Cloudflare's [origin parameters](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)
 and [HTTPS-origin troubleshooting](https://developers.cloudflare.com/tunnel/troubleshooting/https-origins/).
 
-Check both public hostnames, Keycloak sign-in, `/graphql`, `/data/graphql` and the negative
+Before the production change, prove cloudflared itself enforces these settings using an
+operator-approved, access-restricted temporary test hostname/tunnel. Send its authenticated
+requests through a test connector with the same public CA mount to this HTTPS origin;
+only that test route may override HTTP Host to `econgraph.com` for routing. Require a
+successful origin response with the correct name and trust bundle. Then set only the
+test route's Origin Server Name to `wrong.invalid`, keep Match SNI to host false, and
+require an origin TLS failure plus a connector x509 hostname error. Restore the correct
+name, point only the test route at an unrelated public test-CA bundle mounted in the test
+connector, and require an unknown-authority failure. Restore the valid settings and
+require success again. Do not put intentionally invalid trust settings on production
+routes. Record route configuration, responses and connector errors; OpenSSL tests alone
+do not prove the remote connector is enforcing verification.
+
+After that rehearsal, switch the production routes. Check both public hostnames,
+Keycloak sign-in, `/graphql`, `/data/graphql` and the negative
 admin-path checks with `scripts/deploy/check-public-site.sh`. Confirm the connector logs
 show no x509/unknown-authority/name errors and the dashboard still shows healthy
 connectors. Record the successful checks and the negative certificate tests before
