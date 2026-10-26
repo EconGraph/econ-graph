@@ -747,6 +747,67 @@ async fn fetch_miss(pool: &DatabasePool, id: &str) {
 }
 
 #[tokio::test]
+async fn direct_fetch_success_resets_a_worker_miss_committed_while_it_waited() {
+    let Some(db) = fetch_counter_db("eco464_direct_fetch_order").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let id = "first-success";
+    persist::persist_discovered(pool, SourceId::Fred, &[counter_series(id)])
+        .await
+        .unwrap();
+    let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Pid {
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        pid: i32,
+    }
+    #[derive(QueryableByName)]
+    struct Blocked {
+        #[diesel(sql_type=diesel::sql_types::BigInt)]
+        n: i64,
+    }
+
+    let fetch = conn.transaction::<_, AppError, _>(async |conn| {
+        diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
+            .bind::<SqlUuid,_>(source_id).execute(&mut *conn).await?;
+        let blocker: Pid = diesel::sql_query("SELECT pg_backend_pid() AS pid")
+            .get_result(&mut *conn).await?;
+        let direct_pool = pool.clone();
+        let fetch = tokio::spawn(async move {
+            persist::persist_series(&direct_pool, SourceId::Fred, id, &successful_history()).await
+        });
+        // With the old ordering, the direct fetch read zero misses before blocking on
+        // its first economic_series INSERT's parent FK. This wait exposes that race.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let blocked: Blocked = diesel::sql_query(
+                    "SELECT count(*) AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))")
+                    .bind::<diesel::sql_types::Integer,_>(blocker.pid)
+                    .get_result(&mut *conn).await.unwrap();
+                if blocked.n > 0 { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.expect("the direct fetch waits for this source transaction");
+        record_not_found_conn(conn, SourceId::Fred, id).await?;
+        Ok(fetch)
+    }).await.unwrap();
+    fetch.await.unwrap().unwrap();
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (
+            state.fetch_misses,
+            state.catalog_misses,
+            state.status.as_str()
+        ),
+        (0, 0, "active")
+    );
+    drop(conn);
+    db.drop().await;
+}
+
+#[tokio::test]
 async fn successful_fetch_breaks_not_found_streak_without_catalog_changes() {
     let Some(db) = fetch_counter_db("eco464_nonconsecutive_fetch_misses").await else {
         return;
