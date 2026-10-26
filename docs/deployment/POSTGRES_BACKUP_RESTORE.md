@@ -40,11 +40,15 @@ shipped to object storage.
   the backups of both databases. That still needs its own confirmation, or an explicit
   `--delete-cluster` flag. Both databases live on host btrfs subvolumes
   outside the cluster ([HOST_STORAGE.md](HOST_STORAGE.md)), so they survive
-  it. Every kubectl call goes to the kind cluster's kubectl on context
-  `kind-econ-graph`; it shows that cluster first and stops before any change
-  if the context doesn't reach the kind cluster. Without a terminal it needs
-  both `--yes` and `--delete-cluster` (or `--dry-run`, which changes nothing),
-  and otherwise stops before any change.
+  it. Every kubectl call goes to the kind cluster's kubectl with
+  `--context kind-econ-graph`. Before any change it checks that this context
+  is the kind cluster `econ-graph` on the caller's `DOCKER_HOST` (the same
+  kube-system UID inside its control-plane container), shows the cluster and
+  asks once to go ahead (`--yes` answers that; on a cluster marked production
+  only the first 8 characters of its kube-system UID do, typed or given as
+  `--confirm-production`). Without a terminal it needs `--yes` and one of
+  `--delete-cluster` or `--keep-cluster` (or `--dry-run`, which changes
+  nothing), and otherwise stops before any change.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: restores `econ_graph`.
