@@ -18,6 +18,7 @@ CODES = {'FRED', 'BLS', 'BEA', 'CENSUS', 'WORLD_BANK', 'IMF', 'ECB', 'OECD',
 
 
 def inventory(plane):
+    """Read baseline table/type inventories and all checked-in migration versions."""
     directory = ROOT / 'backend/migrations' / plane
     baseline = next(directory.glob('*baseline/up.sql'))
     content = baseline.read_text()
@@ -28,23 +29,28 @@ def inventory(plane):
 
 
 def require(condition, message):
+    """Stop with an operator-facing explanation that contains no row values."""
     if not condition:
         raise RuntimeError(message)
 
 
 def query(conn, text, params=None):
+    """Execute an inspection query and collect its small result set."""
     return conn.execute(text, params).fetchall()
 
 
 def tables(conn):
+    """Inspect public tables, including any unknown tables that must block conversion."""
     return {r[0] for r in query(conn, "SELECT tablename FROM pg_tables WHERE schemaname='public'")}
 
 
 def versions(conn):
+    """Read Diesel version identifiers without copying migration execution history."""
     return {r[0] for r in query(conn, 'SELECT version FROM public.__diesel_schema_migrations')}
 
 
 def identifiers(names):
+    """Quote table names explicitly in the public schema."""
     from psycopg import sql
     return sql.SQL(', ').join(sql.Identifier('public', n) for n in names)
 
@@ -64,10 +70,12 @@ def fingerprint(conn, table):
 
 
 def fingerprints(conn, names):
+    """Collect row counts and content digests for an explicit table inventory."""
     return {name: fingerprint(conn, name) for name in names}
 
 
 def stable_ids(conn, mapping):
+    """Verify every economic series against the crawler UUIDv5 contract."""
     mismatches = 0
     digest = hashlib.sha256()
     # A server cursor keeps a large catalog out of client memory.
@@ -82,6 +90,7 @@ def stable_ids(conn, mapping):
 
 
 def private_dump(source, service, directory):
+    """Dump the locked snapshot, decode the full archive, and return its checksum."""
     snapshot = query(source, 'SELECT pg_export_snapshot()')[0][0]
     path = directory / 'combined.dump'
     # Open the private archive ourselves, including when pg_dump is wrapped in a container.
@@ -101,13 +110,24 @@ def private_dump(source, service, directory):
 
 
 def encrypted_backup(source, service, directory, evidence):
+    """Seal a verified tmpfs source dump and persist ciphertext before mutation."""
     helper = ROOT / 'scripts/backup/encryption.sh'
     command = ('set -euo pipefail\n'
                'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
                'source "$1"\nbackup_encryption_preflight\n')
-    staging = subprocess.run(['bash', '-c', command + 'backup_plaintext_dir',
-                              'conversion-backup', str(helper)], check=True,
-                             capture_output=True, text=True).stdout.strip()
+    preflight = subprocess.run(['bash', '-c', command + 'backup_plaintext_dir',
+                                'conversion-backup', str(helper)], capture_output=True, text=True)
+    # Only fixed helper diagnostics are safe to echo; sourced operator config can emit anything.
+    diagnostics = (
+        'set BACKUP_AGE_RECIPIENT to the maintainer\'s public age recipient; no plaintext fallback',
+        'age is required for encrypted backups',
+        'invalid age recipient',
+        'BACKUP_PLAINTEXT_ROOT must be tmpfs; plaintext staging on disk is refused',
+    )
+    diagnostic = next((message for message in diagnostics if message in preflight.stderr.splitlines()),
+                      'check the public recipient, age installation, and available private tmpfs staging space')
+    require(preflight.returncode == 0, f'Backup encryption preflight failed: {diagnostic}')
+    staging = preflight.stdout.strip()
     stage = Path(staging)
     require(stage.is_absolute() and stage.name.startswith('econgraph-backup.') and stage.is_dir(),
             'Backup helper returned an invalid staging directory')
@@ -130,6 +150,7 @@ def encrypted_backup(source, service, directory, evidence):
 
 
 def sync_directory(directory):
+    """Persist directory entries after publishing recovery artifacts."""
     descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)
@@ -138,6 +159,7 @@ def sync_directory(directory):
 
 
 def save_evidence(directory, report):
+    """Replace evidence atomically and persist it before releasing database locks."""
     temporary = directory / 'evidence.next.json'
     with temporary.open('x') as output:
         temporary.chmod(0o600)
@@ -149,11 +171,13 @@ def save_evidence(directory, report):
 
 
 def columns(conn, table):
+    """Read ordered column names so COPY cannot silently reorder app fields."""
     return query(conn, "SELECT column_name FROM information_schema.columns "
                  "WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position", (table,))
 
 
 def copy_app(source, target, app_tables):
+    """Copy all app rows atomically while preserving self-referencing foreign keys."""
     from psycopg import sql
     # Temporarily defer even self-referencing foreign keys, then restore their definitions.
     fkeys = query(target, "SELECT conrelid::regclass::text, conname, condeferrable, condeferred "
@@ -178,6 +202,7 @@ def copy_app(source, target, app_tables):
 
 
 def only_seed_templates(target, app_tables, baseline):
+    """Refuse existing target app records except exact baseline template content."""
     from psycopg import sql
     for name in app_tables:
         if name != 'annotation_templates':
@@ -198,6 +223,7 @@ def only_seed_templates(target, app_tables, baseline):
 
 
 def convert(args):
+    """Run a maintenance conversion with locked, verified copy and explicit cleanup."""
     import psycopg
     from psycopg import sql
     app_tables, app_enums, app_versions, baseline = inventory('app')
@@ -302,6 +328,7 @@ def convert(args):
 
 
 def main():
+    """Parse operator options and redact database/tool failures before reporting them."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-service', required=True, help='libpq service for the existing combined/data database')
     parser.add_argument('--app-service', required=True, help='libpq service for a migrated app database')

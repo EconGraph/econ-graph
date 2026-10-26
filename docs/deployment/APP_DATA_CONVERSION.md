@@ -83,7 +83,17 @@ against the copied records while keeping writers stopped. An existing user's ann
 must still resolve their original series IDs. The encrypted bundle contains the full source
 archive, its checksum and the pre-copy fingerprints. Counts and hashes in the external
 evidence file contain no row contents. Restore the bundle using the operator decryption
-procedure in the backup runbook if recovery is needed.
+procedure in the backup runbook if recovery is needed. To rehearse recovery, create a new,
+empty scratch database and a `conversion_rehearsal` libpq service pointing only at it, then
+restore the encrypted combined archive there:
+
+```sh
+scripts/backup/open-backup.sh /durable/operator-backups/new-conversion-copy -- \
+  pg_restore --no-owner --no-privileges --exit-on-error \
+  --dbname service=conversion_rehearsal @BACKUP@/combined.dump
+```
+
+The archive includes both schemas; do not restore it over an initialized app database.
 
 After approving the copied records, rerun with a **new** backup directory and
 `--drop-source-app`. It repeats the backup and verification and requires typing

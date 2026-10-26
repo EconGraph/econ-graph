@@ -29,9 +29,25 @@ spec.loader.exec_module(conversion)
 DOCKER = ['docker', '--host=unix:///var/run/docker.sock']
 
 
+class PreflightDiagnostics(unittest.TestCase):
+    """Keep maintenance diagnostics useful without echoing arbitrary operator config output."""
+
+    def test_preflight_failure_reports_only_a_fixed_diagnostic(self):
+        """Surface missing age while excluding unrelated sensitive stderr and ignoring stdout."""
+        failure = subprocess.CompletedProcess([], 1, '/not/a/staging/directory',
+                                              'operator-private-value\nage is required for encrypted backups\n')
+        with patch.object(conversion.subprocess, 'run', return_value=failure):
+            with self.assertRaises(RuntimeError) as raised:
+                conversion.encrypted_backup(None, 'unused', Path('/unused'), {})
+        self.assertEqual(str(raised.exception),
+                         'Backup encryption preflight failed: age is required for encrypted backups')
+
+
 class ConversionRehearsal(unittest.TestCase):
+    """Exercise actual migrations and recovery behavior using synthetic records only."""
     @classmethod
     def setUpClass(cls):
+        """Start one uniquely named, disposable PostgreSQL container and test-only services."""
         cls.scratch = tempfile.TemporaryDirectory(prefix='econgraph-conversion-')
         cls.root = Path(cls.scratch.name)
         cls.container = 'econgraph-conversion-' + uuid.uuid4().hex[:12]
@@ -73,6 +89,7 @@ class ConversionRehearsal(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        """Remove only the test container and its synthetic artifacts."""
         subprocess.run(DOCKER + ['rm', '-f', '-v', cls.container], check=False, stdout=subprocess.DEVNULL)
         if hasattr(cls, 'old_path'):
             os.environ['PATH'] = cls.old_path
@@ -87,6 +104,7 @@ class ConversionRehearsal(unittest.TestCase):
         cls.scratch.cleanup()
 
     def setUp(self):
+        """Create independent source and app databases from the checked-in migrations."""
         self.number = uuid.uuid4().hex[:12]
         self.source_db = 'combined_' + self.number
         self.app_db = 'app_' + self.number
@@ -125,10 +143,12 @@ class ConversionRehearsal(unittest.TestCase):
                                     writers_stopped=True, drop_source_app=False, previous_evidence=None)
 
     def run_conversion(self):
+        """Run the maintenance command while keeping synthetic evidence out of test logs."""
         with contextlib.redirect_stdout(io.StringIO()):
             conversion.convert(self.args)
 
     def test_copy_cleanup_and_idempotent_rerun(self):
+        """Verify locks, exact copy, encrypted recovery, cleanup and evidence-backed rerun."""
         self.args.dry_run = True
         self.run_conversion()
         self.assertFalse(self.args.backup_dir.exists())
@@ -169,10 +189,21 @@ class ConversionRehearsal(unittest.TestCase):
         with tarfile.open(fileobj=io.BytesIO(decrypted)) as bundle:
             archive = bundle.extractfile('./combined.dump').read()
             self.assertEqual(hashlib.sha256(archive).hexdigest(), evidence['backup_sha256'])
-            subprocess.run(['pg_restore', '--file', os.devnull], input=archive,
+            restored_db = 'restored_' + self.number
+            with psycopg.connect(self.admin, autocommit=True) as admin:
+                admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(restored_db)))
+            with self.services.open('a') as services:
+                services.write(f'[conversion_restored]\nhost=127.0.0.1\nport={self.port}\n'
+                               f'user=postgres\ndbname={restored_db}\n')
+            subprocess.run(['pg_restore', '--no-owner', '--no-privileges', '--exit-on-error',
+                            '--dbname', 'service=conversion_restored'], input=archive,
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with psycopg.connect(service='conversion_restored') as restored:
+                self.assertEqual(conversion.fingerprints(restored, conversion.inventory('data')[0]), self.before)
+                self.assertEqual(conversion.fingerprints(restored, conversion.inventory('app')[0]), evidence['source_app'])
 
     def test_refuses_unrelated_target_and_wrong_stable_ids(self):
+        """Reject unrelated target rows, ambiguous services and unstable source IDs."""
         with psycopg.connect(service='conversion_app') as db:
             db.execute("INSERT INTO users(email,name) VALUES ('unrelated@example.invalid','Do not replace')")
         with self.assertRaisesRegex(RuntimeError, 'Target contains existing app data'):
@@ -187,6 +218,7 @@ class ConversionRehearsal(unittest.TestCase):
             self.run_conversion()
 
     def test_copy_failure_retains_backup_and_rolls_back_both_databases(self):
+        """Keep recovery artifacts and both original schemas when the app copy fails."""
         with psycopg.connect(service='conversion_app') as db:
             db.execute("ALTER TABLE users ADD CONSTRAINT rehearsal_refusal CHECK(name <> 'Synthetic User')")
         with self.assertRaises(psycopg.errors.CheckViolation):
@@ -200,6 +232,7 @@ class ConversionRehearsal(unittest.TestCase):
             self.assertEqual(conversion.fingerprints(db, conversion.inventory('data')[0]), self.before)
 
     def test_copy_requires_stopped_writers_and_cleanup_requires_terminal(self):
+        """Require maintenance confirmation and a terminal for destructive cleanup."""
         self.args.writers_stopped = False
         with self.assertRaisesRegex(RuntimeError, 'Stop all app/crawler writers'):
             self.run_conversion()
