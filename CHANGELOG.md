@@ -77,6 +77,8 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Fixed
 
+- Observation values are stored exactly, as unconstrained `NUMERIC`: data migration
+  `20261025000100`, which `crawler migrate` applies (ECO-501).
 - `searchSeries`'s `totalCount` is the number of series that match the query and filters, the
   same on every page, instead of the length of the page returned (ECO-508).
 - A `source` on `searchSeries`, or a `filter.sourceId` on `seriesList`, that isn't a UUID
