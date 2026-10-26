@@ -77,7 +77,15 @@ case "${cmd}" in
         restic init
         ;;
     backup)
-        mapfile -t dirs < <(find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n' | sort)
+        # Upgrade backups live under the deploy writer's root, which can
+        # differ from the nightly root on the mounted backup pool.
+        keycloak_root="${KEYCLOAK_BACKUP_ROOT:-${ECONGRAPH_BACKUP_ROOT:-$HOME/econgraph-backups}/keycloak}"
+        mapfile -t dirs < <(
+            { find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n';
+              if [[ -d "$keycloak_root" ]]; then
+                  find "$keycloak_root" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n'
+              fi; } | sort -u
+        )
         (( ${#dirs[@]} > 0 )) || die "no verified dump directories under ${BACKUP_ROOT}"
         log "restic backup of ${#dirs[@]} verified dump dir(s) to ${RESTIC_REPOSITORY}"
         restic backup --tag econgraph-dumps --host "$(hostname)" "${dirs[@]}"
