@@ -65,6 +65,15 @@ PG_IMAGE="postgres:18"
 AWS_IMAGE="amazon/aws-cli:2.38.5"
 S3MOCK_IMAGE="adobe/s3mock:4.7.0"
 
+# Bind-mount fixtures must be owned by the invoking host account after umask
+# 077. Rootless Docker maps that account to container root; a rootful daemon
+# maps its ordinary uid directly. The separate encryption smoke test still
+# exercises the production uid 999 with a read-only root and no capabilities.
+TEST_USER="$(id -u):$(id -g)"
+case "$(docker info --format '{{json .SecurityOptions}}')" in
+    *rootless*) TEST_USER=0:0 ;;
+esac
+
 ID="pgbackup-test-$$"
 NET="$ID"
 ECON="$ID-econ"
@@ -117,6 +126,28 @@ for key, text in yaml.safe_load(open(sys.argv[1]))["data"].items():
     os.chmod(path, 0o555)
 PY
 
+# Install the same checksum-pinned age release as the Job, then generate only
+# a disposable synthetic identity on the test host. No identity enters a pod.
+mkdir -p "$tmp/tools" "$tmp/ciphertexts"
+# A retained plaintext backup and an unfinished ciphertext must never ship.
+printf 'legacy plaintext fixture' >"$tmp/ciphertexts/legacy.dump"
+printf 'unfinished ciphertext' >"$tmp/ciphertexts/incomplete.dump.age.partial"
+printf 'not an archive' >"$tmp/ciphertexts/other.age"
+ln -s legacy.dump "$tmp/ciphertexts/escape.dump.age"
+CURL_IMAGE="$(python3 - "$CRONJOB" <<'PYIMAGE'
+import sys, yaml
+spec = yaml.safe_load(open(sys.argv[1]))['spec']['jobTemplate']['spec']['template']['spec']
+print(next(c['image'] for c in spec['initContainers'] if c['name'] == 'install-age'))
+PYIMAGE
+)"
+docker run --rm --user "$TEST_USER" --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --entrypoint /scripts/install-age.sh \
+    -v "$tmp/scripts:/scripts:ro" -v "$tmp/tools:/tools" "$CURL_IMAGE" >>"$LOG" 2>&1
+"$tmp/tools/age/age-keygen" -o "$tmp/test-identity" >>"$LOG" 2>&1
+RECIPIENT="$("$tmp/tools/age/age-keygen" -y "$tmp/test-identity")"
+AGE_BIN="$tmp/tools/age/age" AGE_KEYGEN_BIN="$tmp/tools/age/age-keygen" \
+    BACKUP_ENCRYPT_IMAGE="$CURL_IMAGE" python3 "$ROOT/scripts/deploy/test-postgres-backup-encryption.py"
+
 # KEY=VALUE lines for docker --env-file, from the pg-dump init container.
 python3 - "$CRONJOB" "$ECON_PW" "$APP_PW" "$KC_PW" "$APP_URL" "$DATA_URL" >"$tmp/dump.env" <<'PY'
 import sys, yaml
@@ -132,7 +163,9 @@ spec = doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
 (container,) = [c for c in spec["initContainers"] if c["name"] == "pg-dump"]
 for env in container["env"]:
     if "value" in env:
-        print(f"{env['name']}={env['value']}")
+        # Unit-stage fixtures live on the test host, never on a cluster PVC.
+        value = "/backups" if env["name"] == "BACKUP_DIR" else env["value"]
+        print(f"{env['name']}={value}")
     else:
         ref = env["valueFrom"]["secretKeyRef"]
         print(f"{env['name']}={secrets[(ref['name'], ref['key'])]}")
@@ -333,10 +366,10 @@ new_status() {
 }
 
 # run_backup [docker run options...]: backup.sh as the pg-dump init container
-# runs it (uid 999, read-only root, no capabilities). Prints its exit status.
+# runs it (the host-mapped fixture uid, read-only root, no capabilities). Prints its exit status.
 run_backup() {
     local rc=0
-    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
         --security-opt no-new-privileges --env-file "$tmp/dump.env" "$@" \
         -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
         "$PG_IMAGE" /scripts/backup.sh >>"$LOG" 2>&1 || rc=$?
@@ -346,24 +379,46 @@ run_backup() {
 # run_sync PREFIX: sync.sh as the backup-sync container runs it, to the mock.
 run_sync() {
     local rc=0
-    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    # Exercise the production encryption stage before the production sync.
+    # Earlier dump fixtures remain for the restore assertions; a real pod's
+    # plaintext emptyDir holds only this run, so stage only new fixtures here.
+    local stage
+    stage="$(mktemp -d /dev/shm/econgraph-encrypt-stage.XXXXXX)"
+    for file in "$tmp/backups"/*-*.dump; do
+        [ -f "$file" ] && [ ! -L "$file" ] || continue
+        [ -f "$tmp/ciphertexts/${file##*/}.age" ] || cp "$file" "$stage/"
+    done
+    for link in "$tmp/backups"/latest*.dump; do
+        [ ! -L "$link" ] || cp -P "$link" "$stage/"
+    done
+    BACKUP_PLAINTEXT_DIR="$stage" BACKUP_DIR="$tmp/ciphertexts" \
+        BACKUP_AGE_RECIPIENT="$RECIPIENT" AGE_BIN="$tmp/tools/age/age" \
+        BACKUP_STATUS_FILE="$tmp/status/failed" sh "$tmp/scripts/encrypt.sh" >>"$LOG" 2>&1 || rc=$?
+    for file in "$tmp/backups"/*-*.dump; do
+        [ -f "$file" ] && [ ! -L "$file" ] || continue
+        [ -f "$tmp/ciphertexts/${file##*/}.age" ] || continue
+        { "$tmp/tools/age/age" -d -i "$tmp/test-identity" \
+            "$tmp/ciphertexts/${file##*/}.age" | cmp - "$file"; } >>"$LOG" 2>&1 || rc=1
+    done
+    rm -rf "$stage"
+    docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
         --security-opt no-new-privileges --entrypoint /scripts/sync.sh \
         -e BACKUP_DIR=/backups -e BACKUP_DESTINATION=s3 -e BACKUP_S3_BUCKET=backups \
         -e BACKUP_S3_PREFIX="$1" -e BACKUP_S3_ENDPOINT=http://s3mock:9090 \
         -e BACKUP_STATUS_FILE=/status/failed \
         -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 \
         -e AWS_CONFIG_FILE=/aws/config \
-        -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" -v "$tmp/status:/status:ro" \
+        -v "$tmp/scripts:/scripts:ro" -v "$tmp/ciphertexts:/backups:ro" -v "$tmp/status:/status:ro" \
         -v "$tmp/aws:/aws:ro" \
         "$AWS_IMAGE" >>"$LOG" 2>&1 || rc=$?
     echo "$rc"
 }
 
-s3_keys() { # s3_keys PREFIX: object keys under the prefix, one per line
+s3_keys() { # s3_keys PREFIX: compare encrypted object names with their plaintext fixture names
     docker run --rm --network "$NET" -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
         -e AWS_DEFAULT_REGION=us-east-1 -e AWS_CONFIG_FILE=/aws/config -v "$tmp/aws:/aws:ro" \
         "$AWS_IMAGE" s3 ls --recursive --endpoint-url http://s3mock:9090 "s3://backups/$1/" |
-        awk '{ print $4 }' | sed "s|^$1/||" | sort
+        awk '{ print $4 }' | sed "s|^$1/||; s|\\.age$||" | sort
 }
 
 # Dump files (not the latest*.dump links), and the newest dump of one database.
@@ -432,6 +487,38 @@ if ! $s3_ready; then
     exit 1
 fi
 
+# --- production UID on private container tmpfs -------------------------------
+
+# Keep this pair independent of host bind-mount ownership. Both scripts run as
+# the actual production uid, and share only a private tmpfs for their synthetic
+# archive. This also works with rootless Docker's uid mapping.
+if docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --entrypoint /bin/sh \
+    --env-file "$tmp/dump.env" -e RESTORE_OWNER=econgraph \
+    --tmpfs /backups:rw,uid=999,gid=999,mode=0700 \
+    --tmpfs /status:rw,uid=999,gid=999,mode=0700 \
+    -v "$tmp/scripts:/scripts:ro" "$PG_IMAGE" -c '
+        set -eu
+        test "$(id -u)" = 999
+        /scripts/backup.sh
+        test -z "$(cat /status/failed)"
+        test "$(stat -c %a /backups/econ_graph-*.dump)" = 600
+        /scripts/restore.sh
+    ' >>"$LOG" 2>&1; then
+    pass "backup.sh and restore.sh run as production uid 999 on private tmpfs"
+else
+    fail "backup.sh or restore.sh failed as production uid 999 (see test log)"
+fi
+counts "$ECON" postgres econ_graph >"$tmp/uid999.counts"
+check "uid 999 restore preserves every data-table row count" \
+    diff -u "$tmp/econ.counts" "$tmp/uid999.counts"
+schema "$ECON" postgres econ_graph >"$tmp/uid999.schema"
+check "uid 999 restore preserves source schema" \
+    diff -u "$tmp/econ.schema" "$tmp/uid999.schema"
+check "uid 999 restore keeps application tables owned by econgraph" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT count(*) FROM pg_tables
+        WHERE schemaname IN ('public', 'audit') AND tableowner <> 'econgraph'")" = 0 ]
+
 # --- 1. both databases up -------------------------------------------------------
 
 echo "# all three databases up"
@@ -498,7 +585,7 @@ grep -v '^RESTORE_OWNER=' "$tmp/restore.env" >"$tmp/restore-default-owner.env"
 # status.
 run_restore() {
     local rc=0
-    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
         --security-opt no-new-privileges --env-file "${RESTORE_ENV:-$tmp/restore.env}" "$@" \
         -v "$tmp/scripts:/scripts:ro" -v "${RESTORE_BACKUPS:-$tmp/backups}:/backups:ro" \
         "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
@@ -678,7 +765,7 @@ chmod 0555 "$tmp/wrap/pg_restore"
 chmod 0755 "$tmp/wrap"
 psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100;"
 rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
     --security-opt no-new-privileges --env-file "$tmp/restore.env" \
     -e PATH=/wrap:/usr/lib/postgresql/18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/wrap:/wrap:ro" -v "$tmp/swap:/backups" \
@@ -741,7 +828,7 @@ check "no dump deleted" nothing_deleted
 
 sleep 1
 rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
     --env-file "$tmp/dump.env" -e BACKUP_STATUS_FILE= \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" \
     "$PG_IMAGE" /scripts/backup.sh >>"$LOG" 2>&1 || rc=$?
@@ -826,7 +913,7 @@ check "no dump deleted" nothing_deleted
 backup_with() {
     local rc=0 env_file="$1"
     shift
-    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
         --security-opt no-new-privileges --env-file "$env_file" "$@" \
         -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
         "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
@@ -960,7 +1047,7 @@ sleep 1
 new_status
 before_econ="$(newest econ_graph)"
 rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
     --env-file "$tmp/dump-no-kc.env" \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
     "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
@@ -984,7 +1071,7 @@ echo "# no Keycloak password, KEYCLOAK_REQUIRED=false (a cluster without Keycloa
 sleep 1
 new_status
 rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+docker run --rm --network "$NET" --user "$TEST_USER" --read-only --cap-drop ALL \
     --env-file "$tmp/dump-no-kc.env" -e KEYCLOAK_REQUIRED=false \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
     "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
@@ -1035,7 +1122,8 @@ check "sync.sh fails when backup.sh wrote no status" [ "$rc" = 1 ]
 
 echo "# a dump removed from the volume, then synced again"
 check "the first keycloak dump is in S3 ($kc_dump)" grep -qx "$kc_dump" <(s3_keys run7)
-rm -f "$tmp/backups/$kc_dump"
+# Operator removal covers both temporary test plaintext and its PVC ciphertext.
+rm -f "$tmp/backups/$kc_dump" "$tmp/ciphertexts/$kc_dump.age"
 grep -vx "$kc_dump" "$SEEN" >"$tmp/seen.new" || true
 mv "$tmp/seen.new" "$SEEN"
 new_status
