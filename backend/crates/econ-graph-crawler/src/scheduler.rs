@@ -209,6 +209,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active') \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM datasets d \
@@ -222,6 +225,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              LEFT JOIN failed_jobs f \
                     ON f.source = src.code AND f.series_id = sm.external_id \
              WHERE sm.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
+                     AND lc.status <> 'active') \
                AND (src.code <> '{census}' OR sm.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
@@ -982,6 +988,71 @@ mod tests {
         for sql in &cleanup {
             exec(p, sql).await;
         }
+    }
+
+    #[tokio::test]
+    async fn publication_state_suspends_automatic_fetches_and_recovery_resumes_them() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        for status in [
+            "active",
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            let id = format!("t15c_lifecycle_{status}");
+            seed(
+                pool,
+                SourceId::Fred,
+                &id,
+                "Monthly",
+                Some(365.0),
+                Some("success"),
+            )
+            .await;
+            let metadata_only = format!("{id}_catalog");
+            discover(pool, SourceId::Fred, &[(&metadata_only, "Monthly")]).await;
+            let mut conn = pool.get().await.unwrap();
+            for external_id in [&id, &metadata_only] {
+                diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,successor_id) VALUES($1,$2,$3,NOW(),'test',CASE WHEN $3='superseded' THEN gen_random_uuid() END)")
+                    .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(external_id)
+                    .bind::<Text,_>(status).execute(&mut conn).await.unwrap();
+            }
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let jobs = queued_series(pool).await;
+        let ours: BTreeSet<_> = jobs
+            .into_iter()
+            .filter(|id| id.starts_with("t15c_lifecycle_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "t15c_lifecycle_active".to_string(),
+                "t15c_lifecycle_active_catalog".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(pool, "UPDATE series_lifecycle SET status='active',since=NULL WHERE external_id='t15c_lifecycle_retired'").await;
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        assert!(queued_series(pool).await.contains("t15c_lifecycle_retired"));
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
+        )
+        .await;
     }
 
     #[tokio::test]

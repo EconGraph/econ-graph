@@ -115,6 +115,9 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
              SELECT src.code, sm.external_id::text AS external_id \
              FROM src JOIN series_metadata sm ON sm.source_id = src.ds_id \
              WHERE sm.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
+                     AND lc.status <> 'active') \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
                      WHERE es.source_id = sm.source_id AND es.external_id = sm.external_id \
@@ -123,6 +126,9 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
              SELECT src.code, es.external_id::text \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active') \
                AND (es.crawl_status IS DISTINCT FROM 'not_found' OR es.end_date IS NOT NULL) \
          ), discovered AS ( \
              SELECT code, COUNT(*) AS n FROM ids \
@@ -139,6 +145,9 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
                     MIN(es.last_crawled_at) AS oldest_success \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active') \
                AND (src.code <> '{census}' OR es.external_id ~ $3) \
              GROUP BY src.code \
          ) \
@@ -462,6 +471,63 @@ mod tests {
         .execute(&mut conn)
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn retained_public_histories_do_not_distort_live_coverage_or_freshness() {
+        let Some((url, _guard)) = crate::testkit::lock_test_db("coverage").await else {
+            return;
+        };
+        let pool = econ_graph_core::create_pool(&url).await.unwrap();
+        let src = source(&pool, "t_cov lifecycle", true).await;
+        series(&pool, src, "current", "Monthly", true, Some(0.1)).await;
+        for status in [
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            discovered(&pool, src, status, true).await;
+            series(&pool, src, status, "Monthly", true, Some(365.0)).await;
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,successor_id) VALUES($1,$2,$2,NOW(),'test',CASE WHEN $2='superseded' THEN gen_random_uuid() END)")
+                .bind::<diesel::sql_types::Uuid,_>(src).bind::<Text,_>(status)
+                .execute(&mut conn).await.unwrap();
+        }
+        let got = coverage_for(&pool, &[pair("A", "t_cov lifecycle")], "")
+            .await
+            .unwrap();
+        assert_eq!(
+            (got[0].discovered, got[0].with_data, got[0].overdue),
+            (1, 1, 0)
+        );
+        // Exclusion is a reporting policy, not deletion or deactivation of public history.
+        #[derive(QueryableByName)]
+        struct Count {
+            #[diesel(sql_type = BigInt)]
+            n: i64,
+        }
+        let mut conn = pool.get().await.unwrap();
+        let row: Count = diesel::sql_query(
+            "SELECT count(*) AS n FROM economic_series WHERE source_id=$1 AND is_active",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(src)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(row.n, 6);
+        diesel::sql_query("DELETE FROM series_lifecycle WHERE source_id=$1")
+            .bind::<diesel::sql_types::Uuid, _>(src)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        exec(
+            &pool,
+            "DELETE FROM data_sources WHERE name='t_cov lifecycle'",
+        )
+        .await;
     }
 
     #[tokio::test]
