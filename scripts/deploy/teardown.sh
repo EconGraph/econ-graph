@@ -14,9 +14,10 @@
 # --keep-cluster, never implied by --yes.
 #
 # On a cluster marked production (scripts/deploy/mark-production-cluster.sh),
-# going ahead takes the first 8 characters of the kube-system UID shown: typed
-# at the terminal, or given as --confirm-production UID-PREFIX. --yes alone
-# does not answer it.
+# or whose marker can't be read, going ahead takes the first 8 characters of
+# the kube-system UID shown: typed at the terminal, or given as
+# --confirm-production UID-PREFIX. --yes alone does not answer it. A
+# --confirm-production that doesn't match the cluster is refused, marker or not.
 #
 # Deleting the econ-graph namespace deletes the PostgreSQL PVCs and the backup
 # PVC; their PVs, set to Retain, are left Released with their contents in
@@ -58,7 +59,7 @@ while [ $# -gt 0 ]; do
         --delete-cluster) DELETE_CLUSTER_FLAG="true" ;;
         --keep-cluster) KEEP_CLUSTER_FLAG="true" ;;
         --confirm-production)
-            [ $# -ge 2 ] && [ -n "$2" ] || { echo "$usage" >&2; exit 2; }
+            if [ $# -lt 2 ] || [ -z "$2" ]; then echo "$usage" >&2; exit 2; fi
             CONFIRM_PRODUCTION="$2"
             shift
             ;;
@@ -165,8 +166,11 @@ server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}')" 
 production="false"
 marker_status=0
 cluster_is_marked_production || marker_status=$?
+# A marker that can't be read (status 2) might be production's: it takes the
+# same confirmation.
 case "${marker_status}" in
     0) production="true"; marker="marked production: this is the cluster serving econgraph.com" ;;
+    2) production="true"; marker="${CLUSTER_ROLE_REASON}; treated as production for the confirmation" ;;
     *) marker="${CLUSTER_ROLE_REASON}" ;;
 esac
 code="${uid:0:8}"
@@ -180,6 +184,11 @@ echo "  nodes           ${nodes:-(none)}"
 echo "  kube-system UID ${uid} (the same inside ${CONTROL_PLANE})"
 echo "  production      ${marker}"
 
+# --confirm-production names one cluster: refuse it for any other, marked or not.
+if [ -n "${CONFIRM_PRODUCTION}" ] && [ "${CONFIRM_PRODUCTION}" != "${code}" ]; then
+    die "--confirm-production ${CONFIRM_PRODUCTION} does not match this cluster's kube-system UID; nothing was changed"
+fi
+
 # One confirmation for everything below, before anything changes. Production
 # takes the UID prefix (typed, or --confirm-production), never --yes alone.
 if [ "${DRY_RUN}" = "true" ]; then
@@ -191,10 +200,13 @@ if [ "${DRY_RUN}" = "true" ]; then
     fi
 elif [ "${production}" = "true" ]; then
     echo ""
-    echo "!!! WARNING: this is the cluster marked production, serving econgraph.com."
+    if [ "${marker_status}" -eq 0 ]; then
+        echo "!!! WARNING: this is the cluster marked production, serving econgraph.com."
+    else
+        echo "!!! WARNING: whether this cluster is production could not be checked, so it is treated as production."
+    fi
     if [ -n "${CONFIRM_PRODUCTION}" ]; then
-        [ "${CONFIRM_PRODUCTION}" = "${code}" ] ||
-            die "--confirm-production ${CONFIRM_PRODUCTION} does not match this cluster's kube-system UID; nothing was changed"
+        : # It matched the UID above.
     elif [ -t 0 ]; then
         read -r -p "Type the first 8 characters of the kube-system UID above to tear it down: " answer || answer=""
         [ "${answer}" = "${code}" ] || die "confirmation did not match; nothing was changed"

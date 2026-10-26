@@ -44,9 +44,10 @@ shipped to object storage.
   `--context kind-econ-graph`. Before any change it checks that this context
   is the kind cluster `econ-graph` on the caller's `DOCKER_HOST` (the same
   kube-system UID inside its control-plane container), shows the cluster and
-  asks once to go ahead (`--yes` answers that; on a cluster marked production
-  only the first 8 characters of its kube-system UID do, typed or given as
-  `--confirm-production`). Without a terminal it needs `--yes` and one of
+  asks once to go ahead (`--yes` answers that; on a cluster marked production,
+  or whose marker can't be read, only the first 8 characters of its
+  kube-system UID do, typed or given as `--confirm-production`, which is
+  refused on any cluster it doesn't match). Without a terminal it needs `--yes` and one of
   `--delete-cluster` or `--keep-cluster` (or `--dry-run`, which changes
   nothing), and otherwise stops before any change.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup

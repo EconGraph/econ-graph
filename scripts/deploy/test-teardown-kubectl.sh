@@ -49,7 +49,8 @@ EOF
 
 # The kind cluster's kubectl. FAKE_NO_CONTEXT set: it has no kind-econ-graph
 # context. FAKE_UID: the kube-system UID it reports. FAKE_MARKED set: the
-# cluster carries a production marker made on it.
+# cluster carries a production marker made on it. FAKE_MARKER_FAILS set: the
+# marker can't be read.
 cat >"$CACHE/bin/kubectl" <<EOF
 #!/bin/sh
 echo "KUBECONFIG=\${KUBECONFIG:-} \$*" >>"$CALLS"
@@ -61,6 +62,7 @@ case " \$* " in
     *" get nodes "*) printf '%s' "econ-graph-control-plane econ-graph-worker" ;;
     *" get namespace kube-system "*) printf '%s' "\$uid" ;;
     *" get configmap econgraph-cluster-role "*)
+        [ -z "\${FAKE_MARKER_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKED:-}" ] || printf '%s' "production \$uid" ;;
     *" -o name"*) echo "persistentvolumeclaim/stub" ;;
     *"{.spec.volumeName}"*) printf '%s' pv-stub ;;
@@ -81,11 +83,13 @@ EOF
 
 # docker: only the kube-system UID read inside the control-plane container.
 # FAKE_DOCKER_UID: the UID of the kind cluster on this DOCKER_HOST.
+# FAKE_DOCKER_FAILS set: the exec fails (no such container on this daemon).
 cat >"$WORK/bin/docker" <<EOF
 #!/bin/sh
 echo "docker \$*" >>"$KIND"
 case "\$*" in
     "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf get namespace kube-system -o jsonpath={.metadata.uid}")
+        [ -z "\${FAKE_DOCKER_FAILS:-}" ] || { echo "Error: No such container" >&2; exit 1; }
         printf '%s' "\${FAKE_DOCKER_UID:-uid-kind-cluster}"; exit 0 ;;
 esac
 echo "docker stub: unexpected call" >&2
@@ -252,6 +256,17 @@ out="$(FAKE_UID=uid-other-cluster teardown --yes --delete-cluster)"; rc=$?
 expect_refusal "teardown.sh when the context is another econ-graph cluster than kind's" \
     "is not the kind cluster econ-graph on DOCKER_HOST"
 
+# 6b. The control-plane container can't be asked (another daemon), or kind
+# would use another provider than docker: refused.
+reset
+out="$(FAKE_DOCKER_FAILS=1 teardown --yes --delete-cluster)"; rc=$?
+expect_refusal "teardown.sh when docker exec into the control plane fails" \
+    "could not read the kube-system UID inside econ-graph-control-plane"
+reset
+out="$(KIND_EXPERIMENTAL_PROVIDER=podman teardown --yes --delete-cluster)"; rc=$?
+expect_refusal "teardown.sh with KIND_EXPERIMENTAL_PROVIDER=podman" \
+    "KIND_EXPERIMENTAL_PROVIDER=podman is not supported"
+
 # 7. An inherited CLUSTER_ROLE_CONTEXT is dropped, not followed.
 reset
 out="$(CLUSTER_ROLE_CONTEXT=microk8s teardown --dry-run)"; rc=$?
@@ -283,6 +298,20 @@ expect_refusal "teardown.sh --confirm-production with the wrong prefix" "does no
 reset
 out="$(FAKE_MARKED=1 teardown --yes --keep-cluster --confirm-production uid-kind)"; rc=$?
 expect_teardown "teardown.sh --yes --keep-cluster --confirm-production on production"
+
+# 9b. A marker that can't be read is treated as production; a
+# --confirm-production that doesn't match is refused on any cluster.
+reset
+out="$(FAKE_MARKER_FAILS=1 teardown --yes --delete-cluster)"; rc=$?
+expect_refusal "teardown.sh --yes --delete-cluster with an unreadable marker" "needs --confirm-production"
+grep -q "treated as production for the confirmation" <<<"$out" ||
+    fail "teardown.sh with an unreadable marker does not say it is treated as production"
+reset
+out="$(FAKE_MARKER_FAILS=1 teardown --yes --keep-cluster --confirm-production uid-kind)"; rc=$?
+expect_teardown "teardown.sh --confirm-production with an unreadable marker"
+reset
+out="$(teardown --yes --delete-cluster --confirm-production uid-othe)"; rc=$?
+expect_refusal "teardown.sh --confirm-production with the wrong prefix on an unmarked cluster" "does not match"
 
 # 10. At a terminal: one confirmation before any change.
 reset
