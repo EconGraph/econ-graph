@@ -20,6 +20,18 @@ use async_graphql::extensions::{Extension, ExtensionContext, ExtensionFactory, N
 use async_graphql::{PathSegment, Response, ServerError};
 use econ_graph_core::error::{AppError, DATA_PLANE_UNAVAILABLE};
 
+/// The `code` extension of an error caused by a malformed argument.
+pub const BAD_USER_INPUT: &str = "BAD_USER_INPUT";
+
+/// An error for a malformed argument: `message` (which should name the argument) reaches the
+/// client, with the `BAD_USER_INPUT` code.
+pub fn bad_user_input(message: impl Into<String>) -> async_graphql::Error {
+    use async_graphql::ErrorExtensions;
+    async_graphql::Error::new(message).extend_with(|_, extensions| {
+        extensions.set("code", BAD_USER_INPUT);
+    })
+}
+
 /// What the client sees in place of a server-side error's detail.
 pub const INTERNAL_ERROR_MESSAGE: &str = "Internal server error";
 
@@ -257,6 +269,10 @@ mod tests {
             Err("seriesIds need a source".into())
         }
 
+        async fn bad_user_input_failure(&self) -> Result<i32> {
+            Err(bad_user_input("`source` is not a valid id: \"x\""))
+        }
+
         async fn bad_uuid(&self) -> Result<i32> {
             let id = uuid::Uuid::parse_str("not-a-uuid")?;
             Ok(id.as_bytes()[0].into())
@@ -378,6 +394,17 @@ mod tests {
             .await
             .message
             .contains("invalid character"));
+    }
+
+    /// A `bad_user_input` error keeps its message and its `BAD_USER_INPUT` code.
+    #[tokio::test]
+    async fn bad_user_input_errors_reach_the_client() {
+        let error = first_error("{ badUserInputFailure }").await;
+        assert_eq!(error.message, r#"`source` is not a valid id: "x""#);
+        assert_eq!(
+            error.extensions.and_then(|e| e.get("code").cloned()),
+            Some(BAD_USER_INPUT.into())
+        );
     }
 
     /// The detail a client doesn't see is logged, with where it happened.

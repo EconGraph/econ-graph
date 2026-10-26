@@ -748,8 +748,8 @@ jobs:
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
     # needed; default build and with the xbrl-parser feature), then the core financial ratio,
-    # crawl_queue, dataset model, dataset GraphQL, queue service and cross-section tests
-    # (against this job's Postgres). These must pass for the job (and the PR) to go green.
+    # crawl_queue, dataset model, dataset GraphQL, queue service, cross-section and series
+    # search tests (against this job's Postgres). These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
@@ -773,6 +773,8 @@ jobs:
         cargo test -p econ-graph-services queue_service -- --test-threads=1
         cargo test -p econ-graph-services cross_section -- --test-threads=1
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
+        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
     # backend/.cargo/config.toml defaults FLAGS_PROFILE to dev, which keeps the static_catalogs
