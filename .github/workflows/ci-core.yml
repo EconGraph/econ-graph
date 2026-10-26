@@ -412,6 +412,9 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        # This job has no Postgres service. DB-backed tests matched by the name filters
+        # below run in the required workspace job; do not inherit the workflow's DB URL.
+        unset DATABASE_URL APP_DATABASE_URL DATA_DATABASE_URL
         cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
