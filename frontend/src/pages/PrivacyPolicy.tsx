@@ -100,8 +100,8 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            EconGraph never sees your Google password, and we do not ask Google for anything beyond
-            your basic profile.
+            EconGraph never sees your sign-in provider's password, and we do not ask for anything
+            beyond your basic profile.
           </Typography>
 
           <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
@@ -349,9 +349,9 @@ const PrivacyPolicy: React.FC = () => {
           }}
         >
           EconGraph is an open-source economic data explorer. Browsing needs no account. If you sign
-          in with Google, we keep your basic Google profile and the annotations and comments you
-          write. Annotations are private unless you make them public. We use no trackers and share
-          no personal information with third parties.
+          in through a configured provider, we keep your basic profile and the annotations and
+          comments you write. Annotations are private unless you make them public. We use no
+          trackers and share no personal information with third parties.
         </Typography>
       </Paper>
 
