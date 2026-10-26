@@ -531,6 +531,57 @@ pub static CRAWLER_DISCOVERY_METRICS: Lazy<CrawlerDiscoveryMetrics> = Lazy::new(
         .expect("Failed to initialize crawler discovery metrics")
 });
 
+/// Catalog safety guards and retained series lifecycle. Labels are bounded source codes,
+/// lifecycle statuses and guard reasons, never upstream series identifiers.
+pub struct CrawlerCatalogMetrics {
+    /// Rejected catalog refreshes, by source and reason (volume or mass_disappearance).
+    pub guard_rejections_total: IntCounterVec,
+    /// Durable lifecycle changes observed by this worker, by source and destination status.
+    pub transitions_total: IntCounterVec,
+    /// Latest retained series counts by source and lifecycle status.
+    pub series: IntGaugeVec,
+}
+
+impl CrawlerCatalogMetrics {
+    /// Register catalog metrics with the supplied registry.
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let guard_rejections_total = IntCounterVec::new(
+            Opts::new(
+                "crawler_catalog_guard_rejections_total",
+                "Catalog refreshes rejected by safety guards",
+            ),
+            &["source", "reason"],
+        )?;
+        let transitions_total = IntCounterVec::new(
+            Opts::new(
+                "crawler_series_lifecycle_transitions_total",
+                "Retained series lifecycle transitions",
+            ),
+            &["source", "status"],
+        )?;
+        let series = IntGaugeVec::new(
+            Opts::new(
+                "crawler_series_lifecycle",
+                "Retained series by source and lifecycle status",
+            ),
+            &["source", "status"],
+        )?;
+        registry.register(Box::new(guard_rejections_total.clone()))?;
+        registry.register(Box::new(transitions_total.clone()))?;
+        registry.register(Box::new(series.clone()))?;
+        Ok(Self {
+            guard_rejections_total,
+            transitions_total,
+            series,
+        })
+    }
+}
+
+/// Global catalog metrics, served with the other crawler metrics.
+pub static CRAWLER_CATALOG_METRICS: Lazy<CrawlerCatalogMetrics> = Lazy::new(|| {
+    CrawlerCatalogMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize catalog metrics")
+});
+
 /// Refresh scheduler activity. Counters have bounded registry-source and job-kind labels.
 pub struct CrawlerSchedulerMetrics {
     /// Scheduling passes started, including idle passes and passes that later fail.
@@ -641,5 +692,27 @@ mod queue_metrics_tests {
             .map(|f| f.name().to_string())
             .collect();
         assert!(names.contains(&"crawler_curated_missing".to_string()));
+    }
+
+    #[test]
+    fn catalog_guards_and_lifecycle_metrics_are_exported() {
+        let registry = Registry::new();
+        let m = CrawlerCatalogMetrics::new(&registry).unwrap();
+        m.guard_rejections_total
+            .with_label_values(&["BEA", "volume"])
+            .inc();
+        m.transitions_total
+            .with_label_values(&["FRED", "retired"])
+            .inc();
+        m.series.with_label_values(&["FRED", "retired"]).set(2);
+        let families = registry.gather();
+        for name in [
+            "crawler_catalog_guard_rejections_total",
+            "crawler_series_lifecycle_transitions_total",
+            "crawler_series_lifecycle",
+        ] {
+            assert!(families.iter().any(|f| f.name() == name));
+        }
+        assert_eq!(m.series.with_label_values(&["FRED", "retired"]).get(), 2);
     }
 }
