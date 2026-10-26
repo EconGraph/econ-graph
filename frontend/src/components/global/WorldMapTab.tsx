@@ -95,7 +95,7 @@ const WorldMapTab: React.FC = () => {
 
   return (
     <Grid container spacing={3}>
-      <Grid item xs={12} lg={9}>
+      <Grid size={{ xs: 12, lg: 9 }}>
         <Paper elevation={2} sx={{ p: 2 }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mb: 2 }}>
             <FormControl size='small' sx={{ minWidth: 280, maxWidth: '100%' }} disabled={!dataset}>
@@ -192,7 +192,7 @@ const WorldMapTab: React.FC = () => {
           )}
         </Paper>
       </Grid>
-      <Grid item xs={12} lg={3}>
+      <Grid size={{ xs: 12, lg: 3 }}>
         {shown && shownLabel ? (
           <MapLegend
             colorScale={colorScale}

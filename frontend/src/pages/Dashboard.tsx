@@ -31,19 +31,19 @@ const Dashboard: React.FC = () => {
       </Box>
 
       <Grid container spacing={3}>
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Typography variant='h5' component='h2' sx={{ mb: 2 }}>
             Key Indicators
           </Typography>
         </Grid>
 
         {DASHBOARD_SERIES.map(entry => (
-          <Grid item xs={12} sm={6} md={3} key={entry.id}>
+          <Grid key={entry.id} size={{ xs: 12, sm: 6, md: 3 }}>
             <LatestValueCard entry={entry} />
           </Grid>
         ))}
 
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Paper sx={{ p: 3 }}>
             <Typography variant='h6' component='h2' gutterBottom>
               Quick Actions

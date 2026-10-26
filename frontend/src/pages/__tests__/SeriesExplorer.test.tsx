@@ -883,8 +883,8 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     expect(await screen.findByText('1948-01-01 - 2024-11-01')).toBeInTheDocument();
   });
 
-  // ECO-414: cards sat straight in the grid container, so they had no gutter at the sidebar
-  // and widths set by their text. jsdom has no layout, so check each card has a grid cell.
+  // ECO-414: a card placed straight in the grid container gets a width set by its text.
+  // jsdom has no layout, so check each card sits in a sized grid cell.
   test('each result card sits in its own fixed-width grid cell', async () => {
     const user = userEvent.setup();
     renderSeriesExplorer();
@@ -893,7 +893,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     const title = await screen.findByText('Unemployment Rate');
 
     const cell = title.closest('.MuiCard-root')?.parentElement;
-    expect(cell).toHaveClass('MuiGrid-item', 'MuiGrid-grid-xs-12', 'MuiGrid-grid-sm-6', 'MuiGrid-grid-md-4');
+    expect(cell).toHaveClass('MuiGrid-grid-xs-12', 'MuiGrid-grid-sm-6', 'MuiGrid-grid-md-4');
   });
 
   test('the source filter lists the data sources and sends the chosen id', async () => {
