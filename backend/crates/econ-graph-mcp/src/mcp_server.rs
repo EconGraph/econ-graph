@@ -1347,34 +1347,12 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_create_data_visualization_missing_series_id() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
-
-        // Test create_data_visualization with missing series_id
-        let arguments = json!({
-            "chart_type": "line",
-            "title": "Test Chart"
-        });
-
-        let result = server.create_data_visualization(arguments).await;
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: series_id"));
-    }
-
-    #[tokio::test]
-    #[serial]
     async fn test_create_data_visualization_requires_series_ids_array() {
         let container = TestContainer::new().await;
         let pool = container.pool();
         let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test create_data_visualization with missing chart_type
+        // A singular series_id cannot replace the required series_ids array.
         let arguments = json!({
             "series_id": "550e8400-e29b-41d4-a716-446655440000",
             "title": "Test Chart"
@@ -1384,9 +1362,7 @@ mod tests {
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: series_ids"));
+        assert_eq!(error.to_string(), "Missing required parameter: series_ids");
     }
 
     #[tokio::test]
