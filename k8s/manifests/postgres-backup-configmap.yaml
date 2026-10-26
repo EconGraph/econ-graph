@@ -1,6 +1,7 @@
 # Backup and restore scripts shared by postgres-backup-cronjob.yaml and
 # scripts/deploy/restore-postgres-backup.sh (which runs the restore.sh
-# script below inside a one-off Job).
+# script below inside a one-off Job). scripts/deploy/test-postgres-backup-scripts.sh
+# runs them against scratch PostgreSQL containers.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,35 +10,136 @@ metadata:
 data:
   backup.sh: |
     #!/bin/sh
+    # Dumps the data database econ_graph (PG* env), the app database
+    # econ_graph_app (APP_PG* env) and Keycloak's database (KEYCLOAK_PG* env)
+    # to ${BACKUP_DIR} as <name>-<UTC stamp>.dump, with one stamp per run.
+    # The app database is skipped when APP_PGPASSWORD is unset or empty, unless
+    # APP_REQUIRED=true, which makes that a failed dump; Keycloak likewise with
+    # KEYCLOAK_PGPASSWORD and KEYCLOAK_REQUIRED.
+    #
+    # Each dump is attempted even if the other fails, and a dump that fails
+    # leaves nothing under a final name. Exit status: 1 if any dump failed,
+    # unless BACKUP_STATUS_FILE is set; then the names of the failed dumps (an
+    # empty line if none) are written there and the exit status is 0, so that
+    # sync.sh still ships the dumps that succeeded before it fails the Job.
     set -eu
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
     STAMP="$(date -u +%Y%m%d-%H%M%S)"
-    DEST="${BACKUP_DIR}/econ_graph-${STAMP}.dump"
-    PARTIAL="${DEST}.partial"
-    trap 'rm -f "${PARTIAL}"' EXIT
+    # Fail on an unreachable server in seconds instead of hanging the Job.
+    export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-30}"
+    # pg_dump waits this long for its ACCESS SHARE lock on each table, then
+    # fails that dump. Only an ACCESS EXCLUSIVE lock blocks it (a migration's
+    # ALTER/DROP, VACUUM FULL, an explicit LOCK TABLE); none of those should
+    # hold for 10 minutes, and failing beats waiting until the Job deadline.
+    LOCK_WAIT_TIMEOUT="${PG_DUMP_LOCK_WAIT_TIMEOUT:-600s}"
+    trap 'rm -f "${BACKUP_DIR}"/*-"${STAMP}".dump.partial' EXIT
 
-    echo "Dumping database '${PGDATABASE}' from ${PGHOST}:${PGPORT} to ${PARTIAL}"
-    pg_dump --format=custom --no-owner --no-privileges --file="${PARTIAL}"
+    # dump_database NAME LATEST_LINK: dump the database the PG* env names to
+    # ${BACKUP_DIR}/NAME-${STAMP}.dump and point ${BACKUP_DIR}/LATEST_LINK at
+    # it. Every step checks its own status: set -e does not apply inside a
+    # function called from an `if`.
+    dump_database() {
+      name="$1"
+      dest="${BACKUP_DIR}/${name}-${STAMP}.dump"
+      partial="${dest}.partial"
 
-    echo "Verifying archive integrity"
-    pg_restore --file=/dev/null "${PARTIAL}"
+      echo "[${name}] Dumping database '${PGDATABASE}' from ${PGHOST}:${PGPORT} as ${PGUSER}"
+      pg_dump --format=custom --no-owner --no-privileges \
+        --lock-wait-timeout="${LOCK_WAIT_TIMEOUT}" --file="${partial}" ||
+        { echo "[${name}] pg_dump failed" >&2; return 1; }
 
-    # Only give the dump its final name (picked up by sync.sh / restore.sh)
-    # once it's confirmed valid, so a failed or
-    # truncated dump never sits under a name that looks like a good backup.
-    mv "${PARTIAL}" "${DEST}"
+      if [ ! -s "${partial}" ]; then
+        echo "[${name}] the dump is empty" >&2
+        return 1
+      fi
 
-    echo "Backup OK: $(du -h "${DEST}" | cut -f1) written"
+      echo "[${name}] Verifying archive integrity"
+      pg_restore --file=/dev/null "${partial}" ||
+        { echo "[${name}] the archive does not read back" >&2; return 1; }
+      # A dump with no table at all (wrong database, schema never created)
+      # restores to nothing, so it doesn't count as a backup.
+      tables="$(pg_restore --list "${partial}" | awk '$4 == "TABLE" && $5 != "DATA"' | wc -l)"
+      if [ "${tables}" -eq 0 ]; then
+        echo "[${name}] the dump holds no table" >&2
+        return 1
+      fi
+
+      # Only give the dump its final name (picked up by sync.sh / restore.sh)
+      # once it's confirmed valid, so a failed or truncated dump never sits
+      # under a name that looks like a good backup.
+      mv "${partial}" "${dest}" || return 1
+      ln -sf "${dest}" "${BACKUP_DIR}/$2" || return 1
+      echo "[${name}] Backup OK: ${tables} tables, $(du -h "${dest}" | cut -f1) in ${dest}"
+    }
+
+    FAILED=""
+
+    if ! dump_database econ_graph latest.dump; then
+      FAILED="${FAILED} econ_graph"
+    fi
+
+    if [ -n "${APP_PGPASSWORD:-}" ]; then
+      # A subshell, so the app database's connection settings stay out of the
+      # rest of the script.
+      if ! (
+        export PGHOST="${APP_PGHOST:-app-postgres-service}"
+        export PGPORT="${APP_PGPORT:-5432}"
+        export PGUSER="${APP_PGUSER:-postgres}"
+        export PGDATABASE="${APP_PGDATABASE:-econ_graph_app}"
+        export PGPASSWORD="${APP_PGPASSWORD}"
+        dump_database econ_graph_app latest-econ_graph_app.dump
+      ); then
+        FAILED="${FAILED} econ_graph_app"
+      fi
+    elif [ "${APP_REQUIRED:-false}" = "true" ]; then
+      echo "[econ_graph_app] APP_PGPASSWORD is empty but APP_REQUIRED=true (Secret econ-graph-app-postgres or its key postgres-password is missing)" >&2
+      FAILED="${FAILED} econ_graph_app"
+    else
+      echo "[econ_graph_app] APP_PGPASSWORD is empty and APP_REQUIRED is not true (a cluster without the app database); skipping"
+    fi
+
+    if [ -n "${KEYCLOAK_PGPASSWORD:-}" ]; then
+      # Likewise for Keycloak's connection settings.
+      if ! (
+        export PGHOST="${KEYCLOAK_PGHOST:-keycloak-postgres-service}"
+        export PGPORT="${KEYCLOAK_PGPORT:-5432}"
+        export PGUSER="${KEYCLOAK_PGUSER:-keycloak}"
+        export PGDATABASE="${KEYCLOAK_PGDATABASE:-keycloak}"
+        export PGPASSWORD="${KEYCLOAK_PGPASSWORD}"
+        dump_database keycloak latest-keycloak.dump
+      ); then
+        FAILED="${FAILED} keycloak"
+      fi
+    elif [ "${KEYCLOAK_REQUIRED:-false}" = "true" ]; then
+      echo "[keycloak] KEYCLOAK_PGPASSWORD is empty but KEYCLOAK_REQUIRED=true (Secret econ-graph-keycloak or its key db-password is missing)" >&2
+      FAILED="${FAILED} keycloak"
+    else
+      echo "[keycloak] KEYCLOAK_PGPASSWORD is empty and KEYCLOAK_REQUIRED is not true (a cluster without Keycloak); skipping"
+    fi
 
     # Backups are never deleted automatically. Old dumps are removed by hand
     # (see docs/deployment/POSTGRES_BACKUP_RESTORE.md, "Retention").
 
-    ln -sf "${DEST}" "${BACKUP_DIR}/latest.dump"
+    if [ -n "${BACKUP_STATUS_FILE:-}" ]; then
+      printf '%s\n' "${FAILED# }" > "${BACKUP_STATUS_FILE}"
+    fi
+    if [ -n "${FAILED}" ]; then
+      echo "Backup FAILED for:${FAILED}" >&2
+      if [ -n "${BACKUP_STATUS_FILE:-}" ]; then
+        echo "Recorded in ${BACKUP_STATUS_FILE}; sync.sh ships the dumps that succeeded, then fails the Job." >&2
+        exit 0
+      fi
+      exit 1
+    fi
     echo "Done."
 
   sync.sh: |
     #!/bin/sh
+    # Ships ${BACKUP_DIR} to S3 when BACKUP_DESTINATION=s3. Then, when
+    # BACKUP_STATUS_FILE is set, exits 1 if backup.sh recorded a failed dump
+    # there (or wrote no status at all), so the Job fails after the dumps that
+    # did succeed are off the PVC.
     set -eu
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
@@ -45,27 +147,41 @@ data:
 
     if [ "${DESTINATION}" != "s3" ]; then
       echo "BACKUP_DESTINATION not set to 's3'; backups stay on the PVC only."
-      exit 0
+    else
+      if [ -z "${BACKUP_S3_BUCKET:-}" ]; then
+        echo "BACKUP_DESTINATION=s3 but BACKUP_S3_BUCKET is empty" >&2
+        exit 1
+      fi
+
+      ENDPOINT_ARGS=""
+      if [ -n "${BACKUP_S3_ENDPOINT:-}" ]; then
+        ENDPOINT_ARGS="--endpoint-url ${BACKUP_S3_ENDPOINT}"
+      fi
+
+      echo "Syncing ${BACKUP_DIR} to s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}"
+      # The latest*.dump symlinks (latest.dump, latest-econ_graph_app.dump,
+      # latest-keycloak.dump) point at dumps already being synced, and
+      # `aws s3 sync` follows symlinks by default, which would upload the same
+      # content twice under two keys. A *.partial is a dump that never
+      # finished (its pod was killed mid-dump).
+      # shellcheck disable=SC2086
+      aws s3 sync "${BACKUP_DIR}" "s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}" \
+        --exclude "latest*.dump" --exclude "*.partial" \
+        ${ENDPOINT_ARGS} --only-show-errors
+      echo "Sync complete."
     fi
 
-    if [ -z "${BACKUP_S3_BUCKET:-}" ]; then
-      echo "BACKUP_DESTINATION=s3 but BACKUP_S3_BUCKET is empty" >&2
-      exit 1
+    if [ -n "${BACKUP_STATUS_FILE:-}" ]; then
+      if [ ! -f "${BACKUP_STATUS_FILE}" ]; then
+        echo "backup.sh wrote no status to ${BACKUP_STATUS_FILE}; failing the Job" >&2
+        exit 1
+      fi
+      FAILED="$(cat "${BACKUP_STATUS_FILE}")"
+      if [ -n "${FAILED}" ]; then
+        echo "Backup FAILED for: ${FAILED} (see the pg-dump container's log); failing the Job" >&2
+        exit 1
+      fi
     fi
-
-    ENDPOINT_ARGS=""
-    if [ -n "${BACKUP_S3_ENDPOINT:-}" ]; then
-      ENDPOINT_ARGS="--endpoint-url ${BACKUP_S3_ENDPOINT}"
-    fi
-
-    echo "Syncing ${BACKUP_DIR} to s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}"
-    # --exclude latest.dump: it's a symlink to a dump already being synced,
-    # and `aws s3 sync` follows symlinks by default, which would upload the
-    # same content twice under two keys.
-    # shellcheck disable=SC2086
-    aws s3 sync "${BACKUP_DIR}" "s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}" \
-      --exclude "latest.dump" ${ENDPOINT_ARGS} --only-show-errors
-    echo "Sync complete."
 
   restore.sh: |
     #!/bin/sh
@@ -80,6 +196,17 @@ data:
       ls -1 "${BACKUP_DIR}"/econ_graph-*.dump 1>&2 2>/dev/null || echo "  (none)" >&2
       exit 1
     fi
+
+    # The backup volume also holds the app database's and Keycloak's dumps;
+    # restoring one of those here would add their tables to ${PGDATABASE}.
+    # (econ_graph_app-<stamp>.dump doesn't match econ_graph-*.)
+    case "$(basename "$(readlink -f "${FILE}")")" in
+      "${PGDATABASE}"-*) ;;
+      *)
+        echo "${FILE} is not a ${PGDATABASE} dump (expected ${PGDATABASE}-<stamp>.dump)" >&2
+        exit 1
+        ;;
+    esac
 
     echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}"
     # --single-transaction: a failed restore rolls back cleanly instead of

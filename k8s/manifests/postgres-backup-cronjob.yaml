@@ -1,8 +1,27 @@
 # Nightly PostgreSQL backup.
 #
-# Writes a pg_dump to postgres-backup-data (a PVC separate from the
-# database's own postgresql-data volume, see postgres-backup-pvc.yaml), so a
+# Writes a pg_dump of each of the three databases, the data database
+# econ_graph (StatefulSet postgresql, data-postgres-service), the app
+# database econ_graph_app (StatefulSet app-postgres, app-postgres-service) and
+# Keycloak's keycloak (StatefulSet keycloak-postgres,
+# keycloak-postgres-service), to postgres-backup-data (a PVC separate from the
+# databases' own volumes, see postgres-backup-pvc.yaml), so a
 # lost/corrupted/torn-down primary volume doesn't take the backups with it.
+# On threadripper the host-side dumps (scripts/backup/dump-databases.sh, see
+# docs/deployment/BACKUPS.md) cover the same databases; this job is a second,
+# independent copy.
+#
+# If one database's dump fails, the others are still taken and kept: pg-dump
+# (backup.sh) records the failure in the status emptyDir and exits 0, and
+# backup-sync (sync.sh) syncs what was written, then exits 1 so the Job fails
+# (without a retry, see podFailurePolicy).
+#
+# APP_REQUIRED and KEYCLOAK_REQUIRED are true: a missing Secret
+# econ-graph-app-postgres (or key postgres-password), or econ-graph-keycloak
+# (or key db-password), fails the run. On a cluster deployed without the app
+# database or without Keycloak, set the matching one to "false" and backup.sh
+# skips that database:
+#   kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 #
 # To also ship backups to object storage, set BACKUP_DESTINATION=s3 and the
 # BACKUP_S3_* env vars below (and provide AWS credentials, e.g. via a
@@ -25,7 +44,34 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # A deadline, so a hung run can't hold the Forbid concurrency policy and
+      # block every later night. 4 hours: the volumes are 50Gi for econ_graph
+      # (postgres-deployment.yaml), 10Gi for econ_graph_app (app-postgres.yaml)
+      # and 5Gi for keycloak (keycloak/postgres.yaml); pg_dump --format=custom
+      # runs at about 25MB/s of database on a single core (measured with
+      # postgres:18 on a synthetic 1.5GB data_points-like table) and the
+      # read-back check is several times faster, so all three, full, take
+      # about 50 minutes. backup.sh's 10-minute lock wait per dump fits as
+      # well, with room for the sync.
+      activeDeadlineSeconds: 14400
+      # Retries only for pod disruptions (eviction, node drain, preemption, node
+      # loss; the DisruptionTarget rule below). A container that exits non-zero
+      # fails the Job at once: a dump that failed (pg-dump recorded it, then
+      # backup-sync exits 1) would fail again, and each retry writes another
+      # full dump of every database that did succeed, which nothing prunes.
       backoffLimit: 2
+      podFailurePolicy:
+        rules:
+        # An eviction, node drain or preemption kills the containers (exit 137
+        # once SIGTERM is ignored by sh as PID 1), so it is matched first by its
+        # DisruptionTarget condition and retried within backoffLimit.
+        - action: Count
+          onPodConditions:
+          - type: DisruptionTarget
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
       template:
         metadata:
           labels:
@@ -42,8 +88,10 @@ spec:
             image: postgres:18
             command: ["/scripts/backup.sh"]
             env:
+            # The data database (postgres-deployment.yaml, Services in
+            # postgres.yaml).
             - name: PGHOST
-              value: "postgres-service"
+              value: "data-postgres-service"
             - name: PGPORT
               value: "5432"
             - name: PGUSER
@@ -55,13 +103,55 @@ spec:
                   key: postgres-password
             - name: PGDATABASE
               value: "econ_graph"
+            # The app database (k8s/manifests/app-postgres.yaml), as its
+            # superuser. The Secret is optional so that the pod still starts,
+            # and the other databases are still dumped, when it is missing;
+            # APP_REQUIRED decides whether that is a failure (see the top).
+            - name: APP_REQUIRED
+              value: "true"
+            - name: APP_PGHOST
+              value: "app-postgres-service"
+            - name: APP_PGPORT
+              value: "5432"
+            - name: APP_PGUSER
+              value: "postgres"
+            - name: APP_PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-app-postgres
+                  key: postgres-password
+                  optional: true
+            - name: APP_PGDATABASE
+              value: "econ_graph_app"
+            # Keycloak's database (k8s/manifests/keycloak/postgres.yaml), the
+            # same way, with KEYCLOAK_REQUIRED.
+            - name: KEYCLOAK_REQUIRED
+              value: "true"
+            - name: KEYCLOAK_PGHOST
+              value: "keycloak-postgres-service"
+            - name: KEYCLOAK_PGPORT
+              value: "5432"
+            - name: KEYCLOAK_PGUSER
+              value: "keycloak"
+            - name: KEYCLOAK_PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-keycloak
+                  key: db-password
+                  optional: true
+            - name: KEYCLOAK_PGDATABASE
+              value: "keycloak"
             - name: BACKUP_DIR
               value: "/backups"
+            - name: BACKUP_STATUS_FILE
+              value: "/status/failed"
             volumeMounts:
             - name: scripts
               mountPath: /scripts
             - name: backup-data
               mountPath: /backups
+            - name: status
+              mountPath: /status
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
@@ -84,11 +174,16 @@ spec:
               value: "postgres/econ-graph"
             - name: BACKUP_S3_ENDPOINT
               value: "" # optional, for S3-compatible endpoints (e.g. MinIO)
+            - name: BACKUP_STATUS_FILE
+              value: "/status/failed"
             volumeMounts:
             - name: scripts
               mountPath: /scripts
             - name: backup-data
               mountPath: /backups
+              readOnly: true
+            - name: status
+              mountPath: /status
               readOnly: true
             securityContext:
               allowPrivilegeEscalation: false
@@ -105,3 +200,7 @@ spec:
           - name: backup-data
             persistentVolumeClaim:
               claimName: postgres-backup-data
+          # Which dumps failed, from pg-dump to backup-sync (see the top).
+          - name: status
+            emptyDir:
+              sizeLimit: 1Mi
