@@ -22,6 +22,8 @@ NAMESPACE="econ-graph"
 DOMAIN="econgraph.example.com"
 CLOUDFLARE_API_TOKEN=""
 USE_STAGING=false
+CONTEXT="kind-econ-graph"
+DRY_RUN=false
 
 # Function to print colored output
 print_status() {
@@ -52,7 +54,15 @@ OPTIONS:
     -t, --token TOKEN          Cloudflare API token (required)
     -n, --namespace NAMESPACE  Kubernetes namespace (default: econ-graph)
     --staging                  Use Let's Encrypt staging server (for testing)
+    --context CONTEXT          kubectl context (default: kind-econ-graph); the
+                               current context is not changed
+    --dry-run                  Show the cluster and what would be applied; change nothing
     -h, --help                 Show this help message
+
+Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) on that
+one context, with the kind cluster's own kubectl and kubeconfig from
+~/.cache/econgraph when KUBECTL and KUBECONFIG are unset: plain kubectl may be
+another cluster's. The cluster's identity is shown before anything is applied.
 
 EXAMPLES:
     # Production setup
@@ -100,6 +110,15 @@ while [[ $# -gt 0 ]]; do
             USE_STAGING=true
             shift
             ;;
+        --context)
+            [ $# -ge 2 ] && [ -n "$2" ] || { print_error "--context needs a non-empty value"; exit 2; }
+            CONTEXT="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -127,10 +146,21 @@ print_status "Environment: $([ "$USE_STAGING" = true ] && echo "staging" || echo
 # Check prerequisites
 print_status "Checking prerequisites..."
 
-# Check if kubectl is available
-if ! command -v kubectl &> /dev/null; then
-    print_error "kubectl is not installed or not in PATH"
+# One kubectl and one context for every call below (kc, lib/cluster-role.sh),
+# never plain kubectl.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "${PROJECT_ROOT}/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_operator_context "$CONTEXT"; then
+    print_error "Nothing was changed."
     exit 1
+fi
+kubectl() { kc "$@"; }
+
+if [[ "$DRY_RUN" = true ]]; then
+    print_status "Dry run: on context $CONTEXT, would create Secret cert-manager/cloudflare-api-token-secret,"
+    print_status "  apply the ClusterIssuer and a wildcard Certificate for $DOMAIN in $NAMESPACE, wait for it,"
+    print_status "  and apply k8s/manifests/ingress-cloudflare-dns01.yaml. Nothing was changed."
+    exit 0
 fi
 
 # Check if cluster is accessible
@@ -212,20 +242,20 @@ print_success "Wildcard certificate created"
 
 # Wait for certificate to be issued
 print_status "Waiting for certificate to be issued (this may take 2-5 minutes)..."
-kubectl wait --for=condition=Ready --timeout=600s certificate/${DOMAIN}-wildcard-tls -n ${NAMESPACE}
+kubectl wait --for=condition=Ready --timeout=600s "certificate/${DOMAIN}-wildcard-tls" -n "${NAMESPACE}"
 
 # Check certificate status
-CERT_STATUS=$(kubectl get certificate ${DOMAIN}-wildcard-tls -n ${NAMESPACE} -o jsonpath='{.status.conditions[0].type}')
+CERT_STATUS=$(kubectl get certificate "${DOMAIN}-wildcard-tls" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[0].type}')
 if [[ "$CERT_STATUS" == "Ready" ]]; then
     print_success "Certificate issued successfully!"
     
     # Display certificate details
     print_status "Certificate details:"
-    kubectl describe certificate ${DOMAIN}-wildcard-tls -n ${NAMESPACE}
+    kubectl describe certificate "${DOMAIN}-wildcard-tls" -n "${NAMESPACE}"
 else
     print_error "Certificate issuance failed or timed out"
     print_status "Certificate status:"
-    kubectl describe certificate ${DOMAIN}-wildcard-tls -n ${NAMESPACE}
+    kubectl describe certificate "${DOMAIN}-wildcard-tls" -n "${NAMESPACE}"
     exit 1
 fi
 
@@ -239,10 +269,10 @@ print_success "Ingress configuration updated"
 print_status "Setup completed successfully!"
 echo ""
 print_status "Certificate information:"
-kubectl get certificate ${DOMAIN}-wildcard-tls -n ${NAMESPACE}
+kubectl get certificate "${DOMAIN}-wildcard-tls" -n "${NAMESPACE}"
 echo ""
 print_status "ClusterIssuer information:"
-kubectl get clusterissuer ${CLUSTER_ISSUER_NAME}
+kubectl get clusterissuer "${CLUSTER_ISSUER_NAME}"
 echo ""
 print_status "Secret information:"
 kubectl get secret cloudflare-api-token-secret -n cert-manager

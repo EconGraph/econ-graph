@@ -8,40 +8,74 @@
 # for confirmation unless --yes is given.
 #
 # Usage:
-#   ./scripts/deploy/restore-postgres-backup.sh --list
+#   ./scripts/deploy/restore-postgres-backup.sh --list [--context CONTEXT]
 #   ./scripts/deploy/restore-postgres-backup.sh [--file econ_graph-20260101-080000.dump] [--yes]
+#       [--context CONTEXT] [--dry-run]
+#
+#   --context CONTEXT  the kubectl context (default kind-econ-graph); the
+#                      current context is not changed
+#   --dry-run          show the cluster and what would be restored; change nothing
+#
+# Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) on
+# that one context. With none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT
+# set, it uses the kind cluster's own kubectl and kubeconfig when copies are
+# kept in ~/.cache/econgraph (bin/kubectl, kubeconfig-econ-graph): plain
+# kubectl may be another cluster's (the microk8s snap wrapper ignores
+# ~/.kube/config). It shows the cluster's identity before the confirmation.
 #
 # See docs/deployment/POSTGRES_BACKUP_RESTORE.md for the full runbook.
 
 set -euo pipefail
+
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 
 NAMESPACE="econ-graph"
 JOB_NAME="postgres-restore-$(date +%s)"
 BACKUP_FILE=""
 ASSUME_YES="false"
 LIST_ONLY="false"
+DRY_RUN="false"
+CONTEXT="kind-econ-graph"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --file) BACKUP_FILE="$2"; shift 2 ;;
+        --file)
+            [ $# -ge 2 ] || { echo "--file needs a value" >&2; exit 2; }
+            BACKUP_FILE="$2"; shift 2 ;;
         --yes|-y) ASSUME_YES="true"; shift ;;
         --list) LIST_ONLY="true"; shift ;;
+        --dry-run|-n) DRY_RUN="true"; shift ;;
+        --context)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "--context needs a non-empty value" >&2; exit 2; }
+            CONTEXT="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
 
+cluster_role_operator_context "${CONTEXT}" || { echo "Nothing was changed." >&2; exit 1; }
+
 if [ "${LIST_ONLY}" = "true" ]; then
     echo "📋 Backups available in postgres-backup-data:"
-    kubectl run "postgres-backup-list-$(date +%s)" --rm -i --restart=Never \
+    kc run "postgres-backup-list-$(date +%s)" --rm -i --restart=Never \
         --image=busybox:1.38 -n "${NAMESPACE}" \
         --overrides="{\"spec\":{\"containers\":[{\"name\":\"list\",\"image\":\"busybox:1.38\",\"command\":[\"ls\",\"-la\",\"/backups\"],\"volumeMounts\":[{\"name\":\"backup-data\",\"mountPath\":\"/backups\"}]}],\"volumes\":[{\"name\":\"backup-data\",\"persistentVolumeClaim\":{\"claimName\":\"postgres-backup-data\"}}]}}" \
         -- true
     exit 0
 fi
 
+if [ "${DRY_RUN}" = "true" ]; then
+    echo "Dry run: would DROP and recreate database objects in 'econ_graph' in namespace ${NAMESPACE}"
+    echo "  on context ${CONTEXT}, restoring from ${BACKUP_FILE:-the latest backup}, through a restore Job."
+    [ "${ASSUME_YES}" = "true" ] || echo "  (would ask for confirmation first)"
+    exit 0
+fi
+
 if [ "${ASSUME_YES}" != "true" ]; then
-    echo "⚠️  This will DROP and recreate database objects in 'econ_graph' on the"
-    echo "   ${NAMESPACE} cluster, restoring from ${BACKUP_FILE:-the latest backup}."
+    echo "⚠️  This will DROP and recreate database objects in 'econ_graph' in namespace"
+    echo "   ${NAMESPACE} on the cluster above (context ${CONTEXT}), restoring from"
+    echo "   ${BACKUP_FILE:-the latest backup}."
+    [ -t 0 ] || { echo "The confirmation is read from a terminal only; pass --yes to skip it." >&2; exit 1; }
     read -r -p "Type 'yes' to continue: " CONFIRM
     if [ "${CONFIRM}" != "yes" ]; then
         echo "Aborted."
@@ -55,7 +89,7 @@ if [ -n "${BACKUP_FILE}" ]; then
 fi
 
 echo "🔁 Running restore job ${JOB_NAME}..."
-cat <<EOF | kubectl apply -f -
+cat <<EOF | kc apply -f -
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -119,12 +153,12 @@ spec:
 EOF
 
 echo "⏳ Waiting for the restore to complete..."
-kubectl wait --for=condition=complete "job/${JOB_NAME}" -n "${NAMESPACE}" --timeout=600s || {
+kc wait --for=condition=complete "job/${JOB_NAME}" -n "${NAMESPACE}" --timeout=600s || {
     echo "❌ Restore did not complete successfully; logs:"
-    kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}"
+    kc logs "job/${JOB_NAME}" -n "${NAMESPACE}"
     exit 1
 }
 
-kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}"
-kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true
+kc logs "job/${JOB_NAME}" -n "${NAMESPACE}"
+kc delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true
 echo "✅ Restore complete."

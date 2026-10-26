@@ -275,6 +275,11 @@ jobs:
     - name: Check that teardown uses only the kind cluster's context
       run: scripts/deploy/test-teardown-kubectl.sh
 
+    # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
+    # reach only the kind cluster's kubectl with --context, never plain kubectl.
+    - name: Check which cluster the operator scripts reach
+      run: scripts/deploy/test-operator-kubectl.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh

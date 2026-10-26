@@ -110,6 +110,69 @@ cluster_role_use_context() {
     export CLUSTER_ROLE_CONTEXT
 }
 
+# For an operator script that acts on one named context (the database backup
+# and restore scripts): pin CLUSTER_ROLE_CONTEXT to context $1 without changing
+# the current context of ${KUBECTL:-kubectl}, replacing any inherited one.
+# Fails when ${KUBECTL:-kubectl}'s kubeconfig has no such context. The check is
+# itself a kc call, so it carries the context like every later call.
+cluster_role_pin_named_context() {
+    local server
+    # An empty name would make kc fall back to the current context.
+    [ -n "${1:-}" ] || return 1
+    CLUSTER_ROLE_CONTEXT="$1"
+    export CLUSTER_ROLE_CONTEXT
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" &&
+        [ -n "$server" ] || return 1
+}
+
+# Print, indented, which cluster the pinned context reaches: this host, the
+# kubectl and KUBECONFIG, the context, its API server, its nodes, its
+# kube-system UID (new for every cluster) and whether it carries the production
+# marker. Shown before a script changes anything, so the output says which
+# cluster it acted on.
+cluster_role_show_identity() {
+    local server nodes uid role
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
+        server=""
+    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || nodes="(unknown)"
+    uid="$(kube_system_uid 2>/dev/null)" || uid="(unknown)"
+    if cluster_is_marked_production; then
+        role="PRODUCTION (marked by mark-production-cluster.sh)"
+    else
+        role="not production: ${CLUSTER_ROLE_REASON}"
+    fi
+    echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
+    echo "  kubectl         ${KUBECTL:-kubectl}"
+    echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"
+    echo "  context         ${CLUSTER_ROLE_CONTEXT:-(none)}"
+    echo "  API server      ${server:-(unknown)}"
+    echo "  nodes           ${nodes:-(none)}"
+    echo "  kube-system UID ${uid}"
+    echo "  cluster role    ${role}"
+}
+
+# For an operator script run by hand on one named context: one kubectl and one
+# context for every later call, never a CLUSTER_ROLE_CONTEXT inherited from the
+# environment. Picks the kubectl (cluster_role_default_kubectl), pins context
+# $1 (cluster_role_pin_named_context) and prints the cluster's identity. Fails,
+# having changed nothing, when the kubectl is missing or has no such context.
+cluster_role_operator_context() {
+    unset CLUSTER_ROLE_CONTEXT
+    cluster_role_default_kubectl
+    KUBECTL="${KUBECTL:-kubectl}"
+    export KUBECTL
+    if ! command -v "${KUBECTL}" >/dev/null 2>&1; then
+        echo "${KUBECTL} not found" >&2
+        return 1
+    fi
+    if ! cluster_role_pin_named_context "${1:-}"; then
+        echo "${KUBECTL} has no context ${1:-(empty)} (KUBECONFIG=${KUBECONFIG:-unset})" >&2
+        return 1
+    fi
+    echo "Cluster:"
+    cluster_role_show_identity
+}
+
 # Print the UID of the kube-system namespace. Fails when the cluster cannot be
 # asked or answers with nothing.
 kube_system_uid() {
