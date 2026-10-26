@@ -13,11 +13,12 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use crate::imports::*;
+//! use econ_graph_graphql::imports::*;
 //!
-//! // Now you can use all the imported types directly
-//! let pool: DatabasePool = get_pool();
-//! let user: User = get_user();
+//! // Imported model and pool types can be used together in application code.
+//! fn with_user(pool: DatabasePool, user: User) -> (DatabasePool, User) {
+//!     (pool, user)
+//! }
 //! ```
 
 // Core crate imports

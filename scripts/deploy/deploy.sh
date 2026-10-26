@@ -213,6 +213,10 @@ fi
 # that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
+# crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
+# deploy (scripts/deploy/precheck-db-migration.sh --stop-crawler) stays stopped while the data
+# migrations run, and stays stopped if the Job fails (a migration that gave up on its table
+# locks, say): the deploy stops here.
 has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
   -o jsonpath='{.data.data-database-url}')"
 if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then

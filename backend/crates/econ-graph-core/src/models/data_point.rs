@@ -31,7 +31,7 @@ use crate::schema::data_points;
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::models::DataPoint;
+/// use econ_graph_core::models::DataPoint;
 /// use uuid::Uuid;
 /// use chrono::{NaiveDate, Utc};
 /// use bigdecimal::BigDecimal;
@@ -110,7 +110,7 @@ pub struct DataPoint {
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::models::NewDataPoint;
+/// use econ_graph_core::models::NewDataPoint;
 /// use uuid::Uuid;
 /// use chrono::NaiveDate;
 /// use bigdecimal::BigDecimal;
@@ -167,7 +167,7 @@ pub struct NewDataPoint {
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::models::UpdateDataPoint;
+/// use econ_graph_core::models::UpdateDataPoint;
 /// use chrono::{NaiveDate, Utc};
 /// use bigdecimal::BigDecimal;
 /// use std::str::FromStr;
@@ -274,7 +274,7 @@ pub struct DataPointWithSeries {
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::models::DataQueryParams;
+/// use econ_graph_core::models::DataQueryParams;
 /// use uuid::Uuid;
 /// use chrono::NaiveDate;
 ///
@@ -580,7 +580,7 @@ impl DataPoint {
     ///
     /// # Examples
     /// ```rust,no_run
-    /// use econ_graph_backend::models::DataPoint;
+    /// use econ_graph_core::models::DataPoint;
     /// use bigdecimal::BigDecimal;
     /// use uuid::Uuid;
     /// use chrono::{NaiveDate, Utc};
@@ -635,7 +635,7 @@ impl DataPoint {
     ///
     /// # Examples
     /// ```rust,no_run
-    /// use econ_graph_backend::models::DataPoint;
+    /// use econ_graph_core::models::DataPoint;
     /// use bigdecimal::BigDecimal;
     /// use uuid::Uuid;
     /// use chrono::{NaiveDate, Utc};
@@ -695,7 +695,7 @@ impl DataPoint {
     ///
     /// # Examples
     /// ```rust,no_run
-    /// use econ_graph_backend::models::DataPoint;
+    /// use econ_graph_core::models::DataPoint;
     /// use bigdecimal::BigDecimal;
     /// use uuid::Uuid;
     /// use chrono::{NaiveDate, Utc};

@@ -54,6 +54,10 @@ pub enum JobKind {
     DiscoverCatalog,
     /// Fetch one filing (SEC).
     FetchFiling,
+    /// Re-fetch one series' full history, ignoring stored validators and incremental bounds,
+    /// so every stored observation is rewritten from what the source serves now (see the
+    /// crawler's `refetch` module).
+    RefetchSeries,
 }
 
 impl JobKind {
@@ -63,6 +67,7 @@ impl JobKind {
             JobKind::FetchSeries => "fetch_series",
             JobKind::DiscoverCatalog => "discover_catalog",
             JobKind::FetchFiling => "fetch_filing",
+            JobKind::RefetchSeries => "refetch_series",
         }
     }
 }
@@ -81,6 +86,7 @@ impl FromStr for JobKind {
             "fetch_series" => Ok(JobKind::FetchSeries),
             "discover_catalog" => Ok(JobKind::DiscoverCatalog),
             "fetch_filing" => Ok(JobKind::FetchFiling),
+            "refetch_series" => Ok(JobKind::RefetchSeries),
             other => Err(AppError::Validation(format!("unknown job kind: {other}"))),
         }
     }
@@ -936,6 +942,7 @@ mod _inline_tests {
             JobKind::FetchSeries,
             JobKind::DiscoverCatalog,
             JobKind::FetchFiling,
+            JobKind::RefetchSeries,
         ] {
             assert_eq!(kind.as_str().parse::<JobKind>().unwrap(), kind);
             assert_eq!(kind.to_string(), kind.as_str());

@@ -14,8 +14,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use econ_graph_metrics::{CRAWLER_METRICS, DEFAULT_REGISTRY};
-//! use econ_graph_metrics::crawler::CrawlerMetrics;
+//! use econ_graph_metrics::crawler::CRAWLER_METRICS;
 //!
 //! // Record a crawler request
 //! CRAWLER_METRICS.record_request("sec_edgar", "sec.gov", "/filings", "200", 1.5);
