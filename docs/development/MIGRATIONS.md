@@ -32,6 +32,14 @@ the app set to `econ_graph_app` on `app-postgres-service` (key `app-database-url
 whose `app-database-url` still names the data database keeps both sets in `econ_graph`; see
 "Databases" in [k8s/README.md](../../k8s/README.md).
 
+## User deletion policy
+
+Deleting a user removes their sessions, chart annotations, annotation comments, chart access
+grants (`chart_collaborators.user_id`), and source preferences. Comments on an annotation are
+removed with that annotation. Other users' chart grants survive the inviter's deletion with
+`invited_by = NULL`; their annotations and comments on surviving annotations remain. Audit
+history and security events retain their existing nullable user references.
+
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited, renumbered or removed.**
