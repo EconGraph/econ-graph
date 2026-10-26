@@ -9,7 +9,19 @@ This directory contains all the necessary files to deploy EconGraph to a local K
 - Docker
 - Terraform
 - kubectl
-- kind (will be installed automatically)
+- kind v0.33.0, the version the deploy scripts run. Install it once, as the user who runs
+  them (no sudo):
+
+  ```bash
+  ./scripts/deploy/install-kind.sh
+  ```
+
+  It downloads the release binary, checks it against the SHA-256 pinned in the script and
+  installs it as `${XDG_DATA_HOME:-~/.local/share}/econgraph/bin/kind-v0.33.0`, with a
+  `kind` symlink next to it. The deploy scripts run that copy, not the `kind` on `PATH`; a
+  packaged kind (`/usr/bin/kind`) is left alone. Without it they stop and say to run the
+  installer; only read-only `kind get` commands fall back to the `kind` on `PATH`, with a
+  warning. Re-running the installer does nothing when the right version is in place.
 
 ### One-Command Setup
 

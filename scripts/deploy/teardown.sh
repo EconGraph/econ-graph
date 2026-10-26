@@ -93,6 +93,11 @@ if [ "${DRY_RUN}" != "true" ] && [ ! -t 0 ]; then
         die "--include-data-plane needs the data database's name typed on a terminal; --yes doesn't answer it. Nothing was changed"
     fi
 fi
+# --delete-cluster runs the pinned kind (scripts/deploy/install-kind.sh);
+# checked before anything changes.
+if [ "${DELETE_CLUSTER}" = "true" ]; then
+    require_kind_version
+fi
 
 # typed_confirm PROMPT ANSWER: read ANSWER from the terminal or stop. --yes
 # doesn't answer it.
