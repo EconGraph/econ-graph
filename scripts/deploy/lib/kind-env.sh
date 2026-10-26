@@ -265,7 +265,7 @@ try_use_kind_kubectl() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
         if [ -x "${dir}/bin/kubectl" ] && [ -s "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
             KUBECONFIG="${dir}/kubeconfig-${KIND_CLUSTER}" "${dir}/bin/kubectl" \
-                version --request-timeout=15s >/dev/null 2>&1; then
+                --context "kind-${KIND_CLUSTER}" version --request-timeout=15s >/dev/null 2>&1; then
             point_kubectl_at "${dir}"
             return 0
         fi
@@ -278,7 +278,7 @@ try_use_kind_kubectl() {
     mv -f "${dir}/bin/kubectl.new" "${dir}/bin/kubectl" || return 1
     (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${dir}/kubeconfig-${KIND_CLUSTER}") || return 1
     point_kubectl_at "${dir}"
-    kubectl version --request-timeout=15s >/dev/null 2>&1
+    kubectl --context "kind-${KIND_CLUSTER}" version --request-timeout=15s >/dev/null 2>&1
 }
 
 # point_kubectl_at DIR: use DIR/bin/kubectl and DIR/kubeconfig-<cluster>.
