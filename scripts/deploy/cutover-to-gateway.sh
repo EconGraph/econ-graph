@@ -78,10 +78,14 @@
 #      selector included) and Secrets. The admission webhook's certificate
 #      Secret is the exception: the manifest's own Job issues a new one that
 #      matches the new webhook configuration.
-#   3. Re-create the saved Ingresses, and put back the saved NetworkPolicies
-#      (k8s/manifests/network-policy.yaml admits only the gateway's proxy, so
-#      one applied after the cut-over would block ingress-nginx; a policy
-#      that did not exist at the cut-over is reported, not deleted).
+#   3. Re-create the saved Ingresses, put back the saved NetworkPolicies, and
+#      add NetworkPolicy econ-graph-ingress-nginx-rollback, which admits the
+#      ingress-nginx controller to every pod in the namespace on the ports the
+#      Ingresses use (3000, 8080, 9876; never Postgres). It is needed when
+#      k8s/manifests/network-policy.yaml, which admits only the gateway's
+#      proxy, was applied before the cut-over (and so saved) or after it; the
+#      next cut-over deletes it. A policy that did not exist at the cut-over
+#      is reported, not deleted.
 #   4. Check that --host-url serves the frontend again.
 #   The same steps by hand, if this script is not usable:
 #     GATEWAY_HOST_PORTS=false scripts/deploy/install-gateway.sh --context kind-econ-graph --manifests-dir DIR/gateway-manifests
@@ -90,6 +94,7 @@
 #     kubectl create -f DIR/ingress-nginx-objects/<each secret-* file>
 #     kubectl apply -f DIR/ingresses.yaml
 #     kubectl apply -f DIR/networkpolicies.yaml       # if it lists any
+#     (and the policy econ-graph-ingress-nginx-rollback, printed by a --dry-run rollback)
 #
 # Never touches PersistentVolumes, databases or the Secrets of econ-graph;
 # the only Secrets it deletes are those in namespace ingress-nginx, after
@@ -100,6 +105,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="econ-graph"
 PREFLIGHT_IMAGE="curlimages/curl:8.11.1"
+# Added by --rollback, deleted by the next cut-over (see the header).
+ROLLBACK_POLICY="econ-graph-ingress-nginx-rollback"
 
 DRY_RUN=false
 ASSUME_YES=false
@@ -251,6 +258,38 @@ check_routes_in_cluster() {
 # check_pod_reaches_proxy URL HOST: a pod in econ-graph (only the
 # namespace-wide NetworkPolicy applies to it, as to the tunnel connector)
 # gets 200 for URL/health with Host HOST.
+# NetworkPolicy ROLLBACK_POLICY: the ingress-nginx controller may reach every
+# pod in NAMESPACE on the ports the Ingresses use (frontend 3000, Keycloak
+# 8080, backend 9876), and nothing else (never Postgres).
+rollback_policy_yaml() {
+    cat <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ${ROLLBACK_POLICY}
+  namespace: ${NAMESPACE}
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9876
+EOF
+}
+
 check_pod_reaches_proxy() {
     local url="$1" host="$2" out
     if [ "$DRY_RUN" = true ]; then
@@ -386,9 +425,18 @@ if [ -n "$ROLLBACK_DIR" ]; then
     if grep -q '^  kind: NetworkPolicy' "$ROLLBACK_DIR/networkpolicies.yaml" 2>/dev/null; then
         run kc apply -f "$ROLLBACK_DIR/networkpolicies.yaml"
     fi
+    # NetworkPolicies add up: this one lets ingress-nginx through whatever the
+    # others admit (a saved or later network-policy.yaml admits only Envoy).
+    if [ "$DRY_RUN" = true ]; then
+        echo "+ kubectl --context ${KUBE_CONTEXT} apply -f - <<"
+        rollback_policy_yaml | sed 's/^/    /'
+    else
+        rollback_policy_yaml | kc apply -f -
+    fi
     for policy in $(kc -n "$NAMESPACE" get networkpolicy -o name 2>/dev/null); do
+        [ "${policy#*/}" != "$ROLLBACK_POLICY" ] || continue
         grep -qx "  name: ${policy#*/}" <(sed -n 's/^  \{0,2\}  name: /  name: /p' "$ROLLBACK_DIR/networkpolicies.yaml" 2>/dev/null) ||
-            warn "${policy} did not exist at the cut-over and was kept; it may block ingress-nginx (kubectl -n ${NAMESPACE} describe ${policy})"
+            warn "${policy} did not exist at the cut-over and was kept; ${ROLLBACK_POLICY} admits ingress-nginx on 3000/8080/9876, check it allows anything else the Ingresses need (kubectl -n ${NAMESPACE} describe ${policy})"
     done
 
     log "4/4 ${HOST_URL}/ answers"
@@ -570,6 +618,8 @@ if [ -n "$nginx_image" ]; then
     run kc delete ingressclass,validatingwebhookconfiguration,clusterrole,clusterrolebinding \
         -l app.kubernetes.io/name=ingress-nginx --ignore-not-found
 fi
+# A rollback's opening for ingress-nginx (see --rollback) is no longer needed.
+run kc -n "$NAMESPACE" delete networkpolicy "$ROLLBACK_POLICY" --ignore-not-found
 if [ "$TUNNEL" = true ]; then
     # The tunnel's dashboard origin names ingress-nginx's Service; keep that
     # name answering, now from the gateway's proxy (port 443 is passed on).
