@@ -82,6 +82,15 @@ if grep -qF "$KEYCLOAK_BACKUP_ROOT/incomplete" "$STUB_LOG"; then
     failures=$((failures + 1))
 fi
 
+# An explicitly configured missing root must not silently omit upgrade backups.
+KEYCLOAK_BACKUP_ROOT="$tmp/missing-upgrade-root" expect 1 "configured Keycloak backup root is missing" backup
+# The absent default root remains optional on a host without upgrade backups.
+env -u KEYCLOAK_BACKUP_ROOT ECONGRAPH_BACKUP_ROOT="$tmp/unused-default" "$script" backup >/dev/null
+# Failed enumeration of the nightly root must not produce a partial success.
+mv "$BACKUP_ROOT" "$BACKUP_ROOT.saved"
+expect 1 "could not enumerate all configured backup roots" backup
+mv "$BACKUP_ROOT.saved" "$BACKUP_ROOT"
+
 if [[ "${failures}" -ne 0 ]]; then
     echo "${failures} offsite-restic test(s) failed"
     exit 1

@@ -58,6 +58,7 @@ export STUB_LOG="$tmp/log"
 
 mkdir -p "$tmp/home" "$tmp/tmpdir" "$tmp/bin"
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" TMPDIR="$tmp/tmpdir"
+export ECONGRAPH_CONFIG_DIR="$tmp/no-config"
 export ECONGRAPH_BACKUP_ROOT="$tmp/econgraph-backups" KEYCLOAK_BACKUP_ROOT="$tmp/backups"
 export ECONGRAPH_DOCKER_HOST="unix://$tmp/no-docker.sock"
 unset KUBECONFIG KUBECTL KIND_CLUSTER NAMESPACE ECONGRAPH_SCRATCH_STORAGE ECONGRAPH_KUBE_DIR
