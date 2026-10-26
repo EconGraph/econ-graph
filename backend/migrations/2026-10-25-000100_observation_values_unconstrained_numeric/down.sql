@@ -17,11 +17,17 @@
 -- The tables are locked before the checks, in the crawler worker's order (crawl_queue, then
 -- data_points), so no value can be written between the checks and the narrowing (where the
 -- cast would round it), and the rollback waits for a worker instead of deadlocking with it.
--- lock_timeout makes it fail rather than stall reads while a long transaction holds them.
+-- lock_timeout (per lock) and statement_timeout (for the whole LOCK statement) make it fail
+-- after about 10 seconds rather than stall reads while long transactions hold the tables;
+-- statement_timeout is reset once the locks are held, so the checks and the rewrite aren't
+-- cut short.
 
 SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '10s';
 
 LOCK TABLE crawl_queue, data_points, global_indicator_data IN ACCESS EXCLUSIVE MODE;
+
+RESET statement_timeout;
 
 DO $$
 DECLARE

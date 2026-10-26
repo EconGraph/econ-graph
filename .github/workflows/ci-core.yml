@@ -275,6 +275,11 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-host-storage.sh
 
+    # The pre-deploy database check (backup running, crawler stop, long transactions),
+    # against a stub kubectl.
+    - name: Check the pre-deploy database check
+      run: scripts/deploy/test-precheck-db-migration.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

@@ -341,27 +341,57 @@ async fn numeric_fix_waits_for_a_worker_instead_of_deadlocking() {
     assert_eq!(migration.join().expect("migration applies"), "numeric");
 }
 
-/// While another transaction holds a lock the migration needs, the migration gives up after
-/// its lock_timeout and leaves the schema unchanged, rather than waiting indefinitely.
+/// Each table the migration locks is held by its own reader, released at 8, 16 and 24
+/// seconds: one at a time, each lock would come within its 10-second lock_timeout, so only the
+/// statement_timeout on the lock step as a whole stops the migration from stalling reads for
+/// about 24 seconds. It gives up after about 10 seconds and leaves the schema unchanged.
 #[tokio::test]
-async fn numeric_fix_gives_up_after_its_lock_timeout() {
+async fn numeric_fix_gives_up_on_its_locks_within_about_ten_seconds() {
     let (_container, url) = start_postgres().await;
-    let mut holder = connect(&url);
-    migrate_to_before(&mut holder, NUMERIC_FIX);
-    diesel::sql_query("BEGIN").execute(&mut holder).unwrap();
-    diesel::sql_query("LOCK TABLE data_points IN ROW EXCLUSIVE MODE")
-        .execute(&mut holder)
-        .unwrap();
+    let mut setup = connect(&url);
+    migrate_to_before(&mut setup, NUMERIC_FIX);
+
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let readers: Vec<_> = [
+        ("crawl_queue", 8),
+        ("data_points", 16),
+        ("global_indicator_data", 24),
+    ]
+    .into_iter()
+    .map(|(table, release_after)| {
+        let url = url.clone();
+        let held_tx = held_tx.clone();
+        std::thread::spawn(move || {
+            let mut reader = connect(&url);
+            diesel::sql_query("BEGIN").execute(&mut reader).unwrap();
+            diesel::sql_query(format!("SELECT count(*) AS n FROM {table}"))
+                .get_result::<Count>(&mut reader)
+                .unwrap();
+            held_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(release_after));
+            diesel::sql_query("ROLLBACK").execute(&mut reader).unwrap();
+        })
+    })
+    .collect();
+    for _ in 0..3 {
+        held_rx.recv().unwrap();
+    }
 
     let mut conn = connect(&url);
-    let started = std::time::Instant::now();
     let next = conn.pending_migrations(MIGRATIONS).unwrap().remove(0);
     assert_eq!(next.name().version().to_string(), NUMERIC_FIX);
+    let started = std::time::Instant::now();
     assert!(conn.run_migration(next.as_ref()).is_err());
-    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    let waited = started.elapsed();
+    assert!(
+        waited >= std::time::Duration::from_secs(9) && waited < std::time::Duration::from_secs(13),
+        "gave up after {waited:?}"
+    );
     assert_eq!(
         column_type(&mut conn, "data_points", "value"),
         "numeric(20,6)"
     );
-    diesel::sql_query("ROLLBACK").execute(&mut holder).unwrap();
+    for reader in readers {
+        reader.join().unwrap();
+    }
 }

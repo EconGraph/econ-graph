@@ -18,14 +18,19 @@
 -- Locking: every statement here takes ACCESS EXCLUSIVE on its table until the migration
 -- commits. The tables are locked up front in the order the crawler worker uses (its result
 -- transaction locks its crawl_queue row, then writes data_points), so the migration waits
--- for a worker instead of deadlocking with it. lock_timeout bounds that wait: while the
--- migration waits for its locks, reads of these tables queue behind it, so if a long
--- transaction holds them the migration fails after 10 seconds (and the backend retries it
--- on its next start) rather than stalling the API.
+-- for a worker instead of deadlocking with it. While the migration waits for its locks,
+-- reads of these tables queue behind it, so the whole lock step is bounded: LOCK TABLE takes
+-- the three locks one after another, each under lock_timeout, and statement_timeout caps
+-- the statement as a whole. If long transactions hold the tables, the migration fails after
+-- about 10 seconds with nothing changed (and the backend retries it on its next start)
+-- rather than stalling the API. statement_timeout is reset once the locks are held.
 
 SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '10s';
 
 LOCK TABLE crawl_queue, data_points, global_indicator_data IN ACCESS EXCLUSIVE MODE;
+
+RESET statement_timeout;
 
 ALTER TABLE crawl_queue DROP CONSTRAINT check_crawl_queue_kind;
 

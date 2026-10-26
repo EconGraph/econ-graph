@@ -71,6 +71,37 @@ Only precision the source still serves can be recovered:
   BLS history beyond the adapter's 20-year window is not re-read.
 - A series the source no longer publishes fails with `not_found` and keeps its stored values.
 
+### Deploying the migration
+
+The backend applies migration `2026-10-25-000100_observation_values_unconstrained_numeric`
+(version `20261025000100`) at startup. It locks `crawl_queue`, `data_points` and
+`global_indicator_data` and gives up after about 10 seconds if other transactions hold them,
+so the deploy goes in this order. `KC` below stands for the kind cluster's kubectl:
+`KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph`.
+
+1. **Pick the time.** Deploy outside 08:00 UTC, when the nightly `postgres-backup` CronJob
+   starts and holds a long transaction on the database.
+2. **Check the database.** `scripts/deploy/precheck-db-migration.sh --stop-crawler` (first with
+   `--dry-run`, which changes nothing). It refuses while a `postgres-backup` Job runs, scales
+   `crawler-worker` to 0 and waits for its pods, and lists any session in a transaction for
+   more than 5 seconds or idle in one, exiting non-zero while there are any. It never ends a
+   session: find the owner it names, stop or finish that work, and run it again until it
+   passes.
+3. **Deploy and confirm.** Run `scripts/deploy/deploy.sh`, then check that the migration is
+   recorded:
+   `KC -n econ-graph exec postgresql-0 -- psql -U postgres -d econ_graph -Atc "SELECT version FROM __diesel_schema_migrations WHERE version = '20261025000100'"`
+   prints `20261025000100`. If the new backend pod restarts with `Failed to run migrations`
+   and a lock or statement timeout in its log (`KC -n econ-graph logs deployment/econ-graph-backend`),
+   something held the tables: don't leave it restarting. Run
+   `scripts/deploy/precheck-db-migration.sh --dry-run` to list the sessions holding
+   transactions open, deal with their owner, then `KC -n econ-graph rollout restart deployment/econ-graph-backend`.
+   The previous backend pod keeps serving until the new one is ready.
+4. **Crawler back on the new image.** `deploy.sh` applies `crawler-worker.yaml`, which brings
+   the worker back at 1 replica with the new image. Check with
+   `KC -n econ-graph get deployment crawler-worker -o jsonpath='{.status.readyReplicas} {..image}'`;
+   if the backend was deployed some other way, `KC -n econ-graph scale deployment/crawler-worker --replicas=1`.
+5. **Only then re-fetch,** as below.
+
 ### Running it
 
 Enqueue only once every `crawler-worker` pod runs an image that knows the `refetch_series`
@@ -127,8 +158,11 @@ The migration that made the columns unconstrained
 `data_points`' indexes; it rebuilds only `global_indicator_data`'s partial index
 `idx_global_data_date_value`, whose predicate reads the column. It holds `ACCESS EXCLUSIVE` on
 `crawl_queue`, `data_points` and `global_indicator_data` for its few milliseconds, taking them in
-the crawler worker's order, and gives up after a 10-second `lock_timeout` if a long transaction
-holds them (the backend applies it again on its next start).
+the crawler worker's order. Taking the three locks is bounded as a whole: each lock waits at most
+10 seconds (`lock_timeout`) and the lock statement at most 10 seconds in all
+(`statement_timeout`), so if long transactions hold the tables it gives up after about 10
+seconds with nothing changed, and the backend applies it again on its next start (see
+[Deploying the migration](#deploying-the-migration)).
 
 Its `down.sql` narrows the columns back to `DECIMAL(20,6)`, which rewrites both tables and
 rebuilds their indexes. It locks the tables before checking them, and refuses, changing
