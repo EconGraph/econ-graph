@@ -94,6 +94,7 @@ case "$*" in
   *"get secret cloudflare-tunnel"*)
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  *"get job keycloak-realm-import"*) echo Complete ;;
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
@@ -557,6 +558,17 @@ if [ "$have_script" = true ]; then
   grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
   grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
+  # Facebook mode writes only its optional IdP keys and reapplies the realm,
+  # without asking for crawler credentials or starting the crawler.
+  run_keys 'STUB_MARKER=none' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
+    fail "set-crawler-keys --facebook failed: $(cat "$out")"
+  grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp-client-id=.*--from-file=facebook-idp-client-secret=' "$log" ||
+    fail "Facebook IdP keys were not written"
+  grep -q 'rollout restart deployment/keycloak' "$log" || fail "Facebook mode did not restart Keycloak"
+  grep -q 'apply -f .*keycloak/realm-import-job.yaml' "$log" || fail "Facebook mode did not reapply the realm"
+  grep -q 'crawler-worker' "$log" && fail "Facebook mode touched the crawler"
+  grep -q 'FRED_API_KEY:' "$out" && fail "Facebook mode prompted for crawler credentials"
+
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
 fi

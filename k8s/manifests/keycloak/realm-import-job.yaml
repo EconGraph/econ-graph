@@ -47,6 +47,7 @@ spec:
         - |
           set -euo pipefail
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}" ]; then export KC_GOOGLE_ENABLED=true; fi
+          if [ -n "${KC_FACEBOOK_CLIENT_ID:-}" ] && [ -n "${KC_FACEBOOK_CLIENT_SECRET:-}" ]; then export KC_FACEBOOK_ENABLED=true; fi
           bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/econ-graph-realm.json
         env:
         # Placeholders in config/keycloak/econ-graph-realm.json; keep in step with
@@ -67,6 +68,18 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: google-idp-client-secret
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-id
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-secret
               optional: true
         volumeMounts:
         - name: realm

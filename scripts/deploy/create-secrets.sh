@@ -38,6 +38,8 @@
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
+#                                  facebook-idp-client-id    KEYCLOAK_FACEBOOK_CLIENT_ID (optional)
+#                                  facebook-idp-client-secret KEYCLOAK_FACEBOOK_CLIENT_SECRET (optional)
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
 #   monitoring-auth                auth                      MONITORING_BASIC_AUTH (optional,
 #                                                            one htpasswd line, e.g. from
@@ -437,7 +439,8 @@ kc get namespace "$NAMESPACE" >/dev/null 2>&1 ||
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD APP_POSTGRES_PASSWORD APP_POSTGRES_APP_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
-    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
+    KEYCLOAK_GOOGLE_CLIENT_SECRET KEYCLOAK_FACEBOOK_CLIENT_ID \
+    KEYCLOAK_FACEBOOK_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
     CLOUDFLARE_TUNNEL_TOKEN; do
     [[ -z "${!var-}" ]] || check_input "$var" "${!var}"
 done
@@ -604,6 +607,8 @@ add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
+add_optional KEYCLOAK_FACEBOOK_CLIENT_ID facebook-idp-client-id
+add_optional KEYCLOAK_FACEBOOK_CLIENT_SECRET facebook-idp-client-secret
 apply_secret
 
 # --- cloudflare-tunnel (token for the cloudflared connector) -----------------

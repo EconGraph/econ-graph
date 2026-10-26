@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Enter the crawler API keys (and, with --google, the Google sign-in client)
+# Enter crawler API keys, or optional Google/Facebook sign-in credentials,
 # into the kind cluster's Secrets without the values ever appearing on screen,
 # in shell history, in process arguments, or in an AI agent's context.
 #
 # Usage (run it yourself, in your own terminal):
 #   scripts/deploy/set-crawler-keys.sh [--google] [--no-start-crawler] [--dry-run]
 #   scripts/deploy/set-crawler-keys.sh --tunnel [--dry-run]
+#   scripts/deploy/set-crawler-keys.sh --facebook [--dry-run]
+# --facebook asks only for the Facebook IdP client and reapplies the realm.
+# Use a separate Meta app for each non-production environment; never copy
+# production credentials to dev/test clusters.
 #
 # --tunnel asks only for the Cloudflare Tunnel token (Secret cloudflare-tunnel,
 # key token; ECO-457), the one the dashboard shows for the tunnel's connector:
@@ -27,6 +31,7 @@
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
 # restarted and the keycloak-realm-import Job is run again (as deploy.sh
 # does), since that Job is what puts the Google client into the realm.
+# --facebook does the same for Facebook, without prompting for crawler keys.
 #
 # --dry-run prints which keys are currently set (names only) and what would
 # happen (with --tunnel, whether the cluster is marked production: these reads
@@ -45,16 +50,18 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 
 DRY_RUN=false
 GOOGLE=false
+FACEBOOK=false
 TUNNEL=false
 START_CRAWLER=true
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
         --google) GOOGLE=true ;;
+        --facebook) FACEBOOK=true ;;
         --tunnel) TUNNEL=true ;;
         --no-start-crawler) START_CRAWLER=false ;;
         -h | --help)
-            sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/d; p; }' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -78,8 +85,11 @@ source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 cluster_role_use_context "kind-${KIND_CLUSTER}" || die "${KUBECTL} has no context kind-${KIND_CLUSTER}"
 kubectl() { kc "$@"; }
 
-if [ "$TUNNEL" = true ] && [ "$GOOGLE" = true ]; then
-    die "--tunnel and --google are separate runs; run the script once for each"
+if [ "$TUNNEL" = true ] && { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; }; then
+    die "--tunnel and social sign-in modes are separate runs; run the script once for each"
+fi
+if [ "$FACEBOOK" = true ] && [ "$GOOGLE" = true ]; then
+    die "--facebook and --google are separate runs; run the script once for each"
 fi
 if [ "$TUNNEL" = true ] &&
     ! grep -q 'CLOUDFLARE_TUNNEL_TOKEN' "$PROJECT_ROOT/scripts/deploy/create-secrets.sh"; then
@@ -89,6 +99,7 @@ fi
 
 CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY)
 GOOGLE_KEYS=(KEYCLOAK_GOOGLE_CLIENT_ID KEYCLOAK_GOOGLE_CLIENT_SECRET)
+FACEBOOK_KEYS=(KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET)
 TUNNEL_KEYS=(CLOUDFLARE_TUNNEL_TOKEN)
 
 # Secret and key each variable lands in (see create-secrets.sh).
@@ -107,6 +118,8 @@ key_of() {
         CENSUS_API_KEY) echo census-api-key ;;
         KEYCLOAK_GOOGLE_CLIENT_ID) echo google-idp-client-id ;;
         KEYCLOAK_GOOGLE_CLIENT_SECRET) echo google-idp-client-secret ;;
+        KEYCLOAK_FACEBOOK_CLIENT_ID) echo facebook-idp-client-id ;;
+        KEYCLOAK_FACEBOOK_CLIENT_SECRET) echo facebook-idp-client-secret ;;
         CLOUDFLARE_TUNNEL_TOKEN) echo token ;;
     esac
 }
@@ -127,6 +140,9 @@ key_state() {
 if [ "$TUNNEL" = true ]; then
     # Only the token: the crawler is not touched.
     vars=("${TUNNEL_KEYS[@]}")
+    START_CRAWLER=false
+elif [ "$FACEBOOK" = true ]; then
+    vars=("${FACEBOOK_KEYS[@]}")
     START_CRAWLER=false
 else
     vars=("${CRAWLER_KEYS[@]}")
@@ -160,7 +176,7 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
-    [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
+    { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
         "then delete and re-apply job/keycloak-realm-import and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
@@ -216,15 +232,15 @@ if [ "$START_CRAWLER" = true ] &&
     kubectl -n "$NAMESPACE" scale deployment/crawler-worker --replicas=1
     kubectl -n "$NAMESPACE" rollout restart deployment/crawler-worker
 fi
-if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
+if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } && [ "$entered" -gt 0 ] &&
     kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
-    echo "==> Restarting Keycloak for the new Google client"
+    echo "==> Restarting Keycloak for the new sign-in client"
     kubectl -n "$NAMESPACE" rollout restart deployment/keycloak
     kubectl -n "$NAMESPACE" rollout status deployment/keycloak --timeout=600s
-    # The realm-import Job renders the Google client from the Secret into
+    # The realm-import Job renders the sign-in client from the Secret into
     # the realm; a restart alone does not re-run it. A finished Job cannot be
     # re-run in place, so the old one goes first (as in deploy.sh).
-    echo "==> Re-running the Keycloak realm import for the new Google client"
+    echo "==> Re-running the Keycloak realm import for the new sign-in client"
     kubectl -n "$NAMESPACE" delete job keycloak-realm-import --ignore-not-found
     kubectl -n "$NAMESPACE" apply -f "$PROJECT_ROOT/k8s/manifests/keycloak/realm-import-job.yaml"
     realm_import_status=""
@@ -237,7 +253,7 @@ if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
         sleep 5
     done
     case "$realm_import_status" in
-        *Complete*) echo "==> Keycloak realm applied with the new Google client" ;;
+        *Complete*) echo "==> Keycloak realm applied with the new sign-in client" ;;
         *)
             kubectl -n "$NAMESPACE" logs job/keycloak-realm-import --all-containers || true
             die "the Keycloak realm import did not complete (status: ${realm_import_status:-none})"

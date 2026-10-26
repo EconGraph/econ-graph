@@ -4,7 +4,7 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 
 | File | Used by | Contents |
 |---|---|---|
-| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google identity provider |
+| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google and Facebook identity providers |
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
 | `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
@@ -93,6 +93,8 @@ The realm file reads these environment variables when it is imported:
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
 | `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when both the Google client id and secret are configured |
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
+| `KC_FACEBOOK_ENABLED` | `false` | Enabled by the Kubernetes render command only when both Facebook credentials are present |
+| `KC_FACEBOOK_CLIENT_ID`, `KC_FACEBOOK_CLIENT_SECRET` | `unset` | Facebook app credentials, read from the environment-specific Kubernetes Secret |
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
 is first imported; change a value later by recreating the volume. In Kubernetes the
@@ -146,3 +148,36 @@ The Job signs in as the admin from the Secret's `admin-username` / `admin-passwo
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
 realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --all-containers`.
+
+## Facebook sign-in
+
+The optional `facebook` provider uses the same first-broker-login and account-linking
+flow as Google, requests only `email` and `public_profile`, and stores no upstream
+token. Without both credentials it stays disabled and no Facebook button appears.
+Kubernetes reads `facebook-idp-client-id` and `facebook-idp-client-secret` from
+`econ-graph-keycloak`; a maintainer enters them with hidden input:
+
+```bash
+scripts/deploy/set-crawler-keys.sh --facebook
+```
+
+This mode updates only the Facebook credentials, restarts Keycloak, and reapplies
+the realm. It does not start or restart the crawler. Blank input keeps the existing
+value. The retired in-house `facebook-app-*` keys are unrelated and remain removed.
+
+Follow the [Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook).
+Configure Facebook Login on the Meta app with domain `econgraph.com` and redirect URI
+`https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`.
+Use `https://econgraph.com/privacy` for the privacy policy and
+`https://econgraph.com/privacy#account-deletion` for data-deletion instructions.
+There is no Facebook deletion callback: the instructions explain how to request
+account deletion. The retired `/auth/facebook` endpoints remain unavailable.
+
+Each non-production environment must use its own Meta app or leave Facebook
+unconfigured. Never copy production credentials or its Secret into a development
+or test cluster. Local compose does not forward Facebook credentials.
+
+After configuring the app and credentials, manually confirm that the Facebook
+button appears, a first login and an existing-account link succeed, and sign-out
+returns to the app. This requires the maintainer's Meta app access and a real
+Facebook account; rendering tests cannot verify Meta's configuration or approval.
