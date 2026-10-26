@@ -229,18 +229,54 @@ then prints its logs. It dumps the same databases as the nightly run.
 
 This is **destructive**: `pg_restore --clean --if-exists` drops and
 recreates every object the dump contains before restoring it, overwriting
-whatever is currently in `econ_graph`. The restore Job sets
-`RESTORE_ROLE=econgraph`, so `restore.sh` runs `pg_restore --role=econgraph`:
-the dumps carry no owner, and `econgraph`, the role the backend and crawler
-connect as and the one the data migrations created the tables as, owns
-everything the restore recreates, as before. Restored as `postgres` alone,
-the tables would belong to `postgres` and the services could not use them.
-The extensions in the dump are left as they are, since the init script
-created some of them as the superuser and `econgraph` can't drop or recreate
-those; `restore.sh` refuses, before changing anything, a database that lacks
-one of them. That's why it prompts unless `--yes`
+whatever is currently in `econ_graph`. That's why it prompts unless `--yes`
 is passed. `restore.sh` refuses a file that isn't an `econ_graph-*.dump`
-(such as an `econ_graph_app` or Keycloak dump).
+(such as an `econ_graph_app` or Keycloak dump), and a dump that lists no
+table. It resolves `latest.dump` to the dump it points at once, before
+reading anything, so a backup that finishes during the restore and moves the
+link doesn't change which dump is restored.
+
+#### Ownership
+
+The restore Job connects as `postgres`, but every object it recreates is
+owned by `econgraph`, the role the backend and crawler-worker connect as to
+`econ_graph` and the one the data migrations create the schema as (the Job's
+`RESTORE_OWNER`; `restore.sh` defaults to `econgraph` when it is unset). The
+dumps carry no owners or grants (they are taken with `--no-owner
+--no-privileges`), so a plain `pg_restore` run as `postgres` would leave every
+table owned by `postgres`, and the services could neither read nor write it.
+`restore.sh` runs in two steps:
+
+1. **Extensions**, as `postgres`: the dump's extensions that `econ_graph`
+   lacks, with their comments, as `CREATE EXTENSION IF NOT EXISTS`. Each one
+   created is logged (`Created extension pgcrypto`). An extension already
+   there is never dropped or changed, owner and comment included. On a newly
+   initialised server, where the init script has created `uuid-ossp`,
+   `pg_stat_statements` and `pg_trgm`, this adds `pgcrypto`, owned by
+   `postgres`. `econgraph` can't do this step itself: some extensions need a
+   superuser to create, and the init script's are owned by `postgres`, so
+   `econgraph` can't drop them either.
+2. **Everything else**, with `pg_restore --role=econgraph --clean --if-exists
+   --no-owner --no-privileges --single-transaction --exit-on-error`, the
+   extension entries left out by their type in the dump's table of contents:
+   after connecting, `pg_restore` switches to `econgraph`, which drops and
+   recreates the tables, sequences, views, indexes, types, functions,
+   schemas and `__diesel_schema_migrations` as their owner. A failure rolls
+   this step back, leaving the database as it was. An extension step 1
+   created stays.
+
+`restore.sh` checks that `RESTORE_OWNER` exists before changing anything.
+Every object in the dump must be owned by `econgraph` in the database being
+restored into, since that role drops them. If one isn't, the restore stops at
+`must be owner of ...` and rolls back. Give the object to `econgraph`
+(`ALTER TABLE ... OWNER TO econgraph`, or the matching `ALTER` for another
+kind of object), then restore again. To check the result, as `postgres` in
+`econ_graph`:
+
+```sql
+SELECT tableowner, count(*) FROM pg_tables
+ WHERE schemaname NOT IN ('pg_catalog', 'information_schema') GROUP BY 1;
+```
 
 Before restoring into a real deployment, scale `backend-deployment` and
 `crawler-worker` to 0 replicas first: `--clean` waits on any lock they hold
@@ -352,11 +388,18 @@ are written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in its step 3 above) and sync
 without the `latest` links; that the app dump, restored as in
 [econ_graph_app](#econ_graph_app) step 3, leaves `econgraph` owning its
-tables and able to write them, with the source's schema; that `restore.sh`, as the restore Job runs it,
-puts `econ_graph` back with `econgraph` still owning and able to write its
-tables, the schema (tables, indexes, constraints, views, functions,
-extensions) equal to the source's and the superuser's extensions untouched, refuses a database lacking
-one of the dump's extensions, and refuses an app or Keycloak dump; that `backup.sh` reads
+tables and able to write them, with the source's schema; that `restore.sh`,
+with the restore Job's environment, puts `econ_graph` back with `econgraph`
+owning everything but the extensions and able to write its tables, the
+schema (tables, indexes, constraints, views, functions, extensions) equal to
+the source's and every extension untouched, owner included; that on a newly
+initialised server (the init script only, `RESTORE_OWNER` unset) it creates
+and logs the one extension that server lacks, `pgcrypto`, and leaves
+everything else owned by `econgraph`; that a restore failing at its last drop
+(a schema owned by `postgres`) rolls every table and row back; that with
+`latest.dump` moved to another dump right after the list, the listed dump is
+the one restored; and that it refuses a dump with no table, a missing
+`RESTORE_OWNER` role, and an app or Keycloak dump; that `backup.sh` reads
 each kind of `app-database-url` as intended (case, Service suffixes, IP
 literals, options, unreadable URLs); that the app database is dumped when
 `app-database-url` names `app-postgres-service:5432/econ_graph_app` (also in

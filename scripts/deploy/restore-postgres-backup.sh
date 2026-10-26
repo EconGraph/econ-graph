@@ -93,8 +93,8 @@ spec:
           value: "econ_graph"
         # The role the backend and crawler connect as (econ-graph-secrets
         # data-database-url, created by postgres-init.yaml). It owns the tables,
-        # and restore.sh restores as it so that it still does afterwards.
-        - name: RESTORE_ROLE
+        # and restore.sh recreates every object as it so that it still does.
+        - name: RESTORE_OWNER
           value: "econgraph"
         - name: BACKUP_DIR
           value: "/backups"

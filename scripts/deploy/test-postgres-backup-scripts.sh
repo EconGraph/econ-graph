@@ -17,10 +17,15 @@
 #   - the app dump, restored as the runbook says (--role=econgraph into a
 #     database owned by econgraph), leaves econgraph owning its tables and
 #     able to write them;
-#   - restore.sh, as the restore Job runs it (RESTORE_ROLE=econgraph), puts
-#     econ_graph back with econgraph still owning and able to write its
-#     tables and the superuser's extensions untouched; it refuses a target
-#     that lacks one of the dump's extensions, and an app or Keycloak dump;
+#   - restore.sh, with the restore Job's environment (RESTORE_OWNER=econgraph),
+#     puts econ_graph back with econgraph owning everything but the
+#     extensions and able to write its tables, and every extension untouched;
+#     on a newly initialised server (postgres-init.yaml's script only, and
+#     RESTORE_OWNER unset) it creates and logs the extension that server
+#     lacks and leaves everything else econgraph's; a restore that fails at
+#     its last drop rolls every table back; latest.dump moved to another dump
+#     right after the list doesn't change which dump is restored; it refuses
+#     a dump with no table, a missing owner role, and an app or Keycloak dump;
 #   - when any database's dump fails (server down, wrong password, no tables)
 #     the others are still written and synced, and sync.sh fails the Job;
 #     without BACKUP_STATUS_FILE, backup.sh itself exits 1;
@@ -61,6 +66,7 @@ ID="pgbackup-test-$$"
 NET="$ID"
 ECON="$ID-econ"
 APP="$ID-app"
+FRESH="$ID-fresh"
 KC="$ID-keycloak"
 S3="$ID-s3"
 ECON_PW="econ-pw-$RANDOM$RANDOM"
@@ -81,7 +87,7 @@ LOG="$tmp/all-output.log"
 : >"$LOG"
 
 cleanup() {
-    docker rm -f "$ECON" "$APP" "$KC" "$S3">/dev/null 2>&1 || true
+    docker rm -f "$ECON" "$APP" "$FRESH" "$KC" "$S3" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
     rm -rf "$tmp" 2>/dev/null || true
 }
@@ -455,30 +461,96 @@ check "no dump deleted" nothing_deleted
 # --- 2. restore.sh ------------------------------------------------------------
 
 echo "# restore.sh"
-# The restore Job's RESTORE_ROLE, from scripts/deploy/restore-postgres-backup.sh.
-RESTORE_ROLE="$(python3 - "$ROOT/scripts/deploy/restore-postgres-backup.sh" <<'PY'
-import re, sys
-m = re.search(r'- name: RESTORE_ROLE\n\s+value: "([^"]*)"', open(sys.argv[1]).read())
-print(m.group(1) if m else "")
+
+# KEY=VALUE lines for docker --env-file, from the Job restore-postgres-backup.sh
+# applies (its shell variables blanked), with the test password for the Secret.
+python3 - "$ROOT/scripts/deploy/restore-postgres-backup.sh" "$ECON_PW" >"$tmp/restore.env" <<'PY'
+import re, sys, yaml
+text = open(sys.argv[1]).read()
+manifest = re.search(r"<<EOF \| \S+ apply -f -\n(.*?)\nEOF\n", text, re.S).group(1)
+manifest = re.sub(r"\$\{[A-Z_]+\}", "", manifest)
+(container,) = yaml.safe_load(manifest)["spec"]["template"]["spec"]["containers"]
+for env in container["env"]:
+    if "value" in env:
+        print(f"{env['name']}={env['value']}")
+    else:
+        ref = env["valueFrom"]["secretKeyRef"]
+        assert (ref["name"], ref["key"]) == ("econ-graph-postgres", "postgres-password"), ref
+        print(f"{env['name']}={sys.argv[2]}")
 PY
-)"
-check "the restore Job restores as econgraph (RESTORE_ROLE)" [ "$RESTORE_ROLE" = econgraph ]
-psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100; DELETE FROM audit.events;"
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e RESTORE_ROLE="$RESTORE_ROLE" \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
-    "$PG_IMAGE" /scripts/restore.sh >>"$LOG" 2>&1 || rc=$?
-check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
-check "econ_graph row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
-check "  econgraph still owns every table and schema" \
-    [ "$(psql_in "$ECON" postgres econ_graph "SELECT
-          (SELECT count(*) FROM pg_tables WHERE schemaname IN ('public', 'audit') AND tableowner <> 'econgraph')
-        + (SELECT count(*) FROM pg_namespace WHERE nspname = 'audit' AND nspowner <> 'econgraph'::regrole)")" = 0 ]
-check "  and can write to them" psql_in "$ECON" econgraph econ_graph \
-    "INSERT INTO economic_series (title) VALUES ('new'); INSERT INTO audit.events (note) VALUES ('new');
+check "the restore Job recreates everything as econgraph (RESTORE_OWNER)" \
+    grep -qx 'RESTORE_OWNER=econgraph' "$tmp/restore.env"
+check "  and restores the data database through postgres-service" \
+    grep -qx 'PGHOST=postgres-service' "$tmp/restore.env"
+grep -v '^RESTORE_OWNER=' "$tmp/restore.env" >"$tmp/restore-default-owner.env"
+
+# run_restore [docker run options...]: restore.sh as the restore Job runs it
+# (uid 999, read-only root, the backup volume read-only), with RESTORE_ENV
+# (default the Job's environment) and RESTORE_BACKUPS (default the backup
+# volume) mounted at /backups. Its output goes to $tmp/out; prints its exit
+# status.
+run_restore() {
+    local rc=0
+    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+        --security-opt no-new-privileges --env-file "${RESTORE_ENV:-$tmp/restore.env}" "$@" \
+        -v "$tmp/scripts:/scripts:ro" -v "${RESTORE_BACKUPS:-$tmp/backups}:/backups:ro" \
+        "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
+    cat "$tmp/out" >>"$LOG"
+    echo "$rc"
+}
+
+# Objects in econ_graph's own schemas not owned by econgraph, one per line:
+# relations (tables, sequences, views, indexes), functions, types (not the
+# array types, which follow their element) and schemas. Extensions' members
+# don't count: the init script creates most extensions as the superuser.
+FOREIGN_OWNED_SQL="SELECT kind || ' ' || name || ' ' || owner FROM (
+    SELECT 'relation' AS kind, c.oid::regclass::text AS name, c.relowner::regrole::text AS owner,
+           c.oid, 'pg_class'::regclass AS cls, c.relnamespace AS nsp
+      FROM pg_class c
+    UNION ALL
+    SELECT 'function', p.oid::regprocedure::text, p.proowner::regrole::text, p.oid, 'pg_proc'::regclass, p.pronamespace
+      FROM pg_proc p
+    UNION ALL
+    SELECT 'type', t.oid::regtype::text, t.typowner::regrole::text, t.oid, 'pg_type'::regclass, t.typnamespace
+      FROM pg_type t
+     WHERE NOT EXISTS (SELECT 1 FROM pg_type e WHERE e.typarray = t.oid)
+    UNION ALL
+    SELECT 'schema', n.nspname::text, n.nspowner::regrole::text, n.oid, 'pg_namespace'::regclass, n.oid
+      FROM pg_namespace n
+  ) o
+  JOIN pg_namespace n ON n.oid = o.nsp
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%'
+   AND o.owner <> 'econgraph'
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = o.cls AND d.objid = o.oid AND d.deptype = 'e')
+ ORDER BY 1"
+EXTENSIONS_SQL="SELECT string_agg(extname || ':' || extowner::regrole::text, ' ' ORDER BY extname) FROM pg_extension"
+# What the app does with econ_graph: write rows (sequences, defaults,
+# constraints) in every schema, and read the view and the function.
+APP_WRITE_SQL="INSERT INTO economic_series (title) VALUES ('new'); INSERT INTO audit.events (note) VALUES ('new');
+     INSERT INTO data_points (series_id, value) SELECT id, 1 FROM economic_series WHERE title = 'new';
+     SELECT count(*) FROM series_point_counts; SELECT audit.note_upper('x');
+     DELETE FROM data_points WHERE series_id = (SELECT id FROM economic_series WHERE title = 'new');
      DELETE FROM audit.events WHERE note = 'new'; DELETE FROM economic_series WHERE title = 'new';"
+app_writes() { psql_in "$1" econgraph econ_graph "$APP_WRITE_SQL" >/dev/null; }
+
+check "the source econ_graph is all econgraph's, but for extensions" \
+    [ -z "$(psql_in "$ECON" postgres econ_graph "$FOREIGN_OWNED_SQL")" ]
+psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL" >"$tmp/econ.extensions"
+echo "# source econ_graph extensions: $(cat "$tmp/econ.extensions")"
+
+echo "# restore.sh over the existing database"
+psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100; DELETE FROM audit.events;"
+rc="$(run_restore)"
+check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
+check "  restoring as econgraph" grep -q "owned by econgraph" "$tmp/out"
+check "  creating no extension (they are all there)" \
+    grep -q "Every extension in the dump is already in 'econ_graph'" "$tmp/out"
+check "econ_graph row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+psql_in "$ECON" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
+check "  econgraph still owns every table, sequence, view, index, function, type and schema" \
+    [ ! -s "$tmp/foreign-owned" ]
+[ ! -s "$tmp/foreign-owned" ] || sed 's/^/    owned by another role: /' "$tmp/foreign-owned"
+check "  and can write to them" app_writes "$ECON"
 check "  and the schema is the source's (tables, indexes, constraints, views, functions, extensions)" \
     diff <(schema "$ECON" postgres econ_graph) "$tmp/econ.schema"
 # The schema comparison itself catches a lost index: a restore from a TOC
@@ -493,46 +565,125 @@ differs() { ! diff -q "$1" "$2" >/dev/null; }
 check "  (and that comparison fails for a restore that lost an index)" \
     differs <(schema "$ECON" postgres econ_noindex) "$tmp/econ.schema"
 psql_in "$ECON" postgres postgres "DROP DATABASE econ_noindex"
-check "  and the superuser's extensions are untouched" \
-    [ "$(psql_in "$ECON" postgres econ_graph "SELECT string_agg(extname || ':' || extowner::regrole, ' ' ORDER BY extname)
-          FROM pg_extension WHERE extname IN ('pg_trgm', 'uuid-ossp')")" = "pg_trgm:postgres uuid-ossp:postgres" ]
-# A target without one of the dump's extensions is refused before anything
-# changes: an empty econ_graph, owned by econgraph, on the app server.
-psql_in "$APP" postgres postgres "CREATE DATABASE econ_graph OWNER econgraph"
+check "  and every extension is untouched, owner included ($(cat "$tmp/econ.extensions"))" \
+    [ "$(psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL")" = "$(cat "$tmp/econ.extensions")" ]
+
+# A newly initialised server: postgres-init.yaml's script only, which creates
+# uuid-ossp, pg_stat_statements and pg_trgm, but not pgcrypto (the data
+# migrations create that). Restored without RESTORE_OWNER, so the default
+# owner applies.
+echo "# restore.sh on a newly initialised server, without RESTORE_OWNER"
+mkdir -m 0755 "$tmp/initdb"
+python3 - "$ROOT/k8s/manifests/postgres-init.yaml" "$tmp/initdb" <<'PY'
+import os, sys, yaml
+for key, text in yaml.safe_load(open(sys.argv[1]))["data"].items():
+    path = os.path.join(sys.argv[2], key)
+    with open(path, "w") as f:
+        f.write(text)
+    os.chmod(path, 0o555)
+PY
+docker run -d --name "$FRESH" --network "$NET" --network-alias postgres-fresh \
+    -e POSTGRES_PASSWORD="$ECON_PW" -e POSTGRES_DB=econ_graph -e APP_DB_PASSWORD="$DATA_ROLE_PW" \
+    -v "$tmp/initdb:/docker-entrypoint-initdb.d:ro" "$PG_IMAGE" >/dev/null
+# Ready over TCP only once the init script has run (the image's temporary
+# server for it listens on the socket alone).
+wait_pg "$FRESH" postgres econ_graph
+fresh_before="$(psql_in "$FRESH" postgres econ_graph "$EXTENSIONS_SQL")"
+check "the new server lacks pgcrypto ($fresh_before)" \
+    [ "$fresh_before" = "pg_stat_statements:postgres pg_trgm:postgres plpgsql:postgres uuid-ossp:postgres" ]
+rc="$(RESTORE_ENV="$tmp/restore-default-owner.env" run_restore -e PGHOST=postgres-fresh)"
+check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
+check "  restoring as econgraph, the default owner" grep -q "owned by econgraph" "$tmp/out"
+check "  creating pgcrypto, and logging it" grep -qx "Created extension pgcrypto" "$tmp/out"
+check "  and no other extension" [ "$(grep -c '^Created extension ' "$tmp/out")" = 1 ]
+check "  the extensions are those already there plus pgcrypto, owned by the superuser" \
+    [ "$(psql_in "$FRESH" postgres econ_graph "$EXTENSIONS_SQL")" = "pg_stat_statements:postgres pg_trgm:postgres pgcrypto:postgres plpgsql:postgres uuid-ossp:postgres" ]
+check "  the row counts are the source's" diff <(counts "$FRESH" postgres econ_graph) "$tmp/econ.counts"
+psql_in "$FRESH" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
+check "  everything else is econgraph's" [ ! -s "$tmp/foreign-owned" ]
+[ ! -s "$tmp/foreign-owned" ] || sed 's/^/    owned by another role: /' "$tmp/foreign-owned"
+check "  and econgraph can write to it" app_writes "$FRESH"
+docker rm -f "$FRESH" >/dev/null
+
+echo "# restore.sh failures"
+# An object econgraph can't drop, and one dropped last: the schema audit,
+# owned by postgres, with econgraph still able to use it. --clean drops every
+# table before it, so this checks that the whole step is one transaction: the
+# restore stops at DROP SCHEMA and every table comes back as it was.
+psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100;
+  ALTER SCHEMA audit OWNER TO postgres; GRANT USAGE, CREATE ON SCHEMA audit TO econgraph;"
+counts "$ECON" postgres econ_graph >"$tmp/before"
+rc="$(run_restore)"
+check "a schema owned by another role: restore.sh exits non-zero" [ "$rc" != 0 ]
+check "  and says why" grep -q "must be owner of schema audit" "$tmp/out"
+check "  and rolls back, leaving every table and row as it was" diff <(counts "$ECON" postgres econ_graph) "$tmp/before"
+# The grant goes before the owner changes back: after it, the REVOKE would
+# take the privileges from the owner itself.
+psql_in "$ECON" postgres econ_graph "REVOKE USAGE, CREATE ON SCHEMA audit FROM econgraph; ALTER SCHEMA audit OWNER TO econgraph;"
+rc="$(run_restore)"
+check "  once the schema is econgraph's again, restore.sh exits 0" [ "$rc" = 0 ]
+check "  and the row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+
+# A backup finishing during the restore moves latest.dump to a newer dump.
+# restore.sh must keep reading the dump it listed: another dump's TOC ids
+# name other objects. The swap happens right after pg_restore --list, through
+# a wrapper first on PATH. Dump B has an extra table, so its ids differ.
+echo "# restore.sh while latest.dump moves to another dump"
+mkdir -p "$tmp/swap" "$tmp/wrap"
+chmod 0777 "$tmp/swap"
+cp "$tmp/backups/$econ_dump" "$tmp/swap/$econ_dump"
+psql_in "$ECON" econgraph econ_graph "CREATE TABLE aaa_swap_test (id int); INSERT INTO aaa_swap_test VALUES (1);"
+docker exec "$ECON" pg_dump -U postgres -d econ_graph --format=custom --no-owner --no-privileges \
+    >"$tmp/swap/econ_graph-29990101-000000.dump"
+psql_in "$ECON" econgraph econ_graph "DROP TABLE aaa_swap_test;"
+ln -s "/backups/$econ_dump" "$tmp/swap/latest.dump"
+cat >"$tmp/wrap/pg_restore" <<'SH'
+#!/bin/sh
+/usr/lib/postgresql/18/bin/pg_restore "$@" || exit $?
+case " $* " in
+  *" --list "*) ln -sfn /backups/econ_graph-29990101-000000.dump /backups/latest.dump ;;
+esac
+SH
+chmod 0555 "$tmp/wrap/pg_restore"
+chmod 0755 "$tmp/wrap"
+psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100;"
 rc=0
 docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=app-postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$APP_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e RESTORE_ROLE=econgraph \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
+    --security-opt no-new-privileges --env-file "$tmp/restore.env" \
+    -e PATH=/wrap:/usr/lib/postgresql/18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    -v "$tmp/scripts:/scripts:ro" -v "$tmp/wrap:/wrap:ro" -v "$tmp/swap:/backups" \
     "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
 cat "$tmp/out" >>"$LOG"
-check "restore.sh refuses a target that lacks one of the dump's extensions" [ "$rc" = 1 ]
-check "  and names it" grep -q "The dump needs extension .*, which 'econ_graph' doesn't have" "$tmp/out"
-check "  and restores nothing" \
-    [ "$(psql_in "$APP" postgres econ_graph "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" = 0 ]
-psql_in "$APP" postgres postgres "DROP DATABASE econ_graph"
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e BACKUP_FILE="/backups/$kc_dump" \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
-    "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
-cat "$tmp/out" >>"$LOG"
+check "latest.dump moved mid-restore: restore.sh exits 0" [ "$rc" = 0 ]
+check "  the link did move" [ "$(basename "$(readlink "$tmp/swap/latest.dump")")" = "econ_graph-29990101-000000.dump" ]
+check "  and the listed dump was restored, every row of it" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+check "  and the other dump's table was not" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT to_regclass('public.aaa_swap_test') IS NULL")" = t ]
+
+# A dump named like econ_graph's that holds no table (another database's).
+mkdir -m 0755 "$tmp/notable"
+docker exec "$ECON" pg_dump -U postgres -d postgres --format=custom --no-owner --no-privileges \
+    >"$tmp/notable/econ_graph-20000101-000000.dump"
+rc="$(RESTORE_BACKUPS="$tmp/notable" run_restore -e BACKUP_FILE=/backups/econ_graph-20000101-000000.dump)"
+check "a dump with no table: restore.sh exits 1" [ "$rc" = 1 ]
+check "  and says why" grep -q "lists no table to restore" "$tmp/out"
+check "  and econ_graph is untouched" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+
+rc="$(run_restore -e RESTORE_OWNER=no_such_role)"
+check "a missing RESTORE_OWNER: restore.sh exits 1" [ "$rc" = 1 ]
+check "  and says why" grep -q "Role no_such_role (RESTORE_OWNER) does not exist" "$tmp/out"
+
+rc="$(run_restore -e BACKUP_FILE="/backups/$kc_dump")"
 check "restore.sh refuses a keycloak dump for econ_graph" [ "$rc" = 1 ]
 check "  and says why" grep -q "is not a econ_graph dump" "$tmp/out"
 check "  and econ_graph is untouched" \
     [ "$(psql_in "$ECON" postgres econ_graph "SELECT count(*) FROM information_schema.tables WHERE table_name = 'user_entity'")" = 0 ]
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e BACKUP_FILE="/backups/latest-econ_graph_app.dump" \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
-    "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
-cat "$tmp/out" >>"$LOG"
+rc="$(run_restore -e BACKUP_FILE=/backups/latest-econ_graph_app.dump)"
 check "restore.sh refuses an econ_graph_app dump (through its latest link) for econ_graph" [ "$rc" = 1 ]
 check "  and says why" grep -q "is not a econ_graph dump" "$tmp/out"
 check "  and econ_graph is untouched" \
     [ "$(psql_in "$ECON" postgres econ_graph "SELECT count(*) FROM information_schema.tables WHERE table_name = 'chart_annotations'")" = 0 ]
+check "no dump deleted" nothing_deleted
 
 # --- 3. Keycloak's server down ----------------------------------------------------
 
