@@ -311,6 +311,7 @@ async fn make_worker(
             bea: None,
             census: None,
         },
+        bypass_validators: false,
     };
     let mut reg = AdapterRegistry::new();
     reg.register(Arc::new(Tracking {

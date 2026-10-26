@@ -16,7 +16,7 @@ const base = {
   units: 'Billions of Chained 2017 Dollars',
   transformation: '',
   retrievedAt,
-  points: [] as { date: string; value: number | null }[],
+  points: [] as { date: string; value: number | null; exactValue?: string }[],
 };
 
 describe('csvField', () => {
@@ -68,6 +68,28 @@ describe('buildSeriesCsv', () => {
         '',
       ].join('\r\n')
     );
+  });
+
+  it('writes the exact decimal the API sent, keeping digits a double loses', () => {
+    const csv = buildSeriesCsv({
+      ...base,
+      points: [
+        // World GDP at PPP: about 1.9e14 with a fractional part, 22 significant digits.
+        { date: '2023-01-01', value: 189543211876543.2, exactValue: '189543211876543.2109375' },
+        { date: '2022-01-01', value: 0.1234567890123457, exactValue: '0.12345678901234567890' },
+        { date: '2021-01-01', value: 1.5 },
+        { date: '2020-01-01', value: 2, exactValue: '=2' },
+        { date: '2019-01-01', value: null, exactValue: '3' },
+      ],
+    });
+    expect(csv.split('\r\n').slice(6, 11)).toEqual([
+      '2023-01-01,189543211876543.2109375',
+      '2022-01-01,0.12345678901234567890',
+      '2021-01-01,1.5',
+      // Anything but a plain decimal falls back to the number.
+      '2020-01-01,2',
+      '2019-01-01,',
+    ]);
   });
 
   it('escapes commas and quotes in the title', () => {

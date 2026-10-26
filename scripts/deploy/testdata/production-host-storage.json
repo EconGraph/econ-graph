@@ -1,0 +1,683 @@
+{
+  "objects": [
+    {
+      "kind": "PersistentVolume",
+      "last_applied": {
+        "apiVersion": "v1",
+        "kind": "PersistentVolume",
+        "metadata": {
+          "annotations": {},
+          "labels": {
+            "app": "keycloak-postgres",
+            "econgraph.io/protected": "true"
+          },
+          "name": "econgraph-app-prod-keycloak-pg"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "capacity": {
+            "storage": "5Gi"
+          },
+          "claimRef": {
+            "name": "keycloak-postgres-data-keycloak-postgres-0",
+            "namespace": "econ-graph"
+          },
+          "hostPath": {
+            "path": "/srv/econgraph/app-prod/keycloak-pg",
+            "type": "Directory"
+          },
+          "nodeAffinity": {
+            "required": {
+              "nodeSelectorTerms": [
+                {
+                  "matchExpressions": [
+                    {
+                      "key": "econgraph.io/host-storage",
+                      "operator": "In",
+                      "values": [
+                        "true"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "persistentVolumeReclaimPolicy": "Retain",
+          "storageClassName": "econgraph-host",
+          "volumeMode": "Filesystem"
+        }
+      },
+      "live": {
+        "labels": {
+          "app": "keycloak-postgres",
+          "econgraph.io/protected": "true"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "capacity": {
+            "storage": "5Gi"
+          },
+          "claimRef": {
+            "name": "keycloak-postgres-data-keycloak-postgres-0",
+            "namespace": "econ-graph"
+          },
+          "hostPath": {
+            "path": "/srv/econgraph/app-prod/keycloak-pg",
+            "type": "Directory"
+          },
+          "nodeAffinity": {
+            "required": {
+              "nodeSelectorTerms": [
+                {
+                  "matchExpressions": [
+                    {
+                      "key": "econgraph.io/host-storage",
+                      "operator": "In",
+                      "values": [
+                        "true"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "persistentVolumeReclaimPolicy": "Retain",
+          "storageClassName": "econgraph-host",
+          "volumeMode": "Filesystem"
+        }
+      },
+      "name": "econgraph-app-prod-keycloak-pg"
+    },
+    {
+      "kind": "PersistentVolume",
+      "last_applied": {
+        "apiVersion": "v1",
+        "kind": "PersistentVolume",
+        "metadata": {
+          "annotations": {},
+          "labels": {
+            "app": "postgresql",
+            "econgraph.io/protected": "true"
+          },
+          "name": "econgraph-data-plane-pg"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "capacity": {
+            "storage": "50Gi"
+          },
+          "claimRef": {
+            "name": "postgresql-data-postgresql-0",
+            "namespace": "econ-graph"
+          },
+          "hostPath": {
+            "path": "/srv/econgraph/data-plane/pg",
+            "type": "Directory"
+          },
+          "nodeAffinity": {
+            "required": {
+              "nodeSelectorTerms": [
+                {
+                  "matchExpressions": [
+                    {
+                      "key": "econgraph.io/host-storage",
+                      "operator": "In",
+                      "values": [
+                        "true"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "persistentVolumeReclaimPolicy": "Retain",
+          "storageClassName": "econgraph-host",
+          "volumeMode": "Filesystem"
+        }
+      },
+      "live": {
+        "labels": {
+          "app": "postgresql",
+          "econgraph.io/protected": "true"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "capacity": {
+            "storage": "50Gi"
+          },
+          "claimRef": {
+            "name": "postgresql-data-postgresql-0",
+            "namespace": "econ-graph"
+          },
+          "hostPath": {
+            "path": "/srv/econgraph/data-plane/pg",
+            "type": "Directory"
+          },
+          "nodeAffinity": {
+            "required": {
+              "nodeSelectorTerms": [
+                {
+                  "matchExpressions": [
+                    {
+                      "key": "econgraph.io/host-storage",
+                      "operator": "In",
+                      "values": [
+                        "true"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "persistentVolumeReclaimPolicy": "Retain",
+          "storageClassName": "econgraph-host",
+          "volumeMode": "Filesystem"
+        }
+      },
+      "name": "econgraph-data-plane-pg"
+    },
+    {
+      "kind": "StatefulSet",
+      "last_applied": {
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet",
+        "metadata": {
+          "annotations": {},
+          "labels": {
+            "app": "keycloak-postgres",
+            "version": "18"
+          },
+          "name": "keycloak-postgres",
+          "namespace": "econ-graph"
+        },
+        "spec": {
+          "replicas": 1,
+          "selector": {
+            "matchLabels": {
+              "app": "keycloak-postgres"
+            }
+          },
+          "serviceName": "keycloak-postgres-service",
+          "template": {
+            "metadata": {
+              "labels": {
+                "app": "keycloak-postgres",
+                "version": "18"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "env": [
+                    {
+                      "name": "POSTGRES_DB",
+                      "value": "keycloak"
+                    },
+                    {
+                      "name": "POSTGRES_USER",
+                      "value": "keycloak"
+                    },
+                    {
+                      "name": "POSTGRES_PASSWORD",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "db-password",
+                          "name": "econ-graph-keycloak"
+                        }
+                      }
+                    }
+                  ],
+                  "image": "postgres:18",
+                  "livenessProbe": {
+                    "exec": {
+                      "command": [
+                        "pg_isready",
+                        "-U",
+                        "keycloak",
+                        "-d",
+                        "keycloak"
+                      ]
+                    },
+                    "failureThreshold": 3,
+                    "initialDelaySeconds": 30,
+                    "periodSeconds": 10,
+                    "timeoutSeconds": 5
+                  },
+                  "name": "postgres",
+                  "ports": [
+                    {
+                      "containerPort": 5432,
+                      "name": "postgres"
+                    }
+                  ],
+                  "readinessProbe": {
+                    "exec": {
+                      "command": [
+                        "pg_isready",
+                        "-U",
+                        "keycloak",
+                        "-d",
+                        "keycloak"
+                      ]
+                    },
+                    "failureThreshold": 3,
+                    "initialDelaySeconds": 5,
+                    "periodSeconds": 5,
+                    "timeoutSeconds": 3
+                  },
+                  "resources": {
+                    "limits": {
+                      "cpu": "500m",
+                      "memory": "512Mi"
+                    },
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "256Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "runAsNonRoot": true,
+                    "runAsUser": 999,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/var/lib/postgresql",
+                      "name": "keycloak-postgres-data"
+                    }
+                  ]
+                }
+              ],
+              "initContainers": [
+                {
+                  "command": [
+                    "sh",
+                    "-ec",
+                    "root=\"$1\"; pgdata=\"$2\"\n# The host directory starts out owned by jmalicki (uid 1000). Postgres runs\n# as 999 and has to create PGDATA inside it, so hand the volume root over.\nchown 999:999 \"$root\"\nchmod 0700 \"$root\"\n# A data directory restored by a copy that didn't keep ownership (anything\n# but 999:999) would stop Postgres starting; fix it once.\nif [ -e \"$pgdata\" ] && [ \"$(stat -c %u:%g \"$pgdata\")\" != \"999:999\" ]; then\n  echo \"fixing ownership of $pgdata\"\n  chown -R 999:999 \"$pgdata\"\nfi\nstat -c '%n %u:%g %a' \"$root\"\n",
+                    "init-data-dir",
+                    "/var/lib/postgresql",
+                    "/var/lib/postgresql/18/docker"
+                  ],
+                  "image": "postgres:18",
+                  "name": "init-data-dir",
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "add": [
+                        "CHOWN",
+                        "FOWNER",
+                        "DAC_READ_SEARCH"
+                      ],
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true,
+                    "runAsNonRoot": false,
+                    "runAsUser": 0,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/var/lib/postgresql",
+                      "name": "keycloak-postgres-data"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "econgraph.io/host-storage": "true"
+              },
+              "securityContext": {
+                "fsGroup": 999
+              }
+            }
+          },
+          "volumeClaimTemplates": [
+            {
+              "metadata": {
+                "name": "keycloak-postgres-data"
+              },
+              "spec": {
+                "accessModes": [
+                  "ReadWriteOnce"
+                ],
+                "resources": {
+                  "requests": {
+                    "storage": "5Gi"
+                  }
+                },
+                "storageClassName": "econgraph-host",
+                "volumeName": "econgraph-app-prod-keycloak-pg"
+              }
+            }
+          ]
+        }
+      },
+      "live": {
+        "podManagementPolicy": "OrderedReady",
+        "selector": {
+          "matchLabels": {
+            "app": "keycloak-postgres"
+          }
+        },
+        "serviceName": "keycloak-postgres-service",
+        "volumeClaimTemplates": [
+          {
+            "name": "keycloak-postgres-data",
+            "spec": {
+              "accessModes": [
+                "ReadWriteOnce"
+              ],
+              "resources": {
+                "requests": {
+                  "storage": "5Gi"
+                }
+              },
+              "storageClassName": "econgraph-host",
+              "volumeMode": "Filesystem",
+              "volumeName": "econgraph-app-prod-keycloak-pg"
+            }
+          }
+        ]
+      },
+      "name": "keycloak-postgres"
+    },
+    {
+      "kind": "StatefulSet",
+      "last_applied": {
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet",
+        "metadata": {
+          "annotations": {},
+          "labels": {
+            "app": "postgresql",
+            "version": "18"
+          },
+          "name": "postgresql",
+          "namespace": "econ-graph"
+        },
+        "spec": {
+          "replicas": 1,
+          "selector": {
+            "matchLabels": {
+              "app": "postgresql"
+            }
+          },
+          "serviceName": "postgres-service",
+          "template": {
+            "metadata": {
+              "labels": {
+                "app": "postgresql",
+                "version": "18"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "env": [
+                    {
+                      "name": "POSTGRES_DB",
+                      "value": "econ_graph"
+                    },
+                    {
+                      "name": "POSTGRES_USER",
+                      "value": "postgres"
+                    },
+                    {
+                      "name": "POSTGRES_PASSWORD",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "postgres-password",
+                          "name": "econ-graph-postgres"
+                        }
+                      }
+                    },
+                    {
+                      "name": "APP_DB_PASSWORD",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "app-password",
+                          "name": "econ-graph-postgres"
+                        }
+                      }
+                    },
+                    {
+                      "name": "PGDATA",
+                      "value": "/data/pgdata"
+                    }
+                  ],
+                  "image": "postgres:18",
+                  "livenessProbe": {
+                    "exec": {
+                      "command": [
+                        "pg_isready",
+                        "-U",
+                        "postgres",
+                        "-d",
+                        "econ_graph"
+                      ]
+                    },
+                    "failureThreshold": 3,
+                    "initialDelaySeconds": 30,
+                    "periodSeconds": 10,
+                    "timeoutSeconds": 5
+                  },
+                  "name": "postgresql",
+                  "ports": [
+                    {
+                      "containerPort": 5432,
+                      "name": "postgresql"
+                    }
+                  ],
+                  "readinessProbe": {
+                    "exec": {
+                      "command": [
+                        "pg_isready",
+                        "-U",
+                        "postgres",
+                        "-d",
+                        "econ_graph"
+                      ]
+                    },
+                    "failureThreshold": 3,
+                    "initialDelaySeconds": 5,
+                    "periodSeconds": 5,
+                    "timeoutSeconds": 3
+                  },
+                  "resources": {
+                    "limits": {
+                      "cpu": "1000m",
+                      "memory": "4Gi"
+                    },
+                    "requests": {
+                      "cpu": "250m",
+                      "memory": "512Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": false,
+                    "runAsNonRoot": true,
+                    "runAsUser": 999,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/data",
+                      "name": "postgresql-data"
+                    },
+                    {
+                      "mountPath": "/docker-entrypoint-initdb.d",
+                      "name": "postgresql-init"
+                    }
+                  ]
+                }
+              ],
+              "initContainers": [
+                {
+                  "command": [
+                    "sh",
+                    "-ec",
+                    "root=\"$1\"; pgdata=\"$2\"\n# The host directory starts out owned by jmalicki (uid 1000). Postgres runs\n# as 999 and has to create PGDATA inside it, so hand the volume root over.\nchown 999:999 \"$root\"\nchmod 0700 \"$root\"\n# A data directory restored by a copy that didn't keep ownership (anything\n# but 999:999) would stop Postgres starting; fix it once.\nif [ -e \"$pgdata\" ] && [ \"$(stat -c %u:%g \"$pgdata\")\" != \"999:999\" ]; then\n  echo \"fixing ownership of $pgdata\"\n  chown -R 999:999 \"$pgdata\"\nfi\nstat -c '%n %u:%g %a' \"$root\"\n",
+                    "init-data-dir",
+                    "/data",
+                    "/data/pgdata"
+                  ],
+                  "image": "postgres:18",
+                  "name": "init-data-dir",
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "add": [
+                        "CHOWN",
+                        "FOWNER",
+                        "DAC_READ_SEARCH"
+                      ],
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true,
+                    "runAsNonRoot": false,
+                    "runAsUser": 0,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/data",
+                      "name": "postgresql-data"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "econgraph.io/host-storage": "true"
+              },
+              "securityContext": {
+                "fsGroup": 999
+              },
+              "volumes": [
+                {
+                  "configMap": {
+                    "defaultMode": 365,
+                    "name": "postgresql-init"
+                  },
+                  "name": "postgresql-init"
+                }
+              ]
+            }
+          },
+          "volumeClaimTemplates": [
+            {
+              "metadata": {
+                "name": "postgresql-data"
+              },
+              "spec": {
+                "accessModes": [
+                  "ReadWriteOnce"
+                ],
+                "resources": {
+                  "requests": {
+                    "storage": "50Gi"
+                  }
+                },
+                "storageClassName": "econgraph-host",
+                "volumeName": "econgraph-data-plane-pg"
+              }
+            }
+          ]
+        }
+      },
+      "live": {
+        "podManagementPolicy": "OrderedReady",
+        "selector": {
+          "matchLabels": {
+            "app": "postgresql"
+          }
+        },
+        "serviceName": "postgres-service",
+        "volumeClaimTemplates": [
+          {
+            "name": "postgresql-data",
+            "spec": {
+              "accessModes": [
+                "ReadWriteOnce"
+              ],
+              "resources": {
+                "requests": {
+                  "storage": "50Gi"
+                }
+              },
+              "storageClassName": "econgraph-host",
+              "volumeMode": "Filesystem",
+              "volumeName": "econgraph-data-plane-pg"
+            }
+          }
+        ]
+      },
+      "name": "postgresql"
+    },
+    {
+      "kind": "StorageClass",
+      "last_applied": {
+        "apiVersion": "storage.k8s.io/v1",
+        "kind": "StorageClass",
+        "metadata": {
+          "annotations": {},
+          "labels": {
+            "app": "econ-graph",
+            "econgraph.io/protected": "true"
+          },
+          "name": "econgraph-host"
+        },
+        "provisioner": "kubernetes.io/no-provisioner",
+        "reclaimPolicy": "Retain",
+        "volumeBindingMode": "Immediate"
+      },
+      "live": {
+        "labels": {
+          "app": "econ-graph",
+          "econgraph.io/protected": "true"
+        },
+        "mountOptions": [],
+        "parameters": {},
+        "provisioner": "kubernetes.io/no-provisioner",
+        "reclaimPolicy": "Retain",
+        "volumeBindingMode": "Immediate"
+      },
+      "name": "econgraph-host"
+    }
+  ]
+}

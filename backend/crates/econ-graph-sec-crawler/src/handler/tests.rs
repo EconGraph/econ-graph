@@ -47,6 +47,7 @@ fn ctx(config: HttpConfig, sec: SourcePolicy, pool: DatabasePool) -> CrawlCtx {
         http: HttpFetcher::new(config, policies).expect("fetcher"),
         pool,
         keys: test_keys(),
+        bypass_validators: false,
     }
 }
 

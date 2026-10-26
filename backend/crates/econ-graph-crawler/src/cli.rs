@@ -10,12 +10,17 @@
 //! ```text
 //! crawler enqueue  --source FRED --series GDP,UNRATE [--priority N]
 //! crawler discover --source FRED [--priority N]
+//! crawler refetch  (--source FRED,BLS | --all) [--dry-run] [--completed-since TIME] [--priority N] [--include-inactive] [--json]
+//! crawler refetch-status (--source FRED,BLS | --all) [--since TIME] [--failures N] [--json]
 //! crawler status   [--json]
 //! crawler coverage [--json] [--fail-under PCT]   # per-source coverage and freshness
 //! crawler sources
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
 //! ```
+//!
+//! `refetch` enqueues a forced full-history re-fetch (`refetch_series` jobs, see
+//! [`crate::refetch`]) and `refetch-status` reports its per-source progress.
 //!
 //! `record-reference-seeds` downloads a source's code lists and writes them, with the `ETag`s
 //! they were served with, as a seed migration for new databases (see [`crate::reference_file`]).
@@ -40,6 +45,7 @@ use crate::http::{HttpConfig, HttpFetcher};
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference_file;
+use crate::refetch::{self, RefetchOptions, SourcePlan, SourceProgress, DEFAULT_REFETCH_PRIORITY};
 use crate::source::SourceId;
 use crate::sources::default_registry;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
@@ -91,6 +97,45 @@ pub enum Command {
         #[arg(long, default_value_t = DEFAULT_PRIORITY, value_parser = clap::value_parser!(i32).range(1..=10))]
         priority: i32,
     },
+    /// Enqueue a forced full-history re-fetch (`refetch_series` jobs) of every series of the
+    /// given sources: the worker re-reads each series' whole history, ignoring stored validators
+    /// and incremental bounds, and rewrites stored values in place. Idempotent: series with an
+    /// active re-fetch job (or, with --completed-since, a completed one) are skipped.
+    Refetch {
+        #[command(flatten)]
+        sources: SourceSelection,
+        /// Print what would be enqueued without enqueuing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip series whose re-fetch completed at or after this RFC 3339 time (to resume a
+        /// campaign started then without redoing finished series).
+        #[arg(long, value_name = "TIME")]
+        completed_since: Option<DateTime<Utc>>,
+        /// Queue priority, 1 (lowest) to 10 (highest). Below scheduled refreshes by default.
+        #[arg(long, default_value_t = DEFAULT_REFETCH_PRIORITY, value_parser = clap::value_parser!(i32).range(1..=10))]
+        priority: i32,
+        /// Also re-fetch series marked inactive (retired by the source's catalog).
+        #[arg(long)]
+        include_inactive: bool,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print per-source progress of re-fetch jobs: for each series, the state of its latest
+    /// refetch_series job.
+    RefetchStatus {
+        #[command(flatten)]
+        sources: SourceSelection,
+        /// Only count jobs created at or after this RFC 3339 time.
+        #[arg(long, value_name = "TIME")]
+        since: Option<DateTime<Utc>>,
+        /// Also list up to N failed series with their errors.
+        #[arg(long, value_name = "N", default_value_t = 0)]
+        failures: i64,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print crawler status derived from crawl_queue.
     Status {
         /// Print JSON instead of text.
@@ -136,6 +181,37 @@ pub enum Command {
         #[arg(long)]
         skip_failed: bool,
     },
+}
+
+/// The sources a `refetch` / `refetch-status` command covers.
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+#[group(required = true, multiple = false)]
+pub struct SourceSelection {
+    /// Comma-separated sources, e.g. FRED,WORLD_BANK.
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub source: Vec<SourceId>,
+    /// Every source the refresh scheduler refreshes (FRED, BLS, BEA, Census, World Bank, FHFA
+    /// in a release build).
+    #[arg(long)]
+    pub all: bool,
+}
+
+impl SourceSelection {
+    /// The selected sources, sorted and de-duplicated. A named source must be one the refresh
+    /// scheduler refreshes (it has an adapter that fetches series).
+    pub fn resolve(&self, registry: &AdapterRegistry) -> anyhow::Result<Vec<SourceId>> {
+        let fetchable = covered_sources(&registry.ids());
+        if self.all {
+            return Ok(fetchable);
+        }
+        let mut out = self.source.clone();
+        out.sort_unstable();
+        out.dedup();
+        if let Some(bad) = out.iter().find(|s| !fetchable.contains(s)) {
+            bail!("{bad} has no adapter that fetches series; refetchable sources: {fetchable:?}");
+        }
+        Ok(out)
+    }
 }
 
 /// Version of the migration that creates `seed_reference_codes` (the v4.0.0 baseline,
@@ -318,6 +394,66 @@ impl Cli {
                 }
                 Ok(out)
             }
+            Command::Refetch {
+                sources,
+                dry_run,
+                completed_since,
+                priority,
+                include_inactive,
+                json,
+            } => {
+                let sources = sources.resolve(&default_registry())?;
+                let options = RefetchOptions {
+                    priority,
+                    include_inactive,
+                    completed_since,
+                };
+                let plans = if dry_run {
+                    refetch::plan(&pool, &sources, &options).await?
+                } else {
+                    refetch::enqueue(&pool, &sources, &options).await?
+                };
+                if json {
+                    Ok(format!("{}\n", serde_json::to_string_pretty(&plans)?))
+                } else {
+                    Ok(format_refetch_plan(&plans, dry_run))
+                }
+            }
+            Command::RefetchStatus {
+                sources,
+                since,
+                failures,
+                json,
+            } => {
+                let sources = sources.resolve(&default_registry())?;
+                let progress = refetch::progress(&pool, &sources, since).await?;
+                let failed = if failures > 0 {
+                    refetch::failures(&pool, &sources, since, failures).await?
+                } else {
+                    Vec::new()
+                };
+                if json {
+                    Ok(format!(
+                        "{}\n",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "sources": progress,
+                            "failures": failed,
+                        }))?
+                    ))
+                } else {
+                    let mut out = format_refetch_progress(&progress);
+                    for f in &failed {
+                        let _ = writeln!(
+                            out,
+                            "failed {} {}: {}",
+                            f.source,
+                            f.series_id,
+                            f.error_message.as_deref().unwrap_or("-")
+                        );
+                    }
+                    Ok(out)
+                }
+            }
             Command::Fetch {
                 source,
                 series,
@@ -452,6 +588,7 @@ async fn fetch_one(
         http: build_http(&registry)?,
         pool: pool.clone(),
         keys: ApiKeys::from_env(),
+        bypass_validators: full,
     };
     let known_vintage = if full || !adapter.tracks_vintages() {
         None
@@ -475,6 +612,7 @@ async fn fetch_one(
         .fetch_series_incremental(&ctx, external_id, since, known_vintage)
         .await?;
     datasets.check(source, external_id, &fetched.dataset)?;
+    crate::value::check_fetched_values(external_id, &fetched)?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
     Ok(format!(
         "{source} {external_id}: {} point(s) written ({} new), latest {}, series {}{}\n",
@@ -541,6 +679,58 @@ pub fn format_status(s: &CrawlerStatusSnapshot) -> String {
                 fmt_time(p.last_success)
             );
         }
+    }
+    out
+}
+
+/// Text rendering of [`refetch::plan`] / [`refetch::enqueue`] results.
+pub fn format_refetch_plan(plans: &[SourcePlan], dry_run: bool) -> String {
+    let mut out = String::new();
+    let verb = if dry_run { "WOULD ENQUEUE" } else { "ENQUEUED" };
+    let _ = writeln!(
+        out,
+        "{:<12} {:>8} {:>8} {:>10} {:>14}",
+        "SOURCE", "SERIES", "QUEUED", "COMPLETED", verb
+    );
+    for p in plans {
+        let n = if dry_run { p.to_enqueue() } else { p.enqueued };
+        let _ = writeln!(
+            out,
+            "{:<12} {:>8} {:>8} {:>10} {:>14}",
+            p.source, p.series, p.already_queued, p.already_completed, n
+        );
+    }
+    out
+}
+
+/// Text rendering of [`refetch::progress`].
+pub fn format_refetch_progress(rows: &[SourceProgress]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{:<12} {:>8} {:>8} {:>10} {:>9} {:>10} {:>7} {:>10}  state",
+        "SOURCE", "SERIES", "PENDING", "PROCESSING", "RETRYING", "COMPLETED", "FAILED", "CANCELLED"
+    );
+    for p in rows {
+        let state = if p.total() == 0 {
+            "none"
+        } else if p.finished() {
+            "finished"
+        } else {
+            "running"
+        };
+        let _ = writeln!(
+            out,
+            "{:<12} {:>8} {:>8} {:>10} {:>9} {:>10} {:>7} {:>10}  {state}",
+            p.source,
+            p.total(),
+            p.pending,
+            p.processing,
+            p.retrying,
+            p.completed,
+            p.failed,
+            p.cancelled
+        );
     }
     out
 }
@@ -652,6 +842,112 @@ mod tests {
             }
         );
         assert_eq!(cli.database_url.as_deref(), Some("postgres://x"));
+    }
+
+    #[test]
+    fn cli_parses_refetch() {
+        let cli = parse(&["refetch", "--source", "fred,world_bank", "--dry-run"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Refetch {
+                sources: SourceSelection {
+                    source: vec![SourceId::Fred, SourceId::WorldBank],
+                    all: false,
+                },
+                dry_run: true,
+                completed_since: None,
+                priority: DEFAULT_REFETCH_PRIORITY,
+                include_inactive: false,
+                json: false,
+            }
+        );
+        let cli = parse(&[
+            "refetch",
+            "--all",
+            "--completed-since",
+            "2026-10-26T00:00:00Z",
+            "--priority",
+            "2",
+        ])
+        .unwrap();
+        let Command::Refetch {
+            sources,
+            completed_since,
+            priority,
+            ..
+        } = cli.command
+        else {
+            panic!("not refetch");
+        };
+        assert!(sources.all);
+        assert_eq!(
+            completed_since,
+            Some("2026-10-26T00:00:00Z".parse().unwrap())
+        );
+        assert_eq!(priority, 2);
+        // A source selection is required, and --source and --all exclude each other.
+        assert!(parse(&["refetch"]).is_err());
+        assert!(parse(&["refetch", "--all", "--source", "FRED"]).is_err());
+        assert!(parse(&["refetch-status", "--all", "--failures", "20", "--json"]).is_ok());
+    }
+
+    #[test]
+    fn refetch_sources_resolve_to_fetchable_sources() {
+        let registry = default_registry();
+        let all = SourceSelection {
+            source: Vec::new(),
+            all: true,
+        };
+        let resolved = all.resolve(&registry).unwrap();
+        for s in [
+            SourceId::Fred,
+            SourceId::Bls,
+            SourceId::Bea,
+            SourceId::Census,
+            SourceId::WorldBank,
+            SourceId::Fhfa,
+        ] {
+            assert!(resolved.contains(&s), "{s}");
+        }
+        assert!(!resolved.contains(&SourceId::Sec));
+        let named = SourceSelection {
+            source: vec![SourceId::WorldBank, SourceId::Fred, SourceId::Fred],
+            all: false,
+        };
+        assert_eq!(
+            named.resolve(&registry).unwrap(),
+            vec![SourceId::Fred, SourceId::WorldBank]
+        );
+        let sec = SourceSelection {
+            source: vec![SourceId::Sec],
+            all: false,
+        };
+        assert!(sec.resolve(&registry).is_err());
+    }
+
+    #[test]
+    fn refetch_reports_render() {
+        let plan = vec![SourcePlan {
+            source: "FRED".into(),
+            series: 10,
+            already_queued: 2,
+            already_completed: 3,
+            enqueued: 0,
+        }];
+        let text = format_refetch_plan(&plan, true);
+        assert!(text.contains("WOULD ENQUEUE"), "{text}");
+        assert!(
+            text.lines().nth(1).unwrap().trim_end().ends_with(" 5"),
+            "{text}"
+        );
+        let progress = vec![SourceProgress {
+            source: "FRED".into(),
+            completed: 4,
+            failed: 1,
+            ..SourceProgress::default()
+        }];
+        let text = format_refetch_progress(&progress);
+        assert!(text.contains("finished"), "{text}");
     }
 
     #[test]
