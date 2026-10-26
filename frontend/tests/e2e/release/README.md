@@ -167,8 +167,8 @@ In this mode (`env.ts`):
   ended at Keycloak leave the page signed out with a way to sign in again; a map
   whose values fail to load says so and Retry recovers. The detailed permutations
   are the component tests'. The signed-in specs use `erin` and `frank`. Saving
-  an annotation again after a lost response stores it once. One known gap is
-  `test.fixme`: a failed source listing has no Retry.
+  an annotation again after a lost response stores it once. A failed source
+  listing offers Retry and loads the source’s series after recovery (ECO-440).
   The backend side of ECO-264 is mapped in
   `docs/testing/failure-behavior-matrix.md`.
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map

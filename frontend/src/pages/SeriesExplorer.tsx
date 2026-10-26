@@ -632,7 +632,20 @@ const SeriesExplorer: React.FC = () => {
 
       {/* Search error */}
       {searchError && (
-        <Alert severity='error' sx={{ mb: 3 }}>
+        <Alert
+          severity='error'
+          sx={{ mb: 3 }}
+          action={
+            <Button
+              color='inherit'
+              size='small'
+              disabled={activeResult?.isFetching}
+              onClick={() => void activeResult?.refetch()}
+            >
+              Retry
+            </Button>
+          }
+        >
           {browsing ? 'Could not list series' : 'Search failed'}:{' '}
           {searchError instanceof Error ? searchError.message : 'unknown error'}
         </Alert>
