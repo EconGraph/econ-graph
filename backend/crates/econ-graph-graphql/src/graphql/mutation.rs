@@ -46,6 +46,7 @@ impl Mutation {
             "series_ids": input.series_ids,
             "priority": input.priority,
         });
+        let audit = audit::Attempt::new(ctx, "trigger_crawl", "crawl_queue", None, details.clone());
         let attempt = async {
             // Inside the audited attempt, so a backend with no data database still records it.
             let pool: &DatabasePool =
@@ -71,8 +72,7 @@ impl Mutation {
             Ok((enqueued, pool))
         }
         .await;
-        let (enqueued, pool) =
-            audit::audited(ctx, "trigger_crawl", "crawl_queue", None, details, attempt).await?;
+        let (enqueued, pool) = audit.finish(details, attempt).await?;
 
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         let mut status = CrawlerStatusType::from_snapshot(snapshot);
@@ -246,6 +246,13 @@ impl Mutation {
             is_active: input.is_active,
         };
         let details = serde_json::json!({ "fields": changes.field_names() });
+        let audit = audit::Attempt::new(
+            ctx,
+            "update_user",
+            "user",
+            user_id.map(|id| id.to_string()),
+            details.clone(),
+        );
         let attempt = async {
             if changes.is_active.is_some() {
                 require_role(ctx, Role::AdminUsersSuspend).or_outcome(Outcome::Denied)?;
@@ -276,15 +283,7 @@ impl Mutation {
                 })
         }
         .await;
-        let final_user = audit::audited(
-            ctx,
-            "update_user",
-            "user",
-            user_id.map(|id| id.to_string()),
-            details,
-            attempt,
-        )
-        .await?;
+        let final_user = audit.finish(details, attempt).await?;
 
         Ok(UserType::from(final_user))
     }
@@ -299,6 +298,13 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
+        let audit = audit::Attempt::new(
+            ctx,
+            "delete_user",
+            "user",
+            user_id.map(|id| id.to_string()),
+            serde_json::json!({}),
+        );
         let attempt = async {
             let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
             refuse_self_lockout(caller, user_id, "delete").or_outcome(Outcome::SelfLockout)?;
@@ -315,15 +321,7 @@ impl Mutation {
             Ok(true)
         }
         .await;
-        audit::audited(
-            ctx,
-            "delete_user",
-            "user",
-            user_id.map(|id| id.to_string()),
-            serde_json::json!({}),
-            attempt,
-        )
-        .await
+        audit.finish(serde_json::json!({}), attempt).await
     }
 
     /// Suspend a user account (requires `admin.users:suspend`); never the caller's own
@@ -353,6 +351,17 @@ async fn set_user_active(
 
     let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
     let user_id = uuid::Uuid::parse_str(id).ok();
+    let audit = audit::Attempt::new(
+        ctx,
+        if active {
+            "activate_user"
+        } else {
+            "suspend_user"
+        },
+        "user",
+        user_id.map(|id| id.to_string()),
+        serde_json::json!({}),
+    );
     let attempt = async {
         let user_id = user_id.ok_or_else(|| fail(Outcome::Invalid, "Invalid user id"))?;
         if !active {
@@ -371,19 +380,7 @@ async fn set_user_active(
         Ok(true)
     }
     .await;
-    audit::audited(
-        ctx,
-        if active {
-            "activate_user"
-        } else {
-            "suspend_user"
-        },
-        "user",
-        user_id.map(|id| id.to_string()),
-        serde_json::json!({}),
-        attempt,
-    )
-    .await
+    audit.finish(serde_json::json!({}), attempt).await
 }
 
 /// Turns a `triggerCrawl` input into queue rows, or a validation message.

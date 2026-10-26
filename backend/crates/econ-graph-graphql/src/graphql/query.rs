@@ -718,19 +718,40 @@ impl Query {
         })
     }
 
-    /// Get security events (requires `admin.security:read`)
+    /// Get security events (requires `admin.security:read`). Existing list clients retain
+    /// their response shape; use `securityEventsPage` for cursors and total count.
     async fn security_events(
         &self,
         ctx: &Context<'_>,
         limit: Option<i32>,
+        after: Option<String>,
+        filter: Option<SecurityEventFilterInput>,
     ) -> Result<Vec<SecurityEventType>> {
         require_role(ctx, Role::AdminSecurityRead)?;
-        let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
-
-        let limit = limit.unwrap_or(50).clamp(1, 100) as i64;
-        let events =
-            core_models::admin::SecurityEvent::get_events(pool, None, None, None, limit).await?;
+        let pool = crate::graphql::context::app_pool(ctx)?;
+        let offset = parse_audit_offset(after.as_deref())?;
+        let limit = i64::from(limit.unwrap_or(50).clamp(1, 100));
+        let events = core_models::admin::SecurityEvent::get_events(
+            pool,
+            &security_event_filter(filter),
+            limit,
+            offset,
+        )
+        .await?;
         Ok(events.into_iter().map(SecurityEventType::from).collect())
+    }
+
+    /// Get a filtered security-event connection (requires `admin.security:read`). Offset
+    /// cursors have the same semantics as `auditLogs`, including concurrent-insert drift.
+    async fn security_events_page(
+        &self,
+        ctx: &Context<'_>,
+        filter: Option<SecurityEventFilterInput>,
+        pagination: Option<PaginationInput>,
+    ) -> Result<SecurityEventConnection> {
+        let first = pagination.as_ref().and_then(|p| p.first);
+        let after = pagination.as_ref().and_then(|p| p.after.as_deref());
+        load_security_events(ctx, filter, first, after).await
     }
 
     /// Get audit logs (requires `admin.audit:read`)
@@ -761,16 +782,11 @@ impl Query {
             .and_then(|p| p.first)
             .unwrap_or(50)
             .clamp(1, 100) as i64;
-        let offset = pagination
-            .as_ref()
-            .and_then(|p| p.after.as_deref())
-            .and_then(|cursor| cursor.parse::<i64>().ok())
-            .unwrap_or(0)
-            .max(0);
+        let offset = parse_audit_offset(pagination.as_ref().and_then(|p| p.after.as_deref()))?;
 
         let total_count = AuditLog::get_count(pool, &filter).await?;
         let logs = AuditLog::get_logs(pool, &filter, limit, offset).await?;
-        let has_next_page = (offset + limit) < total_count;
+        let has_next_page = offset.saturating_add(limit) < total_count;
         let has_previous_page = offset > 0;
 
         Ok(AuditLogConnection {
@@ -780,10 +796,67 @@ impl Query {
                 has_next_page,
                 has_previous_page,
                 start_cursor: has_previous_page.then(|| offset.to_string()),
-                end_cursor: has_next_page.then(|| (offset + limit).to_string()),
+                end_cursor: has_next_page.then(|| offset.saturating_add(limit).to_string()),
             },
         })
     }
+}
+
+/// Validate admin offset cursors instead of silently restarting at page one.
+fn parse_audit_offset(after: Option<&str>) -> Result<i64> {
+    match after {
+        None => Ok(0),
+        Some(value) => value
+            .parse::<i64>()
+            .ok()
+            .filter(|offset| *offset >= 0)
+            .ok_or_else(|| {
+                crate::graphql::errors::bad_user_input(
+                    "`after` must be a nonnegative 64-bit offset",
+                )
+            }),
+    }
+}
+
+fn security_event_filter(
+    filter: Option<SecurityEventFilterInput>,
+) -> core_models::admin::SecurityEventFilter {
+    let filter = filter.unwrap_or_default();
+    core_models::admin::SecurityEventFilter {
+        event_type: filter.event_type,
+        severity: filter.severity,
+        resolved: filter.resolved,
+        created_after: filter.created_after,
+        created_before: filter.created_before,
+    }
+}
+
+async fn load_security_events(
+    ctx: &Context<'_>,
+    filter: Option<SecurityEventFilterInput>,
+    first: Option<i32>,
+    after: Option<&str>,
+) -> Result<SecurityEventConnection> {
+    use core_models::admin::SecurityEvent;
+    require_role(ctx, Role::AdminSecurityRead)?;
+    let pool = crate::graphql::context::app_pool(ctx)?;
+    let filter = security_event_filter(filter);
+    let limit = i64::from(first.unwrap_or(50).clamp(1, 100));
+    let offset = parse_audit_offset(after)?;
+    let total_count = SecurityEvent::get_count(pool, &filter).await?;
+    let nodes = SecurityEvent::get_events(pool, &filter, limit, offset).await?;
+    let next = offset.saturating_add(limit);
+    let has_next_page = next < total_count;
+    Ok(SecurityEventConnection {
+        nodes: nodes.into_iter().map(SecurityEventType::from).collect(),
+        total_count: total_count.min(i64::from(i32::MAX)) as i32,
+        page_info: PageInfo {
+            has_next_page,
+            has_previous_page: offset > 0,
+            start_cursor: (offset > 0).then(|| offset.to_string()),
+            end_cursor: has_next_page.then(|| next.to_string()),
+        },
+    })
 }
 
 /// Parses a UUID passed as the argument `name`. A malformed one is the client's mistake, so
