@@ -1013,6 +1013,20 @@ impl Worker {
                     });
             }
         }
+        if matches!(result, Err(CrawlError::Restricted(_))) {
+            if let Some(status) =
+                crate::lifecycle::record_restricted_conn(conn, source, &item.series_id).await?
+            {
+                pending_metrics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(crate::lifecycle::Reconciled {
+                        guarded: false,
+                        transitions: 1,
+                        transition_statuses: vec![status],
+                    });
+            }
+        }
         let series_id = match result {
             Ok(stats) => stats.series_id,
             Err(_) => persist::find_series_id_conn(conn, source, &item.series_id).await?,
@@ -1093,6 +1107,7 @@ impl Worker {
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
             CrawlError::Busy { retry_after, .. } => Some((*retry_after, false)),
             CrawlError::NotFound(_)
+            | CrawlError::Restricted(_)
             | CrawlError::Auth(_)
             | CrawlError::Parse(_)
             | CrawlError::Permanent(_) => None,

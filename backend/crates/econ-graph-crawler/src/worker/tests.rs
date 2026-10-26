@@ -1123,6 +1123,92 @@ async fn not_found_on_existing_series_sets_not_found_status() {
 }
 
 #[tokio::test]
+async fn publication_restriction_on_fetch_preserves_history_and_hides_unscoped_series() {
+    let Some(db) = db().await else { return };
+    // These ids deliberately have no catalog scope/lifecycle row: a direct or scheduled
+    // fetch must still hide a previously stored series when verified metadata forbids it.
+    let ids = ["t5_restricted_history", "t5_restricted_metadata"];
+    let adapter = Arc::new(BatchAdapter {
+        series_errors: ids
+            .iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    CrawlError::Restricted("redistribution prohibited".into()),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 1);
+    let discovered: Vec<_> = ids
+        .iter()
+        .map(|id| DiscoveredSeries {
+            external_id: id.to_string(),
+            title: id.to_string(),
+            description: None,
+            units: None,
+            frequency: Some("Monthly".into()),
+            data_url: None,
+            dataset: flat(),
+        })
+        .collect();
+    persist::persist_discovered(&db.pool, SRC, &discovered)
+        .await
+        .unwrap();
+    let write = persist::persist_series(
+        &db.pool,
+        SRC,
+        ids[0],
+        &BatchAdapter::default().series(ids[0]).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(point_count(&db.pool, write.series_id).await, 1);
+    let queue = enqueue_fetch(&db.pool, &ids).await;
+    for job_id in queue {
+        let result = w.run_once().await.expect("one restricted fetch");
+        assert!(matches!(result, JobOutcome::Failed { .. }), "{result:?}");
+        let queued = item(&db.pool, job_id).await;
+        assert_eq!(queued.status, "failed");
+        assert_eq!(queued.retry_count, 0);
+    }
+    let mut conn = db.pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Publication {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        status: String,
+    }
+    for id in ids {
+        let state = diesel::sql_query("SELECT status FROM series_lifecycle WHERE external_id=$1")
+            .bind::<diesel::sql_types::Text, _>(id)
+            .get_result::<Publication>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(state.status, "restricted", "{id}");
+        assert_eq!(metadata_is_active(&db.pool, id).await, Some(false));
+    }
+    drop(conn);
+    assert_eq!(
+        point_count(&db.pool, write.series_id).await,
+        1,
+        "retained history"
+    );
+    assert!(
+        series_row(&db.pool, ids[1]).await.is_none(),
+        "do not invent observations"
+    );
+    assert_eq!(
+        series_row(&db.pool, ids[0]).await.unwrap().6.as_deref(),
+        Some("restricted")
+    );
+    assert_eq!(
+        attempts(&db.pool, write.series_id).await,
+        vec![(false, Some("restricted".into()), Some(0))]
+    );
+}
+
+#[tokio::test]
 async fn unknown_source_and_missing_adapter_fail() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await;

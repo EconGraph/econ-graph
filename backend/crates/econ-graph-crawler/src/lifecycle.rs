@@ -465,16 +465,17 @@ pub(crate) async fn record_restricted_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
-) -> AppResult<()> {
+) -> AppResult<Option<String>> {
     let source_id = persist::data_source_id_conn(conn, source).await?;
     diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
         .bind::<SqlUuid, _>(source_id)
         .execute(&mut *conn)
         .await?;
-    diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint)
+    let change = diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint)
         VALUES($1,$2,'restricted',NOW(),'fetch-only') ON CONFLICT(source_id,external_id) DO UPDATE SET
-        status='restricted',since=CASE WHEN series_lifecycle.status='restricted' THEN series_lifecycle.since ELSE NOW() END")
-        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
+        status='restricted',since=CASE WHEN series_lifecycle.status='restricted' THEN series_lifecycle.since ELSE NOW() END
+        RETURNING CASE WHEN old.status='restricted' THEN NULL ELSE status END AS status")
+        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result::<StatusChange>(&mut *conn).await?;
     diesel::sql_query("UPDATE economic_series SET crawl_status='restricted',is_active=false WHERE source_id=$1 AND external_id=$2")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
     diesel::sql_query(
@@ -484,7 +485,7 @@ pub(crate) async fn record_restricted_conn(
     .bind::<Text, _>(external_id)
     .execute(&mut *conn)
     .await?;
-    Ok(())
+    Ok(change.status)
 }
 
 /// Human confirmation of a proposed successor. Both ids must exist under the same
