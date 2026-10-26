@@ -293,6 +293,16 @@ jobs:
     - name: Check the full-history re-fetch script
       run: scripts/deploy/test-refetch-full-history.sh
 
+    # Loading a release candidate's GHCR images into the kind cluster, the
+    # restart and image check after deploy.sh, and the rollback, against stub
+    # git, docker, kind and kubectl.
+    - name: Check the release image load, verify and rollback scripts
+      run: |
+        shellcheck -x scripts/deploy/load-release-images.sh scripts/deploy/verify-release-images.sh \
+          scripts/deploy/rollback-release-images.sh scripts/deploy/test-release-images.sh \
+          scripts/deploy/lib/release-images.sh
+        scripts/deploy/test-release-images.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
