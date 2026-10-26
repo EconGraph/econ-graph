@@ -270,6 +270,11 @@ jobs:
     - name: Check the teardown guards
       run: scripts/deploy/test-teardown-guards.sh
 
+    # teardown.sh and protect-postgres-pv.sh reach only the kind cluster's
+    # kubectl on context kind-econ-graph, never plain kubectl (all stubs here).
+    - name: Check that teardown uses only the kind cluster's context
+      run: scripts/deploy/test-teardown-kubectl.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
