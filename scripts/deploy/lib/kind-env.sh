@@ -181,8 +181,10 @@ kind_bin() {
 
 # `kind ...` in these scripts and everything they source runs kind_bin's
 # choice. A caller that defines its own kind() first (deploy.sh --dry-run's
-# stub) keeps it.
+# stub) keeps it; KIND_WRAPPER says which one is in use.
+KIND_WRAPPER=false
 if ! declare -F kind >/dev/null; then
+    KIND_WRAPPER=true
     kind() {
         local bin
         bin="$(kind_bin "${1:-}")" || exit 1
@@ -196,7 +198,9 @@ fi
 require_kind_version() {
     local bin have
     bin="$(kind_bin)" || exit 1
-    have="$("$bin" version 2>/dev/null | awk '{print $2}')"
+    # `|| have=""`: a failing kind must reach the die below, not stop a
+    # `set -e -o pipefail` caller here without a message.
+    have="$("$bin" version 2>/dev/null | awk '{print $2}')" || have=""
     [ -n "$have" ] || die "${bin} does not run; reinstall it with scripts/deploy/install-kind.sh"
     if [ "$(printf '%s\n%s\n' "${KIND_MIN_VERSION#v}" "${have#v}" | sort -V | head -1)" != "${KIND_MIN_VERSION#v}" ]; then
         die "${bin} is kind ${have}, older than ${KIND_MIN_VERSION}; run scripts/deploy/install-kind.sh"
@@ -207,8 +211,11 @@ kind_cluster_exists() {
     local clusters
     # Resolved here rather than inside $(...) below, whose stderr is
     # discarded, so a missing pinned kind is reported; warned about once.
-    kind_bin get >/dev/null || exit 1
-    KIND_FALLBACK_WARNED=true
+    # Not when the caller brought its own kind() (deploy.sh --dry-run).
+    if [ "${KIND_WRAPPER}" = "true" ]; then
+        kind_bin get >/dev/null || exit 1
+        KIND_FALLBACK_WARNED=true
+    fi
     clusters="$(kind get clusters 2>/dev/null)" || die "kind get clusters failed against ${DOCKER_HOST}"
     grep -qx "${KIND_CLUSTER}" <<<"$clusters"
 }

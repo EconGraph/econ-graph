@@ -26,10 +26,17 @@ source "${PROJECT_ROOT}/scripts/deploy/lib/kind-version.sh"
 # SHA-256 of the release binaries, as published with the release:
 #   https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
 #   https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-arm64.sha256sum
-declare -A KIND_SHA256=(
-    [v0.33.0/linux-amd64]="aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d"
-    [v0.33.0/linux-arm64]="20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2"
-)
+#   https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-amd64.sha256sum
+#   https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-arm64.sha256sum
+# A case statement rather than an associative array: macOS ships bash 3.2.
+pinned_sha256() {
+    case "$1" in
+        v0.33.0/linux-amd64) echo aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d ;;
+        v0.33.0/linux-arm64) echo 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2 ;;
+        v0.33.0/darwin-amd64) echo 5a99f26f57246dc9319dd294803313197a0f34d33c525b3ea8b655db5916ece0 ;;
+        v0.33.0/darwin-arm64) echo 0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f ;;
+    esac
+}
 KIND_RELEASES="https://github.com/kubernetes-sigs/kind/releases/download"
 
 DRY_RUN=false
@@ -52,7 +59,8 @@ die() {
 
 case "$(uname -s)" in
     Linux) os=linux ;;
-    *) die "unsupported OS $(uname -s); this installs the Linux release of kind" ;;
+    Darwin) os=darwin ;;
+    *) die "unsupported OS $(uname -s); this installs the Linux or macOS release of kind" ;;
 esac
 case "$(uname -m)" in
     x86_64 | amd64) arch=amd64 ;;
@@ -60,13 +68,20 @@ case "$(uname -m)" in
     *) die "unsupported CPU architecture $(uname -m)" ;;
 esac
 platform="${os}-${arch}"
-expected="${KIND_SHA256[${KIND_VERSION}/${platform}]:-}"
+expected="$(pinned_sha256 "${KIND_VERSION}/${platform}")"
 [ -n "$expected" ] || die "no checksum pinned for kind ${KIND_VERSION} ${platform} in $0"
 url="${KIND_RELEASES}/${KIND_VERSION}/kind-${platform}"
 link="${KIND_BIN_DIR}/kind"
 target="$(basename "${KIND_PINNED_BIN}")"
 
-sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
+# sha256sum (GNU coreutils), or shasum on macOS.
+sha256_of() {
+    if command -v sha256sum >/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
 
 link_ok() { [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; }
 

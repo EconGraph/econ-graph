@@ -14,8 +14,13 @@
 #     read-only `kind get`, which falls back to a kind on PATH with a warning;
 #   - require_kind_version accepts the pinned kind and refuses an old one.
 #
-# curl, sha256sum and id are stubs on PATH: curl "downloads" a fake kind,
-# sha256sum reports FAKE_SHA256 when it is set. Usage:
+#   - each supported platform (Linux and macOS, amd64 and arm64) has its own
+#     release URL and pinned checksum;
+#   - a caller's own kind() (deploy.sh --dry-run's stub) is kept and used.
+#
+# curl, sha256sum, id and uname are stubs on PATH: curl "downloads" a fake
+# kind, sha256sum reports FAKE_SHA256 when it is set, id and uname report root
+# or another platform when asked to. Usage:
 # scripts/deploy/test-install-kind.sh
 
 set -uo pipefail
@@ -64,8 +69,18 @@ fi
 EOF
 cat >"${STUBS}/id" <<'EOF'
 #!/bin/bash
-if [ "${FAKE_ROOT:-}" = 1 ] && [ "${1:-}" = -u ]; then echo 0; else exec /usr/bin/id "$@"; fi
+if [ "${FAKE_ROOT:-}" = 1 ] && [ "${1:-}" = -u ]; then echo 0; else exec "$REAL_ID" "$@"; fi
 EOF
+cat >"${STUBS}/uname" <<'EOF'
+#!/bin/bash
+case "${1:-}" in
+    -s) [ -n "${FAKE_UNAME_S:-}" ] && { echo "$FAKE_UNAME_S"; exit 0; } ;;
+    -m) [ -n "${FAKE_UNAME_M:-}" ] && { echo "$FAKE_UNAME_M"; exit 0; } ;;
+esac
+exec "$REAL_UNAME" "$@"
+EOF
+REAL_ID="$(type -P id)" REAL_UNAME="$(type -P uname)"
+export REAL_ID REAL_UNAME
 chmod 0755 "${STUBS}"/*
 export PATH="${STUBS}:${PATH}"
 
@@ -151,6 +166,27 @@ else
 fi
 unset FAKE_SHA256
 
+seen=""
+for platform in Linux:x86_64:linux-amd64 Linux:aarch64:linux-arm64 Darwin:x86_64:darwin-amd64 Darwin:arm64:darwin-arm64; do
+    IFS=: read -r os machine name <<<"$platform"
+    FAKE_UNAME_S="$os" FAKE_UNAME_M="$machine" run_install "${WORK}/data-${name}" --dry-run
+    sha="$(sed -n 's/^+ check its SHA-256 is \([0-9a-f]\{64\}\)$/\1/p' <<<"$OUT")"
+    if [ "$RC" -eq 0 ] && [ -n "$sha" ] && ! grep -qw "$sha" <<<"$seen" &&
+        grep -qx "+ curl https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${name}" <<<"$OUT"; then
+        pass "${os} ${machine} gets kind-${name} with its own pinned checksum"
+    else
+        fail "${os} ${machine} gets kind-${name} with its own pinned checksum (exit $RC)" "$OUT"
+    fi
+    seen+=" $sha"
+done
+
+FAKE_UNAME_S=FreeBSD run_install "${WORK}/data-freebsd" --dry-run
+if [ "$RC" -ne 0 ] && grep -q "unsupported OS FreeBSD" <<<"$OUT"; then
+    pass "refuses an unsupported OS"
+else
+    fail "refuses an unsupported OS (exit $RC)" "$OUT"
+fi
+
 # --- the resolver in kind-env.sh ----------------------------------------------------
 
 # A PATH with only the tools kind-env.sh needs, so no kind the host (or CI
@@ -220,6 +256,29 @@ if [ "$RC" -ne 0 ] && grep -q "older than ${KIND_MIN_VERSION}" <<<"$OUT"; then
     pass "require_kind_version refuses a pinned binary that reports an older kind"
 else
     fail "require_kind_version refuses a pinned binary that reports an older kind (exit $RC)" "$OUT"
+fi
+
+broken="${WORK}/data-broken"
+mkdir -p "${broken}/econgraph/bin"
+printf '#!/bin/sh\nexit 1\n' >"${broken}/econgraph/bin/kind-${KIND_VERSION}"
+chmod 0755 "${broken}/econgraph/bin/kind-${KIND_VERSION}"
+in_kind_env "$broken" "" 'set -e -o pipefail; require_kind_version'
+if [ "$RC" -ne 0 ] && grep -q "does not run; reinstall it with scripts/deploy/install-kind.sh" <<<"$OUT"; then
+    pass "under set -e -o pipefail, a pinned kind that fails still gets the reinstall message"
+else
+    fail "under set -e -o pipefail, a pinned kind that fails still gets the reinstall message (exit $RC)" "$OUT"
+fi
+
+# As deploy.sh --dry-run: kind() is defined before kind-env.sh is sourced.
+OUT="$(env XDG_DATA_HOME="$empty" PATH="${SYSBIN}" KIND_CLUSTER=econ-graph ECONGRAPH_SCRATCH_STORAGE= bash -c "
+    kind() { echo econ-graph; }
+    source '${PROJECT_ROOT}/scripts/deploy/lib/kind-env.sh'
+    kind_cluster_exists && echo cluster-found" 2>&1)"
+RC=$?
+if [ "$RC" -eq 0 ] && grep -qx "cluster-found" <<<"$OUT"; then
+    pass "a caller's own kind() is kept and kind_cluster_exists uses it"
+else
+    fail "a caller's own kind() is kept and kind_cluster_exists uses it (exit $RC)" "$OUT"
 fi
 
 if [ "$failed" -ne 0 ]; then
