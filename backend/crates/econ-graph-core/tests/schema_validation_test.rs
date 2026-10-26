@@ -103,28 +103,10 @@ async fn test_schema_compatibility() {
 
 /// Generate schema using diesel print-schema command
 fn generate_schema_with_diesel(database_url: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // Try to find diesel in common locations
-    let diesel_paths = [
-        "diesel",
-        "/Users/josephmalicki/.cargo/bin/diesel",
-        "/usr/local/bin/diesel",
-        "/usr/bin/diesel",
-    ];
-
-    let mut diesel_cmd = None;
-    for path in &diesel_paths {
-        if Command::new("which").arg(path).output().is_ok() {
-            diesel_cmd = Some(path);
-            break;
-        }
-    }
-
-    let diesel_path = diesel_cmd.ok_or("diesel CLI not found in PATH or common locations")?;
-
-    println!("Using diesel at: {}", diesel_path);
+    // Resolve the installed CLI through PATH instead of a developer-specific home path.
     println!("Database URL: {}", redact_database_url(database_url));
 
-    let output = Command::new(diesel_path)
+    let output = Command::new("diesel")
         .args(["print-schema", "--database-url", database_url])
         .output()?;
 

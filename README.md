@@ -209,7 +209,7 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/jmalicki/econ-graph.git
+   git clone https://github.com/EconGraph/econ-graph.git
    cd econ-graph
    ```
 
@@ -393,7 +393,7 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 
 ### 🎯 **Explore the economic data visualization platform**
 
-**[🚀 Try the Live Demo](#getting-started)** • **[📚 Read the Code](https://github.com/jmalicki/econ-graph)**
+**[🚀 Try the Live Demo](#getting-started)** • **[📚 Read the Code](https://github.com/EconGraph/econ-graph)**
 
 ---
 

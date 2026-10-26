@@ -84,6 +84,8 @@ tmp/
 temp/
 
 # Playwright
+/admin-frontend/test-results/
+/admin-frontend/playwright-report/
 /frontend/test-results/
 /frontend/playwright-report/
 /frontend/test-results-release/

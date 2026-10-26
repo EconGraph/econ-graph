@@ -36,7 +36,7 @@ ffmpeg -f lavfi -i color=c=0x1976d2:size=1920x1080:duration=90 \
          drawtext=fontfile='/System/Library/Fonts/ArialHB.ttc':text='Open-Source Competitive Advantage':fontsize=44:fontcolor=white:x=(w-text_w)/2:y=550:enable='between(t,60,75)',\
          drawtext=fontfile='/System/Library/Fonts/ArialHB.ttc':text='EconGraph: The Future of Economic Analysis':fontsize=52:fontcolor=white:x=(w-text_w)/2:y=300:enable='between(t,75,90)',\
          drawtext=fontfile='/System/Library/Fonts/ArialHB.ttc':text='Professional • Open-Source • Free':fontsize=48:fontcolor=yellow:x=(w-text_w)/2:y=450:enable='between(t,75,90)',\
-         drawtext=fontfile='/System/Library/Fonts/ArialHB.ttc':text='github.com/jmalicki/econ-graph':fontsize=40:fontcolor=white:x=(w-text_w)/2:y=550:enable='between(t,75,90)'" \
+         drawtext=fontfile='/System/Library/Fonts/ArialHB.ttc':text='github.com/EconGraph/econ-graph':fontsize=40:fontcolor=white:x=(w-text_w)/2:y=550:enable='between(t,75,90)'" \
     -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p "$OUTPUT_FILE" -y
 
 if [ $? -eq 0 ]; then
