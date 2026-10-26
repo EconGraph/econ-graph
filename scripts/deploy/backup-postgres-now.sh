@@ -29,7 +29,7 @@ CONTEXT="kind-econ-graph"
 while [ $# -gt 0 ]; do
     case "$1" in
         --context)
-            [ $# -ge 2 ] || { echo "--context needs a value" >&2; exit 2; }
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "--context needs a non-empty value" >&2; exit 2; }
             CONTEXT="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac

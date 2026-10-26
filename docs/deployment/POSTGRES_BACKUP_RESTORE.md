@@ -7,6 +7,15 @@ database (the `keycloak-postgres` StatefulSet, behind
 Google identities. Both are dumped nightly to a separate volume, and can be
 shipped to object storage.
 
+The commands below run kubectl as `k`, the kind cluster's own kubectl and
+kubeconfig on its context. On the production host, plain `kubectl` is the
+MicroK8s snap wrapper, which reaches a different cluster. Define `k` once
+per shell:
+
+```sh
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
+```
+
 ## What's in place
 
 - **`postgres-backup-cronjob.yaml`**: a nightly (`0 8 * * *` UTC) `CronJob`
@@ -77,7 +86,7 @@ exists; on a cluster deployed without it, set the variable to `false` and the
 run logs that Keycloak is skipped and backs up `econ_graph` alone:
 
 ```sh
-kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
+k -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 ```
 
 `deploy.sh` re-applies the manifest, so this is needed again after each
@@ -93,8 +102,8 @@ that succeeded. `sync.sh` then exits 1 (and also if `/status/failed` is
 missing), so the Job fails and its pod shows which dump failed:
 
 ```sh
-kubectl -n econ-graph get jobs -l app=postgres-backup
-kubectl -n econ-graph logs job/<job-name> --all-containers=true --prefix=true
+k -n econ-graph get jobs -l app=postgres-backup
+k -n econ-graph logs job/<job-name> --all-containers=true --prefix=true
 ```
 
 A container that exits non-zero fails the Job at once, without a retry
@@ -192,7 +201,9 @@ This is **destructive**: `pg_restore --clean --if-exists` drops and
 recreates every object the dump contains before restoring it, overwriting
 whatever is currently in `econ_graph`. That's why it prompts unless `--yes`
 is passed. `restore.sh` refuses a file that isn't an `econ_graph-*.dump`
-(such as a Keycloak dump).
+(such as a Keycloak dump). It resolves `latest.dump` to the dump it points
+at once, before reading anything, so a backup that finishes during the
+restore and moves the link doesn't change which dump is restored.
 
 #### Ownership
 
@@ -209,7 +220,7 @@ neither read nor write it. `restore.sh` runs in two steps:
    where the init script has created `uuid-ossp`, `pg_stat_statements` and
    `pg_trgm`, that adds `pgcrypto`. `econgraph` can't do this step itself:
    `pg_stat_statements` needs a superuser to create, and the extensions
-   (`pg_stat_statements`, `pg_trgm`, `pgcrypto`, `plpgsql`, `uuid-ossp`) are
+   (`pg_stat_statements`, `pg_trgm`, `pgcrypto`, `uuid-ossp`) are
    owned by `postgres`, so `econgraph` can't drop them either.
 2. **Everything else**, with `pg_restore --role=econgraph --clean --if-exists
    --single-transaction --exit-on-error`: after connecting, `pg_restore`
@@ -228,7 +239,7 @@ kind of object), then restore again.
 To check the result:
 
 ```sh
-kubectl -n econ-graph exec postgresql-0 -- psql -U postgres -d econ_graph -c \
+k -n econ-graph exec postgresql-0 -- psql -U postgres -d econ_graph -c \
   "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
 ```
 
@@ -257,11 +268,11 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
 
    ```sh
    DUMP=keycloak-20260101-080000.dump
-   kubectl -n econ-graph run postgres-backup-copy --restart=Never --image=busybox:1.38 \
+   k -n econ-graph run postgres-backup-copy --restart=Never --image=busybox:1.38 \
      --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":999},"containers":[{"name":"copy","image":"busybox:1.38","command":["sleep","600"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups","readOnly":true}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
-   kubectl -n econ-graph wait --for=condition=Ready pod/postgres-backup-copy --timeout=120s
-   kubectl -n econ-graph cp "postgres-backup-copy:/backups/${DUMP}" "./${DUMP}"
-   kubectl -n econ-graph delete pod postgres-backup-copy
+   k -n econ-graph wait --for=condition=Ready pod/postgres-backup-copy --timeout=120s
+   k -n econ-graph cp "postgres-backup-copy:/backups/${DUMP}" "./${DUMP}"
+   k -n econ-graph delete pod postgres-backup-copy
    ```
 
    The dump holds password hashes and client secrets; keep the local copy
@@ -270,23 +281,23 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
 2. Stop Keycloak, so nothing writes to the database during the restore:
 
    ```sh
-   kubectl -n econ-graph scale deployment/keycloak --replicas=0
+   k -n econ-graph scale deployment/keycloak --replicas=0
    # Until no Keycloak pod is left (returns at once if there was none)
-   while kubectl -n econ-graph get pods -l app=keycloak -o name | grep -q .; do sleep 2; done
+   while k -n econ-graph get pods -l app=keycloak -o name | grep -q .; do sleep 2; done
    ```
 
 3. Recreate the database and restore the dump into it:
 
    ```sh
-   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak
-   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak
-   kubectl -n econ-graph exec -i keycloak-postgres-0 -- \
+   k -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak
+   k -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak
+   k -n econ-graph exec -i keycloak-postgres-0 -- \
      pg_restore -U keycloak -d keycloak --no-owner --no-privileges \
      --exit-on-error --single-transaction < "./${DUMP}"
    ```
 
 4. Start Keycloak again: `./scripts/deploy/deploy.sh`, or
-   `kubectl -n econ-graph scale deployment/keycloak --replicas=1`.
+   `k -n econ-graph scale deployment/keycloak --replicas=1`.
 
 ## Testing
 
@@ -310,8 +321,10 @@ without the `latest` links; that `restore.sh`, run with the restore job's
 environment, puts `econ_graph` back both over the existing database and on a
 newly initialised server, with every object owned by `econgraph`, the
 extensions in place, and `econgraph` (connecting with its password, as the
-app does) able to read every table and write; that it rolls back when it
-can't drop an object, stops when `RESTORE_OWNER` doesn't exist, and refuses a
+app does) able to read every table and write; that it rolls back every table
+when it can't drop a schema, which `--clean` drops after the tables; that it
+keeps restoring the dump it listed when `latest.dump` moves to another dump
+mid-restore; that it stops when `RESTORE_OWNER` doesn't exist, and refuses a
 Keycloak dump; that a failure of either dump (server down, wrong
 password, no tables, a table locked past the lock wait) keeps and syncs the
 other and fails the Job; that a missing Keycloak password is a failure with
@@ -333,6 +346,7 @@ cluster's copies in a scratch `~/.cache/econgraph`. It checks that:
   `CLUSTER_ROLE_CONTEXT` is inherited;
 - the identity is shown before the confirmation;
 - an unconfirmed restore, or one on a missing context, applies nothing;
+- an empty `--context` is refused before any call;
 - the restore Job sets `RESTORE_OWNER=econgraph`.
 
 It also runs in the "PostgreSQL Backup Scripts" CI job.
@@ -380,9 +394,9 @@ behind in the `Released` phase; it isn't automatically reused. A plain
 redeploy creates a *new*, empty PVC/PV pair, quietly giving you a fresh,
 empty database instead of your old data. To bind back to the old volume:
 
-1. `kubectl get pv` and find the `Released` one (check its capacity/claimRef
+1. `k get pv` and find the `Released` one (check its capacity/claimRef
    to confirm it's the right one).
-2. `kubectl patch pv <pv-name> -p '{"spec":{"claimRef": null}}'` to clear its
+2. `k patch pv <pv-name> -p '{"spec":{"claimRef": null}}'` to clear its
    claim so it's `Available` again.
 3. Apply `postgres-deployment.yaml` as usual; if the new PVC doesn't bind to
    it automatically (StatefulSet-created PVCs don't pin a specific volume),
@@ -404,6 +418,6 @@ The PVC is `ReadWriteOnce`, so delete from a short-lived pod that mounts it whil
 backup Job is running, naming each dump explicitly:
 
 ```bash
-kubectl -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.38 \
+k -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.38 \
   --overrides='{"spec":{"containers":[{"name":"cleanup","image":"busybox:1.38","stdin":true,"command":["rm","-v","/backups/econ_graph-20260101-080000.dump"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
 ```

@@ -91,6 +91,8 @@ cluster_role_use_context() {
 # itself a kc call, so it carries the context like every later call.
 cluster_role_pin_named_context() {
     local server
+    # An empty name would make kc fall back to the current context.
+    [ -n "${1:-}" ] || return 1
     CLUSTER_ROLE_CONTEXT="$1"
     export CLUSTER_ROLE_CONTEXT
     server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" &&

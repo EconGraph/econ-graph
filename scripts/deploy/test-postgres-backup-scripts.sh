@@ -21,7 +21,9 @@
 #   - restore.sh puts econ_graph back, both over the existing database and on
 #     a newly initialised server, with every object owned by econgraph, the
 #     extensions in place, and econgraph able to read and write every table;
-#     it refuses a Keycloak dump, and a restore that fails rolls back;
+#     it refuses a Keycloak dump, a restore that fails at the last drop rolls
+#     every table back, and latest.dump moving to another dump mid-restore
+#     doesn't change which dump is restored;
 #   - when either database's dump fails (server down, wrong password, no
 #     tables) the other dump is still written and synced, and sync.sh fails
 #     the Job; without BACKUP_STATUS_FILE, backup.sh itself exits 1;
@@ -469,18 +471,59 @@ restored_like_production "$FRESH" postgres-fresh "on a new server"
 docker rm -f "$FRESH" >/dev/null
 
 echo "# restore.sh failures"
-# An object econgraph can't drop (as an earlier restore that ran as the
-# superuser leaves every table): the restore stops and rolls back.
-psql_in "$ECON" postgres econ_graph "DELETE FROM backup_test_points WHERE id > 100; ALTER TABLE audit.events OWNER TO postgres;"
+# An object econgraph can't drop, and one dropped last: the schema audit,
+# owned by postgres, with econgraph still able to use it. --clean drops every
+# table before it, so this checks that the whole step is one transaction: the
+# restore stops at DROP SCHEMA and every table comes back as it was.
+psql_in "$ECON" postgres econ_graph "DELETE FROM backup_test_points WHERE id > 100;
+  ALTER SCHEMA audit OWNER TO postgres; GRANT USAGE, CREATE ON SCHEMA audit TO econgraph;"
 counts "$ECON" postgres econ_graph >"$tmp/before"
 rc="$(run_restore)"
-check "a table owned by another role: restore.sh exits non-zero" [ "$rc" != 0 ]
-check "  and says why" grep -q "must be owner of table events" "$tmp/out"
-check "  and rolls back, leaving every row as it was" diff <(counts "$ECON" postgres econ_graph) "$tmp/before"
-psql_in "$ECON" postgres econ_graph "ALTER TABLE audit.events OWNER TO econgraph;"
+check "a schema owned by another role: restore.sh exits non-zero" [ "$rc" != 0 ]
+check "  and says why" grep -q "must be owner of schema audit" "$tmp/out"
+check "  and rolls back, leaving every table and row as it was" diff <(counts "$ECON" postgres econ_graph) "$tmp/before"
+# The grant goes before the owner changes back: after it, the REVOKE would
+# take the privileges from the owner itself.
+psql_in "$ECON" postgres econ_graph "REVOKE USAGE, CREATE ON SCHEMA audit FROM econgraph; ALTER SCHEMA audit OWNER TO econgraph;"
 rc="$(run_restore)"
-check "  once the table is econgraph's again, restore.sh exits 0" [ "$rc" = 0 ]
+check "  once the schema is econgraph's again, restore.sh exits 0" [ "$rc" = 0 ]
 check "  and the row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+
+# A backup finishing during the restore moves latest.dump to a newer dump.
+# restore.sh must keep reading the dump it listed: another dump's TOC ids
+# name other objects. The swap happens right after pg_restore --list, through
+# a wrapper first on PATH. Dump B has an extra table, so its ids differ.
+echo "# restore.sh while latest.dump moves to another dump"
+mkdir -p "$tmp/swap" "$tmp/wrap"
+chmod 0777 "$tmp/swap"
+cp "$tmp/backups/$econ_dump" "$tmp/swap/$econ_dump"
+app_sql postgres-service <<<"CREATE TABLE aaa_swap_test (id int); INSERT INTO aaa_swap_test VALUES (1);"
+docker exec "$ECON" pg_dump -U postgres -d econ_graph --format=custom --no-owner --no-privileges \
+    >"$tmp/swap/econ_graph-29990101-000000.dump"
+app_sql postgres-service <<<"DROP TABLE aaa_swap_test;"
+ln -s "/backups/$econ_dump" "$tmp/swap/latest.dump"
+cat >"$tmp/wrap/pg_restore" <<'SH'
+#!/bin/sh
+/usr/lib/postgresql/18/bin/pg_restore "$@" || exit $?
+case " $* " in
+  *" --list "*) ln -sfn /backups/econ_graph-29990101-000000.dump /backups/latest.dump ;;
+esac
+SH
+chmod 0555 "$tmp/wrap/pg_restore"
+chmod 0755 "$tmp/wrap"
+psql_in "$ECON" postgres econ_graph "DELETE FROM backup_test_points WHERE id > 100;"
+rc=0
+docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --env-file "$tmp/restore.env" \
+    -e PATH=/wrap:/usr/lib/postgresql/18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    -v "$tmp/scripts:/scripts:ro" -v "$tmp/wrap:/wrap:ro" -v "$tmp/swap:/backups" \
+    "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
+cat "$tmp/out" >>"$LOG"
+check "latest.dump moved mid-restore: restore.sh exits 0" [ "$rc" = 0 ]
+check "  the link did move" [ "$(basename "$(readlink "$tmp/swap/latest.dump")")" = "econ_graph-29990101-000000.dump" ]
+check "  and the listed dump was restored, every row of it" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+check "  and the other dump's table was not" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT to_regclass('public.aaa_swap_test') IS NULL")" = t ]
 
 rc="$(run_restore -e RESTORE_OWNER=no_such_role)"
 check "a missing RESTORE_OWNER: restore.sh exits 1" [ "$rc" = 1 ]

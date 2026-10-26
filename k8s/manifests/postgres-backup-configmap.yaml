@@ -192,9 +192,14 @@ data:
       exit 1
     fi
 
+    # The dump itself, not latest.dump: backup.sh moves that link when a run
+    # finishes, and pg_restore opens the file three times below (the list and
+    # both steps). Every step must read the dump the list came from.
+    FILE="$(readlink -f "${FILE}")"
+
     # The backup volume also holds Keycloak's dumps; restoring one of those
     # here would add Keycloak's tables to ${PGDATABASE}.
-    case "$(basename "$(readlink -f "${FILE}")")" in
+    case "$(basename "${FILE}")" in
       "${PGDATABASE}"-*) ;;
       *)
         echo "${FILE} is not a ${PGDATABASE} dump (expected ${PGDATABASE}-<stamp>.dump)" >&2

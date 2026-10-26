@@ -13,7 +13,7 @@
 #   - the cluster's identity (context, API server, nodes, kube-system UID,
 #     production marker) is shown before the restore's confirmation, and an
 #     unconfirmed restore, or one on a context that doesn't exist, applies
-#     nothing;
+#     nothing; an empty --context is refused before any call;
 #   - the restore Job applied names the dump and RESTORE_OWNER=econgraph.
 #
 # Usage: scripts/deploy/test-postgres-backup-cluster.sh (from anywhere)
@@ -127,6 +127,19 @@ run "$restore" --context kind-missing --yes
 [ "$(calls)" = 1 ] || fail "restore on a missing context made more than the check: $(cat "$STUB_LOG")"
 [ -z "$(plain)" ] || fail "restore on a missing context called the plain kubectl"
 [ ! -e "$STUB_APPLIED" ] || fail "restore on a missing context applied a Job"
+
+# An empty context name (which kubectl would read as "the current context")
+# is refused before any call, by both scripts and by the lib function.
+for script in "$restore" "$backup"; do
+    run "$script" --context "" --yes
+    [ "$status" = 2 ] || fail "$(basename "$script") --context \"\" exits $status: $(cat "$tmp/out")"
+    [ "$(calls)" = 0 ] || fail "$(basename "$script") --context \"\" made calls: $(cat "$STUB_LOG")"
+    [ ! -e "$STUB_APPLIED" ] || fail "$(basename "$script") --context \"\" applied a Job"
+done
+run bash -c 'source "$1"; KUBECTL="$2"; cluster_role_pin_named_context ""' _ \
+    "$repo_root/scripts/deploy/lib/cluster-role.sh" "$cache/bin/kubectl"
+[ "$status" != 0 ] || fail "cluster_role_pin_named_context \"\" succeeded"
+[ "$(calls)" = 0 ] || fail "cluster_role_pin_named_context \"\" made calls: $(cat "$STUB_LOG")"
 
 # A confirmed restore.
 run "$restore" --file econ_graph-20260101-080000.dump --yes
