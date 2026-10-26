@@ -1401,6 +1401,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tempfile",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.21",

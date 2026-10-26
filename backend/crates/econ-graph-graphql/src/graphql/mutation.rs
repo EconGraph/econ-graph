@@ -441,10 +441,10 @@ fn plan_trigger_crawl(
 
     let mut jobs = Vec::new();
     let series_source = if series.is_empty() {
-        if let Some(id) = explicit {
-            if !sources.contains(&id) {
-                sources.push(id);
-            }
+        if let Some(id) = explicit
+            && !sources.contains(&id)
+        {
+            sources.push(id);
         }
         None
     } else {

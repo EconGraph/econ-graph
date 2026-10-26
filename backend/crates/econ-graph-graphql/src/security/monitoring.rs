@@ -621,12 +621,11 @@ impl SecurityMonitor {
         let mut last_notifications = self.notification_service.last_notification.write().await;
         let now = Instant::now();
 
-        if let Some(last_time) = last_notifications.get(&alert.alert_type.to_string()) {
-            if now.duration_since(*last_time)
+        if let Some(last_time) = last_notifications.get(&alert.alert_type.to_string())
+            && now.duration_since(*last_time)
                 < Duration::from_secs(self.config.notifications.cooldown_period)
-            {
-                return; // Still in cooldown period
-            }
+        {
+            return; // Still in cooldown period
         }
 
         last_notifications.insert(alert.alert_type.to_string(), now);

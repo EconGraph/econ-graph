@@ -40,7 +40,7 @@ jobs:
         cache-dependency-path: frontend/package-lock.json
 
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 

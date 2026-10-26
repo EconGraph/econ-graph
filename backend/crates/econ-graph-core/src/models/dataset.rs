@@ -281,13 +281,13 @@ impl NewDataset {
                     self.code, component.name
                 ));
             }
-            if let Some(codelist) = &component.codelist {
-                if !KNOWN_CODELISTS.contains(&codelist.as_str()) {
-                    return invalid(format!(
-                        "dataset {} component {:?} names unknown codelist {:?}",
-                        self.code, component.name, codelist
-                    ));
-                }
+            if let Some(codelist) = &component.codelist
+                && !KNOWN_CODELISTS.contains(&codelist.as_str())
+            {
+                return invalid(format!(
+                    "dataset {} component {:?} names unknown codelist {:?}",
+                    self.code, component.name, codelist
+                ));
             }
             let mut codes = HashSet::new();
             for code in component.codes.iter().flatten() {

@@ -199,7 +199,7 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 
 #### **Prerequisites**
 - Node.js 24 LTS and npm
-- Rust 1.98.1 and Cargo (pinned in `rust-toolchain.toml`; rustup installs it automatically)
+- Rust 1.99.1 and Cargo, using the 2024 edition (pinned in `rust-toolchain.toml`; rustup installs it automatically)
 - PostgreSQL 18+ (recommended for production)
 - Docker (for containerized deployment)
 

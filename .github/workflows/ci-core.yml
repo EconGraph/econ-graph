@@ -201,7 +201,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -368,7 +368,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -537,7 +537,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -663,7 +663,7 @@ jobs:
         persist-credentials: false
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -861,7 +861,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1085,7 +1085,7 @@ jobs:
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -1155,7 +1155,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1222,7 +1222,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1331,7 +1331,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1492,7 +1492,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1610,7 +1610,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1813,7 +1813,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 

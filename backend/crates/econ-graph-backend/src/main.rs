@@ -801,7 +801,7 @@ fn build_routes(
     verifier: Option<Arc<OidcVerifier>>,
     cors_origins: &[String],
     playground_enabled: bool,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+) -> impl Filter<Extract = (impl warp::Reply + use<>,), Error = warp::Rejection> + Clone + use<> {
     let cors = cors_filter(cors_origins);
 
     // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.

@@ -41,7 +41,7 @@ Exact paths are in the changes job. Shared paths include CI configuration, scrip
 | Docker Build Test | Detect changes and Backend Smoke Tests | Load built backend/frontend images and check their runtime health |
 | Optional E2E container build and suites | Frontend integration, plus backend dependencies for suites | Manual opt-in desktop/mobile Playwright |
 
-The cache build compiles test binaries; it does not execute tests. Rust test jobs restore the shared Swatinem/rust-cache cache; only the build job saves it. Diesel CLI is downloaded from a pinned release and checksum-verified in the relevant jobs. Core CI uses Rust 1.98.1, Node 24 and PostgreSQL 18; database credentials and ports are job-specific.
+The cache build compiles test binaries; it does not execute tests. Rust test jobs restore the shared Swatinem/rust-cache cache; only the build job saves it. Diesel CLI is downloaded from a pinned release and checksum-verified in the relevant jobs. Core CI uses Rust 1.99.1, Node 24 and PostgreSQL 18; database credentials and ports are job-specific.
 
 ## Known coverage limitations
 

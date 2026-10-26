@@ -565,7 +565,7 @@ fn calculate_yoy_changes(data_points: Vec<DataPoint>) -> Vec<TransformedDataPoin
         let previous_year = date.year() - 1;
         let _key = (previous_year, date.month(), date.day());
 
-        let transformed_value = if let (Some(ref _current_value), Some(previous_value)) = (
+        let transformed_value = if let (Some(_current_value), Some(previous_value)) = (
             &data_point.value,
             previous_year_values.get(&(previous_year, date.month(), date.day())),
         ) {

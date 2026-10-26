@@ -184,29 +184,27 @@ impl InputValidator {
         }
 
         // Check blocked characters
-        if let Some(blocked_pattern) = &self.config.blocked_characters {
-            if let Some(regex) = self.regex_patterns.get(blocked_pattern) {
-                if regex.is_match(value) {
-                    return Err(ValidationError::InvalidCharacters {
-                        field: field_name.to_string(),
-                        value: value.to_string(),
-                        pattern: blocked_pattern.clone(),
-                    });
-                }
-            }
+        if let Some(blocked_pattern) = &self.config.blocked_characters
+            && let Some(regex) = self.regex_patterns.get(blocked_pattern)
+            && regex.is_match(value)
+        {
+            return Err(ValidationError::InvalidCharacters {
+                field: field_name.to_string(),
+                value: value.to_string(),
+                pattern: blocked_pattern.clone(),
+            });
         }
 
         // Check allowed characters
-        if let Some(allowed_pattern) = &self.config.allowed_characters {
-            if let Some(regex) = self.regex_patterns.get(allowed_pattern) {
-                if !regex.is_match(value) {
-                    return Err(ValidationError::InvalidCharacters {
-                        field: field_name.to_string(),
-                        value: value.to_string(),
-                        pattern: allowed_pattern.clone(),
-                    });
-                }
-            }
+        if let Some(allowed_pattern) = &self.config.allowed_characters
+            && let Some(regex) = self.regex_patterns.get(allowed_pattern)
+            && !regex.is_match(value)
+        {
+            return Err(ValidationError::InvalidCharacters {
+                field: field_name.to_string(),
+                value: value.to_string(),
+                pattern: allowed_pattern.clone(),
+            });
         }
 
         // Sanitize the value
@@ -233,24 +231,24 @@ impl InputValidator {
     pub fn validate_integer(&self, value: i64, field_name: &str) -> Result<i64, ValidationError> {
         // Check range if specified
         if let Some(rule) = self.config.custom_rules.get(field_name) {
-            if let Some(min) = rule.min_value {
-                if (value as f64) < min {
-                    return Err(ValidationError::ValueTooSmall {
-                        field: field_name.to_string(),
-                        value: value as f64,
-                        min_value: min,
-                    });
-                }
+            if let Some(min) = rule.min_value
+                && (value as f64) < min
+            {
+                return Err(ValidationError::ValueTooSmall {
+                    field: field_name.to_string(),
+                    value: value as f64,
+                    min_value: min,
+                });
             }
 
-            if let Some(max) = rule.max_value {
-                if (value as f64) > max {
-                    return Err(ValidationError::ValueTooLarge {
-                        field: field_name.to_string(),
-                        value: value as f64,
-                        max_value: max,
-                    });
-                }
+            if let Some(max) = rule.max_value
+                && (value as f64) > max
+            {
+                return Err(ValidationError::ValueTooLarge {
+                    field: field_name.to_string(),
+                    value: value as f64,
+                    max_value: max,
+                });
             }
         }
 
@@ -259,16 +257,15 @@ impl InputValidator {
 
     /// Validate an enum-like input
     pub fn validate_enum(&self, value: &str, field_name: &str) -> Result<String, ValidationError> {
-        if let Some(rule) = self.config.custom_rules.get(field_name) {
-            if let Some(allowed_values) = &rule.allowed_values {
-                if !allowed_values.contains(&value.to_string()) {
-                    return Err(ValidationError::InvalidEnumValue {
-                        field: field_name.to_string(),
-                        value: value.to_string(),
-                        allowed_values: allowed_values.clone(),
-                    });
-                }
-            }
+        if let Some(rule) = self.config.custom_rules.get(field_name)
+            && let Some(allowed_values) = &rule.allowed_values
+            && !allowed_values.contains(&value.to_string())
+        {
+            return Err(ValidationError::InvalidEnumValue {
+                field: field_name.to_string(),
+                value: value.to_string(),
+                allowed_values: allowed_values.clone(),
+            });
         }
 
         Ok(value.to_string())
@@ -291,17 +288,16 @@ impl InputValidator {
         }
 
         // Pattern validation
-        if let Some(pattern) = &rule.pattern {
-            if let Some(regex) = self.regex_patterns.get(pattern) {
-                if !regex.is_match(value) {
-                    return Err(ValidationError::PatternMismatch {
-                        field: rule_name.to_string(),
-                        value: value.to_string(),
-                        pattern: pattern.clone(),
-                        error_message: rule.error_message.clone(),
-                    });
-                }
-            }
+        if let Some(pattern) = &rule.pattern
+            && let Some(regex) = self.regex_patterns.get(pattern)
+            && !regex.is_match(value)
+        {
+            return Err(ValidationError::PatternMismatch {
+                field: rule_name.to_string(),
+                value: value.to_string(),
+                pattern: pattern.clone(),
+                error_message: rule.error_message.clone(),
+            });
         }
 
         // Sanitize the value
@@ -422,28 +418,31 @@ impl InputValidator {
         // Compile custom rule patterns
         for rule in self.config.custom_rules.values() {
             if let Some(pattern) = &rule.pattern {
-                if let Ok(regex) = Regex::new(pattern) {
-                    self.regex_patterns.insert(pattern.clone(), regex);
-                } else {
-                    warn!(
-                        "Failed to compile regex pattern for rule {}: {}",
-                        rule.name, pattern
-                    );
+                match Regex::new(pattern) {
+                    Ok(regex) => {
+                        self.regex_patterns.insert(pattern.clone(), regex);
+                    }
+                    _ => {
+                        warn!(
+                            "Failed to compile regex pattern for rule {}: {}",
+                            rule.name, pattern
+                        );
+                    }
                 }
             }
         }
 
         // Compile configuration patterns
-        if let Some(pattern) = &self.config.allowed_characters {
-            if let Ok(regex) = Regex::new(pattern) {
-                self.regex_patterns.insert(pattern.clone(), regex);
-            }
+        if let Some(pattern) = &self.config.allowed_characters
+            && let Ok(regex) = Regex::new(pattern)
+        {
+            self.regex_patterns.insert(pattern.clone(), regex);
         }
 
-        if let Some(pattern) = &self.config.blocked_characters {
-            if let Ok(regex) = Regex::new(pattern) {
-                self.regex_patterns.insert(pattern.clone(), regex);
-            }
+        if let Some(pattern) = &self.config.blocked_characters
+            && let Ok(regex) = Regex::new(pattern)
+        {
+            self.regex_patterns.insert(pattern.clone(), regex);
         }
     }
 

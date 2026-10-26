@@ -402,18 +402,18 @@ impl Worker {
                 Ok(n) => tracing::warn!(released = n, "released stuck crawl_queue items"),
                 Err(e) => tracing::warn!(error = %e, "release_stuck failed"),
             }
-            if let Some(retention) = self.config.queue_retention {
-                if last_purge.is_none_or(|t| t.elapsed() >= PURGE_INTERVAL) {
-                    last_purge = Some(Instant::now());
-                    match CrawlQueueItem::purge_finished(&self.ctx.pool, retention).await {
-                        Ok(0) => {}
-                        Ok(n) => tracing::info!(
-                            deleted = n,
-                            retention_days = retention.as_secs() / 86_400,
-                            "purged finished crawl_queue items"
-                        ),
-                        Err(e) => tracing::warn!(error = %e, "purging crawl_queue failed"),
-                    }
+            if let Some(retention) = self.config.queue_retention
+                && last_purge.is_none_or(|t| t.elapsed() >= PURGE_INTERVAL)
+            {
+                last_purge = Some(Instant::now());
+                match CrawlQueueItem::purge_finished(&self.ctx.pool, retention).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(
+                        deleted = n,
+                        retention_days = retention.as_secs() / 86_400,
+                        "purged finished crawl_queue items"
+                    ),
+                    Err(e) => tracing::warn!(error = %e, "purging crawl_queue failed"),
                 }
             }
             tokio::select! {
@@ -957,10 +957,10 @@ impl Worker {
         // crawl_status either, so it deactivates the series_metadata row instead, matching
         // `retire_unlisted_conn`: the next catalog discovery that lists the id again reactivates it.
         let Some(series_id) = series_id else {
-            if let Err(e) = result {
-                if e.kind() == "not_found" {
-                    persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
-                }
+            if let Err(e) = result
+                && e.kind() == "not_found"
+            {
+                persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
             }
             return Ok(());
         };
