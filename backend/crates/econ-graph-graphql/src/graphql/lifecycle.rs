@@ -201,7 +201,7 @@ mod tests {
         drop(conn);
         let schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool.clone())));
         let query = format!("{{ old: series(id: {}) {{ lifecycle {{ status since successorId proposedSuccessorId }} source {{ lifecycleCounts {{ discontinued missingFromCatalog retired superseded }} }} }} active: series(id: {}) {{ lifecycle {{ status since }} }} }}", json!(series[0].id), json!(series[3].id));
-        let response = schema.execute(query.clone()).await;
+        let response = async_graphql::Schema::execute(&schema, query.clone()).await;
         assert!(response.errors.is_empty(), "{:?}", response.errors);
         let result = response.data.into_json().unwrap();
         assert_eq!(result["old"]["lifecycle"]["status"], "missing_from_catalog");
@@ -230,7 +230,7 @@ mod tests {
             .bind::<diesel::sql_types::Uuid,_>(series[4].id)
             .execute(&mut conn).await.unwrap();
         drop(conn);
-        let response = schema.execute(query.clone()).await;
+        let response = async_graphql::Schema::execute(&schema, query.clone()).await;
         assert!(response.errors.is_empty(), "{:?}", response.errors);
         let result = response.data.into_json().unwrap();
         assert_eq!(
@@ -245,7 +245,7 @@ mod tests {
             .bind::<diesel::sql_types::Uuid,_>(series[1].id)
             .execute(&mut conn).await.unwrap();
         drop(conn);
-        let response = schema.execute(query).await;
+        let response = async_graphql::Schema::execute(&schema, query).await;
         assert!(response.errors.is_empty(), "{:?}", response.errors);
         let result = response.data.into_json().unwrap();
         assert_eq!(result["old"]["lifecycle"]["status"], "superseded");

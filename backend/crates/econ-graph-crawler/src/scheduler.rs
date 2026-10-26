@@ -613,6 +613,7 @@ mod tests {
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
         for sql in [
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM series_metadata WHERE external_id LIKE 't15c\\_%'",
         ] {
@@ -1031,13 +1032,13 @@ mod tests {
         let jobs = queued_series(pool).await;
         let ours: BTreeSet<_> = jobs
             .into_iter()
-            .filter(|id| id.starts_with("t15c_lifecycle_"))
+            .filter(|id| id.starts_with("FRED/t15c_lifecycle_"))
             .collect();
         assert_eq!(
             ours,
             [
-                "t15c_lifecycle_active".to_string(),
-                "t15c_lifecycle_active_catalog".to_string()
+                "FRED/t15c_lifecycle_active".to_string(),
+                "FRED/t15c_lifecycle_active_catalog".to_string()
             ]
             .into_iter()
             .collect()
@@ -1047,7 +1048,9 @@ mod tests {
             .tick()
             .await
             .unwrap();
-        assert!(queued_series(pool).await.contains("t15c_lifecycle_retired"));
+        assert!(queued_series(pool)
+            .await
+            .contains("FRED/t15c_lifecycle_retired"));
         exec(
             pool,
             "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
