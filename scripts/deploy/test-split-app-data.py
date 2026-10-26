@@ -2,11 +2,14 @@
 """Real PostgreSQL 18 rehearsal, with synthetic records in a disposable container."""
 import contextlib
 import importlib.util
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import socket
+import sys
+import tarfile
 import subprocess
 import tempfile
 import time
@@ -18,6 +21,7 @@ import uuid
 import psycopg
 from psycopg import sql
 
+sys.dont_write_bytecode = True
 SCRIPT = Path(__file__).with_name('split-app-data.py')
 spec = importlib.util.spec_from_file_location('split_app_data', SCRIPT)
 conversion = importlib.util.module_from_spec(spec)
@@ -51,13 +55,18 @@ class ConversionRehearsal(unittest.TestCase):
         else:
             cls.tearDownClass()
             raise RuntimeError('Scratch PostgreSQL did not start')
+        cls.identity = cls.root / 'synthetic.agekey'
+        subprocess.run(['age-keygen', '-o', str(cls.identity)], check=True, capture_output=True)
+        cls.old_recipient = os.environ.get('BACKUP_AGE_RECIPIENT')
+        os.environ['BACKUP_AGE_RECIPIENT'] = subprocess.run(['age-keygen', '-y', str(cls.identity)],
+            check=True, capture_output=True, text=True).stdout.strip()
         cls.old_path = os.environ['PATH']
         cls.old_service = os.environ.get('PGSERVICEFILE')
         cls.services = cls.root / 'services.conf'
         os.environ['PGSERVICEFILE'] = str(cls.services)
         for tool in ('pg_dump', 'pg_restore'):
             wrapper = cls.root / tool
-            wrapper.write_text('#!/bin/sh\nexec docker --host=unix:///var/run/docker.sock exec '
+            wrapper.write_text('#!/bin/sh\nexec docker --host=unix:///var/run/docker.sock exec -i '
                                f'-e PGSERVICEFILE={cls.services} {cls.container} {tool} "$@"\n')
             wrapper.chmod(0o700)
         os.environ['PATH'] = str(cls.root) + ':' + cls.old_path
@@ -67,6 +76,10 @@ class ConversionRehearsal(unittest.TestCase):
         subprocess.run(DOCKER + ['rm', '-f', '-v', cls.container], check=False, stdout=subprocess.DEVNULL)
         if hasattr(cls, 'old_path'):
             os.environ['PATH'] = cls.old_path
+            if cls.old_recipient is None:
+                os.environ.pop('BACKUP_AGE_RECIPIENT', None)
+            else:
+                os.environ['BACKUP_AGE_RECIPIENT'] = cls.old_recipient
             if cls.old_service is None:
                 os.environ.pop('PGSERVICEFILE', None)
             else:
@@ -109,7 +122,7 @@ class ConversionRehearsal(unittest.TestCase):
         self.mapping.write_text(json.dumps({str(source_id): 'FRED'}))
         self.args = SimpleNamespace(source_service='conversion_source', app_service='conversion_app', source_map=self.mapping,
                                     backup_dir=self.root / ('backup-' + self.number), dry_run=False,
-                                    writers_stopped=True, drop_source_app=False)
+                                    writers_stopped=True, drop_source_app=False, previous_evidence=None)
 
     def run_conversion(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -122,7 +135,16 @@ class ConversionRehearsal(unittest.TestCase):
         with psycopg.connect(service='conversion_app') as db:
             self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
         self.args.dry_run = False
-        self.run_conversion()
+        backup = conversion.encrypted_backup
+        def check_locks(*args):
+            for service in ('conversion_source', 'conversion_app'):
+                with psycopg.connect(service=service) as writer:
+                    writer.execute("SET lock_timeout='100ms'")
+                    with self.assertRaises(psycopg.errors.LockNotAvailable):
+                        writer.execute("UPDATE users SET name='concurrent writer'")
+            return backup(*args)
+        with patch.object(conversion, 'encrypted_backup', side_effect=check_locks):
+            self.run_conversion()
         with psycopg.connect(service='conversion_app') as db:
             self.assertEqual(db.execute('SELECT user_id,series_id FROM chart_annotations').fetchone(), (self.user_id, str(self.series_id)))
         # Reuse neither backup directories nor overwrite a verified dump on rerun.
@@ -134,10 +156,21 @@ class ConversionRehearsal(unittest.TestCase):
             self.assertNotIn('users', conversion.tables(db))
             self.assertEqual(conversion.fingerprints(db, conversion.inventory('data')[0]), self.before)
             self.assertEqual(conversion.versions(db), conversion.inventory('data')[2])
+        with self.assertRaisesRegex(RuntimeError, '--previous-evidence'):
+            self.run_conversion()
+        self.args.previous_evidence = self.args.backup_dir / 'evidence.json'
         self.run_conversion()
         evidence = json.loads((self.args.backup_dir / 'evidence.json').read_text())
         self.assertTrue(evidence['source_app_removed'])
-        self.assertEqual((self.args.backup_dir / 'combined.dump').stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.args.backup_dir / 'backup.tar.age').stat().st_mode & 0o777, 0o600)
+        decrypted = subprocess.run(['age', '-d', '-i', str(self.identity),
+                                    str(self.args.backup_dir / 'backup.tar.age')],
+                                   check=True, capture_output=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(decrypted)) as bundle:
+            archive = bundle.extractfile('./combined.dump').read()
+            self.assertEqual(hashlib.sha256(archive).hexdigest(), evidence['backup_sha256'])
+            subprocess.run(['pg_restore', '--file', os.devnull], input=archive,
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def test_refuses_unrelated_target_and_wrong_stable_ids(self):
         with psycopg.connect(service='conversion_app') as db:
@@ -148,6 +181,19 @@ class ConversionRehearsal(unittest.TestCase):
         self.mapping.write_text(json.dumps({next(iter(json.loads(self.mapping.read_text()))): 'BLS'}))
         with self.assertRaisesRegex(RuntimeError, 'Unstable series IDs'):
             self.run_conversion()
+
+    def test_copy_failure_retains_backup_and_rolls_back_both_databases(self):
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute("ALTER TABLE users ADD CONSTRAINT rehearsal_refusal CHECK(name <> 'Synthetic User')")
+        with self.assertRaises(psycopg.errors.CheckViolation):
+            self.run_conversion()
+        self.assertTrue((self.args.backup_dir / 'backup.tar.age').is_file())
+        with psycopg.connect(service='conversion_app') as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM annotation_templates').fetchone()[0], 3)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 1)
+            self.assertEqual(conversion.fingerprints(db, conversion.inventory('data')[0]), self.before)
 
     def test_copy_requires_stopped_writers_and_cleanup_requires_terminal(self):
         self.args.writers_stopped = False

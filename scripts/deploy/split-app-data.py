@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -80,24 +81,47 @@ def stable_ids(conn, mapping):
     return {'mismatches': mismatches, 'sha256': digest.hexdigest()}
 
 
-def private_backup(source, service, directory):
-    # New directory only: never overwrite, prune, or delete an existing backup.
-    directory.mkdir(mode=0o700)
+def private_dump(source, service, directory):
     snapshot = query(source, 'SELECT pg_export_snapshot()')[0][0]
     path = directory / 'combined.dump'
-    # Reserve it privately even if a tool wrapper starts with a different umask.
-    with path.open('xb'):
+    # Open the private archive ourselves, including when pg_dump is wrapped in a container.
+    with path.open('xb') as archive:
         path.chmod(0o600)
-    subprocess.run(['pg_dump', '--no-password', '--dbname', f'service={service}',
-                    '--format=custom', '--snapshot', snapshot, '--file', str(path)],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['pg_dump', '--no-password', '--dbname', f'service={service}',
+                        '--format=custom', '--snapshot', snapshot], check=True,
+                       stdout=archive, stderr=subprocess.DEVNULL)
     # Decode every data block, not just the archive's table of contents.
-    subprocess.run(['pg_restore', '--file', os.devnull, str(path)], check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with path.open('rb') as archive:
+        subprocess.run(['pg_restore', '--file', os.devnull], stdin=archive, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     with path.open('rb') as archive:
         digest = hashlib.file_digest(archive, 'sha256').hexdigest()
     (directory / 'SHA256SUMS').write_text(f'{digest}  combined.dump\n')
     return digest
+
+
+def encrypted_backup(source, service, directory, evidence):
+    helper = ROOT / 'scripts/backup/encryption.sh'
+    command = ('set -euo pipefail\n'
+               'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
+               'source "$1"\nbackup_encryption_preflight\n')
+    staging = subprocess.run(['bash', '-c', command + 'backup_plaintext_dir',
+                              'conversion-backup', str(helper)], check=True,
+                             capture_output=True, text=True).stdout.strip()
+    stage = Path(staging)
+    require(stage.is_absolute() and stage.name.startswith('econgraph-backup.') and stage.is_dir(),
+            'Backup helper returned an invalid staging directory')
+    try:
+        # The helper requires tmpfs and validates the public recipient before any mutation.
+        digest = private_dump(source, service, stage)
+        (stage / 'source-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
+        subprocess.run(['bash', '-c', command + 'backup_seal_dir "$2" "$3"',
+                        'conversion-backup', str(helper), str(stage), str(directory)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return digest
+    finally:
+        # Only newly allocated plaintext staging is disposable; never remove a backup.
+        shutil.rmtree(stage)
 
 
 def columns(conn, table):
@@ -168,8 +192,11 @@ def convert(args):
             conn.execute("SET LOCAL intervalstyle='postgres'")
             conn.execute("SET LOCAL bytea_output='hex'")
         identity = 'SELECT system_identifier::text, current_database() FROM pg_control_system()'
-        require(query(source, identity) != query(target, identity), 'Source and target are the same database')
+        source_identity, target_identity = query(source, identity)[0], query(target, identity)[0]
+        require(source_identity != target_identity, 'Source and target are the same database')
         source_tables, target_tables = tables(source), tables(target)
+        require(not query(target, "SELECT 1 FROM pg_class WHERE relkind='S' AND relnamespace='public'::regnamespace"),
+                'Target has sequences: this UUID-based conversion requires operator review for sequence state')
         metadata = {'__diesel_schema_migrations'}
         require(target_tables == set(app_tables) | metadata, 'Target table inventory is not exactly the app schema')
         source_app = source_tables & set(app_tables)
@@ -186,11 +213,23 @@ def convert(args):
         require(series['mismatches'] == 0, 'Unstable series IDs: stop for operator investigation')
         data_before = fingerprints(source, data_tables)
         target_before = fingerprints(target, app_tables)
-        report = {'series': series, 'data_before': data_before, 'app_before': target_before, 'dry_run': args.dry_run}
+        report = {'series': series, 'data_before': data_before, 'app_before': target_before, 'dry_run': args.dry_run,
+                  'source_identity': list(source_identity), 'target_identity': list(target_identity)}
         if not source_app:
             require(not (set(app_enums) & {r[0] for r in query(source, "SELECT typname FROM pg_type WHERE typnamespace='public'::regnamespace")}),
                     'Source app enums remain; investigate partial conversion')
-            print('Source already contains only the data schema; no conversion performed. Verify deployment separately.')
+            require(versions(source) == data_versions, 'Source app migration entries remain after a partial conversion')
+            require(args.previous_evidence is not None,
+                    'Source has no app tables: --previous-evidence is required to verify an already completed conversion')
+            previous = json.loads(args.previous_evidence.read_text())
+            require(previous.get('copy_verified') is True
+                    and previous.get('source_app') == target_before
+                    and previous.get('data_before') == data_before
+                    and previous.get('series') == series
+                    and previous.get('source_identity') == list(source_identity)
+                    and previous.get('target_identity') == list(target_identity),
+                    'Previous conversion evidence does not match these databases and their current contents')
+            print('Already converted: source data and target app contents match the previous verified conversion.')
             return
         source_app_before = fingerprints(source, app_tables)
         matches = target_before == source_app_before
@@ -204,7 +243,7 @@ def convert(args):
             target.rollback()
             return
         require(args.writers_stopped, 'Stop all app/crawler writers and pass --writers-stopped before copying')
-        report['backup_sha256'] = private_backup(source, args.source_service, args.backup_dir)
+        report['backup_sha256'] = encrypted_backup(source, args.source_service, args.backup_dir, report)
         if not matches:
             copy_app(source, target, app_tables)
         require(fingerprints(target, app_tables) == source_app_before, 'App copy content verification failed')
@@ -239,8 +278,9 @@ def main():
     parser.add_argument('--source-service', required=True, help='libpq service for the existing combined/data database')
     parser.add_argument('--app-service', required=True, help='libpq service for a migrated app database')
     parser.add_argument('--source-map', required=True, type=Path, help='JSON object: data_sources UUID -> canonical crawler code')
-    parser.add_argument('--backup-dir', type=Path, help='New private directory for the verified source backup/evidence')
+    parser.add_argument('--backup-dir', type=Path, help='New directory for the encrypted verified source backup and nonsecret evidence')
     parser.add_argument('--dry-run', action='store_true', help='Read and lock schemas; never write persistent data')
+    parser.add_argument('--previous-evidence', type=Path, help='Previous evidence.json required to verify an already converted source')
     parser.add_argument('--writers-stopped', action='store_true', help='Operator confirms every app and crawler writer is stopped')
     parser.add_argument('--drop-source-app', action='store_true', help='After copy verification, ask for typed source cleanup confirmation')
     args = parser.parse_args()

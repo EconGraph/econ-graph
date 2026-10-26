@@ -1,0 +1,42 @@
+name: App and data database conversion rehearsal
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/app-data-conversion.yml'
+      - 'scripts/deploy/*split-app-data*'
+      - 'scripts/backup/encryption.sh'
+      - 'backend/migrations/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/app-data-conversion.yml'
+      - 'scripts/deploy/*split-app-data*'
+      - 'scripts/backup/encryption.sh'
+      - 'backend/migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conversion-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conversion:
+    name: Rehearse app/data conversion on synthetic PostgreSQL records
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.14'
+      - name: Install rehearsal dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+          python -m pip install 'psycopg[binary]==3.2.12'
+      - name: Rehearse a conversion and refusal cases
+        run: python scripts/deploy/test-split-app-data.py -v
