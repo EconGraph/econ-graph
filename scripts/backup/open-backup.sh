@@ -31,6 +31,10 @@ read -r -p 'Path to your age identity (kept outside agent access): ' identity </
 # Only regular files and directories are accepted, with no absolute paths,
 # traversal, symlinks, hard links, devices or duplicate files.
 age -d -i "$identity" "$bundle/backup.tar.age" | python3 "$script_dir/unpack-backup.py" "$scratch"
+# Consumers that persist resume state must keep the durable bundle identity,
+# while backup_source_dir resolves file reads to this temporary payload.
+export BACKUP_ACTIVE_OUTPUT="$bundle"
+export BACKUP_ACTIVE_DIR="$scratch"
 args=()
 for arg in "$@"; do args+=("${arg//@BACKUP@/$scratch}"); done
 "${args[@]}"

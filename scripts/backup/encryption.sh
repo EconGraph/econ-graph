@@ -32,6 +32,9 @@ backup_seal_dir() {
     (umask 077
         mkdir -p -- "$(dirname "$output")" || exit
         mkdir -- "$partial" || exit
+        # An interrupted/failed final rename must not leave an unpublished
+        # directory eligible for off-site selection.
+        trap 'rm -f -- "$partial/VERIFIED"' EXIT
         tar -C "$source" -cf - . | age -r "$BACKUP_AGE_RECIPIENT" -o "$partial/backup.tar.age" || exit
         (cd "$partial" || exit; sha256sum backup.tar.age > SHA256SUMS) || exit
         date -u +%Y-%m-%dT%H:%M:%SZ > "$partial/VERIFIED" || exit
@@ -47,6 +50,15 @@ backup_source_dir() {
         printf '%s\n' "$BACKUP_ACTIVE_DIR"
     else
         [[ ! -f "$1/backup.tar.age" ]] || die "encrypted bundle: use scripts/backup/open-backup.sh $1 -- COMMAND @BACKUP@ at an operator terminal"
+        printf '%s\n' "$1"
+    fi
+}
+
+# Keep resume-state identity stable while the opened payload changes tmpfs path.
+backup_original_dir() {
+    if [[ -n "${BACKUP_ACTIVE_OUTPUT:-}" && "$1" == "${BACKUP_ACTIVE_DIR:-}" ]]; then
+        printf '%s\n' "$BACKUP_ACTIVE_OUTPUT"
+    else
         printf '%s\n' "$1"
     fi
 }
