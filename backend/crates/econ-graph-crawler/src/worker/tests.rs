@@ -4210,7 +4210,7 @@ async fn lifecycle_capability_counts_confirmed_not_found_before_first_catalog_ca
         missing: i32,
     }
     let state: State = diesel::sql_query(
-        "SELECT status,missing_refreshes AS missing FROM series_lifecycle WHERE external_id=$1",
+        "SELECT status,fetch_not_found_count AS missing FROM series_lifecycle WHERE external_id=$1",
     )
     .bind::<diesel::sql_types::Text, _>(id)
     .get_result(&mut conn)

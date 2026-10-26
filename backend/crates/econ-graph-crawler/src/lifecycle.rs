@@ -333,7 +333,9 @@ async fn write_states(
          ON CONFLICT(source_id,external_id) DO UPDATE SET status=EXCLUDED.status,since=EXCLUDED.since, \
             missing_refreshes=EXCLUDED.missing_refreshes,last_seen_at=EXCLUDED.last_seen_at, \
             proposed_successor_id=EXCLUDED.proposed_successor_id,successor_id=EXCLUDED.successor_id, \
-            scope_fingerprint=EXCLUDED.scope_fingerprint")
+            scope_fingerprint=EXCLUDED.scope_fingerprint, \
+            fetch_retired=CASE WHEN EXCLUDED.status='retired' AND EXCLUDED.missing_refreshes<3 \
+                THEN series_lifecycle.fetch_retired ELSE FALSE END")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint).bind::<Jsonb,_>(payload).execute(&mut *conn).await?;
     // A lifecycle badge must not remove historical data from normal series browsing.
     // Only a verified legal restriction makes a row inactive; the API additionally
@@ -434,8 +436,9 @@ impl Reconciled {
     }
 }
 
-/// Record confirmed NotFound as one durable absence, even when no observations were
-/// ever fetched. Failed HTTP requests and parse errors must never call this function.
+/// Record confirmed NotFound as one consecutive fetch miss, even when no observations
+/// were ever fetched. This evidence never changes the catalog absence counter. Failed
+/// HTTP requests and parse errors must never call this function.
 pub(crate) async fn record_not_found_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
@@ -453,9 +456,11 @@ pub(crate) async fn record_not_found_conn(
             OR EXISTS(SELECT 1 FROM series_metadata WHERE source_id=$1 AND external_id=$2)
         ON CONFLICT(source_id,external_id) DO NOTHING")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
-    let change:Option<StatusChange> = diesel::sql_query("UPDATE series_lifecycle SET missing_refreshes=LEAST(missing_refreshes::bigint+1,2147483647)::integer, \
-        status=CASE WHEN missing_refreshes>=2 AND status NOT IN ('restricted','superseded') THEN 'retired' ELSE status END, \
-        since=CASE WHEN missing_refreshes>=2 AND status NOT IN ('retired','restricted','superseded') THEN NOW() ELSE since END \
+    let change:Option<StatusChange> = diesel::sql_query("UPDATE series_lifecycle SET \
+        fetch_not_found_count=LEAST(fetch_not_found_count::bigint+1,2147483647)::integer, \
+        status=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN 'retired' ELSE status END, \
+        fetch_retired=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN TRUE ELSE fetch_retired END, \
+        since=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN NOW() ELSE since END \
         WHERE source_id=$1 AND external_id=$2 RETURNING CASE WHEN old.status<>status THEN status ELSE NULL END AS status")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result(&mut *conn).await.optional()?;
     diesel::sql_query(
@@ -468,6 +473,39 @@ pub(crate) async fn record_not_found_conn(
     .execute(&mut *conn)
     .await?;
     Ok(change.and_then(|c| c.status))
+}
+
+/// Reset only fetch evidence when history was successfully fetched. Run before the
+/// economic-series upsert: a metadata-only series may need a new FK parent key lock.
+/// If evidence exists, source-first locking matches catalog/NotFound/restriction writes.
+/// Normal successful crawls do no lifecycle mutation and do not serialize on the source.
+pub(crate) async fn record_fetch_success_conn(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    external_id: &str,
+) -> AppResult<()> {
+    #[derive(QueryableByName)]
+    struct Needed {
+        #[diesel(sql_type=diesel::sql_types::Bool)]
+        needed: bool,
+    }
+    let needed:Needed=diesel::sql_query("SELECT EXISTS(SELECT 1 FROM series_lifecycle
+        WHERE source_id=$1 AND external_id=$2 AND (fetch_not_found_count>0 OR fetch_retired)) AS needed")
+        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result(&mut *conn).await?;
+    if !needed.needed {
+        return Ok(());
+    }
+    diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
+        .bind::<SqlUuid, _>(source_id)
+        .execute(&mut *conn)
+        .await?;
+    diesel::sql_query("UPDATE series_lifecycle SET fetch_not_found_count=0,fetch_retired=FALSE,
+        status=CASE WHEN fetch_retired AND status='retired'
+            THEN CASE WHEN missing_refreshes>=3 THEN 'missing_from_catalog' ELSE 'active' END ELSE status END,
+        since=CASE WHEN fetch_retired AND status='retired' AND missing_refreshes<3 THEN NULL ELSE since END
+        WHERE source_id=$1 AND external_id=$2 AND (fetch_not_found_count>0 OR fetch_retired)")
+        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
+    Ok(())
 }
 
 #[derive(QueryableByName)]

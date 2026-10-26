@@ -956,6 +956,9 @@ pub(crate) async fn persist_series_conn(
     let frequency = meta.and_then(|m| clip_opt(m.frequency.as_deref(), 50));
     let seasonal = meta.and_then(|m| clip_opt(m.seasonal_adjustment.as_deref(), 100));
     let external_id = clip(external_id, 255);
+    // A successful historical fetch resets only its consecutive fetch misses. Catalog
+    // disappearance, legal restrictions and confirmed successor links remain authoritative.
+    crate::lifecycle::record_fetch_success_conn(conn, source_id, &external_id).await?;
     let id = stable_series_id(source, &external_id);
 
     // Last occurrence wins for duplicate keys (one INSERT can't touch a row twice).

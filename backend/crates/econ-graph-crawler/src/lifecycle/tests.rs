@@ -339,7 +339,8 @@ async fn fetch_only_not_found_and_restriction_evidence_is_durable() {
         .await
         .unwrap();
         let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id='retired'").get_result(&mut conn).await.unwrap();
-        assert_eq!(state.missing_refreshes, n);
+        assert_eq!(state.missing_refreshes, 0);
+        assert_eq!(fetch_evidence(pool, "retired").await.fetch_misses, n);
         assert_eq!(state.status, if n < 3 { "active" } else { "retired" });
     }
     conn.transaction::<(), AppError, _>(async |conn| {
@@ -678,6 +679,367 @@ name="Regional"
             .await
             .unwrap();
     assert_eq!(retained.n, 2);
+    drop(conn);
+    db.drop().await;
+}
+
+#[derive(Debug, QueryableByName)]
+struct FetchEvidence {
+    #[diesel(sql_type=Text)]
+    status: String,
+    #[diesel(sql_type=diesel::sql_types::Integer)]
+    catalog_misses: i32,
+    #[diesel(sql_type=diesel::sql_types::Integer)]
+    fetch_misses: i32,
+    #[diesel(sql_type=diesel::sql_types::Bool)]
+    fetch_retired: bool,
+}
+
+async fn fetch_evidence(pool: &DatabasePool, id: &str) -> FetchEvidence {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("SELECT status,missing_refreshes AS catalog_misses,fetch_not_found_count AS fetch_misses,fetch_retired
+        FROM series_lifecycle WHERE external_id=$1")
+        .bind::<Text,_>(id).get_result(&mut conn).await.unwrap()
+}
+
+async fn fetch_counter_db(tag: &str) -> Option<crate::persist::stable_id_tests::FreshDb> {
+    use crate::{testkit::echo::EchoAdapter, DatasetCatalog};
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let db = crate::persist::stable_id_tests::FreshDb::create(&url, tag).await;
+    let mut catalog = DatasetCatalog::empty();
+    catalog
+        .load_adapter(&EchoAdapter::new("https://unused.invalid"))
+        .unwrap();
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    Some(db)
+}
+
+fn counter_series(id: &str) -> DiscoveredSeries {
+    DiscoveredSeries {
+        dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+        ..found(id)
+    }
+}
+
+fn successful_history() -> crate::FetchedSeries {
+    let date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    crate::FetchedSeries {
+        metadata: None,
+        points: vec![crate::FetchedPoint {
+            date,
+            value: Some(7.into()),
+            revision_date: date,
+            is_original_release: true,
+        }],
+        dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+        validators: None,
+    }
+}
+
+async fn fetch_miss(pool: &DatabasePool, id: &str) {
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        record_not_found_conn(conn, SourceId::Fred, id).await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn successful_fetch_breaks_not_found_streak_without_catalog_changes() {
+    let Some(db) = fetch_counter_db("eco464_nonconsecutive_fetch_misses").await else {
+        return;
+    };
+    let p = &db.pool;
+    persist::persist_discovered(p, SourceId::Fred, &[counter_series("intermittent")])
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        fetch_miss(p, "intermittent").await;
+        let e = fetch_evidence(p, "intermittent").await;
+        assert_eq!(
+            (
+                e.status.as_str(),
+                e.fetch_misses,
+                e.catalog_misses,
+                e.fetch_retired
+            ),
+            ("active", 1, 0, false)
+        );
+        persist::persist_series(p, SourceId::Fred, "intermittent", &successful_history())
+            .await
+            .unwrap();
+        let e = fetch_evidence(p, "intermittent").await;
+        assert_eq!(
+            (
+                e.status.as_str(),
+                e.fetch_misses,
+                e.catalog_misses,
+                e.fetch_retired
+            ),
+            ("active", 0, 0, false)
+        );
+    }
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn mixed_catalog_and_fetch_absences_never_share_their_confirmation_threshold() {
+    let Some(db) = fetch_counter_db("eco464_independent_catalog_fetch_misses").await else {
+        return;
+    };
+    let p = &db.pool;
+    let baseline: Vec<_> = ["target", "a", "b", "c", "d"]
+        .into_iter()
+        .map(counter_series)
+        .collect();
+    let present = baseline[1..].to_vec();
+    let mut now = Utc::now();
+    let mut conn = p.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        persist::persist_discovered_conn(conn, SourceId::Fred, &baseline).await?;
+        reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &baseline,
+            &CatalogLifecycle::default(),
+            "scope",
+            now,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    now += chrono::Duration::seconds(1);
+    conn.transaction::<(), AppError, _>(async |conn| {
+        reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &present,
+            &CatalogLifecycle::default(),
+            "scope",
+            now,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    fetch_miss(p, "target").await;
+    fetch_miss(p, "target").await;
+    let e = fetch_evidence(p, "target").await;
+    assert_eq!(
+        (e.status.as_str(), e.catalog_misses, e.fetch_misses),
+        ("active", 1, 2),
+        "one catalog miss plus two fetch misses is not three of either"
+    );
+    persist::persist_series(p, SourceId::Fred, "target", &successful_history())
+        .await
+        .unwrap();
+    let e = fetch_evidence(p, "target").await;
+    assert_eq!(
+        (e.status.as_str(), e.catalog_misses, e.fetch_misses),
+        ("active", 1, 0)
+    );
+    // Historical data remains fetchable while publication is gone. Successes between
+    // catalog observations must not prevent the third complete-catalog absence badge.
+    for n in 2..=3 {
+        now += chrono::Duration::seconds(1);
+        conn.transaction::<(), AppError, _>(async |conn| {
+            reconcile_conn(
+                conn,
+                SourceId::Fred,
+                &present,
+                &CatalogLifecycle::default(),
+                "scope",
+                now,
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        persist::persist_series(p, SourceId::Fred, "target", &successful_history())
+            .await
+            .unwrap();
+        let e = fetch_evidence(p, "target").await;
+        assert_eq!(e.catalog_misses, n);
+        assert_eq!(e.fetch_misses, 0);
+        assert_eq!(
+            e.status,
+            if n < 3 {
+                "active"
+            } else {
+                "missing_from_catalog"
+            }
+        );
+    }
+    for _ in 0..3 {
+        fetch_miss(p, "target").await;
+    }
+    let e = fetch_evidence(p, "target").await;
+    assert_eq!(e.status, "missing_from_catalog");
+    assert!(!e.fetch_retired);
+    persist::persist_series(p, SourceId::Fred, "target", &successful_history())
+        .await
+        .unwrap();
+    let e = fetch_evidence(p, "target").await;
+    assert_eq!(
+        (
+            e.status.as_str(),
+            e.catalog_misses,
+            e.fetch_misses,
+            e.fetch_retired
+        ),
+        ("missing_from_catalog", 3, 0, false)
+    );
+    drop(conn);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn first_successful_fetch_recovers_fetch_only_retirement_but_never_legal_state() {
+    let Some(db) = fetch_counter_db("eco464_fetch_only_recovery").await else {
+        return;
+    };
+    let p = &db.pool;
+    persist::persist_discovered(p, SourceId::Fred, &[counter_series("metadata-only")])
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        fetch_miss(p, "metadata-only").await;
+    }
+    let e = fetch_evidence(p, "metadata-only").await;
+    assert_eq!(
+        (
+            e.status.as_str(),
+            e.catalog_misses,
+            e.fetch_misses,
+            e.fetch_retired
+        ),
+        ("retired", 0, 3, true)
+    );
+    // No economic_series row exists yet. Recovery must lock the source before the
+    // lifecycle row so inserting the FK-backed series cannot invert catalog lock order.
+    let written =
+        persist::persist_series(p, SourceId::Fred, "metadata-only", &successful_history())
+            .await
+            .unwrap();
+    let e = fetch_evidence(p, "metadata-only").await;
+    assert_eq!(
+        (
+            e.status.as_str(),
+            e.catalog_misses,
+            e.fetch_misses,
+            e.fetch_retired
+        ),
+        ("active", 0, 0, false)
+    );
+    let mut conn = p.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Es {
+        #[diesel(sql_type=Nullable<Text>)]
+        status: Option<String>,
+        #[diesel(sql_type=diesel::sql_types::Bool)]
+        active: bool,
+    }
+    let es: Es = diesel::sql_query(
+        "SELECT crawl_status AS status,is_active AS active FROM economic_series WHERE id=$1",
+    )
+    .bind::<SqlUuid, _>(written.series_id)
+    .get_result(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(es.status.as_deref(), Some("success"));
+    assert!(es.active);
+    conn.transaction::<(), AppError, _>(async |conn| {
+        record_restricted_conn(conn, SourceId::Fred, "metadata-only").await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    for _ in 0..3 {
+        fetch_miss(p, "metadata-only").await;
+    }
+    persist::persist_series(p, SourceId::Fred, "metadata-only", &successful_history())
+        .await
+        .unwrap();
+    let e = fetch_evidence(p, "metadata-only").await;
+    assert_eq!(e.status, "restricted");
+    assert_eq!(e.fetch_misses, 0);
+    drop(conn);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn catalog_confirmed_retirement_survives_fetch_success_and_rule_baseline_reset() {
+    let Some(db) = fetch_counter_db("eco464_catalog_retirement_reason").await else {
+        return;
+    };
+    let p = &db.pool;
+    let baseline: Vec<_> = ["gone", "a", "b", "c", "d"]
+        .into_iter()
+        .map(counter_series)
+        .collect();
+    let present = baseline[1..].to_vec();
+    let mut now = Utc::now();
+    let mut conn = p.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        persist::persist_discovered_conn(conn, SourceId::Fred, &baseline).await?;
+        reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &baseline,
+            &CatalogLifecycle::default(),
+            "old-scope",
+            now,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let facts = CatalogLifecycle {
+        confirmed_missing_ids: vec!["gone".into()],
+        ..Default::default()
+    };
+    for _ in 0..3 {
+        now += chrono::Duration::seconds(1);
+        conn.transaction::<(), AppError, _>(async |conn| {
+            reconcile_conn(conn, SourceId::Fred, &present, &facts, "old-scope", now).await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+    let e = fetch_evidence(p, "gone").await;
+    assert_eq!(e.status, "retired");
+    assert!(!e.fetch_retired);
+    // Changing the rule fingerprint resets absence evidence without revoking a
+    // previously confirmed catalog state. The explicit reason flag preserves it.
+    now += chrono::Duration::seconds(1);
+    conn.transaction::<(), AppError, _>(async |conn| {
+        reconcile_conn(conn, SourceId::Fred, &present, &facts, "new-scope", now).await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    fetch_miss(p, "gone").await;
+    persist::persist_series(p, SourceId::Fred, "gone", &successful_history())
+        .await
+        .unwrap();
+    let e = fetch_evidence(p, "gone").await;
+    assert_eq!(
+        (
+            e.status.as_str(),
+            e.catalog_misses,
+            e.fetch_misses,
+            e.fetch_retired
+        ),
+        ("retired", 1, 0, false)
+    );
     drop(conn);
     db.drop().await;
 }
