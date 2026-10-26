@@ -920,6 +920,39 @@ mod tests {
         assert_eq!(public_tables(&mut conn), sorted(&all));
     }
 
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn reverting_catalog_evidence_preserves_the_schema_and_migration_record() {
+        use diesel::connection::SimpleConnection;
+        use diesel_migrations::MigrationHarness;
+
+        let db = ScratchDatabase::create("catalog_forward_only");
+        run_migration_set(&db.url, MigrationSet::Data)
+            .await
+            .unwrap();
+        let mut conn = db.connect();
+        conn.batch_execute("INSERT INTO catalog_reference_snapshots(source,url,content_sha256,codes) \
+            VALUES('BEA','https://example.test/catalog','test','[{\"code\":\"OLD\",\"label\":\"Retained\"}]')")
+            .unwrap();
+        let versions = recorded_versions(&mut conn);
+        let schema = schema_signature(&mut conn);
+        let error = conn.revert_last_migration(DATA_MIGRATIONS).unwrap_err();
+        assert!(error.to_string().contains("forward-only"), "{error}");
+        assert_eq!(recorded_versions(&mut conn), versions);
+        assert_eq!(schema_signature(&mut conn), schema);
+        assert_eq!(
+            text_rows(
+                &mut conn,
+                "SELECT codes->0->>'label' AS value FROM catalog_reference_snapshots"
+            ),
+            vec!["Retained"]
+        );
+        assert!(run_migration_set(&db.url, MigrationSet::Data)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     /// Each set builds on an empty database by itself and creates only its own tables, so the
     /// app and data sets can live in separate databases.
     #[tokio::test]

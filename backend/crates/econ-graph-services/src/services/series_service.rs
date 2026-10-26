@@ -465,14 +465,13 @@ fn filtered_data_points(
 ) -> data_points::BoxedQuery<'static, diesel::pg::Pg> {
     let mut query = data_points::table
         .filter(data_points::series_id.eq(params.series_id))
-        .filter(sql::<Bool>(
-            "EXISTS (SELECT 1 FROM economic_series public_series \
-             WHERE public_series.id = data_points.series_id \
-               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
-                   WHERE lifecycle.source_id = public_series.source_id \
-                     AND lifecycle.external_id = public_series.external_id \
-                     AND lifecycle.status = 'restricted'))",
-        ))
+        .filter(
+            data_points::series_id.eq_any(
+                economic_series::table
+                    .filter(public_series_predicate())
+                    .select(economic_series::id),
+            ),
+        )
         .into_boxed();
 
     if let Some(start_date) = params.start_date {
