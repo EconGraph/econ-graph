@@ -181,12 +181,15 @@ psql_in() { # psql_in CONTAINER USER DB SQL
     docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$1" psql -X -q -v ON_ERROR_STOP=1 -U "$2" -d "$3" -At -c "$4"
 }
 
-# app_sql HOST: run the SQL on stdin as econgraph with its password, from
-# another container over the network, as the backend and crawler connect.
+# app_sql HOST [psql options...]: run the SQL on stdin as econgraph with its
+# password, from another container over the network, as the backend and
+# crawler connect.
 app_sql() {
+    local host="$1"
+    shift
     docker run --rm -i --network "$NET" -e PGPASSWORD="$APP_PW" \
         -e PGOPTIONS="-c client_min_messages=warning" "$PG_IMAGE" \
-        psql -X -q -v ON_ERROR_STOP=1 -h "$1" -U econgraph -d econ_graph -At
+        psql -X -q -v ON_ERROR_STOP=1 -h "$host" -U econgraph -d econ_graph -At "$@"
 }
 
 # In production every extension, pgcrypto included, is owned by the
@@ -197,8 +200,9 @@ psql_in "$ECON" postgres econ_graph "CREATE EXTENSION IF NOT EXISTS pgcrypto"
 # The backend runs the migrations as econgraph at startup, each in a
 # transaction, and records them in Diesel's table.
 for migration in "$MIGRATIONS"/*/up.sql; do
-    app_sql postgres-service <"$migration" >/dev/null 2>>"$LOG" || {
-        echo "migration $migration failed" >&2
+    app_sql postgres-service --single-transaction <"$migration" >/dev/null 2>"$tmp/out" || {
+        echo "migration $migration failed:" >&2
+        cat "$tmp/out" >&2
         exit 1
     }
 done
