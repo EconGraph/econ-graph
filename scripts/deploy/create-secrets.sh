@@ -130,6 +130,11 @@ for arg in "$@"; do
     esac
 done
 
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
+
 APP_DB_USER="econgraph"
 DB_PORT="5432"
 # The data database (StatefulSet postgresql) and the app database (StatefulSet

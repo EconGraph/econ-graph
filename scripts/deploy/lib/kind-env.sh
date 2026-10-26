@@ -7,6 +7,12 @@
 # Callers set DRY_RUN=true|false and ASSUME_YES=true|false before using run()
 # or confirm().
 
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/agent-access.sh"
+if econgraph_agent_session; then
+    export ECONGRAPH_AGENT_SESSION=1
+fi
+
 # The Docker daemon the kind cluster runs on: the rootful system daemon
 # (data on ext4). kind can't start under rootless Docker on this host, whose
 # data root is on btrfs (kind then bind-mounts /dev/mapper into the nodes).
@@ -257,6 +263,18 @@ use_kind_kubectl() {
 # use_kind_kubectl, but return non-zero instead of exiting when the cluster is
 # missing or its API server doesn't answer (e.g. expired certificates).
 try_use_kind_kubectl() {
+    if [ "${ECONGRAPH_AGENT_SESSION:-}" = 1 ]; then
+        # Never mint cluster-admin credentials from Docker in a restricted session.
+        local agent_dir="${ECONGRAPH_KUBE_DIR:-}"
+        [ -n "$agent_dir" ] && [ -x "$agent_dir/bin/kubectl" ] &&
+            [ "${KUBECONFIG:-}" = "$agent_dir/kubeconfig-${KIND_CLUSTER}" ] || {
+            warn "restricted kubeconfig missing; ask the operator to renew it"
+            return 1
+        }
+        "$agent_dir/bin/kubectl" --kubeconfig "$KUBECONFIG" \
+            version --request-timeout=15s >/dev/null 2>&1
+        return
+    fi
     kind_cluster_exists || {
         warn "kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}"
         return 1
@@ -308,6 +326,10 @@ ensure_kind_kubectl() {
 
 # ensure_kind_kubectl, but return non-zero instead of exiting.
 ensure_kind_kubectl_quietly() {
+    if [ "${ECONGRAPH_AGENT_SESSION:-}" = 1 ]; then
+        try_use_kind_kubectl
+        return
+    fi
     local dir="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}"
     if [ "${KUBECONFIG:-}" = "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
         [ "$(command -v kubectl)" = "${dir}/bin/kubectl" ] && [ -x "${dir}/bin/kubectl" ]; then

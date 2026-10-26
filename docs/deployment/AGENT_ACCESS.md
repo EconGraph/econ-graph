@@ -1,0 +1,99 @@
+# Restricted Kubernetes sessions for coding agents
+
+Agent tools use a short-lived ServiceAccount kubeconfig through
+`scripts/deploy/run-agent-session.sh`. The identity can manage workloads in one
+namespace and read pod logs, but its Role grants no access to Secrets, RBAC,
+ServiceAccount tokens, pod exec, nodes, namespaces or cluster-scoped resources.
+Use this launcher as the default entry point for every agent session that needs
+Kubernetes access. Existing sessions keep their credentials until restarted.
+
+This reduces accidental direct access to Secrets; it is **not a confidentiality
+boundary**. An identity that can deploy arbitrary workloads can mount Secrets or
+run a pod under another ServiceAccount. Logs and ConfigMaps can also contain
+sensitive data. A process running as the operator's Unix user can read that user's
+admin kubeconfig and plaintext backups. Access to the rootful Docker socket can
+recover kind's admin credentials or mount host files. Environment flags and script
+guards do not prevent those bypasses.
+
+A true boundary requires a separate Unix account with no operator files or Docker
+socket access, namespace separation, and admission policy restricting workloads,
+ServiceAccounts, volumes and security contexts. Those controls must precede any
+claim that agents cannot obtain production secrets. Until then, grant deployment
+access only to trusted tools, preferably in a disposable branch namespace.
+
+## Bootstrap and launch
+
+Run the bootstrap yourself in an operator terminal. Supply an absolute path to a
+real kubectl binary; on this host the snap wrapper named kubectl selects MicroK8s
+instead of respecting the intended kubeconfig. The cached kind kubectl is suitable.
+The selected context is `kind-econ-graph`; the namespace must already exist.
+
+```bash
+scripts/deploy/create-agent-kubeconfig.sh \
+  --operator-kubeconfig "$HOME/.cache/econgraph/kubeconfig-econ-graph" \
+  --kubectl "$HOME/.cache/econgraph/bin/kubectl" --dry-run
+
+scripts/deploy/create-agent-kubeconfig.sh \
+  --operator-kubeconfig "$HOME/.cache/econgraph/kubeconfig-econ-graph" \
+  --kubectl "$HOME/.cache/econgraph/bin/kubectl"
+
+scripts/deploy/run-agent-session.sh -- bash
+```
+
+Replace `bash` with the coding agent's command. Bootstrap is idempotent and writes
+only namespaced RBAC and a private local kubeconfig. It requests a token lifetime
+of one hour; the API server determines the actual expiration. Re-run bootstrap to
+renew it. `--namespace`, `--cluster`, and `--output-dir` allow an existing scratch
+namespace/cluster; pass the matching `--cluster` and `--config-dir` to the launcher.
+Protect the output directory (0700) and kubeconfig (0600), which holds a bearer
+token. Never attach or paste the kubeconfig in an issue, terminal output or chat.
+
+The launcher replaces inherited kubectl/config selections and marks the session.
+The shared kind helper preserves that identity and fails when it cannot use the
+restricted config; it never falls back to `kind get kubeconfig` in such a session.
+Full deployment scripts also manage namespaces, Secrets and cluster components,
+so they still require an operator. Agents can apply individual permitted workload
+manifests; they cannot run the full provisioning workflow with this Role.
+
+`create-secrets.sh` and `set-crawler-keys.sh` refuse before reading or prompting
+for credentials when the session marker or configured agent identity is present.
+Run these yourself outside the agent session using an operator-only kubeconfig.
+For conservative detection, any explicitly selected config containing an
+`econgraph-agent` entry is treated as restricted, including an unused entry. Any
+future SOPS apply entry point must source `lib/agent-access.sh` and call
+`require_operator_session` before decrypting or selecting admin credentials.
+
+## Verify and revoke
+
+From the launched restricted session, direct Secret access must be denied:
+
+```bash
+kubectl auth can-i get pods -n econ-graph
+kubectl auth can-i get secrets -n econ-graph
+kubectl auth can-i list secrets -n econ-graph
+kubectl auth can-i watch secrets -n econ-graph
+kubectl auth can-i get secrets -n kube-system
+```
+
+Expect `yes` only for pods. Broader existing RoleBindings can grant additional
+permissions, so verify the effective identity after installation. Remove the
+`econgraph-agent` RoleBinding and ServiceAccount in the selected namespace to
+revoke access; deleting the kubeconfig alone does not revoke a copied token.
+
+## Existing files that need operator review
+
+No secret contents are needed for this review. Existing host backups may contain
+`~/econgraph-backups/*/secrets/`, plaintext database dumps (including Keycloak
+client secrets), and Terraform state or state backups. age identity files are
+private keys too; only age public recipients belong in backup configuration.
+Check ownership, mode and parent-directory traversal permissions yourself, using
+file metadata only. Keep credential directories 0700 and files 0600, account for
+ACLs, and encrypt backup contents before sending them off-site. Restrictive modes
+protect against other Unix users, but do not isolate tools running as your UID.
+
+Do not delete existing backups as part of cleanup. The backup encryption work
+covers encrypted writers/restores and manual migration of historical copies.
+Before moving agents to a separate Unix user, inventory these locations and the
+admin kubeconfig, Terraform state, age identities, Docker group membership and
+supplementary groups. Verify the new user cannot traverse or read them, and cannot
+obtain equivalent access via sudo, Docker, hostPath pods or Kubernetes RBAC.

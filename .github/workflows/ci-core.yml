@@ -279,6 +279,9 @@ jobs:
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
 
+    - name: Check restricted agent access and credential guards
+      run: scripts/deploy/test-agent-access.sh
+
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
     - name: Check the kind installer
