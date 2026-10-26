@@ -25,6 +25,19 @@ use crate::graphql::cross_section::{self, CrossSectionEntry, DimensionFilterInpu
 /// Root query object
 pub struct Query;
 
+/// Search/list cursors are nonnegative offsets within the services' i32 range.
+/// Only an omitted cursor starts at zero; invalid continuations must not repeat page one.
+fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
+    match after {
+        None => Ok(0),
+        Some(cursor) => cursor
+            .parse::<i32>()
+            .ok()
+            .filter(|offset| *offset >= 0)
+            .ok_or_else(|| async_graphql::Error::new(format!("Invalid cursor: {cursor}"))),
+    }
+}
+
 #[Object]
 impl Query {
     /// Get a specific economic series by ID
@@ -93,11 +106,7 @@ impl Query {
         // source's whole catalog can be paged through and its size reported.
         let pagination = pagination.unwrap_or_default();
         let first = pagination.first.unwrap_or(50).clamp(1, 100);
-        let offset = pagination
-            .after
-            .and_then(|cursor| cursor.parse::<i32>().ok())
-            .unwrap_or(0)
-            .max(0);
+        let offset = parse_series_cursor(pagination.after.as_deref())?;
 
         let mut search_params = convert_series_filter_to_params(filter)?;
         search_params.limit = Some(i64::from(first));
@@ -410,7 +419,7 @@ impl Query {
             query: query.clone(),
             similarity_threshold: Some(0.3),
             limit: first,
-            offset: after.and_then(|cursor| cursor.parse::<i32>().ok()),
+            offset: Some(parse_series_cursor(after.as_deref())?),
             source_id,
             frequency: frequency.map(|f| format!("{:?}", f)),
             include_inactive: Some(false),
@@ -1024,6 +1033,9 @@ impl Default for Query {
 
 #[cfg(test)]
 mod series_data_tests;
+
+#[cfg(test)]
+mod pagination_tests;
 
 #[cfg(test)]
 mod tests {

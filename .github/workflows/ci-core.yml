@@ -914,6 +914,8 @@ jobs:
           echo "::endgroup::"
         }
 
+        run_group pagination_cursors \
+          graphql::query::pagination_tests
         run_group models_basic \
           models::data_source::tests::simple_tests \
           models::economic_series::tests::simple_tests \
