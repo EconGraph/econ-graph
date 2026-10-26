@@ -94,7 +94,19 @@ elif 'patch' in args:
     assert set(patch['spec']) == {'template'}, 'mount patch must preserve replicas'
     pod=patch['spec']['template']['spec']
     assert not any('secret' in volume for volume in pod['volumes'])
-    assert pod['containers'][0]['volumeMounts'][0]['readOnly'] is True
+    patch_container = pod['containers'][0]
+    assert patch_container['name'] == 'cloudflared'
+    mount = patch_container['volumeMounts'][0]
+    assert mount == {'name': 'origin-ca', 'mountPath': '/etc/cloudflared/origin-ca', 'readOnly': True}
+    volume = next(volume for volume in pod['volumes'] if volume['name'] == mount['name'])
+    assert volume == {'name': 'origin-ca', 'configMap': {'name': 'cloudflared-origin-ca',
+                     'optional': True, 'items': [{'key': 'ca.crt', 'path': 'ca.crt'}]}}
+    deployment = yaml.safe_load((root/'k8s/manifests/cloudflared.yaml').read_text())
+    deployed_pod = deployment['spec']['template']['spec']
+    deployed_container = next(container for container in deployed_pod['containers']
+                              if container['name'] == patch_container['name'])
+    assert mount in deployed_container['volumeMounts']
+    assert volume in deployed_pod['volumes'], 'normal deploys must preserve the staged trust mount'
     assert run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text()).returncode == 0
     calls.write_text('')
     result=run('--context','scratch-only','--apply',EXISTING_CA='different-existing-public-root')
