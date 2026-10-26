@@ -95,15 +95,21 @@ APP_URL="postgresql://econgraph:${APP_ROLE_PW}%40x%3Ay@app-postgres-service:5432
 SHARED_APP_URL="$DATA_URL"
 
 tmp="$(mktemp -d)"
+STAGE_ROOT=""
 LOG="$tmp/all-output.log"
 : >"$LOG"
 
 cleanup() {
     docker rm -f "$ECON" "$APP" "$FRESH" "$KC" "$S3" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
-    rm -rf "$tmp" 2>/dev/null || true
+    rm -rf "$tmp" "$STAGE_ROOT" 2>/dev/null || true
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Created in the parent: cleanup can remove staged plaintext even when an
+# interrupted run_sync is executing inside a command-substitution subshell.
+STAGE_ROOT="$(mktemp -d /dev/shm/econgraph-encrypt-stage.XXXXXX)"
 
 failures=0
 pass() { echo "ok - $*"; }
@@ -383,7 +389,7 @@ run_sync() {
     # Earlier dump fixtures remain for the restore assertions; a real pod's
     # plaintext emptyDir holds only this run, so stage only new fixtures here.
     local stage
-    stage="$(mktemp -d /dev/shm/econgraph-encrypt-stage.XXXXXX)"
+    stage="$(mktemp -d "$STAGE_ROOT/run.XXXXXX")"
     for file in "$tmp/backups"/*-*.dump; do
         [ -f "$file" ] && [ ! -L "$file" ] || continue
         [ -f "$tmp/ciphertexts/${file##*/}.age" ] || cp "$file" "$stage/"
@@ -415,10 +421,25 @@ run_sync() {
 }
 
 s3_keys() { # s3_keys PREFIX: compare encrypted object names with their plaintext fixture names
-    docker run --rm --network "$NET" -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
+    local keys key
+    keys="$(docker run --rm --network "$NET" -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
         -e AWS_DEFAULT_REGION=us-east-1 -e AWS_CONFIG_FILE=/aws/config -v "$tmp/aws:/aws:ro" \
         "$AWS_IMAGE" s3 ls --recursive --endpoint-url http://s3mock:9090 "s3://backups/$1/" |
-        awk '{ print $4 }' | sed "s|^$1/||; s|\\.age$||" | sort
+        awk '{ print $4 }')" || return 1
+    [ -n "$keys" ] || return 0
+    while IFS= read -r key; do
+        case "$key" in
+            *.dump.age) ;;
+            *)
+                echo "Non-ciphertext object uploaded: $key" >&2
+                # Callers also use process substitutions, whose exit status
+                # is ignored; retain a parent-visible failure for the final check.
+                : >"$tmp/invalid-s3-key"
+                return 1
+                ;;
+        esac
+    done <<<"$keys"
+    printf '%s\n' "$keys" | sed "s|^$1/||; s|\\.age$||" | sort
 }
 
 # Dump files (not the latest*.dump links), and the newest dump of one database.
@@ -1131,6 +1152,8 @@ printf '\n' >"$tmp/status/failed"
 rc="$(run_sync run7)"
 check "sync.sh exits 0" [ "$rc" = 0 ]
 check "  and the removed dump is still in S3" grep -qx "$kc_dump" <(s3_keys run7)
+
+check "all raw off-site object names end in .dump.age" [ ! -e "$tmp/invalid-s3-key" ]
 
 # --- credentials ---------------------------------------------------------------------
 
