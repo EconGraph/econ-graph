@@ -481,7 +481,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
-            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>("NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id=economic_series.source_id AND l.external_id=economic_series.external_id AND l.status='restricted')"))
+            .filter(econ_graph_services::services::series_service::public_series_predicate())
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
@@ -534,7 +534,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
-            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>("NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id=economic_series.source_id AND l.external_id=economic_series.external_id AND l.status='restricted')"))
+            .filter(econ_graph_services::services::series_service::public_series_predicate())
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .count()

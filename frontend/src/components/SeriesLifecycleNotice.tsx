@@ -2,7 +2,14 @@ import React from 'react';
 import { Alert, Box, Link, Typography } from '@mui/material';
 import type { SeriesLifecycle } from '../utils/graphql';
 
-/** Retained history stays usable; only a confirmed successor is described as a replacement. */
+/**
+ * Retained history stays usable; only a confirmed successor is described as a replacement.
+ * @param root0 - Publication metadata and display options.
+ * @param root0.lifecycle - The source's confirmed publication state.
+ * @param root0.sourceName - Human-readable name of the publishing source.
+ * @param root0.compact - Whether to show the notice inside a search result card.
+ * @returns A publication notice, or nothing for an active series.
+ */
 const SeriesLifecycleNotice: React.FC<{
   lifecycle?: SeriesLifecycle | null;
   sourceName?: string;
