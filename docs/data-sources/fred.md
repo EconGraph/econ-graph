@@ -12,11 +12,15 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/fred.rs`. Fixtures:
   (e.g. Coinbase, S&P/Case-Shiller) is dropped as a safety net before it is discovered. This
   replaced a `/series/search`-based crawl, which had no bound on how many series it could
   turn up.
-- **Fetch**: `GET /fred/series/observations?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=100000[&offset=...]`,
-  paged. A full fetch asks for every vintage FRED has
-  (`realtime_start=1776-07-04`); an incremental fetch starts the real-time window the day
-  before the newest stored vintage, so revisions to old dates still arrive, and re-reads
-  that vintage in case it changed.
+- **Fetch**: `GET /fred/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=10000[&offset=...]`
+  to list the vintage dates in the fetch's real-time window, then
+  `GET /fred/series/observations?series_id=ID&realtime_start=..&realtime_end=..&limit=100000[&offset=...]`
+  once per real-time window of at most 1,000 vintage dates (see
+  [Vintage-date limit](#vintage-date-limit)), each paged. A full fetch asks for every
+  vintage FRED has (`realtime_start=1776-07-04`); an incremental fetch starts the real-time
+  window the day before the newest stored vintage, so revisions to old dates still arrive,
+  and re-reads that vintage in case it changed. A series whose `last_updated` hasn't moved
+  since the last fetch skips both requests.
 - **Kept**: title, notes, units, frequency, seasonal adjustment; per observation `date`,
   `value`, and `realtime_start` (as the vintage date).
 - **Dropped**: `realtime_end` (derived from the next vintage), `last_updated`, `popularity`,
@@ -72,6 +76,36 @@ the 1990s, not necessarily the series' first ever publication) is marked
 
 For the federation model, `realtime_start` maps directly to `revision_date`, and
 `realtime_end` is what the reader derives from the next vintage.
+
+### Vintage-date limit
+
+One `/series/observations` request may cover at most 2,000 vintage dates in JSON. The
+[`vintage_dates` parameter docs](https://fred.stlouisfed.org/docs/api/fred/series_observations.html)
+say: "Your query will be limited to a specific number of vintage dates depending on the
+series_id, file_type and output_type specified", with "any output_type or other series: 1000
+csv, 1000 xlsx, 2000 json, 2000 xml". FRED applies the limit to a
+`realtime_start`..`realtime_end` window too, and answers a window holding more with HTTP 400,
+`Bad Request.  This exceeds the maximum number of vintage dates allowed (2000).` Daily series
+such as DFF, DGS10 and EFFR have several thousand vintage dates.
+
+- **Default batch**: every fetch lists the vintage dates in its window first and requests
+  the observations in consecutive real-time windows of at most 1,000 vintage dates
+  (`FRED_MAX_VINTAGE_DATES_PER_REQUEST`), half the documented limit. The margin covers what
+  FRED's count may include beyond the listed dates (each window after the first starts the
+  day before its first vintage, which can itself be a vintage date), dates the listing leaves
+  out (it omits release dates on which the series didn't change), and a JSON limit lowered to
+  the 1,000 FRED already uses for other formats. A series with at most 1,000 vintage dates is
+  one observations request, as before; DFF's roughly 5,150 take six.
+- **Windows**: the first window starts where the fetch does; each later one starts the day
+  before its first vintage and ends the day before the next window's first vintage; the last
+  ends at `9999-12-31`. A row is stored only from the window whose range, from its first
+  vintage on, holds the row's `realtime_start`, so each vintage of each date is stored
+  exactly once. The values FRED returns as already in effect on a window's first day (clamped
+  to it) aren't stored, but mark those dates as already published, so original releases are
+  the same as with one request.
+- **Fallback**: if FRED still rejects a window for too many vintage dates (for example after
+  lowering its limit), the crawler logs a warning, splits that window in half and retries,
+  down to a single vintage date. Every other HTTP 400 fails the fetch as before.
 
 ## Flags and footnotes
 
