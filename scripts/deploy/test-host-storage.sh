@@ -5,7 +5,8 @@
 # cluster, no Docker and nothing written outside a scratch directory:
 #   - the StorageClass, PVs and StatefulSets in the manifests equal what production
 #     runs (scripts/deploy/check-host-storage-fixture.py against the committed
-#     fixture), and a StatefulSet without the storage class fails that check;
+#     fixture), apart from comment lines in the init-data-dir script; a StatefulSet
+#     without the storage class, or with a changed command in that script, fails it;
 #   - apply-host-storage.sh applies host-storage.yaml only when the host subvolumes
 #     are mounted, the data directories exist, the node is labelled and bind-mounts
 #     them, and every existing database still has its Secret; it creates a missing
@@ -54,6 +55,17 @@ if python3 "$copy/scripts/deploy/check-host-storage-fixture.py" >"$scratch/fixtu
 fi
 grep -q "StatefulSet/postgresql.*immutable fields differ" "$scratch/fixture-neg.out" ||
   fail "the fixture check did not name the postgresql StatefulSet's immutable fields"
+
+# Only comment lines of the init-data-dir script may differ; a change to a command in it
+# must fail too.
+cp "$repo_root/k8s/manifests/postgres-deployment.yaml" "$copy/k8s/manifests/"
+sed -i 's/chmod 0700 "\$root"/chmod 0750 "$root"/' "$copy/k8s/manifests/postgres-deployment.yaml"
+grep -q 'chmod 0750' "$copy/k8s/manifests/postgres-deployment.yaml" || fail "test setup: chmod not changed"
+if python3 "$copy/scripts/deploy/check-host-storage-fixture.py" >"$scratch/fixture-neg.out" 2>&1; then
+  fail "a changed command in the init-data-dir script passed the fixture check"
+fi
+grep -q "StatefulSet/postgresql.*differs from production's last-applied" "$scratch/fixture-neg.out" ||
+  fail "the fixture check did not name the changed postgresql pod template"
 
 # --- stubs ---------------------------------------------------------------------
 

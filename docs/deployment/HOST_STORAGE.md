@@ -131,9 +131,15 @@ production cluster. `scripts/deploy/check-host-storage-fixture.py` (run by
 `scripts/deploy/test-host-storage.sh` in CI) fails when the manifests, as
 committed or rendered for `PUBLIC_HOST=econgraph.com`, differ from it. A
 difference means a deploy would change production's objects; a difference in
-an immutable field means the apply would be refused. The initContainer's
-script text, comments included, is part of the pod template, so editing it
-restarts the database on the next deploy.
+an immutable field means the apply would be refused. The immutable fields are
+always compared exactly.
+
+The one difference it allows, and reports as a note, is in the comment lines
+of the `init-data-dir` script. The script, comments included, is part of the
+pod template, so such a difference restarts that database pod once on the
+next deploy. The fixture's scripts carry an older wording of one comment, so
+the first deploy of these manifests restarts `postgresql-0` and
+`keycloak-postgres-0` once each.
 
 After a deliberate change has been deployed, capture the fixture again:
 

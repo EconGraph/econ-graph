@@ -50,15 +50,16 @@ spec:
       initContainers:
       - name: init-data-dir
         image: postgres:18
-        # This text, comments included, is part of the pod template production
-        # runs (scripts/deploy/testdata/production-host-storage.json); any edit
-        # restarts the database on the next deploy.
+        # This script, comments included, is part of the pod template: any edit
+        # restarts the database on the next deploy. scripts/deploy/
+        # check-host-storage-fixture.py compares it with production's
+        # (scripts/deploy/testdata/production-host-storage.json), comments aside.
         command:
         - sh
         - -ec
         - |
           root="$1"; pgdata="$2"
-          # The host directory starts out owned by jmalicki (uid 1000). Postgres runs
+          # The host directory starts out owned by the operator account. Postgres runs
           # as 999 and has to create PGDATA inside it, so hand the volume root over.
           chown 999:999 "$root"
           chmod 0700 "$root"

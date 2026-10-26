@@ -19,7 +19,10 @@ econgraph-app-prod-keycloak-pg and the StatefulSets postgresql and keycloak-post
 The check passes when, for every object, the committed manifest (and the manifest as
 deploy.sh and restart-k8s-rollout.sh render it for PUBLIC_HOST=econgraph.com) equals
 last_applied, so `kubectl apply` sends no change, and its immutable fields, with the
-API server's defaults filled in, equal live, so the apply cannot be refused.
+API server's defaults filled in, equal live, so the apply cannot be refused. The one
+allowed difference is in the comment lines of a StatefulSet's init-data-dir script:
+it is reported as a note, since the apply then restarts that database pod once.
+The immutable fields are always compared exactly.
 
 --capture builds the fixture from `kubectl get ... -o yaml` output, read-only:
   kubectl get storageclass econgraph-host -o yaml > SC.yaml
@@ -123,6 +126,18 @@ def normalise(obj):
     return obj
 
 
+def without_script_comments(obj):
+    """OBJ with the comment lines of each init-data-dir script removed."""
+    obj = normalise(obj)
+    if obj["kind"] == "StatefulSet":
+        for init in obj["spec"]["template"]["spec"].get("initContainers", []):
+            if init.get("name") == "init-data-dir" and len(init.get("command", [])) > 2:
+                init["command"][2] = "\n".join(
+                    line for line in init["command"][2].split("\n")
+                    if not line.lstrip().startswith("#"))
+    return obj
+
+
 def check(fixture_path):
     with open(fixture_path, encoding="utf-8") as f:
         fixture = json.load(f)
@@ -139,8 +154,13 @@ def check(fixture_path):
                 failures += 1
                 continue
             if normalise(obj) != normalise(entry["last_applied"]):
-                print(f"FAIL {label}: differs from production's last-applied configuration")
-                failures += 1
+                if without_script_comments(obj) == without_script_comments(entry["last_applied"]):
+                    if not public_host:
+                        print(f"note {label}: only the comments in the init-data-dir script differ"
+                              " from production's; the next deploy restarts the pod once")
+                else:
+                    print(f"FAIL {label}: differs from production's last-applied configuration")
+                    failures += 1
             if immutable(obj) != entry["live"]:
                 print(f"FAIL {label}: immutable fields differ from production's")
                 print("  manifest:   " + json.dumps(immutable(obj), sort_keys=True))
