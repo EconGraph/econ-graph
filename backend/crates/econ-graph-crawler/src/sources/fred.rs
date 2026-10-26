@@ -872,6 +872,10 @@ impl SourceAdapter for FredAdapter {
         true
     }
 
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        true
+    }
+
     fn catalog_scope(&self) -> Option<String> {
         self.catalog
             .lock()

@@ -2171,6 +2171,7 @@ async fn persist_discovered_rejects_a_dataset_key_collision_across_calls() {
 #[derive(Default)]
 struct BatchAdapter {
     batching: bool,
+    lifecycle_tracking: bool,
     /// When true, `tracks_vintages()` returns true, which must keep this adapter out of
     /// batching even when it has a `batch_key`.
     vintage_tracking: bool,
@@ -2244,6 +2245,10 @@ impl SourceAdapter for BatchAdapter {
             .unwrap()
             .push((external_id.to_string(), since));
         self.series(external_id)
+    }
+
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        self.lifecycle_tracking
     }
 
     fn tracks_vintages(&self) -> bool {
@@ -2413,13 +2418,13 @@ async fn one_bad_series_fails_only_its_own_job() {
         matches!(&outcomes[2], JobOutcome::Retrying { error, .. } if error.kind() == "transient")
     );
     assert!(
-        matches!(&outcomes[3], JobOutcome::Failed { error } if error.contains("missing from the batch response")),
+        matches!(&outcomes[3], JobOutcome::Retrying { error, .. } if error.kind()=="transient" && error.to_string().contains("missing from the batch response")),
         "{outcomes:?}"
     );
 
     assert_eq!(item(&db.pool, queue[0]).await.status, "completed");
     assert_eq!(item(&db.pool, queue[1]).await.status, "failed");
-    assert_eq!(item(&db.pool, queue[3]).await.status, "failed");
+    assert_eq!(item(&db.pool, queue[3]).await.status, "retrying");
     // The transient failure keeps the usual counted retry and backoff (base 60 s).
     let retrying = item(&db.pool, queue[2]).await;
     assert_eq!(retrying.status, "retrying");
@@ -2445,7 +2450,7 @@ async fn one_bad_series_fails_only_its_own_job() {
     );
     assert_eq!(
         attempts(&db.pool, series[3]).await,
-        vec![(false, Some("not_found".into()), Some(0))]
+        vec![(false, Some("transient".into()), Some(0))]
     );
 }
 
@@ -4022,4 +4027,320 @@ async fn shutdown_mid_request_finishes_the_job_and_claims_no_more() {
     assert_eq!(point_count(&db.pool, series_id).await, 1);
     assert_eq!(item(&db.pool, second).await.status, "pending");
     assert!(series_row(&db.pool, "t5_shutdown_b").await.is_none());
+}
+
+async fn review_worker_db(tag: &str) -> Option<crate::persist::stable_id_tests::FreshDb> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let db = crate::persist::stable_id_tests::FreshDb::create(&url, tag).await;
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    Some(db)
+}
+
+#[tokio::test]
+async fn three_batch_omissions_never_become_publication_absence_evidence() {
+    let Some(db) = review_worker_db("eco464_worker_omissions").await else {
+        return;
+    };
+    let ids = ["t5_omission_1", "t5_omission_2"];
+    let series = create_series(&db.pool, &ids).await;
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        lifecycle_tracking: true,
+        omitted: ids.into_iter().map(str::to_string).collect(),
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 2);
+    // A catalog-tracked series is the strongest regression: accidental NotFound
+    // classification would increment this row and retire it after the third omission.
+    let mut conn = db.pool.get().await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO series_lifecycle(source_id,external_id,scope_fingerprint)
+        SELECT source_id,external_id,'review-scope' FROM economic_series WHERE id=ANY($1)",
+    )
+    .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&series)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    let queue = enqueue_fetch(&db.pool, &ids).await;
+    diesel::update(crawl_queue::table.filter(crawl_queue::id.eq_any(&queue)))
+        .set(crawl_queue::max_retries.eq(5))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    for _ in 0..3 {
+        let mut claims = Vec::new();
+        for &id in &queue {
+            claims.push(
+                CrawlQueueItem::claim_by_id(&db.pool, id, &w.config.worker_id)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        let outcomes = w.process_batch(SRC, adapter.clone(), claims).await;
+        assert!(
+            outcomes
+                .iter()
+                .all(|o| matches!(o,JobOutcome::Retrying{error,..} if error.kind()=="transient")),
+            "{outcomes:?}"
+        );
+    }
+    #[derive(QueryableByName)]
+    struct State {
+        #[diesel(sql_type=diesel::sql_types::Text)]
+        status: String,
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        missing: i32,
+    }
+    let mut conn = db.pool.get().await.unwrap();
+    let states:Vec<State>=diesel::sql_query("SELECT status,missing_refreshes AS missing FROM series_lifecycle WHERE external_id=ANY($1)")
+        .bind::<diesel::sql_types::Array<diesel::sql_types::Text>,_>(strings(&ids)).load(&mut conn).await.unwrap();
+    assert_eq!(states.len(), 2);
+    assert!(states
+        .iter()
+        .all(|s| s.status == "active" && s.missing == 0));
+    for &id in &series {
+        assert_eq!(
+            attempts(&db.pool, id).await,
+            vec![(false, Some("transient".into()), Some(0)); 3]
+        );
+    }
+    drop(conn);
+    drop(w);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn confirmed_not_found_without_catalog_lifecycle_keeps_retry_and_recovery_path() {
+    let Some(db) = review_worker_db("eco464_worker_legacy_notfound").await else {
+        return;
+    };
+    let id = "t5_legacy_recovery";
+    let series = create_series(&db.pool, &[id]).await[0];
+    let adapter = Arc::new(BatchAdapter {
+        series_errors: HashMap::from([(
+            id.into(),
+            CrawlError::NotFound("upstream confirms absent".into()),
+        )]),
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 1);
+    for _ in 0..3 {
+        enqueue_fetch(&db.pool, &[id]).await;
+        assert!(matches!(
+            w.run_once().await,
+            Some(JobOutcome::Failed { .. })
+        ));
+    }
+    let mut conn = db.pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Count {
+        #[diesel(sql_type=diesel::sql_types::BigInt)]
+        n: i64,
+    }
+    let lifecycle: Count =
+        diesel::sql_query("SELECT count(*) AS n FROM series_lifecycle WHERE external_id=$1")
+            .bind::<diesel::sql_types::Text, _>(id)
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        lifecycle.n, 0,
+        "a source without catalog recovery must not acquire an exclusionary retired row"
+    );
+    assert_eq!(
+        series_row(&db.pool, id).await.unwrap().6.as_deref(),
+        Some("not_found")
+    );
+    // A future normal refresh can recover, unlike a permanently excluded lifecycle row.
+    let recovered = Arc::new(BatchAdapter::default());
+    let recovery_worker = batch_worker(&db.pool, &recovered, 1);
+    enqueue_fetch(&db.pool, &[id]).await;
+    assert!(matches!(
+        recovery_worker.run_once().await,
+        Some(JobOutcome::Completed(_))
+    ));
+    assert_eq!(
+        series_row(&db.pool, id).await.unwrap().6.as_deref(),
+        Some("success")
+    );
+    assert_eq!(point_count(&db.pool, series).await, 1);
+    drop(conn);
+    drop(w);
+    drop(recovery_worker);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn lifecycle_capability_counts_confirmed_not_found_before_first_catalog_cache() {
+    let Some(db) = review_worker_db("eco464_worker_scoped_notfound").await else {
+        return;
+    };
+    let id = "t5_scoped_missing";
+    create_series(&db.pool, &[id]).await;
+    let adapter = Arc::new(BatchAdapter {
+        lifecycle_tracking: true,
+        series_errors: HashMap::from([(
+            id.into(),
+            CrawlError::NotFound("confirmed upstream".into()),
+        )]),
+        ..Default::default()
+    });
+    assert!(
+        adapter.catalog_scope().is_none(),
+        "test represents a worker before its first catalog is cached"
+    );
+    let w = batch_worker(&db.pool, &adapter, 1);
+    for _ in 0..3 {
+        enqueue_fetch(&db.pool, &[id]).await;
+        assert!(matches!(
+            w.run_once().await,
+            Some(JobOutcome::Failed { .. })
+        ));
+    }
+    let mut conn = db.pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct State {
+        #[diesel(sql_type=diesel::sql_types::Text)]
+        status: String,
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        missing: i32,
+    }
+    let state: State = diesel::sql_query(
+        "SELECT status,missing_refreshes AS missing FROM series_lifecycle WHERE external_id=$1",
+    )
+    .bind::<diesel::sql_types::Text, _>(id)
+    .get_result(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(state.status, "retired");
+    assert_eq!(state.missing, 3);
+    drop(conn);
+    drop(w);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn scoped_discovery_takes_source_lock_before_metadata_rows() {
+    let Some(db) = review_worker_db("eco464_worker_lock_order").await else {
+        return;
+    };
+    let id = "t5_discovery_lock_order";
+    let found = DiscoveredSeries {
+        external_id: id.into(),
+        title: "Original".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: flat(),
+    };
+    persist::persist_discovered(&db.pool, SRC, std::slice::from_ref(&found))
+        .await
+        .unwrap();
+    let source_id = persist::data_source_id(&db.pool, SRC).await.unwrap();
+    let adapter = Arc::new(BatchAdapter {
+        lifecycle_tracking: true,
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 1);
+    let q = enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_lock_catalog",
+        JobKind::DiscoverCatalog,
+        5,
+    )
+    .await;
+    let claim = CrawlQueueItem::claim_by_id(&db.pool, q, &w.config.worker_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut blocker = db.pool.get().await.unwrap();
+    diesel::sql_query("BEGIN")
+        .execute(&mut blocker)
+        .await
+        .unwrap();
+    diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
+        .bind::<diesel::sql_types::Uuid, _>(source_id)
+        .execute(&mut blocker)
+        .await
+        .unwrap();
+    #[derive(QueryableByName)]
+    struct Pid {
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        pid: i32,
+    }
+    let pid: Pid = diesel::sql_query("SELECT pg_backend_pid() AS pid")
+        .get_result(&mut blocker)
+        .await
+        .unwrap();
+    let job = tokio::spawn(async move {
+        w.commit_result(
+            SRC,
+            &claim,
+            Ok(JobWrite::Discovery {
+                found: vec![DiscoveredSeries {
+                    title: "New title".into(),
+                    ..found
+                }],
+                complete: true,
+                scope_prefix: None,
+                lifecycle: crate::lifecycle::CatalogLifecycle::default(),
+                catalog_scope: Some("test-scope".into()),
+                observed_at: Utc::now(),
+                validator: None,
+            }),
+            Duration::ZERO,
+        )
+        .await
+    });
+    let mut probe = db.pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Waiting {
+        #[diesel(sql_type=diesel::sql_types::Bool)]
+        waiting: bool,
+    }
+    let waited=tokio::time::timeout(Duration::from_secs(5),async{
+        loop {
+            let waiting:Waiting=diesel::sql_query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting")
+                .bind::<diesel::sql_types::Integer,_>(pid.pid).get_result(&mut probe).await.unwrap();
+            if waiting.waiting {break;}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await;
+    // Once the catalog transaction waits on the held source lock, metadata must
+    // still be free for a restricted-fetch writer. The old opposite lock order
+    // acquired metadata first, so this NOWAIT query failed with lock_not_available.
+    #[derive(Debug, QueryableByName)]
+    struct Row {
+        #[diesel(sql_type=diesel::sql_types::Uuid)]
+        _id: Uuid,
+    }
+    let metadata_free=diesel::sql_query("SELECT id AS _id FROM series_metadata WHERE source_id=$1 AND external_id=$2 FOR UPDATE NOWAIT")
+        .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<diesel::sql_types::Text,_>(id)
+        .get_result::<Row>(&mut probe).await;
+    diesel::sql_query("ROLLBACK")
+        .execute(&mut blocker)
+        .await
+        .unwrap();
+    assert!(waited.is_ok(), "discovery did not reach the source lock");
+    assert!(
+        metadata_free.is_ok(),
+        "discovery locked metadata before the source row: {metadata_free:?}"
+    );
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(5), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        JobOutcome::Completed(_)
+    ));
+    drop(blocker);
+    drop(probe);
+    db.drop().await;
 }

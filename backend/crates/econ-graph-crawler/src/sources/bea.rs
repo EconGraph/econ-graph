@@ -969,6 +969,10 @@ impl SourceAdapter for BeaAdapter {
         true
     }
 
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        true
+    }
+
     fn catalog_scope(&self) -> Option<String> {
         self.selection().ok().map(BeaSelection::fingerprint)
     }

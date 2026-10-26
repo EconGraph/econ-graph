@@ -261,6 +261,14 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Whether confirmed upstream NotFound results can accumulate publication lifecycle
+    /// evidence. Opt in only when this adapter implements scoped catalog reconciliation,
+    /// which can later reactivate a recovered series. This capability is independent of
+    /// whether a worker has already cached its first successful catalog.
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        false
+    }
+
     /// Verified publication facts from the last complete successful catalog. Facts are kept
     /// separate from fetch health, so a successful history fetch cannot revive a retired id.
     fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {

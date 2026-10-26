@@ -75,7 +75,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use diesel_async::AsyncPgConnection;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::models::{CrawlQueueItem, JobKind, LeaseOutcome, QueueTransition};
 use econ_graph_core::{AppError, AppResult};
 use tokio::sync::watch;
@@ -670,7 +670,7 @@ impl Worker {
                             .check(source, &item.series_id, &series.dataset)
                             .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
-                        None => Err(CrawlError::NotFound(format!(
+                        None => Err(CrawlError::Transient(format!(
                             "{} missing from the batch response",
                             item.series_id
                         ))),
@@ -913,6 +913,17 @@ impl Worker {
                         observed_at,
                         validator,
                     }) => {
+                        // Lifecycle fetch writers acquire this source row before touching
+                        // series/metadata. Take the same lock order before validators and
+                        // discovered metadata so catalog and restricted fetch commits cannot
+                        // hold each other's source/metadata locks in opposite order.
+                        if complete && catalog_scope.is_some() {
+                            let source_id = persist::data_source_id_conn(conn, source).await?;
+                            diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
+                                .bind::<diesel::sql_types::Uuid, _>(source_id)
+                                .execute(&mut *conn)
+                                .await?;
+                        }
                         if let Some((url, validators)) = &validator {
                             persist::set_url_validators_conn(conn, source, url, validators).await?;
                         }
@@ -967,15 +978,17 @@ impl Worker {
             })
             .await?;
         drop(conn);
-        for metrics in pending_metrics
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-        {
+        let pending =
+            std::mem::take(&mut *pending_metrics.lock().unwrap_or_else(|e| e.into_inner()));
+        for metrics in &pending {
             metrics.publish(source);
         }
-        if let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await {
-            tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
+        // Most jobs only update fetch health. Periodic coverage polling already restores
+        // lifecycle gauges after restart, so aggregate again only for an actual transition.
+        if pending.iter().any(|m| m.transitions > 0) {
+            if let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await {
+                tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
+            }
         }
         Ok(outcome)
     }
@@ -1006,8 +1019,13 @@ impl Worker {
         duration: Duration,
         pending_metrics: &std::sync::Mutex<Vec<crate::lifecycle::Reconciled>>,
     ) -> AppResult<()> {
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
         if let Err(e) = result
             && e.kind() == "not_found"
+            && tracks_lifecycle
         {
             if let Some(status) =
                 crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
@@ -1050,12 +1068,7 @@ impl Worker {
             {
                 // Sources without catalog lifecycle tracking retain the legacy inactive
                 // metadata behavior; tracked histories stay browsable with a badge.
-                if self
-                    .registry
-                    .get(source)
-                    .and_then(|a| a.catalog_scope())
-                    .is_none()
-                {
+                if !tracks_lifecycle {
                     persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
                 }
             }
