@@ -441,7 +441,7 @@ mod tests {
         let content = b"<schema xmlns=\"http://www.w3.org/2001/XMLSchema\"/>";
         let path = cache.path().join("us-gaap.xsd");
         fs::write(&path, content).await.unwrap();
-        let manager = DtsManager::new(database.pool(), cache.path().to_path_buf());
+        let manager = DtsManager::new(database.pool().clone(), cache.path().to_path_buf());
         let reference = DtsReference {
             reference_type: "schemaRef".into(),
             reference_href: "https://fasb.org/us-gaap/2023/us-gaap.xsd".into(),
