@@ -1,9 +1,6 @@
 #!/bin/bash
 # Pre-commit utility script for EconGraph
-# Makes it easy to run pre-commit commands with proper PATH setup
-
-# Add pre-commit to PATH
-export PATH="/Users/josephmalicki/Library/Python/3.9/bin:$PATH"
+# Run the pre-commit installed on PATH.
 
 # Check if pre-commit is available
 if ! command -v pre-commit &> /dev/null; then

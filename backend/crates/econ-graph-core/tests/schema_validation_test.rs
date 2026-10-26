@@ -35,7 +35,8 @@ fn run_both_migration_sets(
 async fn test_schema_compatibility() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -52,12 +53,9 @@ async fn test_schema_compatibility() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait a moment for the database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Establish connection
     let mut conn =
@@ -103,28 +101,10 @@ async fn test_schema_compatibility() {
 
 /// Generate schema using diesel print-schema command
 fn generate_schema_with_diesel(database_url: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // Try to find diesel in common locations
-    let diesel_paths = [
-        "diesel",
-        "/Users/josephmalicki/.cargo/bin/diesel",
-        "/usr/local/bin/diesel",
-        "/usr/bin/diesel",
-    ];
-
-    let mut diesel_cmd = None;
-    for path in &diesel_paths {
-        if Command::new("which").arg(path).output().is_ok() {
-            diesel_cmd = Some(path);
-            break;
-        }
-    }
-
-    let diesel_path = diesel_cmd.ok_or("diesel CLI not found in PATH or common locations")?;
-
-    println!("Using diesel at: {}", diesel_path);
+    // Resolve the installed CLI through PATH instead of a developer-specific home path.
     println!("Database URL: {}", redact_database_url(database_url));
 
-    let output = Command::new(diesel_path)
+    let output = Command::new("diesel")
         .args(["print-schema", "--database-url", database_url])
         .output()?;
 
@@ -193,7 +173,8 @@ fn find_schema_differences(schema1: &str, schema2: &str) -> Vec<String> {
 async fn test_schema_generation_process() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -210,12 +191,9 @@ async fn test_schema_generation_process() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Apply migrations first
     let mut conn =
@@ -252,7 +230,8 @@ async fn test_schema_generation_process() {
 async fn test_migration_application() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -269,12 +248,9 @@ async fn test_migration_application() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Establish connection
     let mut conn =
@@ -298,7 +274,8 @@ async fn test_migration_application() {
 async fn test_schema_compatibility_comparison() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -315,12 +292,9 @@ async fn test_schema_compatibility_comparison() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Apply migrations first
     let mut conn =

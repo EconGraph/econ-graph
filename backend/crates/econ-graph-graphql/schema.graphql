@@ -860,7 +860,8 @@ type Query {
 	Search economic series using full-text search with spelling correction
 	
 	`source` is a data source id; a value that isn't a UUID is rejected with a
-	`BAD_USER_INPUT` error. `totalCount` counts every matching series, not just this page;
+	`BAD_USER_INPUT` error. `after` must be a nonnegative integer in the i32 range,
+	or it is rejected with the same code. `totalCount` counts every matching series;
 	read the next page with `after` set to the number of series already read.
 	"""
 	searchSeries(query: String!, source: String, frequency: SeriesFrequency, first: Int, after: String): SearchResult!
@@ -895,9 +896,15 @@ type Query {
 	"""
 	systemHealth: SystemHealthType!
 	"""
-	Get security events (requires `admin.security:read`)
+	Get security events (requires `admin.security:read`). Existing list clients retain
+	their response shape; use `securityEventsPage` for cursors and total count.
 	"""
-	securityEvents(limit: Int): [SecurityEventType!]!
+	securityEvents(limit: Int, after: String, filter: SecurityEventFilterInput): [SecurityEventType!]!
+	"""
+	Get a filtered security-event connection (requires `admin.security:read`). Offset
+	cursors have the same semantics as `auditLogs`, including concurrent-insert drift.
+	"""
+	securityEventsPage(filter: SecurityEventFilterInput, pagination: PaginationInput): SecurityEventConnection!
 	"""
 	Get audit logs (requires `admin.audit:read`)
 	"""
@@ -951,6 +958,26 @@ type SearchSuggestionType {
 	Confidence score
 	"""
 	confidence: Float!
+}
+
+"""
+Paged security events. The legacy `securityEvents` list remains available.
+"""
+type SecurityEventConnection {
+	nodes: [SecurityEventType!]!
+	totalCount: Int!
+	pageInfo: PageInfo!
+}
+
+"""
+Filter security events; time bounds are exclusive, as in `AuditLogFilterInput`.
+"""
+input SecurityEventFilterInput {
+	eventType: String
+	severity: String
+	resolved: Boolean
+	createdAfter: DateTime
+	createdBefore: DateTime
 }
 
 """

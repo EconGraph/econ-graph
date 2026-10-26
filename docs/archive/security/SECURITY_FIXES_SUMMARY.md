@@ -1,5 +1,8 @@
 # Security Fixes Implementation Summary
 
+**Historical assessment:** the Sealed Secrets/submodule design below was never
+deployed and is retired. See [current secrets management](../../technical/SECRETS_MANAGEMENT.md).
+
 ## Overview
 This document summarizes the comprehensive security vulnerability fixes implemented during the EconGraph security assessment and remediation process. The work addressed multiple critical and high-severity vulnerabilities across the entire platform stack.
 

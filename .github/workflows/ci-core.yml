@@ -743,6 +743,36 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run mapped trusted-proxy regression (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        name="client_ip_tests::mapped_ipv6_proxy_networks_match_canonical_addresses"
+        log="$RUNNER_TEMP/mapped-proxy.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend "$name" -- --exact --nocapture | tee "$log"
+        grep -Fq "test $name ... ok" "$log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
+    - name: Run audit cancellation and pagination regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for audit regressions}"
+        for test in \
+          cancellation_during_mutation_records_unknown_outcome \
+          cancellation_during_audit_insert_preserves_one_success_row \
+          cancellation_during_denial_write_preserves_event \
+          admin_pagination_rejects_bad_cursors_and_handles_maximum_offset \
+          security_event_pages_filter_type_and_time_and_reach_older_rows; do
+          name="graphql::audit::tests::$test"
+          log="$RUNNER_TEMP/$test.log"
+          cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
+          grep -Fq "test $name ... ok" "$log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+        done
+      working-directory: backend
+
     # ECO-439: a retried createAnnotation stores one annotation, across replicas.
     - name: Run annotation idempotency regressions (required)
       run: |

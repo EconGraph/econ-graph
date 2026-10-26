@@ -256,11 +256,22 @@ impl NewAuditLog {
     /// already happened, so a failed write must not turn it into an error for the caller.
     ///
     /// The trade-off: the write is best-effort and runs after the action's own statement,
-    /// not in one transaction with it (none of the admin mutations runs in a transaction), so
+    /// not in one transaction with it, so
     /// a database failure in between can leave a committed action with no audit row. Each
     /// such failure is logged at error level and counted in [`audit_log_write_failures`],
     /// which the backend exports for alerting.
     pub async fn record(self, pool: &DatabasePool) {
+        let _ = self.spawn_record(pool).await;
+    }
+
+    /// Start an owned write which continues if the calling request is cancelled. The caller
+    /// may await the handle to keep normal response ordering; dropping it detaches the write.
+    pub fn spawn_record(self, pool: &DatabasePool) -> tokio::task::JoinHandle<()> {
+        let pool = pool.clone();
+        tokio::spawn(async move { self.record_inline(&pool).await })
+    }
+
+    async fn record_inline(self, pool: &DatabasePool) {
         let written = async {
             let mut conn = pool.get().await.map_err(|e| e.to_string())?;
             diesel::insert_into(audit_logs::table)
@@ -278,6 +289,40 @@ impl NewAuditLog {
                 self.user_id
             );
         }
+    }
+}
+
+/// Security-event filters; omitted values leave the corresponding column unfiltered.
+#[derive(Debug, Clone, Default)]
+pub struct SecurityEventFilter {
+    pub event_type: Option<String>,
+    pub severity: Option<String>,
+    pub resolved: Option<bool>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+}
+
+impl SecurityEventFilter {
+    fn apply<'a>(
+        &self,
+        mut query: security_events::BoxedQuery<'a, diesel::pg::Pg>,
+    ) -> security_events::BoxedQuery<'a, diesel::pg::Pg> {
+        if let Some(value) = &self.event_type {
+            query = query.filter(security_events::event_type.eq(value.clone()));
+        }
+        if let Some(value) = &self.severity {
+            query = query.filter(security_events::severity.eq(value.clone()));
+        }
+        if let Some(value) = self.resolved {
+            query = query.filter(security_events::resolved.eq(value));
+        }
+        if let Some(value) = self.created_after {
+            query = query.filter(security_events::created_at.gt(value));
+        }
+        if let Some(value) = self.created_before {
+            query = query.filter(security_events::created_at.lt(value));
+        }
+        query
     }
 }
 
@@ -318,40 +363,42 @@ impl SecurityEvent {
         Ok(event)
     }
 
-    /// Get security events with filtering
+    /// Get security events matching the filter, newest first with a stable UUID tie-breaker.
     pub async fn get_events(
         pool: &DatabasePool,
-        event_type: Option<String>,
-        severity: Option<String>,
-        resolved: Option<bool>,
+        filter: &SecurityEventFilter,
         limit: i64,
+        offset: i64,
     ) -> AppResult<Vec<SecurityEvent>> {
-        let mut conn = pool.get().await.map_err(|e| {
-            AppError::DatabaseError(format!("Failed to get database connection: {}", e))
-        })?;
-
-        let mut query = security_events::table.into_boxed();
-
-        if let Some(event_type) = event_type {
-            query = query.filter(security_events::event_type.eq(event_type));
-        }
-
-        if let Some(severity) = severity {
-            query = query.filter(security_events::severity.eq(severity));
-        }
-
-        if let Some(resolved) = resolved {
-            query = query.filter(security_events::resolved.eq(resolved));
-        }
-
-        let events = query
-            .order(security_events::created_at.desc())
-            .limit(limit)
-            .get_results::<SecurityEvent>(&mut conn)
+        let mut conn = pool
+            .get()
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        filter
+            .apply(security_events::table.into_boxed())
+            .order((
+                security_events::created_at.desc(),
+                security_events::id.desc(),
+            ))
+            .limit(limit)
+            .offset(offset)
+            .load::<SecurityEvent>(&mut conn)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))
+    }
 
-        Ok(events)
+    /// Count the same filtered set used by `get_events`.
+    pub async fn get_count(pool: &DatabasePool, filter: &SecurityEventFilter) -> AppResult<i64> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        filter
+            .apply(security_events::table.into_boxed())
+            .count()
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))
     }
 
     /// Resolve a security event
@@ -422,6 +469,17 @@ impl NewSecurityEvent {
     /// Insert the event, logging rather than returning a failure: recording it must not
     /// change the reply to the request that raised it.
     pub async fn record(self, pool: &DatabasePool) {
+        let _ = self.spawn_record(pool).await;
+    }
+
+    /// Start an owned write which continues if the calling request is cancelled. The caller
+    /// may await the handle to keep normal response ordering; dropping it detaches the write.
+    pub fn spawn_record(self, pool: &DatabasePool) -> tokio::task::JoinHandle<()> {
+        let pool = pool.clone();
+        tokio::spawn(async move { self.record_inline(&pool).await })
+    }
+
+    async fn record_inline(self, pool: &DatabasePool) {
         let written = async {
             let mut conn = pool.get().await.map_err(|e| e.to_string())?;
             diesel::insert_into(security_events::table)
