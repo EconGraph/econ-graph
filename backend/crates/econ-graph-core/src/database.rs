@@ -1066,12 +1066,21 @@ mod tests {
     /// baseline less those keys.
     async fn single_baseline_database(name: &str) -> (ScratchDatabase, diesel::PgConnection) {
         use diesel::connection::SimpleConnection;
+        use diesel_migrations::MigrationHarness;
 
         let db = ScratchDatabase::create(name);
-        run_migration_sets(&db.url, &[MigrationSet::Data])
-            .await
-            .expect("the data set should apply");
         let mut conn = db.connect();
+        // Reconstruct the historical baseline, not today's whole data migration set.
+        // Later data migrations must be exercised by the upgrade below.
+        let mut baseline = conn
+            .pending_migrations(DATA_MIGRATIONS)
+            .expect("embedded data migrations")
+            .into_iter()
+            .filter(|m| m.name().version().to_string().as_str() <= DATA_BASELINE_VERSION)
+            .collect::<Vec<_>>();
+        baseline.sort_by_key(|m| m.name().version().to_string());
+        conn.run_migrations(&baseline)
+            .expect("the data baseline should apply");
         conn.batch_execute(include_str!(
             "../../../migrations/app/2026-10-21-000200_v4_0_app_baseline/up.sql"
         ))
@@ -1112,19 +1121,24 @@ mod tests {
         }
     }
 
-    /// Bring a reference schema forward by running only pending app incrementals.
-    /// Its app tables already exist, so neither run nor record the split app baseline:
-    /// this independently checks the production baseline-recording path's result.
-    fn apply_pending_app_incrementals(conn: &mut diesel::PgConnection) {
+    /// Independently apply data and app incrementals to the historical reference schema.
+    /// Its app tables already exist, so skip the split app baseline rather than recording it.
+    fn apply_pending_incrementals(conn: &mut diesel::PgConnection) {
         use diesel_migrations::MigrationHarness;
 
-        let pending = conn
-            .pending_migrations(MigrationSet::App.migrations())
-            .expect("should read pending app migrations");
-        for migration in pending {
-            if migration.name().version().to_string().as_str() > APP_BASELINE_VERSION {
-                conn.run_migration(&migration)
-                    .expect("pending app incremental should run");
+        for set in [MigrationSet::Data, MigrationSet::App] {
+            let baseline = match set {
+                MigrationSet::Data => DATA_BASELINE_VERSION,
+                MigrationSet::App => APP_BASELINE_VERSION,
+            };
+            let pending = conn
+                .pending_migrations(set.migrations())
+                .expect("should read pending migrations");
+            for migration in pending {
+                if migration.name().version().to_string().as_str() > baseline {
+                    conn.run_migration(&migration)
+                        .expect("pending incremental should run");
+                }
             }
         }
         assert!(
@@ -1142,7 +1156,7 @@ mod tests {
         let (db, mut conn) = single_baseline_database("single_baseline_rc").await;
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_rc_reference").await;
-        apply_pending_app_incrementals(&mut reference_conn);
+        apply_pending_incrementals(&mut reference_conn);
         let before = schema_signature(&mut conn);
         let expected_schema = schema_signature(&mut reference_conn);
         assert_ne!(
@@ -1160,7 +1174,7 @@ mod tests {
         assert_eq!(
             schema_signature(&mut conn),
             expected_schema,
-            "only the later app migrations should change the schema; the app baseline is recorded, not run"
+            "only pending incrementals should change the schema; the app baseline is recorded, not run"
         );
 
         run_migrations(&db.url)
@@ -1180,7 +1194,7 @@ mod tests {
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_reference").await;
         apply_release_v4_0_app_migrations(&mut reference_conn);
-        apply_pending_app_incrementals(&mut reference_conn);
+        apply_pending_incrementals(&mut reference_conn);
         let expected_schema = schema_signature(&mut reference_conn);
 
         run_migrations(&db.url)
@@ -1194,7 +1208,7 @@ mod tests {
         assert_eq!(
             schema_signature(&mut conn),
             expected_schema,
-            "only pending app incrementals should change the release schema"
+            "only pending incrementals should change the release schema"
         );
 
         run_migrations(&db.url)

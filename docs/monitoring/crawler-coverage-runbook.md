@@ -87,6 +87,9 @@ catalog under unchanged selection rules supplies absence evidence. Failed or par
 supply none, and a rule change resets the comparison scope. Three consecutive successful
 absences confirm a missing series. A snapshot that suddenly loses more than 20% of the
 previously present scope, or an empty scope, is guarded rather than treated as removal.
+On first adoption, retained BEA histories that match the configured rules establish a
+baseline without counting absence. Three subsequent complete snapshots are required for
+a missing badge. Histories outside those rules are not enrolled or retired by that scope.
 
 | Status | Public behavior |
 |---|---|
