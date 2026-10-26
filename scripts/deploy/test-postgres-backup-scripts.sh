@@ -400,10 +400,24 @@ restore_app_as_documented() { # restore_app_as_documented DUMP SCRATCH_DB
         psql_in "$APP" postgres postgres "DROP DATABASE $2"
 }
 
+# The mock is up once it serves the backups bucket. (Listing an empty prefix
+# would not do: `aws s3 ls` exits 1 when nothing matches.)
+s3_ready=false
 for _ in $(seq 1 60); do
-    if s3_keys ready >/dev/null 2>&1; then break; fi
+    if docker run --rm --network "$NET" -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
+        -e AWS_DEFAULT_REGION=us-east-1 -e AWS_CONFIG_FILE=/aws/config -v "$tmp/aws:/aws:ro" \
+        "$AWS_IMAGE" s3api head-bucket --bucket backups --endpoint-url http://s3mock:9090 \
+        >>"$LOG" 2>&1; then
+        s3_ready=true
+        break
+    fi
     sleep 1
 done
+if ! $s3_ready; then
+    echo "the S3 mock never served bucket backups; output so far:" >&2
+    cat "$LOG" >&2
+    exit 1
+fi
 
 # --- 1. both databases up -------------------------------------------------------
 
@@ -437,8 +451,7 @@ rc="$(run_sync run1)"
 check "sync.sh exits 0" [ "$rc" = 0 ]
 check "S3 holds exactly the three dumps, no latest links" \
     [ "$(s3_keys run1 | tr '\n' ' ')" = "$(printf '%s\n' "$econ_dump" "$app_dump" "$kc_dump" | sort | tr '\n' ' ')" ]
-nothing_deleted
-
+check "no dump deleted" nothing_deleted
 # --- 2. restore.sh ------------------------------------------------------------
 
 echo "# restore.sh"
