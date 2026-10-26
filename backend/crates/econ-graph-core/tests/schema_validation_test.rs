@@ -52,7 +52,7 @@ async fn test_schema_compatibility() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
 
@@ -192,7 +192,7 @@ async fn test_schema_generation_process() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
 
@@ -251,7 +251,7 @@ async fn test_migration_application() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
 
@@ -297,7 +297,7 @@ async fn test_schema_compatibility_comparison() {
         .await
         .expect("Failed to get port");
     let database_url = format!(
-        "postgres://test_user:test_password@localhost:{}/test_econ_graph",
+        "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
 
