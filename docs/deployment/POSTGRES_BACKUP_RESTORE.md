@@ -102,8 +102,9 @@ Before doing anything else, both print the cluster they reached:
   `mark-production-cluster.sh` writes.
 
 The restore prints this before its confirmation prompt, which is read from a
-terminal only. A context the kubeconfig doesn't have stops either script
-before any other call. `--dry-run` shows the cluster and what would run, and
+terminal only. A context the kubeconfig doesn't have, or an identity that can't be
+read (API server, nodes, `kube-system` UID), stops either script before it
+changes anything. `--dry-run` shows the cluster and what would run, and
 starts nothing.
 
 ## Restore

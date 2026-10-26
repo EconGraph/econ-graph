@@ -42,7 +42,9 @@ case " \$* " in
 esac
 case " \$* " in
     *" config view "*) echo "https://127.0.0.1:6443" ;;
-    *" get nodes "*) echo "econ-graph-control-plane econ-graph-worker" ;;
+    *" get nodes "*)
+        [ -z "\${FAKE_NODES_FAIL:-}" ] || { echo "error: the server is unavailable" >&2; exit 1; }
+        echo "econ-graph-control-plane econ-graph-worker" ;;
     *" get namespace kube-system "*) echo "11111111-2222-3333-4444-555555555555" ;;
 esac
 exit 0
@@ -98,6 +100,16 @@ only_context() {
     bad="$(grep -v -- "--context ${context} " "$CALLS" || true)"
     [ -z "$bad" ] || { fail "$name used another context:"; printf '     %s\n' "$bad"; }
 }
+
+# An identity that can't be read stops every script before it changes anything.
+reset; out="$(FAKE_NODES_FAIL=1 run backup-postgres-now.sh)"; rc=$?
+expect "backup-postgres-now.sh with an unreadable identity" nonzero "could not read the identity" none
+reset; out="$(FAKE_NODES_FAIL=1 run restore-postgres-backup.sh --yes)"; rc=$?
+expect "restore-postgres-backup.sh with an unreadable identity" nonzero "could not read the identity" none
+reset; out="$(FAKE_NODES_FAIL=1 run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token)"; rc=$?
+expect "setup-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
+reset; out="$(FAKE_NODES_FAIL=1 run test-letsencrypt-cloudflare.sh -d example.invalid)"; rc=$?
+expect "test-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
 
 # A non-default --context reaches every call, in each script.
 for script in backup-postgres-now.sh restore-postgres-backup.sh; do

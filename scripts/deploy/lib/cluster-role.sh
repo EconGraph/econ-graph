@@ -129,13 +129,16 @@ cluster_role_pin_named_context() {
 # kubectl and KUBECONFIG, the context, its API server, its nodes, its
 # kube-system UID (new for every cluster) and whether it carries the production
 # marker. Shown before a script changes anything, so the output says which
-# cluster it acted on.
+# cluster it acted on. Prints what it could read, and fails when the API
+# server, the nodes or the kube-system UID could not be read: the identity is
+# then not verified.
 cluster_role_show_identity() {
-    local server nodes uid role
+    local server nodes uid role verified=0
     server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
         server=""
-    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || nodes="(unknown)"
-    uid="$(kube_system_uid 2>/dev/null)" || uid="(unknown)"
+    [ -n "$server" ] || verified=1
+    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || { nodes="(unknown)"; verified=1; }
+    uid="$(kube_system_uid 2>/dev/null)" || { uid="(unknown)"; verified=1; }
     if cluster_is_marked_production; then
         role="PRODUCTION (marked by mark-production-cluster.sh)"
     else
@@ -149,13 +152,15 @@ cluster_role_show_identity() {
     echo "  nodes           ${nodes:-(none)}"
     echo "  kube-system UID ${uid}"
     echo "  cluster role    ${role}"
+    return "$verified"
 }
 
 # For an operator script run by hand on one named context: one kubectl and one
 # context for every later call, never a CLUSTER_ROLE_CONTEXT inherited from the
 # environment. Picks the kubectl (cluster_role_default_kubectl), pins context
 # $1 (cluster_role_pin_named_context) and prints the cluster's identity. Fails,
-# having changed nothing, when the kubectl is missing or has no such context.
+# having changed nothing, when the kubectl is missing, has no such context, or
+# the identity can't be read.
 cluster_role_operator_context() {
     unset CLUSTER_ROLE_CONTEXT
     cluster_role_default_kubectl
@@ -170,7 +175,10 @@ cluster_role_operator_context() {
         return 1
     fi
     echo "Cluster:"
-    cluster_role_show_identity
+    if ! cluster_role_show_identity; then
+        echo "could not read the identity (API server, nodes, kube-system UID) of context $1" >&2
+        return 1
+    fi
 }
 
 # Print the UID of the kube-system namespace. Fails when the cluster cannot be
