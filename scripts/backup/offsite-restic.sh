@@ -80,6 +80,8 @@ case "${cmd}" in
         # Upgrade backups live under the deploy writer's root, which can
         # differ from the nightly root on the mounted backup pool.
         keycloak_root="${KEYCLOAK_BACKUP_ROOT:-${ECONGRAPH_BACKUP_ROOT:-$HOME/econgraph-backups}/keycloak}"
+        [[ -z "${KEYCLOAK_BACKUP_ROOT:-}" || -d "$keycloak_root" ]] ||
+            die "configured Keycloak backup root is missing: $keycloak_root"
         list_verified() {
             find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n' || return
             if [[ -d "$keycloak_root" ]]; then
