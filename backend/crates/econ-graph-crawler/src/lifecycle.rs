@@ -23,6 +23,10 @@ use crate::{persist, DiscoveredSeries, SourceId};
 /// Verified upstream facts, published only after all pages of a catalog succeeded.
 #[derive(Debug, Clone, Default)]
 pub struct CatalogLifecycle {
+    /// Existing retained ids positively matched by the current selection rules. These
+    /// seed the first scope baseline even if already missing upstream. Unmatched legacy
+    /// rows are never inferred absent merely because the adapter adopted new rules.
+    pub scope_ids: Vec<String>,
     /// Entries that the upstream forbids us from exposing publicly.
     pub restricted_ids: Vec<String>,
     /// Entries explicitly described as discontinued, whose history stays public.
@@ -116,6 +120,7 @@ pub(crate) async fn reconcile_conn(
          FROM series_lifecycle WHERE source_id=$1 AND (scope_fingerprint=$2 OR external_id=ANY($3))")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint)
         .bind::<diesel::sql_types::Array<Text>,_>(found.iter().map(|d| d.external_id.clone())
+            .chain(facts.scope_ids.iter().cloned())
             .chain(facts.restricted_ids.iter().cloned())
             .chain(facts.discontinued_ids.iter().cloned())
             .chain(facts.confirmed_missing_ids.iter().cloned()).collect::<Vec<_>>())
@@ -238,6 +243,8 @@ fn plan(
         .iter()
         .map(String::as_str)
         .collect();
+    let previously_tracked: BTreeSet<&str> =
+        existing.iter().map(|s| s.external_id.as_str()).collect();
     let mut states: BTreeMap<String, State> = existing
         .iter()
         .cloned()
@@ -246,6 +253,7 @@ fn plan(
     for id in listed
         .iter()
         .copied()
+        .chain(facts.scope_ids.iter().map(String::as_str))
         .chain(restricted.iter().copied())
         .chain(confirmed.iter().copied())
     {
@@ -276,7 +284,9 @@ fn plan(
                 "active"
             }
             .into();
-        } else if same_scope || confirmed.contains(state.external_id.as_str()) {
+        } else if (same_scope && previously_tracked.contains(state.external_id.as_str()))
+            || confirmed.contains(state.external_id.as_str())
+        {
             state.missing_refreshes = state.missing_refreshes.saturating_add(1);
             if state.missing_refreshes
                 >= i32::try_from(policy.consecutive_absences).unwrap_or(i32::MAX)

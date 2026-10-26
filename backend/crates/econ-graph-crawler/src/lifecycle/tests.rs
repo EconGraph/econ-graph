@@ -116,6 +116,7 @@ fn explicit_restrictions_and_discontinued_titles_are_distinct_from_absence() {
         restricted_ids: vec!["r".into()],
         discontinued_ids: vec!["d".into()],
         confirmed_missing_ids: vec![],
+        scope_ids: vec![],
     };
     let (states, guarded) = plan(
         &[],
@@ -547,6 +548,136 @@ label="Table"
     let codes = dims.dimensions.0[0].codes.as_ref().unwrap();
     assert!(codes.contains(&old));
     assert!(codes.contains(&new));
+    drop(conn);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn first_rules_baseline_enrolls_only_proven_legacy_scope_members() {
+    use crate::{persist::stable_id_tests::FreshDb, DatasetCatalog, FetchedPoint, FetchedSeries};
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let db = FreshDb::create(&url, "eco464_legacy_scope_adoption").await;
+    let pool = &db.pool;
+    let mut catalog = DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::Bea,
+            &["bea_regional"],
+            crate::dataset::parse_dataset_file(
+                r#"
+[[dataset]]
+code="bea_regional"
+name="Regional"
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    persist::sync_datasets(pool, &catalog).await.unwrap();
+    let old_id = "bea_regional/SAGDP2N.1.06000";
+    let new_id = "bea_regional/SAGDP2.1.06000";
+    let unrelated_id = "bea_regional/SAINC1.1.06000";
+    let old = found(old_id);
+    let unrelated = found(unrelated_id);
+    persist::persist_discovered(pool, SourceId::Bea, &[old.clone(), unrelated.clone()])
+        .await
+        .unwrap();
+    let point_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let sample = FetchedSeries {
+        metadata: None,
+        points: vec![FetchedPoint {
+            date: point_date,
+            value: Some(7.into()),
+            revision_date: point_date,
+            is_original_release: true,
+        }],
+        dataset: old.dataset.clone(),
+        validators: None,
+    };
+    let old_series = persist::persist_series(pool, SourceId::Bea, old_id, &sample)
+        .await
+        .unwrap()
+        .series_id;
+    let unrelated_series = persist::persist_series(pool, SourceId::Bea, unrelated_id, &sample)
+        .await
+        .unwrap()
+        .series_id;
+    let mut current: Vec<_> = (0..4)
+        .map(|i| found(&format!("bea_regional/SAGDP2.{i}.00000")))
+        .collect();
+    current.push(found(new_id));
+    // The adapter, rather than the generic lifecycle layer, proves membership using
+    // canonical BEA ids + retained table titles. SAINC1 is outside the selected family.
+    let facts = CatalogLifecycle {
+        scope_ids: vec![old_id.into()],
+        ..Default::default()
+    };
+    let mut conn = pool.get().await.unwrap();
+    let mut now = Utc::now();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        persist::persist_discovered_conn(conn, SourceId::Bea, &current).await?;
+        reconcile_conn(
+            conn,
+            SourceId::Bea,
+            &current,
+            &facts,
+            "bea-SAGDP2-family",
+            now,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let enrolled:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+        .bind::<Text,_>(old_id).get_result(&mut conn).await.unwrap();
+    assert_eq!(enrolled.status, "active");
+    assert_eq!(enrolled.missing_refreshes, 0);
+    for refresh in 1..=3 {
+        now += chrono::Duration::seconds(1);
+        conn.transaction::<(), AppError, _>(async |conn| {
+            reconcile_conn(
+                conn,
+                SourceId::Bea,
+                &current,
+                &facts,
+                "bea-SAGDP2-family",
+                now,
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+            .bind::<Text,_>(old_id).get_result(&mut conn).await.unwrap();
+        assert_eq!(state.missing_refreshes, refresh);
+        assert_eq!(
+            state.status,
+            if refresh < 3 {
+                "active"
+            } else {
+                "missing_from_catalog"
+            }
+        );
+    }
+    let unrelated_state:Option<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+        .bind::<Text,_>(unrelated_id).get_result(&mut conn).await.optional().unwrap();
+    assert!(unrelated_state.is_none());
+    #[derive(QueryableByName)]
+    struct Retained {
+        #[diesel(sql_type=diesel::sql_types::BigInt)]
+        n: i64,
+    }
+    let retained: Retained =
+        diesel::sql_query("SELECT count(*) AS n FROM data_points WHERE series_id=ANY($1)")
+            .bind::<diesel::sql_types::Array<SqlUuid>, _>(vec![old_series, unrelated_series])
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(retained.n, 2);
     drop(conn);
     db.drop().await;
 }

@@ -780,10 +780,18 @@ impl Worker {
             .with_label_values(&[source.as_str()])
             .set(i64::try_from(missing.len()).unwrap_or(i64::MAX));
         let catalog_scope = adapter.catalog_scope();
-        let lifecycle = adapter.catalog_lifecycle();
+        let mut lifecycle = adapter.catalog_lifecycle();
         let complete = reference_ok
             && adapter.discovery_is_complete()
             && (missing.is_empty() || catalog_scope.is_some());
+        if complete && catalog_scope.is_some() {
+            let scope_adapter = adapter.clone();
+            let scope_ctx = self.ctx.clone();
+            lifecycle.scope_ids.extend(
+                guarded(async move { scope_adapter.catalog_scope_members(&scope_ctx).await })
+                    .await?,
+            );
+        }
         self.datasets.check_all(
             source,
             found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),
