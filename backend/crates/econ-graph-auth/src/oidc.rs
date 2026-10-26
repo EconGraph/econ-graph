@@ -354,7 +354,6 @@ impl OidcVerifier {
     /// [`Self::with_min_refresh_interval`]. Keys older than [`MAX_STALE_KEY_AGE`] are not used:
     /// if the provider stays unreachable that long, tokens can no longer be checked.
     async fn key(&self, kid: &str) -> Result<DecodingKey, VerifyError> {
-        let started = Instant::now();
         if let Some(key) = self.cached(kid, MAX_KEY_AGE).await {
             return Ok(key);
         }
@@ -382,15 +381,16 @@ impl OidcVerifier {
             return Ok(key);
         }
         let fetched_at = self.cache.read().await.fetched_at;
-        // A key id is unknown only if keys fetched since this request arrived lack it. When
-        // the refetch was throttled, or failed, the kid may be a new key the provider has not
-        // told us about yet, so the token can't be checked rather than being invalid.
-        let checked = fetched_at.is_some_and(|at| at >= started);
-        if checked && last_error.is_none() {
+        // A successful JWKS is also a bounded negative cache for every absent kid. A
+        // throttled refresh is not a provider outage: keep rejecting missing keys until
+        // the next allowed fetch can discover a rotation. Only an actual fetch failure
+        // makes an absent key unverifiable. No per-kid entries are needed (kids are
+        // caller-controlled and could otherwise grow the cache without bound).
+        if fetched_at.is_some() && last_error.is_none() {
             Err(VerifyError::invalid(format!("unknown key id {kid:?}")))
         } else {
             Err(VerifyError::Unavailable(last_error.unwrap_or_else(|| {
-                format!("key id {kid:?} not checked: signing keys were refetched too recently")
+                "signing keys have not been fetched".to_string()
             })))
         }
     }
@@ -917,11 +917,8 @@ mod verify_tests {
         for i in 0..5 {
             let token = SigningKey::generate(&format!("random-{i}")).sign(&claims);
             let result = verifier.verify(&token).await;
-            // Not refetched, so not known to be invalid.
-            assert!(
-                matches!(result, Err(VerifyError::Unavailable(_))),
-                "{result:?}"
-            );
+            // A successful snapshot rejects absent kids even when refresh is throttled.
+            assert!(matches!(result, Err(VerifyError::Invalid(_))), "{result:?}");
         }
         assert_eq!(
             issuer.jwks_requests(),
@@ -931,7 +928,7 @@ mod verify_tests {
     }
 
     #[tokio::test]
-    async fn a_key_rotated_while_refetches_are_throttled_is_not_called_invalid() {
+    async fn a_key_rotated_while_refetches_are_throttled_recovers_after_the_interval() {
         let issuer = TestIssuer::start().await;
         // Long enough to cover generating the new RSA key in a debug build.
         let interval = Duration::from_secs(3);
@@ -949,10 +946,7 @@ mod verify_tests {
         issuer.rotate("test-key-2", true);
         let rotated = issuer.sign(&claims);
         let result = verifier.verify(&rotated).await;
-        assert!(
-            matches!(result, Err(VerifyError::Unavailable(_))),
-            "{result:?}"
-        );
+        assert!(matches!(result, Err(VerifyError::Invalid(_))), "{result:?}");
 
         tokio::time::sleep(interval + Duration::from_millis(50)).await;
         verifier.verify(&rotated).await.unwrap();
