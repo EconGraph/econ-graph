@@ -81,8 +81,9 @@ Selection limits bound expansion before observation jobs are enqueued. A rejecte
 raises `CrawlerCatalogGuardRejected`; inspect the upstream catalog and worker warning before
 increasing limits. Do not blindly raise a limit to silence an alert.
 
-The data migrations create `series_lifecycle` and `catalog_lifecycle_scopes`. Apply them with
-`crawler migrate` before deploying code that reads lifecycle state. A complete successful
+One atomic data migration creates `series_lifecycle` (including fetch evidence),
+`catalog_lifecycle_scopes`, and `catalog_reference_snapshots`. Apply it with `crawler migrate`
+before deploying code that reads lifecycle state. A complete successful
 catalog under unchanged selection rules supplies absence evidence. Failed or partial catalogs
 supply none, and a rule change resets the comparison scope. Three consecutive successful
 absences confirm a missing series. A snapshot that suddenly loses more than 20% of the
@@ -91,7 +92,9 @@ On first adoption, retained BEA histories that match the configured rules establ
 baseline without counting absence. Three subsequent complete snapshots are required for
 a missing badge. Histories outside those rules are not enrolled or retired by that scope.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
-by a successful fetch. Fetch success never erases catalog absence evidence: a delisted
+by a successful fetch. Successful persistence shares the source lock with missing-result
+writes so normal fetches and forced refetches cannot race; upstream HTTP stays concurrent.
+Fetch success never erases catalog absence evidence: a delisted
 series can still serve historical observations.
 
 | Status | Public behavior |

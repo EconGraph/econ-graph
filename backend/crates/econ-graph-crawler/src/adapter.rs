@@ -87,6 +87,11 @@ pub struct CrawlCtx {
     pub pool: DatabasePool,
     /// Upstream API keys.
     pub keys: ApiKeys,
+    /// When true, adapters ignore the validators stored with each series (`Last-Modified`,
+    /// `ETag`, content hashes, source-reported versions) and fetch in full, as if the series had
+    /// never been fetched. Set for `refetch_series` jobs (see [`crate::refetch`]) and
+    /// `crawler fetch --full`; adapters still store the new validators they get back.
+    pub bypass_validators: bool,
 }
 
 /// Series-level metadata returned alongside observations. Maps onto `economic_series` columns.

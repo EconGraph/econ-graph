@@ -311,6 +311,7 @@ async fn make_worker(
             bea: None,
             census: None,
         },
+        bypass_validators: false,
     };
     let mut reg = AdapterRegistry::new();
     reg.register(Arc::new(Tracking {
@@ -609,7 +610,11 @@ async fn run_phase(
             .collect();
         let mut conn = admin.get().await.unwrap();
         let codes: Vec<String> = economic_series::table
-            .inner_join(datasets::table)
+            .inner_join(
+                datasets::table.on(datasets::id
+                    .eq(economic_series::dataset_id)
+                    .and(datasets::source_id.eq(economic_series::source_id))),
+            )
             .filter(economic_series::external_id.eq_any(&bls_ids))
             .select(datasets::code)
             .load(&mut conn)

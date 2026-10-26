@@ -961,6 +961,161 @@ async fn fred_vintages_first_and_incremental_fetch() {
     }
 }
 
+/// A `refetch_series` job reads FRED's full vintage history through the normal FRED fetch, even
+/// when `last_updated` is unchanged (a `fetch_series` job then skips the observations), and
+/// rewrites rounded vintage values in place: same series, same rows, a vintage FRED no longer
+/// serves left as stored.
+#[tokio::test]
+async fn fred_refetch_rewrites_rounded_vintages_in_place() {
+    let Some(db) = db().await else { return };
+    const ID: &str = "t5_fred_refetch";
+    let series = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/fred/series_gdp.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let mock = MockSource::start().await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/series"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(series))
+        .mount(mock.server())
+        .await;
+    mock.mount(
+        &Route::get("/series/vintagedates").query("series_id", ID),
+        Reply::json_str(
+            r#"{"realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "count": 3,
+                "offset": 0, "limit": 10000,
+                "vintage_dates": ["2025-07-30", "2025-08-28", "2025-09-25"]}"#,
+        ),
+    )
+    .await;
+    // Every vintage, with more digits than DECIMAL(20,6) kept.
+    let observations = r#"{
+      "realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "count": 3, "offset": 0,
+      "limit": 100000,
+      "observations": [
+        {"realtime_start": "2025-07-30", "realtime_end": "2025-08-27", "date": "2025-04-01",
+         "value": "30331.1171234567"},
+        {"realtime_start": "2025-08-28", "realtime_end": "2025-09-24", "date": "2025-04-01",
+         "value": "30353.902"},
+        {"realtime_start": "2025-09-25", "realtime_end": "9999-12-31", "date": "2025-04-01",
+         "value": "123456789012345.6789012"}
+      ]
+    }"#;
+    mock.mount_expect(
+        &Route::get("/series/observations")
+            .query("series_id", ID)
+            .query(
+                "realtime_start",
+                crate::sources::fred::EARLIEST_REALTIME_START,
+            ),
+        Reply::json_str(observations),
+        1,
+    )
+    .await;
+    let adapter = Arc::new(crate::sources::fred::FredAdapter::new(mock.base_url()));
+    let mut registry = AdapterRegistry::new();
+    registry.register(adapter.clone());
+    let mut datasets = DatasetCatalog::empty();
+    datasets.load_adapter(&*adapter).unwrap();
+    persist::sync_datasets(&db.pool, &datasets).await.unwrap();
+    let w = Worker::new(ctx(&db.pool), registry, config("t5-worker")).with_datasets(datasets);
+
+    // What a DECIMAL(20,6) column kept of those vintages, plus a vintage FRED no longer serves,
+    // stored with the validator for FRED's current `last_updated`.
+    let stored = persist::persist_series(
+        &db.pool,
+        SourceId::Fred,
+        ID,
+        &FetchedSeries {
+            metadata: None,
+            dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+            points: vec![
+                revision("2025-04-01", "30331.117123", "2025-07-30", true),
+                revision("2025-04-01", "30340.5", "2025-08-01", false),
+                revision("2025-04-01", "30353.902", "2025-08-28", false),
+                revision("2025-04-01", "99999999.999999", "2025-09-25", false),
+            ],
+            validators: Some(crate::http::Validators {
+                version: Some(format!(
+                    "{}:2026-08-28 07:54:02-05",
+                    crate::sources::fred::PARSE_VERSION
+                )),
+                ..Default::default()
+            }),
+        },
+    )
+    .await
+    .unwrap();
+    let rows = |pool: DatabasePool| async move {
+        let mut conn = pool.get().await.unwrap();
+        data_points::table
+            .filter(data_points::series_id.eq(stored.series_id))
+            .order((data_points::revision_date, data_points::is_original_release))
+            .select((
+                data_points::id,
+                data_points::revision_date,
+                data_points::is_original_release,
+                data_points::value,
+            ))
+            .load::<(Uuid, NaiveDate, bool, Option<BigDecimal>)>(&mut conn)
+            .await
+            .unwrap()
+    };
+    let before = rows(db.pool.clone()).await;
+    let run = |kind: JobKind| {
+        let pool = db.pool.clone();
+        let w = &w;
+        async move {
+            enqueue(&pool, SourceId::Fred.as_str(), ID, kind, 5).await;
+            match w.run_once().await.expect("claimed") {
+                JobOutcome::Completed(stats) => stats,
+                other => panic!("expected Completed, got {other:?}"),
+            }
+        }
+    };
+
+    // A normal fetch: a known vintage and an unchanged last_updated skip the observations.
+    let stats = run(JobKind::FetchSeries).await;
+    assert_eq!(stats.points_written, 0);
+    assert_eq!(rows(db.pool.clone()).await, before);
+
+    // The re-fetch asks for every vintage and corrects the rounded ones in place.
+    let stats = run(JobKind::RefetchSeries).await;
+    assert_eq!((stats.points_written, stats.new_points), (2, 0));
+    assert_eq!(stats.series_id, Some(stored.series_id));
+    let after = rows(db.pool.clone()).await;
+    assert_eq!(
+        after.iter().map(|r| r.0).collect::<Vec<_>>(),
+        before.iter().map(|r| r.0).collect::<Vec<_>>(),
+        "same rows, no duplicates"
+    );
+    assert_eq!(
+        after
+            .iter()
+            .map(|r| (r.1, r.2, r.3.as_ref().unwrap().to_string()))
+            .collect::<Vec<_>>(),
+        vec![
+            (d("2025-07-30"), true, "30331.1171234567".to_string()),
+            (d("2025-08-01"), false, "30340.5".to_string()),
+            (d("2025-08-28"), false, "30353.902".to_string()),
+            (
+                d("2025-09-25"),
+                false,
+                "123456789012345.6789012".to_string()
+            ),
+        ]
+    );
+    mock.server().verify().await;
+    for r in mock.received_requests().await {
+        assert!(
+            !r.url.query_pairs().any(|(k, _)| k == "observation_start"),
+            "{}",
+            r.url
+        );
+    }
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };
@@ -2187,6 +2342,10 @@ struct BatchAdapter {
     batch_error: Option<CrawlError>,
     /// Observation date per id (default 2024-01-01).
     dates: HashMap<String, NaiveDate>,
+    /// Observation value per id (default 1).
+    values: HashMap<String, BigDecimal>,
+    /// `bypass_validators` of every adapter call's context, in call order.
+    bypass: Mutex<Vec<bool>>,
 }
 
 impl BatchAdapter {
@@ -2202,7 +2361,12 @@ impl BatchAdapter {
             }),
             points: vec![FetchedPoint {
                 date,
-                value: Some(BigDecimal::from(1)),
+                value: Some(
+                    self.values
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| BigDecimal::from(1)),
+                ),
                 revision_date: date,
                 is_original_release: true,
             }],
@@ -2236,10 +2400,11 @@ impl SourceAdapter for BatchAdapter {
 
     async fn fetch_series(
         &self,
-        _: &CrawlCtx,
+        ctx: &CrawlCtx,
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
+        self.bypass.lock().unwrap().push(ctx.bypass_validators);
         self.series_calls
             .lock()
             .unwrap()
@@ -2268,10 +2433,11 @@ impl SourceAdapter for BatchAdapter {
 
     async fn fetch_batch(
         &self,
-        _: &CrawlCtx,
+        ctx: &CrawlCtx,
         external_ids: &[String],
         since: Option<NaiveDate>,
     ) -> Result<crate::adapter::BatchFetch, CrawlError> {
+        self.bypass.lock().unwrap().push(ctx.bypass_validators);
         self.batch_calls
             .lock()
             .unwrap()
@@ -2323,6 +2489,84 @@ async fn create_series(pool: &DatabasePool, ids: &[&str]) -> Vec<Uuid> {
 
 fn strings(ids: &[&str]) -> Vec<String> {
     ids.iter().map(|s| (*s).to_string()).collect()
+}
+
+/// A value outside the stored-value limits fails its own job with a parse error and nothing of
+/// that series is written, whether it came from a batch or a single fetch; the batch's other
+/// series are written as usual.
+#[tokio::test]
+async fn an_over_limit_value_fails_its_job_without_persisting() {
+    let Some(db) = db().await else { return };
+    let huge = BigDecimal::from_str(&format!("1{}", "0".repeat(50))).unwrap();
+    for batching in [true, false] {
+        let adapter = Arc::new(BatchAdapter {
+            batching,
+            values: HashMap::from([
+                ("t5_kv_2".to_string(), huge.clone()),
+                ("t5_kw_1".to_string(), huge.clone()),
+            ]),
+            ..Default::default()
+        });
+        let w = batch_worker(&db.pool, &adapter, 3);
+        let ids: &[&str] = if batching {
+            &["t5_kv_1", "t5_kv_2"]
+        } else {
+            &["t5_kw_1"]
+        };
+        let queue = enqueue_fetch(&db.pool, ids).await;
+        let mut outcomes = Vec::new();
+        while let Some(o) = w.run_batch_once().await {
+            outcomes.extend(o);
+        }
+        assert_eq!(outcomes.len(), ids.len(), "{outcomes:?}");
+        if batching {
+            assert_eq!(adapter.batch_calls().len(), 1);
+            assert_eq!(item(&db.pool, queue[0]).await.status, "completed");
+            assert!(series_row(&db.pool, "t5_kv_1").await.is_some());
+        }
+        let bad = queue[queue.len() - 1];
+        let bad_item = item(&db.pool, bad).await;
+        assert_eq!(bad_item.status, "failed", "batching {batching}");
+        assert!(
+            bad_item
+                .error_message
+                .as_deref()
+                .is_some_and(|m| m.contains("integer digits")),
+            "{:?}",
+            bad_item.error_message
+        );
+        assert!(
+            series_row(&db.pool, ids[ids.len() - 1]).await.is_none(),
+            "nothing of the over-limit series is written (batching {batching})"
+        );
+    }
+}
+
+/// `refetch_series` jobs batch like `fetch_series` jobs, but the batch is a full fetch (no
+/// `since`, though the series have points) with `bypass_validators` set.
+#[tokio::test]
+async fn refetch_jobs_batch_as_full_fetches_that_bypass_validators() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 3);
+    enqueue_fetch(&db.pool, &["t5_kr_1", "t5_kr_2"]).await;
+    while w.run_batch_once().await.is_some() {}
+    for id in ["t5_kr_1", "t5_kr_2"] {
+        enqueue(&db.pool, SRC.as_str(), id, JobKind::RefetchSeries, 5).await;
+    }
+    let outcomes = w.run_batch_once().await.expect("claimed");
+    assert_eq!(outcomes.len(), 2, "{outcomes:?}");
+    assert!(outcomes
+        .iter()
+        .all(|o| matches!(o, JobOutcome::Completed(_))));
+    let calls = adapter.batch_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[0].1.is_none(), "first fetch: no points yet");
+    assert_eq!(calls[1], (strings(&["t5_kr_1", "t5_kr_2"]), None));
+    assert_eq!(*adapter.bypass.lock().unwrap(), vec![false, true]);
 }
 
 #[tokio::test]
@@ -4343,4 +4587,164 @@ async fn scoped_discovery_takes_source_lock_before_metadata_rows() {
     drop(blocker);
     drop(probe);
     db.drop().await;
+}
+
+/// Forced history jobs have a different uniqueness key from scheduled refreshes. Both
+/// claims may be valid, so a successful write must recheck evidence after source locking.
+#[tokio::test]
+async fn concurrent_fetch_and_refetch_success_resets_the_other_kinds_new_miss() {
+    for (success_kind, missing_kind) in [
+        (JobKind::FetchSeries, JobKind::RefetchSeries),
+        (JobKind::RefetchSeries, JobKind::FetchSeries),
+    ] {
+        let Some(db) = review_worker_db("eco464_cross_kind_fetch_evidence").await else {
+            return;
+        };
+        let id = "t5_cross_kind_first_fetch";
+        persist::persist_discovered(
+            &db.pool,
+            SRC,
+            &[DiscoveredSeries {
+                external_id: id.into(),
+                title: "First history".into(),
+                description: None,
+                units: None,
+                frequency: None,
+                data_url: None,
+                dataset: flat(),
+            }],
+        )
+        .await
+        .unwrap();
+        let adapter = Arc::new(BatchAdapter {
+            lifecycle_tracking: true,
+            ..Default::default()
+        });
+        let w = Arc::new(batch_worker(&db.pool, &adapter, 1));
+        let success_job = enqueue(&db.pool, SRC.as_str(), id, success_kind, 5).await;
+        let missing_job = enqueue(&db.pool, SRC.as_str(), id, missing_kind, 5).await;
+        let success_claim = CrawlQueueItem::claim_by_id(&db.pool, success_job, &w.config.worker_id)
+            .await
+            .unwrap()
+            .expect("first kind claimed");
+        let missing_claim = CrawlQueueItem::claim_by_id(&db.pool, missing_job, &w.config.worker_id)
+            .await
+            .unwrap()
+            .expect("other kind claimed for the same series");
+        let source_id = persist::data_source_id(&db.pool, SRC).await.unwrap();
+        let mut blocker = db.pool.get().await.unwrap();
+        diesel::sql_query("BEGIN")
+            .execute(&mut blocker)
+            .await
+            .unwrap();
+        diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
+            .bind::<diesel::sql_types::Uuid, _>(source_id)
+            .execute(&mut blocker)
+            .await
+            .unwrap();
+        #[derive(QueryableByName)]
+        struct Pid {
+            #[diesel(sql_type=diesel::sql_types::Integer)]
+            pid: i32,
+        }
+        let pid: Pid = diesel::sql_query("SELECT pg_backend_pid() AS pid")
+            .get_result(&mut blocker)
+            .await
+            .unwrap();
+        let successful = adapter.series(id).unwrap();
+        let success_worker = w.clone();
+        let success = tokio::spawn(async move {
+            success_worker
+                .commit_result(
+                    SRC,
+                    &success_claim,
+                    Ok(JobWrite::Series(successful)),
+                    Duration::ZERO,
+                )
+                .await
+        });
+        let mut probe = db.pool.get().await.unwrap();
+        #[derive(QueryableByName)]
+        struct Waiting {
+            #[diesel(sql_type=diesel::sql_types::Bool)]
+            waiting: bool,
+        }
+        let waited = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let blocked: Waiting = diesel::sql_query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting")
+                    .bind::<diesel::sql_types::Integer,_>(pid.pid).get_result(&mut probe).await.unwrap();
+                if blocked.waiting { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await;
+        if waited.is_err() {
+            diesel::sql_query("ROLLBACK")
+                .execute(&mut blocker)
+                .await
+                .unwrap();
+            success.abort();
+            panic!("successful {success_kind:?} never reached the source lock");
+        }
+        // Execute the other valid claim's result transaction on the held source lock.
+        // Without source-first success locking, its earlier negative evidence peek
+        // precedes this miss and its new economic_series FK waits here instead.
+        assert!(
+            CrawlQueueItem::lock_current_claim(&mut blocker, &missing_claim)
+                .await
+                .unwrap()
+        );
+        let missing = Err(CrawlError::NotFound("confirmed by upstream".into()));
+        let metrics = std::sync::Mutex::new(Vec::new());
+        w.record_attempt_conn(
+            &mut blocker,
+            SRC,
+            &missing_claim,
+            &missing,
+            Duration::ZERO,
+            &metrics,
+        )
+        .await
+        .unwrap();
+        let outcome = w
+            .transition_conn(&mut blocker, SRC, &missing_claim, missing)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, JobOutcome::Failed { .. }));
+        diesel::sql_query("COMMIT")
+            .execute(&mut blocker)
+            .await
+            .unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), success)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            JobOutcome::Completed(_)
+        ));
+        #[derive(QueryableByName)]
+        struct Evidence {
+            #[diesel(sql_type=diesel::sql_types::Text)]
+            status: String,
+            #[diesel(sql_type=diesel::sql_types::Integer)]
+            misses: i32,
+        }
+        let evidence: Evidence = diesel::sql_query("SELECT status,fetch_not_found_count AS misses FROM series_lifecycle WHERE source_id=$1 AND external_id=$2")
+            .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<diesel::sql_types::Text,_>(id)
+            .get_result(&mut probe).await.unwrap();
+        assert_eq!(
+            (evidence.status.as_str(), evidence.misses),
+            ("active", 0),
+            "{success_kind:?} success must reset the {missing_kind:?} miss committed before it"
+        );
+        let stored = series_row(&db.pool, id).await.unwrap();
+        assert_eq!(stored.6.as_deref(), Some("success"));
+        assert_eq!(point_count(&db.pool, stored.0).await, 1);
+        assert_eq!(item(&db.pool, success_job).await.status, "completed");
+        assert_eq!(item(&db.pool, missing_job).await.status, "failed");
+        drop(blocker);
+        drop(probe);
+        drop(w);
+        db.drop().await;
+    }
 }

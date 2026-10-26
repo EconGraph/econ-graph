@@ -33,15 +33,19 @@
 //! [`revision_lookback`](crate::SourcePolicy::revision_lookback) (so recent revisions are
 //! re-fetched; `None` for a series with no stored points). Adapters that
 //! [track vintages](crate::SourceAdapter::tracks_vintages) get no `since` and the newest stored
-//! `revision_date` as the known vintage instead. `discover_catalog` calls
+//! `revision_date` as the known vintage instead. `refetch_series` (see [`crate::refetch`]) is
+//! `fetch_series` with neither bound, whatever the adapter, and with
+//! [`CrawlCtx::bypass_validators`] set, so the adapter re-reads the full history even when its
+//! stored validators say nothing changed. `discover_catalog` calls
 //! [`SourceAdapter::discover`]. Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
-//! Batching: when the claimed item is a `fetch_series` job with no registered handler, the
+//! Batching: when the claimed item is a `fetch_series` or `refetch_series` job with no
+//! registered handler, the
 //! adapter doesn't [track vintages](crate::SourceAdapter::tracks_vintages), its source's
 //! [`max_batch`](crate::SourcePolicy::max_batch) is above 1 and the adapter gives its
 //! series a [`batch_key`](crate::SourceAdapter::batch_key), the worker also claims up to
-//! `max_batch - 1` other due `fetch_series` jobs of that source with the same key (looking at the
+//! `max_batch - 1` other due jobs of that source and kind with the same key (looking at the
 //! next `max_batch * `[`BATCH_SCAN_PER_SLOT`] due jobs of the source, at most [`BATCH_SCAN_MAX`])
 //! and fetches them all with one [`SourceAdapter::fetch_batch`]
 //! call, passing the earliest `since` of the batch. A keyed item that finds no mates is fetched
@@ -89,6 +93,7 @@ use crate::error::CrawlError;
 use crate::http::Validators;
 use crate::persist::{self, AttemptRecord};
 use crate::source::SourceId;
+use crate::value::check_fetched_values;
 
 /// Worker settings.
 #[derive(Debug, Clone, PartialEq)]
@@ -505,16 +510,16 @@ impl Worker {
         Some(outcomes)
     }
 
-    /// Claims the due `fetch_series` jobs that can be fetched together with `lead` (same source
-    /// and batch key), up to the source's `max_batch` including `lead`. `None` when `lead`
-    /// doesn't batch.
+    /// Claims the due jobs that can be fetched together with `lead` (same source, kind and batch
+    /// key), up to the source's `max_batch` including `lead`. `None` when `lead` doesn't batch.
     async fn batch_mates(
         &self,
         lead: &CrawlQueueItem,
     ) -> Option<(SourceId, Arc<dyn SourceAdapter>, Vec<CrawlQueueItem>)> {
         let source = SourceId::from_str(&lead.source).ok()?;
-        if JobKind::from_str(&lead.kind).ok()? != JobKind::FetchSeries
-            || self.handlers.contains_key(&(source, JobKind::FetchSeries))
+        let kind = JobKind::from_str(&lead.kind).ok()?;
+        if !matches!(kind, JobKind::FetchSeries | JobKind::RefetchSeries)
+            || self.handlers.contains_key(&(source, kind))
         {
             return None;
         }
@@ -602,8 +607,9 @@ impl Worker {
             .await
     }
 
-    /// Fetches `items` (claimed `fetch_series` jobs of `source` sharing a batch key) with one
-    /// [`SourceAdapter::fetch_batch`] call, then records and transitions each job on its own.
+    /// Fetches `items` (claimed `fetch_series` or `refetch_series` jobs of `source` sharing a
+    /// kind and batch key) with one [`SourceAdapter::fetch_batch`] call, then records and
+    /// transitions each job on its own.
     async fn process_batch(
         &self,
         source: SourceId,
@@ -614,11 +620,22 @@ impl Worker {
         let policy = self.ctx.http.policy(source);
         tracing::debug!(%source, jobs = items.len(), "processing batch");
 
+        // A re-fetch is a full fetch of every series, ignoring stored validators.
+        let refetch = items
+            .as_slice()
+            .first()
+            .is_some_and(|i| i.job_kind() == JobKind::RefetchSeries);
         // `since` for the batch is the earliest of its series (a full fetch if any has no points).
         let mut results: Vec<Option<Fetched>> = Vec::with_capacity(items.len());
         let mut ids = Vec::with_capacity(items.len());
         let mut since: Option<Option<NaiveDate>> = None;
         for item in &items {
+            if refetch {
+                since = Some(None);
+                ids.push(item.series_id.clone());
+                results.push(None);
+                continue;
+            }
             match persist::latest_point_date(&self.ctx.pool, source, &item.series_id).await {
                 Ok(latest) => {
                     let own = latest.and_then(|d| incremental_since(d, policy));
@@ -637,7 +654,10 @@ impl Worker {
         let mut fetched = if ids.is_empty() {
             Ok(Default::default())
         } else {
-            let ctx = self.ctx.clone();
+            let ctx = CrawlCtx {
+                bypass_validators: refetch,
+                ..self.ctx.clone()
+            };
             let request = ids.clone();
             let since = since.flatten();
             let fetched =
@@ -668,6 +688,7 @@ impl Worker {
                         Some(Ok(series)) => self
                             .datasets
                             .check(source, &item.series_id, &series.dataset)
+                            .and_then(|_| check_fetched_values(&item.series_id, &series))
                             .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
                         None => Err(CrawlError::Transient(format!(
@@ -698,7 +719,8 @@ impl Worker {
             };
         }
         match kind {
-            JobKind::FetchSeries => self.fetch_series(source, &item.series_id).await,
+            JobKind::FetchSeries => self.fetch_series(source, &item.series_id, false).await,
+            JobKind::RefetchSeries => self.fetch_series(source, &item.series_id, true).await,
             JobKind::DiscoverCatalog => self.discover(source).await,
             other => Err(CrawlError::Permanent(format!(
                 "no handler registered for {source} {other}"
@@ -706,12 +728,16 @@ impl Worker {
         }
     }
 
-    async fn fetch_series(&self, source: SourceId, external_id: &str) -> Fetched {
+    /// A `fetch_series` job, or with `full` a `refetch_series` job: no `since`, no known vintage
+    /// and [`CrawlCtx::bypass_validators`] set.
+    async fn fetch_series(&self, source: SourceId, external_id: &str, full: bool) -> Fetched {
         let adapter = self
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let known_vintage = if adapter.tracks_vintages() {
+        let known_vintage = if full {
+            None
+        } else if adapter.tracks_vintages() {
             persist::latest_revision_date(&self.ctx.pool, source, external_id)
                 .await
                 .map_err(db_error)?
@@ -720,7 +746,7 @@ impl Worker {
         };
         // A vintage-tracking adapter gets no `since`: with a known vintage it ignores it, and
         // without one it must fetch every date's history.
-        let since = if adapter.tracks_vintages() {
+        let since = if full || adapter.tracks_vintages() {
             None
         } else {
             persist::latest_point_date(&self.ctx.pool, source, external_id)
@@ -728,7 +754,10 @@ impl Worker {
                 .map_err(db_error)?
                 .and_then(|d| incremental_since(d, self.ctx.http.policy(source)))
         };
-        let ctx = self.ctx.clone();
+        let ctx = CrawlCtx {
+            bypass_validators: full,
+            ..self.ctx.clone()
+        };
         let id = external_id.to_string();
         let fetched = guarded(async move {
             adapter
@@ -737,6 +766,7 @@ impl Worker {
         })
         .await?;
         self.datasets.check(source, external_id, &fetched.dataset)?;
+        check_fetched_values(external_id, &fetched)?;
         Ok(JobWrite::Series(fetched))
     }
 
@@ -963,7 +993,10 @@ impl Worker {
                     Ok(JobWrite::Handler(stats)) => Ok(stats),
                     Err(error) => Err(error),
                 };
-                if item.job_kind() == JobKind::FetchSeries {
+                if matches!(
+                    item.job_kind(),
+                    JobKind::FetchSeries | JobKind::RefetchSeries
+                ) {
                     self.record_attempt_conn(
                         conn,
                         source,

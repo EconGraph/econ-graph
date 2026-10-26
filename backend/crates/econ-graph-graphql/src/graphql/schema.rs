@@ -9,7 +9,6 @@ use std::sync::Arc;
 use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::errors::SanitizeErrors;
 use crate::graphql::{mutation::Mutation, query::Query};
-use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::{AppPool, DataPool};
 use econ_graph_services::services::series_check::DataPlaneClient;
 
@@ -20,8 +19,6 @@ pub struct SchemaResources {
     /// DataLoaders on the data database, for N+1 query prevention; `None` when this schema has
     /// no data database (see [`crate::graphql::context::data_loaders`])
     pub data_loaders: Option<Arc<DataLoaders>>,
-    /// Security middleware
-    pub security: Arc<SecurityMiddleware>,
 }
 
 /// Deepest query the API runs. The standard introspection query that GraphiQL, the
@@ -104,12 +101,10 @@ pub fn create_schema_with_data_plane<T: Send + Sync + 'static>(
     data_plane: Option<Arc<DataPlaneClient>>,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
-    let security = Arc::new(SecurityMiddleware::new(SecurityConfig::default()));
     let resources = SchemaResources {
         data_loaders: data
             .as_ref()
             .map(|data| Arc::new(DataLoaders::new(data.clone()))),
-        security,
     };
 
     let mut builder = schema_builder()

@@ -23,6 +23,11 @@ export interface SeriesDataPoint {
   date: string;
   /** Value after the requested transformation; null where it can't be computed. */
   value: number | null;
+  /**
+   * The value exactly as the API sent it (a decimal string), for output that must keep every
+   * digit, such as the CSV download. `value` is the nearest double, for charting.
+   */
+  exactValue?: string;
   revisionDate: string;
   isOriginalRelease: boolean;
 }
@@ -75,12 +80,15 @@ interface RawDataPoint {
 
 function toDataPoint(raw: RawDataPoint): SeriesDataPoint {
   const value = raw.value === null ? null : Number(raw.value);
-  return {
+  const finite = value === null || Number.isFinite(value) ? value : null;
+  const point: SeriesDataPoint = {
     date: raw.date,
-    value: value === null || Number.isFinite(value) ? value : null,
+    value: finite,
     revisionDate: raw.revisionDate,
     isOriginalRelease: raw.isOriginalRelease,
   };
+  if (finite !== null && typeof raw.value === 'string') point.exactValue = raw.value.trim();
+  return point;
 }
 
 export interface SeriesSearchResult {

@@ -243,6 +243,27 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+  postgres-backup-scripts:
+    name: PostgreSQL Backup Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    # The postgres-backup CronJob's backup, sync and restore scripts, in its
+    # images, against scratch econ_graph, econ_graph_app and keycloak databases
+    # and an S3 mock.
+    - name: Check the backup and restore scripts
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-postgres-backup-scripts.sh
+
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
@@ -283,6 +304,11 @@ jobs:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
     - name: Check the kind installer
       run: scripts/deploy/test-install-kind.sh
+
+    # The pre-deploy database check (backup running, crawler stop, long transactions),
+    # against a stub kubectl.
+    - name: Check the pre-deploy database check
+      run: scripts/deploy/test-precheck-db-migration.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -733,7 +759,8 @@ jobs:
           own_account_cannot_be_suspended_or_deleted \
           own_account_is_left_intact_by_suspend_and_delete \
           update_user_email_conflict_leaves_other_fields_unchanged \
-          deleting_a_chart_inviter_preserves_other_users_access; do
+          deleting_a_chart_inviter_preserves_other_users_access \
+          concurrent_admin_removals_leave_an_active_admin; do
           name="graphql::authorization_tests::$test"
           log="$RUNNER_TEMP/$test.log"
           cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
@@ -873,12 +900,8 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
-    # Allowed to fail (owner decision): the full workspace run still has known
-    # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
-    # running so those failures stay visible in the log. TODO: drop
-    # continue-on-error once the pre-existing failures are fixed.
+    # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
-      continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
@@ -888,11 +911,9 @@ jobs:
         exit $status
       working-directory: backend
 
-    # TODO: ~45 doctests across the workspace do not compile (stale examples).
-    # Fix them, then drop continue-on-error (or fold into the step above by
-    # removing --lib --bins --tests).
+    # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
-      continue-on-error: true
+      if: ${{ !cancelled() }}
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0

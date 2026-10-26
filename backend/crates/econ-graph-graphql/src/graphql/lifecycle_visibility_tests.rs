@@ -354,7 +354,6 @@ impl HeldSeriesQuery {
 #[tokio::test]
 async fn held_series_nested_fields_recheck_restrictions_on_a_reused_schema() {
     use crate::graphql::{dataloaders::DataLoaders, schema::SchemaResources};
-    use crate::security::{SecurityConfig, SecurityMiddleware};
 
     let Some(pool) = pool().await else { return };
     let source = source(&pool).await;
@@ -377,7 +376,6 @@ async fn held_series_nested_fields_recheck_restrictions_on_a_reused_schema() {
     .data(DataPool(pool.clone()))
     .data(SchemaResources {
         data_loaders: Some(Arc::new(DataLoaders::new(DataPool(pool.clone())))),
-        security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
     })
     .finish();
     let query = "{held { recentDataPoints {value} dataPointCount latestObservation {value} \

@@ -3,13 +3,12 @@
 //! These tests require database access and test the full integration
 //! between World Bank data source configuration and database storage.
 
-use diesel::Connection;
 use econ_graph_core::models::DataSource;
 use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use serial_test::serial;
 use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+use testcontainers::{GenericImage, ImageExt};
 
 /// Test World Bank data source database integration
 #[tokio::test]
@@ -18,7 +17,7 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
 {
     // Set up test database
     let postgres = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "econ_graph_test")
@@ -34,8 +33,7 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
     // Create database pool
     let pool = econ_graph_core::database::create_pool(&connection_string).await?;
 
-    // Note: Migrations would need to be run separately in a real integration test
-    // For now, we'll skip migrations and just test the basic functionality
+    econ_graph_core::database::run_migrations(&connection_string).await?;
 
     // Test creating and retrieving World Bank data source from database
     let world_bank_source = DataSource::get_or_create(&pool, DataSource::world_bank()).await?;
@@ -68,7 +66,7 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
 async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::error::Error>> {
     // Set up test database
     let postgres = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "econ_graph_test")
@@ -84,12 +82,10 @@ async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::er
     // Create database pool
     let pool = econ_graph_core::database::create_pool(&connection_string).await?;
 
-    // Note: Migrations would need to be run separately in a real integration test
-    // For now, we'll skip migrations and just test the basic functionality
+    econ_graph_core::database::run_migrations(&connection_string).await?;
 
     // Create World Bank data source
     let world_bank_source = DataSource::get_or_create(&pool, DataSource::world_bank()).await?;
-    let source_id = world_bank_source.id;
 
     // Test that the data source was created successfully
     assert_eq!(world_bank_source.name, "World Bank Open Data");

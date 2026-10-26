@@ -38,7 +38,9 @@
 //! - [`scheduler`]: [`RefreshScheduler`], enqueues due series refreshes and weekly catalog discovery
 //! - [`status`]: crawler status derived from `crawl_queue` ([`status::crawler_status`])
 //! - [`coverage`]: per-source data coverage and freshness ([`coverage::crawl_coverage`])
-//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, coverage, sources, fetch)
+//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, refetch, status, coverage, sources, fetch)
+//! - [`refetch`]: forced full-history re-fetches (`refetch_series` jobs) and their progress
+//! - [`value`]: exact parsing and size limits for observation values
 //! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
 //! ## Usage
@@ -51,7 +53,7 @@
 //!
 //! # async fn run(pool: econ_graph_core::DatabasePool) -> Result<(), Box<dyn std::error::Error>> {
 //! let http = HttpFetcher::new(HttpConfig::default(), HashMap::new())?;
-//! let ctx = CrawlCtx { http, pool, keys: ApiKeys::from_env() };
+//! let ctx = CrawlCtx { http, pool, keys: ApiKeys::from_env(), bypass_validators: false };
 //!
 //! let registry = AdapterRegistry::new(); // register source adapters here
 //! if let Some(adapter) = registry.get("FRED".parse::<SourceId>()?) {
@@ -76,6 +78,7 @@ pub mod policy;
 pub mod rate_limit;
 pub mod reference;
 pub mod reference_file;
+pub mod refetch;
 pub mod scheduler;
 pub mod series_id;
 pub mod source;
@@ -83,6 +86,7 @@ pub mod sources;
 pub mod status;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
+pub mod value;
 pub mod worker;
 
 pub use adapter::{

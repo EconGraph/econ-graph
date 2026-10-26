@@ -477,24 +477,15 @@ pub(crate) async fn record_not_found_conn(
 
 /// Reset only fetch evidence when history was successfully fetched. Run before the
 /// economic-series upsert: a metadata-only series may need a new FK parent key lock.
-/// If evidence exists, source-first locking matches catalog/NotFound/restriction writes.
-/// Normal successful crawls do no lifecycle mutation and do not serialize on the source.
+/// Source-first locking matches catalog/NotFound/restriction writes. A normal fetch and
+/// a forced refetch can hold valid claims for the same series at once, so the lock must
+/// precede even an evidence-absent read. This briefly serializes successful persistence
+/// per source; upstream HTTP requests remain concurrent.
 pub(crate) async fn record_fetch_success_conn(
     conn: &mut AsyncPgConnection,
     source_id: Uuid,
     external_id: &str,
 ) -> AppResult<()> {
-    #[derive(QueryableByName)]
-    struct Needed {
-        #[diesel(sql_type=diesel::sql_types::Bool)]
-        needed: bool,
-    }
-    let needed:Needed=diesel::sql_query("SELECT EXISTS(SELECT 1 FROM series_lifecycle
-        WHERE source_id=$1 AND external_id=$2 AND (fetch_not_found_count>0 OR fetch_retired)) AS needed")
-        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result(&mut *conn).await?;
-    if !needed.needed {
-        return Ok(());
-    }
     diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
         .bind::<SqlUuid, _>(source_id)
         .execute(&mut *conn)

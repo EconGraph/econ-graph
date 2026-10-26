@@ -236,6 +236,7 @@ impl BatchFn<Uuid, Vec<EconomicSeries>> for SeriesBySourceBatcher {
                 .filter(dsl::end_date.is_not_null())
                 .filter(econ_graph_services::services::series_service::public_series_predicate())
                 .order(dsl::title.asc())
+                .select(EconomicSeries::as_select())
                 .load::<EconomicSeries>(&mut conn)
                 .await
             {

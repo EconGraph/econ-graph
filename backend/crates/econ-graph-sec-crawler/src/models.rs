@@ -271,6 +271,7 @@ pub struct CrawlResult {
 /// // Configuration for crawling recent 10-K filings
 /// let config = CrawlConfig {
 ///     max_requests_per_second: 10,
+///     max_concurrent_requests: Some(4),
 ///     max_retries: 3,
 ///     retry_delay_seconds: 5,
 ///     max_file_size_bytes: 50 * 1024 * 1024, // 50MB

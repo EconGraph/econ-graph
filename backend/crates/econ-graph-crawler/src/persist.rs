@@ -936,14 +936,6 @@ pub async fn persist_series(
 ) -> AppResult<SeriesWrite> {
     let mut conn = pool.get().await.map_err(conn_err)?;
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
-        // Direct operator/debug fetches bypass queue claim fencing. Serialize them
-        // before inspecting lifecycle evidence so they cannot miss a concurrently
-        // committed worker NotFound. Workers use the connection form below.
-        let source_id = data_source_id_conn(conn, source).await?;
-        diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
-            .bind::<diesel::sql_types::Uuid, _>(source_id)
-            .execute(&mut *conn)
-            .await?;
         persist_series_conn(conn, source, external_id, fetched).await
     })
     .await

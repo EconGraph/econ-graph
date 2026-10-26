@@ -107,7 +107,6 @@
 //! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
@@ -126,6 +125,7 @@ use crate::lifecycle::CatalogLifecycle;
 use crate::persist;
 use crate::reference::data_dir;
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// The real FRED API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.stlouisfed.org/fred";
@@ -996,6 +996,7 @@ impl FredAdapter {
             ..Validators::default()
         });
         if known_vintage.is_some()
+            && !ctx.bypass_validators
             && validators.is_some()
             && stored_validators(ctx, external_id).await == validators
         {
@@ -1156,10 +1157,8 @@ fn parse_row(series_id: &str, o: FredObservation) -> Result<VintageRow, CrawlErr
     let realtime_start = parse_date(series_id, "realtime_start", &o.realtime_start)?;
     let value = match o.value.trim() {
         MISSING_VALUE | "" => None,
-        v => Some(BigDecimal::from_str(v).map_err(|e| {
-            CrawlError::Parse(format!(
-                "FRED {series_id}: invalid value {v:?} on {date}: {e}"
-            ))
+        v => Some(parse_observation_value(v).map_err(|e| {
+            CrawlError::Parse(format!("FRED {series_id}: invalid value on {date}: {e}"))
         })?),
     };
     Ok(VintageRow {
@@ -1272,6 +1271,8 @@ struct FredObservation {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
 

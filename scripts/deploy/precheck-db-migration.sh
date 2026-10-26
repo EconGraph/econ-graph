@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+#
+# Check that the data database is quiet enough for a deploy whose data
+# migrations lock tables, before running scripts/deploy/deploy.sh.
+#
+# Usage:
+#   scripts/deploy/precheck-db-migration.sh [--dry-run] [--stop-crawler]
+#
+# Run it immediately before scripts/deploy/deploy.sh, on the cluster deploy.sh
+# deploys to: the kind cluster econ-graph, context kind-econ-graph, always.
+# deploy.sh applies the data migrations with the crawler-migrate Job
+# (/app/crawler migrate) before it applies the backend and crawler-worker.
+#
+#   --dry-run       check, and show what --stop-crawler would change, but change
+#                   nothing
+#   --stop-crawler  scale deployment/crawler-worker to 0 and wait for its pods
+#                   to go. deploy.sh applies crawler-worker.yaml, bringing it
+#                   back at 1 replica on the new image, only after the
+#                   crawler-migrate Job has completed; if the Job fails, the
+#                   deploy stops and the worker stays stopped. If a later check
+#                   here fails, the command to scale it back is printed.
+#
+# Checks, in order; any failure exits non-zero:
+#   1. No postgres-backup Job is running (the nightly CronJob runs at 08:00
+#      UTC; a migration waiting behind the backup's long transaction would time
+#      out, and one taking an ACCESS EXCLUSIVE lock would stall the backup), and
+#      no crawler-migrate Job is running (deploy.sh replaces it; let a running
+#      one finish first).
+#   2. With --stop-crawler, the crawler worker is stopped.
+#   3. No session on the data database has been in its transaction for more
+#      than 5 seconds or is idle in a transaction: such a session holds locks
+#      the migration waits for. Each one is listed with how to find its owner.
+#      Sessions are never cancelled or terminated by this script.
+#
+# Idempotent: it reads the cluster, and --stop-crawler only scales down a
+# worker that is running. It deletes nothing.
+#
+# Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) with
+# the kind cluster's own kubectl and kubeconfig (scripts/deploy/lib/kind-env.sh,
+# which also selects the rootful Docker daemon the cluster runs on) on context
+# kind-econ-graph, without changing the current context; never plain kubectl.
+# Under --dry-run nothing is written to ~/.cache/econgraph: a cached kubectl
+# that still reaches the cluster is used, and otherwise a temporary copy that is
+# removed on exit.
+#
+# Environment: KIND_CLUSTER (default econ-graph), NAMESPACE (default
+# econ-graph), POSTGRES_POD (default postgresql-0, container postgresql: the
+# data database's server), DATA_DB_NAME (default econ_graph), DB_USER (default
+# postgres).
+
+set -euo pipefail
+
+SCRIPT="precheck-db-migration"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+DRY_RUN=false
+STOP_CRAWLER=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --stop-crawler) STOP_CRAWLER=true; shift ;;
+        -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
+        *) echo "${SCRIPT}: error: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+# Read by kind-env.sh: under a dry run it writes nothing to the kubectl cache.
+export DRY_RUN
+
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+
+NAMESPACE="${NAMESPACE:-econ-graph}"
+POSTGRES_POD="${POSTGRES_POD:-postgresql-0}"
+POSTGRES_CONTAINER="postgresql"
+DATA_DB_NAME="${DATA_DB_NAME:-econ_graph}"
+DB_USER="${DB_USER:-postgres}"
+CRAWLER="crawler-worker"
+MIGRATE_JOB="crawler-migrate"
+BACKUP_PREFIX="postgres-backup"
+# A transaction older than this blocks the migration's locks long enough to matter.
+MAX_XACT_SECONDS=5
+# The context deploy.sh deploys to.
+CONTEXT="kind-${KIND_CLUSTER}"
+
+# After kind-env.sh, whose helpers then report through these.
+die() {
+    echo "${SCRIPT}: error: $*" >&2
+    exit 1
+}
+
+log() {
+    echo "${SCRIPT}: $*"
+}
+
+# Once this run has scaled the crawler down, a failed check says how to bring it back.
+SCALED_FROM=""
+crawler_restore_hint() {
+    local status=$?
+    if [ "$status" != 0 ] && [ -n "$SCALED_FROM" ]; then
+        echo "${SCRIPT}: crawler-worker was scaled from ${SCALED_FROM} to 0 by this run and stays" \
+            "stopped. To bring it back without deploying:" >&2
+        echo "  KUBECONFIG=${KUBECONFIG} ${KUBECTL} --context ${CONTEXT} -n ${NAMESPACE}" \
+            "scale deployment/${CRAWLER} --replicas=${SCALED_FROM}" >&2
+    fi
+    return "$status"
+}
+# Set before ensure_kind_kubectl, whose dry-run cleanup (add_exit_cleanup) then runs after
+# the hint, which reads the exit status.
+trap crawler_restore_hint EXIT
+
+# One kubectl and one context for every call (kc), without changing the current
+# context: the kind cluster's own kubectl, copied out of the cluster by
+# ensure_kind_kubectl, never a KUBECTL, KUBECONFIG or context from the
+# environment.
+check_docker_daemon
+kind_cluster_exists || die "kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}"
+ensure_kind_kubectl
+KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+[ -x "$KUBECTL" ] || die "the kind cluster's kubectl is not at ${KUBECTL}"
+export KUBECTL
+contexts="$(command "$KUBECTL" config get-contexts -o name)" || die "could not list the contexts of $KUBECTL"
+grep -qxF -- "$CONTEXT" <<<"$contexts" || die "$KUBECTL has no context $CONTEXT"
+CLUSTER_ROLE_CONTEXT="$CONTEXT"
+export CLUSTER_ROLE_CONTEXT
+role_status=0
+cluster_is_marked_production || role_status=$?
+case "$role_status" in
+    0) cluster_role="PRODUCTION" ;;
+    1) cluster_role="not marked production" ;;
+    *) cluster_role="unknown: ${CLUSTER_ROLE_REASON}" ;;
+esac
+log "context ${CONTEXT} (${cluster_role}), kubectl ${KUBECTL}, KUBECONFIG=${KUBECONFIG}"
+
+failed=false
+
+# The crawler pods, one name per line.
+crawler_pods() {
+    kc -n "$NAMESPACE" get pods -l "app=${CRAWLER}" -o name
+}
+
+# 1. No backup or data migration running.
+jobs="$(kc -n "$NAMESPACE" get jobs \
+    -o 'jsonpath={range .items[*]}{.metadata.name}{" "}{.status.active}{"\n"}{end}')" ||
+    die "could not list the Jobs in ${NAMESPACE}"
+active_backups="$(awk -v p="$BACKUP_PREFIX" 'index($1, p) == 1 && $2 + 0 > 0 { print $1 }' <<<"$jobs")"
+if [ -n "$active_backups" ]; then
+    echo "${SCRIPT}: BLOCKED: a postgres backup is running: $(tr '\n' ' ' <<<"$active_backups")" >&2
+    echo "  Wait for it to finish (kubectl -n ${NAMESPACE} get jobs), then run this again." >&2
+    echo "  The nightly backup starts at 08:00 UTC; deploy outside that time." >&2
+    exit 1
+fi
+log "ok: no postgres-backup Job is running"
+if awk -v j="$MIGRATE_JOB" '$1 == j && $2 + 0 > 0 { found = 1 } END { exit !found }' <<<"$jobs"; then
+    echo "${SCRIPT}: BLOCKED: the ${MIGRATE_JOB} Job is still running" >&2
+    echo "  Let it finish (kubectl -n ${NAMESPACE} logs job/${MIGRATE_JOB} -f), then run this again." >&2
+    exit 1
+fi
+log "ok: no ${MIGRATE_JOB} Job is running"
+
+# 2. Crawler worker.
+if [ "$STOP_CRAWLER" = true ]; then
+    replicas="$(kc -n "$NAMESPACE" get deployment "$CRAWLER" --ignore-not-found \
+        -o 'jsonpath={.spec.replicas}')" || die "could not read deployment/${CRAWLER}"
+    pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
+    if [ -z "$replicas" ]; then
+        log "ok: there is no deployment/${CRAWLER}"
+    elif [ "$DRY_RUN" = true ]; then
+        if [ "$replicas" != 0 ] || [ -n "$pods" ]; then
+            log "dry run: would scale deployment/${CRAWLER} in ${NAMESPACE} from ${replicas} to 0" \
+                "and wait for its pods to go (now: $(wc -w <<<"$pods") pod(s))"
+        else
+            log "dry run: deployment/${CRAWLER} is already at 0 with no pods; nothing to change"
+        fi
+    else
+        if [ "$replicas" != 0 ]; then
+            log "scaling deployment/${CRAWLER} from ${replicas} to 0"
+            kc -n "$NAMESPACE" scale "deployment/${CRAWLER}" --replicas=0 ||
+                die "could not scale deployment/${CRAWLER} to 0"
+            SCALED_FROM="$replicas"
+        fi
+        # `wait --for=delete` fails when no pod matches, so only wait for pods still there,
+        # and count a failed wait as success when they are gone by then.
+        pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
+        if [ -n "$pods" ] &&
+            ! kc -n "$NAMESPACE" wait --for=delete pod -l "app=${CRAWLER}" --timeout=300s; then
+            pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
+            [ -z "$pods" ] || die "the ${CRAWLER} pods did not go within 5 minutes: ${pods}"
+        fi
+        log "ok: ${CRAWLER} is stopped; deploy.sh brings it back at 1 replica on the new image once crawler-migrate has completed"
+    fi
+fi
+
+# 3. Sessions that hold locks the migration would wait for. Read-only.
+read -r -d '' sessions_sql <<SQL || true
+SELECT pid, coalesce(usename, '-'), coalesce(nullif(application_name, ''), '-'),
+       coalesce(host(client_addr), 'local'), coalesce(state, '-'),
+       extract(epoch FROM now() - xact_start)::int, coalesce(wait_event_type, '-'),
+       left(regexp_replace(coalesce(query, ''), '\\s+', ' ', 'g'), 100)
+FROM pg_stat_activity
+WHERE datname = current_database() AND pid <> pg_backend_pid()
+  AND xact_start IS NOT NULL
+  AND (state LIKE 'idle in transaction%'
+       OR now() - xact_start > interval '${MAX_XACT_SECONDS} seconds')
+ORDER BY xact_start
+SQL
+sessions="$(kc -n "$NAMESPACE" exec -i "$POSTGRES_POD" -c "$POSTGRES_CONTAINER" -- \
+    psql -U "$DB_USER" -d "$DATA_DB_NAME" -v ON_ERROR_STOP=1 -X -A -t -F $'\t' -c "$sessions_sql")" ||
+    die "could not read pg_stat_activity of ${DATA_DB_NAME} in ${NAMESPACE}/${POSTGRES_POD}"
+if [ -n "$sessions" ]; then
+    failed=true
+    echo "${SCRIPT}: BLOCKED: sessions on ${DATA_DB_NAME} in a transaction for more than" \
+        "${MAX_XACT_SECONDS}s or idle in a transaction:" >&2
+    printf '  %-8s %-10s %-22s %-12s %-28s %8s %-8s %s\n' \
+        PID USER APPLICATION CLIENT STATE "XACT_S" WAIT QUERY >&2
+    while IFS=$'\t' read -r pid user app client state age wait query; do
+        printf '  %-8s %-10s %-22s %-12s %-28s %8s %-8s %s\n' \
+            "$pid" "$user" "$app" "$client" "$state" "$age" "$wait" "$query" >&2
+    done <<<"$sessions"
+    cat >&2 <<EOF
+  A data migration would wait behind these and give up after 10 seconds. Find each
+  owner by its application and client address (kubectl -n ${NAMESPACE} get pods -o wide
+  maps a pod IP to its pod) and stop or finish that work, then run this again.
+  This script never ends sessions. If a session is certainly abandoned, end it
+  yourself with: SELECT pg_terminate_backend(<pid>);
+EOF
+else
+    log "ok: no session on ${DATA_DB_NAME} has been in a transaction for more than ${MAX_XACT_SECONDS}s or is idle in one"
+fi
+
+if [ "$failed" = true ]; then
+    exit 1
+fi
+if [ "$DRY_RUN" = true ]; then
+    log "dry run: checks passed, nothing changed"
+else
+    log "checks passed: deploy now (scripts/deploy/deploy.sh)"
+fi
