@@ -1288,6 +1288,29 @@ mod tests {
             );
         }
 
+        // A forced re-fetch ignores the stored validators: an unconditional download, read in
+        // full for every series.
+        let before = mock.received_requests().await.len();
+        let forced = adapter
+            .fetch_batch(
+                &CrawlCtx {
+                    bypass_validators: true,
+                    ..ctx.clone()
+                },
+                &ids,
+                None,
+            )
+            .await
+            .unwrap();
+        for id in &ids {
+            let f = forced[id].as_ref().unwrap();
+            assert_eq!(f.points, first[id].as_ref().unwrap().points, "{id}");
+            assert_eq!(f.validators.as_ref(), Some(&validators));
+        }
+        let reqs = mock.received_requests().await;
+        assert_eq!(reqs.len(), before + 1);
+        assert!(reqs[before].headers.get("if-none-match").is_none());
+
         // A series never fetched in the batch makes it a full download for every series.
         let new = found
             .iter()
@@ -1322,9 +1345,9 @@ mod tests {
             .iter()
             .map(|r| r.headers.contains_key("if-none-match"))
             .collect();
-        // discover, rediscover (304), fetch, refetch (304), mixed batch and old parser version
-        // (plain GETs).
-        assert_eq!(conditional, [false, true, false, true, false, false]);
+        // discover, rediscover (304), fetch, refetch (304), forced re-fetch, mixed batch and old
+        // parser version (plain GETs).
+        assert_eq!(conditional, [false, true, false, true, false, false, false]);
 
         db.drop().await;
     }

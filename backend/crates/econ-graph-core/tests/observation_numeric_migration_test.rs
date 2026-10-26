@@ -270,3 +270,98 @@ async fn numeric_fix_up_down_on_a_populated_database() {
     assert_eq!(column_type(&mut conn, "data_points", "value"), "numeric");
     assert_eq!(checksum(&mut conn), before);
 }
+
+#[derive(QueryableByName)]
+struct Count {
+    #[diesel(sql_type = BigInt)]
+    n: i64,
+}
+
+/// Whether some session is waiting for a lock.
+fn someone_waits_for_a_lock(conn: &mut PgConnection) -> bool {
+    diesel::sql_query(
+        "SELECT count(*) AS n FROM pg_stat_activity \
+         WHERE wait_event_type = 'Lock' AND datname = current_database()",
+    )
+    .get_result::<Count>(conn)
+    .expect("pg_stat_activity")
+    .n > 0
+}
+
+/// The migration while a crawler worker is mid-result: the worker's transaction holds its
+/// crawl_queue row lock and then writes data_points. The migration takes its locks in the same
+/// order, so it waits for the worker and then applies, instead of one of them failing with
+/// "deadlock detected".
+#[tokio::test]
+async fn numeric_fix_waits_for_a_worker_instead_of_deadlocking() {
+    let (_container, url) = start_postgres().await;
+    let mut worker = connect(&url);
+    migrate_to_before(&mut worker, NUMERIC_FIX);
+    create_series(&mut worker);
+
+    // The worker claims a job and starts its result transaction: queue row lock first.
+    diesel::sql_query(
+        "INSERT INTO crawl_queue (source, series_id, kind) VALUES ('FRED', 'GDP', 'fetch_series')",
+    )
+    .execute(&mut worker)
+    .unwrap();
+    diesel::sql_query("BEGIN").execute(&mut worker).unwrap();
+    diesel::sql_query("SELECT id FROM crawl_queue WHERE series_id = 'GDP' FOR UPDATE")
+        .execute(&mut worker)
+        .unwrap();
+
+    // The migration starts and blocks on the worker's lock.
+    let migration_url = url.clone();
+    let migration = std::thread::spawn(move || {
+        let mut conn = connect(&migration_url);
+        migrate_through(&mut conn, NUMERIC_FIX);
+        column_type(&mut conn, "data_points", "value")
+    });
+    let mut observer = connect(&url);
+    let started = std::time::Instant::now();
+    while !someone_waits_for_a_lock(&mut observer) {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the migration never waited for the worker's lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // The worker writes its points and commits; with the opposite lock order this insert
+    // would deadlock against the migration's lock on data_points.
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date) \
+         SELECT id, DATE '2026-01-01', 1.5, DATE '2026-01-01' FROM economic_series \
+         WHERE external_id = 'numeric_fix'",
+    )
+    .execute(&mut worker)
+    .expect("the worker's write is not a deadlock victim");
+    diesel::sql_query("COMMIT").execute(&mut worker).unwrap();
+
+    assert_eq!(migration.join().expect("migration applies"), "numeric");
+}
+
+/// While another transaction holds a lock the migration needs, the migration gives up after
+/// its lock_timeout and leaves the schema unchanged, rather than waiting indefinitely.
+#[tokio::test]
+async fn numeric_fix_gives_up_after_its_lock_timeout() {
+    let (_container, url) = start_postgres().await;
+    let mut holder = connect(&url);
+    migrate_to_before(&mut holder, NUMERIC_FIX);
+    diesel::sql_query("BEGIN").execute(&mut holder).unwrap();
+    diesel::sql_query("LOCK TABLE data_points IN ROW EXCLUSIVE MODE")
+        .execute(&mut holder)
+        .unwrap();
+
+    let mut conn = connect(&url);
+    let started = std::time::Instant::now();
+    let next = conn.pending_migrations(MIGRATIONS).unwrap().remove(0);
+    assert_eq!(next.name().version().to_string(), NUMERIC_FIX);
+    assert!(conn.run_migration(next.as_ref()).is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    assert_eq!(
+        column_type(&mut conn, "data_points", "value"),
+        "numeric(20,6)"
+    );
+    diesel::sql_query("ROLLBACK").execute(&mut holder).unwrap();
+}

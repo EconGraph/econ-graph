@@ -33,6 +33,10 @@ pub const MAX_INTEGER_DIGITS: i64 = 40;
 /// count).
 pub const MAX_FRACTION_DIGITS: i64 = 30;
 
+/// Most digits after the decimal point a value may be written with, trailing zeros included
+/// (`1.50` is written with 2). PostgreSQL stores the value at this scale.
+pub const MAX_WRITTEN_SCALE: i64 = 128;
+
 /// Parses `text` (a plain decimal such as `-12.345` or `1.9E14`, surrounding whitespace
 /// allowed) into the exact decimal it writes, checked against [`check_observation_value`].
 /// The caller handles source-specific markers (missing-value symbols, thousands separators)
@@ -64,8 +68,17 @@ pub fn parse_observation_value(text: &str) -> Result<BigDecimal, String> {
 }
 
 /// Whether `value` is within the stored-value limits: at most [`MAX_INTEGER_DIGITS`] digits
-/// before the point and [`MAX_FRACTION_DIGITS`] significant digits after it.
+/// before the point and [`MAX_FRACTION_DIGITS`] significant digits after it, written with at
+/// most [`MAX_WRITTEN_SCALE`] digits after the point and an exponent of at most
+/// [`MAX_INTEGER_DIGITS`]. The written-scale bounds apply to zero too, so `0e999999999` and
+/// `0e-20000` are refused.
 pub fn check_observation_value(value: &BigDecimal) -> Result<(), String> {
+    let (_, written_scale) = value.as_bigint_and_exponent();
+    if !(-MAX_INTEGER_DIGITS..=MAX_WRITTEN_SCALE).contains(&written_scale) {
+        return Err(format!(
+            "value is written at scale {written_scale} (from -{MAX_INTEGER_DIGITS} to {MAX_WRITTEN_SCALE})"
+        ));
+    }
     let normalized = value.normalized();
     let (digits, scale) = normalized.as_bigint_and_exponent();
     if digits == 0.into() {
@@ -147,7 +160,13 @@ mod tests {
         assert!(parse_observation_value("1e39").is_ok());
         assert!(parse_observation_value("1e-31").is_err());
         assert!(parse_observation_value("1e999999999").is_err());
-        assert!(parse_observation_value("0e999999999").is_ok());
+        // Zero is held to the written-scale limits too.
+        assert!(parse_observation_value("0e999999999").is_err());
+        assert!(parse_observation_value("0e-20000").is_err());
+        assert!(parse_observation_value("0e-128").is_ok());
+        assert!(parse_observation_value("0.000").is_ok());
+        assert!(check_observation_value(&BigDecimal::new(0.into(), -41)).is_err());
+        assert!(check_observation_value(&BigDecimal::new(0.into(), 129)).is_err());
         assert!(parse_observation_value(&"1".repeat(MAX_VALUE_TEXT_LEN + 1)).is_err());
     }
 }

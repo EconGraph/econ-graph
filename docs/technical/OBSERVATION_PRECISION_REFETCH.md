@@ -12,9 +12,13 @@ scale (`1.50` stays `1.50`). The path from the source to the user keeps those di
   response (`serde_json::value::RawValue`) instead of letting the JSON parser turn it into an
   `f64`. BEA's `UNIT_MULT` scaling is an exact decimal multiplication.
 - **Limits.** A value may have at most 40 digits before the decimal point and 30 significant
-  digits after it, and its text at most 128 characters. Text that isn't a plain decimal
-  (`NaN`, `inf`, `1,234` after the adapter's own clean-up) is rejected. The worker checks every
-  fetched value against the same limits before persisting
+  digits after it, and its text at most 128 characters; it may be written with at most 128
+  digits after the point and an exponent of at most 40 (zero included, so `0e999999999` is
+  refused). Text that isn't a plain decimal (`NaN`, `inf`, `1,234` after the adapter's own
+  clean-up) is rejected. A source's missing-value marker (FRED's `.`, BLS and BEA markers
+  without digits, a Census letter flag) is a missing value; anything else that fails to parse
+  is an error, never a missing value that would overwrite a stored one. The worker checks
+  every fetched value against the same limits before persisting
   (`value::check_fetched_values`); a series with a value outside them fails with a parse error
   and nothing of it is written.
 - **API.** GraphQL serializes values as decimal strings (`BigDecimal`). Derived values are
@@ -69,6 +73,11 @@ Only precision the source still serves can be recovered:
 
 ### Running it
 
+Enqueue only once every `crawler-worker` pod runs an image that knows the `refetch_series`
+kind (check `kubectl -n econ-graph get pods -l app=crawler-worker -o
+jsonpath='{..image}'`). A worker from an earlier image fails each `refetch_series` job it claims
+as an unknown job kind; running the command again after the rollout re-enqueues those series.
+
 Run from a checkout with `kubectl` access to the cluster. The script runs the crawler CLI in the
 `crawler-worker` pod (`/app/crawler`), which uses the worker's own database URL:
 
@@ -98,6 +107,9 @@ time filled in. The underlying commands are `crawler refetch` and `crawler refet
   enqueued again; re-running the command after an interruption only adds what is missing.
 - **Priority.** Jobs default to priority 3, below scheduled refreshes (5), so regular crawling
   continues while the re-fetch drains. `--priority` overrides it.
+- **Scheduled refreshes.** While a series has an active `refetch_series` job, the refresh
+  scheduler doesn't enqueue a `fetch_series` job for it. A refresh already queued when the
+  re-fetch is enqueued still runs; both write the source's current values.
 - **Resumable.** Jobs live in `crawl_queue` and survive worker restarts. A job that failed for
   good stays `failed` until the command is run again.
 - **Progress window.** Finished queue rows are purged after `CRAWLER_QUEUE_RETENTION_DAYS`
@@ -111,8 +123,14 @@ time filled in. The underlying commands are `crawler refetch` and `crawler refet
 ## Rolling back the column type
 
 The migration that made the columns unconstrained
-(`2026-10-25-000100_observation_values_unconstrained_numeric`) changes only the catalog: no table
-rewrite and no index rebuild, under a brief `ACCESS EXCLUSIVE` lock. Its `down.sql` narrows the
-columns back to `DECIMAL(20,6)`, which rewrites both tables and rebuilds their indexes. It refuses,
-changing nothing, while any stored value needs more than 14 integer or 6 fractional digits, or
-while any `refetch_series` queue row exists; it never rounds or deletes values itself.
+(`2026-10-25-000100_observation_values_unconstrained_numeric`) rewrites neither table and keeps
+`data_points`' indexes; it rebuilds only `global_indicator_data`'s partial index
+`idx_global_data_date_value`, whose predicate reads the column. It holds `ACCESS EXCLUSIVE` on
+`crawl_queue`, `data_points` and `global_indicator_data` for its few milliseconds, taking them in
+the crawler worker's order, and gives up after a 10-second `lock_timeout` if a long transaction
+holds them (the backend applies it again on its next start).
+
+Its `down.sql` narrows the columns back to `DECIMAL(20,6)`, which rewrites both tables and
+rebuilds their indexes. It locks the tables before checking them, and refuses, changing
+nothing, while any stored value needs more than 14 integer or 6 fractional digits, or while any
+`refetch_series` queue row exists; it never rounds or deletes values itself.

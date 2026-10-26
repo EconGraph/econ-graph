@@ -6,17 +6,31 @@
 -- overflow it, and sources publishing more than 6 fractional digits were rounded.
 -- Unconstrained NUMERIC stores each value exactly as given.
 --
--- Widening numeric(p,s) to unconstrained numeric is binary-compatible: PostgreSQL only
--- updates the catalog (no table rewrite, no index rebuild). ALTER COLUMN TYPE still takes
--- an ACCESS EXCLUSIVE lock on each table until the migration commits, so the statement
--- first waits for in-flight transactions on these tables, and readers and writers queue
--- behind it while it waits.
+-- Widening numeric(p,s) to unconstrained numeric is binary-compatible: PostgreSQL does not
+-- rewrite either table, and keeps data_points' indexes (idx_data_points_latest_revision
+-- includes value). It does rebuild global_indicator_data's partial index
+-- idx_global_data_date_value, whose predicate (value IS NOT NULL) reads the column.
 --
 -- Values already stored keep the digits they were rounded to. The crawler's
 -- refetch_series job kind, allowed below, re-fetches a series' full history and rewrites
 -- them from what the source still serves (docs/technical/OBSERVATION_PRECISION_REFETCH.md).
--- Replacing the crawl_queue kind constraint scans crawl_queue (finished rows are purged
--- after 14 days, so it stays small) under the same ACCESS EXCLUSIVE lock.
+--
+-- Locking: every statement here takes ACCESS EXCLUSIVE on its table until the migration
+-- commits. The tables are locked up front in the order the crawler worker uses (its result
+-- transaction locks its crawl_queue row, then writes data_points), so the migration waits
+-- for a worker instead of deadlocking with it. lock_timeout bounds that wait: while the
+-- migration waits for its locks, reads of these tables queue behind it, so if a long
+-- transaction holds them the migration fails after 10 seconds (and the backend retries it
+-- on its next start) rather than stalling the API.
+
+SET LOCAL lock_timeout = '10s';
+
+LOCK TABLE crawl_queue, data_points, global_indicator_data IN ACCESS EXCLUSIVE MODE;
+
+ALTER TABLE crawl_queue DROP CONSTRAINT check_crawl_queue_kind;
+
+ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_kind
+    CHECK (kind IN ('fetch_series', 'discover_catalog', 'fetch_filing', 'refetch_series'));
 
 ALTER TABLE data_points ALTER COLUMN value TYPE NUMERIC;
 
@@ -27,8 +41,3 @@ COMMENT ON COLUMN data_points.value IS
 
 COMMENT ON COLUMN global_indicator_data.value IS
     'Observation value, exactly as the source published it (unconstrained NUMERIC)';
-
-ALTER TABLE crawl_queue DROP CONSTRAINT check_crawl_queue_kind;
-
-ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_kind
-    CHECK (kind IN ('fetch_series', 'discover_catalog', 'fetch_filing', 'refetch_series'));

@@ -2255,6 +2255,10 @@ struct BatchAdapter {
     batch_error: Option<CrawlError>,
     /// Observation date per id (default 2024-01-01).
     dates: HashMap<String, NaiveDate>,
+    /// Observation value per id (default 1).
+    values: HashMap<String, BigDecimal>,
+    /// `bypass_validators` of every adapter call's context, in call order.
+    bypass: Mutex<Vec<bool>>,
 }
 
 impl BatchAdapter {
@@ -2270,7 +2274,12 @@ impl BatchAdapter {
             }),
             points: vec![FetchedPoint {
                 date,
-                value: Some(BigDecimal::from(1)),
+                value: Some(
+                    self.values
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| BigDecimal::from(1)),
+                ),
                 revision_date: date,
                 is_original_release: true,
             }],
@@ -2304,10 +2313,11 @@ impl SourceAdapter for BatchAdapter {
 
     async fn fetch_series(
         &self,
-        _: &CrawlCtx,
+        ctx: &CrawlCtx,
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
+        self.bypass.lock().unwrap().push(ctx.bypass_validators);
         self.series_calls
             .lock()
             .unwrap()
@@ -2332,10 +2342,11 @@ impl SourceAdapter for BatchAdapter {
 
     async fn fetch_batch(
         &self,
-        _: &CrawlCtx,
+        ctx: &CrawlCtx,
         external_ids: &[String],
         since: Option<NaiveDate>,
     ) -> Result<crate::adapter::BatchFetch, CrawlError> {
+        self.bypass.lock().unwrap().push(ctx.bypass_validators);
         self.batch_calls
             .lock()
             .unwrap()
@@ -2387,6 +2398,84 @@ async fn create_series(pool: &DatabasePool, ids: &[&str]) -> Vec<Uuid> {
 
 fn strings(ids: &[&str]) -> Vec<String> {
     ids.iter().map(|s| (*s).to_string()).collect()
+}
+
+/// A value outside the stored-value limits fails its own job with a parse error and nothing of
+/// that series is written, whether it came from a batch or a single fetch; the batch's other
+/// series are written as usual.
+#[tokio::test]
+async fn an_over_limit_value_fails_its_job_without_persisting() {
+    let Some(db) = db().await else { return };
+    let huge = BigDecimal::from_str(&format!("1{}", "0".repeat(50))).unwrap();
+    for batching in [true, false] {
+        let adapter = Arc::new(BatchAdapter {
+            batching,
+            values: HashMap::from([
+                ("t5_kv_2".to_string(), huge.clone()),
+                ("t5_kw_1".to_string(), huge.clone()),
+            ]),
+            ..Default::default()
+        });
+        let w = batch_worker(&db.pool, &adapter, 3);
+        let ids: &[&str] = if batching {
+            &["t5_kv_1", "t5_kv_2"]
+        } else {
+            &["t5_kw_1"]
+        };
+        let queue = enqueue_fetch(&db.pool, ids).await;
+        let mut outcomes = Vec::new();
+        while let Some(o) = w.run_batch_once().await {
+            outcomes.extend(o);
+        }
+        assert_eq!(outcomes.len(), ids.len(), "{outcomes:?}");
+        if batching {
+            assert_eq!(adapter.batch_calls().len(), 1);
+            assert_eq!(item(&db.pool, queue[0]).await.status, "completed");
+            assert!(series_row(&db.pool, "t5_kv_1").await.is_some());
+        }
+        let bad = queue[queue.len() - 1];
+        let bad_item = item(&db.pool, bad).await;
+        assert_eq!(bad_item.status, "failed", "batching {batching}");
+        assert!(
+            bad_item
+                .error_message
+                .as_deref()
+                .is_some_and(|m| m.contains("integer digits")),
+            "{:?}",
+            bad_item.error_message
+        );
+        assert!(
+            series_row(&db.pool, ids[ids.len() - 1]).await.is_none(),
+            "nothing of the over-limit series is written (batching {batching})"
+        );
+    }
+}
+
+/// `refetch_series` jobs batch like `fetch_series` jobs, but the batch is a full fetch (no
+/// `since`, though the series have points) with `bypass_validators` set.
+#[tokio::test]
+async fn refetch_jobs_batch_as_full_fetches_that_bypass_validators() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 3);
+    enqueue_fetch(&db.pool, &["t5_kr_1", "t5_kr_2"]).await;
+    while w.run_batch_once().await.is_some() {}
+    for id in ["t5_kr_1", "t5_kr_2"] {
+        enqueue(&db.pool, SRC.as_str(), id, JobKind::RefetchSeries, 5).await;
+    }
+    let outcomes = w.run_batch_once().await.expect("claimed");
+    assert_eq!(outcomes.len(), 2, "{outcomes:?}");
+    assert!(outcomes
+        .iter()
+        .all(|o| matches!(o, JobOutcome::Completed(_))));
+    let calls = adapter.batch_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[0].1.is_none(), "first fetch: no points yet");
+    assert_eq!(calls[1], (strings(&["t5_kr_1", "t5_kr_2"]), None));
+    assert_eq!(*adapter.bypass.lock().unwrap(), vec![false, true]);
 }
 
 #[tokio::test]
