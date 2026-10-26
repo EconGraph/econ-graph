@@ -201,8 +201,11 @@ done
 # 8. An unknown argument (a mistyped --dry-run) stops before anything runs.
 reset
 out="$(teardown --dryrun)"; rc=$?
-[ "$rc" -eq 2 ] && [ ! -s "$CALLS" ] && [ ! -s "$KIND" ] ||
+if [ "$rc" -eq 2 ] && [ ! -s "$CALLS" ] && [ ! -s "$KIND" ]; then
+    echo "ok   teardown.sh rejects an unknown argument before anything runs"
+else
     fail "teardown.sh --dryrun (exit $rc) did not stop at the argument: $out"
+fi
 
 if [ "$failed" -ne 0 ]; then
     echo "teardown kubectl checks failed"
