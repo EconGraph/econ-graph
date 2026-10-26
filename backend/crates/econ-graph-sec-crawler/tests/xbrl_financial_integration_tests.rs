@@ -214,6 +214,7 @@ mod tests {
 
         // Retrieve line items for the statement
         let retrieved_items = financial_line_items::table
+            .select(FinancialLineItem::as_select())
             .filter(financial_line_items::statement_id.eq(statement.id))
             .order(financial_line_items::order_index)
             .load::<FinancialLineItem>(&mut conn)

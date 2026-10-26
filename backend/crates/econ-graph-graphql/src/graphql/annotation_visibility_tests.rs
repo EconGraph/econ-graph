@@ -431,7 +431,7 @@ async fn annotations_on_unknown_series_or_absurd_dates_are_refused() {
         ),
         (
             create(&series_id, "2024-01-01", "1e40"),
-            "is too large".to_string(),
+            "integer digits".to_string(),
         ),
         (
             create(&series_id, "2024-01-01", "1e-31"),

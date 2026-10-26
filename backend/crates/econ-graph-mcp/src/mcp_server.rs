@@ -753,13 +753,13 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_get_economic_series_tool() {
+    async fn test_get_series_data_rejects_invalid_series_id() {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
         let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test the get series tool with a mock series ID
+        // Invalid IDs must propagate the GraphQL validation error.
         let get_args = json!({
             "series_id": "test-series-id",
             "start_date": "2020-01-01",
@@ -767,11 +767,9 @@ mod tests {
         });
 
         let result = server.get_series_data(get_args).await;
-        assert!(result.is_ok(), "Get series tool failed: {:?}", result.err());
-
-        let response = result.unwrap();
-        assert!(response.get("content").is_some());
-        // Note: This might return an error if the series doesn't exist, which is expected
+        let error = result.expect_err("An invalid UUID must fail").to_string();
+        assert!(error.contains("GraphQL request failed"), "{error}");
+        assert!(error.contains("invalid character"), "{error}");
     }
 
     // test_create_data_visualization_tool moved to integration tests
