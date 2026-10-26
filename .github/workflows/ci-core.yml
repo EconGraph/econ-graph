@@ -242,6 +242,11 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-postgres-backup-scripts.sh
 
+    # restore-postgres-backup.sh and backup-postgres-now.sh against stub
+    # kubectls: every call on the pinned context, never the plain kubectl.
+    - name: Check which cluster the backup and restore scripts reach
+      run: scripts/deploy/test-postgres-backup-cluster.sh
+
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest

@@ -163,10 +163,27 @@ data:
 
   restore.sh: |
     #!/bin/sh
+    # Restores an econ_graph dump (BACKUP_FILE, default ${BACKUP_DIR}/latest.dump)
+    # into ${PGDATABASE}, connecting as a superuser (PG* env).
+    #
+    # Every object is dropped and recreated as RESTORE_OWNER (default econgraph),
+    # the role the backend and crawler connect as and that owns the schema the
+    # migrations build. The dumps carry no owners or grants (backup.sh dumps with
+    # --no-owner --no-privileges), so a plain restore as the superuser would leave
+    # every table owned by it, with no grant the app could use. pg_restore
+    # --role switches to RESTORE_OWNER after connecting, so the objects are
+    # created by, and owned by, that role.
+    #
+    # Extensions are the exception: most need a superuser to create, and the ones
+    # the postgres init script creates are owned by the superuser, so
+    # RESTORE_OWNER can neither drop nor create them. They are restored first, as
+    # the superuser, with CREATE EXTENSION IF NOT EXISTS (only adds an extension
+    # the database lacks, never drops one), and left out of the main restore.
     set -eu
 
     BACKUP_DIR="${BACKUP_DIR:-/backups}"
     FILE="${BACKUP_FILE:-${BACKUP_DIR}/latest.dump}"
+    OWNER="${RESTORE_OWNER:-econgraph}"
 
     if [ ! -e "${FILE}" ]; then
       echo "Backup file not found: ${FILE}" >&2
@@ -175,9 +192,14 @@ data:
       exit 1
     fi
 
+    # The dump itself, not latest.dump: backup.sh moves that link when a run
+    # finishes, and pg_restore opens the file three times below (the list and
+    # both steps). Every step must read the dump the list came from.
+    FILE="$(readlink -f "${FILE}")"
+
     # The backup volume also holds Keycloak's dumps; restoring one of those
     # here would add Keycloak's tables to ${PGDATABASE}.
-    case "$(basename "$(readlink -f "${FILE}")")" in
+    case "$(basename "${FILE}")" in
       "${PGDATABASE}"-*) ;;
       *)
         echo "${FILE} is not a ${PGDATABASE} dump (expected ${PGDATABASE}-<stamp>.dump)" >&2
@@ -185,11 +207,43 @@ data:
         ;;
     esac
 
-    echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}"
+    # Fail before changing anything if the owner role is missing.
+    owner_exists="$(printf '%s\n' "SELECT count(*) FROM pg_roles WHERE rolname = :'owner'" |
+      psql -X -At -v ON_ERROR_STOP=1 -v owner="${OWNER}")"
+    if [ "${owner_exists}" != 1 ]; then
+      echo "Role ${OWNER} (RESTORE_OWNER) does not exist on ${PGHOST}:${PGPORT}" >&2
+      exit 1
+    fi
+
+    # The archive's table of contents, split into the extensions (and their
+    # comments) and everything else. Columns: "<id>; <tableoid> <oid> <type>
+    # <schema> <name> <owner>"; a comment's name starts with the kind of object.
+    TOC="$(pg_restore --list "${FILE}")"
+    EXTENSIONS="$(printf '%s\n' "${TOC}" |
+      awk '$4 == "EXTENSION" || ($4 == "COMMENT" && $5 == "-" && $6 == "EXTENSION")')"
+    OBJECTS="$(printf '%s\n' "${TOC}" |
+      awk '!($4 == "EXTENSION" || ($4 == "COMMENT" && $5 == "-" && $6 == "EXTENSION"))')"
+    # An empty list would restore nothing and still succeed.
+    if ! printf '%s\n' "${OBJECTS}" | awk '$4 == "TABLE" { found = 1 } END { exit !found }'; then
+      echo "${FILE} lists no table to restore" >&2
+      exit 1
+    fi
+
+    echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}, owned by ${OWNER}"
+    if [ -n "${EXTENSIONS}" ]; then
+      echo "Creating the dump's extensions that are missing, as ${PGUSER}"
+      printf '%s\n' "${EXTENSIONS}" |
+        pg_restore --use-list=/dev/stdin --no-owner --no-privileges \
+          --single-transaction --exit-on-error \
+          --dbname="${PGDATABASE}" "${FILE}"
+    fi
+
     # --single-transaction: a failed restore rolls back cleanly instead of
     # leaving the database with some objects dropped and never recreated.
-    pg_restore --clean --if-exists --no-owner --no-privileges \
-      --single-transaction --exit-on-error \
-      --dbname="${PGDATABASE}" "${FILE}"
+    printf '%s\n' "${OBJECTS}" |
+      pg_restore --use-list=/dev/stdin --role="${OWNER}" \
+        --clean --if-exists --no-owner --no-privileges \
+        --single-transaction --exit-on-error \
+        --dbname="${PGDATABASE}" "${FILE}"
 
     echo "Restore complete."

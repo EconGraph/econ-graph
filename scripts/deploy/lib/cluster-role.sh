@@ -84,6 +84,47 @@ cluster_role_use_context() {
     export CLUSTER_ROLE_CONTEXT
 }
 
+# For an operator script that acts on one named context (the database backup
+# and restore scripts): pin CLUSTER_ROLE_CONTEXT to context $1 without changing
+# the current context of ${KUBECTL:-kubectl}, replacing any inherited one.
+# Fails when ${KUBECTL:-kubectl}'s kubeconfig has no such context. The check is
+# itself a kc call, so it carries the context like every later call.
+cluster_role_pin_named_context() {
+    local server
+    # An empty name would make kc fall back to the current context.
+    [ -n "${1:-}" ] || return 1
+    CLUSTER_ROLE_CONTEXT="$1"
+    export CLUSTER_ROLE_CONTEXT
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" &&
+        [ -n "$server" ] || return 1
+}
+
+# Print, indented, which cluster the pinned context reaches: this host, the
+# kubectl and KUBECONFIG, the context, its API server, its nodes, its
+# kube-system UID (new for every cluster) and whether it carries the production
+# marker. Shown before a script changes anything, so the output says which
+# cluster it acted on.
+cluster_role_show_identity() {
+    local server nodes uid role
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
+        server=""
+    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || nodes="(unknown)"
+    uid="$(kube_system_uid 2>/dev/null)" || uid="(unknown)"
+    if cluster_is_marked_production; then
+        role="PRODUCTION (marked by mark-production-cluster.sh)"
+    else
+        role="not production: ${CLUSTER_ROLE_REASON}"
+    fi
+    echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
+    echo "  kubectl         ${KUBECTL:-kubectl}"
+    echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"
+    echo "  context         ${CLUSTER_ROLE_CONTEXT:-(none)}"
+    echo "  API server      ${server:-(unknown)}"
+    echo "  nodes           ${nodes:-(none)}"
+    echo "  kube-system UID ${uid}"
+    echo "  cluster role    ${role}"
+}
+
 # Print the UID of the kube-system namespace. Fails when the cluster cannot be
 # asked or answers with nothing.
 kube_system_uid() {
