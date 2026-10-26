@@ -101,9 +101,9 @@ database with both sets applied. `test_schema_compatibility` (in
 DATABASE_URL=postgres://... diesel print-schema > crates/econ-graph-core/src/schema.rs
 ```
 
-`diesel.toml`'s `[print_schema] file = "src/schema.rs"` is relative to `backend/`, so
-`diesel migration run` there also writes a stray `backend/src/schema.rs`. Delete it; it is not
-the file the code uses.
+`diesel.toml` deliberately omits `[print_schema] file`, so `diesel migration run` does not
+write a schema file automatically. Keep regeneration explicit: migrating either plane alone
+must not overwrite the shared schema with only that plane's tables.
 
 ### Reference-code seed migrations
 
@@ -199,9 +199,9 @@ diesel migration run --migration-dir migrations/data
 diesel migration run --migration-dir migrations/app
 ```
 
-Both also write the stray `backend/src/schema.rs` described in "Adding a migration". On a
-database built from the single v4.0.0 baseline, start the backend once instead (see below); the
-diesel CLI stops there at the app baseline's guard.
+Neither command regenerates the shared schema; use the explicit command in "Adding a
+migration" after both sets are applied. On a database built from the single v4.0.0 baseline,
+start the backend once instead (see below); the diesel CLI stops there at the app baseline's guard.
 
 ## The v4.0.0 baseline split
 
