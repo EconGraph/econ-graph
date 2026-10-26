@@ -17,6 +17,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$#" -gt 0 ] || { echo 'error: supply an agent command after --' >&2; exit 2; }
 config_dir="${config_dir:-${XDG_CACHE_HOME:-$HOME/.cache}/econgraph/agent-${cluster}}"
+[[ "$config_dir" = /* ]] || { echo 'error: --config-dir must be absolute' >&2; exit 2; }
 export KIND_CLUSTER="$cluster" ECONGRAPH_AGENT_SESSION=1
 export ECONGRAPH_KUBE_DIR="$config_dir" KUBECONFIG="$config_dir/kubeconfig-${cluster}"
 export KUBECTL="$config_dir/bin/kubectl"

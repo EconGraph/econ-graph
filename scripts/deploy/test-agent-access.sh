@@ -44,7 +44,19 @@ for rule in role["rules"]:
     assert "serviceaccounts/token" not in rule["resources"]
     assert "pods/exec" not in rule["resources"]
     assert not ({"bind", "escalate", "impersonate"} & set(rule["verbs"]))
-assert resources[2]["kind"] == "RoleBinding"
+binding = resources[2]
+assert binding["kind"] == "RoleBinding"
+assert binding["roleRef"] == {
+    "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "econgraph-agent"}
+assert binding["subjects"] == [{
+    "kind": "ServiceAccount", "name": "econgraph-agent",
+    "namespace": binding["metadata"]["namespace"]}]
+assert role["metadata"]["namespace"] == binding["metadata"]["namespace"]
+allowed = {"pods", "pods/log", "services", "configmaps", "persistentvolumeclaims", "events",
+           "deployments", "replicasets", "statefulsets", "daemonsets",
+           "jobs", "cronjobs", "networkpolicies", "ingresses"}
+assert {r for rule in role["rules"] for r in rule["resources"]} <= allowed
+assert all("*" not in rule["verbs"] and "*" not in rule["apiGroups"] for rule in role["rules"])
 PY
 "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
     --kubectl "$KUBECTL" --output-dir "$scratch/agent" >"$scratch/output"
@@ -109,4 +121,8 @@ done
 AGENT_TEST_USER="admin" "$ROOT/scripts/deploy/run-agent-session.sh" \
     --config-dir "$scratch/agent" -- true >"$scratch/guard" 2>&1 && exit 1
 grep -q 'non-agent kubeconfig' "$scratch/guard"
+if "$ROOT/scripts/deploy/run-agent-session.sh" --config-dir relative -- true >"$scratch/guard" 2>&1; then
+    echo 'launcher accepted relative config directory' >&2; exit 1
+fi
+grep -q 'must be absolute' "$scratch/guard"
 echo 'Agent access checks passed.'
