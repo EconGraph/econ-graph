@@ -11,6 +11,7 @@ live in [Linear](https://linear.app/econgraph).
 - **[Privacy Policy](./business/PRIVACY_POLICY.md)** - Data privacy and protection policies
 
 ### 🔧 [Technical Documentation](./technical/)
+- **[Secrets Management](./technical/SECRETS_MANAGEMENT.md)** - Current human-run secret setup and handling rules
 - **[Admin Security](./technical/ADMIN_SECURITY.md)** - Security configuration and best practices
 - **[Frontend Summary](./technical/FRONTEND_SUMMARY.md)** - React frontend architecture overview
 - **[Full-text Search](./technical/FULLTEXT_SEARCH.md)** - Search implementation details
@@ -81,7 +82,10 @@ live in [Linear](https://linear.app/econgraph).
 Kubernetes credentials are Secrets created by `scripts/deploy/create-secrets.sh`, which
 `scripts/deploy/deploy.sh` runs on every deploy. No credential is committed to the repository.
 
-The `k8s/secrets` submodule is registered in `.gitmodules` but not initialized.
+Run `scripts/deploy/set-crawler-keys.sh` yourself for hidden-input crawler key setup.
+Agents never handle secret values. See [Secrets Management](./technical/SECRETS_MANAGEMENT.md)
+for handling tiers and the accepted SOPS + age direction; Sealed Secrets and the
+old secrets submodule are retired.
 
 ## 📝 Contributing to Documentation
 
