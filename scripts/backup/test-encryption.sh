@@ -135,12 +135,29 @@ age -d -i "$scratch/identity" "$scratch/canonical/backup.tar.age" |
 [[ -f "$scratch/canonical-opened/secrets/econ-graph-secrets.yaml" ]]
 [[ -f "$scratch/canonical-opened/counts.env" ]]
 [[ "$(find "$scratch/canonical-opened" -name '*.dump' | wc -l)" == 3 ]]
+# Resume identity survives different operator-opened tmpfs paths; an explicit
+# unrelated resume directory must never be redirected to the active bundle.
+(
+    export BACKUP_ACTIVE_OUTPUT="$scratch/canonical" BACKUP_ACTIVE_DIR="$scratch/open-1"
+    [[ "$(backup_original_dir "$scratch/open-1")" == "$scratch/canonical" ]]
+    BACKUP_ACTIVE_DIR="$scratch/open-2"
+    [[ "$(backup_original_dir "$scratch/open-2")" == "$scratch/canonical" ]]
+    [[ "$(backup_original_dir "$scratch/unrelated")" == "$scratch/unrelated" ]]
+)
 # A failed encryptor must never publish VERIFIED or final output.
 mkdir "$scratch/bin"
 printf '#!/bin/sh\nexit 42\n' > "$scratch/bin/age"
 chmod +x "$scratch/bin/age"
 if (PATH="$scratch/bin:$PATH"; backup_seal_dir "$payload" "$scratch/failure"); then die 'ignored encryption failure'; fi
 [[ ! -e "$scratch/failure" && ! -e "$scratch/failure.partial/VERIFIED" ]]
+# A final publication failure must also leave no eligible VERIFIED marker.
+mkdir "$scratch/fail-publish-bin"
+printf '#!/bin/sh\nexit 42\n' > "$scratch/fail-publish-bin/mv"
+chmod +x "$scratch/fail-publish-bin/mv"
+if (PATH="$scratch/fail-publish-bin:$PATH"; backup_seal_dir "$payload" "$scratch/fail-publish"); then
+    die 'ignored publication failure'
+fi
+[[ ! -e "$scratch/fail-publish.partial/VERIFIED" ]]
 # Malicious paths and links must not escape disposable staging.
 for attack in traversal symlink hardlink duplicate; do
     mkdir "$scratch/$attack"

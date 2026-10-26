@@ -66,6 +66,9 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
+# open-backup.sh substitutes a fresh tmpfs path for @BACKUP@. Persist the
+# original bundle path so repeated opens still match RESTORED= state.
+RESUME_FROM="$(backup_original_dir "$RESUME_FROM")"
 export DRY_RUN ASSUME_YES
 
 STATE_FILE="${ECONGRAPH_CACHE}/host-storage-migration.env"
@@ -294,7 +297,7 @@ restore_and_deploy() {
     local src="$1"
     # Once restored, a resumed run must not restore again: deploy.sh may have
     # started the crawler, which adds rows the backup doesn't have.
-    if [ -f "${STATE_FILE}" ] && grep -qx "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
+    if [ -f "${STATE_FILE}" ] && grep -qxF "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
         log "Databases already restored from ${BACKUP_DIR} by an earlier run"
     else
         run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "$(backup_source_dir "$BACKUP_DIR")" --no-bootstrap "${common_flags[@]}"
