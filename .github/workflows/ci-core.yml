@@ -412,6 +412,9 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        # This job has no Postgres service. DB-backed tests matched by the name filters
+        # below run in the required workspace job; do not inherit the workflow's DB URL.
+        unset DATABASE_URL APP_DATABASE_URL DATA_DATABASE_URL
         cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
@@ -768,6 +771,8 @@ jobs:
       run: |
         set -euo pipefail
         export PATH="$HOME/.cargo/bin:$PATH"
+        # Scheduler retry/backoff regressions must exercise Postgres rather than skip locally.
+        : "${DATABASE_URL:?DATABASE_URL is required for crawler scheduler regressions}"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
