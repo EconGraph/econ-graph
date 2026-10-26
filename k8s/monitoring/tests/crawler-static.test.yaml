@@ -1,25 +1,27 @@
-# Intentional static primary: only idle traffic and automatic freshness are suppressed.
+# Static-primary alert scenarios, in order: 48-hour quiet period; missing mode;
+# enabled then disabled; mixed enabled/disabled; retained queue/metric faults;
+# unrelated enabled branch; old-image target; failed scrape target.
 rule_files:
   - crawler.rules.yml
 evaluation_interval: 1m
-
 tests:
-  # A drained worker stays quiet for 48 hours with old data and no requests. The coverage
-  # poller is independent of the scheduler and must keep reporting fresh metrics.
   - interval: 5m
     input_series:
-      - series: 'crawler_scheduler_enabled{pod="worker-1"}'
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph",
+          pod="worker-1"}
         values: '0x576'
-      - series: 'econgraph_crawler_requests_total{crawler_type="fred"}'
-        values: '10x576'
-      - series: 'crawler_coverage_series_overdue{source="FRED"}'
-        values: '5x576'
-      - series: 'crawler_queue_items{status="pending"}'
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x576
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x576
+      - series: crawler_queue_items{status="pending"}
         values: '0x576'
-      - series: 'crawler_coverage_last_refresh_timestamp_seconds'
-        values: '0+300x576'
-      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
-        values: '1x576'
+      - series: crawler_coverage_last_refresh_timestamp_seconds
+        values: 0+300x576
+      - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
+        values: 1x576
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
     alert_rule_test:
       - eval_time: 48h
         alertname: CrawlerNoTraffic
@@ -33,139 +35,250 @@ tests:
       - eval_time: 48h
         alertname: CrawlerCoverageStale
         exp_alerts: []
-
-  # Explicitly enabled, missing mode (older image), and a rollout with one enabled
-  # scheduler all retain idle warnings. Once every scheduler is off, they clear.
   - interval: 5m
     input_series:
-    - series: econgraph_crawler_requests_total{crawler_type="fred"}
-      values: 10x36
-    - series: crawler_coverage_series_overdue{source="FRED"}
-      values: 5x36
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x36
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x36
     alert_rule_test:
-    - eval_time: 1h40m
-      alertname: CrawlerNoTraffic
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-        exp_annotations:
-          summary: No crawler traffic detected
-          description: The crawler has made no upstream requests for over an hour (queue
-            empty, all sources paused, or worker stuck).
-    - eval_time: 1h40m
-      alertname: CrawlerSourceNotRefreshed
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-          source: FRED
-        exp_annotations:
-          summary: 5 FRED series not refreshed within twice their interval
-          description: FRED has series whose last successful crawl is older than twice
-            their refresh interval (scheduler disabled or behind, source paused, or
-            refreshes failing). `crawler coverage` shows the oldest successful crawl.
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all
+                sources paused, or worker stuck).
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh
+                interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
+                coverage` shows the oldest successful crawl.
   - interval: 5m
     input_series:
-    - series: econgraph_crawler_requests_total{crawler_type="fred"}
-      values: 10x36
-    - series: crawler_coverage_series_overdue{source="FRED"}
-      values: 5x36
-    - series: crawler_scheduler_enabled{pod="worker-1"}
-      values: 1x24 0x12
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x36
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x36
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph",
+          pod="worker-1"}
+        values: 1x24 0x12
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
+      - series: crawler_scheduler_enabled{kubernetes_namespace="econ-graph-br-test", job="kubernetes-pods",
+          instance="branch"}
+        values: '0x576'
     alert_rule_test:
-    - eval_time: 1h40m
-      alertname: CrawlerNoTraffic
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-        exp_annotations:
-          summary: No crawler traffic detected
-          description: The crawler has made no upstream requests for over an hour (queue
-            empty, all sources paused, or worker stuck).
-    - eval_time: 2h30m
-      alertname: CrawlerNoTraffic
-      exp_alerts: []
-    - eval_time: 1h40m
-      alertname: CrawlerSourceNotRefreshed
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-          source: FRED
-        exp_annotations:
-          summary: 5 FRED series not refreshed within twice their interval
-          description: FRED has series whose last successful crawl is older than twice
-            their refresh interval (scheduler disabled or behind, source paused, or
-            refreshes failing). `crawler coverage` shows the oldest successful crawl.
-    - eval_time: 2h30m
-      alertname: CrawlerSourceNotRefreshed
-      exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all
+                sources paused, or worker stuck).
+      - eval_time: 2h30m
+        alertname: CrawlerNoTraffic
+        exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh
+                interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
+                coverage` shows the oldest successful crawl.
+      - eval_time: 2h30m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts: []
   - interval: 5m
     input_series:
-    - series: econgraph_crawler_requests_total{crawler_type="fred"}
-      values: 10x36
-    - series: crawler_coverage_series_overdue{source="FRED"}
-      values: 5x36
-    - series: crawler_scheduler_enabled{pod="worker-1"}
-      values: 0x24 0x12
-    - series: crawler_scheduler_enabled{pod="worker-2"}
-      values: 1x24 0x12
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x36
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x36
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph",
+          pod="worker-1"}
+        values: 0x24 0x12
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-2", kubernetes_namespace="econ-graph",
+          pod="worker-2"}
+        values: 1x24 0x12
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
+      - series: up{job="kubernetes-pods", instance="worker-2", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
     alert_rule_test:
-    - eval_time: 1h40m
-      alertname: CrawlerNoTraffic
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-        exp_annotations:
-          summary: No crawler traffic detected
-          description: The crawler has made no upstream requests for over an hour (queue
-            empty, all sources paused, or worker stuck).
-    - eval_time: 2h30m
-      alertname: CrawlerNoTraffic
-      exp_alerts: []
-    - eval_time: 1h40m
-      alertname: CrawlerSourceNotRefreshed
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-          source: FRED
-        exp_annotations:
-          summary: 5 FRED series not refreshed within twice their interval
-          description: FRED has series whose last successful crawl is older than twice
-            their refresh interval (scheduler disabled or behind, source paused, or
-            refreshes failing). `crawler coverage` shows the oldest successful crawl.
-    - eval_time: 2h30m
-      alertname: CrawlerSourceNotRefreshed
-      exp_alerts: []
-
-  # Stalled manual work and stale coverage metrics still alert in static mode.
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all
+                sources paused, or worker stuck).
+      - eval_time: 2h30m
+        alertname: CrawlerNoTraffic
+        exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh
+                interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
+                coverage` shows the oldest successful crawl.
+      - eval_time: 2h30m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts: []
   - interval: 5m
     input_series:
-    - series: crawler_scheduler_enabled
-      values: '0x24'
-    - series: crawler_queue_items{status="pending"}
-      values: 40x24
-    - series: crawler_coverage_last_refresh_timestamp_seconds
-      values: '0x24'
-    - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
-      values: 1x24
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph"}
+        values: '0x24'
+      - series: crawler_queue_items{status="pending"}
+        values: 40x24
+      - series: crawler_coverage_last_refresh_timestamp_seconds
+        values: '0x24'
+      - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
+        values: 1x24
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
     alert_rule_test:
-    - eval_time: 1h30m
-      alertname: CrawlerNoCompletions
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-        exp_annotations:
-          summary: crawl_queue has work but no job completed in the last hour
-          description: crawl_queue holds 40 active items but crawler-worker completed
-            no job in the last hour (all jobs failing/retrying, sources paused, or the
-            worker is stuck).
-    - eval_time: 1h30m
-      alertname: CrawlerCoverageStale
-      exp_alerts:
-      - exp_labels:
-          severity: warning
-        exp_annotations:
-          summary: crawler-worker coverage metrics are stale
-          description: crawler-worker is running but has not refreshed the crawler_coverage_*
-            gauges for over 15 minutes (the coverage query is failing, see the worker
-            log for "updating coverage gauges failed", or /metrics is not scraped),
-            so the coverage and freshness alerts see old numbers.
+      - eval_time: 1h30m
+        alertname: CrawlerNoCompletions
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawl_queue has work but no job completed in the last hour
+              description: crawl_queue holds 40 active items but crawler-worker completed no job in the
+                last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
+      - eval_time: 1h30m
+        alertname: CrawlerCoverageStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawler-worker coverage metrics are stale
+              description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges
+                for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage
+                gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see
+                old numbers.
+  - interval: 5m
+    input_series:
+      - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph",
+          pod="worker-1"}
+        values: '0x576'
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x576
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x576
+      - series: crawler_queue_items{status="pending"}
+        values: '0x576'
+      - series: crawler_coverage_last_refresh_timestamp_seconds
+        values: 0+300x576
+      - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
+        values: 1x576
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
+      - series: crawler_scheduler_enabled{kubernetes_namespace="econ-graph-br-test", job="kubernetes-pods",
+          instance="branch"}
+        values: 1x576
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+        values: 0+100x576
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+        values: 100x576
+    alert_rule_test:
+      - eval_time: 48h
+        alertname: CrawlerNoTraffic
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: CrawlerNoCompletions
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: CrawlerCoverageStale
+        exp_alerts: []
+  - interval: 5m
+    input_series:
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x36
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x36
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
+      - series: crawler_scheduler_enabled{kubernetes_namespace="econ-graph", job="kubernetes-pods", instance="worker-1"}
+        values: '0x36'
+      - series: up{kubernetes_namespace="econ-graph", app="crawler-worker", job="kubernetes-pods", instance="old-worker"}
+        values: 1x36
+    alert_rule_test:
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all
+                sources paused, or worker stuck).
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh
+                interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
+                coverage` shows the oldest successful crawl.
+  - interval: 5m
+    input_series:
+      - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+        values: 10x36
+      - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
+        values: 5x36
+      - series: up{job="kubernetes-pods", instance="worker-1", app="crawler-worker", kubernetes_namespace="econ-graph"}
+        values: 1x576
+      - series: crawler_scheduler_enabled{kubernetes_namespace="econ-graph", job="kubernetes-pods", instance="worker-1"}
+        values: '0x36'
+      - series: up{kubernetes_namespace="econ-graph", app="crawler-worker", job="kubernetes-pods", instance="old-worker"}
+        values: '0x36'
+    alert_rule_test:
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all
+                sources paused, or worker stuck).
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh
+                interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
+                coverage` shows the oldest successful crawl.

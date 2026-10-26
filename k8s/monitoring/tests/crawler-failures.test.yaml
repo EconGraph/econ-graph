@@ -114,11 +114,11 @@ tests:
   # source's 1% doesn't, and the overall rate (about 5.5%) fires the global alert too.
   - interval: 1m
     input_series:
-      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '0+100x30'
       - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
         values: '0+10x30'
-      - series: 'econgraph_crawler_requests_total{crawler_type="fred"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}'
         values: '0+100x30'
       - series: 'econgraph_crawler_errors_total{crawler_type="fred"}'
         values: '0+1x30'
@@ -148,7 +148,7 @@ tests:
   # crawler (CrawlerNoTraffic is for that).
   - interval: 1m
     input_series:
-      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '5x30'
       - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
         values: '5x30'

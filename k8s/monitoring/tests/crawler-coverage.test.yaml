@@ -40,9 +40,9 @@ tests:
   # Freshness: FRED gets 3 overdue series at 1h; the alert fires once that lasts 30m.
   - interval: 5m
     input_series:
-      - series: 'crawler_coverage_series_overdue{source="FRED", pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
         values: '0x11 3x24'
-      - series: 'crawler_coverage_series_overdue{source="BLS", pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="BLS", pod="crawler-worker-1"}'
         values: '0x35'
     alert_rule_test:
       - eval_time: 1h20m

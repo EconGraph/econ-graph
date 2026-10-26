@@ -172,12 +172,22 @@ data:
         # The worker only makes requests when due jobs exist, so an empty queue also yields
         # zero traffic; this is a warning, not critical. Per-source "no traffic" alerts were
         # dropped: sources are crawled on their own schedules and an idle source is normal.
-        # An explicitly disabled scheduler holds the primary crawl static. Missing mode metrics
-        # keep the existing behavior (older worker images or broken scrapes must not mute alerts).
+        # Scope static-mode suppression to the primary data plane. Every discovered primary worker
+        # scrape target must report its mode; a missing/failed scrape or old image fails open.
+        # Branch workers cannot mute primary warnings or re-enable them on a static primary.
         - alert: CrawlerNoTraffic
           expr: |
-            (sum(rate(econgraph_crawler_requests_total[15m])) == 0)
-            unless on() (max(crawler_scheduler_enabled) == 0)
+            (sum(rate(econgraph_crawler_requests_total{kubernetes_namespace="econ-graph"}[15m])) == 0)
+            unless on()
+            (
+              (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+              and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+              unless on()
+              (
+                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+              )
+            )
           for: 1h
           labels:
             severity: warning
@@ -259,11 +269,20 @@ data:
         # successful crawl is older than twice that. The scheduler retries a failed series only after
         # twice its interval, so one failed refresh is enough to make it overdue until a retry succeeds;
         # a series that always fails keeps it firing until it is fixed or deactivated (runbook).
-        # Suppress freshness only when every reporting scheduler is explicitly disabled.
+        # Suppress primary freshness only with complete, explicitly disabled scheduler modes.
         - alert: CrawlerSourceNotRefreshed
           expr: |
-            (max by (source) (crawler_coverage_series_overdue) > 0)
-            unless on() (max(crawler_scheduler_enabled) == 0)
+            (max by (source) (crawler_coverage_series_overdue{kubernetes_namespace="econ-graph"}) > 0)
+            unless on()
+            (
+              (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+              and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+              unless on()
+              (
+                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+              )
+            )
           for: 30m
           labels:
             severity: warning

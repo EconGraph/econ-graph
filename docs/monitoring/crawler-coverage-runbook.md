@@ -97,14 +97,14 @@ Confirm `crawler status` has no pending, processing or retrying jobs before cons
 the crawl static. Startup reference-data refreshes still run; this setting is not a
 read-only database mode.
 
-When every reporting worker has `crawler_scheduler_enabled=0`, `CrawlerNoTraffic` and
-`CrawlerSourceNotRefreshed` are suppressed: idle traffic and aging observations are
-expected. An enabled worker during a rollout keeps those alerts active. Missing mode
-metrics across the deployment preserve the old alert behavior. During an upgrade from
-images without this metric, wait until all worker replicas report it before relying on
-static-mode suppression; the rule can only observe workers that report a mode. `CrawlerNoCompletions` stays active when jobs are queued, because manual
-work must still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/
-scrape failures also remain active: the independent metric pollers must stay healthy.
+On the primary (`kubernetes_namespace="econ-graph"`), `CrawlerNoTraffic` and
+`CrawlerSourceNotRefreshed` are suppressed only when every discovered worker scrape
+target reports `crawler_scheduler_enabled=0`: idle traffic and aging observations are
+expected. An enabled worker, an old image without the mode metric, or a failed scrape
+keeps the alerts active. Branch schedulers do not affect the primary's mode or these two
+alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
+still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/scrape
+failures also remain active: the independent metric pollers must stay healthy.
 No blanket Alertmanager silence is required.
 
 Before a deliberate refresh, obtain the operator's approval for the source and series,
