@@ -352,7 +352,7 @@ A Security Engineer is responsible for identifying, assessing, and mitigating se
 ### Secrets Management & Git Security
 
 #### Secrets Management Patterns
-- **Sealed Secrets**: Bitnami Sealed Secrets for Kubernetes secret encryption
+- **Project workflow**: Follow [Secrets Management](../docs/technical/SECRETS_MANAGEMENT.md); agents never handle secret values. Sealed Secrets is retired.
 - **SOPS**: Secrets OPerationS for file-based secret encryption
 - **External Secrets Operator**: Kubernetes operator for external secret synchronization
 - **HashiCorp Vault**: Enterprise secret management and rotation

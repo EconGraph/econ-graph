@@ -1234,6 +1234,24 @@ pub struct UserFilterInput {
     pub search_query: Option<String>,
 }
 
+/// Filter security events; time bounds are exclusive, as in `AuditLogFilterInput`.
+#[derive(InputObject, Default)]
+pub struct SecurityEventFilterInput {
+    pub event_type: Option<String>,
+    pub severity: Option<String>,
+    pub resolved: Option<bool>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+}
+
+/// Paged security events. The legacy `securityEvents` list remains available.
+#[derive(SimpleObject)]
+pub struct SecurityEventConnection {
+    pub nodes: Vec<SecurityEventType>,
+    pub total_count: i32,
+    pub page_info: PageInfo,
+}
+
 /// Input for filtering audit logs (admin only)
 #[derive(InputObject)]
 pub struct AuditLogFilterInput {

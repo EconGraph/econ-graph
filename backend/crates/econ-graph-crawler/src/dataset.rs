@@ -275,7 +275,7 @@ impl DatasetDef {
                 && self.default_measure == DEFAULT_MEASURE)
         {
             return Err(format!(
-                "dataset {code}: train 1 stores one decimal measure named {DEFAULT_MEASURE:?} \
+                "dataset {code}: datasets store one decimal measure named {DEFAULT_MEASURE:?} \
                  (with default_measure {DEFAULT_MEASURE:?}); leave measures out, and publish \
                  other measures as a dimension"
             ));
@@ -659,9 +659,9 @@ label = "Observation status"
             ),
             (
                 &format!("{base}[[dataset.measures]]\nname = \"level\"\nlabel = \"L\"\n"),
-                "train 1",
+                "one decimal measure",
             ),
-            (&format!("{base}default_measure = \"level\"\n"), "train 1"),
+            (&format!("{base}default_measure = \"level\"\n"), "one decimal measure"),
             (&format!("{base}{base}"), "defined twice"),
             (&format!("{base}colour = \"red\"\n"), "unknown field"),
             (
