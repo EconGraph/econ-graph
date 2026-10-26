@@ -347,38 +347,38 @@ impl WorldBankAdapter {
         // calls for the same indicator find the cache populated and skip straight past this. A
         // failed or no-op attempt is only skipped for the rest of this `discover`/`fetch_batch`
         // call (via `attempted`), not forever, so a later call can retry.
-        if let Some(name) = fallback_to_merge {
-            if attempted.insert(indicator.id.clone()) {
-                match persist::merge_dataset_dimension_code_entries(
-                    &ctx.pool,
-                    SourceId::WorldBank,
-                    DATASET,
-                    INDICATOR_DIMENSION,
-                    &[Code::new(&indicator.id, &name)],
-                )
-                .await
-                {
-                    // Only cache a name the DB actually stored: `false` (the dataset row isn't
-                    // synced yet) must not make later calls in this process believe the DB has a
-                    // label it doesn't.
-                    Ok(true) => {
-                        self.indicator_meta
-                            .lock()
-                            .unwrap()
-                            .entry(indicator.id.clone())
-                            .or_insert(IndicatorMeta {
-                                name,
-                                description: None,
-                            });
-                    }
-                    Ok(false) => {}
-                    Err(e) => {
-                        tracing::warn!(
-                            indicator = %indicator.id,
-                            error = %e,
-                            "World Bank: could not merge the row-carried indicator name into the dataset codes"
-                        );
-                    }
+        if let Some(name) = fallback_to_merge
+            && attempted.insert(indicator.id.clone())
+        {
+            match persist::merge_dataset_dimension_code_entries(
+                &ctx.pool,
+                SourceId::WorldBank,
+                DATASET,
+                INDICATOR_DIMENSION,
+                &[Code::new(&indicator.id, &name)],
+            )
+            .await
+            {
+                // Only cache a name the DB actually stored: `false` (the dataset row isn't
+                // synced yet) must not make later calls in this process believe the DB has a
+                // label it doesn't.
+                Ok(true) => {
+                    self.indicator_meta
+                        .lock()
+                        .unwrap()
+                        .entry(indicator.id.clone())
+                        .or_insert(IndicatorMeta {
+                            name,
+                            description: None,
+                        });
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        indicator = %indicator.id,
+                        error = %e,
+                        "World Bank: could not merge the row-carried indicator name into the dataset codes"
+                    );
                 }
             }
         }

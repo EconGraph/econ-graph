@@ -255,17 +255,17 @@ macro_rules! adapter_contract_tests {
     // With discovery: the fetch tests, plus `contract_discover_ok`.
     (
         $(#[$meta:meta])*
-        adapter: $adapter:expr,
-        external_id: $id:expr,
-        route: $route:expr,
-        ok_reply: $ok:expr,
-        expect_points: $points:expr
-        $(, malformed_reply: $malformed:expr)?
+        adapter: $adapter:expr_2021,
+        external_id: $id:expr_2021,
+        route: $route:expr_2021,
+        ok_reply: $ok:expr_2021,
+        expect_points: $points:expr_2021
+        $(, malformed_reply: $malformed:expr_2021)?
         $(, setup: |$m:ident| $setup:block)?,
         discover: {
-            route: $droute:expr,
-            reply: $dreply:expr,
-            min_series: $dmin:expr $(,)?
+            route: $droute:expr_2021,
+            reply: $dreply:expr_2021,
+            min_series: $dmin:expr_2021 $(,)?
         }
         $(,)?
     ) => {
@@ -292,12 +292,12 @@ macro_rules! adapter_contract_tests {
     // Fetch tests only.
     (
         $(#[$meta:meta])*
-        adapter: $adapter:expr,
-        external_id: $id:expr,
-        route: $route:expr,
-        ok_reply: $ok:expr,
-        expect_points: $points:expr
-        $(, malformed_reply: $malformed:expr)?
+        adapter: $adapter:expr_2021,
+        external_id: $id:expr_2021,
+        route: $route:expr_2021,
+        ok_reply: $ok:expr_2021,
+        expect_points: $points:expr_2021
+        $(, malformed_reply: $malformed:expr_2021)?
         $(, setup: |$m:ident| $setup:block)?
         $(,)?
     ) => {

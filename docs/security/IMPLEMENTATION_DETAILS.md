@@ -605,7 +605,7 @@ enable_xss_prevention = true
 ### Docker Configuration
 
 ```dockerfile
-FROM rust:1.98.1-trixie as builder
+FROM rust:1.99.1-trixie as builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release

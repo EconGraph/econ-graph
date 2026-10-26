@@ -6,7 +6,7 @@ use warp::{http::StatusCode, reject::Reject, Reply};
 /// Usage: `log_and_return!(error, "context message")`
 #[macro_export]
 macro_rules! log_and_return {
-    ($error:expr, $context:expr) => {{
+    ($error:expr_2021, $context:expr_2021) => {{
         $error.log_with_context($context);
         return Err($error);
     }};
@@ -16,7 +16,7 @@ macro_rules! log_and_return {
 /// Usage: `log_error!(error, "context message")`
 #[macro_export]
 macro_rules! log_error {
-    ($error:expr, $context:expr) => {{
+    ($error:expr_2021, $context:expr_2021) => {{
         $error.log_with_context($context);
         Err($error)
     }};

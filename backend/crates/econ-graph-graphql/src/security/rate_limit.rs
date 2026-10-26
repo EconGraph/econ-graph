@@ -416,8 +416,8 @@ mod tests {
         let limiter = RateLimiter::new(config);
         let client_ip = "127.0.0.1";
 
-        // Exceed the limit
-        for _ in 0..3 {
+        // Fill the limit, then verify the next request is rejected.
+        for _ in 0..2 {
             limiter.check_rate_limit(client_ip).await.unwrap();
         }
         assert!(limiter.check_rate_limit(client_ip).await.is_err());

@@ -448,10 +448,10 @@ pub async fn record_reference_seeds(
         .with_context(|| format!("reading {}", migrations_dir.display()))?
     {
         let path = entry?.path();
-        if let Some(n) = path.file_name().and_then(|n| n.to_str()) {
-            if path.is_dir() {
-                names.push((n.to_string(), path.clone()));
-            }
+        if let Some(n) = path.file_name().and_then(|n| n.to_str())
+            && path.is_dir()
+        {
+            names.push((n.to_string(), path.clone()));
         }
     }
     // Diesel identifies a migration by its version alone, so a second migration with this

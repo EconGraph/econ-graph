@@ -305,32 +305,41 @@ impl QueryFilter {
 
         // Compile blacklist patterns
         for pattern in &self.config.blacklist_patterns {
-            if let Ok(regex) = Regex::new(pattern) {
-                self.regex_patterns.insert(pattern.clone(), regex);
-            } else {
-                warn!("Failed to compile regex pattern: {}", pattern);
+            match Regex::new(pattern) {
+                Ok(regex) => {
+                    self.regex_patterns.insert(pattern.clone(), regex);
+                }
+                _ => {
+                    warn!("Failed to compile regex pattern: {}", pattern);
+                }
             }
         }
 
         // Compile whitelist patterns
         for pattern in &self.config.whitelist_patterns {
-            if let Ok(regex) = Regex::new(pattern) {
-                self.regex_patterns.insert(pattern.clone(), regex);
-            } else {
-                warn!("Failed to compile regex pattern: {}", pattern);
+            match Regex::new(pattern) {
+                Ok(regex) => {
+                    self.regex_patterns.insert(pattern.clone(), regex);
+                }
+                _ => {
+                    warn!("Failed to compile regex pattern: {}", pattern);
+                }
             }
         }
 
         // Compile rule patterns
         for rule in &self.rules {
             if rule.rule_type == FilterRuleType::Regex {
-                if let Ok(regex) = Regex::new(&rule.pattern) {
-                    self.regex_patterns.insert(rule.pattern.clone(), regex);
-                } else {
-                    warn!(
-                        "Failed to compile regex pattern for rule {}: {}",
-                        rule.id, rule.pattern
-                    );
+                match Regex::new(&rule.pattern) {
+                    Ok(regex) => {
+                        self.regex_patterns.insert(rule.pattern.clone(), regex);
+                    }
+                    _ => {
+                        warn!(
+                            "Failed to compile regex pattern for rule {}: {}",
+                            rule.id, rule.pattern
+                        );
+                    }
                 }
             }
         }
