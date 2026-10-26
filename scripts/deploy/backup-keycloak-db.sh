@@ -16,7 +16,7 @@
 # Steps:
 #   1. Scale deployment/keycloak to 0 and wait for its pods to go, so the dump
 #      is consistent. It stays at 0: the next scripts/deploy/deploy.sh brings it
-#      back (or `kubectl -n econ-graph scale deployment/keycloak --replicas=1`).
+#      back (or scale deployment/keycloak to 1 with the kind cluster's kubectl; see the QA doc).
 #   2. pg_dump --format=custom of the `keycloak` database from the pod
 #      keycloak-postgres-0 into ~/econgraph-backups/keycloak/<UTC time>/
 #      (KEYCLOAK_BACKUP_ROOT overrides the root), with exact row counts of
