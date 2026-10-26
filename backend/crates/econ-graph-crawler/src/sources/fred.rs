@@ -2346,10 +2346,17 @@ mod contract {
         expect_points: 6,
         setup: |mock| {
             mock.mount(
-                &Route::get("/series").query("series_id", "GDP"),
+                &Route::get("/series"),
                 Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
             )
             .await;
+            for id in ["WPU00000000", "CAPUTLG2211S1"] {
+                mock.mount(
+                    &Route::get("/series").query("series_id", id),
+                    Reply::json_str(r#"{"error_code":400,"error_message":"Bad Request. The series does not exist."}"#)
+                        .with_status(400),
+                ).await;
+            }
             mock.mount(
                 &Route::get("/series/vintagedates").query("series_id", "GDP"),
                 Reply::json_str(include_str!("../../tests/fixtures/fred/vintagedates_gdp.json")),
@@ -2357,9 +2364,18 @@ mod contract {
             .await;
         },
         discover: {
-            route: Route::get("/series"),
-            reply: Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
-            min_series: 100,
+            route: Route::get("/release/series").query("release_id", "53"),
+            reply: {
+                let metadata: serde_json::Value = serde_json::from_str(
+                    include_str!("../../tests/fixtures/fred/series_gdp.json")
+                ).unwrap();
+                Reply::json_str(serde_json::json!({
+                    "count":1, "offset":0, "limit":1000, "seriess":metadata["seriess"]
+                }).to_string())
+            },
+            // One catalog series and eight live headline overrides; the two confirmed
+            // NotFound probes remain available to lifecycle reconciliation instead.
+            min_series: 9,
         },
     }
 }
