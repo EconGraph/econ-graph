@@ -465,6 +465,14 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
 
+Cloudflare DNS-01 uses a separate Secret in `cert-manager`:
+`cloudflare-api-token-secret/api-token`. The certificate setup script accepts
+hidden terminal input or `CLOUDFLARE_API_TOKEN` from a secure environment source
+and writes it through `create-secrets.sh --cloudflare-dns-only`; normal deploys
+do not create this credential. Use a token scoped to one zone, with DNS edit
+and zone read permissions and no account-wide grants. See the
+[DNS-01 setup guide](../docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md).
+
 Read a value back with, for example:
 
 ```bash

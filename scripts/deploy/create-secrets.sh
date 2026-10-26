@@ -5,6 +5,9 @@
 #
 # Usage:
 #   [VAR=value ...] scripts/deploy/create-secrets.sh [--dry-run] [--prompt-tunnel-token]
+#   CLOUDFLARE_API_TOKEN from a secure environment source, with --cloudflare-dns-only,
+#   writes only cert-manager/cloudflare-api-token-secret (key api-token).
+#   setup-letsencrypt-cloudflare.sh provides hidden terminal input for this mode.
 #
 # Every input is an environment variable, except that --prompt-tunnel-token
 # reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
@@ -110,13 +113,16 @@
 set -euo pipefail
 # Never trace: the values handled below are credentials.
 set +x
+umask 077
 
 NAMESPACE="${NAMESPACE:-econ-graph}"
 
+CLOUDFLARE_DNS_ONLY=false
 PROMPT_TUNNEL_TOKEN=false
 DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
+        --cloudflare-dns-only) CLOUDFLARE_DNS_ONLY=true ;;
         --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
         --dry-run | -n) DRY_RUN=true ;;
         -h | --help)
@@ -129,6 +135,11 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+if [[ "$CLOUDFLARE_DNS_ONLY" == true && "$PROMPT_TUNNEL_TOKEN" == true ]]; then
+    echo "create-secrets: error: DNS-only mode cannot prompt for a tunnel token" >&2
+    exit 2
+fi
 
 APP_DB_USER="econgraph"
 DB_PORT="5432"
@@ -428,6 +439,18 @@ apply_secret() {
     joined="$(printf '%s, ' "${SUMMARY[@]}")"
     log "$name: ${joined%, }"
 }
+
+# DNS-01 setup writes only the cert-manager credential, never application
+# passwords. Reuse the private files and server-side apply path above.
+if [[ "$CLOUDFLARE_DNS_ONLY" == true ]]; then
+    NAMESPACE=cert-manager
+    kc get namespace "$NAMESPACE" >/dev/null 2>&1 || die "cert-manager namespace not found"
+    check_input CLOUDFLARE_API_TOKEN "${CLOUDFLARE_API_TOKEN:-}"
+    begin_secret cloudflare-api-token-secret
+    put api-token "$CLOUDFLARE_API_TOKEN" "from CLOUDFLARE_API_TOKEN"
+    apply_secret
+    exit 0
+fi
 
 kc get namespace "$NAMESPACE" >/dev/null 2>&1 ||
     die "namespace $NAMESPACE not found; apply k8s/manifests/namespace.yaml first"
