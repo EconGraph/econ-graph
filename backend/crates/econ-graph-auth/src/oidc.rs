@@ -905,6 +905,7 @@ mod verify_tests {
         );
     }
 
+    /// Missing keys stay invalid without bypassing the JWKS refresh rate limit.
     #[tokio::test]
     async fn unknown_key_ids_do_not_refetch_more_than_the_interval_allows() {
         let issuer = TestIssuer::start().await;
@@ -927,6 +928,7 @@ mod verify_tests {
         );
     }
 
+    /// A healthy snapshot rejects unpublished keys until refresh can discover a rotation.
     #[tokio::test]
     async fn a_key_rotated_while_refetches_are_throttled_recovers_after_the_interval() {
         let issuer = TestIssuer::start().await;

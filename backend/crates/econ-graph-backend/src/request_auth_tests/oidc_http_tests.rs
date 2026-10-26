@@ -11,6 +11,7 @@ use std::time::Duration;
 use uuid::Uuid;
 use warp::Filter;
 
+/// Build the production HTTP routes with the supplied app pool and OIDC verifier.
 fn routes(
     pool: AppPool,
     verifier: Arc<OidcVerifier>,
@@ -23,6 +24,7 @@ fn routes(
     build_routes(databases, None, schema, Some(verifier), &[], false)
 }
 
+/// Send a bearer-authenticated GraphQL POST and decode its HTTP status and JSON body.
 async fn post<F>(routes: &F, token: &str, query: &str) -> (u16, Value)
 where
     F: Filter + Clone + 'static,
@@ -47,6 +49,7 @@ where
     )
 }
 
+/// Require the complete invalid-token response, including HTTP 401 and no data.
 fn invalid((status, body): (u16, Value)) {
     assert_eq!(status, 401, "{body}");
     assert_eq!(
