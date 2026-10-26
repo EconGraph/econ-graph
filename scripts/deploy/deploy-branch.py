@@ -200,7 +200,7 @@ def seed_local(args, namespace, k, lookup, apply):
     for migration in (renderer.ROOT/'backend/migrations/data').glob('*/up.sql'):
         sql = re.sub(r'/\*.*?\*/|--[^\n]*', '', migration.read_text(), flags=re.DOTALL)
         allowed.update(re.findall(r'(?mi)^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_]\w*)', sql))
-    archived = set(re.findall(r' TABLE (\S+) (\S+) ', listing))
+    archived = set(re.findall(r'(?m)^\d+;\s+\d+\s+\d+\s+TABLE(?:\s+DATA)?\s+(\S+)\s+(\S+)\s', listing))
     if not archived or any(schema != 'public' or table not in allowed for schema, table in archived):
         raise ValueError('seed contains app/unknown tables; use a converted data-plane dump matching this checkout')
     marker = lookup('configmap', 'branch-data-seed', namespace)

@@ -266,7 +266,10 @@ jobs:
         scripts/deploy/test-public-host-lib.sh
 
     - name: Check isolated branch rendering and deployment guards
-      run: KUSTOMIZE_KUBECTL="$(command -v kubectl)" python3 scripts/deploy/test-branch-environments.py
+      run: |
+        KUSTOMIZE_KUBECTL="$(command -v kubectl)" || { echo 'kubectl is required for Kustomize parity' >&2; exit 1; }
+        export KUSTOMIZE_KUBECTL
+        python3 scripts/deploy/test-branch-environments.py
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.

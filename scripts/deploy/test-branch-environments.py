@@ -166,6 +166,22 @@ class GuardTests(unittest.TestCase):
         with patch.object(sys.stdin, 'isatty', return_value=False), self.assertRaisesRegex(ValueError, 'typed'):
             self.invoke(['down', 'one', '--context', 'scratch'], lambda cmd: json.dumps(existing))
 
+    def test_ci_missing_kubectl_fails_before_python_can_skip_parity(self):
+        workflow = yaml.safe_load((ROOT/'.github/workflows/ci-core.yml').read_text())
+        step = next(s for s in workflow['jobs']['deploy-manifests']['steps']
+                    if s.get('name') == 'Check isolated branch rendering and deployment guards')
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            marker = path/'python-was-run'
+            python = path/'python3'
+            python.write_text('#!/bin/sh\n: > "'+str(marker)+'"\nexit 0\n')
+            python.chmod(0o755)
+            result = subprocess.run(['/bin/bash', '-e', '-c', step['run']], env={'PATH': temp},
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('kubectl is required', result.stderr)
+            self.assertFalse(marker.exists())
+
     def test_local_data_rejects_untagged_crawler(self):
         with self.assertRaises(SystemExit):
             self.invoke(['up', 'one', '--context', 'scratch', '--dry-run', '--local-data', '--data-image', 'worker:latest',
@@ -191,13 +207,14 @@ class GuardTests(unittest.TestCase):
             (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
             args = type('Args', (), {'seed_dir': path, 'context': 'scratch'})()
             for toc in ['1; 1259 1 TABLE public chart_annotations postgres\n',
+                        '2; 0 1 TABLE DATA public chart_annotations postgres\n',
                         '1; 1259 1 TABLE private economic_series postgres\n',
                         '1; 1259 1 TABLE public unknown_data postgres\n']:
                 with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout=toc)):
                     with self.assertRaisesRegex(ValueError, 'app/unknown'):
                         deploy.seed_local(args, 'branch', None, None, None)
             with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0,
-                    stdout='1; 1259 1 TABLE public economic_series postgres\n')):
+                    stdout='1; 1259 1 TABLE public economic_series postgres\n2; 0 1 TABLE DATA public economic_series postgres\n')):
                 deploy.seed_local(args, 'branch', None, lambda *args: {'data': {'sha256': checksum}}, None)
 
 
