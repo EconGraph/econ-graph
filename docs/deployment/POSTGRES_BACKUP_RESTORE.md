@@ -142,6 +142,32 @@ database-side change; verify with a manual backup after deployment.
 Creates and waits on a one-off `Job` from the `postgres-backup` CronJob,
 then prints its logs. It dumps both databases, like the nightly run.
 
+### Which cluster
+
+`backup-postgres-now.sh` and `restore-postgres-backup.sh` act on one kubectl
+context, `kind-econ-graph` unless `--context` names another. They don't
+change the current context. Every kubectl call goes through `kc`
+(`scripts/deploy/lib/cluster-role.sh`) with `--context`. With none of
+`KUBECTL`, `KUBECONFIG` and `CLUSTER_ROLE_CONTEXT` set, they use the kind
+cluster's own kubectl and kubeconfig kept in `~/.cache/econgraph`
+(`bin/kubectl`, `kubeconfig-econ-graph`), and say so. On the production
+host, plain `kubectl` is the MicroK8s snap wrapper, which reaches a different
+cluster. A `CLUSTER_ROLE_CONTEXT` inherited from the environment is replaced,
+not followed.
+
+Before doing anything else, both print the cluster they reached:
+
+- this host;
+- the kubectl and the `KUBECONFIG`;
+- the context and its API server;
+- the nodes;
+- the `kube-system` namespace UID, which is new for every cluster;
+- whether the cluster carries the production marker that
+  `mark-production-cluster.sh` writes.
+
+The restore prints this before its confirmation prompt. A context the
+kubeconfig doesn't have stops either script before any other call.
+
 ## Restore
 
 ### econ_graph
@@ -156,6 +182,9 @@ then prints its logs. It dumps both databases, like the nightly run.
 # Restore a specific dump, without the confirmation prompt
 ./scripts/deploy/restore-postgres-backup.sh --file econ_graph-20260101-080000.dump --yes
 ```
+
+Each command shows the cluster's identity first; see [Which cluster](#which-cluster).
+Without `--yes`, the confirmation is read from a terminal only.
 
 This is **destructive**: `pg_restore --clean --if-exists` drops and
 recreates every object the dump contains before restoring it, overwriting
@@ -289,7 +318,24 @@ deadline and a `podFailurePolicy` that doesn't retry a failed container;
 that no run deletes a dump; and that no output contains a password. It needs Docker and
 python3 with PyYAML, and runs in CI ("PostgreSQL Backup Scripts").
 
-It does not cover the in-cluster wiring (the PVC mounts, the Secrets, the
+```sh
+scripts/deploy/test-postgres-backup-cluster.sh
+```
+
+Runs `restore-postgres-backup.sh` and `backup-postgres-now.sh` against stub
+kubectls, with a failing plain `kubectl` first on `PATH` and the kind
+cluster's copies in a scratch `~/.cache/econgraph`. It checks that:
+
+- the plain kubectl is never called;
+- every call carries the pinned context, also when another
+  `CLUSTER_ROLE_CONTEXT` is inherited;
+- the identity is shown before the confirmation;
+- an unconfirmed restore, or one on a missing context, applies nothing;
+- the restore Job sets `RESTORE_OWNER=econgraph`.
+
+It also runs in the "PostgreSQL Backup Scripts" CI job.
+
+The two tests do not cover the in-cluster wiring (the PVC mounts, the Secrets, the
 CronJob schedule, the Services' selectors, network policy). Check that on a
 cluster with `backup-postgres-now.sh` followed by
 `restore-postgres-backup.sh --list`.

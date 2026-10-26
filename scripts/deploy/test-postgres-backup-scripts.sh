@@ -411,7 +411,7 @@ echo "# restore.sh"
 python3 - "$ROOT/scripts/deploy/restore-postgres-backup.sh" "$ECON_PW" >"$tmp/restore.env" <<'PY'
 import re, sys, yaml
 text = open(sys.argv[1]).read()
-manifest = re.search(r"<<EOF \| kubectl apply -f -\n(.*?)\nEOF\n", text, re.S).group(1)
+manifest = re.search(r"<<EOF \| kc apply -f -\n(.*?)\nEOF\n", text, re.S).group(1)
 manifest = re.sub(r"\$\{[A-Z_]+\}", "", manifest)
 (container,) = yaml.safe_load(manifest)["spec"]["template"]["spec"]["containers"]
 for env in container["env"]:
