@@ -12,6 +12,7 @@ import unittest
 
 class ReleaseBuildTest(unittest.TestCase):
     def test_profiles_features_paths_and_offline_seed(self):
+        """Run the real entry point and verify isolated builds, fixture data and network guard."""
         source = Path(__file__).resolve().parents[1] / 'release-e2e.sh'
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
