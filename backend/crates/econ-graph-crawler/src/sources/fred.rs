@@ -159,7 +159,8 @@ struct FredCatalogRules {
     include: Vec<String>,
     /// Intentional retirement probes: still record lifecycle evidence, but their confirmed
     /// absence is not an unexpected-missing alert. Must be a subset of `include`.
-    #[serde(default)]
+    /// Alert policy does not change selection identity or reset catalog absence evidence.
+    #[serde(default, skip_serializing)]
     expected_missing: Vec<String>,
     #[serde(default)]
     exclude: Vec<String>,
@@ -1574,6 +1575,13 @@ mod tests {
         assert_eq!(
             FredCatalogRules::parse(text).unwrap().fingerprint(),
             FredCatalogRules::parse(&format!("# comment\n{text}\n"))
+                .unwrap()
+                .fingerprint()
+        );
+        let with_probe = format!("include=['GDP']\n{text}");
+        assert_eq!(
+            FredCatalogRules::parse(&with_probe).unwrap().fingerprint(),
+            FredCatalogRules::parse(&format!("expected_missing=['GDP']\n{with_probe}"))
                 .unwrap()
                 .fingerprint()
         );

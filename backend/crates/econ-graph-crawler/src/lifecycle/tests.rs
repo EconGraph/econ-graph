@@ -782,6 +782,10 @@ async fn direct_fetch_success_resets_a_worker_miss_committed_while_it_waited() {
         // its first economic_series INSERT's parent FK. This wait exposes that race.
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
+                // PostgreSQL caches activity statistics until this transaction ends.
+                // Refresh before polling so a wait that began after our first read is visible.
+                diesel::sql_query("SELECT pg_stat_clear_snapshot()")
+                    .execute(&mut *conn).await.unwrap();
                 let blocked: Blocked = diesel::sql_query(
                     "SELECT count(*) AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))")
                     .bind::<diesel::sql_types::Integer,_>(blocker.pid)

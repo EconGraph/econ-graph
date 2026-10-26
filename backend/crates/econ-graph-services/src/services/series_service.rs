@@ -19,12 +19,19 @@ use econ_graph_core::{
 /// Public reads exclude legally restricted series independently of activity filters.
 /// Internal crawler storage remains untouched; a missing lifecycle row means active.
 pub fn public_series_predicate() -> diesel::expression::SqlLiteral<Bool> {
-    sql::<Bool>(
-        "NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
-         WHERE lifecycle.source_id = economic_series.source_id \
-           AND lifecycle.external_id = economic_series.external_id \
-           AND lifecycle.status = 'restricted')",
-    )
+    sql::<Bool>(&public_series_sql("economic_series"))
+}
+
+/// Restriction condition shared by public series and observation readers.
+const PUBLIC_SERIES_SQL: &str = "NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
+    WHERE lifecycle.source_id = {series}.source_id \
+      AND lifecycle.external_id = {series}.external_id \
+      AND lifecycle.status = 'restricted')";
+
+/// Build the public restriction condition for a trusted, code-defined SQL table alias.
+/// Never pass user input as `series_alias`.
+pub fn public_series_sql(series_alias: &str) -> String {
+    PUBLIC_SERIES_SQL.replace("{series}", series_alias)
 }
 
 /// **List Economic Series with Filtering**

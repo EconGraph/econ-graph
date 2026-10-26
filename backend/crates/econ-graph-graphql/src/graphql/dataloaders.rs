@@ -25,20 +25,18 @@ use dataloader::non_cached::Loader as NonCachedLoader;
 use dataloader::BatchFn;
 use econ_graph_core::database::DataPool;
 use econ_graph_core::models::Dataset;
+use econ_graph_services::services::series_service::public_series_sql;
 use std::collections::HashMap;
 
 /// Restriction check for every public observation reader, including nested resolvers.
 /// This tests the durable lifecycle state rather than an independently updated activity flag.
 pub(crate) fn public_data_points_predicate(
 ) -> diesel::expression::SqlLiteral<diesel::sql_types::Bool> {
-    diesel::dsl::sql::<diesel::sql_types::Bool>(
+    diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
         "EXISTS (SELECT 1 FROM economic_series public_series \
-         WHERE public_series.id = data_points.series_id \
-           AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
-               WHERE lifecycle.source_id = public_series.source_id \
-                 AND lifecycle.external_id = public_series.external_id \
-                 AND lifecycle.status = 'restricted'))",
-    )
+             WHERE public_series.id = data_points.series_id AND {})",
+        public_series_sql("public_series")
+    ))
 }
 
 /// DataLoader batcher for efficiently loading data sources by ID
@@ -365,7 +363,7 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
             // `LIMIT 1` per key walks the unique index backwards and reads only the newest
             // (date, revision_date) group, at most two rows sorted to put the revision first;
             // DISTINCT ON would read and sort every row of every requested series.
-            let rows = match diesel::sql_query(
+            let rows = match diesel::sql_query(format!(
                 "SELECT k.id AS series_id, dp.date, dp.value, dp.revision_date \
                  FROM unnest($1::uuid[]) AS k(id) \
                  CROSS JOIN LATERAL ( \
@@ -376,11 +374,9 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                  ) dp \
                  WHERE EXISTS (SELECT 1 FROM economic_series public_series \
                      WHERE public_series.id = k.id \
-                       AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
-                           WHERE lifecycle.source_id = public_series.source_id \
-                             AND lifecycle.external_id = public_series.external_id \
-                             AND lifecycle.status = 'restricted'))",
-            )
+                       AND {})",
+                public_series_sql("public_series")
+            ))
             .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)
             .load::<LatestObservationRow>(&mut conn)
             .await
