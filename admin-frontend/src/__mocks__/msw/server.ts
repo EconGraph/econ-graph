@@ -9,7 +9,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 
 // Debug flag - set to true to enable MSW debug output
-const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+const MSW_DEBUG = import.meta.env.VITE_MSW_DEBUG === "true";
 
 // Import GraphQL mock responses from directory structure
 import getCrawlerConfigSuccess from "../graphql/getCrawlerConfig/success.json";

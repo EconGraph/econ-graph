@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
-  ChatBubbleOutline as CommentsIcon,
+  ChatBubbleOutlineOutlined as CommentsIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
   Lock as LockIcon,

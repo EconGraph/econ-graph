@@ -754,3 +754,102 @@ async fn update_user_email_conflict_leaves_other_fields_unchanged() {
     assert_eq!(changed.email, target.email);
     assert_eq!(changed.last_login_at, target.last_login_at);
 }
+
+/// Deleting an inviter keeps other recipients' grants while removing the
+/// deleted user's sessions, private content and access grants.
+#[tokio::test]
+async fn deleting_a_chart_inviter_preserves_other_users_access() {
+    use diesel::prelude::*;
+    use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
+    use econ_graph_core::schema::chart_collaborators;
+
+    let url = required_database_url();
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .unwrap();
+    let pool = econ_graph_core::database::create_pool(&url).await.unwrap();
+    let inviter = insert_user(&pool).await;
+    let recipient = insert_user(&pool).await;
+    let chart = Uuid::new_v4();
+    let own_annotation = Uuid::new_v4();
+    let other_annotation = Uuid::new_v4();
+    let own_comment = Uuid::new_v4();
+    let other_comment = Uuid::new_v4();
+    let mut conn = pool.get().await.unwrap();
+    conn.batch_execute(&format!(
+        "INSERT INTO chart_collaborators (chart_id, user_id, invited_by, role)
+         VALUES ('{chart}', '{recipient}', '{inviter}', 'viewer'),
+                ('{chart}', '{inviter}', '{recipient}', 'owner');
+         INSERT INTO user_sessions (user_id, token_hash, expires_at)
+         VALUES ('{inviter}', 'delete-inviter-test', NOW() + interval '1 day');
+         INSERT INTO user_data_source_preferences (user_id, data_source_id)
+         VALUES ('{inviter}', '{chart}');
+         INSERT INTO chart_annotations (id, user_id, chart_id, annotation_date, title)
+         VALUES ('{own_annotation}', '{inviter}', '{chart}', '2024-01-01', 'Own'),
+                ('{other_annotation}', '{recipient}', '{chart}', '2024-01-01', 'Other');
+         INSERT INTO annotation_comments (id, annotation_id, user_id, content)
+         VALUES ('{own_comment}', '{other_annotation}', '{inviter}', 'Own comment'),
+                ('{other_comment}', '{other_annotation}', '{recipient}', 'Other comment');",
+        inviter = inviter.id,
+        recipient = recipient.id,
+    ))
+    .await
+    .unwrap();
+    drop(conn);
+
+    let staff: Vec<_> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
+    // The down migration restores the old restriction. Prove the fixture exposes
+    // the original deletion failure, then reapply the forward migration and retry.
+    let mut conn = pool.get().await.unwrap();
+    conn.batch_execute(include_str!(
+        "../../../../migrations/app/2026-10-26-000451_keep_chart_grants_on_inviter_delete/down.sql"
+    ))
+    .await
+    .unwrap();
+    drop(conn);
+    let query = format!(r#"mutation {{ deleteUser(id: "{}") }}"#, inviter.id);
+    let old_errors = run_user_mutation(&pool, &staff, &query).await;
+    assert_eq!(old_errors.len(), 1, "old FK must prevent deletion");
+    assert!(read_user(&pool, inviter.id).await.is_some());
+    let mut conn = pool.get().await.unwrap();
+    conn.batch_execute(include_str!(
+        "../../../../migrations/app/2026-10-26-000451_keep_chart_grants_on_inviter_delete/up.sql"
+    ))
+    .await
+    .unwrap();
+    drop(conn);
+    let errs = run_user_mutation(&pool, &staff, &query).await;
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!(read_user(&pool, inviter.id).await.is_none());
+    assert!(read_user(&pool, recipient.id).await.is_some());
+
+    let mut conn = pool.get().await.unwrap();
+    let grant: (Option<Uuid>, Option<String>) = chart_collaborators::table
+        .filter(chart_collaborators::chart_id.eq(chart))
+        .filter(chart_collaborators::user_id.eq(recipient.id))
+        .select((chart_collaborators::invited_by, chart_collaborators::role))
+        .first(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(grant, (None, Some("viewer".into())));
+    // Fail on any changed cascade policy or accidental deletion of the survivor's content.
+    conn.batch_execute(&format!(
+        "DO $$ BEGIN
+         ASSERT NOT EXISTS (SELECT 1 FROM user_sessions WHERE user_id = '{inviter}');
+         ASSERT NOT EXISTS (SELECT 1 FROM user_data_source_preferences WHERE user_id = '{inviter}');
+         ASSERT NOT EXISTS (SELECT 1 FROM chart_collaborators WHERE user_id = '{inviter}');
+         ASSERT NOT EXISTS (SELECT 1 FROM chart_annotations WHERE id = '{own_annotation}');
+         ASSERT NOT EXISTS (SELECT 1 FROM annotation_comments WHERE id = '{own_comment}');
+         ASSERT EXISTS (SELECT 1 FROM chart_annotations WHERE id = '{other_annotation}');
+         ASSERT EXISTS (SELECT 1 FROM annotation_comments WHERE id = '{other_comment}');
+         END $$;",
+        inviter = inviter.id,
+    ))
+    .await
+    .unwrap();
+}

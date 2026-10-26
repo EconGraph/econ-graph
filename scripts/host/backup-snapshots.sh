@@ -11,7 +11,11 @@
 #      `btrfs send | btrfs receive`, incrementally (-p the newest snapshot
 #      already on both sides). The pool is a different filesystem, so this is
 #      the only way across. If it is not mounted, the copy is skipped with a
-#      message.
+#      message. A read-only subvolume of the same name on the pool counts as
+#      the copy only if its Received UUID is the local snapshot's UUID (or,
+#      for a local snapshot that was itself received, its Received UUID);
+#      one that does not match is renamed <name>.<stamp>.mismatch-<when>
+#      (not deleted) and received again.
 #   3. Writes a status file and (at most daily) a size report to
 #      /var/lib/econgraph/ for scripts/backup/check-freshness.sh.
 #
@@ -28,15 +32,21 @@
 #
 # --dry-run (-n) prints every snapshot and copy it would make and writes
 # nothing: no snapshot, no lock file, no status file.
+#
+# ECONGRAPH_TEST_ROOT, if set, is prefixed to every absolute path below, so
+# scripts/host/test-backup-scripts.sh can run this against stubs in a
+# temporary directory.
 
 set -euo pipefail
 
+TEST_ROOT="${ECONGRAPH_TEST_ROOT:-}"
 NAMES=(data-plane app-prod)
-SRV_ROOT="/srv/econgraph"
+SRV_ROOT="$TEST_ROOT/srv/econgraph"
 SNAPSHOT_DIR="$SRV_ROOT/snapshots"
-POOL_MOUNT="/srv/econgraph-backups"
+POOL_MOUNT="$TEST_ROOT/srv/econgraph-backups"
 POOL_SNAPSHOT_DIR="$POOL_MOUNT/snapshots"
-STATE_DIR="/var/lib/econgraph"
+STATE_DIR="$TEST_ROOT/var/lib/econgraph"
+LOCK_FILE="$TEST_ROOT/run/econgraph-backup-snapshots.lock"
 SIZE_REPORT_EVERY_HOURS=24
 
 DRY_RUN="false"
@@ -61,7 +71,7 @@ fi
 
 # A dry run takes no lock: opening the lock file would create it.
 if [ "$DRY_RUN" = "false" ]; then
-    exec 9>/run/econgraph-backup-snapshots.lock
+    exec 9>"$LOCK_FILE"
     if ! flock -n 9; then
         echo "error: another backup-snapshots run is in progress" >&2
         exit 1
@@ -92,6 +102,27 @@ is_ro_subvolume() {
     local p="$1"
     [ ! -L "$p" ] && [ -d "$p" ] && [ "$(stat -c %i "$p")" = 256 ] \
         && [ "$(btrfs property get "$p" ro 2>/dev/null)" = "ro=true" ]
+}
+
+# subvol_field <path> <field>: a field of `btrfs subvolume show <path>`
+# ("UUID" or "Received UUID"); "-" when unset, empty when unreadable.
+subvol_field() {
+    # || true: an unreadable subvolume must not abort the run under pipefail.
+    { btrfs subvolume show "$1" 2>/dev/null \
+        | sed -nE "s/^[[:space:]]*$2:[[:space:]]+([^[:space:]]+).*/\1/p" | head -n 1; } || true
+}
+
+# send_uuid <path>: the UUID a send of <path> carries, which the receiving
+# side records as its Received UUID: <path>'s own Received UUID if it was
+# itself received, otherwise its UUID. Empty when unreadable.
+send_uuid() {
+    local received
+    received="$(subvol_field "$1" "Received UUID")"
+    if [ -n "$received" ] && [ "$received" != "-" ]; then
+        echo "$received"
+    else
+        subvol_field "$1" "UUID"
+    fi
 }
 
 newest_epoch() {
@@ -155,12 +186,29 @@ else
             fi
             if [ -e "$target_path" ]; then
                 if is_ro_subvolume "$target_path"; then
-                    parent="$snap"
-                    continue
+                    # It must have been received from this snapshot: a stale
+                    # or unrelated copy would otherwise become the next send
+                    # parent, or be restored with --from-pool.
+                    want="$(send_uuid "$local_path")"
+                    if [ -z "$want" ] || [ "$want" = "-" ]; then
+                        echo "error: cannot read the UUID of $local_path" >&2
+                        failures=$((failures + 1))
+                        pool_status="error"
+                        break
+                    fi
+                    got="$(subvol_field "$target_path" "Received UUID")"
+                    if [ "$got" = "$want" ]; then
+                        parent="$snap"
+                        continue
+                    fi
+                    # Set it aside (never delete) and receive again.
+                    echo "warning: $target_path has Received UUID ${got:-(unreadable)}, not $want from $local_path; setting it aside" >&2
+                    run mv "$target_path" "$target_path.mismatch-$stamp"
+                else
+                    # A receive that died half-way leaves a writable subvolume.
+                    # Set it aside (never delete) and receive again.
+                    run mv "$target_path" "$target_path.incomplete-$stamp"
                 fi
-                # A receive that died half-way leaves a writable subvolume.
-                # Set it aside (never delete) and receive again.
-                run mv "$target_path" "$target_path.incomplete-$stamp"
             fi
             if [ -n "$parent" ]; then
                 echo "+ btrfs send -p $SNAPSHOT_DIR/$parent $local_path | btrfs receive $POOL_SNAPSHOT_DIR"

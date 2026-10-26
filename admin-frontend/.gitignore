@@ -3,3 +3,4 @@
 /vite.config.js
 /vite.config.d.ts
 *.tsbuildinfo
+/test-results-smoke/

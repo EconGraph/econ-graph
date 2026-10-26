@@ -18,6 +18,9 @@ cd "$PROJECT_ROOT"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
+# `kind load` below runs the pinned kind (scripts/deploy/install-kind.sh);
+# checked before the builds rather than after them.
+require_kind_version
 
 # Version to tag images with, read from backend/Cargo.toml (the one place the
 # version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml,

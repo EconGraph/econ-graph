@@ -555,6 +555,8 @@ kubectl scale deployment econ-graph-graphql --replicas=5 -n econ-graph
 
 ### Nginx Configuration
 
+Use your own domain in place of the `api.example.com` placeholder here as well.
+
 Create `nginx.conf`:
 
 ```nginx
@@ -566,7 +568,7 @@ upstream econ_graph_backend {
 
 server {
     listen 80;
-    server_name api.econ-graph.com;
+    server_name api.example.com;
 
     # Rate limiting
     limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;

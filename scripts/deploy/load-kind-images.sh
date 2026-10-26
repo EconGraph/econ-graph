@@ -45,6 +45,8 @@ done
 
 log "Docker daemons"
 check_docker_daemon
+# `kind load` runs the pinned kind (scripts/deploy/install-kind.sh).
+require_kind_version
 echo "  images from: ${SOURCE_DOCKER_HOST}"
 src_docker() { docker -H "${SOURCE_DOCKER_HOST}" "$@"; }
 src_docker version --format '{{.Server.Version}}' >/dev/null 2>&1 ||

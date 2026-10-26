@@ -17,6 +17,19 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/app")
 const BASELINE: &str = "20261021000200";
 const AUDIT_FIX: &str = "20261024000100";
 
+/// Keep this migration's rollback tests independent of later app migrations.
+fn migrate_through_audit_fix(conn: &mut PgConnection) {
+    let pending = conn
+        .pending_migrations(MIGRATIONS)
+        .expect("pending migrations");
+    for migration in pending {
+        if migration.name().version().to_string().as_str() <= AUDIT_FIX {
+            conn.run_migration(&migration)
+                .expect("migrate through audit fix");
+        }
+    }
+}
+
 #[derive(QueryableByName, Debug, PartialEq)]
 struct FkState {
     #[diesel(sql_type = Text)]
@@ -99,7 +112,7 @@ async fn audit_fix_migration_up_down_up() {
     let mut conn = connect(&url);
 
     // Up: applies after the baseline, in order.
-    conn.run_pending_migrations(MIGRATIONS).expect("migrate up");
+    migrate_through_audit_fix(&mut conn);
     let versions = applied(&mut conn);
     let baseline_pos = versions.iter().position(|v| v == BASELINE);
     let fix_pos = versions.iter().position(|v| v == AUDIT_FIX);
@@ -114,8 +127,7 @@ async fn audit_fix_migration_up_down_up() {
     assert_baseline(&mut conn);
 
     // Up again.
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("migrate up again");
+    migrate_through_audit_fix(&mut conn);
     assert_fixed(&mut conn);
 }
 
@@ -125,7 +137,7 @@ async fn audit_fix_migration_up_down_up() {
 async fn audit_fix_down_refuses_to_drop_orphaned_history() {
     let (_container, url) = start_postgres().await;
     let mut conn = connect(&url);
-    conn.run_pending_migrations(MIGRATIONS).expect("migrate up");
+    migrate_through_audit_fix(&mut conn);
 
     diesel::sql_query(
         "WITH u AS (INSERT INTO users (email, name) VALUES ('gone@example.com', 'Gone User') \

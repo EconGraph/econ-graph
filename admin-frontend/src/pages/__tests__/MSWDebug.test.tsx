@@ -7,7 +7,7 @@ import { server } from "../../mocks/server";
 import { http } from "msw";
 
 // Debug flag - set to true to enable MSW debug output
-const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+const MSW_DEBUG = import.meta.env.VITE_MSW_DEBUG === "true";
 
 describe("MSW Debug", () => {
   it("should intercept GraphQL requests with MSW", async () => {

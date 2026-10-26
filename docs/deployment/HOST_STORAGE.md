@@ -89,6 +89,26 @@ from there (`docker save`) and loads them into the cluster
 (`kind load image-archive`), checking each image ID on every node.
 `build-images.sh` now builds into the rootful daemon.
 
+## Which kind
+
+The scripts run kind v0.33.0 from
+`~/.local/share/econgraph/bin/kind-v0.33.0` (under `$XDG_DATA_HOME` when it
+is set), whatever `kind` is on `PATH`. Older kind cannot load images into a
+node running Kubernetes 1.36 or newer ("unknown containerd config version:
+4"). Install it once, as the operator account and without sudo:
+
+```bash
+scripts/deploy/install-kind.sh
+```
+
+It verifies the download against the SHA-256 pinned in the script and leaves
+the packaged `/usr/bin/kind` alone. The scripts that create or delete the
+cluster or load images into it (`recreate-kind-cluster.sh`,
+`load-kind-images.sh`, `build-images.sh`, `migrate-to-host-storage.sh` and
+`teardown.sh --delete-cluster`) stop before changing anything when it is
+missing. Read-only `kind get` commands fall back to the `kind` on `PATH`, with
+a warning.
+
 ## Ownership
 
 Rootful Docker runs containers without a user namespace (this daemon has no

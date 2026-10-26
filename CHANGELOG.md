@@ -40,6 +40,11 @@ All notable changes to EconGraph are documented here. The format follows
 - GraphQL query field `seriesExists(id: ID!): Boolean!`: whether a series exists, counting a
   series with no observations (which `series(id)` returns as null). The remote annotation check
   above asks it, so both checks accept the same series.
+- `scripts/deploy/install-kind.sh` installs kind v0.33.0 for the current user (no sudo) under
+  `~/.local/share/econgraph/bin`, checked against a pinned SHA-256. The deploy scripts and
+  `terraform/k8s` run that kind instead of the one on `PATH`, and stop with a pointer to the
+  installer when it is missing; only read-only `kind get` falls back to the `kind` on `PATH`.
+  Older kind cannot load images into Kubernetes 1.36 nodes.
 
 ### Changed
 

@@ -71,10 +71,10 @@ jobs:
           k8s/monitoring/grafana-*.yaml
         retention-days: 30
 
+  # Runs independently of grafana validation (no `needs`).
   playwright-tests:
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    needs: []  # Run independently of grafana validation
 
     steps:
     - uses: actions/checkout@v7

@@ -93,30 +93,12 @@ resource "null_resource" "kind_cluster" {
       DOCKER_HOST = "unix:///var/run/docker.sock"
     }
     command = <<-EOT
-      # Check if kind is installed
-      if ! command -v kind &> /dev/null; then
-        echo "Installing kind..."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-          # macOS
-          brew install kind
-        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-          # Linux
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
-        else
-          echo "Unsupported OS: $OSTYPE"
-          exit 1
-        fi
-      fi
-
-      # The node image (var.node_image, Kubernetes 1.36) needs kind v0.33.0 or
-      # newer: older kind creates the cluster but cannot load images into it.
-      kind_have="$(kind version | awk '{print $2}')"
-      if [ "$(printf '%s\n%s\n' 0.33.0 "$${kind_have#v}" | sort -V | head -1)" != "0.33.0" ]; then
-        echo "kind $${kind_have} is too old for ${var.node_image}: install kind v0.33.0 or newer"
-        exit 1
-      fi
+      # The kind the deploy scripts use: scripts/deploy/install-kind.sh puts
+      # the pinned version in the user's data directory (no sudo; does nothing
+      # when it is already there), and that copy is run, whatever is on PATH.
+      "${path.module}/../../scripts/deploy/install-kind.sh" || exit 1
+      source "${path.module}/../../scripts/deploy/lib/kind-version.sh" || exit 1
+      kind() { "$KIND_PINNED_BIN" "$@"; }
 
       # Check if kubectl is installed
       if ! command -v kubectl &> /dev/null; then

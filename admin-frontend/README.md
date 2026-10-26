@@ -281,13 +281,16 @@ wired configuration options. Grafana links currently use
 [`MonitoringPage.tsx`](src/pages/MonitoringPage.tsx) and
 [`useMonitoring.ts`](src/hooks/useMonitoring.ts).
 
-**Known migration gap:** [`graphqlClient.ts`](src/services/graphqlClient.ts)
-still reads `process.env.REACT_APP_GRAPHQL_ENDPOINT` and falls back to
-`http://localhost:8080/graphql`. This is an absolute URL, so it bypasses Vite's
-`/graphql` proxy. The Vite configs do not map that environment variable, and
-there is no implemented `VITE_*` endpoint setting in this client. Changing the
-proxy alone does not resolve this client configuration; it needs a separate
-code fix.
+The Apollo client reads `VITE_GRAPHQL_ENDPOINT` at build time and defaults to
+`/graphql`, using the development proxy or the production same-origin backend.
+For a separate backend, set it before building, for example:
+`VITE_GRAPHQL_ENDPOINT=https://api.example.com/graphql npm run build`.
+Browser code uses Vite's `import.meta.env`; `process.env` is rejected by ESLint
+under `src/`. Custom public variables are typed in `src/vite-env.d.ts`.
+
+Run `npx playwright install chromium` once, then `npm run e2e:smoke` to build and
+load the production app at `/admin/` in Chromium. This test stubs GraphQL and
+needs no backend; it fails on browser exceptions or missing application UI.
 
 ### Build Process
 
