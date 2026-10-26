@@ -14,8 +14,11 @@
 # written by scripts/deploy/deploy.sh). deploy.sh deletes the previous Job, applies
 # this one after the Keycloak Deployment and waits for it to complete.
 #
-# keycloak-config-cli is pinned to the newest build for Keycloak 26; bump it with the
-# Keycloak image in deployment.yaml.
+# keycloak-config-cli is pinned to its newest release, 6.5.1. Its newest build is
+# against Keycloak 26.5.5; it uses only the admin REST API, and it applies this realm
+# to Keycloak 26.8.1 (fresh, and upgraded from 26.7.4) with a second run changing
+# nothing. On a Keycloak image bump, check it against the new version and move to a
+# newer release when one exists.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -38,7 +41,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
       - name: render-realm
-        image: quay.io/keycloak/keycloak:26.7.4
+        image: quay.io/keycloak/keycloak:26.8.1
         command: ["/bin/bash", "-c"]
         args:
         - |
