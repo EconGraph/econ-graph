@@ -2,7 +2,8 @@
 # see https://diesel.rs/guides/configuring-diesel-cli
 
 [print_schema]
-file = "src/schema.rs"
+# Do not auto-write a schema after migrating just one plane. Regenerate explicitly
+# from a database containing both migration sets (docs/development/MIGRATIONS.md).
 custom_type_derives = ["diesel::query_builder::QueryId"]
 
 [migrations_directory]

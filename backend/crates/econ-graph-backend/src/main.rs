@@ -1466,6 +1466,7 @@ mod client_ip_tests {
 
 #[cfg(test)]
 mod request_auth_tests {
+    mod oidc_http_tests;
     use super::{graphql_caller, GraphqlRefusal};
     use econ_graph_auth::testkit::{now, sign_hs256, TestIssuer};
     use econ_graph_auth::{OidcConfig, OidcVerifier, Role};

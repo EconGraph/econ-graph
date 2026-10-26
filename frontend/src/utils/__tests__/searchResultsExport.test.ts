@@ -47,6 +47,18 @@ describe('search results export', () => {
     expect(row.split(',')[2]).toBe("'=cmd|/c calc");
   });
 
+  test.each(['-', '+', '@', '=', '\t', '\r', '\n'])(
+    'CSV protects IDs starting with %j while JSON preserves the exact source ID',
+    prefix => {
+      const externalId = `${prefix}SOURCE_ID`;
+      const entry = { ...worldBank, externalId, title: 'Économie 日本' };
+      const csv = buildSearchResultsCsv([entry]);
+      const escapedId = /[\r\n]/.test(prefix) ? `"'${externalId}"` : `'${externalId}`;
+      expect(csv).toContain(`World Bank,${escapedId},Économie 日本,`);
+      expect(JSON.parse(buildSearchResultsJson([entry]))[0].externalId).toBe(externalId);
+    }
+  );
+
   test('JSON has every field, in CSV order, with null for missing ones', () => {
     const parsed = JSON.parse(
       buildSearchResultsJson([

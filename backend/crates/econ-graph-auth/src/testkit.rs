@@ -243,7 +243,11 @@ impl TestIssuer {
     /// the previous keys (as Keycloak does while old tokens are still valid); without it, only
     /// the new key is published.
     pub fn rotate(&self, kid: &str, keep_old: bool) -> Arc<SigningKey> {
-        let key = Arc::new(SigningKey::generate(kid));
+        self.publish(Arc::new(SigningKey::generate(kid)), keep_old)
+    }
+
+    /// Publish a prepared signing key, allowing tests to reject its tokens before rotation.
+    pub fn publish(&self, key: Arc<SigningKey>, keep_old: bool) -> Arc<SigningKey> {
         let mut state = self.state.write().expect("test issuer state");
         if !keep_old {
             state.published.clear();

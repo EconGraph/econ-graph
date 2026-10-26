@@ -32,6 +32,14 @@ the app set to `econ_graph_app` on `app-postgres-service` (key `app-database-url
 whose `app-database-url` still names the data database keeps both sets in `econ_graph`; see
 "Databases" in [k8s/README.md](../../k8s/README.md).
 
+## User deletion policy
+
+Deleting a user removes their sessions, chart annotations, annotation comments, chart access
+grants (`chart_collaborators.user_id`), and source preferences. Comments on an annotation are
+removed with that annotation. Other users' chart grants survive the inviter's deletion with
+`invited_by = NULL`; their annotations and comments on surviving annotations remain. Audit
+history and security events retain their existing nullable user references.
+
 ## Rules
 
 1. **A migration that shipped in a release tag is never edited, renumbered or removed.**
@@ -93,9 +101,9 @@ database with both sets applied. `test_schema_compatibility` (in
 DATABASE_URL=postgres://... diesel print-schema > crates/econ-graph-core/src/schema.rs
 ```
 
-`diesel.toml`'s `[print_schema] file = "src/schema.rs"` is relative to `backend/`, so
-`diesel migration run` there also writes a stray `backend/src/schema.rs`. Delete it; it is not
-the file the code uses.
+`diesel.toml` deliberately omits `[print_schema] file`, so `diesel migration run` does not
+write a schema file automatically. Keep regeneration explicit: migrating either plane alone
+must not overwrite the shared schema with only that plane's tables.
 
 ### Reference-code seed migrations
 
@@ -191,9 +199,9 @@ diesel migration run --migration-dir migrations/data
 diesel migration run --migration-dir migrations/app
 ```
 
-Both also write the stray `backend/src/schema.rs` described in "Adding a migration". On a
-database built from the single v4.0.0 baseline, start the backend once instead (see below); the
-diesel CLI stops there at the app baseline's guard.
+Neither command regenerates the shared schema; use the explicit command in "Adding a
+migration" after both sets are applied. On a database built from the single v4.0.0 baseline,
+start the backend once instead (see below); the diesel CLI stops there at the app baseline's guard.
 
 ## The v4.0.0 baseline split
 

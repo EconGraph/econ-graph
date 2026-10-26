@@ -1109,6 +1109,27 @@ mod tests {
         }
     }
 
+    /// Bring a reference schema forward by running only pending app incrementals.
+    /// Its app tables already exist, so neither run nor record the split app baseline:
+    /// this independently checks the production baseline-recording path's result.
+    fn apply_pending_app_incrementals(conn: &mut diesel::PgConnection) {
+        use diesel_migrations::MigrationHarness;
+
+        let pending = conn
+            .pending_migrations(MigrationSet::App.migrations())
+            .expect("should read pending app migrations");
+        for migration in pending {
+            if migration.name().version().to_string().as_str() > APP_BASELINE_VERSION {
+                conn.run_migration(&migration)
+                    .expect("pending app incremental should run");
+            }
+        }
+        assert!(
+            !recorded_versions(conn).contains(&APP_BASELINE_VERSION.to_string()),
+            "the reference must not record or run the split app baseline"
+        );
+    }
+
     /// A single-baseline database without the later app migrations (a release candidate from
     /// before them): the app baseline is recorded, not run, and the later app migrations run.
     /// The schema ends up exactly as the single baseline plus those migrations.
@@ -1118,7 +1139,7 @@ mod tests {
         let (db, mut conn) = single_baseline_database("single_baseline_rc").await;
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_rc_reference").await;
-        apply_release_v4_0_app_migrations(&mut reference_conn);
+        apply_pending_app_incrementals(&mut reference_conn);
         let before = schema_signature(&mut conn);
         let expected_schema = schema_signature(&mut reference_conn);
         assert_ne!(
@@ -1146,14 +1167,18 @@ mod tests {
     }
 
     /// A database migrated on release/v4.0 (the single baseline plus its later app migrations,
-    /// applied and recorded) is brought forward without any schema change: the app baseline is
-    /// recorded, not run.
+    /// applied and recorded) receives pending main app incrementals. The app baseline is
+    /// recorded, not run; the resulting schema matches independently applied incrementals.
     #[tokio::test]
     #[serial_test::serial]
     async fn run_migrations_records_the_app_baseline_on_a_single_baseline_database() {
         let (db, mut conn) = single_baseline_database("single_baseline").await;
         apply_release_v4_0_app_migrations(&mut conn);
-        let before = schema_signature(&mut conn);
+        let (_reference, mut reference_conn) =
+            single_baseline_database("single_baseline_reference").await;
+        apply_release_v4_0_app_migrations(&mut reference_conn);
+        apply_pending_app_incrementals(&mut reference_conn);
+        let expected_schema = schema_signature(&mut reference_conn);
 
         run_migrations(&db.url)
             .await
@@ -1165,14 +1190,14 @@ mod tests {
         assert_eq!(recorded_versions(&mut conn), expected);
         assert_eq!(
             schema_signature(&mut conn),
-            before,
-            "recording the app baseline should not change the schema"
+            expected_schema,
+            "only pending app incrementals should change the release schema"
         );
 
         run_migrations(&db.url)
             .await
             .expect("a second run should succeed");
-        assert_eq!(schema_signature(&mut conn), before);
+        assert_eq!(schema_signature(&mut conn), expected_schema);
     }
 
     /// A database with a stray `users` table and no migrations is not a single-baseline database,

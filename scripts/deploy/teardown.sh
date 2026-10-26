@@ -36,7 +36,9 @@
 #      backups and Grafana's data).
 #
 # A confirmation that can't be typed (no terminal) stops the script before it
-# changes anything.
+# changes anything. Every kubectl call goes to the kind cluster's own kubectl
+# on context kind-<cluster> (printed before anything else happens), never to
+# plain `kubectl`; if that context can't be selected, the script stops.
 #
 # The databases live on host btrfs subvolumes (static PVs in
 # k8s/manifests/host-storage.yaml, docs/deployment/HOST_STORAGE.md). This
@@ -62,7 +64,7 @@ for arg in "$@"; do
         --no-backup) NO_BACKUP="true" ;;
         --include-data-plane) INCLUDE_DATA_PLANE="true" ;;
         --delete-cluster) DELETE_CLUSTER="true" ;;
-        -h|--help) sed -n '3,48p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,50p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
@@ -91,6 +93,11 @@ if [ "${DRY_RUN}" != "true" ] && [ ! -t 0 ]; then
         die "--include-data-plane needs the data database's name typed on a terminal; --yes doesn't answer it. Nothing was changed"
     fi
 fi
+# --delete-cluster runs the pinned kind (scripts/deploy/install-kind.sh);
+# checked before anything changes.
+if [ "${DELETE_CLUSTER}" = "true" ]; then
+    require_kind_version
+fi
 
 # typed_confirm PROMPT ANSWER: read ANSWER from the terminal or stop. --yes
 # doesn't answer it.
@@ -109,6 +116,28 @@ echo "Tearing down EconGraph from kind cluster '${CLUSTER}'"
 check_docker_daemon
 kind_cluster_exists || die "kind cluster '${CLUSTER}' not found on ${DOCKER_HOST}"
 ensure_kind_kubectl
+
+# One kubectl and one context for everything below: the kind cluster's own
+# kubectl (copied by ensure_kind_kubectl) on context kind-<cluster>, through kc
+# (scripts/deploy/lib/cluster-role.sh). Plain `kubectl` may reach another
+# cluster (on the production host it is the MicroK8s wrapper), so it is
+# replaced by a function that calls kc, which also covers kind-env.sh's helpers;
+# KUBECTL and CLUSTER_ROLE_CONTEXT are exported for protect-postgres-pv.sh.
+export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+[ -x "${KUBECTL}" ] || die "the kind cluster's kubectl is not at ${KUBECTL}; nothing was changed"
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+EXPECTED_CONTEXT="kind-${CLUSTER}"
+cluster_role_use_context "${EXPECTED_CONTEXT}" ||
+    die "${KUBECTL} has no context ${EXPECTED_CONTEXT}; nothing was changed"
+kubectl() { kc "$@"; }
+current_context="$(kc config current-context)" ||
+    die "could not read the current context; nothing was changed"
+[ "${current_context}" = "${EXPECTED_CONTEXT}" ] ||
+    die "kubectl's context is ${current_context}, not ${EXPECTED_CONTEXT}; nothing was changed"
+server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}')" ||
+    die "could not read the API server of ${EXPECTED_CONTEXT}; nothing was changed"
+echo "Cluster: context ${EXPECTED_CONTEXT}, API server ${server}, kubectl ${KUBECTL}"
 
 # 1. Off-cluster copy of the databases first, while they are still running.
 if pod_running postgresql-0; then

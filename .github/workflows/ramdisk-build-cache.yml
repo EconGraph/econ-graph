@@ -67,22 +67,22 @@ jobs:
 
         # Install diesel_cli
         echo "Installing diesel_cli..."
-        $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        "$HOME/.cargo/bin/cargo" install diesel_cli --no-default-features --features postgres --verbose --force
 
         # Install cargo-audit
         echo "Installing cargo-audit..."
-        $HOME/.cargo/bin/cargo install cargo-audit --locked --verbose --force
+        "$HOME/.cargo/bin/cargo" install cargo-audit --locked --verbose --force
 
         # Install cargo-deny
         echo "Installing cargo-deny..."
-        $HOME/.cargo/bin/cargo install cargo-deny --locked --verbose --force
+        "$HOME/.cargo/bin/cargo" install cargo-deny --locked --verbose --force
 
         # Verify installations
         echo "Verifying installations..."
-        ls -la $HOME/.cargo/bin/
-        $HOME/.cargo/bin/diesel --version || echo "diesel not found"
-        $HOME/.cargo/bin/cargo-audit --version || echo "cargo-audit not found"
-        $HOME/.cargo/bin/cargo-deny --version || echo "cargo-deny not found"
+        ls -la "$HOME/.cargo/bin/"
+        "$HOME/.cargo/bin/diesel" --version || echo "diesel not found"
+        "$HOME/.cargo/bin/cargo-audit" --version || echo "cargo-audit not found"
+        "$HOME/.cargo/bin/cargo-deny" --version || echo "cargo-deny not found"
       working-directory: backend
 
     - name: Build backend

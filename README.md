@@ -195,6 +195,16 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 4. **Export Charts**: Download professional-quality visualizations
 5. **API Testing**: Test GraphQL API with provided examples
 
+#### Series CSV exports
+
+The Series Explorer's **Export as CSV** and the series page's **Download CSV**
+produce UTF-8 files with a byte-order mark so Excel recognizes non-ASCII titles.
+Text beginning with `=`, `+`, `-`, `@`, tab, carriage return, or line feed gets a
+leading apostrophe to prevent spreadsheet formula evaluation. This also applies
+to the Explorer's ID columns: an external ID such as `-ABC` exports as `'-ABC`.
+For exact source IDs in automated matching, use **Export as JSON**, which preserves
+them unchanged. Numeric observation values remain numbers in series CSV files.
+
 ### **🛠️ For Technical Teams**
 
 #### **Prerequisites**
@@ -333,7 +343,8 @@ newgrp microk8s
 
 #### **Kind (Alternative for Docker-based Development)**
 ```bash
-# Install kind and kubectl
+# kind v0.33.0, which the deploy scripts run (once; no sudo), and kubectl
+./scripts/deploy/install-kind.sh
 # Deploy application
 ./scripts/deploy/restart-k8s-rollout.sh
 ```

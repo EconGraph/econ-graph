@@ -270,6 +270,11 @@ jobs:
     - name: Check the teardown guards
       run: scripts/deploy/test-teardown-guards.sh
 
+    # teardown.sh and protect-postgres-pv.sh reach only the kind cluster's
+    # kubectl on context kind-econ-graph, never plain kubectl (all stubs here).
+    - name: Check that teardown uses only the kind cluster's context
+      run: scripts/deploy/test-teardown-kubectl.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
@@ -278,6 +283,11 @@ jobs:
     # and no network (kubectl, kind, docker, curl and the rest are stubs here).
     - name: Check that the monitoring lint contacts nothing
       run: scripts/test-monitoring-lint-only.sh
+
+    # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
+    # curl and sha256sum are stubs, nothing is downloaded or installed.
+    - name: Check the kind installer
+      run: scripts/deploy/test-install-kind.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -316,7 +326,7 @@ jobs:
         # Diesel reads as the same version.
         plant() {
           local set="$1" other="$2" form="${3:-}" latest version dup expected out
-          latest=$(ls -d "migrations/$set"/[0-9]*_*/ | sort | tail -1 | xargs basename)
+          latest=$(find "migrations/$set" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*_*' -printf '%f\n' | sort | tail -1)
           version="${latest%%_*}"
           [ "$form" = compact ] && version="${version//-/}"
           dup="migrations/$other/${version}_duplicate_migration_test"
@@ -417,6 +427,9 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        # This job has no Postgres service. DB-backed tests matched by the name filters
+        # below run in the required workspace job; do not inherit the workflow's DB URL.
+        unset DATABASE_URL APP_DATABASE_URL DATA_DATABASE_URL
         cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
@@ -466,6 +479,9 @@ jobs:
 
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh
+
+    - name: Check the backup and restore scripts against fake btrfs (no root)
+      run: scripts/host/test-backup-scripts.sh
 
   chart-api-integration-tests:
     name: Chart API Integration Tests
@@ -721,7 +737,8 @@ jobs:
           self_access_still_requires_named_operation_roles \
           own_account_cannot_be_suspended_or_deleted \
           own_account_is_left_intact_by_suspend_and_delete \
-          update_user_email_conflict_leaves_other_fields_unchanged; do
+          update_user_email_conflict_leaves_other_fields_unchanged \
+          deleting_a_chart_inviter_preserves_other_users_access; do
           name="graphql::authorization_tests::$test"
           log="$RUNNER_TEMP/$test.log"
           cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
@@ -769,6 +786,8 @@ jobs:
       run: |
         set -euo pipefail
         export PATH="$HOME/.cargo/bin:$PATH"
+        # Scheduler retry/backoff regressions must exercise Postgres rather than skip locally.
+        : "${DATABASE_URL:?DATABASE_URL is required for crawler scheduler regressions}"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
@@ -1032,6 +1051,14 @@ jobs:
     - name: Run admin frontend unit tests
       working-directory: admin-frontend
       run: npm run test:run -- --coverage --reporter=verbose --exclude="tests/**/*.spec.ts"
+
+    - name: Install Chromium for admin smoke test
+      working-directory: admin-frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: Smoke test the built admin frontend
+      working-directory: admin-frontend
+      run: npm run e2e:smoke
 
     - name: Upload admin frontend test coverage
       uses: actions/upload-artifact@v7
@@ -1498,15 +1525,17 @@ jobs:
         echo "REACT_APP_BACKEND_PORT: $REACT_APP_BACKEND_PORT"
         echo "CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
         # Export variables for subsequent steps
-        echo "BACKEND_PORT=$BACKEND_PORT" >> $GITHUB_ENV
-        echo "FRONTEND_PORT=$FRONTEND_PORT" >> $GITHUB_ENV
-        echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
-        echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT" >> $GITHUB_ENV
-        echo "REACT_APP_API_URL=$REACT_APP_API_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL" >> $GITHUB_ENV
-        echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT" >> $GITHUB_ENV
-        echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
+        {
+          echo "BACKEND_PORT=$BACKEND_PORT"
+          echo "FRONTEND_PORT=$FRONTEND_PORT"
+          echo "BACKEND_URL=$BACKEND_URL"
+          echo "FRONTEND_URL=$FRONTEND_URL"
+          echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT"
+          echo "REACT_APP_API_URL=$REACT_APP_API_URL"
+          echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL"
+          echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT"
+          echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS"
+        } >> "$GITHUB_ENV"
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.99.1
@@ -1763,11 +1792,11 @@ jobs:
         for container in $(docker ps --format "{{.Names}}"); do
           echo "📋 Searching in container: $container"
           echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          docker exec "$container" find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
           echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          docker exec "$container" find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
           echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+          docker exec "$container" find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
         done
 
         # Copy artifacts to the root for upload
@@ -1972,11 +2001,11 @@ jobs:
         for container in $(docker ps --format "{{.Names}}"); do
           echo "📋 Searching in container: $container"
           echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          docker exec "$container" find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
           echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          docker exec "$container" find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
           echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+          docker exec "$container" find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
         done
 
         # Copy artifacts to the root for upload
@@ -2119,7 +2148,7 @@ jobs:
           -e JWT_SECRET=ci-only-jwt-secret \
           econ-graph-backend:test
         backend_ok=""
-        for i in $(seq 1 30); do
+        for _ in $(seq 1 30); do
           if ! docker ps --format '{{.Names}}' | grep -q '^backend-smoke-test$'; then
             echo "Backend container exited unexpectedly" >&2
             break
@@ -2142,7 +2171,7 @@ jobs:
         echo "Testing frontend Docker image..."
         docker run -d --name frontend-smoke-test -p 18080:3000 econ-graph-frontend:test
         frontend_ok=""
-        for i in $(seq 1 15); do
+        for _ in $(seq 1 15); do
           if ! docker ps --format '{{.Names}}' | grep -q '^frontend-smoke-test$'; then
             echo "Frontend container exited unexpectedly" >&2
             break

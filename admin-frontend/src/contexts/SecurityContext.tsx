@@ -119,7 +119,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         (e.ctrlKey && e.shiftKey && e.key === "J") ||
         e.key === "F12";
 
-      if (isDev && process.env.NODE_ENV === "production") {
+      if (isDev && import.meta.env.PROD) {
         e.preventDefault();
         logSecurityEvent({
           type: "suspicious_activity",
@@ -227,7 +227,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Console log for development
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       console.warn("🔒 Security Event:", securityEvent);
     }
   };
@@ -255,7 +255,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   // Warn about insecure connections
   useEffect(() => {
-    if (!isSecureConnection && process.env.NODE_ENV === "production") {
+    if (!isSecureConnection && import.meta.env.PROD) {
       logSecurityEvent({
         type: "suspicious_activity",
         severity: "critical",

@@ -87,7 +87,7 @@ export const useUsers = (filters?: {
  */
 export const useOnlineUsers = () => {
   // Disable refetch interval in test environments to prevent infinite loops
-  const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST;
+  const isTestEnv = import.meta.env.MODE === "test";
 
   return useQuery({
     queryKey: ["users", "online"],

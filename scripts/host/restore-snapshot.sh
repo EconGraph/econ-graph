@@ -34,12 +34,23 @@
 # and, through findmnt on the existing mounts, that the target and the
 # snapshot directory are the expected subvolumes of this filesystem), then
 # prints each step. With --from-pool it stops before the copy back.
+#
+# --from-pool uses the pool copy only if it has a Received UUID (it was made
+# by btrfs receive), and refuses a local snapshot of the same name that is
+# not the one the pool copy was received from. After the copy back, the new
+# local snapshot's Received UUID must match too; if not, it is set aside as
+# <snapshot>.mismatch-<stamp> (not deleted).
+#
+# ECONGRAPH_TEST_ROOT, if set, is prefixed to the /srv paths below, so
+# scripts/host/test-backup-scripts.sh can run this against stubs in a
+# temporary directory.
 
 set -euo pipefail
 
+TEST_ROOT="${ECONGRAPH_TEST_ROOT:-}"
 FS_UUID="03ee0fcb-5f19-4f44-8596-e227f1fb647c"
-SNAPSHOT_DIR="/srv/econgraph/snapshots"
-SRV_ROOT="/srv/econgraph"
+SNAPSHOT_DIR="$TEST_ROOT/srv/econgraph/snapshots"
+SRV_ROOT="$TEST_ROOT/srv/econgraph"
 KIND_NODE="econ-graph-control-plane"      # where kubectl runs
 STORAGE_NODE="econ-graph-worker"          # the node that bind-mounts /srv/econgraph/*
 NAMESPACE="econ-graph"
@@ -50,7 +61,8 @@ DOCKER_SOCK="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
 DRY_RUN="false"
 YES="false"
 FROM_POOL="false"
-POOL_SNAPSHOT_DIR="/srv/econgraph-backups/snapshots"
+POOL_MOUNT="$TEST_ROOT/srv/econgraph-backups"
+POOL_SNAPSHOT_DIR="$POOL_MOUNT/snapshots"
 snap=""
 for arg in "$@"; do
     case "$arg" in
@@ -93,6 +105,25 @@ subvol="@econgraph-$name"
 mounted_subvol() {
     findmnt -n -o UUID,FSROOT --mountpoint "$1" | tail -n 1
 }
+# subvol_field <path> <field>: a field of `btrfs subvolume show <path>`
+# ("UUID" or "Received UUID"); "-" when unset, empty when unreadable.
+subvol_field() {
+    # || true: an unreadable subvolume must reach the callers' error
+    # messages, not abort the script under pipefail.
+    { btrfs subvolume show "$1" 2>/dev/null \
+        | sed -nE "s/^[[:space:]]*$2:[[:space:]]+([^[:space:]]+).*/\1/p" | head -n 1; } || true
+}
+# send_uuid <path>: the UUID a send of <path> carries (its Received UUID if
+# it was itself received, otherwise its UUID). Empty when unreadable.
+send_uuid() {
+    local received
+    received="$(subvol_field "$1" "Received UUID")"
+    if [ -n "$received" ] && [ "$received" != "-" ]; then
+        echo "$received"
+    else
+        subvol_field "$1" "UUID"
+    fi
+}
 # mount_target: mount $target from /etc/fstab (its options), then check it
 # really is $subvol on this filesystem; if not, unmount it again and fail.
 mount_target() {
@@ -122,16 +153,28 @@ elif [ "$DRY_RUN" = "true" ]; then
 fi
 
 if [ "$FROM_POOL" = "true" ]; then
-    if ! mountpoint -q /srv/econgraph-backups; then
-        echo "error: the backup pool is not mounted at /srv/econgraph-backups" >&2
+    if ! mountpoint -q "$POOL_MOUNT"; then
+        echo "error: the backup pool is not mounted at $POOL_MOUNT" >&2
         exit 1
     fi
     if [ "$(btrfs property get "$POOL_SNAPSHOT_DIR/$snap" ro 2>/dev/null)" != "ro=true" ]; then
         echo "error: $POOL_SNAPSHOT_DIR/$snap is not a complete read-only snapshot" >&2
         exit 1
     fi
+    pool_received="$(subvol_field "$POOL_SNAPSHOT_DIR/$snap" "Received UUID")"
+    if [ -z "$pool_received" ] || [ "$pool_received" = "-" ]; then
+        echo "error: $POOL_SNAPSHOT_DIR/$snap has no Received UUID, so it is not a copy made by btrfs receive; refusing" >&2
+        exit 1
+    fi
     if [ -e "$SNAPSHOT_DIR/$snap" ]; then
-        echo "= $SNAPSHOT_DIR/$snap already exists locally; using it"
+        local_uuid="$(send_uuid "$SNAPSHOT_DIR/$snap")"
+        if [ "$local_uuid" != "$pool_received" ]; then
+            echo "error: $SNAPSHOT_DIR/$snap (UUID ${local_uuid:-unreadable}) is not the snapshot" >&2
+            echo "  $POOL_SNAPSHOT_DIR/$snap was received from (Received UUID $pool_received); refusing." >&2
+            echo "  Restore the local one without --from-pool, or move it aside by hand to use the pool copy." >&2
+            exit 1
+        fi
+        echo "= $SNAPSHOT_DIR/$snap already exists locally and is the snapshot the pool copy was received from; using it"
     else
         echo "+ btrfs send $POOL_SNAPSHOT_DIR/$snap | btrfs receive $SNAPSHOT_DIR"
         if [ "$DRY_RUN" = "true" ]; then
@@ -147,6 +190,13 @@ if [ "$FROM_POOL" = "true" ]; then
                 echo "  the partial copy is set aside as $leftover (not deleted)" >&2
                 mv "$SNAPSHOT_DIR/$snap" "$leftover" || echo "  could not rename it; move it aside by hand" >&2
             fi
+            exit 1
+        fi
+        got="$(subvol_field "$SNAPSHOT_DIR/$snap" "Received UUID")"
+        if [ "$got" != "$pool_received" ]; then
+            mismatch="$SNAPSHOT_DIR/$snap.mismatch-$(date -u +%Y%m%dT%H%M%SZ)"
+            echo "error: the copy back has Received UUID ${got:-(unreadable)}, not $pool_received; set aside as $mismatch (not deleted)" >&2
+            mv "$SNAPSHOT_DIR/$snap" "$mismatch" || echo "  could not rename it; move it aside by hand" >&2
             exit 1
         fi
     fi
@@ -251,9 +301,11 @@ elif ! mount_target; then
     put_back
 fi
 
-if [ "$DRY_RUN" = "false" ]; then
-    findmnt "$target"
+if [ "$DRY_RUN" = "true" ]; then
+    echo "(dry run: nothing restored)"
+    exit 0
 fi
+findmnt "$target"
 cat <<EOF
 
 Restored $target from $snap. The previous data is kept as $subvol.replaced-$stamp.

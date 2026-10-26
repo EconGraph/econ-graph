@@ -7,7 +7,8 @@
 //! - `GET /metrics`: Prometheus text exposition of `econ_graph_metrics::DEFAULT_REGISTRY`, the
 //!   registry `CRAWLER_METRICS` (HTTP-level `econgraph_crawler_*`), `CRAWLER_QUEUE_METRICS`
 //!   (`crawler_jobs_total`, `crawler_queue_*`, `crawler_last_{success,failure}_timestamp_seconds`)
-//!   and `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`) use.
+//!   `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`) and `CRAWLER_SCHEDULER_METRICS`
+//!   (`crawler_scheduler_*`) use.
 //! - `GET /healthz`: 200 while the worker loop runs, 503 before it starts and once it stops.
 //!
 //! [`queue_gauge_loop`] refreshes the queue gauges from
@@ -29,7 +30,7 @@ use econ_graph_crawler::status::{crawler_status, CrawlerStatusSnapshot};
 use econ_graph_crawler::SourceId;
 use econ_graph_metrics::crawler::{
     CrawlerCoverageMetrics, CrawlerQueueMetrics, CRAWLER_COVERAGE_METRICS, CRAWLER_METRICS,
-    CRAWLER_QUEUE_METRICS,
+    CRAWLER_QUEUE_METRICS, CRAWLER_SCHEDULER_METRICS,
 };
 use econ_graph_metrics::prometheus::{Encoder, TextEncoder};
 use econ_graph_metrics::DEFAULT_REGISTRY;
@@ -56,6 +57,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_METRICS;
     let _ = &*CRAWLER_QUEUE_METRICS;
     let _ = &*CRAWLER_COVERAGE_METRICS;
+    let _ = &*CRAWLER_SCHEDULER_METRICS;
 }
 
 /// Unix seconds of `t`, as a gauge value.
@@ -372,6 +374,43 @@ mod tests {
         let (status, body) = get(addr, "/metrics").await;
         assert_eq!(status, 200);
         assert!(body.contains("econgraph_crawler_requests_total{"), "{body}");
+        let _ = stop.send(());
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_exposes_scheduler_activity_after_idle_tick() {
+        use econ_graph_crawler::scheduler::{RefreshScheduler, SchedulerConfig};
+
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        init_metrics();
+        let scheduler = RefreshScheduler::new(
+            pool,
+            vec![SourceId::Fred],
+            SchedulerConfig {
+                batch_limit: 0,
+                ..SchedulerConfig::default()
+            },
+        );
+        assert_eq!(scheduler.tick().await.unwrap().discover_enqueued, 1);
+        assert_eq!(scheduler.tick().await.unwrap().discover_enqueued, 0);
+        let (addr, stop) = start_server(Arc::new(AtomicBool::new(true)));
+        let (status, body) = get(addr, "/metrics").await;
+        assert_eq!(status, 200);
+        for name in [
+            "crawler_scheduler_ticks_total",
+            "crawler_scheduler_enqueued_total",
+        ] {
+            assert!(
+                body.lines()
+                    .any(|line| line.starts_with(&format!("{name}{{"))
+                        && line.contains(r#"source="FRED""#)
+                        && line.contains(r#"kind="discover_catalog""#)),
+                "{body}"
+            );
+        }
+        assert!(body.contains("crawler_scheduler_last_discovery_success_timestamp_seconds{"));
         let _ = stop.send(());
     }
 

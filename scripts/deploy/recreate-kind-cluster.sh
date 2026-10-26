@@ -69,6 +69,11 @@ KIND_KUBECONFIG="${ECONGRAPH_CACHE}/kubeconfig-${KIND_CLUSTER}"
 
 log "Docker daemon"
 check_docker_daemon
+# Creating a cluster needs a kind new enough for the node image; keeping one
+# (--if-missing) does not. Checked here, before anything is backed up or deleted.
+if [ "$IF_MISSING" != "true" ] || ! kind_cluster_exists; then
+    require_kind_version
+fi
 
 # Every bind-mounted host directory must already exist as a real mount, or
 # kind would fail half-way (or, for a missing mount under an existing

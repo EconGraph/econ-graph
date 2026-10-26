@@ -63,11 +63,13 @@ WRITERS=(deployment/crawler-worker deployment/econ-graph-backend deployment/keyc
 common_flags=()
 [ "${DRY_RUN}" = "true" ] && common_flags+=(--dry-run)
 
-for tool in kind docker yq git mountpoint findmnt; do
+for tool in docker yq git mountpoint findmnt; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found"
 done
 log "Docker daemon"
 check_docker_daemon
+# The cluster is recreated with the pinned kind (scripts/deploy/install-kind.sh).
+require_kind_version
 
 # recreate-kind-cluster.sh has its own --dry-run, so it runs (and checks the
 # kind config and host mounts) even in a dry run; common_flags passes it on.

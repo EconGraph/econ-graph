@@ -531,6 +531,59 @@ pub static CRAWLER_DISCOVERY_METRICS: Lazy<CrawlerDiscoveryMetrics> = Lazy::new(
         .expect("Failed to initialize crawler discovery metrics")
 });
 
+/// Refresh scheduler activity. Counters have bounded registry-source and job-kind labels.
+pub struct CrawlerSchedulerMetrics {
+    /// Scheduling passes started, including idle passes and passes that later fail.
+    pub ticks_total: IntCounterVec,
+    /// Jobs actually inserted (duplicate active jobs are not counted).
+    pub enqueued_total: IntCounterVec,
+    /// Latest successful discovery in retained queue history; zero when none is retained.
+    /// Refreshed on each successful discovery-state query, including disabled sources.
+    pub last_discovery_success_timestamp_seconds: GaugeVec,
+}
+
+impl CrawlerSchedulerMetrics {
+    /// Creates scheduler metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    /// Returns an error if any metric fails to register.
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let counter = |name: &str, help: &str| -> anyhow::Result<IntCounterVec> {
+            let value = IntCounterVec::new(Opts::new(name, help), &["source", "kind"])?;
+            registry.register(Box::new(value.clone()))?;
+            Ok(value)
+        };
+        let last_discovery_success_timestamp_seconds = GaugeVec::new(
+            Opts::new(
+                "crawler_scheduler_last_discovery_success_timestamp_seconds",
+                "Unix time of latest successful discovery in retained queue history (0 if none)",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(last_discovery_success_timestamp_seconds.clone()))?;
+        Ok(Self {
+            ticks_total: counter(
+                "crawler_scheduler_ticks_total",
+                "Scheduling passes started, including idle and failed passes, by source and kind",
+            )?,
+            enqueued_total: counter(
+                "crawler_scheduler_enqueued_total",
+                "Jobs inserted by the scheduler, excluding active duplicates, by source and kind",
+            )?,
+            last_discovery_success_timestamp_seconds,
+        })
+    }
+}
+
+/// Global scheduler metrics, exported by the crawler worker through [`DEFAULT_REGISTRY`].
+///
+/// # Panics
+/// Panics if the metrics cannot be registered.
+pub static CRAWLER_SCHEDULER_METRICS: Lazy<CrawlerSchedulerMetrics> = Lazy::new(|| {
+    CrawlerSchedulerMetrics::new(&DEFAULT_REGISTRY)
+        .expect("Failed to initialize crawler scheduler metrics")
+});
+
 #[cfg(test)]
 mod queue_metrics_tests {
     use super::*;

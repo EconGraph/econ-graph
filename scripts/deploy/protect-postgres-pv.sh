@@ -20,6 +20,14 @@ for arg in "$@"; do
     esac
 done
 
+# Every call goes through kc (scripts/deploy/lib/cluster-role.sh): the KUBECTL
+# and CLUSTER_ROLE_CONTEXT that deploy.sh and teardown.sh export, or, run by
+# hand with neither, the kind cluster's own kubectl and kubeconfig when cached.
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+cluster_role_default_kubectl
+
 NAMESPACE="econ-graph"
 protect_pvc() {
     local pvc_name="$1"
@@ -27,7 +35,7 @@ protect_pvc() {
     local pv_name current_policy
 
     local pvc_resource
-    pvc_resource="$(kubectl get pvc "${pvc_name}" -n "${NAMESPACE}" -o name --ignore-not-found)"
+    pvc_resource="$(kc get pvc "${pvc_name}" -n "${NAMESPACE}" -o name --ignore-not-found)"
     if [ -z "${pvc_resource}" ]; then
         if [ "${required}" = true ]; then
             echo "❌ PVC ${pvc_name} not found in namespace ${NAMESPACE}." >&2
@@ -37,7 +45,7 @@ protect_pvc() {
         return 0
     fi
 
-    pv_name="$(kubectl get pvc "${pvc_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.volumeName}')"
+    pv_name="$(kc get pvc "${pvc_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.volumeName}')"
     if [ -z "${pv_name}" ]; then
         # A Pending claim has no volume or backups to preserve yet.
         echo "ℹ️  PVC ${pvc_name} is not bound yet; check again after the first backup job."
@@ -45,13 +53,13 @@ protect_pvc() {
         return 0
     fi
 
-    current_policy="$(kubectl get pv "${pv_name}" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}')"
+    current_policy="$(kc get pv "${pv_name}" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}')"
     if [ "${current_policy}" = Retain ]; then
         echo "✅ ${pv_name} (backing ${pvc_name}) is already set to Retain."
     elif [ "${DRY_RUN}" = true ]; then
         echo "+ kubectl patch pv ${pv_name} (backing ${pvc_name}): persistentVolumeReclaimPolicy ${current_policy} -> Retain"
     else
-        kubectl patch pv "${pv_name}" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+        kc patch pv "${pv_name}" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
         echo "✅ ${pv_name} (backing ${pvc_name}) is now Retain."
     fi
 }
