@@ -81,7 +81,14 @@ const GlobalAnalysis: React.FC = () => {
             <Home fontSize='small' />
             Dashboard
           </Link>
-          <Typography color='text.primary' sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Typography
+            sx={{
+              color: 'text.primary',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+            }}
+          >
             <Public fontSize='small' />
             Global Analysis
           </Typography>
@@ -102,7 +109,14 @@ const GlobalAnalysis: React.FC = () => {
           Global Analysis
         </Typography>
 
-        <Typography variant='h6' color='text.secondary' paragraph>
+        <Typography
+          variant='h6'
+          component='p'
+          sx={{
+            color: 'text.secondary',
+            marginBottom: '16px',
+          }}
+        >
           Compare countries on World Bank development indicators.
         </Typography>
       </Box>
@@ -168,7 +182,13 @@ const GlobalAnalysis: React.FC = () => {
             <Public color='primary' />
             World Map
           </Typography>
-          <Typography variant='body1' color='text.secondary' paragraph>
+          <Typography
+            variant='body1'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             Each country is colored by its latest value of the chosen indicator. Countries differ in
             how recent their latest value is; the legend gives the range of dates.
           </Typography>
@@ -187,7 +207,13 @@ const GlobalAnalysis: React.FC = () => {
               <CompareArrows color='primary' />
               Multi-Country Economic Dashboard
             </Typography>
-            <Typography variant='body1' color='text.secondary' paragraph>
+            <Typography
+              variant='body1'
+              sx={{
+                color: 'text.secondary',
+                marginBottom: '16px',
+              }}
+            >
               Compare economic indicators across multiple countries simultaneously. Analyze GDP,
               inflation, unemployment, and trade relationships with synchronized charts and
               real-time correlation analysis.
@@ -210,7 +236,13 @@ const GlobalAnalysis: React.FC = () => {
               <Timeline color='primary' />
               Global Economic Events Explorer
             </Typography>
-            <Typography variant='body1' color='text.secondary' paragraph>
+            <Typography
+              variant='body1'
+              sx={{
+                color: 'text.secondary',
+                marginBottom: '16px',
+              }}
+            >
               Explore major global economic events and their impacts across countries. Track
               recovery patterns, impact severity, and economic contagion effects from financial
               crises, policy changes, and external shocks.
@@ -233,7 +265,13 @@ const GlobalAnalysis: React.FC = () => {
               <Assessment color='primary' />
               Economic Impact Analysis
             </Typography>
-            <Typography variant='body1' color='text.secondary' paragraph>
+            <Typography
+              variant='body1'
+              sx={{
+                color: 'text.secondary',
+                marginBottom: '16px',
+              }}
+            >
               Advanced economic impact analysis and predictive modeling tools.
             </Typography>
           </Box>
@@ -241,10 +279,22 @@ const GlobalAnalysis: React.FC = () => {
           {/* Placeholder for future impact analysis features */}
           <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50' }}>
             <Assessment sx={{ fontSize: 64, color: 'grey.400', mb: 2 }} />
-            <Typography variant='h6' color='text.secondary' gutterBottom>
+            <Typography
+              variant='h6'
+              gutterBottom
+              sx={{
+                color: 'text.secondary',
+              }}
+            >
               Advanced Impact Analysis Coming Soon
             </Typography>
-            <Typography variant='body1' color='text.secondary' paragraph>
+            <Typography
+              variant='body1'
+              sx={{
+                color: 'text.secondary',
+                marginBottom: '16px',
+              }}
+            >
               This section will feature advanced econometric modeling, impact prediction algorithms,
               and scenario analysis tools for comprehensive economic impact assessment.
             </Typography>
@@ -271,7 +321,12 @@ const GlobalAnalysis: React.FC = () => {
                     bgcolor: 'background.paper',
                   }}
                 >
-                  <Typography variant='body2' color='text.secondary'>
+                  <Typography
+                    variant='body2'
+                    sx={{
+                      color: 'text.secondary',
+                    }}
+                  >
                     {feature}
                   </Typography>
                 </Paper>

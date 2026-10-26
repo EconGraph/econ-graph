@@ -7,6 +7,12 @@ illustrative. `observations_gdp.json` is a full vintage fetch (`realtime_start=1
 that follows it (known vintage 2026-04-29, so the window starts on 2026-04-28), with rows in
 effect on 2026-04-28 clamped to that `realtime_start` and a later revision to an old quarter.
 
+`vintagedates_gdp.json` is a `/fred/series/vintagedates` response in FRED's documented format
+listing every vintage date the GDP observation fixtures use (the full, incremental and e2e
+ones), so one file serves each of them; the adapter only keeps the dates inside the real-time
+window it asked about. `vintagedates_multipage_e2e.json` lists the two vintages of
+`observations_multipage_e2e.json`.
+
 QA must check against the live API that FRED clamps `realtime_start` to the requested window
 start for rows already in effect on it, as these fixtures assume. The adapter drops rows starting
 before the known vintage either way.

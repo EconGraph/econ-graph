@@ -134,7 +134,12 @@ const About: React.FC = () => {
             <Typography variant='h5' gutterBottom>
               About EconGraph
             </Typography>
-            <Typography variant='body1' paragraph>
+            <Typography
+              variant='body1'
+              sx={{
+                marginBottom: '16px',
+              }}
+            >
               EconGraph is a modern economic data visualization platform inspired by the Federal
               Reserve Economic Data (FRED) system. While FRED provides excellent data coverage,
               EconGraph focuses on delivering that same comprehensive data through a more intuitive,
@@ -200,7 +205,12 @@ const About: React.FC = () => {
                           {feature.title}
                         </Typography>
                       </Box>
-                      <Typography variant='body2' color='text.secondary'>
+                      <Typography
+                        variant='body2'
+                        sx={{
+                          color: 'text.secondary',
+                        }}
+                      >
                         {feature.description}
                       </Typography>
                     </CardContent>
@@ -260,7 +270,12 @@ const About: React.FC = () => {
               <CodeIcon sx={{ mr: 1 }} />
               Open Source
             </Typography>
-            <Typography variant='body2' paragraph>
+            <Typography
+              variant='body2'
+              sx={{
+                marginBottom: '16px',
+              }}
+            >
               EconGraph is built with modern, open-source technologies and follows best practices
               for scalability, security, and maintainability.
             </Typography>
@@ -279,11 +294,22 @@ const About: React.FC = () => {
 
       {/* Footer */}
       <Box sx={{ mt: 6, py: 3, borderTop: 1, borderColor: 'divider', textAlign: 'center' }}>
-        <Typography variant='body2' color='text.secondary'>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           EconGraph is an independent project and is not affiliated with the Federal Reserve Bank of
           St. Louis or FRED.
         </Typography>
-        <Typography variant='body2' color='text.secondary' sx={{ mt: 1 }}>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+            mt: 1,
+          }}
+        >
           Built with ❤️ for the economics and data visualization community.
         </Typography>
       </Box>

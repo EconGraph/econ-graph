@@ -46,13 +46,23 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
     );
   } else if (isError) {
     body = (
-      <Typography variant='body1' color='text.secondary'>
+      <Typography
+        variant='body1'
+        sx={{
+          color: 'text.secondary',
+        }}
+      >
         Couldn&apos;t load this series
       </Typography>
     );
   } else if (!series || !observation) {
     body = (
-      <Typography variant='body1' color='text.secondary'>
+      <Typography
+        variant='body1'
+        sx={{
+          color: 'text.secondary',
+        }}
+      >
         No data yet
       </Typography>
     );
@@ -67,11 +77,23 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
           {value ?? 'No value reported'}
         </Typography>
         {series.units && (
-          <Typography variant='body2' color='text.secondary'>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+            }}
+          >
             {series.units}
           </Typography>
         )}
-        <Typography variant='caption' color='text.secondary' component='div' sx={{ mt: 1 }}>
+        <Typography
+          variant='caption'
+          component='div'
+          sx={{
+            color: 'text.secondary',
+            mt: 1,
+          }}
+        >
           <time dateTime={observation.date}>{formatObservationDate(observation.date)}</time>
         </Typography>
       </>

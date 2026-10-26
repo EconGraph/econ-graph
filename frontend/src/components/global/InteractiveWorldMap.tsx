@@ -284,14 +284,16 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
   return (
     <Box
       ref={boxRef}
-      position='relative'
-      width='100%'
-      maxWidth={width}
-      border='2px solid #e0e0e0'
-      borderRadius={2}
-      overflow='hidden'
-      bgcolor='#fafafa'
       data-testid='world-map'
+      sx={{
+        position: 'relative',
+        width: '100%',
+        maxWidth: width,
+        border: '2px solid #e0e0e0',
+        borderRadius: 2,
+        overflow: 'hidden',
+        bgcolor: '#fafafa',
+      }}
     >
       <svg
         ref={svgRef}
@@ -390,7 +392,15 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
 
   if (isError) {
     return (
-      <Box display='flex' justifyContent='center' alignItems='center' width={width} height={height}>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: width,
+          height: height,
+        }}
+      >
         <Alert
           severity='error'
           action={
@@ -408,12 +418,14 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
   if (!worldData) {
     return (
       <Box
-        display='flex'
-        justifyContent='center'
-        alignItems='center'
-        height={height}
-        width='100%'
-        maxWidth={width}
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: height,
+          width: '100%',
+          maxWidth: width,
+        }}
       >
         <CircularProgress />
       </Box>

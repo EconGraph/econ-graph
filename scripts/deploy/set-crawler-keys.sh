@@ -10,9 +10,11 @@
 #
 # --tunnel asks only for the Cloudflare Tunnel token (Secret cloudflare-tunnel,
 # key token; ECO-457), the one the dashboard shows for the tunnel's connector:
-# paste the bare token, not the `cloudflared ... --token` command. Then
-# cloudflared is started (or restarted) with it; deploy.sh does the same on
-# its next run.
+# paste the bare token, not the `cloudflared ... --token` command. Only on the
+# cluster marked production (scripts/deploy/mark-production-cluster.sh,
+# ECO-468): anywhere else it refuses before asking. Then cloudflared is started
+# (or restarted) with it through apply_cloudflared (scripts/deploy/lib/public-host.sh),
+# for the public host the cluster serves; deploy.sh does the same on its next run.
 #
 # Each key is read with hidden input. Press Enter to keep the value already in
 # the cluster. The values go to scripts/deploy/create-secrets.sh through its
@@ -27,7 +29,8 @@
 # does), since that Job is what puts the Google client into the realm.
 #
 # --dry-run prints which keys are currently set (names only) and what would
-# happen; it prompts for nothing and writes no key. It may create a temporary
+# happen (with --tunnel, whether the cluster is marked production: these reads
+# are real, unlike deploy.sh --dry-run); it prompts for nothing and writes no key. It may create a temporary
 # directory under $TMPDIR (a copy of the cluster's kubectl and kubeconfig),
 # removed on exit; it changes nothing else.
 #
@@ -51,7 +54,7 @@ for arg in "$@"; do
         --tunnel) TUNNEL=true ;;
         --no-start-crawler) START_CRAWLER=false ;;
         -h | --help)
-            sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -65,6 +68,15 @@ done
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
 ensure_kind_kubectl
+# One kubectl, one context, as in deploy.sh: the kind kubectl that
+# ensure_kind_kubectl put first on PATH, on kind-econ-graph (replacing any
+# KUBECTL or CLUSTER_ROLE_CONTEXT from the environment). Every kubectl call
+# below, the production check and create-secrets.sh's writes go through kc.
+export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+cluster_role_use_context "kind-${KIND_CLUSTER}" || die "${KUBECTL} has no context kind-${KIND_CLUSTER}"
+kubectl() { kc "$@"; }
 
 if [ "$TUNNEL" = true ] && [ "$GOOGLE" = true ]; then
     die "--tunnel and --google are separate runs; run the script once for each"
@@ -128,12 +140,29 @@ for v in "${vars[@]}"; do
     printf '  %-30s %s/%s: %s\n' "$v" "$(secret_of "$v")" "$(key_of "$v")" "$(key_state "$v")"
 done
 
+# The tunnel token goes only into the production cluster: refuse before asking
+# for it (create-secrets.sh would refuse it too, but only after it was typed).
+if [ "$TUNNEL" = true ]; then
+    production=0
+    cluster_is_marked_production || production=$?
+    if [ "$production" != 0 ]; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "==> Dry run: would refuse the tunnel token: ${CLUSTER_ROLE_REASON}"
+            exit 0
+        fi
+        die "refusing to take the tunnel token: ${CLUSTER_ROLE_REASON}." \
+            "Only the production cluster may hold it. Only if this is the cluster serving" \
+            "econgraph.com: run scripts/deploy/mark-production-cluster.sh, then run this again." \
+            "Nothing was asked for or written."
+    fi
+fi
+
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
     [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
         "then delete and re-apply job/keycloak-realm-import and wait for it"
-    [ "$TUNNEL" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/cloudflared --replicas=1 and restart it"
+    [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
 fi
 
@@ -163,10 +192,10 @@ else
     # In a subshell: drop every exported variable except the basics and the
     # selected keys, so create-secrets.sh cannot pick up other credentials
     # from the caller's environment. The values stay in the environment (not
-    # on any command line). KUBECTL is dropped too, so create-secrets.sh uses
-    # the same kind kubectl (on PATH) as this script.
+    # on any command line). KUBECTL and CLUSTER_ROLE_CONTEXT are kept, so
+    # create-secrets.sh uses the same kind kubectl and context as this script.
     (
-        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG ${vars[*]} "
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT ${vars[*]} "
         while IFS= read -r name; do
             case "$keep" in
                 *" $name "*) ;;
@@ -216,11 +245,22 @@ if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
     esac
 fi
 if [ "$TUNNEL" = true ] && [ "$entered" -gt 0 ]; then
-    if kubectl -n "$NAMESPACE" get deployment cloudflared >/dev/null 2>&1; then
-        # deploy.sh leaves it at 0 replicas while the token is missing.
-        echo "==> Starting cloudflared with the new token"
-        kubectl -n "$NAMESPACE" scale deployment/cloudflared --replicas=1
-        kubectl -n "$NAMESPACE" rollout restart deployment/cloudflared
+    if [ -n "$(kubectl -n "$NAMESPACE" get deployment cloudflared --ignore-not-found -o name)" ]; then
+        # deploy.sh leaves it at 0 replicas while the token is missing. Started
+        # the way deploy.sh starts it, apply_cloudflared, which checks the
+        # production marker, the Secret and the public host again.
+        PUBLIC_HOST="$(public_host_in_cluster)" ||
+            die "could not read the cluster's Ingresses to see which public host it serves"
+        if [ -z "$PUBLIC_HOST" ]; then
+            echo "==> cloudflared stays at 0 replicas: this cluster serves no public host yet."
+            echo "    Deploy with PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh to start it."
+        else
+            echo "==> Starting cloudflared with the new token for https://${PUBLIC_HOST}"
+            (cd "$PROJECT_ROOT" && apply_cloudflared &&
+                if [ "$CLOUDFLARED_DEPLOYED" = true ]; then
+                    kubectl -n "$NAMESPACE" rollout restart deployment/cloudflared
+                fi)
+        fi
     else
         echo "==> cloudflared is not deployed yet; scripts/deploy/deploy.sh starts it"
     fi

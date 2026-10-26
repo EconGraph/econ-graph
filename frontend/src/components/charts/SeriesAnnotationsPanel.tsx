@@ -87,7 +87,12 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
     );
   } else if (annotations.length === 0) {
     body = (
-      <Typography variant='body2' color='text.secondary'>
+      <Typography
+        variant='body2'
+        sx={{
+          color: 'text.secondary',
+        }}
+      >
         No annotations on this series yet.
       </Typography>
     );
@@ -122,17 +127,25 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
             >
               <ListItemText
                 sx={{ minWidth: 0 }}
-                primaryTypographyProps={{ sx: wrapAnywhere }}
-                secondaryTypographyProps={{ sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } }}
                 primary={annotation.title}
                 secondary={
                   <>
-                    <Typography component='span' variant='caption' display='block'>
+                    <Typography
+                      component='span'
+                      variant='caption'
+                      sx={{
+                        display: 'block',
+                      }}
+                    >
                       {formatIsoDate(annotation.date)}
                     </Typography>
                     {annotation.description}
                   </>
                 }
+                slotProps={{
+                  primary: { sx: wrapAnywhere },
+                  secondary: { sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } },
+                }}
               />
             </ListItemButton>
             {renderAnnotationExtra?.(annotation)}

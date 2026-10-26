@@ -822,6 +822,11 @@ async fn fred_vintages_first_and_incremental_fetch() {
         )
         .mount(mock.server())
         .await;
+    mock.mount(
+        &Route::get("/series/vintagedates").query("series_id", ID),
+        Reply::json_str(fixture("vintagedates_gdp.json")),
+    )
+    .await;
     mock.mount_expect(
         &Route::get("/series/observations")
             .query("series_id", ID)

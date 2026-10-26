@@ -1,0 +1,5 @@
+# Files `tsc -b` writes when a tsconfig emits. Vite loads vite.config.js in
+# preference to vite.config.ts, so a stale copy would override the real config.
+/vite.config.js
+/vite.config.d.ts
+*.tsbuildinfo

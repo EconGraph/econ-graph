@@ -21,9 +21,16 @@
 #
 # The tunnel token comes only from the Secret cloudflare-tunnel (key token),
 # written by scripts/deploy/create-secrets.sh --prompt-tunnel-token (hidden
-# input); it is never committed. deploy.sh applies this Deployment with
-# replicas: 0 while that Secret or a PUBLIC_HOST is missing, so a cluster
-# without a tunnel does not crash-loop.
+# input); it is never committed.
+#
+# Only the production cluster may run this connector (ECO-468): every
+# cloudflared started with the token joins the same tunnel, and Cloudflare
+# silently spreads the site's traffic across all of them. So the Deployment is
+# committed with replicas: 0, and applying it, or all of k8s/manifests, never
+# starts it (on production it stops it until the next deploy). apply_cloudflared
+# in scripts/deploy/lib/public-host.sh scales it up, only on a cluster marked
+# with scripts/deploy/mark-production-cluster.sh that has a PUBLIC_HOST and the
+# Secret.
 #
 # Metrics: GET /metrics on :2000, scraped by the annotation-based kubernetes-pods
 # job in k8s/monitoring/prometheus-config.yaml; alerts are in
@@ -38,11 +45,9 @@ metadata:
     app: cloudflared
     component: tunnel
 spec:
-  # One replica while the cluster has one worker node. Once it is multi-node
-  # (ECO-434), go to 2+ replicas with the pod anti-affinity below
-  # uncommented: every replica registers its own connections for the same
-  # tunnel, so losing a node does not take the site down.
-  replicas: 1
+  # 0 as committed; apply_cloudflared sets CLOUDFLARED_REPLICAS on production
+  # (see the header). With 2+ replicas, uncomment the pod anti-affinity below.
+  replicas: 0
   strategy:
     type: RollingUpdate
     rollingUpdate:
