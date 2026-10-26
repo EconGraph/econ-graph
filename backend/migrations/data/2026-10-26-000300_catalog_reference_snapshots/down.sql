@@ -1,0 +1,1 @@
+-- Forward-only data migration. Keep exact catalog snapshots and their historical evidence.

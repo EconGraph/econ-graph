@@ -1,0 +1,40 @@
+# Match BEA's current table names; the prefixes follow families through suffix renames.
+# Expansion beyond these bounds stops the discovery rather than silently truncating it.
+max_tables = 32
+max_series = 20000
+exclude = []
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T10101"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T10105"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T10106"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T20100"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T20600"
+frequencies = ["M"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T20804"
+frequencies = ["M"]
+
+[[rule]]
+dataset = "Regional"
+prefix = "SAGDP2"
+frequencies = ["A"]
