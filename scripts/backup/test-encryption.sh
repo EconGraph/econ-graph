@@ -84,6 +84,7 @@ PYCHECK
     trap - EXIT
     # shellcheck source=scripts/deploy/lib/kind-env.sh
     source "$root/scripts/deploy/lib/kind-env.sh"
+    backup_prepare_payload() { printf 'test-image:v1\n' > "$1/local-images.txt"; }
     backup_databases_plain() {
         mkdir -p "$1/secrets"
         printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"
@@ -92,10 +93,15 @@ PYCHECK
     }
     backup_databases "$scratch/shared"
     [[ -f "$(backup_source_dir "$scratch/shared")/econ_graph.dump" ]]
+    [[ -f "$(backup_source_dir "$scratch/shared")/local-images.txt" ]]
     printf '%s' "$BACKUP_ACTIVE_DIR" > "$scratch/staging-path"
 )
 [[ -f "$scratch/shared/backup.tar.age" ]]
 [[ ! -e "$(cat "$scratch/staging-path")" ]]
+mkdir "$scratch/shared-opened"
+age -d -i "$scratch/identity" "$scratch/shared/backup.tar.age" |
+    python3 "$root/scripts/backup/unpack-backup.py" "$scratch/shared-opened"
+grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
 # A failed encryptor must never publish VERIFIED or final output.
 mkdir "$scratch/bin"
 printf '#!/bin/sh\nexit 42\n' > "$scratch/bin/age"

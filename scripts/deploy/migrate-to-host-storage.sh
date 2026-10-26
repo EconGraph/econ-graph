@@ -191,14 +191,17 @@ check_local_images() {
 
 save_local_images() {
     if [ "${DRY_RUN}" != "true" ]; then
-        printf '%s\n' "${LOCAL_IMAGES[@]}" >"${BACKUP_DIR}/local-images.txt"
+        printf '%s\n' "${LOCAL_IMAGES[@]}" >"$1/local-images.txt"
     fi
 }
 
+# Called by backup_databases after verification and before age publication.
+backup_prepare_payload() { save_local_images "$1"; }
+
 load_local_images() {
     local image
-    if [ "${#LOCAL_IMAGES[@]}" -eq 0 ] && [ -s "${BACKUP_DIR}/local-images.txt" ]; then
-        mapfile -t LOCAL_IMAGES <"${BACKUP_DIR}/local-images.txt"
+    if [ "${#LOCAL_IMAGES[@]}" -eq 0 ] && [ -s "$(backup_source_dir "$BACKUP_DIR")/local-images.txt" ]; then
+        mapfile -t LOCAL_IMAGES <"$(backup_source_dir "$BACKUP_DIR")/local-images.txt"
     fi
     [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "${BACKUP_DIR}/local-images.txt missing; can't tell which images to load"
     log "Loading the images that ran before into the new cluster"
@@ -329,7 +332,6 @@ forward() {
         remember_backup "$(new_backup_dir)"
         remember_production
         backup_databases "${BACKUP_DIR}"
-        save_local_images
         recreate_cluster --yes --no-backup "${common_flags[@]}"
     else
         BACKUP_DIR="$(recalled_backup)"
@@ -386,7 +388,6 @@ rollback() {
         remember_backup "$(new_backup_dir)"
         remember_production
         backup_databases "${BACKUP_DIR}"
-        save_local_images
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no running database to back up; pass --resume-from ~/econgraph-backups/<ts>"
