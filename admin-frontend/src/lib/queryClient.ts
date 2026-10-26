@@ -40,8 +40,3 @@ export const queryClient = new QueryClient({
     },
   },
 });
-
-// Enable React Query DevTools in development
-if (process.env.NODE_ENV === "development") {
-  // DevTools will be imported and used in the main App component
-}
