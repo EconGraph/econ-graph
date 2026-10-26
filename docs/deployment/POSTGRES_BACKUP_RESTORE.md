@@ -9,11 +9,15 @@ The `econ-graph` namespace runs three PostgreSQL databases
 | `econ_graph_app` (app) | `app-postgres` | `app-postgres-service` | users and everything they create |
 | `keycloak` | `keycloak-postgres` | `keycloak-postgres-service` | user accounts and their linked Google identities |
 
-The in-cluster `postgres-backup` CronJob dumps all three nightly to a
-separate volume, and can ship them to object storage.
+The in-cluster `postgres-backup` CronJob dumps them nightly to a separate
+volume, and can ship them to object storage. It dumps `econ_graph_app` only
+when the backend's `app-database-url` names it (`APP_DATABASE=separate`).
+With `APP_DATABASE=shared`, `app-database-url` names the data database and
+the app tables live in `econ_graph`, so the `econ_graph` dump holds them; see
+[Which app database](#which-app-database).
 
 On threadripper (production), the primary protection is host-side: btrfs
-snapshots, verified nightly dumps of the same three databases
+snapshots, verified nightly dumps of the same databases
 (`scripts/backup/dump-databases.sh`), a weekly restore drill and a freshness
 check; see [BACKUPS.md](BACKUPS.md). The CronJob described here is an
 independent second copy: it runs inside the cluster, needs nothing on the
@@ -72,13 +76,13 @@ Each run takes one UTC timestamp and writes, on the backup PVC:
 | File | Contents |
 |------|----------|
 | `econ_graph-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `econ_graph`, from `data-postgres-service` as `postgres` |
-| `econ_graph_app-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `econ_graph_app`, from `app-postgres-service` as `postgres` |
+| `econ_graph_app-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `econ_graph_app`, from `app-postgres-service` as `postgres`, when `APP_DATABASE=separate` |
 | `keycloak-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `keycloak`, from `keycloak-postgres-service` as `keycloak` |
 | `latest.dump` | symlink to the newest good `econ_graph` dump |
 | `latest-econ_graph_app.dump` | symlink to the newest good `econ_graph_app` dump |
 | `latest-keycloak.dump` | symlink to the newest good `keycloak` dump |
 
-All three dumps use `--no-owner --no-privileges` and `--lock-wait-timeout=600s`:
+Every dump uses `--no-owner --no-privileges` and `--lock-wait-timeout=600s`:
 `pg_dump` waits at most 10 minutes for its share lock on the tables (only an
 exclusive lock, such as a migration's `ALTER TABLE` or a `VACUUM FULL`,
 blocks it), then fails that dump instead of waiting until the Job deadline.
@@ -88,41 +92,55 @@ empty, `pg_restore --file=/dev/null` reads the whole archive back, and
 `pg_restore --list` shows at least one table. A dump that fails a check is
 removed, and the `latest` link keeps pointing at the previous good one.
 
-The table check means a database without any table fails its dump. The app
-database has tables once the backend has started against it (it applies the
-app migrations at startup), so this only fails a run that comes before the
-backend's first start, or a cluster whose `app-database-url` still points at
-the data database (`APP_DATABASE=shared`, see
-[k8s/README.md](../../k8s/README.md#databases)); there the app rows are in
-`econ_graph`, and the app database is skipped as below.
+### Which app database
+
+`backup.sh` decides whether there is a separate app database to dump from
+the same URLs the backend uses: `app-database-url` and `data-database-url`
+in the Secret `econ-graph-secrets` (both read with `optional: true`). It
+reads only their host and database name (the host cut to its first DNS
+label, `postgres-service` read as `data-postgres-service`), and never prints
+either URL.
+
+| `app-database-url` names | What the run does |
+|--------------------------|-------------------|
+| the data database: the same host and database as `data-database-url` (`APP_DATABASE=shared`) | skips the app dump with one log line; the app tables are in the `econ_graph` dump |
+| `app-postgres-service/econ_graph_app` (`APP_DATABASE=separate`) | dumps `econ_graph_app` with the checks above; a missing password, an unreachable server or a database without tables fails it |
+| nothing (Secret or key missing), or some other database | skips the app dump with one log line |
+
+`APP_REQUIRED` is `false` in the manifest. Set it to `true` on a cluster that
+is meant to have a separate app database: every skip in the table then
+fails the run, so a cluster that drifted back to `shared`, or lost
+`app-database-url`, is noticed.
+
+```sh
+kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
+```
+
+With `APP_DATABASE=separate`, the app database has tables once the backend has
+started against it (it applies the app migrations at startup), so the table
+check fails only a run that comes before the backend's first start.
+
+### Keycloak
 
 The CronJob reads the app database's password from the Secret
 `econ-graph-app-postgres` (key `postgres-password`) and Keycloak's from
 `econ-graph-keycloak` (key `db-password`), both with `optional: true`, so a
 missing Secret doesn't stop the pod or the other dumps. The manifest sets
-`APP_REQUIRED=true` and `KEYCLOAK_REQUIRED=true`, which make a missing or
-empty password a failed dump of that database. `deploy.sh` deploys Keycloak
-only when its Secret exists; on a cluster deployed without it, set
-`KEYCLOAK_REQUIRED` to `false` and the run logs that Keycloak is skipped:
+`KEYCLOAK_REQUIRED=true`, which makes a missing or empty Keycloak password a
+failed dump. `deploy.sh` deploys Keycloak only when its Secret exists; on a
+cluster deployed without it, set `KEYCLOAK_REQUIRED` to `false` and the run
+logs that Keycloak is skipped:
 
 ```sh
 kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 ```
 
-To skip the app database (a cluster with `APP_DATABASE=shared`), set
-`APP_REQUIRED` to `false` and remove its password, since a password that is
-set means the dump is attempted:
-
-```sh
-kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=false APP_PGPASSWORD-
-```
-
-`deploy.sh` re-applies the manifest, so either is needed again after each
-deploy on such a cluster.
+`deploy.sh` re-applies the manifest, so `set env` is needed again after each
+deploy.
 
 ### When one dump fails
 
-The three dumps are independent: each is attempted even if another fails,
+The dumps are independent: each is attempted even if another fails,
 and a good dump is kept whatever happens to the others. `backup.sh` records
 the names of the failed dumps in `/status/failed`, an `emptyDir` shared with
 `backup-sync`, and exits 0 so that `sync.sh` still runs and ships the dumps
@@ -165,7 +183,10 @@ dumps' timestamps.
 ## Credentials
 
 The `econ_graph` dump and restore read `postgres-password` from the same
-`econ-graph-postgres` Secret as the `postgresql` StatefulSet. The
+`econ-graph-postgres` Secret as the `postgresql` StatefulSet. The CronJob
+also reads `app-database-url` and `data-database-url` from
+`econ-graph-secrets`, which hold `econgraph`'s passwords; it uses only the
+host and database name from them and never prints them. The
 `econ_graph_app` dump connects as `postgres` with `postgres-password` from
 `econ-graph-app-postgres`, the Secret of the `app-postgres` StatefulSet. The
 Keycloak dump connects as `keycloak` with `db-password` from
@@ -183,7 +204,7 @@ database-side change; verify with a manual backup after deployment.
 ```
 
 Creates and waits on a one-off `Job` from the `postgres-backup` CronJob,
-then prints its logs. It dumps all three databases, like the nightly run.
+then prints its logs. It dumps the same databases as the nightly run.
 
 ## Restore
 
@@ -202,7 +223,16 @@ then prints its logs. It dumps all three databases, like the nightly run.
 
 This is **destructive**: `pg_restore --clean --if-exists` drops and
 recreates every object the dump contains before restoring it, overwriting
-whatever is currently in `econ_graph`. That's why it prompts unless `--yes`
+whatever is currently in `econ_graph`. The restore Job sets
+`RESTORE_ROLE=econgraph`, so `restore.sh` runs `pg_restore --role=econgraph`:
+the dumps carry no owner, and `econgraph`, the role the backend and crawler
+connect as and the one the data migrations created the tables as, owns
+everything the restore recreates, as before. Restored as `postgres` alone,
+the tables would belong to `postgres` and the services could not use them.
+The extensions in the dump are left as they are, since the init script
+created some of them as the superuser and `econgraph` can't drop or recreate
+those; `restore.sh` refuses, before changing anything, a database that lacks
+one of them. That's why it prompts unless `--yes`
 is passed. `restore.sh` refuses a file that isn't an `econ_graph-*.dump`
 (such as an `econ_graph_app` or Keycloak dump).
 
@@ -316,11 +346,18 @@ are written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in its step 3 above) and sync
 without the `latest` links; that the app dump, restored as in
 [econ_graph_app](#econ_graph_app) step 3, leaves `econgraph` owning its
-tables and able to write them; that `restore.sh` puts `econ_graph` back and
-refuses an app or Keycloak dump; that a failure of any dump (server down,
+tables and able to write them; that `restore.sh`, as the restore Job runs it,
+puts `econ_graph` back with `econgraph` still owning and able to write its
+tables and the superuser's extensions untouched, refuses a database lacking
+one of the dump's extensions, and refuses an app or Keycloak dump; that the
+app database is dumped when `app-database-url` names
+`app-postgres-service/econ_graph_app`, and skipped with one log line, the run
+succeeding, when it names the data database (also as `postgres-service` with
+a full DNS name and options), is missing or names another database, unless
+`APP_REQUIRED=true`; that a failure of any dump (server down,
 wrong password, no tables, a table locked past the lock wait) keeps and
-syncs the others and fails the Job; that a missing app or Keycloak password
-is a failure with `APP_REQUIRED` / `KEYCLOAK_REQUIRED` `true` and a skip with
+syncs the others and fails the Job; that a missing app password in separate mode fails the run; that a missing
+Keycloak password is a failure with `KEYCLOAK_REQUIRED=true` and a skip with
 `false`; that the Job has a
 deadline and a `podFailurePolicy` that doesn't retry a failed container;
 that no run deletes a dump; and that no output contains a password. It needs Docker and
@@ -373,7 +410,7 @@ empty database instead of your old data. To bind back to the old volume:
 
 ## Retention
 
-Nothing deletes backups automatically: every nightly dump of all three databases
+Nothing deletes backups automatically: every nightly dump of every database
 stays on the PVC until an operator removes it. Watch the PVC's usage (20Gi by
 default, see `postgres-backup-pvc.yaml`), and when it fills, copy the dumps
 you want to keep elsewhere before deleting old ones by hand. List them with:

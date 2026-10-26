@@ -462,8 +462,11 @@ refusals are tested by `scripts/backup/test-branch-clone.sh` (in CI).
 
 `k8s/manifests/postgres-backup-cronjob.yaml` (with
 `postgres-backup-configmap.yaml` and `postgres-backup-pvc.yaml`) dumps the
-same three databases as `dump-databases.sh` (`econ_graph`, `econ_graph_app`
-and `keycloak`) nightly at 08:00 UTC to the `postgres-backup-data` PVC. Each
+same databases as `dump-databases.sh` (`econ_graph`, `econ_graph_app` and
+`keycloak`) nightly at 08:00 UTC to the `postgres-backup-data` PVC, except
+that it dumps `econ_graph_app` only when the backend's `app-database-url`
+names it (`APP_DATABASE=separate`; with `shared`, the app tables are in the
+`econ_graph` dump). Each
 dump is read back in full and must hold at least one table, each is taken
 whether or not the others succeed, and the Job fails when any of them fails.
 Like everything in this runbook it deletes nothing: it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and

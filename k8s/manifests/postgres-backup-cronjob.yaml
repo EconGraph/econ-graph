@@ -1,6 +1,7 @@
 # Nightly PostgreSQL backup.
 #
-# Writes a pg_dump of each of the three databases, the data database
+# Writes a pg_dump of each of the three databases (the app database only when
+# app-database-url names it, see below), the data database
 # econ_graph (StatefulSet postgresql, data-postgres-service), the app
 # database econ_graph_app (StatefulSet app-postgres, app-postgres-service) and
 # Keycloak's keycloak (StatefulSet keycloak-postgres,
@@ -16,11 +17,17 @@
 # backup-sync (sync.sh) syncs what was written, then exits 1 so the Job fails
 # (without a retry, see podFailurePolicy).
 #
-# APP_REQUIRED and KEYCLOAK_REQUIRED are true: a missing Secret
-# econ-graph-app-postgres (or key postgres-password), or econ-graph-keycloak
-# (or key db-password), fails the run. On a cluster deployed without the app
-# database or without Keycloak, set the matching one to "false" and backup.sh
-# skips that database:
+# The app database is dumped only when the backend's app-database-url names it
+# (APP_DATABASE=separate). With APP_DATABASE=shared, app-database-url names the
+# data database, the app tables are in the econ_graph dump, and backup.sh logs
+# that and skips the separate app dump. APP_REQUIRED=true makes that skip (or
+# a missing app-database-url) a failure, for a cluster that is expected to have
+# a separate app database:
+#   kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
+#
+# KEYCLOAK_REQUIRED is true: a missing Secret econ-graph-keycloak (or key
+# db-password) fails the run. On a cluster deployed without Keycloak, set it to
+# "false" and backup.sh skips Keycloak:
 #   kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 #
 # To also ship backups to object storage, set BACKUP_DESTINATION=s3 and the
@@ -104,11 +111,25 @@ spec:
             - name: PGDATABASE
               value: "econ_graph"
             # The app database (k8s/manifests/app-postgres.yaml), as its
-            # superuser. The Secret is optional so that the pod still starts,
-            # and the other databases are still dumped, when it is missing;
-            # APP_REQUIRED decides whether that is a failure (see the top).
+            # superuser, when app-database-url names it (see the top). The
+            # backend's two URLs say whether it does; backup.sh reads only
+            # their host and database name, and never prints them. All the
+            # Secrets are optional so that the pod still starts, and the other
+            # databases are still dumped, when one is missing.
+            - name: APP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: app-database-url
+                  optional: true
+            - name: DATA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: data-database-url
+                  optional: true
             - name: APP_REQUIRED
-              value: "true"
+              value: "false"
             - name: APP_PGHOST
               value: "app-postgres-service"
             - name: APP_PGPORT

@@ -13,9 +13,23 @@ data:
     # Dumps the data database econ_graph (PG* env), the app database
     # econ_graph_app (APP_PG* env) and Keycloak's database (KEYCLOAK_PG* env)
     # to ${BACKUP_DIR} as <name>-<UTC stamp>.dump, with one stamp per run.
-    # The app database is skipped when APP_PGPASSWORD is unset or empty, unless
-    # APP_REQUIRED=true, which makes that a failed dump; Keycloak likewise with
-    # KEYCLOAK_PGPASSWORD and KEYCLOAK_REQUIRED.
+    #
+    # Whether there is a separate app database to dump comes from the URLs the
+    # backend uses (APP_DATABASE_URL and DATA_DATABASE_URL, from the Secret
+    # econ-graph-secrets); only their host and database name are read, and
+    # neither is ever printed:
+    #   - the app URL names the same host and database as the data URL
+    #     (APP_DATABASE=shared): the app tables are in the econ_graph dump, and
+    #     the app database is skipped with one log line;
+    #   - it names ${APP_PGHOST}/${APP_PGDATABASE} (a separate app database):
+    #     the app database is dumped like the others, and a missing password or
+    #     a failed dump fails the run;
+    #   - there is no app URL, or it names some other database: skipped with
+    #     one log line.
+    # APP_REQUIRED=true turns every skip into a failure: set it once a separate
+    # app database is expected, so that losing it is noticed.
+    # Keycloak is skipped when KEYCLOAK_PGPASSWORD is unset or empty, unless
+    # KEYCLOAK_REQUIRED=true, which makes that a failed dump.
     #
     # Each dump is attempted even if the other fails, and a dump that fails
     # leaves nothing under a final name. Exit status: 1 if any dump failed,
@@ -73,31 +87,82 @@ data:
       echo "[${name}] Backup OK: ${tables} tables, $(du -h "${dest}" | cut -f1) in ${dest}"
     }
 
+    # db_target URL: "host/dbname" of a postgresql://user:password@host:port/dbname?options
+    # URL, with the host cut to its first label (app-postgres-service.econ-graph.svc
+    # is app-postgres-service) and the data database's alias postgres-service
+    # read as data-postgres-service. Nothing else of the URL is kept.
+    db_target() {
+      rest="${1#*://}"
+      rest="${rest##*@}"
+      host="${rest%%/*}"
+      host="${host%%:*}"
+      host="${host%%.*}"
+      case "${rest}" in
+        */*) db="${rest#*/}" ;;
+        *) db="" ;;
+      esac
+      db="${db%%\?*}"
+      [ "${host}" = "postgres-service" ] && host="data-postgres-service"
+      printf '%s/%s\n' "${host}" "${db}"
+    }
+
     FAILED=""
 
     if ! dump_database econ_graph latest.dump; then
       FAILED="${FAILED} econ_graph"
     fi
 
-    if [ -n "${APP_PGPASSWORD:-}" ]; then
-      # A subshell, so the app database's connection settings stay out of the
-      # rest of the script.
-      if ! (
-        export PGHOST="${APP_PGHOST:-app-postgres-service}"
-        export PGPORT="${APP_PGPORT:-5432}"
-        export PGUSER="${APP_PGUSER:-postgres}"
-        export PGDATABASE="${APP_PGDATABASE:-econ_graph_app}"
-        export PGPASSWORD="${APP_PGPASSWORD}"
-        dump_database econ_graph_app latest-econ_graph_app.dump
-      ); then
-        FAILED="${FAILED} econ_graph_app"
+    APP_HOST="${APP_PGHOST:-app-postgres-service}"
+    APP_DB="${APP_PGDATABASE:-econ_graph_app}"
+    APP_MODE="none"
+    if [ -n "${APP_DATABASE_URL:-}" ]; then
+      app_target="$(db_target "${APP_DATABASE_URL}")"
+      if [ -n "${DATA_DATABASE_URL:-}" ]; then
+        data_target="$(db_target "${DATA_DATABASE_URL}")"
+      else
+        data_target="$(db_target "postgresql://${PGHOST}/${PGDATABASE}")"
       fi
-    elif [ "${APP_REQUIRED:-false}" = "true" ]; then
-      echo "[econ_graph_app] APP_PGPASSWORD is empty but APP_REQUIRED=true (Secret econ-graph-app-postgres or its key postgres-password is missing)" >&2
-      FAILED="${FAILED} econ_graph_app"
-    else
-      echo "[econ_graph_app] APP_PGPASSWORD is empty and APP_REQUIRED is not true (a cluster without the app database); skipping"
+      if [ "${app_target}" = "${data_target}" ]; then
+        APP_MODE="shared"
+      elif [ "${app_target}" = "$(db_target "postgresql://${APP_HOST}/${APP_DB}")" ]; then
+        APP_MODE="separate"
+      else
+        APP_MODE="other"
+      fi
     fi
+
+    case "${APP_MODE}" in
+      separate)
+        if [ -z "${APP_PGPASSWORD:-}" ]; then
+          echo "[econ_graph_app] app-database-url names ${APP_HOST}/${APP_DB} but APP_PGPASSWORD is empty (Secret econ-graph-app-postgres or its key postgres-password is missing)" >&2
+          FAILED="${FAILED} econ_graph_app"
+        # A subshell, so the app database's connection settings stay out of the
+        # rest of the script.
+        elif ! (
+          export PGHOST="${APP_HOST}"
+          export PGPORT="${APP_PGPORT:-5432}"
+          export PGUSER="${APP_PGUSER:-postgres}"
+          export PGDATABASE="${APP_DB}"
+          export PGPASSWORD="${APP_PGPASSWORD}"
+          dump_database econ_graph_app latest-econ_graph_app.dump
+        ); then
+          FAILED="${FAILED} econ_graph_app"
+        fi
+        ;;
+      *)
+        case "${APP_MODE}" in
+          shared) why="app-database-url names the data database (APP_DATABASE=shared): the app tables are in the econ_graph dump" ;;
+          other) why="app-database-url names neither the data database nor ${APP_HOST}/${APP_DB}" ;;
+          *) why="APP_DATABASE_URL is empty (Secret econ-graph-secrets or its key app-database-url is missing)" ;;
+        esac
+        if [ "${APP_REQUIRED:-false}" = "true" ]; then
+          echo "[econ_graph_app] ${why}, but APP_REQUIRED=true expects a separate app database" >&2
+          FAILED="${FAILED} econ_graph_app"
+        else
+          echo "[econ_graph_app] ${why}; skipping the separate app dump"
+        fi
+        ;;
+    esac
 
     if [ -n "${KEYCLOAK_PGPASSWORD:-}" ]; then
       # Likewise for Keycloak's connection settings.
@@ -208,11 +273,39 @@ data:
         ;;
     esac
 
-    echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}"
     # --single-transaction: a failed restore rolls back cleanly instead of
     # leaving the database with some objects dropped and never recreated.
-    pg_restore --clean --if-exists --no-owner --no-privileges \
-      --single-transaction --exit-on-error \
-      --dbname="${PGDATABASE}" "${FILE}"
+    if [ -z "${RESTORE_ROLE:-}" ]; then
+      echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}"
+      pg_restore --clean --if-exists --no-owner --no-privileges \
+        --single-transaction --exit-on-error \
+        --dbname="${PGDATABASE}" "${FILE}"
+    else
+      # The dumps carry no owner (--no-owner). Restoring as ${RESTORE_ROLE}
+      # (SET ROLE after connecting) makes it the owner of everything recreated,
+      # as it was: the role the backend and crawler connect as, which created
+      # those objects through the migrations. Without it they would belong to
+      # ${PGUSER}, and the services could not use them.
+      #
+      # The extensions stay as they are: the database's init script created
+      # some as the superuser, and ${RESTORE_ROLE} can't drop or recreate
+      # those. Each extension the dump has must already exist.
+      TOC="$(pg_restore --list "${FILE}")"
+      for ext in $(printf '%s\n' "${TOC}" | awk '$4 == "EXTENSION" && $5 == "-" { print $6 }'); do
+        # Through stdin, as psql doesn't substitute :'ext' in a -c command.
+        found="$(echo "SELECT count(*) FROM pg_extension WHERE extname = :'ext'" |
+          psql -X -At -v ON_ERROR_STOP=1 -v ext="${ext}")"
+        if [ "${found}" != "1" ]; then
+          echo "The dump needs extension ${ext}, which '${PGDATABASE}' doesn't have; create it first" >&2
+          exit 1
+        fi
+      done
+      echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT} as role ${RESTORE_ROLE}"
+      printf '%s\n' "${TOC}" | grep -v ' EXTENSION ' |
+        pg_restore --clean --if-exists --no-owner --no-privileges \
+          --role="${RESTORE_ROLE}" --use-list=/dev/stdin \
+          --single-transaction --exit-on-error \
+          --dbname="${PGDATABASE}" "${FILE}"
+    fi
 
     echo "Restore complete."

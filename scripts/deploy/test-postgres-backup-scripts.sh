@@ -17,13 +17,23 @@
 #   - the app dump, restored as the runbook says (--role=econgraph into a
 #     database owned by econgraph), leaves econgraph owning its tables and
 #     able to write them;
-#   - restore.sh puts econ_graph back, and refuses an app or Keycloak dump;
+#   - restore.sh, as the restore Job runs it (RESTORE_ROLE=econgraph), puts
+#     econ_graph back with econgraph still owning and able to write its
+#     tables and the superuser's extensions untouched; it refuses a target
+#     that lacks one of the dump's extensions, and an app or Keycloak dump;
 #   - when any database's dump fails (server down, wrong password, no tables)
 #     the others are still written and synced, and sync.sh fails the Job;
 #     without BACKUP_STATUS_FILE, backup.sh itself exits 1;
-#   - without the app or Keycloak password, that database is a failed dump
-#     when APP_REQUIRED / KEYCLOAK_REQUIRED is true (the manifest's value) and
-#     skipped when it is false, with the others backed up either way;
+#   - the app database is dumped only when app-database-url names
+#     app-postgres-service/econ_graph_app (APP_DATABASE=separate); when it
+#     names the data database (APP_DATABASE=shared, also through the alias
+#     postgres-service and a full DNS name), is missing, or names another
+#     database, it is skipped with one log line and the run succeeds, unless
+#     APP_REQUIRED=true, which fails it; in separate mode a missing password
+#     or an unreachable server fails it;
+#   - without the Keycloak password, Keycloak is a failed dump when
+#     KEYCLOAK_REQUIRED=true (the manifest's value) and skipped when it is
+#     false, with the others backed up either way;
 #   - a table locked past PG_DUMP_LOCK_WAIT_TIMEOUT fails that dump promptly
 #     and keeps the others;
 #   - the Job has a deadline and does not retry a pod whose container failed;
@@ -51,7 +61,15 @@ S3="$ID-s3"
 ECON_PW="econ-pw-$RANDOM$RANDOM"
 APP_PW="app-pw-$RANDOM$RANDOM"
 APP_ROLE_PW="app-role-pw-$RANDOM$RANDOM"
+DATA_ROLE_PW="data-role-pw-$RANDOM$RANDOM"
 KC_PW="keycloak-pw-$RANDOM$RANDOM"
+# The backend's URLs (econ-graph-secrets app-database-url and data-database-url,
+# as create-secrets.sh writes them: econgraph, the URL-encoded password, host,
+# port, database). The app one is APP_DATABASE=separate; SHARED_APP_URL is
+# APP_DATABASE=shared. The passwords hold encoded '@' and ':' on purpose.
+DATA_URL="postgresql://econgraph:${DATA_ROLE_PW}%40x%3Ay@data-postgres-service:5432/econ_graph"
+APP_URL="postgresql://econgraph:${APP_ROLE_PW}%40x%3Ay@app-postgres-service:5432/econ_graph_app"
+SHARED_APP_URL="$DATA_URL"
 
 tmp="$(mktemp -d)"
 LOG="$tmp/all-output.log"
@@ -86,13 +104,15 @@ for key, text in yaml.safe_load(open(sys.argv[1]))["data"].items():
 PY
 
 # KEY=VALUE lines for docker --env-file, from the pg-dump init container.
-python3 - "$CRONJOB" "$ECON_PW" "$APP_PW" "$KC_PW" >"$tmp/dump.env" <<'PY'
+python3 - "$CRONJOB" "$ECON_PW" "$APP_PW" "$KC_PW" "$APP_URL" "$DATA_URL" >"$tmp/dump.env" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1]))
 secrets = {
     ("econ-graph-postgres", "postgres-password"): sys.argv[2],
     ("econ-graph-app-postgres", "postgres-password"): sys.argv[3],
     ("econ-graph-keycloak", "db-password"): sys.argv[4],
+    ("econ-graph-secrets", "app-database-url"): sys.argv[5],
+    ("econ-graph-secrets", "data-database-url"): sys.argv[6],
 }
 spec = doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
 (container,) = [c for c in spec["initContainers"] if c["name"] == "pg-dump"]
@@ -171,8 +191,20 @@ psql_in() { # psql_in CONTAINER USER DB SQL
     docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$1" psql -X -q -v ON_ERROR_STOP=1 -U "$2" -d "$3" -At -c "$4"
 }
 
+# As in the cluster: postgres-init.yaml creates extensions as the superuser and
+# the role econgraph, which owns the public schema; the data migrations, run as
+# econgraph, create (and so own) a trusted extension, the schemas and tables.
 psql_in "$ECON" postgres econ_graph "
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";
+CREATE USER econgraph WITH ENCRYPTED PASSWORD '$DATA_ROLE_PW';
+GRANT ALL PRIVILEGES ON DATABASE econ_graph TO econgraph;
+ALTER SCHEMA public OWNER TO econgraph;
+GRANT ALL ON SCHEMA public TO econgraph;
+SET ROLE econgraph;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE economic_series (id serial PRIMARY KEY, title text NOT NULL);
+CREATE INDEX economic_series_title_trgm ON economic_series USING gin (title gin_trgm_ops);
 CREATE TABLE data_points (id bigserial PRIMARY KEY, series_id int REFERENCES economic_series(id), value numeric);
 CREATE SCHEMA audit;
 CREATE TABLE audit.events (id serial PRIMARY KEY, note text);
@@ -346,15 +378,48 @@ nothing_deleted
 # --- 2. restore.sh ------------------------------------------------------------
 
 echo "# restore.sh"
+# The restore Job's RESTORE_ROLE, from scripts/deploy/restore-postgres-backup.sh.
+RESTORE_ROLE="$(python3 - "$ROOT/scripts/deploy/restore-postgres-backup.sh" <<'PY'
+import re, sys
+m = re.search(r'- name: RESTORE_ROLE\n\s+value: "([^"]*)"', open(sys.argv[1]).read())
+print(m.group(1) if m else "")
+PY
+)"
+check "the restore Job restores as econgraph (RESTORE_ROLE)" [ "$RESTORE_ROLE" = econgraph ]
 psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100; DELETE FROM audit.events;"
 rc=0
 docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
     -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups \
+    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e RESTORE_ROLE="$RESTORE_ROLE" \
     -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
     "$PG_IMAGE" /scripts/restore.sh >>"$LOG" 2>&1 || rc=$?
 check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
 check "econ_graph row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+check "  econgraph still owns every table and schema" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT
+          (SELECT count(*) FROM pg_tables WHERE schemaname IN ('public', 'audit') AND tableowner <> 'econgraph')
+        + (SELECT count(*) FROM pg_namespace WHERE nspname = 'audit' AND nspowner <> 'econgraph'::regrole)")" = 0 ]
+check "  and can write to them" psql_in "$ECON" econgraph econ_graph \
+    "INSERT INTO economic_series (title) VALUES ('new'); INSERT INTO audit.events (note) VALUES ('new');
+     DELETE FROM audit.events WHERE note = 'new'; DELETE FROM economic_series WHERE title = 'new';"
+check "  and the superuser's extensions are untouched" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT string_agg(extname || ':' || extowner::regrole, ' ' ORDER BY extname)
+          FROM pg_extension WHERE extname IN ('pg_trgm', 'uuid-ossp')")" = "pg_trgm:postgres uuid-ossp:postgres" ]
+# A target without one of the dump's extensions is refused before anything
+# changes: an empty econ_graph, owned by econgraph, on the app server.
+psql_in "$APP" postgres postgres "CREATE DATABASE econ_graph OWNER econgraph"
+rc=0
+docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+    -e PGHOST=app-postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$APP_PW" \
+    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e RESTORE_ROLE=econgraph \
+    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
+    "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
+cat "$tmp/out" >>"$LOG"
+check "restore.sh refuses a target that lacks one of the dump's extensions" [ "$rc" = 1 ]
+check "  and names it" grep -q "The dump needs extension .*, which 'econ_graph' doesn't have" "$tmp/out"
+check "  and restores nothing" \
+    [ "$(psql_in "$APP" postgres econ_graph "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" = 0 ]
+psql_in "$APP" postgres postgres "DROP DATABASE econ_graph"
 rc=0
 docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
     -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
@@ -473,55 +538,102 @@ rc="$(run_backup -e APP_PGPASSWORD=not-the-password)"
 check "wrong app password: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
 sleep 1
 new_status
-rc="$(run_backup -e APP_PGDATABASE=postgres)"
+# A separate app database (app-database-url names it) that has no tables.
+rc="$(run_backup -e APP_PGDATABASE=postgres \
+    -e APP_DATABASE_URL="postgresql://econgraph:pw%40x@app-postgres-service:5432/postgres")"
 check "app database with no tables: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
 check "  as holding no table" grep -q "\[econ_graph_app\] the dump holds no table" "$LOG"
 check "  and no app dump of it kept" [ "$(newest econ_graph_app)" = "$before_app" ]
 check "no .partial left behind" [ -z "$(partials)" ]
 check "no dump deleted" nothing_deleted
 
-# --- 4c. no app database password (Secret or key missing) ------------------------------
+# --- 4c. which app database: APP_DATABASE=shared or separate -------------------------
 
-echo "# no app database password, APP_REQUIRED=true (the manifest's value)"
-check "the manifest sets APP_REQUIRED=true" grep -qx 'APP_REQUIRED=true' "$tmp/dump.env"
+# backup_with ENV_FILE [docker run options...]: backup.sh with that environment,
+# its output in $tmp/out (and the log). Prints its exit status.
+backup_with() {
+    local rc=0 env_file="$1"
+    shift
+    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+        --security-opt no-new-privileges --env-file "$env_file" "$@" \
+        -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
+        "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
+    cat "$tmp/out" >>"$LOG"
+    echo "$rc"
+}
+app_lines() { grep -c '^\[econ_graph_app\]' "$tmp/out" || true; }
+
+check "the manifest sets APP_REQUIRED=false" grep -qx 'APP_REQUIRED=false' "$tmp/dump.env"
+check "the manifest reads app-database-url" grep -qx "APP_DATABASE_URL=$APP_URL" "$tmp/dump.env"
+check "the manifest reads data-database-url" grep -qx "DATA_DATABASE_URL=$DATA_URL" "$tmp/dump.env"
+
+echo "# APP_DATABASE=shared: app-database-url names the data database"
+for shared_url in "$SHARED_APP_URL" \
+    "postgresql://econgraph:pw%40x@postgres-service.econ-graph.svc.cluster.local:5432/econ_graph?sslmode=disable"; do
+    sleep 1
+    new_status
+    before_econ="$(newest econ_graph)"
+    before_kc="$(newest keycloak)"
+    rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$shared_url")"
+    check "backup.sh exits 0" [ "$rc" = 0 ]
+    check "nothing recorded as failed" [ "$(status)" = "" ]
+    check "one log line for the app database" [ "$(app_lines)" = 1 ]
+    check "  saying it is in the econ_graph dump" \
+        grep -q "^\[econ_graph_app\] app-database-url names the data database (APP_DATABASE=shared): the app tables are in the econ_graph dump; skipping" "$tmp/out"
+    check "no app dump" [ "$(newest econ_graph_app)" = "$before_app" ]
+    check "a new econ_graph dump is kept" [ "$(newest econ_graph)" != "$before_econ" ]
+    check "a new keycloak dump is kept" [ "$(newest keycloak)" != "$before_kc" ]
+done
+rc="$(run_sync run4c)"
+check "sync.sh exits 0" [ "$rc" = 0 ]
+check "no dump deleted" nothing_deleted
+
+sleep 1
+new_status
+rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$SHARED_APP_URL" -e APP_REQUIRED=true)"
+check "shared with APP_REQUIRED=true: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
+check "  and says a separate app database is expected" \
+    grep -q "APP_REQUIRED=true expects a separate app database" "$tmp/out"
+check "no dump deleted" nothing_deleted
+
+echo "# no app-database-url (Secret econ-graph-secrets or its key missing)"
+grep -v '^APP_DATABASE_URL=' "$tmp/dump.env" >"$tmp/dump-no-url.env"
+sleep 1
+new_status
+rc="$(backup_with "$tmp/dump-no-url.env")"
+check "backup.sh exits 0, nothing failed" [ "$rc:$(status)" = "0:" ]
+check "  one log line for the app database" [ "$(app_lines)" = 1 ]
+check "  saying it is skipped for want of the URL" grep -q "APP_DATABASE_URL is empty .*; skipping" "$tmp/out"
+sleep 1
+new_status
+rc="$(backup_with "$tmp/dump-no-url.env" -e APP_REQUIRED=true)"
+check "  with APP_REQUIRED=true: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
+
+echo "# app-database-url names some other database"
+sleep 1
+new_status
+rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="postgresql://u:p@elsewhere:5432/other")"
+check "backup.sh exits 0, nothing failed" [ "$rc:$(status)" = "0:" ]
+check "  skipped with one log line" grep -q "names neither the data database nor app-postgres-service/econ_graph_app; skipping" "$tmp/out"
+check "no app dump" [ "$(newest econ_graph_app)" = "$before_app" ]
+
+echo "# APP_DATABASE=separate without the app database's password"
 # Without the Secret, the optional secretKeyRef leaves the variable unset.
 grep -v '^APP_PGPASSWORD=' "$tmp/dump.env" >"$tmp/dump-no-app.env"
 sleep 1
 new_status
 before_econ="$(newest econ_graph)"
 before_kc="$(newest keycloak)"
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    --env-file "$tmp/dump-no-app.env" \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
-    "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
-cat "$tmp/out" >>"$LOG"
+rc="$(backup_with "$tmp/dump-no-app.env")"
 check "backup.sh exits 0 with a status file" [ "$rc" = 0 ]
 check "econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
-check "  and says the Secret is missing" grep -q "APP_REQUIRED=true (Secret econ-graph-app-postgres" "$tmp/out"
+check "  and says the Secret is missing" \
+    grep -q "APP_PGPASSWORD is empty (Secret econ-graph-app-postgres" "$tmp/out"
 check "a new econ_graph dump is kept" [ "$(newest econ_graph)" != "$before_econ" ]
 check "a new keycloak dump is kept" [ "$(newest keycloak)" != "$before_kc" ]
 check "app dump unchanged" [ "$(newest econ_graph_app)" = "$before_app" ]
-rc="$(run_sync run4c)"
-check "sync.sh fails the Job" [ "$rc" = 1 ]
-check "no dump deleted" nothing_deleted
-
-echo "# no app database password, APP_REQUIRED=false (a cluster without the app database)"
-sleep 1
-new_status
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    --env-file "$tmp/dump-no-app.env" -e APP_REQUIRED=false \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups" -v "$tmp/status:/status" \
-    "$PG_IMAGE" /scripts/backup.sh >"$tmp/out" 2>&1 || rc=$?
-cat "$tmp/out" >>"$LOG"
-check "backup.sh exits 0" [ "$rc" = 0 ]
-check "nothing recorded as failed" [ "$(status)" = "" ]
-check "says the app database is skipped" \
-    grep -q "\[econ_graph_app\] APP_PGPASSWORD is empty and APP_REQUIRED is not true" "$tmp/out"
-check "app dump unchanged" [ "$(newest econ_graph_app)" = "$before_app" ]
 rc="$(run_sync run4d)"
-check "sync.sh exits 0" [ "$rc" = 0 ]
+check "sync.sh fails the Job" [ "$rc" = 1 ]
 check "no dump deleted" nothing_deleted
 new_kc="$(newest keycloak)"
 
@@ -628,6 +740,8 @@ check "sync.sh fails when backup.sh wrote no status" [ "$rc" = 1 ]
 
 check "no output shows the econ_graph password" bash -c "! grep -qF -- '$ECON_PW' '$LOG'"
 check "no output shows the econ_graph_app password" bash -c "! grep -qF -- '$APP_PW' '$LOG'"
+check "no output shows the passwords in the backend's URLs" \
+    bash -c "! grep -qF -e '$APP_ROLE_PW' -e '$DATA_ROLE_PW' -e 'pw%40x' -e 'postgresql://' '$LOG'"
 check "no output shows the keycloak password" bash -c "! grep -qF -- '$KC_PW' '$LOG'"
 
 echo
