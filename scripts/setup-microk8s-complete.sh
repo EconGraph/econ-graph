@@ -53,9 +53,9 @@ kubectl config use-context microk8s
 # 80/443; on single-node MicroK8s that is this node.
 echo "🌐 Installing the gateway..."
 kubectl label nodes --all ingress-ready=true --overwrite
-# Calico leaves the nodes' podCIDRs empty; its default pool is 10.1.0.0/16.
-GATEWAY_POD_CIDRS="${GATEWAY_POD_CIDRS:-10.1.0.0/16}" \
-    "$(dirname "${BASH_SOURCE[0]}")/deploy/install-gateway.sh"
+# Calico leaves the nodes' podCIDRs empty: install-gateway.sh reads its IP
+# pools instead (GATEWAY_POD_CIDRS overrides).
+"$(dirname "${BASH_SOURCE[0]}")/deploy/install-gateway.sh"
 
 # Create namespace
 echo "📋 Creating econ-graph namespace..."
