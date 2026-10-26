@@ -958,6 +958,7 @@ impl Worker {
                 self.transition_conn(conn, source, item, result).await
             })
             .await?;
+        drop(conn);
         for metrics in pending_metrics
             .lock()
             .unwrap_or_else(|e| e.into_inner())
