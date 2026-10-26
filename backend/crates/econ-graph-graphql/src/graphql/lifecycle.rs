@@ -59,10 +59,10 @@ impl BatchFn<Uuid, Option<SeriesLifecycleType>> for SeriesLifecycleBatcher {
                        CASE WHEN proposed_public.id IS NOT NULL THEN l.proposed_successor_id END AS proposed_successor_id \
                      FROM economic_series es \
                      LEFT JOIN series_lifecycle l ON l.source_id=es.source_id AND l.external_id=es.external_id \
-                     LEFT JOIN economic_series successor_public ON successor_public.id=l.successor_id \
+                     LEFT JOIN economic_series successor_public ON successor_public.id=l.successor_id AND successor_public.end_date IS NOT NULL \
                        AND NOT EXISTS (SELECT 1 FROM series_lifecycle sl WHERE sl.source_id=successor_public.source_id \
                          AND sl.external_id=successor_public.external_id AND sl.status='restricted') \
-                     LEFT JOIN economic_series proposed_public ON proposed_public.id=l.proposed_successor_id \
+                     LEFT JOIN economic_series proposed_public ON proposed_public.id=l.proposed_successor_id AND proposed_public.end_date IS NOT NULL \
                        AND NOT EXISTS (SELECT 1 FROM series_lifecycle pl WHERE pl.source_id=proposed_public.source_id \
                          AND pl.external_id=proposed_public.external_id AND pl.status='restricted') \
                      WHERE es.id=ANY($1) AND COALESCE(l.status, 'active') <> 'restricted'",
@@ -175,7 +175,7 @@ mod tests {
             econ_graph_core::test_utils::test_dataset_id(&mut pool.get().await.unwrap(), source.id)
                 .await;
         let mut series = Vec::new();
-        for external_id in ["OLD", "NEW", "RESTRICTED", "ACTIVE"] {
+        for external_id in ["OLD", "NEW", "RESTRICTED", "ACTIVE", "EMPTY"] {
             series.push(
                 EconomicSeries::create(
                     &pool,
@@ -184,7 +184,8 @@ mod tests {
                         dataset_id,
                         external_id: external_id.into(),
                         title: format!("Lifecycle {external_id}"),
-                        end_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1),
+                        end_date: (external_id != "EMPTY")
+                            .then(|| chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
                         ..Default::default()
                     },
                 )
@@ -219,6 +220,22 @@ mod tests {
         assert_eq!(
             result["active"]["lifecycle"],
             json!({"status":"active","since":null})
+        );
+
+        // Metadata-only candidates cannot be opened through the public series query yet.
+        // Do not offer a link that would resolve to "series not found".
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("UPDATE series_lifecycle SET proposed_successor_id=$2 WHERE source_id=$1 AND external_id='OLD'")
+            .bind::<diesel::sql_types::Uuid,_>(source.id)
+            .bind::<diesel::sql_types::Uuid,_>(series[4].id)
+            .execute(&mut conn).await.unwrap();
+        drop(conn);
+        let response = schema.execute(query.clone()).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let result = response.data.into_json().unwrap();
+        assert_eq!(
+            result["old"]["lifecycle"]["proposedSuccessorId"],
+            Value::Null
         );
 
         // A long-lived schema must not cache a candidate or a confirmation across requests.
