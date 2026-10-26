@@ -212,6 +212,41 @@ fi
 check "teardown.sh on a production cluster"
 grep -qE -- ' delete ' "$KIND_CALLS" && fail "teardown.sh deleted something after a wrong UID prefix"
 
+# --confirm-production: a matching prefix lets a production teardown go ahead
+# with --yes and no terminal; a wrong one is refused on any cluster; --yes alone
+# is refused on production. Pods report Pending, so no backup is attempted.
+reset
+out="$(FAKE_PRODUCTION=true FAKE_PHASE=Pending teardown --yes --no-backup --confirm-production "${CLUSTER_UID:0:8}")"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q "confirm-production ${CLUSTER_UID:0:8} matches this cluster" <<<"$out" &&
+    grep -q "App plane removed" <<<"$out"; then
+    echo "ok   teardown.sh --yes --confirm-production <right prefix> tears down a production cluster"
+else
+    fail "teardown.sh --yes with the right --confirm-production (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh --yes --confirm-production <right prefix>"
+
+reset
+out="$(FAKE_PHASE=Pending teardown --yes --no-backup --confirm-production deadbeef)"; rc=$?
+if [ "$rc" -ne 0 ] &&
+    grep -q "confirm-production deadbeef does not match this cluster's kube-system UID; nothing was changed" <<<"$out"; then
+    echo "ok   teardown.sh refuses a --confirm-production that doesn't match, on a cluster not marked production"
+else
+    fail "teardown.sh with a wrong --confirm-production (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh with a wrong --confirm-production"
+grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed something before refusing a wrong --confirm-production"
+
+reset
+out="$(FAKE_PRODUCTION=true teardown --yes)"; rc=$?
+if [ "$rc" -ne 0 ] &&
+    grep -q "tearing down the production cluster needs --confirm-production with the first 8 characters" <<<"$out"; then
+    echo "ok   teardown.sh --yes without --confirm-production refuses on a production cluster"
+else
+    fail "teardown.sh --yes on a production cluster (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh --yes on a production cluster"
+grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed or dumped something before refusing --yes on production"
+
 if [ "$failed" -ne 0 ]; then
     echo "teardown kubectl checks failed"
     exit 1

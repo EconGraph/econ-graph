@@ -5,6 +5,7 @@
 #
 # Usage:
 #   scripts/deploy/teardown.sh [--dry-run] [--yes] [--no-backup]
+#                              [--confirm-production UID-PREFIX]
 #                              [--include-data-plane [--delete-cluster]]
 #
 # Steps:
@@ -41,9 +42,15 @@
 # plain `kubectl`; if that context can't be selected, the script stops. It
 # also stops unless the kube-system namespace UID seen through that context
 # equals the one the kind control-plane node reports on DOCKER_HOST, so kubectl
-# and `kind delete cluster` act on the same cluster. On a cluster marked
-# production (scripts/deploy/mark-production-cluster.sh), deleting the app
-# plane also needs the UID's first 8 characters typed (--yes still answers).
+# and `kind delete cluster` act on the same cluster.
+#
+# On a cluster marked production (scripts/deploy/mark-production-cluster.sh),
+# or whose marker can't be read, going ahead takes the first 8 characters of
+# the kube-system UID shown: typed at the terminal, or given as
+# --confirm-production UID-PREFIX. --yes alone does not answer it, and without
+# a terminal or --confirm-production the script stops before the backup. A
+# --confirm-production that doesn't match the cluster is refused, marker or not.
+#
 # A dry run never switches kubectl's context.
 #
 # The databases live on host btrfs subvolumes (static PVs in
@@ -62,17 +69,25 @@ ASSUME_YES="false"
 NO_BACKUP="false"
 INCLUDE_DATA_PLANE="false"
 DELETE_CLUSTER="false"
-usage="usage: $0 [--dry-run] [--yes] [--no-backup] [--include-data-plane [--delete-cluster]]"
-for arg in "$@"; do
-    case "$arg" in
+CONFIRM_PRODUCTION=""
+usage="usage: $0 [--dry-run] [--yes] [--no-backup] [--confirm-production UID-PREFIX] [--include-data-plane [--delete-cluster]]"
+while [ $# -gt 0 ]; do
+    case "$1" in
         --dry-run|-n) DRY_RUN="true" ;;
         --yes|-y) ASSUME_YES="true" ;;
         --no-backup) NO_BACKUP="true" ;;
         --include-data-plane) INCLUDE_DATA_PLANE="true" ;;
         --delete-cluster) DELETE_CLUSTER="true" ;;
-        -h|--help) sed -n '3,56p' "$0"; exit 0 ;;
+        --confirm-production)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then echo "$usage" >&2; exit 2; fi
+            CONFIRM_PRODUCTION="$2"
+            shift
+            ;;
+        --confirm-production=*) CONFIRM_PRODUCTION="${1#*=}" ;;
+        -h|--help) sed -n '3,63p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
+    shift
 done
 export DRY_RUN ASSUME_YES
 
@@ -184,6 +199,17 @@ if [ "${production_rc}" -ne 1 ]; then
     fi
 fi
 
+# --confirm-production names one cluster: refuse it for any other, marked or not.
+if [ -n "${CONFIRM_PRODUCTION}" ] && [ "${CONFIRM_PRODUCTION}" != "${UID_PREFIX}" ]; then
+    die "--confirm-production ${CONFIRM_PRODUCTION} does not match this cluster's kube-system UID; nothing was changed"
+fi
+# Production takes the UID prefix (typed, or --confirm-production), never --yes
+# alone. Without a terminal to type it on, stop before the backup or anything else.
+if [ "${PRODUCTION}" = "true" ] && [ -z "${CONFIRM_PRODUCTION}" ] && [ "${DRY_RUN}" != "true" ] && [ ! -t 0 ]; then
+    die "tearing down the production cluster needs --confirm-production with the first 8 characters" \
+        "of its kube-system UID, or a terminal to type them on; nothing was changed"
+fi
+
 # 1. Off-cluster copy of the databases first, while they are still running.
 if pod_running postgresql-0; then
     backup_databases "$(new_backup_dir)"
@@ -217,8 +243,14 @@ else
     read -r -p "Type the namespace name (${NAMESPACE}) to delete the app plane: " answer || die "aborted; nothing was deleted"
     [ "${answer}" = "${NAMESPACE}" ] || die "aborted; nothing was deleted"
 fi
-if [ "${PRODUCTION}" = "true" ] && [ "${ASSUME_YES}" != "true" ]; then
-    typed_confirm "This is the production cluster (kube-system UID ${cluster_uid})." "${UID_PREFIX}"
+# Production: the UID prefix, from --confirm-production (checked above) or
+# typed; --yes does not answer it.
+if [ "${PRODUCTION}" = "true" ]; then
+    if [ -n "${CONFIRM_PRODUCTION}" ]; then
+        echo "(--confirm-production ${CONFIRM_PRODUCTION} matches this cluster)"
+    else
+        typed_confirm "!!! This is the production cluster (kube-system UID ${cluster_uid})." "${UID_PREFIX}"
+    fi
 fi
 
 if [ "${INCLUDE_DATA_PLANE}" = "true" ]; then
