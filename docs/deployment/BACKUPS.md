@@ -195,8 +195,9 @@ its series (the next hourly copy to the pool then uses an older common
 parent, or does a full send if none is left), and deletes only after you
 type `delete <count>`. Keep at least one snapshot of each series on both
 sides so the hourly copy stays incremental. `*.incomplete-*` leftovers on the
-pool (from a receive that failed and was set aside) can be deleted the same
-way with `--pool`.
+pool (from a receive that failed and was set aside) and `*.mismatch-*` ones
+(a read-only copy whose Received UUID was not the local snapshot's, set
+aside before receiving it again) can be deleted the same way with `--pool`.
 
 Dumps are plain directories owned by the operator: remove old ones with `rm -r`
 if ever needed. Never remove the newest `VERIFIED` one.
@@ -310,6 +311,7 @@ missing or stale, or if space is low ([Space alerts](#space-alerts)):
 | Check | Default limit | Variable |
 |---|---|---|
 | newest local `data-plane` and `app-prod` snapshot (hourly or pre-change) | 3h | `SNAPSHOT_MAX_AGE_HOURS` |
+| last hourly `backup-snapshots.sh` run, which must also have had no failures | 3h | `SNAPSHOT_MAX_AGE_HOURS` |
 | newest snapshot copied to the backup pool (when mounted), and the last copy didn't fail | 3h | `POOL_COPY_MAX_AGE_HOURS` |
 | newest `VERIFIED` dump | 26h | `DUMP_MAX_AGE_HOURS` |
 | newest passing drill | 192h (8 days) | `DRILL_MAX_AGE_HOURS` |
@@ -363,7 +365,9 @@ is set aside, not deleted.
    gone (or the NVMe array was lost and rebuilt), use the copy on the backup
    pool: `sudo scripts/host/delete-snapshots.sh --list --pool` lists them,
    and step 3 takes `--from-pool`, which first receives that snapshot back
-   into `/srv/econgraph/snapshots`.
+   into `/srv/econgraph/snapshots`. It refuses a pool copy without a
+   Received UUID, and a local snapshot of the same name that the pool copy
+   was not received from.
 2. Stop everything that writes, then Postgres (no sudo):
    ```sh
    k() { docker -H unix:///var/run/docker.sock exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
@@ -406,7 +410,8 @@ scripts/backup/restore-dump.sh econ_graph ~/econgraph-backups/<stamp>/econ_graph
 ```
 
 `--dry-run` checks the archive and the pod and prints the plan. Without
-it, it asks for the database name as confirmation (`--yes` skips that), then
+it, it waits up to 2 minutes for the pod to be Ready (and stops if it isn't),
+asks for the database name as confirmation (`--yes` skips that), then
 runs `pg_restore --clean --if-exists --single-transaction --exit-on-error`
 in the pod, so a failure rolls back. As with the in-cluster restore,
 `--clean` only drops objects that are in the dump: tables added by later
@@ -435,7 +440,9 @@ scripts/backup/branch-clone.sh delete my-branch                  # asks you to t
 
 The clone is `btrfs subvolume snapshot <read-only snapshot>
 ~/econgraph-branches/<branch>`, i.e. a new writable subvolume, made without
-sudo, plus a `<branch>.source` file next to it naming the snapshot. Point
+sudo, plus a `<branch>.source` file next to it naming the snapshot. `create`
+only clones a read-only subvolume directly in `/srv/econgraph/snapshots`,
+never a live writable one. Point
 the branch's Postgres 18 at `<clone>/pg` (the files are owned by
 UID 999, the image's postgres user, so run it as a container, not on the
 host). Delete also needs no sudo: it empties the clone from inside a

@@ -12,7 +12,8 @@
 # delete asks you to type the clone's name and refuses without a terminal;
 # --yes (-y) skips that question (for scripted use only).
 #
-# A clone is `btrfs subvolume snapshot` of a read-only snapshot into a new
+# A clone is `btrfs subvolume snapshot` of a read-only snapshot (a direct
+# child of SNAPSHOT_DIR with ro=true; anything else is refused) into a new
 # writable subvolume under BRANCH_CLONE_DIR (default ~/econgraph-branches,
 # which is on the same /home btrfs filesystem, as a snapshot requires). It
 # takes no space until the branch writes to it, and production is never
@@ -72,7 +73,7 @@ for a in "$@"; do
     case "$a" in
         --dry-run|-n) DRY_RUN="true" ;;
         --yes|-y) YES="true" ;;
-        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
         -*) usage ;;
         *) args+=("$a") ;;
     esac
@@ -97,6 +98,14 @@ case "${cmd}" in
         fi
         [[ "${snap}" == /* ]] || snap="${SNAPSHOT_DIR}/${snap}"
         [[ -d "${snap}" && "$(stat -c %i "${snap}")" == 256 ]] || die "${snap} is not a snapshot"
+        # Only a read-only snapshot directly in SNAPSHOT_DIR: never a live
+        # (writable) subvolume such as /srv/econgraph/data-plane itself.
+        snap_dir="$(realpath -e "${SNAPSHOT_DIR}")" || die "${SNAPSHOT_DIR} does not exist"
+        snap="$(realpath -e "${snap}")"
+        [[ "$(dirname "${snap}")" == "${snap_dir}" ]] \
+            || die "${snap} is not directly in ${snap_dir}; refusing"
+        [[ "$(btrfs property get "${snap}" ro 2>/dev/null)" == "ro=true" ]] \
+            || die "${snap} is not a read-only snapshot; refusing"
         # findmnt needs a path that exists; before the first clone that is
         # BRANCH_CLONE_DIR's parent.
         fs_probe="${BRANCH_CLONE_DIR}"

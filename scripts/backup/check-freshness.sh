@@ -4,6 +4,8 @@
 # Freshness:
 #   - the newest snapshot of data-plane and of app-prod in SNAPSHOT_DIR
 #     (hourly ones from scripts/host/backup-snapshots.sh, or snapshot-now),
+#   - the last backup-snapshots.sh run (its status file): recent, and with
+#     failures=0,
 #   - the newest copy on the backup pool (from the status file that
 #     backup-snapshots.sh writes; skipped while the pool is not mounted),
 #   - the newest VERIFIED dump directory under BACKUP_ROOT,
@@ -51,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-snapshots) skip_snapshots=1; shift ;;
         --textfile) textfile="$2"; shift 2 ;;
-        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -130,6 +132,19 @@ check restore_drill "${drill_epoch}" "${DRILL_MAX_AGE_HOURS}" "newest passing re
 # file backup-snapshots.sh leaves behind.
 status_file="${HOST_STATE_DIR}/backup-snapshots.status"
 status_value() { [[ -f "${status_file}" ]] && sed -n "s/^$1=//p" "${status_file}" | tail -n 1; }
+# The hourly run itself: it must have run recently (a status file that
+# stopped updating means the timer stopped), and without failures (one
+# dataset's failed snapshot would otherwise pass while the other's is fresh).
+if (( ! skip_snapshots )); then
+    run_epoch="$(status_value run_epoch || true)"
+    [[ "${run_epoch}" =~ ^[0-9]+$ ]] || run_epoch=""
+    check snapshot_run "${run_epoch}" "${SNAPSHOT_MAX_AGE_HOURS}" "last backup-snapshots run (${status_file})"
+    run_failures="$(status_value failures || true)"
+    if [[ -n "${run_epoch}" ]] && [[ ! "${run_failures}" =~ ^[0-9]+$ || "${run_failures}" -gt 0 ]]; then
+        echo "FAIL    snapshot_run: the last backup-snapshots run had failures=${run_failures:-(missing)} (journalctl -u econgraph-backup-snapshots)"
+        failed=1
+    fi
+fi
 if ! mountpoint -q "${POOL_MOUNT}"; then
     echo "SKIP    pool_copy: ${POOL_MOUNT} is not mounted (scripts/host/setup-backup-pool.sh)"
 elif (( skip_snapshots )); then

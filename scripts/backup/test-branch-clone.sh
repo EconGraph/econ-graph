@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Tests for the safety checks in scripts/backup/branch-clone.sh. Needs no
 # btrfs, Docker or root: every case must be refused before anything is
-# touched, and the test checks that nothing was. (The successful create and
-# delete paths need real btrfs subvolumes; see BACKUPS.md, "Branch clones".)
+# touched, and the test checks that nothing was. Fake btrfs, stat and
+# findmnt (test-stubs.sh) stand in for subvolumes where a case needs one.
+# (The successful create and delete paths need real btrfs subvolumes; see
+# BACKUPS.md, "Branch clones".)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 script="${repo_root}/scripts/backup/branch-clone.sh"
+# shellcheck source=scripts/backup/test-stubs.sh
+source "${repo_root}/scripts/backup/test-stubs.sh"
 failures=0
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
+make_stubs "${tmp}/bin"
+export PATH="${tmp}/bin:${PATH}"
 
 # BRANCH_CLONE_DIR one level under a directory holding data that must
 # survive, like a subvolume root.
@@ -78,6 +84,19 @@ mkdir "${tmp}/snapshots/data-plane.20261024T040000Z" \
 touch "${tmp}/snapshots/data-plane.20991231T000000Z"
 expect 1 "data-plane.pre-20261024T044210Z-recrawl is not a snapshot" --dry-run create my-branch
 expect 0 "marked  <- " list
+# The source must be a read-only subvolume directly in SNAPSHOT_DIR, never a
+# writable one such as the live data-plane subvolume.
+fake_subvol "${tmp}/snapshots/data-plane.20261020T000000Z" true 11111111-0000-0000-0000-000000000001
+fake_subvol "${tmp}/snapshots/data-plane.20261021T000000Z" false 11111111-0000-0000-0000-000000000002
+fake_subvol "${tmp}/live/data-plane" false 11111111-0000-0000-0000-000000000003
+fake_subvol "${tmp}/elsewhere/data-plane.20261022T000000Z" true 11111111-0000-0000-0000-000000000004
+ln -s "${tmp}/live/data-plane" "${tmp}/snapshots/data-plane.20261023T000000Z"
+expect 1 "is not a read-only snapshot" --dry-run create my-branch data-plane.20261021T000000Z
+expect 1 "is not directly in" --dry-run create my-branch "${tmp}/live/data-plane"
+expect 1 "is not directly in" --dry-run create my-branch "${tmp}/elsewhere/data-plane.20261022T000000Z"
+expect 1 "is not directly in" --dry-run create my-branch data-plane.20261023T000000Z
+expect 1 "is not directly in" --dry-run create my-branch "${tmp}/snapshots/../live/data-plane"
+expect 0 "(dry run: nothing created)" --dry-run create my-branch data-plane.20261020T000000Z
 
 if [[ -e "${tmp}/nowhere" ]]; then
     echo "FAIL: a create followed a dangling symlink"
