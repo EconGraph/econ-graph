@@ -9,9 +9,11 @@
 //!   an update touched, never their values.
 //! - A signed-in caller refused for a missing role writes a `permission_denied` security
 //!   event, at most one per request for each (caller, permission): a query that aliases one
-//!   admin field a hundred times still writes one row. The events are queued on the request's
-//!   [`GraphQLContext`] and written by the [`AuditWrites`] extension before the request's
-//!   response is returned, so none is lost when the server shuts down.
+//!   admin field a hundred times still writes one row. Writes start at the denial and the
+//!   [`AuditWrites`] extension waits for them before returning a normal response.
+//! - Request cancellation leaves detached writes running. An admin attempt interrupted
+//!   before its result is known is recorded as `cancelled`; it may have committed. Process
+//!   crashes/runtime shutdown can still interrupt writes; this is not a durable queue.
 
 use crate::graphql::context::GraphQLContext;
 use crate::imports::*;
@@ -84,76 +86,95 @@ pub(crate) fn fail(outcome: Outcome, error: impl Into<GraphQLError>) -> Failure 
     }
 }
 
-/// Audit how an admin mutation attempt by the signed-in caller ended, and return its result.
-///
-/// `details` should be a JSON object; the outcome and request id are added to it. The error
-/// message is not recorded, since it can carry input values.
-pub(crate) async fn audited<T>(
-    ctx: &Context<'_>,
-    action: &str,
-    resource_type: &str,
-    resource_id: Option<String>,
-    mut details: Value,
-    result: std::result::Result<T, Failure>,
-) -> Result<T> {
-    let outcome = match &result {
-        Ok(_) => Outcome::Success,
-        Err(failure) => failure.outcome,
-    };
-    if let Some(object) = details.as_object_mut() {
-        object.insert("outcome".into(), json!(outcome.as_str()));
-    }
-    record_admin_action(ctx, action, resource_type, resource_id, details).await;
-    result.map_err(|failure| failure.error)
+/// Owns an audit attempt before its first database await. Cancellation cannot reveal whether
+/// an in-flight statement committed, so dropping it records `cancelled`, not `success`.
+/// This is best-effort across process/runtime shutdown, as are normal audit writes.
+pub(crate) struct Attempt {
+    pool: Option<AppPool>,
+    row: Option<NewAuditLog>,
 }
 
-/// Record an admin action by the signed-in caller.
-///
-/// `details` should be a JSON object; the request id is added to it.
-async fn record_admin_action(
-    ctx: &Context<'_>,
-    action: &str,
-    resource_type: &str,
-    resource_id: Option<String>,
-    mut details: Value,
-) {
-    let (Ok(pool), Ok(context)) = (ctx.data::<AppPool>(), ctx.data::<Arc<GraphQLContext>>()) else {
-        return;
-    };
-    let Some(user) = context.user.as_ref() else {
-        return;
-    };
-    if let Some(object) = details.as_object_mut() {
-        object.insert("request_id".into(), json!(context.request_id));
+impl Attempt {
+    pub(crate) fn new(
+        ctx: &Context<'_>,
+        action: &str,
+        resource_type: &str,
+        resource_id: Option<String>,
+        mut details: Value,
+    ) -> Self {
+        let (Ok(pool), Ok(context)) = (ctx.data::<AppPool>(), ctx.data::<Arc<GraphQLContext>>())
+        else {
+            return Self {
+                pool: None,
+                row: None,
+            };
+        };
+        let Some(user) = context.user.as_ref() else {
+            return Self {
+                pool: None,
+                row: None,
+            };
+        };
+        details["request_id"] = json!(context.request_id);
+        details["outcome"] = json!("cancelled");
+        Self {
+            pool: Some(pool.clone()),
+            row: Some(NewAuditLog {
+                user_id: user.id,
+                user_name: user.name.clone(),
+                action: action.into(),
+                resource_type: resource_type.into(),
+                resource_id,
+                ip_address: context.client_ip.clone(),
+                user_agent: context.user_agent.clone(),
+                details: Some(details),
+            }),
+        }
     }
-    NewAuditLog {
-        user_id: user.id,
-        user_name: user.name.clone(),
-        action: action.into(),
-        resource_type: resource_type.into(),
-        resource_id,
-        ip_address: context.client_ip.clone(),
-        user_agent: context.user_agent.clone(),
-        details: Some(details),
+
+    pub(crate) async fn finish<T>(
+        mut self,
+        mut details: Value,
+        result: std::result::Result<T, Failure>,
+    ) -> Result<T> {
+        let outcome = match &result {
+            Ok(_) => Outcome::Success,
+            Err(failure) => failure.outcome,
+        };
+        if let (Some(row), Some(pool)) = (self.row.take(), self.pool.as_ref()) {
+            let mut row = row;
+            details["request_id"] = row.details.as_ref().unwrap()["request_id"].clone();
+            details["outcome"] = json!(outcome.as_str());
+            row.details = Some(details);
+            row.record(pool).await;
+        }
+        result.map_err(|failure| failure.error)
     }
-    .record(pool)
-    .await;
 }
 
-/// The permission denials a request has raised and not yet written.
+impl Drop for Attempt {
+    fn drop(&mut self) {
+        if let (Some(row), Some(pool)) = (self.row.take(), self.pool.as_ref()) {
+            // Detached immediately: dropping the request must not abort its audit write.
+            row.spawn_record(pool);
+        }
+    }
+}
+
+/// Permission denials observed and writes started for this request.
 #[derive(Debug, Default)]
 pub(crate) struct PendingDenials {
     /// Every (caller, permission) denied in this request, written or not.
     seen: HashSet<(uuid::Uuid, String)>,
-    /// Events waiting for [`AuditWrites`] to write them.
-    events: Vec<NewSecurityEvent>,
+    /// Started writes that [`AuditWrites`] waits for on normal completion.
+    writes: Vec<tokio::task::JoinHandle<()>>,
 }
 
 /// Record that the signed-in caller `user_id` was refused `permission`, with `description`
 /// saying why.
 ///
-/// Called from the synchronous role checks, so the event is queued on the request's context
-/// and the [`AuditWrites`] extension writes it before the response is returned. Only the first
+/// Called from synchronous role checks: start the write immediately, and let the
+/// [`AuditWrites`] extension await it before returning a normal response. Only the first
 /// denial of each (caller, permission) in a request is kept.
 pub(crate) fn record_permission_denied(
     ctx: &Context<'_>,
@@ -161,7 +182,7 @@ pub(crate) fn record_permission_denied(
     permission: String,
     description: String,
 ) {
-    let Ok(context) = ctx.data::<Arc<GraphQLContext>>() else {
+    let (Ok(context), Ok(pool)) = (ctx.data::<Arc<GraphQLContext>>(), ctx.data::<AppPool>()) else {
         return;
     };
     let mut pending = context
@@ -171,20 +192,23 @@ pub(crate) fn record_permission_denied(
     if !pending.seen.insert((user_id, permission.clone())) {
         return;
     }
-    pending.events.push(NewSecurityEvent {
-        event_type: security_event_type::PERMISSION_DENIED.into(),
-        user_id: Some(user_id),
-        user_email: context.user.as_ref().map(|user| user.email.clone()),
-        severity: "medium".into(),
-        ip_address: context.client_ip.clone(),
-        user_agent: context.user_agent.clone(),
-        description,
-        metadata: Some(json!({ "request_id": context.request_id, "permission": permission })),
-    });
+    pending.writes.push(
+        NewSecurityEvent {
+            event_type: security_event_type::PERMISSION_DENIED.into(),
+            user_id: Some(user_id),
+            user_email: context.user.as_ref().map(|user| user.email.clone()),
+            severity: "medium".into(),
+            ip_address: context.client_ip.clone(),
+            user_agent: context.user_agent.clone(),
+            description,
+            metadata: Some(json!({ "request_id": context.request_id, "permission": permission })),
+        }
+        .spawn_record(pool),
+    );
 }
 
-/// Schema extension that writes the request's queued permission denials once the operation
-/// has run, before `Schema::execute` returns its response.
+/// Schema extension that awaits the request's already-started denial writes after the
+/// operation runs, before `Schema::execute` returns a normal response.
 pub(crate) struct AuditWrites;
 
 impl ExtensionFactory for AuditWrites {
@@ -202,19 +226,16 @@ impl Extension for AuditWrites {
         next: NextExecute<'_>,
     ) -> async_graphql::Response {
         let response = next.run(ctx, operation_name).await;
-        if let (Some(pool), Some(context)) = (
-            ctx.data_opt::<AppPool>(),
-            ctx.data_opt::<Arc<GraphQLContext>>(),
-        ) {
-            let events = std::mem::take(
+        if let Some(context) = ctx.data_opt::<Arc<GraphQLContext>>() {
+            let writes = std::mem::take(
                 &mut context
                     .denials
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .events,
+                    .writes,
             );
-            for event in events {
-                event.record(pool).await;
+            for write in writes {
+                let _ = write.await;
             }
         }
         response
@@ -718,5 +739,235 @@ mod tests {
         let kept = client.user_agent.unwrap();
         assert_eq!(kept.chars().count(), ClientInfo::USER_AGENT_MAX_CHARS);
         assert_eq!(ClientInfo::new(None, Some("   ")).user_agent, None);
+    }
+    /// Observe the server-side lock wait instead of racing cancellation against a timer.
+    async fn wait_for_locked_statement(pool: &DatabasePool, fragment: &str) {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        #[derive(QueryableByName)]
+        struct Waiting {
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            waiting: bool,
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let mut conn = pool.get().await.unwrap();
+                let row: Waiting = diesel::sql_query("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE $1) AS waiting")
+                    .bind::<diesel::sql_types::Text, _>(format!("%{fragment}%"))
+                    .get_result(&mut conn).await.unwrap();
+                if row.waiting { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("statement reached the held database lock");
+    }
+
+    async fn wait_for_audit(pool: &DatabasePool, actor: &User) -> Vec<Value> {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let rows = audit_rows(pool, actor).await;
+                if !rows.is_empty() {
+                    return rows;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("detached audit write completed")
+    }
+
+    /// Disconnect while the action itself waits in PostgreSQL. Its outcome is unknown,
+    /// but the attempt must still be recorded after the request future is gone.
+    #[tokio::test]
+    async fn cancellation_during_mutation_records_unknown_outcome() {
+        use diesel_async::SimpleAsyncConnection;
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let actor = insert_user(&pool, "cancel actor").await;
+        let target = insert_user(&pool, "cancel target").await;
+        let mut lock = pool.get().await.unwrap();
+        lock.batch_execute("BEGIN; LOCK TABLE users IN SHARE MODE")
+            .await
+            .unwrap();
+        let schema = schema_for(&pool, &actor, staff());
+        let request = tokio::spawn(async move {
+            schema
+                .execute(format!("mutation {{ suspendUser(id: \"{}\") }}", target.id))
+                .await
+        });
+        wait_for_locked_statement(&pool, "UPDATE").await;
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        lock.batch_execute("ROLLBACK").await.unwrap();
+        let rows = wait_for_audit(&pool, &actor).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(details(&rows[0])["outcome"], "cancelled");
+    }
+
+    /// Cancellation during the audit insert cannot drop a successful action's row or
+    /// produce an extra `cancelled` row from the attempt guard.
+    #[tokio::test]
+    async fn cancellation_during_audit_insert_preserves_one_success_row() {
+        use diesel_async::SimpleAsyncConnection;
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let actor = insert_user(&pool, "cancel audit actor").await;
+        let target = insert_user(&pool, "cancel audit target").await;
+        let mut lock = pool.get().await.unwrap();
+        lock.batch_execute("BEGIN; LOCK TABLE audit_logs IN SHARE MODE")
+            .await
+            .unwrap();
+        let schema = schema_for(&pool, &actor, staff());
+        let request = tokio::spawn(async move {
+            schema
+                .execute(format!("mutation {{ suspendUser(id: \"{}\") }}", target.id))
+                .await
+        });
+        wait_for_locked_statement(&pool, "INSERT INTO \"audit_logs\"").await;
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        lock.batch_execute("ROLLBACK").await.unwrap();
+        let rows = wait_for_audit(&pool, &actor).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(details(&rows[0])["outcome"], "success");
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_denial_write_preserves_event() {
+        use diesel_async::SimpleAsyncConnection;
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let actor = insert_user(&pool, "cancel denial actor").await;
+        let mut lock = pool.get().await.unwrap();
+        lock.batch_execute("BEGIN; LOCK TABLE security_events IN SHARE MODE")
+            .await
+            .unwrap();
+        let schema = schema_for(&pool, &actor, vec![]);
+        let request = tokio::spawn(async move { schema.execute("{ users { totalCount } }").await });
+        wait_for_locked_statement(&pool, "INSERT INTO \"security_events\"").await;
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        lock.batch_execute("ROLLBACK").await.unwrap();
+        let rows = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let rows = security_rows(&pool, &actor).await;
+                if !rows.is_empty() {
+                    break rows;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["eventType"], "permission_denied");
+    }
+
+    #[tokio::test]
+    async fn admin_pagination_rejects_bad_cursors_and_handles_maximum_offset() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let reader = insert_user(&pool, "cursor reader").await;
+        let schema = schema_for(&pool, &reader, staff());
+        for field in ["auditLogs", "securityEventsPage"] {
+            for cursor in ["broken", "-1", "9223372036854775808"] {
+                let response = schema
+                    .execute(format!(
+                        r#"{{ {field}(pagination: {{after: "{cursor}"}}) {{ totalCount }} }}"#
+                    ))
+                    .await;
+                assert_eq!(response.errors.len(), 1, "{field} {cursor}");
+                assert!(response.errors[0].message.contains("after"));
+                assert_eq!(
+                    response.errors[0].extensions.as_ref().unwrap().get("code"),
+                    Some(&async_graphql::Value::from("BAD_USER_INPUT"))
+                );
+            }
+            let data = run(&pool, &reader, staff(), &format!(r#"{{ {field}(pagination: {{after: "9223372036854775807", first: 100}}) {{ nodes {{ id }} pageInfo {{ hasNextPage endCursor }} }} }}"#)).await;
+            assert!(data[field]["nodes"].as_array().unwrap().is_empty());
+            assert_eq!(data[field]["pageInfo"]["hasNextPage"], false);
+            assert!(data[field]["pageInfo"]["endCursor"].is_null());
+        }
+    }
+
+    #[tokio::test]
+    async fn security_event_pages_filter_type_and_time_and_reach_older_rows() {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::security_events;
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let reader = insert_user(&pool, "event page reader").await;
+        let event_type = format!("test_{}", Uuid::new_v4());
+        let before = chrono::Utc::now();
+        for index in 0..105 {
+            NewSecurityEvent {
+                event_type: event_type.clone(),
+                user_id: Some(reader.id),
+                user_email: None,
+                severity: "medium".into(),
+                ip_address: None,
+                user_agent: None,
+                description: format!("event {index}"),
+                metadata: None,
+            }
+            .record(&pool)
+            .await;
+        }
+        let after = chrono::Utc::now();
+        // Give all matching events one timestamp to exercise the stable ID tie-breaker.
+        let mut conn = pool.get().await.unwrap();
+        diesel::update(security_events::table.filter(security_events::event_type.eq(&event_type)))
+            .set(security_events::created_at.eq(before + (after - before) / 2))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        let filter = format!(
+            r#"eventType: "{event_type}", createdAfter: "{}", createdBefore: "{}""#,
+            before.to_rfc3339(),
+            after.to_rfc3339()
+        );
+        let page = |cursor: &str| {
+            format!(
+                r#"{{ securityEventsPage(filter: {{{filter}}}, pagination: {{ first: 100, after: "{cursor}" }}) {{ totalCount nodes {{ id }} pageInfo {{ hasNextPage endCursor }} }} }}"#
+            )
+        };
+        let first = run(&pool, &reader, staff(), &page("0")).await;
+        assert_eq!(first["securityEventsPage"]["totalCount"], 105);
+        assert_eq!(
+            first["securityEventsPage"]["nodes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            100
+        );
+        assert_eq!(first["securityEventsPage"]["pageInfo"]["endCursor"], "100");
+        let second = run(&pool, &reader, staff(), &page("100")).await;
+        assert_eq!(
+            second["securityEventsPage"]["nodes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+        assert_eq!(
+            second["securityEventsPage"]["pageInfo"]["hasNextPage"],
+            false
+        );
+        let ids: HashSet<_> = first["securityEventsPage"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(second["securityEventsPage"]["nodes"].as_array().unwrap())
+            .map(|n| n["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 105);
+        let empty = run(&pool, &reader, staff(), &format!(r#"{{ securityEvents(filter: {{eventType: "{event_type}", createdAfter: "{}"}}) {{ id }} }}"#, after.to_rfc3339())).await;
+        assert!(empty["securityEvents"].as_array().unwrap().is_empty());
     }
 }

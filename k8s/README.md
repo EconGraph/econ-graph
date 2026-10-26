@@ -626,3 +626,7 @@ For production use, consider:
 - [kind Documentation](https://kind.sigs.k8s.io/)
 - [Terraform Documentation](https://www.terraform.io/docs/)
 - [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+
+Admin audit client-IP attribution depends on the verified proxy chain. See
+[Admin audit and trusted proxies](../docs/security/ADMIN_AUDIT.md) before setting
+`TRUSTED_PROXIES`; the manifests default to the backend TCP peer.

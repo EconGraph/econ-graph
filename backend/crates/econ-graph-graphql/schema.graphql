@@ -895,9 +895,15 @@ type Query {
 	"""
 	systemHealth: SystemHealthType!
 	"""
-	Get security events (requires `admin.security:read`)
+	Get security events (requires `admin.security:read`). Existing list clients retain
+	their response shape; use `securityEventsPage` for cursors and total count.
 	"""
-	securityEvents(limit: Int): [SecurityEventType!]!
+	securityEvents(limit: Int, after: String, filter: SecurityEventFilterInput): [SecurityEventType!]!
+	"""
+	Get a filtered security-event connection (requires `admin.security:read`). Offset
+	cursors have the same semantics as `auditLogs`, including concurrent-insert drift.
+	"""
+	securityEventsPage(filter: SecurityEventFilterInput, pagination: PaginationInput): SecurityEventConnection!
 	"""
 	Get audit logs (requires `admin.audit:read`)
 	"""
@@ -951,6 +957,26 @@ type SearchSuggestionType {
 	Confidence score
 	"""
 	confidence: Float!
+}
+
+"""
+Paged security events. The legacy `securityEvents` list remains available.
+"""
+type SecurityEventConnection {
+	nodes: [SecurityEventType!]!
+	totalCount: Int!
+	pageInfo: PageInfo!
+}
+
+"""
+Filter security events; time bounds are exclusive, as in `AuditLogFilterInput`.
+"""
+input SecurityEventFilterInput {
+	eventType: String
+	severity: String
+	resolved: Boolean
+	createdAfter: DateTime
+	createdBefore: DateTime
 }
 
 """

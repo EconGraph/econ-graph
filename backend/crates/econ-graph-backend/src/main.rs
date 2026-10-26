@@ -478,6 +478,15 @@ impl IpRange {
             Some(p) => p.trim().parse::<u8>().ok().filter(|&p| p <= max)?,
             None => max,
         };
+        // `contains` canonicalizes mapped addresses to IPv4. Do the same for mapped
+        // networks; a prefix shorter than /96 also includes native IPv6, so reject it
+        // (and let startup warn) instead of silently changing its meaning.
+        let (network, prefix) = match network {
+            std::net::IpAddr::V6(v6) if v6.to_ipv4_mapped().is_some() => {
+                (network.to_canonical(), prefix.checked_sub(96)?)
+            }
+            _ => (network, prefix),
+        };
         Some(Self { network, prefix })
     }
 
@@ -1428,6 +1437,27 @@ mod client_ip_tests {
             client_ip(peer, forwarded_for(&opaque).as_deref(), &trusted).as_deref(),
             Some("10.0.0.9")
         );
+    }
+
+    #[test]
+    fn mapped_ipv6_proxy_networks_match_canonical_addresses() {
+        let trusted = parse_trusted_proxies(Some("::ffff:10.0.0.0/104"));
+        assert_eq!(trusted.len(), 1);
+        for peer in ["10.1.2.3", "::ffff:10.1.2.3"] {
+            assert_eq!(
+                client_ip(ip(peer), Some("203.0.113.9"), &trusted).as_deref(),
+                Some("203.0.113.9")
+            );
+        }
+        assert!(!trusted[0].contains("11.0.0.1".parse().unwrap()));
+        assert!(IpRange::parse("::ffff:10.0.0.1")
+            .unwrap()
+            .contains("10.0.0.1".parse().unwrap()));
+        assert!(IpRange::parse("::ffff:0.0.0.0/96")
+            .unwrap()
+            .contains("203.0.113.9".parse().unwrap()));
+        assert!(IpRange::parse("::ffff:0.0.0.0/95").is_none());
+        assert!(IpRange::parse("::ffff:10.0.0.1/129").is_none());
     }
 
     #[test]
