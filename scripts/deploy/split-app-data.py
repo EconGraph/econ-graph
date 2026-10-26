@@ -118,10 +118,34 @@ def encrypted_backup(source, service, directory, evidence):
         subprocess.run(['bash', '-c', command + 'backup_seal_dir "$2" "$3"',
                         'conversion-backup', str(helper), str(stage), str(directory)],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for name in ('backup.tar.age', 'SHA256SUMS', 'VERIFIED'):
+            with (directory / name).open('rb') as retained:
+                os.fsync(retained.fileno())
+        sync_directory(directory)
+        sync_directory(directory.parent)
         return digest
     finally:
         # Only newly allocated plaintext staging is disposable; never remove a backup.
         shutil.rmtree(stage)
+
+
+def sync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def save_evidence(directory, report):
+    temporary = directory / 'evidence.next.json'
+    with temporary.open('x') as output:
+        temporary.chmod(0o600)
+        output.write(json.dumps(report, indent=2) + '\n')
+        output.flush()
+        os.fsync(output.fileno())
+    temporary.replace(directory / 'evidence.json')
+    sync_directory(directory)
 
 
 def columns(conn, table):
@@ -249,7 +273,7 @@ def convert(args):
         require(fingerprints(target, app_tables) == source_app_before, 'App copy content verification failed')
         require(fingerprints(source, data_tables) == data_before, 'Data table content changed')
         report['copy_verified'] = True
-        (args.backup_dir / 'evidence.json').write_text(json.dumps(report, indent=2) + '\n')
+        save_evidence(args.backup_dir, report)
         # Commit the verified app copy first. Source locks remain held until the final commit.
         target.commit()
         if args.drop_source_app:
@@ -268,7 +292,7 @@ def convert(args):
         else:
             source.rollback()
             report['source_app_removed'] = False
-        (args.backup_dir / 'evidence.json').write_text(json.dumps(report, indent=2) + '\n')
+        save_evidence(args.backup_dir, report)
         print('Verified app copy retained. ' + ('Source app tables removed.' if args.drop_source_app else
               'Source app tables retained; rerun with --drop-source-app only after reviewing the copy.'))
 
