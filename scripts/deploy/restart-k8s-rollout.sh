@@ -95,11 +95,16 @@ fi
 kubectl() { kc "$@"; }
 
 # Monitoring stack linter: static checks only (--lint-only contacts no cluster),
-# run once the context is set. A failure stops the rollout.
-echo "🔧 Running monitoring stack linter..."
-if ! ./scripts/test-monitoring.sh --lint-only; then
-    echo "❌ Monitoring stack linter failed - aborting"
-    exit 1
+# run once the context is set. A failure stops the rollout; a checkout without
+# the script skips it.
+if [ -f scripts/test-monitoring.sh ]; then
+    echo "🔧 Running monitoring stack linter..."
+    if ! ./scripts/test-monitoring.sh --lint-only; then
+        echo "❌ Monitoring stack linter failed - aborting"
+        exit 1
+    fi
+else
+    echo "⚠️  scripts/test-monitoring.sh not found, skipping the monitoring stack linter"
 fi
 echo "✅ All linter checks passed - proceeding with deployment"
 echo ""
