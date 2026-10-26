@@ -759,7 +759,8 @@ jobs:
           own_account_cannot_be_suspended_or_deleted \
           own_account_is_left_intact_by_suspend_and_delete \
           update_user_email_conflict_leaves_other_fields_unchanged \
-          deleting_a_chart_inviter_preserves_other_users_access; do
+          deleting_a_chart_inviter_preserves_other_users_access \
+          concurrent_admin_removals_leave_an_active_admin; do
           name="graphql::authorization_tests::$test"
           log="$RUNNER_TEMP/$test.log"
           cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
