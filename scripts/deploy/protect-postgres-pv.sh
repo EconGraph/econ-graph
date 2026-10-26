@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Set the PersistentVolumes backing PostgreSQL and its backups to Retain.
+# Set the PersistentVolumes backing both PostgreSQL databases and the backups to Retain.
 # Safe to re-run, including from teardown before deleting the namespace.
 #
 # This patches the PV directly rather than relying on a StorageClass with
@@ -22,7 +22,7 @@ protect_pvc() {
             echo "❌ PVC ${pvc_name} not found in namespace ${NAMESPACE}." >&2
             return 1
         fi
-        echo "ℹ️  Backup PVC ${pvc_name} does not exist yet."
+        echo "ℹ️  PVC ${pvc_name} does not exist yet."
         return 0
     fi
 
@@ -45,5 +45,6 @@ protect_pvc() {
 
 echo "🔒 Protecting PostgreSQL data and backup volumes..."
 protect_pvc "postgresql-data-postgresql-0" true
+protect_pvc "keycloak-postgres-data-keycloak-postgres-0" false
 protect_pvc "postgres-backup-data" false
 echo "   Released volumes must be manually reclaimed after namespace deletion."

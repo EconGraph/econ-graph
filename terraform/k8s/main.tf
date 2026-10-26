@@ -51,7 +51,25 @@ resource "local_file" "kind_config" {
         ]
       },
       {
+        # Production Postgres data lives on host btrfs subvolumes, bind-mounted
+        # into this node at the same paths (docs/deployment/HOST_STORAGE.md).
+        # The static PVs in k8s/manifests/host-storage.yaml point at these
+        # paths and are pinned to this node by the label below, so deleting
+        # the cluster does not delete the database.
         role = "worker"
+        labels = {
+          "econgraph.io/host-storage" = "true"
+        }
+        extraMounts = [
+          {
+            hostPath      = "/srv/econgraph/data-plane"
+            containerPath = "/srv/econgraph/data-plane"
+          },
+          {
+            hostPath      = "/srv/econgraph/app-prod"
+            containerPath = "/srv/econgraph/app-prod"
+          }
+        ]
       }
     ]
   })
@@ -66,6 +84,12 @@ resource "null_resource" "kind_cluster" {
     # on Debian/Ubuntu; dash doesn't understand this script's `[[ ]]` or `&>`, and silently
     # misparses the `command -v` checks, always falling into "Unsupported OS: $OSTYPE".
     interpreter = ["/bin/bash", "-c"]
+    # The cluster runs on the rootful Docker daemon, whatever DOCKER_HOST the
+    # caller's shell has (kind can't start under rootless Docker on a btrfs
+    # data root); see docs/deployment/HOST_STORAGE.md.
+    environment = {
+      DOCKER_HOST = "unix:///var/run/docker.sock"
+    }
     command = <<-EOT
       # Check if kind is installed
       if ! command -v kind &> /dev/null; then
@@ -111,6 +135,9 @@ resource "null_resource" "kind_cluster" {
 
   provisioner "local-exec" {
     when = destroy
+    environment = {
+      DOCKER_HOST = "unix:///var/run/docker.sock"
+    }
     command = "kind delete cluster --name econ-graph"
   }
 }

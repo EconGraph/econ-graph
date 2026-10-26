@@ -99,6 +99,11 @@ echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
+# The StorageClass and static PVs on the host btrfs subvolumes that both Postgres
+# StatefulSets claim (docs/deployment/HOST_STORAGE.md). It runs on the context
+# pinned above (exported CLUSTER_ROLE_CONTEXT), before create-secrets.sh: it stops
+# if a host data directory already holds a database whose Secret is missing.
+./scripts/deploy/apply-host-storage.sh
 render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.

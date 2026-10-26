@@ -35,10 +35,12 @@ shipped to object storage.
   Before removing resources, it sets both bound PVs to Retain and stops if
   that step fails.
   Pass `--yes`/`-y` to skip that prompt non-interactively (e.g. in CI).
-  This does **not** also delete the kind cluster: on kind, the cluster's
-  node is what actually stores every PV's data (Retain policy included), so
-  deleting it destroys the databases and their backups regardless. That still
-  needs its own confirmation, or an explicit `--delete-cluster` flag.
+  This does **not** also delete the kind cluster: the cluster's nodes hold
+  the backup volume (and Grafana's data), so deleting the cluster destroys
+  the backups of both databases. That still needs its own confirmation, or an explicit
+  `--delete-cluster` flag. Both databases live on host btrfs subvolumes
+  outside the cluster ([HOST_STORAGE.md](HOST_STORAGE.md)), so they survive
+  it.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: restores `econ_graph`.
@@ -271,6 +273,13 @@ AWS credentials need to reach the `backup-sync` container (e.g. via
 not wired up by default.
 
 ## Reattaching a Retain'd volume
+
+The two database PVs, `econgraph-data-plane-pg` and
+`econgraph-app-prod-keycloak-pg`, are re-armed by
+`scripts/deploy/apply-host-storage.sh` on the next deploy, and the
+StatefulSets name them in `volumeName`, so their new PVCs bind to the same
+host directories ([HOST_STORAGE.md](HOST_STORAGE.md)). The steps below are for
+the backup volume.
 
 Once a PV's reclaim policy is `Retain`, deleting its PVC leaves the PV
 behind in the `Released` phase; it isn't automatically reused. A plain

@@ -22,3 +22,10 @@
         node-labels: "ingress-ready=true"
   "role": "control-plane"
 - "role": "worker"
+  "labels":
+    "econgraph.io/host-storage": "true"
+  "extraMounts":
+  - "hostPath": "/srv/econgraph/data-plane"
+    "containerPath": "/srv/econgraph/data-plane"
+  - "hostPath": "/srv/econgraph/app-prod"
+    "containerPath": "/srv/econgraph/app-prod"

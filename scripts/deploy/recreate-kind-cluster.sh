@@ -5,6 +5,18 @@ set -e
 
 echo "🔄 Recreating kind cluster with monitoring port mappings..."
 
+# terraform/k8s/kind-config.yaml bind-mounts the host btrfs subvolumes that hold
+# the Postgres data into econ-graph-worker (docs/deployment/HOST_STORAGE.md).
+# Docker would create a missing bind-mount source as an empty root-owned
+# directory, so check them before the old cluster is deleted.
+for dir in /srv/econgraph/data-plane /srv/econgraph/app-prod; do
+    if ! mountpoint -q "$dir"; then
+        echo "❌ $dir is not mounted. Create the subvolumes first:"
+        echo "   sudo scripts/host/setup-subvolumes.sh --dry-run (then without --dry-run)"
+        exit 1
+    fi
+done
+
 # Delete existing cluster
 echo "🗑️  Deleting existing kind cluster..."
 kind delete cluster --name econ-graph
