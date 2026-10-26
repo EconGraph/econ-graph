@@ -335,7 +335,10 @@ after all writes succeed. Failed ciphertext remains `.partial` without a
 converted automatically. The files are 0600 and directories 0700.
 `--target-dir` or `BACKUP_ROOT` selects the nightly output root; the default
 uses `/srv/econgraph-backups/dumps` when available, otherwise
-`~/econgraph-backups`. The pre-change writer uses `ECONGRAPH_BACKUP_ROOT`.
+`~/econgraph-backups`. The pre-change writer uses `ECONGRAPH_BACKUP_ROOT`. The unified writer covers
+the canonical data/app/Keycloak databases; an older `BACKUP_DATABASES` override
+is refused rather than silently ignored. `KIND_NODE` selects its kind cluster
+and must agree with an explicitly supplied `KIND_CLUSTER`.
 
 Plaintext exists only in a private disposable directory under
 `BACKUP_PLAINTEXT_ROOT` (default `/dev/shm`), which must be tmpfs. It is removed
