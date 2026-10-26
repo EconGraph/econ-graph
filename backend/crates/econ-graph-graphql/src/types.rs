@@ -120,6 +120,14 @@ impl EconomicSeriesType {
         self.is_active
     }
 
+    /// Publication lifecycle, independent of the most recent crawl result.
+    async fn lifecycle(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<Option<crate::graphql::lifecycle::SeriesLifecycleType>> {
+        crate::graphql::lifecycle::load_series_lifecycle(ctx, &self.id).await
+    }
+
     async fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
@@ -416,6 +424,14 @@ pub struct DataSourceType {
 
 #[Object]
 impl DataSourceType {
+    /// Counts of retained historical series whose publication state changed upstream.
+    async fn lifecycle_counts(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<crate::graphql::lifecycle::SourceLifecycleCountsType> {
+        crate::graphql::lifecycle::load_source_counts(ctx, &self.id).await
+    }
+
     async fn id(&self) -> &ID {
         &self.id
     }
@@ -465,6 +481,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
+            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>("NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id=economic_series.source_id AND l.external_id=economic_series.external_id AND l.status='restricted')"))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
@@ -517,6 +534,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
+            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>("NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id=economic_series.source_id AND l.external_id=economic_series.external_id AND l.status='restricted')"))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .count()

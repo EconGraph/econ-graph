@@ -6,7 +6,13 @@
  */
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { executeGraphQL, QUERIES, type SeriesListNode } from '../utils/graphql';
+import {
+  executeGraphQL,
+  QUERIES,
+  type SeriesListNode,
+  type SeriesLifecycle,
+  type SourceLifecycleCounts,
+} from '../utils/graphql';
 import type { DataTransformation } from '../utils/transformations';
 
 // Types for series data
@@ -29,6 +35,7 @@ export interface SeriesObservations {
 
 /** Series metadata as returned by the `series(id)` query. */
 export interface SeriesDetail {
+  lifecycle?: SeriesLifecycle | null;
   id: string;
   externalId: string;
   title: string;
@@ -77,6 +84,7 @@ function toDataPoint(raw: RawDataPoint): SeriesDataPoint {
 }
 
 export interface SeriesSearchResult {
+  lifecycle?: SeriesLifecycle | null;
   id: string;
   title: string;
   description: string;
@@ -93,6 +101,7 @@ export interface SeriesSearchResult {
 }
 
 export interface DataSource {
+  lifecycleCounts?: SourceLifecycleCounts;
   id: string;
   name: string;
   description: string;

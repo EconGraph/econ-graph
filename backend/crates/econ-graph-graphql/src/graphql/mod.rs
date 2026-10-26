@@ -11,6 +11,7 @@ pub mod dataloaders;
 pub mod datasets;
 pub mod errors;
 pub mod global_analysis;
+pub mod lifecycle;
 pub mod mutation;
 pub mod query;
 pub mod schema;

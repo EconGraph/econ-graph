@@ -37,7 +37,7 @@ const getDataSourceIcon = (name: string): React.ReactElement => {
 /**
  * REQUIREMENT: Show the data sources and how many series each one has.
  * PURPOSE: Let users see where the data comes from. Only figures the API actually reports are
- * shown (series counts, rate limits); there is no crawl-health or uptime data to show yet.
+ * shown (series counts, publication lifecycle and rate limits).
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
@@ -173,6 +173,27 @@ const DataSourcesContent: React.FC = () => {
                     {source.seriesCount.toLocaleString()}
                   </Typography>
                 </Box>
+                {source.lifecycleCounts && (
+                  <Box component='dl' sx={{ my: 2 }}>
+                    {(
+                      [
+                        ['Discontinued', source.lifecycleCounts.discontinued],
+                        ['Missing from catalog', source.lifecycleCounts.missingFromCatalog],
+                        ['Retired', source.lifecycleCounts.retired],
+                        ['Superseded', source.lifecycleCounts.superseded],
+                      ] as const
+                    ).map(([label, count]) => (
+                      <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography component='dt' variant='body2'>
+                          {label}
+                        </Typography>
+                        <Typography component='dd' variant='body2' sx={{ m: 0 }}>
+                          {count.toLocaleString()}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant='body2'>Crawl rate limit</Typography>
                   <Typography

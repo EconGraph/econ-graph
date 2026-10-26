@@ -389,6 +389,11 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
 /// Comprehensive DataLoaders struct with all specialized loaders
 #[derive(Clone)]
 pub struct DataLoaders {
+    pub series_lifecycle_loader: NonCachedLoader<
+        Uuid,
+        Option<crate::graphql::lifecycle::SeriesLifecycleType>,
+        crate::graphql::lifecycle::SeriesLifecycleBatcher,
+    >,
     pub data_source_loader: Loader<Uuid, Option<DataSource>, DataSourceBatcher>,
     pub data_points_by_series_loader: Loader<Uuid, Vec<DataPoint>, DataPointsBySeriesBatcher>,
     pub data_point_count_loader: Loader<Uuid, i32, DataPointCountBatcher>,
@@ -442,7 +447,14 @@ impl DataLoaders {
         let latest_observation_loader =
             dataloader::non_cached::Loader::new(LatestObservationBatcher { pool: pool.clone() });
 
+        let series_lifecycle_loader =
+            NonCachedLoader::new(crate::graphql::lifecycle::SeriesLifecycleBatcher {
+                pool: pool.clone(),
+            })
+            .with_max_batch_size(2000);
+
         Self {
+            series_lifecycle_loader,
             data_source_loader,
             data_points_by_series_loader,
             data_point_count_loader,

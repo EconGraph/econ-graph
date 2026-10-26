@@ -35,9 +35,12 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSeriesSearch, useSeriesBrowse, useDataSources } from '../hooks/useSeriesData';
 import { buildSearchResultsCsv, buildSearchResultsJson } from '../utils/searchResultsExport';
+import SeriesLifecycleNotice from '../components/SeriesLifecycleNotice';
+import type { SeriesLifecycle } from '../utils/graphql';
 import { downloadCsv } from '../utils/seriesCsv';
 
 interface EconomicSeries {
+  lifecycle?: SeriesLifecycle | null;
   id: string;
   /** The source's own series id, such as `GDP`. */
   externalId?: string;
@@ -235,6 +238,7 @@ const SeriesExplorer: React.FC = () => {
     return searchResults.map((result: any) => ({
       id: result.id,
       externalId: result.externalId || undefined,
+      lifecycle: result.lifecycle,
       title: result.title,
       description: result.description || undefined,
       sourceId: result.sourceId,
@@ -430,6 +434,8 @@ const SeriesExplorer: React.FC = () => {
             <Chip label={series.frequency} size='small' variant='outlined' />
             {series.units && <Chip label={series.units} size='small' variant='outlined' />}
           </Box>
+
+          <SeriesLifecycleNotice lifecycle={series.lifecycle} sourceName={series.source} compact />
 
           {dateRange(series) && (
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
