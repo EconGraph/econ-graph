@@ -109,9 +109,10 @@ async fn pagination_cursors_reject_invalid_input_and_preserve_traversal() {
                     .execute(endpoint.query(source, 3, Some(invalid)))
                     .await;
                 assert_eq!(response.errors.len(), 1, "{endpoint:?}: {invalid}");
+                assert_bad_user_input(&response.errors[0]);
                 assert_eq!(
                     response.errors[0].message,
-                    format!("Invalid cursor: {invalid}")
+                    format!("`after` is not a valid cursor: {invalid:?}")
                 );
                 assert!(
                     response.data == async_graphql::Value::Null,
@@ -179,10 +180,87 @@ async fn pagination_cursors_reject_invalid_input_and_preserve_traversal() {
             ))
             .await;
         assert_eq!(response.errors.len(), 1);
+        assert_bad_user_input(&response.errors[0]);
         assert_eq!(
             response.errors[0].message,
-            format!("Invalid cursor: {invalid}")
+            format!("`after` is not a valid cursor: {invalid:?}")
         );
         assert_eq!(response.data, async_graphql::Value::Null);
     }
+}
+
+/// The app-plane user list must not silently restart at page one either.
+#[tokio::test]
+async fn users_pagination_rejects_invalid_after_and_handles_large_offsets() {
+    use crate::graphql::{context::GraphQLContext, schema::create_schema_with_data};
+    use econ_graph_auth::Role;
+    use econ_graph_core::{models::User, schema::users};
+    use std::sync::Arc;
+
+    let db = ScratchDatabase::create("user_pagination");
+    run_migrations(&db.url).await.unwrap();
+    let pool = create_pool(&db.url).await.unwrap();
+    let caller = {
+        use diesel::{QueryDsl, SelectableHelper};
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "INSERT INTO users (email, name) VALUES ('cursor@example.test', 'Cursor caller')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        users::table
+            .select(User::as_select())
+            .first::<User>(&mut conn)
+            .await
+            .unwrap()
+    };
+    let schema = create_schema_with_data(
+        AppPool(pool),
+        None,
+        Arc::new(GraphQLContext::signed_in(
+            caller.clone(),
+            [Role::AdminUsersRead],
+        )),
+    );
+    for invalid in ["banana", "", "-1", "9223372036854775808"] {
+        let after = serde_json::to_string(invalid).unwrap();
+        let response = schema
+            .execute(format!(
+                "{{ users(pagination: {{ first: 1, after: {after} }}) {{ nodes {{ id }} }} }}"
+            ))
+            .await;
+        assert_eq!(response.errors.len(), 1);
+        assert_bad_user_input(&response.errors[0]);
+        assert_eq!(response.data, async_graphql::Value::Null);
+    }
+    for after in ["0", "1", "99", "9223372036854775807"] {
+        let response = schema
+            .execute(format!(
+                "{{ users(pagination: {{ first: 1, after: \"{after}\" }}) \
+                 {{ nodes {{ id }} totalCount pageInfo {{ hasNextPage }} }} }}"
+            ))
+            .await;
+        assert!(response.errors.is_empty(), "{after}: {:?}", response.errors);
+        let data = response.data.into_json().unwrap();
+        assert_eq!(data["users"]["totalCount"], 1);
+        assert_eq!(data["users"]["pageInfo"]["hasNextPage"], false);
+        let nodes = data["users"]["nodes"].as_array().unwrap();
+        if after == "0" {
+            assert_eq!(nodes[0]["id"], caller.id.to_string());
+        } else {
+            assert!(nodes.is_empty());
+        }
+    }
+}
+
+/// Check the public error contract without relying only on human-readable text.
+fn assert_bad_user_input(error: &async_graphql::ServerError) {
+    assert_eq!(
+        error.extensions.as_ref().and_then(|ext| ext.get("code")),
+        Some(&async_graphql::Value::from("BAD_USER_INPUT"))
+    );
+    assert!(error.message.contains("`after`"));
 }

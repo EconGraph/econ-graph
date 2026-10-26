@@ -159,6 +159,11 @@ fn protected(self_id: Uuid) -> Vec<(&'static str, Role, String)> {
             "{ securityEvents { __typename } }".into(),
         ),
         (
+            "securityEventsPage",
+            Role::AdminSecurityRead,
+            "{ securityEventsPage { totalCount } }".into(),
+        ),
+        (
             "auditLogs",
             Role::AdminAuditRead,
             "{ auditLogs { __typename } }".into(),

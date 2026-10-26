@@ -2,7 +2,7 @@
 [[dataset]]
 code = "fhfa_hpi"
 name = "FHFA House Price Index"
-description = "FHFA repeat-sales house price indexes from the HPI master file. Train 1 covers the traditional purchase-only and all-transactions indexes for the United States, census divisions and states."
+description = "FHFA repeat-sales house price indexes from the HPI master file. Coverage includes the traditional purchase-only and all-transactions indexes for the United States, census divisions and states."
 
 # Canonical id: fhfa_hpi/{hpi_type}.{hpi_flavor}.{frequency}.{level}.{place_id}.{seasonal_adjustment},
 # for example fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa
