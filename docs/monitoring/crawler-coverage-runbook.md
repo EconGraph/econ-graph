@@ -60,19 +60,58 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
 | `CrawlerCoverageStale` | The worker runs but the coverage gauges haven't been refreshed for 15 minutes, for 30 minutes |
 
-A series is overdue as soon as it misses twice its interval. The scheduler retries a failed
-series only after twice its interval, so a single failed refresh makes it overdue, and
-`CrawlerSourceNotRefreshed` fires, until a retry succeeds. A series that fails every time
-(for example a discontinued id) keeps it firing. Find those series and fix or deactivate
-them:
+A series is overdue as soon as it misses twice its interval. Investigate transient failures
+rather than deactivating stored series. Publication state is separate from fetch health:
+retired series keep their observations and remain reachable by link.
 
-```sql
-SELECT es.external_id, es.crawl_error_message
-FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
-WHERE ds.name = 'Federal Reserve Economic Data (FRED)' AND es.crawl_status = 'failed';
--- then, for a series that is gone for good:
-UPDATE economic_series SET is_active = FALSE WHERE id = '<id>';
+## Catalog selection and retained series
+
+BEA and FRED discovery selects from current upstream catalogs using declarative rules in
+`backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml` and `fred.toml`.
+The worker image includes these files under `$CRAWLER_DATA_DIR/catalog_selection/`.
+Rules select BEA dataset/table families and frequencies, or FRED release/category catalogs
+with optional title, id and frequency predicates. Small explicit overrides are supported.
+Change rules and restart the worker to pick them up. Titles come from the source; historical
+dimension labels stay additive and are never used as the current upstream catalog.
+
+Selection limits bound expansion before observation jobs are enqueued. A rejected selection
+raises `CrawlerCatalogGuardRejected`; inspect the upstream catalog and worker warning before
+increasing limits. Do not blindly raise a limit to silence an alert.
+
+The data migrations create `series_lifecycle` and `catalog_lifecycle_scopes`. Apply them with
+`crawler migrate` before deploying code that reads lifecycle state. A complete successful
+catalog under unchanged selection rules supplies absence evidence. Failed or partial catalogs
+supply none, and a rule change resets the comparison scope. Three consecutive successful
+absences confirm a missing series. A snapshot that suddenly loses more than 20% of the
+previously present scope, or an empty scope, is guarded rather than treated as removal.
+
+| Status | Public behavior |
+|---|---|
+| `active` | Normal listing and ranking |
+| `discontinued` | History remains public with a publication badge |
+| `missing_from_catalog` | History remains public, badged and ranked below current series |
+| `retired` | Confirmed missing upstream; stored history stays public |
+| `restricted` | Hidden from public series and observation reads; retained internally |
+| `superseded` | History stays separate, with a human-confirmed successor link |
+
+Data Sources shows lifecycle counts. Series pages distinguish proposed successors from
+confirmed successors. A proposed match is a review hint: compare source definitions, units
+and base periods before confirming it against the data database:
+
+```sh
+crawler confirm-successor --source FRED --series OLD_ID --successor NEW_ID
 ```
+
+This command records the reviewed link. It never merges histories, moves annotations or
+deletes either series. Keeping values separate avoids joining numbers with different bases.
+
+The worker publishes `crawler_series_lifecycle{source,status}` counts and
+`crawler_series_lifecycle_transitions_total{source,status}` transition counters.
+`CrawlerSeriesPublicationChanged` is informational and points operators to source counts
+and successor candidates. `crawler_catalog_guard_rejections_total{source,reason}` distinguishes
+`volume` and `mass_disappearance`. Counts refresh from the database on the coverage polling
+interval. Event counters are process-local: an increase requires scraping around the event.
+Alert rules do not send notifications without Alertmanager.
 
 To check the rules and run their unit tests locally, with promtool and PyYAML installed:
 `k8s/monitoring/check-prometheus-rules.sh`. CI runs it in the "Prometheus Rules" job.

@@ -218,6 +218,24 @@ data:
 
       - name: crawler.discovery
         rules:
+        - alert: CrawlerCatalogGuardRejected
+          expr: sum by (source, reason) (increase(crawler_catalog_guard_rejections_total[1h])) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.source }} catalog rejected by {{ $labels.reason }} guard'
+            description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying.
+
+        - alert: CrawlerSeriesPublicationChanged
+          expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
+          for: 1m
+          labels:
+            severity: info
+          annotations:
+            summary: '{{ $labels.source }} series publication changed to {{ $labels.status }}'
+            description: Retained series changed publication status. Review lifecycle counts on Data Sources and candidate successors; histories are never merged automatically.
+
         # The gauge only changes when a discovery runs, so it stays above 0 until the curated list
         # is fixed and the source is discovered again. Skipped entries keep their stored series.
         # The gauge is process-local: a worker restart drops the series until the next discovery,

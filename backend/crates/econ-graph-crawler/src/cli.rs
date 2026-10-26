@@ -4,8 +4,8 @@
 
 //! The `crawler` operator CLI.
 //!
-//! Everything except `fetch` and `migrate` only touches `crawl_queue`: jobs are enqueued here and
-//! processed by the `crawler-worker` deployment.
+//! Discovery and fetch jobs are enqueued here and processed by `crawler-worker`.
+//! `confirm-successor` records an operator-reviewed link without changing either history.
 //!
 //! ```text
 //! crawler enqueue  --source FRED --series GDP,UNRATE [--priority N]
@@ -16,6 +16,7 @@
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
 //! crawler migrate  [--dry-run]   # apply the data migrations
+//! crawler confirm-successor --source FRED --series OLD --successor NEW
 //! ```
 //!
 //! `migrate` applies the data migrations (`backend/migrations/data`) to the data database. No
@@ -75,6 +76,19 @@ pub struct Cli {
 /// `crawler` subcommands.
 #[derive(Debug, Subcommand, PartialEq)]
 pub enum Command {
+    /// Confirm a replacement series after reviewing its meaning and units. Records a link;
+    /// never merges observations, deletes a series, or moves annotations.
+    ConfirmSuccessor {
+        /// Source containing both series, e.g. FRED.
+        #[arg(long)]
+        source: SourceId,
+        /// Existing series whose publication has ended.
+        #[arg(long)]
+        series: String,
+        /// Replacement series id, in the same source.
+        #[arg(long)]
+        successor: String,
+    },
     /// Enqueue fetch_series jobs.
     Enqueue {
         /// Source, e.g. FRED, BLS, WORLD_BANK.
@@ -345,6 +359,18 @@ impl Cli {
                 series,
                 full,
             } => fetch_one(pool.0, source, series.trim(), full).await,
+            Command::ConfirmSuccessor {
+                source,
+                series,
+                successor,
+            } => {
+                crate::lifecycle::confirm_successor(&pool, source, series.trim(), successor.trim())
+                    .await
+                    .context("confirming the reviewed successor")?;
+                Ok(format!(
+                    "confirmed successor for {source} {series}: {successor}; histories unchanged\n"
+                ))
+            }
             Command::Sources | Command::RecordReferenceSeeds { .. } | Command::Migrate { .. } => {
                 unreachable!("handled above")
             }
@@ -724,6 +750,30 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn successor_confirmation_requires_both_series_and_source() {
+        assert_eq!(
+            parse(&[
+                "confirm-successor",
+                "--source",
+                "FRED",
+                "--series",
+                "OLD",
+                "--successor",
+                "NEW"
+            ])
+            .unwrap()
+            .command,
+            Command::ConfirmSuccessor {
+                source: SourceId::Fred,
+                series: "OLD".into(),
+                successor: "NEW".into()
+            }
+        );
+        assert!(parse(&["confirm-successor", "--source", "FRED", "--series", "OLD"]).is_err());
+        assert!(parse(&["confirm-successor", "--series", "OLD", "--successor", "NEW"]).is_err());
     }
 
     #[test]

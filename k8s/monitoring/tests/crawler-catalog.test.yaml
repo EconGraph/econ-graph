@@ -1,0 +1,82 @@
+# Catalog guards and publication changes: firing, recovery and ordinary refreshes.
+rule_files:
+- crawler.rules.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guard_rejections_total{source="BEA",reason="volume"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        reason: volume
+      exp_annotations:
+        summary: BEA catalog rejected by volume guard
+        description: A catalog exceeded its configured selection limit or disappearance
+          threshold. The worker retained stored histories; inspect its catalog warning
+          and upstream completeness before changing selection rules or retrying.
+  - eval_time: 2h
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guard_rejections_total{source="FRED",reason="mass_disappearance"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+        reason: mass_disappearance
+      exp_annotations:
+        summary: FRED catalog rejected by mass_disappearance guard
+        description: A catalog exceeded its configured selection limit or disappearance
+          threshold. The worker retained stored histories; inspect its catalog warning
+          and upstream completeness before changing selection rules or retrying.
+  - eval_time: 2h
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="retired"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts:
+    - exp_labels:
+        severity: info
+        source: FRED
+        status: retired
+      exp_annotations:
+        summary: FRED series publication changed to retired
+        description: Retained series changed publication status. Review lifecycle
+          counts on Data Sources and candidate successors; histories are never merged
+          automatically.
+  - eval_time: 2h
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="active"}
+    values: 0+1x20
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
