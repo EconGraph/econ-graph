@@ -43,6 +43,7 @@ done
 if [[ -z "${dump}" ]]; then
     dir="$(latest_verified_dump_dir || true)"
     [[ -n "${dir}" ]] || die "no VERIFIED dump directory under ${BACKUP_ROOT} (pass DUMP_FILE to drill an unverified dump)"
+    [[ ! -f "${dir}/backup.tar.age" ]] || die "encrypted backup: run open-backup.sh $dir -- restore-drill.sh @BACKUP@/econ_graph.dump at an operator terminal; no unattended restore was performed"
     dump="${dir}/econ_graph.dump"
 fi
 dump="$(readlink -f "${dump}")"

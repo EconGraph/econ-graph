@@ -238,7 +238,7 @@ restore_and_deploy() {
     if [ -f "${STATE_FILE}" ] && grep -qx "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
         log "Databases already restored from ${BACKUP_DIR} by an earlier run"
     else
-        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" --no-bootstrap "${common_flags[@]}"
+        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "$(backup_source_dir "$BACKUP_DIR")" --no-bootstrap "${common_flags[@]}"
         if [ "${DRY_RUN}" != "true" ]; then
             echo "RESTORED=${BACKUP_DIR}" >>"${STATE_FILE}"
         fi
@@ -259,7 +259,7 @@ verify() {
     fi
     local series points ok=true
     SERIES_COUNT=0 DATA_POINTS_COUNT=0
-    if [ -n "${BACKUP_DIR:-}" ] && [ -f "${BACKUP_DIR}/counts.env" ]; then
+    if [ -n "${BACKUP_DIR:-}" ] && [ -f "$(backup_source_dir "$BACKUP_DIR")/counts.env" ]; then
         read_counts "${BACKUP_DIR}"
     fi
     series="$(count_rows econ_graph 'select count(*) from economic_series')"
@@ -324,6 +324,7 @@ forward() {
         check_local_images
         note_production
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
+        backup_encryption_preflight
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
@@ -333,7 +334,7 @@ forward() {
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no backup to resume from; pass --resume-from ~/econgraph-backups/<ts>"
-        [ -s "${BACKUP_DIR}/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
+        [ -s "$(backup_source_dir "$BACKUP_DIR")/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
         log "Resuming with backup ${BACKUP_DIR}"
         if [ "$cluster" = "absent" ]; then
             recreate_cluster --yes --no-backup "${common_flags[@]}"
@@ -380,6 +381,7 @@ rollback() {
         check_local_images
         note_production
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
+        backup_encryption_preflight
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
@@ -389,7 +391,7 @@ rollback() {
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no running database to back up; pass --resume-from ~/econgraph-backups/<ts>"
     fi
-    [ "${DRY_RUN}" = "true" ] || [ -s "${BACKUP_DIR}/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
+    [ "${DRY_RUN}" = "true" ] || [ -s "$(backup_source_dir "$BACKUP_DIR")/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
     log "Rolling back to ${REF} with backup ${BACKUP_DIR}"
 
     if [ -d "$src" ]; then
