@@ -102,6 +102,39 @@ mkdir "$scratch/shared-opened"
 age -d -i "$scratch/identity" "$scratch/shared/backup.tar.age" |
     python3 "$root/scripts/backup/unpack-backup.py" "$scratch/shared-opened"
 grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
+# Exercise the canonical three-database payload and encrypted Secrets using
+# a fake cluster transport; the same payload supports an independent seed.
+(
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    pod_running() { return 0; }
+    count_rows() {
+        case "$2" in
+            *to_regclass*) printf 't\n' ;;
+            *) printf '1\n' ;;
+        esac
+    }
+    k() {
+        case "$*" in
+            *'get secret econ-graph-secrets -o name'*) printf 'secret/econ-graph-secrets\n' ;;
+            *'get secret econ-graph-secrets -o go-template='*) printf 'synthetic encrypted secret\n' ;;
+            'get secret '*) return 0 ;;
+            *' pg_dump '*) printf 'PGDMP synthetic archive\n' ;;
+            *' pg_restore '*) cat >/dev/null ;;
+            *) die "unexpected fake cluster call" ;;
+        esac
+    }
+    backup_databases "$scratch/canonical"
+)
+mkdir "$scratch/canonical-opened"
+age -d -i "$scratch/identity" "$scratch/canonical/backup.tar.age" |
+    python3 "$root/scripts/backup/unpack-backup.py" "$scratch/canonical-opened"
+(cd "$scratch/canonical-opened"; sha256sum -c SHA256SUMS)
+[[ -f "$scratch/canonical-opened/VERIFIED" ]]
+[[ -f "$scratch/canonical-opened/secrets/econ-graph-secrets.yaml" ]]
+[[ -f "$scratch/canonical-opened/counts.env" ]]
+[[ "$(find "$scratch/canonical-opened" -name '*.dump' | wc -l)" == 3 ]]
 # A failed encryptor must never publish VERIFIED or final output.
 mkdir "$scratch/bin"
 printf '#!/bin/sh\nexit 42\n' > "$scratch/bin/age"

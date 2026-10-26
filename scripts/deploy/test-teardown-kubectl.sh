@@ -109,6 +109,12 @@ case "\$1 \$2" in
 esac
 exit 0
 EOF
+# This suite only plans a backup; actual recipient parsing/encryption is tested
+# with real age in scripts/backup/test-encryption.sh.
+cat >"$WORK/bin/age" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+EOF
 chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
 # The scripts run kind from its pinned path (lib/kind-version.sh); the stub stands in there too.
 mkdir -p "$WORK/home/.local/share/econgraph/bin"
@@ -123,6 +129,7 @@ TEARDOWN_ENV=(
     -u ECONGRAPH_KUBE_DIR -u ECONGRAPH_SCRATCH_STORAGE -u DRY_RUN -u ASSUME_YES -u NAMESPACE
     -u ALLOW_MISSING_APP_DUMP -u ALLOW_MISSING_KEYCLOAK_DUMP
     HOME="$WORK/home" XDG_DATA_HOME="$WORK/home/.local/share" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp"
+    BACKUP_AGE_RECIPIENT=age1synthetic BACKUP_PLAINTEXT_ROOT=/dev/shm
     ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
 )
 
