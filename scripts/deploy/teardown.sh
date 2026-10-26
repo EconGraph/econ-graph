@@ -38,7 +38,13 @@
 # A confirmation that can't be typed (no terminal) stops the script before it
 # changes anything. Every kubectl call goes to the kind cluster's own kubectl
 # on context kind-<cluster> (printed before anything else happens), never to
-# plain `kubectl`; if that context can't be selected, the script stops.
+# plain `kubectl`; if that context can't be selected, the script stops. It
+# also stops unless the kube-system namespace UID seen through that context
+# equals the one the kind control-plane node reports on DOCKER_HOST, so kubectl
+# and `kind delete cluster` act on the same cluster. On a cluster marked
+# production (scripts/deploy/mark-production-cluster.sh), deleting the app
+# plane also needs the UID's first 8 characters typed (--yes still answers).
+# A dry run never switches kubectl's context.
 #
 # The databases live on host btrfs subvolumes (static PVs in
 # k8s/manifests/host-storage.yaml, docs/deployment/HOST_STORAGE.md). This
@@ -64,7 +70,7 @@ for arg in "$@"; do
         --no-backup) NO_BACKUP="true" ;;
         --include-data-plane) INCLUDE_DATA_PLANE="true" ;;
         --delete-cluster) DELETE_CLUSTER="true" ;;
-        -h|--help) sed -n '3,50p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,56p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
@@ -128,16 +134,55 @@ export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
 EXPECTED_CONTEXT="kind-${CLUSTER}"
+# A dry run pins the context without switching to it (kc passes --context on
+# every call); cluster_role_use_context only prints the switch then. The reads
+# below still run for real.
+if [ "${DRY_RUN}" = "true" ]; then
+    export CLUSTER_ROLE_DRY_RUN=true
+fi
 cluster_role_use_context "${EXPECTED_CONTEXT}" ||
     die "${KUBECTL} has no context ${EXPECTED_CONTEXT}; nothing was changed"
+CLUSTER_ROLE_DRY_RUN=false
 kubectl() { kc "$@"; }
-current_context="$(kc config current-context)" ||
-    die "could not read the current context; nothing was changed"
-[ "${current_context}" = "${EXPECTED_CONTEXT}" ] ||
-    die "kubectl's context is ${current_context}, not ${EXPECTED_CONTEXT}; nothing was changed"
+if [ "${DRY_RUN}" != "true" ]; then
+    current_context="$(kc config current-context)" ||
+        die "could not read the current context; nothing was changed"
+    [ "${current_context}" = "${EXPECTED_CONTEXT}" ] ||
+        die "kubectl's context is ${current_context}, not ${EXPECTED_CONTEXT}; nothing was changed"
+fi
 server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}')" ||
     die "could not read the API server of ${EXPECTED_CONTEXT}; nothing was changed"
-echo "Cluster: context ${EXPECTED_CONTEXT}, API server ${server}, kubectl ${KUBECTL}"
+
+# kubectl may use a cached kubeconfig (a dry run, or KUBECONFIG already set),
+# and kind_cluster_exists only checks a name, while kind delete cluster acts on
+# ${DOCKER_HOST}. So prove both reach the same cluster: the kube-system
+# namespace UID through kc must equal the one the control-plane node reports
+# for itself on ${DOCKER_HOST}.
+cluster_uid="$(kc get namespace kube-system -o 'jsonpath={.metadata.uid}')" && [ -n "${cluster_uid}" ] ||
+    die "could not read the kube-system UID through ${EXPECTED_CONTEXT}; nothing was changed"
+node_uid="$(docker exec "${KIND_CONTROL_PLANE}" kubectl --kubeconfig /etc/kubernetes/admin.conf \
+    get namespace kube-system -o 'jsonpath={.metadata.uid}')" && [ -n "${node_uid}" ] ||
+    die "could not read the kube-system UID from ${KIND_CONTROL_PLANE} on ${DOCKER_HOST}; nothing was changed"
+[ "${cluster_uid}" = "${node_uid}" ] ||
+    die "context ${EXPECTED_CONTEXT} reaches kube-system UID ${cluster_uid}, but ${KIND_CONTROL_PLANE} on ${DOCKER_HOST} is ${node_uid}: kubectl and kind would act on different clusters; nothing was changed"
+echo "Cluster: context ${EXPECTED_CONTEXT}, API server ${server}, kube-system UID ${cluster_uid},"
+echo "  node ${KIND_CONTROL_PLANE} on ${DOCKER_HOST}, kubectl ${KUBECTL}"
+
+# A cluster marked production (scripts/deploy/mark-production-cluster.sh) also
+# needs the UID's first 8 characters typed before the app plane goes. One that
+# can't be checked counts as production.
+UID_PREFIX="${cluster_uid:0:8}"
+PRODUCTION="false"
+production_rc=0
+cluster_is_marked_production || production_rc=$?
+if [ "${production_rc}" -ne 1 ]; then
+    PRODUCTION="true"
+    if [ "${production_rc}" -eq 0 ]; then
+        echo "  This cluster is marked production."
+    else
+        echo "  ${CLUSTER_ROLE_REASON}; treated as production here."
+    fi
+fi
 
 # 1. Off-cluster copy of the databases first, while they are still running.
 if pod_running postgresql-0; then
@@ -171,6 +216,9 @@ elif [ "${DRY_RUN}" = "true" ]; then
 else
     read -r -p "Type the namespace name (${NAMESPACE}) to delete the app plane: " answer || die "aborted; nothing was deleted"
     [ "${answer}" = "${NAMESPACE}" ] || die "aborted; nothing was deleted"
+fi
+if [ "${PRODUCTION}" = "true" ] && [ "${ASSUME_YES}" != "true" ]; then
+    typed_confirm "This is the production cluster (kube-system UID ${cluster_uid})." "${UID_PREFIX}"
 fi
 
 if [ "${INCLUDE_DATA_PLANE}" = "true" ]; then
