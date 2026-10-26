@@ -153,7 +153,10 @@ realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --
 
 The optional `facebook` provider uses the same first-broker-login and account-linking
 flow as Google, requests only `email` and `public_profile`, and stores no upstream
-token. Without both credentials it stays disabled and no Facebook button appears.
+token. Facebook emails are not trusted as verified: Keycloak handles profile
+completion and existing-account verification through its default first-broker-login
+flow, rather than automatically linking by email. Without both credentials the
+provider stays disabled and no Facebook button appears.
 Kubernetes reads `facebook-idp-client-id` and `facebook-idp-client-secret` from
 `econ-graph-keycloak`; a maintainer enters them with hidden input:
 
@@ -179,5 +182,6 @@ or test cluster. Local compose does not forward Facebook credentials.
 
 After configuring the app and credentials, manually confirm that the Facebook
 button appears, a first login and an existing-account link succeed, and sign-out
-returns to the app. This requires the maintainer's Meta app access and a real
+returns to the app. Include accounts that withhold email and verify that linking
+to an existing email requires proof of ownership. This requires the maintainer's Meta app access and a real
 Facebook account; rendering tests cannot verify Meta's configuration or approval.

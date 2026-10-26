@@ -88,6 +88,7 @@ for values, enabled in [({}, False), ({"KC_FACEBOOK_CLIENT_ID": "test-app"}, Fal
     assert facebook["firstBrokerLoginFlowAlias"] == providers["google"]["firstBrokerLoginFlowAlias"]
     assert facebook["config"]["defaultScope"] == "email,public_profile"
     assert facebook["storeToken"] is False
+    assert facebook["trustEmail"] is False  # An upstream email is not proof of verification.
     if enabled:
         assert facebook["config"]["clientSecret"] == values["KC_FACEBOOK_CLIENT_SECRET"]
 PYTEST

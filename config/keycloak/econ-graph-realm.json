@@ -235,7 +235,7 @@
       "displayName": "Facebook",
       "providerId": "facebook",
       "enabled": "${KC_FACEBOOK_ENABLED:false}",
-      "trustEmail": true,
+      "trustEmail": false,
       "storeToken": false,
       "firstBrokerLoginFlowAlias": "first broker login",
       "config": {
