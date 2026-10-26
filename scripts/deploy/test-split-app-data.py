@@ -178,6 +178,10 @@ class ConversionRehearsal(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Target contains existing app data'):
             self.run_conversion()
         self.assertFalse(self.args.backup_dir.exists())
+        self.args.source_service = 'conversion_source dbname=another_database'
+        with self.assertRaisesRegex(RuntimeError, 'simple libpq service name'):
+            self.run_conversion()
+        self.args.source_service = 'conversion_source'
         self.mapping.write_text(json.dumps({next(iter(json.loads(self.mapping.read_text()))): 'BLS'}))
         with self.assertRaisesRegex(RuntimeError, 'Unstable series IDs'):
             self.run_conversion()

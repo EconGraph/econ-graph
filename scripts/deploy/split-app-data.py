@@ -72,7 +72,7 @@ def stable_ids(conn, mapping):
     digest = hashlib.sha256()
     # A server cursor keeps a large catalog out of client memory.
     with conn.cursor(name='series_ids') as cur:
-        cur.execute('SELECT id, source_id, external_id FROM economic_series ORDER BY id')
+        cur.execute('SELECT id, source_id, external_id FROM public.economic_series ORDER BY id')
         for series_id, source_id, external_id in cur:
             code = mapping.get(str(source_id))
             require(code in CODES, 'A series source is unmapped or has an unknown canonical source code')
@@ -202,6 +202,9 @@ def convert(args):
     from psycopg import sql
     app_tables, app_enums, app_versions, baseline = inventory('app')
     data_tables, _, data_versions, _ = inventory('data')
+    for service in (args.source_service, args.app_service):
+        require(re.fullmatch(r'[A-Za-z0-9_.-]+', service) is not None,
+                'Use a simple libpq service name containing only letters, digits, underscore, dot or hyphen')
     mapping = json.loads(args.source_map.read_text())
     require(isinstance(mapping, dict), 'Source map must be an object mapping data_sources UUIDs to canonical codes')
     with psycopg.connect(service=args.source_service) as source, psycopg.connect(service=args.app_service) as target:
@@ -211,6 +214,7 @@ def convert(args):
             conn.execute("SET LOCAL lock_timeout='10s'")
             conn.execute("SET LOCAL statement_timeout='0'")
             conn.execute("SET LOCAL timezone='UTC'")
+            conn.execute("SET LOCAL search_path=pg_catalog,public")
             conn.execute("SET LOCAL extra_float_digits=3")
             conn.execute("SET LOCAL datestyle='ISO, YMD'")
             conn.execute("SET LOCAL intervalstyle='postgres'")
