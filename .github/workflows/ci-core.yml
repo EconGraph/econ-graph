@@ -764,6 +764,8 @@ jobs:
       run: |
         set -euo pipefail
         export PATH="$HOME/.cargo/bin:$PATH"
+        # Scheduler retry/backoff regressions must exercise Postgres rather than skip locally.
+        : "${DATABASE_URL:?DATABASE_URL is required for crawler scheduler regressions}"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1

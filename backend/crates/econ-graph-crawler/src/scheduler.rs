@@ -50,8 +50,12 @@
 //!    a concurrent duplicate rejected by the queue's partial unique index counts as skipped.
 //!
 //! 2. **Catalog discovery** — enqueues one `discover_catalog` job per registry source unless that
-//!    source already has an active discovery job or one finished (completed or failed) within
-//!    [`DISCOVERY_INTERVAL`], or its `data_sources` row exists and is disabled.
+//!    source already has an active discovery job, a successful discovery within
+//!    [`DISCOVERY_INTERVAL`], or its `data_sources` row exists and is disabled. A failed discovery
+//!    instead backs off for one hour, doubling on consecutive failed jobs up to one day. A
+//!    successful discovery resets this backoff. Cancellation retains the weekly delay. History
+//!    comes from retained queue rows (14 days by default); purging that history resets the
+//!    backoff, never lengthens it.
 //!
 //! Deployment runs a single `crawler-worker` replica (which hosts the scheduler), and duplicates
 //! are prevented by the queue's unique index anyway, so there is no leader election.
@@ -60,12 +64,13 @@ use std::future::Future;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use diesel::sql_types::{Array, BigInt, Double, Text};
+use diesel::sql_types::{Array, BigInt, Bool, Double, Nullable, Text};
 use diesel::QueryableByName;
 use diesel_async::RunQueryDsl;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{CrawlQueueItem, JobKind};
 use econ_graph_core::DatabasePool;
+use econ_graph_metrics::crawler::CRAWLER_SCHEDULER_METRICS;
 
 use crate::adapter::AdapterRegistry;
 use crate::cli::{new_job, CATALOG_SERIES_ID, DEFAULT_PRIORITY};
@@ -81,6 +86,12 @@ pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[];
 
 /// How often each source's catalog is re-discovered.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Initial delay after a terminal discovery failure (worker-level retries finish first).
+pub const DISCOVERY_RETRY_BASE: Duration = Duration::from_secs(60 * 60);
+
+/// Maximum delay between terminal discovery failures, shorter than the weekly refresh.
+pub const DISCOVERY_RETRY_CAP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Default seconds between ticks.
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
@@ -247,15 +258,35 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Sources needing discovery. `$1` source codes, `$2` matching data_sources names, `$3` seconds.
-const DISCOVERY_DUE_SQL: &str = "SELECT s.code AS source \
+/// Discovery state, including idle/disabled sources for metrics. `$1` source codes, `$2`
+/// matching data_sources names, `$3` weekly interval, `$4` retry base, `$5` retry cap (seconds).
+const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
+         SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
+         FROM crawl_queue WHERE kind = 'discover_catalog' AND source = ANY($1) \
+     ), summary AS ( \
+         SELECT source, bool_or(status IN ('pending', 'processing', 'retrying')) AS active, \
+                max(finished_at) FILTER (WHERE status = 'completed') AS last_success, \
+                max(finished_at) FILTER (WHERE status IN ('completed', 'cancelled')) AS last_settled, \
+                max(finished_at) FILTER (WHERE status = 'failed') AS last_failure \
+         FROM history GROUP BY source \
+     ) \
+     SELECT s.code AS source, EXTRACT(EPOCH FROM h.last_success)::float8 AS last_success, \
+            NOT EXISTS (SELECT 1 FROM data_sources ds \
+                        WHERE ds.name = s.ds_name AND NOT ds.is_enabled) \
+            AND NOT COALESCE(h.active, false) \
+            AND CASE WHEN h.last_failure IS NOT NULL \
+                           AND (h.last_settled IS NULL OR h.last_failure >= h.last_settled) \
+                THEN h.last_failure <= NOW() - make_interval(secs => LEAST($5, $4 * \
+                    power(2::float8, LEAST(20, ( \
+                        SELECT count(*) - 1 FROM history f \
+                        WHERE f.source = s.code AND f.status = 'failed' \
+                          AND f.finished_at >= COALESCE(h.last_settled, '-infinity'::timestamptz) \
+                    ))::float8))) \
+                ELSE h.last_settled IS NULL \
+                     OR h.last_settled <= NOW() - make_interval(secs => $3) \
+                END AS due \
      FROM unnest($1::text[], $2::text[]) AS s(code, ds_name) \
-     WHERE NOT EXISTS (SELECT 1 FROM data_sources ds \
-                       WHERE ds.name = s.ds_name AND NOT ds.is_enabled) \
-       AND NOT EXISTS (SELECT 1 FROM crawl_queue q \
-                       WHERE q.source = s.code AND q.kind = 'discover_catalog' \
-                         AND (q.status IN ('pending', 'processing', 'retrying') \
-                              OR q.finished_at > NOW() - make_interval(secs => $3))) \
+     LEFT JOIN summary h ON h.source = s.code \
      ORDER BY s.code";
 
 #[derive(QueryableByName)]
@@ -270,6 +301,10 @@ struct DueSeries {
 struct DueSource {
     #[diesel(sql_type = Text)]
     source: String,
+    #[diesel(sql_type = Nullable<Double>)]
+    last_success: Option<f64>,
+    #[diesel(sql_type = Bool)]
+    due: bool,
 }
 
 /// Scheduler settings.
@@ -373,6 +408,22 @@ impl RefreshScheduler {
 
     /// One scheduling pass: enqueue due series refreshes, then due catalog discoveries.
     pub async fn tick(&self) -> AppResult<SchedulerTickStats> {
+        // Count attempted passes even when idle or a database operation fails. Initialize the
+        // enqueue counters to zero so an idle scheduler is visible in /metrics.
+        for (sources, kind) in [
+            (self.refreshable_sources(), JobKind::FetchSeries),
+            (self.discovery_sources(), JobKind::DiscoverCatalog),
+        ] {
+            for source in sources {
+                CRAWLER_SCHEDULER_METRICS
+                    .ticks_total
+                    .with_label_values(&[source.as_str(), kind.as_str()])
+                    .inc();
+                CRAWLER_SCHEDULER_METRICS
+                    .enqueued_total
+                    .with_label_values(&[source.as_str(), kind.as_str()]);
+            }
+        }
         let mut stats = SchedulerTickStats::default();
         self.enqueue_due_series(&mut stats).await?;
         self.enqueue_due_discovery(&mut stats).await?;
@@ -417,7 +468,13 @@ impl RefreshScheduler {
                 DEFAULT_PRIORITY,
             );
             match CrawlQueueItem::enqueue(&self.pool, &job).await? {
-                Some(_) => stats.series_enqueued += 1,
+                Some(_) => {
+                    stats.series_enqueued += 1;
+                    CRAWLER_SCHEDULER_METRICS
+                        .enqueued_total
+                        .with_label_values(&[source.as_str(), JobKind::FetchSeries.as_str()])
+                        .inc();
+                }
                 None => stats.series_skipped += 1,
             }
         }
@@ -440,10 +497,19 @@ impl RefreshScheduler {
                 .bind::<Array<Text>, _>(&codes)
                 .bind::<Array<Text>, _>(&names)
                 .bind::<Double, _>(DISCOVERY_INTERVAL.as_secs_f64())
+                .bind::<Double, _>(DISCOVERY_RETRY_BASE.as_secs_f64())
+                .bind::<Double, _>(DISCOVERY_RETRY_CAP.as_secs_f64())
                 .load(&mut conn)
                 .await?
         };
         for row in due {
+            CRAWLER_SCHEDULER_METRICS
+                .last_discovery_success_timestamp_seconds
+                .with_label_values(&[&row.source])
+                .set(row.last_success.unwrap_or(0.0));
+            if !row.due {
+                continue;
+            }
             let Ok(source) = row.source.parse::<SourceId>() else {
                 continue;
             };
@@ -454,7 +520,13 @@ impl RefreshScheduler {
                 DEFAULT_PRIORITY,
             );
             match CrawlQueueItem::enqueue(&self.pool, &job).await? {
-                Some(_) => stats.discover_enqueued += 1,
+                Some(_) => {
+                    stats.discover_enqueued += 1;
+                    CRAWLER_SCHEDULER_METRICS
+                        .enqueued_total
+                        .with_label_values(&[source.as_str(), JobKind::DiscoverCatalog.as_str()])
+                        .inc();
+                }
                 None => stats.discover_skipped += 1,
             }
         }
@@ -1377,10 +1449,10 @@ mod tests {
         // Active jobs: nothing new.
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
 
-        // Finished just now (FRED completed, BLS failed, ECB completed): nothing new.
+        // Successful discoveries retain the weekly interval.
         exec(
             p,
-            "UPDATE crawl_queue SET status = CASE WHEN source = 'BLS' THEN 'failed' ELSE 'completed' END, \
+            "UPDATE crawl_queue SET status = 'completed', \
              finished_at = NOW() - interval '1 day' WHERE kind = 'discover_catalog'",
         )
         .await;
@@ -1397,6 +1469,200 @@ mod tests {
         let stats = s.tick().await.unwrap();
         assert_eq!(stats.discover_enqueued, 1, "{stats:?}");
         assert_eq!(queued_discovery(p).await, set(&["FRED"]));
+    }
+
+    /// A finished discovery, including exhausted worker retries. Separate rows represent
+    /// successive scheduler-created jobs, not each request-level retry inside a job.
+    async fn finished_discovery(pool: &DatabasePool, status: &str, hours_ago: f64) {
+        let job = new_job(
+            SourceId::Fred,
+            CATALOG_SERIES_ID,
+            JobKind::DiscoverCatalog,
+            DEFAULT_PRIORITY,
+        );
+        let id = CrawlQueueItem::enqueue(pool, &job)
+            .await
+            .unwrap()
+            .expect("no active discovery")
+            .id;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE crawl_queue SET status = $2, \
+             finished_at = NOW() - make_interval(secs => $3) WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(id)
+        .bind::<Text, _>(status)
+        .bind::<Double, _>(hours_ago * 3600.0)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    async fn age_latest_failure(pool: &DatabasePool, hours_ago: f64) {
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE crawl_queue SET finished_at = NOW() - make_interval(secs => $1) \
+             WHERE id = (SELECT id FROM crawl_queue WHERE source = 'FRED' \
+                         AND kind = 'discover_catalog' AND status = 'failed' \
+                         ORDER BY finished_at DESC LIMIT 1)",
+        )
+        .bind::<Double, _>(hours_ago * 3600.0)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_discovery_retries_after_an_hour_instead_of_a_week() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "failed", 0.5).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        age_latest_failure(p, 1.1).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+        assert_eq!(queued_discovery(p).await, set(&["FRED"]));
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "active job");
+    }
+
+    #[tokio::test]
+    async fn consecutive_discovery_failures_double_the_backoff() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "failed", 4.0).await;
+        finished_discovery(p, "failed", 1.5).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "wait two hours"
+        );
+        age_latest_failure(p, 2.1).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_discovery_retains_the_weekly_delay() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "failed", 48.0).await;
+        finished_discovery(p, "cancelled", 1.0).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        exec(p, "DELETE FROM crawl_queue WHERE source = 'FRED'").await;
+        finished_discovery(p, "cancelled", 8.0 * 24.0).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+    }
+
+    #[tokio::test]
+    async fn discovery_retry_backoff_is_capped_at_one_day() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        for hours in [120.0, 100.0, 80.0, 60.0, 40.0, 23.0] {
+            finished_discovery(p, "failed", hours).await;
+        }
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        age_latest_failure(p, 25.0).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+    }
+
+    #[tokio::test]
+    async fn successful_discovery_resets_failed_discovery_backoff() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        for hours in [100.0, 80.0, 60.0, 40.0, 20.0] {
+            finished_discovery(p, "failed", hours).await;
+        }
+        finished_discovery(p, "completed", 2.0).await;
+        finished_discovery(p, "failed", 0.5).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        age_latest_failure(p, 1.1).await;
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "reset to one hour"
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_backoff_uses_updated_at_when_finished_at_is_missing() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        // Legacy/manual terminal rows can lack finished_at. Do not immediately retry them
+        // every tick or ignore their successful discovery time.
+        exec(
+            p,
+            "INSERT INTO crawl_queue (source, series_id, kind, status, updated_at) VALUES \
+             ('FRED', 'catalog', 'discover_catalog', 'failed', NOW() - interval '30 minutes'), \
+             ('BLS', 'catalog', 'discover_catalog', 'failed', NOW() - interval '2 hours'), \
+             ('ECB', 'catalog', 'discover_catalog', 'completed', NOW() - interval '1 day')",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred, SourceId::Bls, SourceId::Ecb], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+        assert_eq!(queued_discovery(p).await, set(&["BLS"]));
+    }
+
+    #[tokio::test]
+    async fn discovery_retry_does_not_duplicate_active_worker_retries() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "failed", 48.0).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+        for status in ["pending", "processing", "retrying"] {
+            exec(
+                p,
+                &format!(
+                    "UPDATE crawl_queue SET status = '{status}' \
+                          WHERE source = 'FRED' AND kind = 'discover_catalog' \
+                            AND status IN ('pending', 'processing', 'retrying')"
+                ),
+            )
+            .await;
+            assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "{status}");
+            assert_eq!(queued_discovery(p).await, set(&["FRED"]));
+        }
+    }
+
+    #[tokio::test]
+    async fn scheduler_metrics_observe_idle_ticks_enqueues_and_success() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let ticks = CRAWLER_SCHEDULER_METRICS
+            .ticks_total
+            .with_label_values(&["FRED", "discover_catalog"]);
+        let enqueued = CRAWLER_SCHEDULER_METRICS
+            .enqueued_total
+            .with_label_values(&["FRED", "discover_catalog"]);
+        let before_ticks = ticks.get();
+        let before_enqueued = enqueued.get();
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        assert_eq!(ticks.get(), before_ticks + 2);
+        assert_eq!(enqueued.get(), before_enqueued + 1);
+        let success = CRAWLER_SCHEDULER_METRICS
+            .last_discovery_success_timestamp_seconds
+            .with_label_values(&["FRED"]);
+        assert_eq!(success.get(), 0.0, "no successful discovery yet");
+
+        exec(
+            p,
+            "UPDATE crawl_queue SET status = 'completed', finished_at = NOW() \
+                 WHERE source = 'FRED' AND kind = 'discover_catalog'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+        assert_eq!(ticks.get(), before_ticks + 3);
+        assert_eq!(enqueued.get(), before_enqueued + 1);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        assert!((now - success.get()).abs() < 5.0, "fresh success timestamp");
     }
 
     #[tokio::test]
