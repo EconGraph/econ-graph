@@ -193,8 +193,6 @@ async fn pagination_cursors_reject_invalid_input_and_preserve_traversal() {
 #[tokio::test]
 async fn users_pagination_rejects_invalid_after_and_handles_large_offsets() {
     use crate::graphql::{context::GraphQLContext, schema::create_schema_with_data};
-    use diesel::{QueryDsl, SelectableHelper};
-    use diesel_async::RunQueryDsl;
     use econ_graph_auth::Role;
     use econ_graph_core::{models::User, schema::users};
     use std::sync::Arc;
@@ -203,6 +201,9 @@ async fn users_pagination_rejects_invalid_after_and_handles_large_offsets() {
     run_migrations(&db.url).await.unwrap();
     let pool = create_pool(&db.url).await.unwrap();
     let caller = {
+        use diesel::{QueryDsl, SelectableHelper};
+        use diesel_async::RunQueryDsl;
+
         let mut conn = pool.get().await.unwrap();
         diesel::sql_query(
             "INSERT INTO users (email, name) VALUES ('cursor@example.test', 'Cursor caller')",
