@@ -5,13 +5,22 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/fred.rs`. Fixtures:
 
 ## What we fetch today
 
-- **Discovery**: looks up live metadata for each id in a curated list,
-  `backend/crates/econ-graph-crawler/data/fred_series.csv` (headline series across GDP,
-  employment, inflation, rates and more; 181 ids), via `GET /fred/series?series_id=ID`
-  per id. A series whose `notes` match a known copyright/reproduction-restriction phrase
-  (e.g. Coinbase, S&P/Case-Shiller) is dropped as a safety net before it is discovered. This
-  replaced a `/series/search`-based crawl, which had no bound on how many series it could
-  turn up.
+- **Discovery**: bounded release/category catalogs selected by
+  `backend/crates/econ-graph-crawler/data/catalog_selection/fred.toml`. Rules can constrain
+  title, id prefix and frequency. All pages must agree on count and ordering before the
+  snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
+  Separate scan and selected-series bounds stop unexpected expansion before observation
+  jobs are enqueued. A small include/exclude list handles explicit exceptions.
+  The default scope is GDP release series plus headline overrides, including probes for two
+  previously curated retired ids. Existing stored series outside that scope stay retained
+  and scheduled; changing the discovery scope does not deactivate them. This is not a full
+  FRED catalog crawl. Defaults are fixture-tested, not validated against the live API here.
+- **Publication state**: complete catalogs track repeated absences separately from fetch
+  failures. Restricted series are retained internally and hidden from public reads.
+  Discontinued, missing and retired histories stay publicly reachable with a badge and
+  lower search priority. Successor candidates require operator confirmation; histories
+  are never merged. See the
+  [catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
 - **Fetch**: `GET /fred/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=10000[&offset=...]`
   to list the vintage dates in the fetch's real-time window, then
   `GET /fred/series/observations?series_id=ID&realtime_start=..&realtime_end=..&limit=100000[&offset=...]`

@@ -137,6 +137,18 @@ const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
 pub const CATALOG_RULES_FILE: &str = "catalog_selection/fred.toml";
 const CATALOG_PAGE_SIZE: usize = 1000;
 
+/// Validate operator selection rules before the worker accepts jobs.
+pub fn validate_catalog_rules() -> Result<(), CrawlError> {
+    load_catalog_rules().map(|_| ())
+}
+
+fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
+    let path = data_dir().join(CATALOG_RULES_FILE);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| CrawlError::Permanent(format!("reading {}: {e}", path.display())))?;
+    FredCatalogRules::parse(&text)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FredCatalogRules {
@@ -852,10 +864,7 @@ impl SourceAdapter for FredAdapter {
 
     /// Walks the complete configured catalog rules, under both scan and selection limits.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let path = data_dir().join(CATALOG_RULES_FILE);
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| CrawlError::Permanent(format!("reading {}: {e}", path.display())))?;
-        let rules = FredCatalogRules::parse(&text)?;
+        let rules = load_catalog_rules()?;
         self.discover_catalog(ctx, &rules).await
     }
 

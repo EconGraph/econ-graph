@@ -25,8 +25,8 @@ them, so check that every release source appears in the table.
 
 | Column | Meaning |
 |---|---|
-| `DISCOVERED` | Distinct series ids from catalog discovery (`series_metadata`) and fetched series (`economic_series`), active only |
-| `WITH DATA` | Fetched series with at least one data point (`end_date` set) |
+| `DISCOVERED` | Distinct current-publication series from catalog discovery and fetched series |
+| `WITH DATA` | Current-publication series with at least one data point (`end_date` set) |
 | `COVERAGE` | `WITH DATA / DISCOVERED`; `-` when nothing is discovered, which counts as below target |
 | `OVERDUE` | Series with data whose last successful crawl is older than twice their refresh interval |
 | `oldest success` | The earliest last successful crawl among the source's series |
@@ -62,7 +62,9 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 
 A series is overdue as soon as it misses twice its interval. Investigate transient failures
 rather than deactivating stored series. Publication state is separate from fetch health:
-retired series keep their observations and remain reachable by link.
+retired series keep their observations and remain reachable by link. Non-active publication
+states are excluded from automatic fetch scheduling and live coverage/freshness denominators;
+complete catalog discovery can reactivate a series that returns upstream.
 
 ## Catalog selection and retained series
 
@@ -71,6 +73,7 @@ BEA and FRED discovery selects from current upstream catalogs using declarative 
 The worker image includes these files under `$CRAWLER_DATA_DIR/catalog_selection/`.
 Rules select BEA dataset/table families and frequencies, or FRED release/category catalogs
 with optional title, id and frequency predicates. Small explicit overrides are supported.
+Deploy the updated data schema before the frontend that selects lifecycle fields.
 Change rules and restart the worker to pick them up. Titles come from the source; historical
 dimension labels stay additive and are never used as the current upstream catalog.
 

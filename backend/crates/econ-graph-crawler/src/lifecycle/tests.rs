@@ -307,7 +307,8 @@ async fn fetch_only_not_found_and_restriction_evidence_is_durable() {
         assert_eq!(state.status, if n < 3 { "active" } else { "retired" });
     }
     conn.transaction::<(), AppError, _>(async |conn| {
-        record_restricted_conn(conn, SourceId::Fred, "retired").await
+        record_restricted_conn(conn, SourceId::Fred, "retired").await?;
+        Ok(())
     })
     .await
     .unwrap();

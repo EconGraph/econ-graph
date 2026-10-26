@@ -497,7 +497,10 @@ impl BeaAdapter {
     }
 
     fn selection(&self) -> Result<&BeaSelection, CrawlError> {
-        self.selection.as_ref().map_or_else(bea_rules, Ok)
+        match self.selection.as_ref() {
+            Some(selection) => Ok(selection),
+            None => bea_rules(),
+        }
     }
 
     #[cfg(test)]

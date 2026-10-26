@@ -543,6 +543,25 @@ pub struct CrawlerCatalogMetrics {
 }
 
 impl CrawlerCatalogMetrics {
+    /// Materialize bounded counter labels at zero before events, so Prometheus can
+    /// observe an increase from a baseline rather than seeing only a first value of one.
+    pub fn initialize_source(&self, source: &str) {
+        for reason in ["volume", "mass_disappearance"] {
+            self.guard_rejections_total
+                .with_label_values(&[source, reason]);
+        }
+        for status in [
+            "active",
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            self.transitions_total.with_label_values(&[source, status]);
+        }
+    }
+
     /// Register catalog metrics with the supplied registry.
     pub fn new(registry: &Registry) -> anyhow::Result<Self> {
         let guard_rejections_total = IntCounterVec::new(
@@ -698,6 +717,19 @@ mod queue_metrics_tests {
     fn catalog_guards_and_lifecycle_metrics_are_exported() {
         let registry = Registry::new();
         let m = CrawlerCatalogMetrics::new(&registry).unwrap();
+        m.initialize_source("BEA");
+        assert_eq!(
+            m.guard_rejections_total
+                .with_label_values(&["BEA", "volume"])
+                .get(),
+            0
+        );
+        assert_eq!(
+            m.transitions_total
+                .with_label_values(&["BEA", "retired"])
+                .get(),
+            0
+        );
         m.guard_rejections_total
             .with_label_values(&["BEA", "volume"])
             .inc();
