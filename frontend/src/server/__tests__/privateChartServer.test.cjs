@@ -134,6 +134,16 @@ describe('Private Chart API Server', () => {
       expect(response.body.error).toContain('Invalid chart request');
     });
 
+    it('should reject a request without a parsed body', async () => {
+      const response = await request(app)
+        .post('/api/private/chart/generate')
+        .set('X-MCP-Server-Request', 'true');
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
+      expect(response.body.error).toContain('Invalid chart request');
+    });
+
     it('should reject request with invalid chart type', async () => {
       const invalidRequest = {
         ...validChartRequest,

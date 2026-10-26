@@ -65,6 +65,16 @@ describe('Chart API Server', () => {
   });
 
   describe('POST /api/chart/generate', () => {
+    it('should reject a request with no body', async () => {
+      const response = await request(app)
+        .post('/api/chart/generate')
+        .set('X-MCP-Server-Request', 'true')
+        .set('X-Internal-Request', 'true');
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Invalid chart request');
+    });
+
     it('should generate chart configuration with valid request', async () => {
       const response = await request(app)
         .post('/api/chart/generate')
@@ -336,9 +346,9 @@ describe('Chart API Server', () => {
       expect(response.status).toBe(400);
     });
 
-    it('should return 404 for unknown endpoints', async () => {
+    it.each(['/', '/unknown-endpoint', '/unknown/nested/endpoint'])('should return 404 for %s', async (path) => {
       const response = await request(app)
-        .get('/unknown-endpoint')
+        .get(path)
         .set('X-MCP-Server-Request', 'true')
         .set('X-Internal-Request', 'true');
 

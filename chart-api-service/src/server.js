@@ -204,7 +204,7 @@ app.get('/api/info', (req, res) => {
 });
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
@@ -219,7 +219,7 @@ app.use('*', (req, res) => {
 });
 
 // Error handler
-app.use((error, req, res, next) => {
+app.use((error, req, res, _next) => {
   // Don't log JSON parse errors as they're expected in tests
   if (error.type !== 'entity.parse.failed') {
     console.error('Unhandled error:', error);

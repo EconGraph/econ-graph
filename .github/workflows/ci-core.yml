@@ -485,6 +485,10 @@ jobs:
       working-directory: chart-api-service
       run: npm ci
 
+    - name: Lint chart API service
+      working-directory: chart-api-service
+      run: npm run lint
+
     - name: Build chart API service
       working-directory: chart-api-service
       run: npm run build
