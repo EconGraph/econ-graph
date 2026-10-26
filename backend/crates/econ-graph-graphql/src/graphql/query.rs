@@ -37,6 +37,7 @@ fn parse_offset_cursor(after: Option<&str>) -> Result<i64> {
     }
 }
 
+/// Identify a malformed continuation argument with the client-facing error code.
 fn invalid_after(cursor: &str) -> async_graphql::Error {
     crate::graphql::errors::bad_user_input(format!("`after` is not a valid cursor: {cursor:?}"))
 }

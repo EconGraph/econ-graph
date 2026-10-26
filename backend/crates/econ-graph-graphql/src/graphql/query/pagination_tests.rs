@@ -256,6 +256,7 @@ async fn users_pagination_rejects_invalid_after_and_handles_large_offsets() {
     }
 }
 
+/// Check the public error contract without relying only on human-readable text.
 fn assert_bad_user_input(error: &async_graphql::ServerError) {
     assert_eq!(
         error.extensions.as_ref().and_then(|ext| ext.get("code")),
