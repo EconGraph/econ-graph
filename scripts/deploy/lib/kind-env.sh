@@ -471,7 +471,7 @@ backup_databases() {
 # row counts and save the app Secrets into $1, which must not exist yet.
 # Needs use_kind_kubectl first.
 backup_databases_plain() {
-    local dir="$1" name
+    local dir="$1" name found
     [ ! -e "$dir" ] || die "$dir already exists; refusing to overwrite a backup"
     log "Backing up to $dir"
     pod_running postgresql-0 || die "postgresql-0 is not running; cannot take a backup"
@@ -558,7 +558,9 @@ backup_databases_plain() {
     # kubectl itself: values stay base64, and no yq/jq flavour is assumed.
     (umask 077 && mkdir -p "$dir/secrets")
     for name in "${APP_SECRETS[@]}"; do
-        if [ -n "$(k get secret "$name" -o name --ignore-not-found)" ]; then
+        found="$(k get secret "$name" -o name --ignore-not-found)" ||
+            die "could not inspect secret/$name; refusing to publish a recovery bundle without its credentials"
+        if [ -n "$found" ]; then
             (umask 077 && k get secret "$name" -o go-template="${SECRET_TEMPLATE}" >"$dir/secrets/$name.yaml")
         fi
     done

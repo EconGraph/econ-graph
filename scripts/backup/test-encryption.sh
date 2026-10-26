@@ -102,12 +102,7 @@ mkdir "$scratch/shared-opened"
 age -d -i "$scratch/identity" "$scratch/shared/backup.tar.age" |
     python3 "$root/scripts/backup/unpack-backup.py" "$scratch/shared-opened"
 grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
-# Exercise the canonical three-database payload and encrypted Secrets using
-# a fake cluster transport; the same payload supports an independent seed.
-(
-    trap - EXIT
-    # shellcheck source=scripts/deploy/lib/kind-env.sh
-    source "$root/scripts/deploy/lib/kind-env.sh"
+canonical_cluster_stubs() {
     pod_running() { return 0; }
     count_rows() {
         case "$2" in
@@ -117,7 +112,9 @@ grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
     }
     k() {
         case "$*" in
-            *'get secret econ-graph-secrets -o name'*) printf 'secret/econ-graph-secrets\n' ;;
+            *'get secret econ-graph-secrets -o name'*)
+                [[ "${TEST_SECRET_DENIED:-0}" != 1 ]] || return 1
+                printf 'secret/econ-graph-secrets\n' ;;
             *'get secret econ-graph-secrets -o go-template='*) printf 'synthetic encrypted secret\n' ;;
             'get secret '*) return 0 ;;
             *' pg_dump '*) printf 'PGDMP synthetic archive\n' ;;
@@ -125,6 +122,14 @@ grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
             *) die "unexpected fake cluster call" ;;
         esac
     }
+}
+# Exercise the canonical three-database payload and encrypted Secrets using
+# a fake cluster transport; the same payload supports an independent seed.
+(
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    canonical_cluster_stubs
     backup_databases "$scratch/canonical"
 )
 mkdir "$scratch/canonical-opened"
@@ -135,6 +140,20 @@ age -d -i "$scratch/identity" "$scratch/canonical/backup.tar.age" |
 [[ -f "$scratch/canonical-opened/secrets/econ-graph-secrets.yaml" ]]
 [[ -f "$scratch/canonical-opened/counts.env" ]]
 [[ "$(find "$scratch/canonical-opened" -name '*.dump' | wc -l)" == 3 ]]
+# A denied Secret read differs from an absent Secret: never publish a
+# supposedly recoverable bundle after a permissions/API error.
+if (
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    canonical_cluster_stubs
+    export TEST_SECRET_DENIED=1
+    backup_databases "$scratch/denied-secret"
+) >"$scratch/denied.log" 2>&1; then
+    die 'published backup after denied Secret read'
+fi
+[[ ! -e "$scratch/denied-secret" && ! -e "$scratch/denied-secret.partial" ]]
+grep -q 'could not inspect secret/' "$scratch/denied.log"
 # Resume identity survives different operator-opened tmpfs paths; an explicit
 # unrelated resume directory must never be redirected to the active bundle.
 (
