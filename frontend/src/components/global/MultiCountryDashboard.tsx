@@ -268,7 +268,7 @@ const MultiCountryDashboard: React.FC = () => {
       {activeTab === 0 && (
         <Grid container spacing={3}>
           {getSelectedCountriesData().map(country => (
-            <Grid item xs={12} md={6} lg={4} key={country.id}>
+            <Grid key={country.id} size={{ xs: 12, md: 6, lg: 4 }}>
               <Card>
                 <CardContent>
                   <Typography
@@ -281,7 +281,7 @@ const MultiCountryDashboard: React.FC = () => {
                   </Typography>
 
                   <Grid container spacing={2}>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Assessment color='primary' />
                         <Box>
@@ -293,7 +293,7 @@ const MultiCountryDashboard: React.FC = () => {
                       </Box>
                     </Grid>
 
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {getMetricIcon('gdpGrowth', country.gdpGrowth)}
                         <Box>
@@ -305,7 +305,7 @@ const MultiCountryDashboard: React.FC = () => {
                       </Box>
                     </Grid>
 
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {getMetricIcon('inflation', country.inflation)}
                         <Box>
@@ -317,7 +317,7 @@ const MultiCountryDashboard: React.FC = () => {
                       </Box>
                     </Grid>
 
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {getMetricIcon('unemployment', country.unemployment)}
                         <Box>
@@ -338,7 +338,7 @@ const MultiCountryDashboard: React.FC = () => {
 
       {activeTab === 1 && (
         <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Paper sx={{ p: 2 }}>
               <Typography variant='h6' gutterBottom>
                 GDP Comparison
@@ -347,7 +347,7 @@ const MultiCountryDashboard: React.FC = () => {
             </Paper>
           </Grid>
 
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Paper sx={{ p: 2 }}>
               <Typography variant='h6' gutterBottom>
                 GDP Growth Comparison
@@ -356,7 +356,7 @@ const MultiCountryDashboard: React.FC = () => {
             </Paper>
           </Grid>
 
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Paper sx={{ p: 2 }}>
               <Typography variant='h6' gutterBottom>
                 Inflation Rate Comparison
@@ -365,7 +365,7 @@ const MultiCountryDashboard: React.FC = () => {
             </Paper>
           </Grid>
 
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Paper sx={{ p: 2 }}>
               <Typography variant='h6' gutterBottom>
                 Unemployment Rate Comparison

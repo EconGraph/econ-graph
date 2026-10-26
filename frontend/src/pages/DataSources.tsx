@@ -97,7 +97,7 @@ const DataSourcesContent: React.FC = () => {
       {/* Summary statistics */}
       <Paper sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={3}>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
                 {dataSources.length}
@@ -112,7 +112,7 @@ const DataSourcesContent: React.FC = () => {
               </Typography>
             </Box>
           </Grid>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
                 {totalSeries.toLocaleString()}
@@ -133,7 +133,7 @@ const DataSourcesContent: React.FC = () => {
       {/* Data sources grid */}
       <Grid container spacing={3}>
         {dataSources.map(source => (
-          <Grid item xs={12} md={6} key={source.id}>
+          <Grid key={source.id} size={{ xs: 12, md: 6 }}>
             <Card
               component='section'
               aria-labelledby={`source-${source.id}`}

@@ -129,7 +129,7 @@ const About: React.FC = () => {
 
       <Grid container spacing={4}>
         {/* Overview */}
-        <Grid item xs={12} md={8}>
+        <Grid size={{ xs: 12, md: 8 }}>
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant='h5' gutterBottom>
               About EconGraph
@@ -196,7 +196,7 @@ const About: React.FC = () => {
             </Typography>
             <Grid container spacing={2}>
               {features.map((feature, index) => (
-                <Grid item xs={12} sm={6} key={index}>
+                <Grid key={index} size={{ xs: 12, sm: 6 }}>
                   <Card variant='outlined'>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
@@ -222,7 +222,7 @@ const About: React.FC = () => {
         </Grid>
 
         {/* Sidebar */}
-        <Grid item xs={12} md={4}>
+        <Grid size={{ xs: 12, md: 4 }}>
           {/* Data Sources */}
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant='h6' gutterBottom>

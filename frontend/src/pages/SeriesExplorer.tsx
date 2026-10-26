@@ -381,10 +381,10 @@ const SeriesExplorer: React.FC = () => {
     return undefined;
   };
 
-  // Each card sits in a Grid item: a Card placed straight in the container took the container's
-  // negative margin (no gutter at the sidebar edge) and a width sized by its own text.
+  // Each card sits in a sized Grid cell: a Card placed straight in the container would take a
+  // width sized by its own text instead of a column.
   const renderSeriesCard = (series: EconomicSeries) => (
-    <Grid item xs={12} sm={6} md={4} key={series.id}>
+    <Grid key={series.id} size={{ xs: 12, sm: 6, md: 4 }}>
       <Card
         sx={{
           height: '100%',
@@ -487,7 +487,7 @@ const SeriesExplorer: React.FC = () => {
       <Paper sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={3}>
           {/* Search input */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               placeholder='Search economic series (e.g., GDP, unemployment, inflation)'
@@ -519,7 +519,7 @@ const SeriesExplorer: React.FC = () => {
           </Grid>
 
           {/* Source filter */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <FormControl fullWidth>
               <InputLabel id='source-filter-label'>Source</InputLabel>
               <Select
@@ -542,7 +542,7 @@ const SeriesExplorer: React.FC = () => {
           </Grid>
 
           {/* Frequency filter */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <FormControl fullWidth>
               <InputLabel id='frequency-filter-label'>Frequency</InputLabel>
               <Select
@@ -565,7 +565,7 @@ const SeriesExplorer: React.FC = () => {
           </Grid>
 
           {/* Search button */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Button
               fullWidth
               variant='contained'
@@ -601,7 +601,7 @@ const SeriesExplorer: React.FC = () => {
         <Collapse in={showAdvancedSearch}>
           <Divider sx={{ my: 2 }} />
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel id='sort-by-label'>Sort By</InputLabel>
                 <Select
@@ -655,7 +655,7 @@ const SeriesExplorer: React.FC = () => {
       {showLoading ? (
         <Grid container spacing={3}>
           {Array.from({ length: 8 }).map((_, index) => (
-            <Grid item xs={12} sm={6} md={4} key={index}>
+            <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
               <Skeleton variant='rectangular' height={200} />
             </Grid>
           ))}

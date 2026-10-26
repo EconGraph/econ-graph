@@ -296,7 +296,7 @@ describe('SeriesDetail annotation editing', () => {
     const dialog = screen.getByRole('dialog', { name: 'Add annotation' });
     // Opens on the latest observation.
     expect(within(dialog).getByLabelText(/^Date/)).toHaveValue('2020-07-01');
-    expect(within(dialog).getByRole('checkbox', { name: 'Public' })).not.toBeChecked();
+    expect(within(dialog).getByRole('switch', { name: 'Public' })).not.toBeChecked();
 
     await user.type(within(dialog).getByLabelText(/^Title/), '  Q3 bounce  ');
     await user.type(within(dialog).getByLabelText('Note'), 'Stimulus.');
@@ -338,7 +338,7 @@ describe('SeriesDetail annotation editing', () => {
     expect(within(dialog).getByLabelText(/^Date/)).toHaveValue('2020-04-01');
 
     await user.type(within(dialog).getByLabelText(/^Title/), 'Trough');
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Public' }));
+    await user.click(within(dialog).getByRole('switch', { name: 'Public' }));
     expect(within(dialog).getByText(/Everyone who opens this series/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
@@ -408,7 +408,7 @@ describe('SeriesDetail annotation editing', () => {
     const dialog = screen.getByRole('dialog', { name: 'Add annotation' });
     await user.type(within(dialog).getByLabelText(/^Title/), 'Q3 bounce');
     await user.type(within(dialog).getByLabelText('Note'), 'Stimulus.');
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Public' }));
+    await user.click(within(dialog).getByRole('switch', { name: 'Public' }));
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     expect(await within(dialog).findByText(DATA_PLANE_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
@@ -416,7 +416,7 @@ describe('SeriesDetail annotation editing', () => {
     expect(screen.getByRole('dialog', { name: 'Add annotation' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/^Title/)).toHaveValue('Q3 bounce');
     expect(within(dialog).getByLabelText('Note')).toHaveValue('Stimulus.');
-    expect(within(dialog).getByRole('checkbox', { name: 'Public' })).toBeChecked();
+    expect(within(dialog).getByRole('switch', { name: 'Public' })).toBeChecked();
     // Existing annotations still list (behind the dialog): they come from the app database.
     expect(screen.getByRole('list', { name: 'Annotations', hidden: true })).toHaveTextContent(
       'Lockdown trough'
@@ -508,11 +508,11 @@ describe('SeriesDetail annotation editing', () => {
     const dialog = screen.getByRole('dialog', { name: 'Edit annotation' });
     expect(within(dialog).getByLabelText(/^Date/)).toBeDisabled();
     expect(within(dialog).getByLabelText(/^Title/)).toHaveValue('My draft note');
-    expect(within(dialog).getByRole('checkbox', { name: 'Public' })).not.toBeChecked();
+    expect(within(dialog).getByRole('switch', { name: 'Public' })).not.toBeChecked();
 
     await user.clear(within(dialog).getByLabelText(/^Title/));
     await user.type(within(dialog).getByLabelText(/^Title/), 'Revision check');
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Public' }));
+    await user.click(within(dialog).getByRole('switch', { name: 'Public' }));
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());

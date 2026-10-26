@@ -256,7 +256,7 @@ const GlobalEventsExplorer: React.FC = () => {
         </Typography>
 
         <Grid container spacing={3}>
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <FormControl fullWidth>
               <InputLabel>Event Types</InputLabel>
               <Select
@@ -281,7 +281,7 @@ const GlobalEventsExplorer: React.FC = () => {
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Typography gutterBottom>Minimum Impact Score: {minImpactScore}</Typography>
             <Slider
               value={minImpactScore}
@@ -294,7 +294,7 @@ const GlobalEventsExplorer: React.FC = () => {
             />
           </Grid>
 
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <FormControlLabel
               control={
                 <Switch
@@ -511,7 +511,7 @@ const GlobalEventsExplorer: React.FC = () => {
         </Typography>
 
         <Grid container spacing={3}>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h4' color='primary'>
                 {filteredEvents.length}
@@ -522,7 +522,7 @@ const GlobalEventsExplorer: React.FC = () => {
             </Box>
           </Grid>
 
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography
                 variant='h4'
@@ -538,7 +538,7 @@ const GlobalEventsExplorer: React.FC = () => {
             </Box>
           </Grid>
 
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography
                 variant='h4'
@@ -558,7 +558,7 @@ const GlobalEventsExplorer: React.FC = () => {
             </Box>
           </Grid>
 
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography
                 variant='h4'

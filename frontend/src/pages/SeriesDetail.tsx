@@ -67,10 +67,10 @@ const PageSkeleton: React.FC = () => (
     <Skeleton variant='text' width='60%' height={40} sx={{ mb: 2 }} />
     <Skeleton variant='text' width='80%' height={24} sx={{ mb: 4 }} />
     <Grid container spacing={3}>
-      <Grid item xs={12} lg={8}>
+      <Grid size={{ xs: 12, lg: 8 }}>
         <Skeleton variant='rectangular' height={500} />
       </Grid>
-      <Grid item xs={12} lg={4}>
+      <Grid size={{ xs: 12, lg: 4 }}>
         <Skeleton variant='rectangular' height={300} />
       </Grid>
     </Grid>
@@ -329,11 +329,9 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       </Box>
 
       <Grid container spacing={3}>
-        <Grid item xs={12} lg={8}>
-          {chart}
-        </Grid>
+        <Grid size={{ xs: 12, lg: 8 }}>{chart}</Grid>
 
-        <Grid item xs={12} lg={4}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <Box sx={{ mb: 3 }}>
             <SeriesAnnotationsPanel
               annotations={annotations.data ?? []}
