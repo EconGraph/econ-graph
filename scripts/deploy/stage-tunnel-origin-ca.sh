@@ -29,6 +29,7 @@ while (($#)); do
     shift
 done
 [[ -n "$context" ]] || { echo 'error: choose an explicit --context' >&2; exit 2; }
+# Run kubectl only against the context explicitly selected by the operator.
 kc() { command "${KUBECTL:-kubectl}" --context "$context" "$@"; }
 
 if [[ "$apply" != true ]]; then

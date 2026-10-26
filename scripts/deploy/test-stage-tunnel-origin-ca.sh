@@ -49,6 +49,7 @@ elif 'patch' in args:
     kubectl.chmod(0o755)
     env = dict(os.environ, KUBECTL=str(kubectl), CALLS=str(calls), CA=str(ca))
     def run(*args, **updates):
+        """Run staging with a pinned fake cluster and only synthetic public certificates."""
         return subprocess.run([str(script),*args],env=dict(env,**updates),text=True,capture_output=True)
     assert run('--apply').returncode == 2
     plan=run('--context','scratch-only')
