@@ -123,6 +123,36 @@ config = {
 }
 (work / "kubeconfig").write_text(json.dumps(config) + "\n")
 PY
+# Existing bindings may grant this ServiceAccount more than the Role above.
+# Verify with the actual issued token before publishing it, never by impersonation.
+# Namespace names are connection metadata; no Secrets are read by these checks.
+operator get namespaces -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' >"$work/namespaces"
+[ -s "$work/namespaces" ] || { echo 'error: could not enumerate namespaces for access verification' >&2; exit 1; }
+expect_permission() {
+    local expected="$1" answer
+    shift
+    answer="$("$kubectl_bin" --kubeconfig "$work/kubeconfig" auth can-i "$@" 2>"$work/auth-error")" || true
+    if [ "$answer" != "$expected" ]; then
+        echo "error: agent access verification failed for '$*' (expected $expected)." >&2
+        echo 'Review existing RoleBindings/ClusterRoleBindings before retrying; no kubeconfig published.' >&2
+        exit 1
+    fi
+}
+expect_permission yes get pods -n "$namespace"
+while IFS= read -r checked_namespace; do
+    [ -n "$checked_namespace" ] || continue
+    for verb in get list watch; do
+        expect_permission no "$verb" secrets -n "$checked_namespace"
+    done
+    expect_permission no create serviceaccounts/token -n "$checked_namespace"
+    expect_permission no create pods/exec -n "$checked_namespace"
+    expect_permission no impersonate serviceaccounts -n "$checked_namespace"
+    expect_permission no bind roles -n "$checked_namespace"
+    expect_permission no escalate roles -n "$checked_namespace"
+done <"$work/namespaces"
+expect_permission no impersonate users
+expect_permission no bind clusterroles
+expect_permission no escalate clusterroles
 [ ! -L "$output_dir/bin" ] || { echo 'error: output bin directory is a symlink' >&2; exit 1; }
 mkdir -p "$output_dir/bin"
 ln -sfn "$kubectl_bin" "$output_dir/bin/kubectl"

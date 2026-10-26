@@ -17,7 +17,11 @@ case "$*" in
     *'config view --minify'*) printf '%s' "${AGENT_TEST_USER:-econgraph-agent}" ;;
     *'apply -f -'*) cat >/dev/null ;;
     *'create token econgraph-agent'*) printf 'test-bearer-token\n' ;;
-    *'auth can-i get pods'*) [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
+    *'get namespaces -o'*) printf 'econ-graph\nkube-system\n' ;;
+    *'auth can-i get pods'*) printf yes; [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
+    *'auth can-i'*secrets*)
+        if [ "${AGENT_TEST_ALLOW_SECRETS:-false}" = true ]; then printf yes; else printf no; exit 1; fi ;;
+    *'auth can-i'*) printf no; exit 1 ;;
     *) echo "unexpected kubectl call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -58,6 +62,15 @@ assert c["users"] == [{"name": "econgraph-agent", "user": {"token": "test-bearer
 assert c["contexts"][0]["context"]["user"] == "econgraph-agent"
 assert c["clusters"][0]["cluster"]["server"] == "https://example.invalid"
 PY
+# A preexisting broad binding must stop publication of a new kubeconfig.
+if AGENT_TEST_ALLOW_SECRETS=true "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" \
+    --operator-kubeconfig "$scratch/operator" --kubectl "$KUBECTL" \
+    --output-dir "$scratch/refused" >"$scratch/refused-output" 2>&1; then
+    echo 'bootstrap accepted inherited Secret access' >&2; exit 1
+fi
+[ ! -f "$scratch/refused/kubeconfig-econ-graph" ]
+grep -q 'access verification failed' "$scratch/refused-output"
+
 # The launcher overrides inherited admin selections and the helper never calls Docker/kind.
 cat >"$scratch/check-session" <<'CHECK'
 #!/usr/bin/env bash

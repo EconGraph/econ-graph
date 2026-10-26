@@ -41,7 +41,11 @@ scripts/deploy/run-agent-session.sh -- bash
 ```
 
 Replace `bash` with the coding agent's command. Bootstrap is idempotent and writes
-only namespaced RBAC and a private local kubeconfig. It requests a token lifetime
+only namespaced RBAC and a private local kubeconfig. Before publishing the config,
+it uses the issued token to check pod access and reject direct Secret, token,
+exec, impersonation and RBAC escalation grants across existing namespaces. An
+operator must be able to list namespaces for that check. A failed check leaves no
+new kubeconfig; inspect existing bindings before retrying. It requests a token lifetime
 of one hour; the API server determines the actual expiration. Re-run bootstrap to
 renew it. `--namespace`, `--cluster`, and `--output-dir` allow an existing scratch
 namespace/cluster; pass the matching `--cluster` and `--config-dir` to the launcher.
@@ -51,6 +55,8 @@ token. Never attach or paste the kubeconfig in an issue, terminal output or chat
 The launcher replaces inherited kubectl/config selections and marks the session.
 The shared kind helper preserves that identity and fails when it cannot use the
 restricted config; it never falls back to `kind get kubeconfig` in such a session.
+The Role also omits Gateway API resources and Envoy policies; installing the
+gateway, applying its routes and the live cutover remain operator work.
 Full deployment scripts also manage namespaces, Secrets and cluster components,
 so they still require an operator. Agents can apply individual permitted workload
 manifests; they cannot run the full provisioning workflow with this Role.
@@ -76,7 +82,12 @@ kubectl auth can-i get secrets -n kube-system
 ```
 
 Expect `yes` only for pods. Broader existing RoleBindings can grant additional
-permissions, so verify the effective identity after installation. Remove the
+permissions, so verify the effective identity after installation and whenever
+bindings or namespaces change. Repeat the negative checks in every namespace,
+including `auth can-i impersonate users`, `auth can-i create serviceaccounts/token`,
+`auth can-i create pods/exec`, `auth can-i bind roles` and `auth can-i escalate roles`.
+Resource-name-specific grants and future binding changes still require an operator
+RBAC audit; these probes do not prove a confidentiality boundary. Remove the
 `econgraph-agent` RoleBinding and ServiceAccount in the selected namespace to
 revoke access; deleting the kubeconfig alone does not revoke a copied token.
 
