@@ -106,7 +106,7 @@
 //! Every series belongs to the one dimensionless dataset [`DATASET`] (defined in
 //! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -157,6 +157,10 @@ struct FredCatalogRules {
     max_catalog_series: usize,
     #[serde(default)]
     include: Vec<String>,
+    /// Intentional retirement probes: still record lifecycle evidence, but their confirmed
+    /// absence is not an unexpected-missing alert. Must be a subset of `include`.
+    #[serde(default)]
+    expected_missing: Vec<String>,
     #[serde(default)]
     exclude: Vec<String>,
     rules: Vec<FredCatalogRule>,
@@ -188,11 +192,12 @@ impl FredCatalogRules {
             || rules.rules.is_empty()
             || rules.rules.len() > 16
             || rules.include.len() > 32
+            || rules.expected_missing.len() > 32
             || rules.exclude.len() > 32
         {
             return Err(CrawlError::Permanent(
                 "FRED catalog rules: positive limits required (at most 10000 selected, \
-                 100000 catalog rows, 16 rules and 32 include/exclude ids)"
+                 100000 catalog rows, 16 rules and 32 include/exclude/expected_missing ids)"
                     .into(),
             ));
         }
@@ -226,6 +231,27 @@ impl FredCatalogRules {
         }
         for id in rules.include.iter().chain(&rules.exclude) {
             validate_catalog_id(id)?;
+        }
+        for (name, ids) in [
+            ("include", &rules.include),
+            ("exclude", &rules.exclude),
+            ("expected_missing", &rules.expected_missing),
+        ] {
+            if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
+                return Err(CrawlError::Permanent(format!(
+                    "FRED catalog rules: {name} contains duplicate ids"
+                )));
+            }
+        }
+        if rules
+            .expected_missing
+            .iter()
+            .any(|id| !rules.include.contains(id) || rules.exclude.contains(id))
+        {
+            return Err(CrawlError::Permanent(
+                "FRED catalog rules: expected_missing must contain only non-excluded include ids"
+                    .into(),
+            ));
         }
         Ok(rules)
     }
@@ -519,7 +545,12 @@ impl FredAdapter {
         *self
             .skipped_ids
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = facts.confirmed_missing_ids.clone();
+            .unwrap_or_else(PoisonError::into_inner) = facts
+            .confirmed_missing_ids
+            .iter()
+            .filter(|id| !rules.expected_missing.contains(id))
+            .cloned()
+            .collect();
         *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((rules.fingerprint(), facts));
         Ok(found)
@@ -907,7 +938,8 @@ impl SourceAdapter for FredAdapter {
         self.fetch(ctx, external_id, since, None).await
     }
 
-    /// Explicit override ids whose lookup confirmed NotFound in the last complete catalog.
+    /// Unexpected missing overrides from the last complete catalog. Intentional retirement
+    /// probes remain lifecycle evidence but do not repeatedly trigger the missing-entry alert.
     fn curated_missing(&self) -> Vec<String> {
         self.skipped_ids
             .lock()
@@ -1301,6 +1333,69 @@ mod tests {
             2,
             "catalog discovery must not fetch any observations"
         );
+    }
+
+    #[tokio::test]
+    async fn expected_retirement_probes_keep_evidence_without_suppressing_unexpected_missing() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/release/series"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(ERR_NO_SERIES).with_status(400),
+        )
+        .await;
+        let rules = FredCatalogRules::parse(
+            "max_series=10\nmax_catalog_series=10\ninclude=['OLDGDP','UNEXPECTED']\n\
+             expected_missing=['OLDGDP']\n[[rules]]\nrelease_id=53",
+        )
+        .unwrap();
+        let adapter = FredAdapter::new(mock.base_url());
+        let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(found[0].external_id, "GDP");
+        assert_eq!(
+            adapter.catalog_lifecycle().confirmed_missing_ids,
+            ["OLDGDP", "UNEXPECTED"],
+            "both kinds of confirmed NotFound remain durable lifecycle evidence"
+        );
+        assert_eq!(
+            adapter.curated_missing(),
+            ["UNEXPECTED"],
+            "only the explicitly declared retirement probe is exempt from missing alerts"
+        );
+    }
+
+    #[test]
+    fn expected_missing_probes_must_be_bounded_unique_nonexcluded_include_ids() {
+        let prefix = "max_series=10\nmax_catalog_series=10\n";
+        let suffix = "\n[[rules]]\nrelease_id=53";
+        for lists in [
+            "include=['OLD']\nexpected_missing=['OTHER']",
+            "include=['OLD']\nexpected_missing=['OLD','OLD']",
+            "include=['OLD']\nexpected_missing=['OLD']\nexclude=['OLD']",
+            "include=['OLD','OLD']",
+            "exclude=['OLD','OLD']",
+        ] {
+            assert!(
+                FredCatalogRules::parse(&format!("{prefix}{lists}{suffix}")).is_err(),
+                "invalid probe configuration accepted: {lists}"
+            );
+        }
+        let ids = (0..33)
+            .map(|i| format!("'OLD{i}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(FredCatalogRules::parse(&format!(
+            "{prefix}include=[{ids}]\nexpected_missing=[{ids}]{suffix}"
+        ))
+        .is_err());
+        assert!(FredCatalogRules::parse(&format!(
+            "{prefix}include=['OLD']\nexpected_missing=['OLD']{suffix}"
+        ))
+        .is_ok());
     }
 
     #[tokio::test]
