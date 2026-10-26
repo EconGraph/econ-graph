@@ -22,7 +22,7 @@ export interface SeriesCsvInput {
 }
 
 // Spreadsheets run a cell starting with one of these as a formula (CSV injection).
-const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+const FORMULA_PREFIX = /^[=+\-@\t\r\n]/;
 
 /**
  * Quote a field when it holds a comma, quote or line break, doubling inner quotes.

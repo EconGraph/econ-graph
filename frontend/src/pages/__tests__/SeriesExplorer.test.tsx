@@ -1141,7 +1141,11 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       const originalCreateObjectURL = URL.createObjectURL;
       const originalRevokeObjectURL = URL.revokeObjectURL;
       let blobText = '';
+      let blobBytes: Uint8Array | undefined;
       URL.createObjectURL = vi.fn((blob: Blob) => {
+        void blob.arrayBuffer().then(buffer => {
+          blobBytes = new Uint8Array(buffer);
+        });
         void blob.text().then(text => {
           blobText = text;
         });
@@ -1154,7 +1158,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
             {
               id: 'wb-uuid',
               externalId: 'NY.GDP.PCAP.CD',
-              title: 'GDP per capita (current US$)',
+              title: 'Économie 日本',
               description: '',
               sourceId: 'wb',
               source: { name: 'World Bank' },
@@ -1166,7 +1170,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
         const user = userEvent.setup();
         renderSeriesExplorer();
         await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
-        await screen.findByText('GDP per capita (current US$)');
+        await screen.findByText('Économie 日本');
 
         await user.click(screen.getByRole('button', { name: /export results/i }));
         await user.click(
@@ -1175,6 +1179,9 @@ describe('SeriesExplorer shows only what the backend returned', () => {
 
         await waitFor(() => expect(blobText).not.toBe(''));
         if (format === 'csv') {
+          await waitFor(() => expect(blobBytes).toBeDefined());
+          expect(Array.from(blobBytes!.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+          expect(new window.TextDecoder().decode(blobBytes!.slice(3))).toContain('Économie 日本');
           const [header, row] = blobText.split('\r\n');
           expect(header.split(',').slice(0, 2)).toEqual(['source', 'externalId']);
           expect(row.startsWith('World Bank,NY.GDP.PCAP.CD,')).toBe(true);
