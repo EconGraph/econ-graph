@@ -67,10 +67,14 @@ echo "kind \$*" >>"$OTHER"
 case "\$1 \$2" in
     "get clusters") echo econ-graph ;;
     "get kubeconfig") echo "apiVersion: v1" ;;
+    "version "*) echo "kind v0.33.0 go1.26.7 linux/amd64" ;;
 esac
 exit 0
 EOF
 chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
+# The scripts run kind from its pinned path (lib/kind-version.sh); the stub stands in there too.
+mkdir -p "$WORK/home/.local/share/econgraph/bin"
+cp "$WORK/bin/kind" "$WORK/home/.local/share/econgraph/bin/kind-v0.33.0"
 
 # teardown CMD-ARGS...: teardown.sh with the stubs first on PATH and no kube
 # config, stdin not a terminal. Prints its output; returns its exit status.
