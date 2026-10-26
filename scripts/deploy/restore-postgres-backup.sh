@@ -8,13 +8,14 @@
 # for confirmation unless --yes is given.
 #
 # Usage:
-#   ./scripts/deploy/restore-postgres-backup.sh --list [--context CONTEXT]
+#   ./scripts/deploy/restore-postgres-backup.sh --list [--context CONTEXT] [--dry-run]
 #   ./scripts/deploy/restore-postgres-backup.sh [--file econ_graph-20260101-080000.dump] [--yes]
 #       [--context CONTEXT] [--dry-run]
 #
 #   --context CONTEXT  the kubectl context (default kind-econ-graph); the
 #                      current context is not changed
-#   --dry-run          show the cluster and what would be restored; change nothing
+#   --dry-run          show the cluster and what would be listed or restored;
+#                      start no pod or Job and change nothing
 #
 # Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) on
 # that one context. With none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT
@@ -56,6 +57,10 @@ done
 cluster_role_operator_context "${CONTEXT}" || { echo "Nothing was changed." >&2; exit 1; }
 
 if [ "${LIST_ONLY}" = "true" ]; then
+    if [ "${DRY_RUN}" = "true" ]; then
+        echo "Dry run: would list postgres-backup-data with a short-lived pod in ${NAMESPACE} on context ${CONTEXT}."
+        exit 0
+    fi
     echo "📋 Backups available in postgres-backup-data:"
     kc run "postgres-backup-list-$(date +%s)" --rm -i --restart=Never \
         --image=busybox:1.38 -n "${NAMESPACE}" \

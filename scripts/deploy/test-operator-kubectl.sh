@@ -102,6 +102,8 @@ expect "backup-postgres-now.sh on an unknown context" nonzero "has no context mi
 
 reset; out="$(run restore-postgres-backup.sh --dry-run)"; rc=$?
 expect "restore-postgres-backup.sh --dry-run" 0 "Dry run: would DROP and recreate" none
+reset; out="$(run restore-postgres-backup.sh --list --dry-run)"; rc=$?
+expect "restore-postgres-backup.sh --list --dry-run" 0 "Dry run: would list postgres-backup-data" none
 reset; out="$(CLUSTER_ROLE_CONTEXT=prod-elsewhere run restore-postgres-backup.sh --dry-run --yes)"; rc=$?
 expect "restore-postgres-backup.sh --dry-run with an inherited CLUSTER_ROLE_CONTEXT" 0 "context         kind-econ-graph" none
 reset; out="$(run restore-postgres-backup.sh)"; rc=$?
