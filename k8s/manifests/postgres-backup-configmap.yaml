@@ -305,10 +305,14 @@ data:
       exit 1
     fi
 
+    # Read one file throughout. latest.dump is a symlink that a nightly backup moves with
+    # ln -sf; resolving it once keeps the table of contents and the restore on the same dump.
+    FILE="$(readlink -f "${FILE}")"
+
     # The backup volume also holds the app database's and Keycloak's dumps;
     # restoring one of those here would add their tables to ${PGDATABASE}.
     # (econ_graph_app-<stamp>.dump doesn't match econ_graph-*.)
-    case "$(basename "$(readlink -f "${FILE}")")" in
+    case "$(basename "${FILE}")" in
       "${PGDATABASE}"-*) ;;
       *)
         echo "${FILE} is not a ${PGDATABASE} dump (expected ${PGDATABASE}-<stamp>.dump)" >&2
