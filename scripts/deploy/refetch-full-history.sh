@@ -35,6 +35,8 @@ status=false
 dry_run=false
 completed_since=""
 source_args=()
+# Options a resumed run must repeat to enqueue the same set of series at the same priority.
+resume_extra=()
 args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,10 +49,14 @@ while [[ $# -gt 0 ]]; do
         --completed-since)
             [[ $# -ge 2 ]] || usage 2
             completed_since="$2"; args+=("$1" "$2"); shift ;;
-        --priority | --since | --failures)
+        --priority)
+            [[ $# -ge 2 ]] || usage 2
+            resume_extra+=("$1" "$2"); args+=("$1" "$2"); shift ;;
+        --since | --failures)
             [[ $# -ge 2 ]] || usage 2
             args+=("$1" "$2"); shift ;;
-        --include-inactive | --json) args+=("$1") ;;
+        --include-inactive) resume_extra+=("$1"); args+=("$1") ;;
+        --json) args+=("$1") ;;
         -h | --help) usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage 2 ;;
     esac
@@ -89,9 +95,10 @@ kc -n "${NAMESPACE}" exec "deploy/${DEPLOYMENT}" -- \
     /app/crawler "${subcommand}" "${args[@]}"
 
 if ! $status && ! $dry_run; then
-    # A resumed run keeps the original start, so finished series stay skipped.
+    # A resumed run keeps the original start, so finished series stay skipped, and the same
+    # --include-inactive and --priority (refetch-status takes neither, so Progress omits them).
     since="${completed_since:-${started}}"
     echo >&2
     echo "Progress: $0 --status ${source_args[*]} --since ${since} --failures 50" >&2
-    echo "Resume:   $0 ${source_args[*]} --completed-since ${since}" >&2
+    echo "Resume:   $0 ${source_args[*]}${resume_extra[*]:+ ${resume_extra[*]}} --completed-since ${since}" >&2
 fi
