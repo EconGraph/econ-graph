@@ -87,6 +87,24 @@ expect_lint_failure "a duplicate JSON key" grafana-dashboards/dup.json \
     '{"title": "a", "title": "b"}' "duplicate key(s) 'title'"
 expect_lint_failure "invalid YAML" k8s/monitoring/bad.yaml \
     $'kind: ConfigMap\nmetadata: [unclosed' "FAIL k8s/monitoring/bad.yaml"
+# Valid YAML with a merge key (<<), an explicit key overriding a merged one,
+# must still pass.
+tree="$WORK/tree-merge"
+mkdir -p "$tree/k8s" "$tree/grafana-dashboards"
+cp -r "$PROJECT_ROOT/k8s/monitoring" "$tree/k8s/"
+cp "$PROJECT_ROOT"/grafana-dashboards/*.json "$tree/grafana-dashboards/"
+printf '%s\n' 'defaults: &defaults' '  a: "1"' '  b: "2"' 'apiVersion: v1' 'kind: ConfigMap' \
+    'metadata:' '  name: merge' 'data:' '  <<: *defaults' '  b: "3"' >"$tree/k8s/monitoring/merge.yaml"
+out="$(MONITORING_LINT_ROOT="$tree" run_isolated "$PROJECT_ROOT/scripts/test-monitoring.sh" --lint-only 2>&1)"
+rc=$?
+if [ "$rc" -eq 0 ]; then
+    echo "ok   --lint-only accepts a YAML merge key overridden by an explicit key"
+else
+    echo "FAIL --lint-only rejected valid YAML with a merge key (exit $rc):"
+    printf '     %s\n' "$out"
+    failed=1
+fi
+
 if [ -s "$CALLS" ]; then
     echo "FAIL the negative lint runs called:"
     sed 's/^/     /' "$CALLS"

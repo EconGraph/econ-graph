@@ -46,8 +46,12 @@ class UniqueKeyLoader(yaml.SafeLoader):
     keeps the last one and silently drops the rest)."""
 
     def construct_mapping(self, node, deep=False):
+        # Only explicit keys count. Merge keys (<<) are left to SafeLoader,
+        # which expands them, and an explicit key may override a merged one.
         seen = set()
         for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
             key = self.construct_object(key_node, deep=deep)
             if key in seen:
                 raise yaml.constructor.ConstructorError(
