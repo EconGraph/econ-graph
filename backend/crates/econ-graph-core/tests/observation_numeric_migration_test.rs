@@ -73,6 +73,20 @@ fn migrate_to_before(conn: &mut PgConnection, version: &str) {
     }
 }
 
+/// Runs pending migrations up to and including `version`, so later migrations stay pending and
+/// `revert_last_migration` reverts `version`.
+fn migrate_through(conn: &mut PgConnection, version: &str) {
+    loop {
+        let pending = conn.pending_migrations(MIGRATIONS).expect("pending");
+        let next = pending.first().expect("migration is pending");
+        let reached = next.name().version().to_string() == version;
+        conn.run_migration(next.as_ref()).expect("run migration");
+        if reached {
+            return;
+        }
+    }
+}
+
 #[derive(QueryableByName)]
 struct ColumnType {
     #[diesel(sql_type = Text)]
@@ -188,7 +202,7 @@ async fn numeric_fix_up_down_on_a_populated_database() {
 
     // Up: unconstrained NUMERIC, without rewriting the table or rebuilding its indexes, and
     // every stored value unchanged.
-    conn.run_pending_migrations(MIGRATIONS).expect("migrate up");
+    migrate_through(&mut conn, NUMERIC_FIX);
     assert!(conn
         .applied_migrations()
         .unwrap()
@@ -252,8 +266,7 @@ async fn numeric_fix_up_down_on_a_populated_database() {
     .is_err());
 
     // Up again.
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("migrate up again");
+    migrate_through(&mut conn, NUMERIC_FIX);
     assert_eq!(column_type(&mut conn, "data_points", "value"), "numeric");
     assert_eq!(checksum(&mut conn), before);
 }

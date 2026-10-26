@@ -66,7 +66,9 @@ else
     subcommand=refetch
 fi
 
-started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Jobs get their created_at from the database clock, so the start used in the progress and
+# resume hints is ten minutes early, to cover clock skew between this machine and the database.
+started="$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)"
 "${KUBECTL_CMD[@]}" -n "${NAMESPACE}" exec "deploy/${DEPLOYMENT}" -- \
     /app/crawler "${subcommand}" "${args[@]}"
 
