@@ -3,7 +3,8 @@
 // See LICENSE file for complete terms and conditions.
 
 //! Migration 2026-10-24-000100_audit_logs_keep_on_user_delete: applies on top of the
-//! v4.0 baseline and survives an up, down, up cycle on an empty database.
+//! v4.0 baseline and survives an up, down, up cycle on an empty database. Later migrations are
+//! left pending, so this one is the last applied.
 
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Text};
@@ -36,6 +37,19 @@ fn fk_state(conn: &mut PgConnection) -> FkState {
     )
     .get_result(conn)
     .expect("audit_logs_user_id_fkey exists")
+}
+
+/// Runs pending migrations up to and including [`AUDIT_FIX`].
+fn migrate_through_audit_fix(conn: &mut PgConnection) {
+    loop {
+        let pending = conn.pending_migrations(MIGRATIONS).expect("pending");
+        let next = pending.first().expect("AUDIT_FIX is pending");
+        let version = next.name().version().to_string();
+        conn.run_migration(next.as_ref()).expect("run migration");
+        if version == AUDIT_FIX {
+            return;
+        }
+    }
 }
 
 fn applied(conn: &mut PgConnection) -> Vec<String> {
@@ -99,7 +113,7 @@ async fn audit_fix_migration_up_down_up() {
     let mut conn = connect(&url);
 
     // Up: applies after the baseline, in order.
-    conn.run_pending_migrations(MIGRATIONS).expect("migrate up");
+    migrate_through_audit_fix(&mut conn);
     let versions = applied(&mut conn);
     let baseline_pos = versions.iter().position(|v| v == BASELINE);
     let fix_pos = versions.iter().position(|v| v == AUDIT_FIX);
@@ -114,8 +128,7 @@ async fn audit_fix_migration_up_down_up() {
     assert_baseline(&mut conn);
 
     // Up again.
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("migrate up again");
+    migrate_through_audit_fix(&mut conn);
     assert_fixed(&mut conn);
 }
 
@@ -125,7 +138,7 @@ async fn audit_fix_migration_up_down_up() {
 async fn audit_fix_down_refuses_to_drop_orphaned_history() {
     let (_container, url) = start_postgres().await;
     let mut conn = connect(&url);
-    conn.run_pending_migrations(MIGRATIONS).expect("migrate up");
+    migrate_through_audit_fix(&mut conn);
 
     diesel::sql_query(
         "WITH u AS (INSERT INTO users (email, name) VALUES ('gone@example.com', 'Gone User') \

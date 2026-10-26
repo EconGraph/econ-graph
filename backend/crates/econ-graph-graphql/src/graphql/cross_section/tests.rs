@@ -178,7 +178,7 @@ async fn cross_section_returns_areas_and_values() {
                 "key": "USA",
                 "area": {"name": "United States", "iso3": "USA", "isoNumeric": 840, "kind": "COUNTRY"},
                 "date": "2023-12-31",
-                "value": "1.500000",
+                "value": "1.5",
                 "flags": [],
             },
             {
@@ -232,7 +232,7 @@ async fn as_of_reads_the_revision_known_on_that_day() {
     assert_eq!(data["crossSection"][0]["key"], json!("USA"));
     assert_eq!(
         data["crossSection"][0]["value"],
-        json!("1.500000"),
+        json!("1.5"),
         "before the revision"
     );
 
@@ -246,7 +246,7 @@ async fn as_of_reads_the_revision_known_on_that_day() {
     assert_eq!(data["crossSection"][0]["key"], json!("USA"));
     assert_eq!(
         data["crossSection"][0]["value"],
-        json!("2.500000"),
+        json!("2.5"),
         "on or after the revision"
     );
 }

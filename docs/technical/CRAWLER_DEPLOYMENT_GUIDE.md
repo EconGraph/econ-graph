@@ -23,6 +23,8 @@ Code: `backend/crates/econ-graph-crawler` (adapters, worker, CLI) and
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE   # fetch_series jobs
 crawler discover --source BLS                        # discover_catalog job (writes series metadata)
+crawler refetch  --all [--dry-run]                   # refetch_series jobs: forced full-history re-fetch
+crawler refetch-status --all [--failures N]          # per-source progress of those jobs
 crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
@@ -38,6 +40,11 @@ direct `fetch` calls.
 An item is enqueued only if no active (pending / processing / retrying) item exists for the
 same `(source, series_id, kind)`.
 
+A `refetch_series` job re-reads a series' whole history, ignoring stored validators and
+incremental bounds, and rewrites stored values in place; see
+[Observation precision and full-history re-fetch](OBSERVATION_PRECISION_REFETCH.md) and
+`scripts/deploy/refetch-full-history.sh`.
+
 ## Run the worker
 
 Locally, from `backend/` with `DATABASE_URL` and provider API keys exported:
@@ -46,7 +53,8 @@ Locally, from `backend/` with `DATABASE_URL` and provider API keys exported:
 Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `econ-graph-crawler-worker:<version>` built from `backend/Dockerfile --target crawler-worker`).
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
-does not run migrations; the backend applies them at startup.
+does not run migrations; the backend applies them at startup, and `deploy.sh` applies the
+worker only after the new backend has rolled out.
 
 Configuration (flags or environment):
 

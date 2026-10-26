@@ -166,6 +166,13 @@ fi
 # Deploy application
 render_manifest k8s/manifests/backend-deployment.yaml | kubectl apply -f -
 kubectl apply -f k8s/manifests/backend-service.yaml
+# The backend applies the database migrations at startup. The crawler worker starts only
+# once the new backend has rolled out, so a worker stopped for the deploy
+# (precheck-db-migration.sh --stop-crawler) stays stopped while the migrations run. If the
+# rollout fails (a migration that timed out on its locks, say), the deploy stops here and
+# the worker stays as it was.
+echo "⏳ Waiting for the backend rollout (it applies the database migrations)..."
+kubectl -n econ-graph rollout status deployment/econ-graph-backend --timeout=600s
 # Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
 # written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
 kubectl apply -f k8s/manifests/crawler-worker.yaml

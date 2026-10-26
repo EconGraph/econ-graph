@@ -17,8 +17,29 @@ export interface SeriesCsvInput {
   transformation: string;
   /** When the values were fetched from the API; null when unknown. */
   retrievedAt: Date | null;
-  /** Points to write, in the order given. */
-  points: readonly { date: string; value: number | null }[];
+  /**
+   * Points to write, in the order given. `exactValue`, the API's decimal string, is written
+   * when present so the file keeps every digit; otherwise `value`.
+   */
+  points: readonly { date: string; value: number | null; exactValue?: string }[];
+}
+
+// A plain decimal number, optionally in exponent notation: what the API sends for a value.
+const DECIMAL = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
+
+/**
+ * The CSV text of one value.
+ * @param point - The point.
+ * @param point.value - Its number; null for no value.
+ * @param point.exactValue - The API's decimal string for it, when known.
+ * @returns Its exact decimal string when it has a well-formed one, else the shortest string
+ * that round-trips to its number; empty for null.
+ */
+export function csvValue(point: { value: number | null; exactValue?: string }): string {
+  if (point.value === null) return '';
+  return point.exactValue !== undefined && DECIMAL.test(point.exactValue)
+    ? point.exactValue
+    : String(point.value);
 }
 
 // Spreadsheets run a cell starting with one of these as a formula (CSV injection).
@@ -60,9 +81,9 @@ export function buildSeriesCsv(input: SeriesCsvInput): string {
   for (const point of input.points) {
     // Keep the calendar date only, should the API ever add a time part.
     const date = csvField(point.date.slice(0, 10));
-    // String() gives the shortest form that round-trips to the same number; spreadsheets
-    // read its exponent notation too.
-    lines.push(`${date},${point.value === null ? '' : String(point.value)}`);
+    // The API's exact decimal when known; otherwise String(), the shortest form that
+    // round-trips to the same number. Spreadsheets read exponent notation too.
+    lines.push(`${date},${csvValue(point)}`);
   }
   return `${lines.join('\r\n')}\r\n`;
 }
