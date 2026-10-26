@@ -10,8 +10,9 @@
 #
 # econ_graph is built as in production: the server runs the init script from
 # k8s/manifests/postgres-init.yaml (the econgraph role, which owns the public
-# schema, and the extensions), and the backend's migrations then run as
-# econgraph, so every object is owned by econgraph.
+# schema, and the extensions), pgcrypto is created as the superuser, and the
+# backend's migrations then run as econgraph: every extension is owned by the
+# superuser and every other object by econgraph, as in production.
 #
 # Checks:
 #   - both dumps are written, read back, restore into scratch databases with
@@ -188,6 +189,11 @@ app_sql() {
         psql -X -q -v ON_ERROR_STOP=1 -h "$1" -U econgraph -d econ_graph -At
 }
 
+# In production every extension, pgcrypto included, is owned by the
+# superuser; the baseline migration's CREATE EXTENSION IF NOT EXISTS pgcrypto
+# then does nothing.
+psql_in "$ECON" postgres econ_graph "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+
 # The backend runs the migrations as econgraph at startup, each in a
 # transaction, and records them in Diesel's table.
 for migration in "$MIGRATIONS"/*/up.sql; do
@@ -241,7 +247,8 @@ FOREIGN_OWNED_SQL="SELECT kind || ' ' || name || ' ' || owner FROM (
  ORDER BY 1"
 TABLE_OWNERS_SQL="SELECT tableowner || ' ' || count(*) FROM pg_tables
  WHERE schemaname NOT IN ('pg_catalog', 'information_schema') GROUP BY tableowner ORDER BY 1"
-EXTENSIONS_SQL="SELECT string_agg(extname, ' ' ORDER BY extname) FROM pg_extension"
+EXTENSIONS_SQL="SELECT string_agg(extname || ':' || extowner::regrole::text, ' ' ORDER BY extname) FROM pg_extension"
+PRODUCTION_EXTENSIONS="pg_stat_statements:postgres pg_trgm:postgres pgcrypto:postgres plpgsql:postgres uuid-ossp:postgres"
 # What the app does: read every table, write rows (sequences, defaults,
 # triggers and the functions they call), record a migration.
 APP_ACCESS_SQL="DO \$\$
@@ -270,6 +277,10 @@ if [ -s "$tmp/foreign-owned" ]; then
 fi
 psql_in "$ECON" postgres econ_graph "$TABLE_OWNERS_SQL" >"$tmp/econ.owners"
 psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL" >"$tmp/econ.extensions"
+if [ "$(cat "$tmp/econ.extensions")" != "$PRODUCTION_EXTENSIONS" ]; then
+    echo "the scratch econ_graph's extensions ($(cat "$tmp/econ.extensions")) differ from production's ($PRODUCTION_EXTENSIONS)" >&2
+    exit 1
+fi
 echo "# scratch econ_graph tables by owner: $(tr '\n' ' ' <"$tmp/econ.owners"); extensions: $(cat "$tmp/econ.extensions")"
 
 psql_in "$KC" keycloak keycloak "
@@ -434,7 +445,7 @@ restored_like_production() {
     psql_in "$1" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
     check "$3: so is every sequence, view, index, function, type and schema" [ ! -s "$tmp/foreign-owned" ]
     [ ! -s "$tmp/foreign-owned" ] || sed 's/^/    owned by another role: /' "$tmp/foreign-owned"
-    check "$3: the extensions are in place ($(cat "$tmp/econ.extensions"))" \
+    check "$3: the extensions are in place, owned by the superuser ($(cat "$tmp/econ.extensions"))" \
         [ "$(psql_in "$1" postgres econ_graph "$EXTENSIONS_SQL")" = "$(cat "$tmp/econ.extensions")" ]
     check "$3: econgraph, connecting as the app does, can read every table and write" \
         [ "$(app_sql "$2" <<<"$APP_ACCESS_SQL" 2>>"$LOG")" = "app access ok" ]

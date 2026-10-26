@@ -174,11 +174,12 @@ neither read nor write it. `restore.sh` runs in two steps:
 
 1. **Extensions**, as `postgres`: the dump's `CREATE EXTENSION IF NOT EXISTS`
    statements and their comments. This only adds an extension the database
-   lacks (on a newly initialised server, `pgcrypto`, which the migrations
-   create) and never drops one. `econgraph` can't do this step itself:
-   `pg_stat_statements` needs a superuser, and the extensions the init script
-   creates (`uuid-ossp`, `pg_stat_statements`, `pg_trgm`) are owned by
-   `postgres`, so `econgraph` can't drop them either.
+   lacks and never drops or changes one. On a newly initialised server,
+   where the init script has created `uuid-ossp`, `pg_stat_statements` and
+   `pg_trgm`, that adds `pgcrypto`. `econgraph` can't do this step itself:
+   `pg_stat_statements` needs a superuser to create, and the extensions
+   (`pg_stat_statements`, `pg_trgm`, `pgcrypto`, `plpgsql`, `uuid-ossp`) are
+   owned by `postgres`, so `econgraph` can't drop them either.
 2. **Everything else**, with `pg_restore --role=econgraph --clean --if-exists
    --single-transaction --exit-on-error`: after connecting, `pg_restore`
    switches to `econgraph`, which drops and recreates the tables, sequences,
@@ -267,8 +268,10 @@ CronJob's images and security settings (uid 999, read-only root), with the
 `pg-dump` container's environment read from the CronJob manifest, against
 scratch `postgres:18` containers standing in for `postgres-service` and
 `keycloak-postgres-service`, and an S3 mock. The `econ_graph` server runs
-the init script from `postgres-init.yaml`, and the backend's migrations run
-as `econgraph`, so every object is owned by `econgraph`, as in production.
+the init script from `postgres-init.yaml`, `pgcrypto` is created as
+`postgres`, and the backend's migrations run as `econgraph`, so, as in
+production, every extension is owned by `postgres` and every other object by
+`econgraph`.
 It checks that both dumps are
 written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in step 3 above) and sync
