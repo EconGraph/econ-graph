@@ -87,7 +87,7 @@ tests:
     input_series:
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
         values: '1x36'
-      - series: 'crawler_coverage_last_refresh_timestamp_seconds{pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph", pod="crawler-worker-1"}'
         values: '0 300 600 900 1200x32'
     alert_rule_test:
       - eval_time: 30m

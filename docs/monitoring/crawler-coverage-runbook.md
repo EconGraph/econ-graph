@@ -101,8 +101,11 @@ On the primary (`kubernetes_namespace="econ-graph"`), `CrawlerNoTraffic` and
 `CrawlerSourceNotRefreshed` are suppressed only when every discovered worker scrape
 target reports `crawler_scheduler_enabled=0`: idle traffic and aging observations are
 expected. An enabled worker, an old image without the mode metric, or a failed scrape
-keeps the alerts active. Branch schedulers do not affect the primary's mode or these two
-alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
+prevents suppression of idle/freshness warnings while measurements are available.
+If a failed scrape makes those measurements stale, `CrawlerMetricsMissing` and
+`CrawlerCoverageStale` report the missing telemetry instead; absent data cannot establish
+no traffic or overdue series. Branch schedulers do not affect the primary's mode or these
+two alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
 still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/scrape
 failures also remain active: the independent metric pollers must stay healthy.
 No blanket Alertmanager silence is required.

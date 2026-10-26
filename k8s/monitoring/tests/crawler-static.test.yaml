@@ -14,9 +14,9 @@ tests:
         values: 10x576
       - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
         values: 5x576
-      - series: crawler_queue_items{status="pending"}
+      - series: crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}
         values: '0x576'
-      - series: crawler_coverage_last_refresh_timestamp_seconds
+      - series: crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}
         values: 0+300x576
       - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
         values: 1x576
@@ -150,9 +150,9 @@ tests:
     input_series:
       - series: crawler_scheduler_enabled{job="kubernetes-pods", instance="worker-1", kubernetes_namespace="econ-graph"}
         values: '0x24'
-      - series: crawler_queue_items{status="pending"}
+      - series: crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}
         values: 40x24
-      - series: crawler_coverage_last_refresh_timestamp_seconds
+      - series: crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}
         values: '0x24'
       - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
         values: 1x24
@@ -188,9 +188,9 @@ tests:
         values: 10x576
       - series: crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}
         values: 5x576
-      - series: crawler_queue_items{status="pending"}
+      - series: crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}
         values: '0x576'
-      - series: crawler_coverage_last_refresh_timestamp_seconds
+      - series: crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}
         values: 0+300x576
       - series: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}
         values: 1x576
@@ -312,3 +312,49 @@ tests:
             exp_annotations:
               summary: 5 FRED series not refreshed within twice their interval
               description: FRED has series whose last successful crawl is older than twice their refresh interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler coverage` shows the oldest successful crawl.
+
+  # A real failed scrape makes worker metrics stale. With no measurements left,
+  # telemetry-health alerts report the fault rather than inventing traffic/freshness data.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_scheduler_enabled{kubernetes_namespace="econ-graph", job="kubernetes-pods", instance="worker-1"}'
+        values: '0x2 stale'
+      - series: 'up{kubernetes_namespace="econ-graph", app="crawler-worker", job="kubernetes-pods", instance="worker-1"}'
+        values: '1x2 0x34'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}'
+        values: '10x2 stale'
+      - series: 'crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}'
+        values: '5x2 stale'
+      - series: 'crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}'
+        values: '0x2 stale'
+      - series: 'crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}'
+        values: '0 300 600 stale'
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x36'
+      - series: 'crawler_queue_items{kubernetes_namespace="econ-graph-br-test", status="pending"}'
+        values: '0x36'
+      - series: 'crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph-br-test"}'
+        values: '0+300x36'
+    alert_rule_test:
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: info
+            exp_annotations:
+              summary: crawler-worker metrics are not being scraped
+              description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
+      - eval_time: 1h40m
+        alertname: CrawlerCoverageStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawler-worker coverage metrics are stale
+              description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see old numbers.
