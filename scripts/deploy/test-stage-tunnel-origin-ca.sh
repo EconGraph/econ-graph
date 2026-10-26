@@ -15,6 +15,22 @@ import yaml
 
 root = Path(sys.argv[1])
 script = root / 'scripts/deploy/stage-tunnel-origin-ca.sh'
+# Cross-file contract: readiness and public-certificate extraction must refer to
+# the root actually issued and consumed by cert-manager, never an unrelated old Secret.
+resources = list(yaml.safe_load_all((root / 'k8s/manifests/tunnel-trust/ca.yaml').read_text()))
+by_kind = {resource['kind']: resource for resource in resources}
+assert len(resources) == len(by_kind) == 3
+issuer = by_kind['Issuer']
+certificate = by_kind['Certificate']
+clusterissuer = by_kind['ClusterIssuer']
+assert issuer['metadata'] == {'name': 'econ-graph-origin-bootstrap', 'namespace': 'cert-manager'}
+assert issuer['spec'] == {'selfSigned': {}}
+assert certificate['metadata'] == {'name': 'econ-graph-origin-ca', 'namespace': 'cert-manager'}
+assert certificate['spec']['isCA'] is True
+assert certificate['spec']['secretName'] == 'econ-graph-origin-ca'
+assert certificate['spec']['issuerRef'] == {'group': 'cert-manager.io', 'kind': 'Issuer', 'name': issuer['metadata']['name']}
+assert clusterissuer['metadata'] == {'name': 'econ-graph-origin-ca'}
+assert clusterissuer['spec']['ca']['secretName'] == certificate['spec']['secretName']
 with tempfile.TemporaryDirectory() as folder:
     work = Path(folder)
     ca = work / 'ca.crt'
@@ -63,10 +79,16 @@ elif 'patch' in args:
     assert all(command[:2]==['--context','scratch-only'] for command in commands)
     assert not any('delete' in command or 'scale' in command for command in commands)
     assert not any('gateway' in command or 'econ-graph-tls' in command for command in commands)
+    certificate_wait = ['--context', 'scratch-only', '-n', 'cert-manager', 'wait',
+                        '--for=condition=Ready', 'certificate/econ-graph-origin-ca', '--timeout=120s']
+    issuer_wait = ['--context', 'scratch-only', 'wait', '--for=condition=Ready',
+                   'clusterissuer/econ-graph-origin-ca', '--timeout=120s']
+    assert certificate_wait in commands and issuer_wait in commands
+    secret = next(i for i, command in enumerate(commands) if 'secret' in command)
     restart=next(i for i, command in enumerate(commands) if 'restart' in command)
     status=next(i for i, command in enumerate(commands) if 'status' in command)
     publish=next(i for i, command in enumerate(commands) if command[-3:] == ['apply','-f','-'])
-    assert publish < restart < status, 'must restart connectors after publishing the CA, then wait'
+    assert commands.index(certificate_wait) < commands.index(issuer_wait) < secret < publish < restart < status, 'must await the issuing CA before extraction, then publish, restart and wait'
 
     patch=yaml.safe_load((root/'k8s/manifests/tunnel-trust/cloudflared-mount.yaml').read_text())
     assert set(patch['spec']) == {'template'}, 'mount patch must preserve replicas'
