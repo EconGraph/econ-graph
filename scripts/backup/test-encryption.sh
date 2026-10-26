@@ -104,21 +104,32 @@ age -d -i "$scratch/identity" "$scratch/shared/backup.tar.age" |
 grep -qx 'test-image:v1' "$scratch/shared-opened/local-images.txt"
 canonical_cluster_stubs() {
     pod_running() { return 0; }
-    count_rows() {
-        case "$2" in
-            *to_regclass*) printf 't\n' ;;
-            *) printf '1\n' ;;
-        esac
-    }
     k() {
         case "$*" in
             *'get secret econ-graph-secrets -o name'*)
                 [[ "${TEST_SECRET_DENIED:-0}" != 1 ]] || return 1
                 printf 'secret/econ-graph-secrets\n' ;;
-            *'get secret econ-graph-secrets -o go-template='*) printf 'synthetic encrypted secret\n' ;;
+            *'get secret econ-graph-secrets -o go-template='*)
+                [[ "${TEST_SECRET_FETCH_DENIED:-0}" != 1 ]] || return 1
+                printf 'synthetic encrypted secret\n' ;;
             'get secret '*) return 0 ;;
-            *' pg_dump '*) printf 'PGDMP synthetic archive\n' ;;
-            *' pg_restore '*) cat >/dev/null ;;
+            *' pg_dump '*)
+                [[ "${TEST_SNAPSHOT_FAILURE:-}" != dump ]] || return 1
+                printf 'PGDMP synthetic archive\n' ;;
+            *' pg_restore '*)
+                [[ "${TEST_SNAPSHOT_FAILURE:-}" != readback ]] || return 1
+                cat >/dev/null ;;
+            *' psql '*)
+                while IFS= read -r sql; do
+                    case "$sql" in
+                        *pg_export_snapshot*)
+                            if [[ "${TEST_SNAPSHOT_FAILURE:-}" == export ]]; then printf 'invalid\n'; else printf '00000001-00000001-1\n'; fi ;;
+                        *to_regclass*) printf 't\n' ;;
+                        *'count(*)'*)
+                            [[ "${TEST_SNAPSHOT_FAILURE:-}" != count ]] || return 1
+                            printf '1\n' ;;
+                    esac
+                done ;;
             *) die "unexpected fake cluster call" ;;
         esac
     }
@@ -154,6 +165,33 @@ if (
 fi
 [[ ! -e "$scratch/denied-secret" && ! -e "$scratch/denied-secret.partial" ]]
 grep -q 'could not inspect secret/' "$scratch/denied.log"
+# A failed template fetch after a successful name lookup must also abort.
+if (
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    canonical_cluster_stubs
+    export TEST_SECRET_FETCH_DENIED=1
+    backup_databases "$scratch/denied-secret-fetch"
+) >"$scratch/denied-fetch.log" 2>&1; then
+    die 'published backup after denied Secret template fetch'
+fi
+[[ ! -e "$scratch/denied-secret-fetch" && ! -e "$scratch/denied-secret-fetch.partial" ]]
+# Snapshot export, metadata queries, dump and readback failures must propagate
+# even when a caller explicitly catches backup_databases' nonzero status.
+for failure in export count dump readback; do
+    if (
+        trap - EXIT
+        # shellcheck source=scripts/deploy/lib/kind-env.sh
+        source "$root/scripts/deploy/lib/kind-env.sh"
+        canonical_cluster_stubs
+        export TEST_SNAPSHOT_FAILURE="$failure"
+        backup_databases "$scratch/failure-$failure"
+    ) >"$scratch/failure-$failure.log" 2>&1; then
+        die "published a bundle after $failure failed"
+    fi
+    [[ ! -e "$scratch/failure-$failure" && ! -e "$scratch/failure-$failure.partial" ]]
+done
 # Resume identity survives different operator-opened tmpfs paths; an explicit
 # unrelated resume directory must never be redirected to the active bundle.
 (

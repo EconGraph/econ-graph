@@ -298,7 +298,13 @@ The nightly `dump-databases.sh` and pre-change
 `backup-kind-databases.sh` share one verified recovery payload. Each dumps
 `econ_graph`, `econ_graph_app` and `keycloak` from the kind cluster, reads
 each archive back in full with the pod's matching `pg_restore`, and records
-row counts. An optional database is skipped only when neither its StatefulSet
+row counts from the same exported PostgreSQL snapshot as each archive. The
+snapshot-exporting session stays alive until its dump and count queries finish,
+so concurrent nightly writes cannot create a false row-count mismatch during
+recovery. Each database has its own consistent snapshot; there is no atomic
+snapshot spanning the app, data and Keycloak databases. Stop writers, as the
+pre-change migration workflow does, when a coordinated cross-database recovery
+point is required. An optional database is skipped only when neither its StatefulSet
 nor its data PVC exists. A stopped or unreachable deployed database fails the
 backup. The payload includes `counts.env`, `MANIFEST` and the cluster Secrets
 needed to recover the databases with their original credentials.
@@ -368,6 +374,15 @@ snapshots, the independent in-cluster backup CronJob/PVC, and the special
 Keycloak-upgrade backup format remain separate copies with their existing
 protection. In particular, these changes do not claim those copies are
 public-key encrypted; the in-cluster backup work must be integrated separately.
+
+The encryption suite (`scripts/backup/test-encryption.sh`) uses a disposable
+synthetic identity and transport stubs. The concurrent-write regression
+(`python3 scripts/backup/test-snapshot-counts.py`) starts one isolated
+`postgres:18` container, inserts rows after each snapshot export, restores all
+three archives, and checks that metadata and restored rows agree while the
+live fixture has newer rows. It also checks that exporter sessions are closed.
+CI runs both; the real PostgreSQL check adds a scratch-container image pull
+and fixture run. Neither test uses a live cluster, backup or maintainer key.
 
 ## Restore drill
 

@@ -421,6 +421,9 @@ jobs:
     - name: Check that the monitoring lint contacts nothing
       run: scripts/test-monitoring-lint-only.sh
 
+    - name: Check backup snapshots against concurrent PostgreSQL writers
+      run: python3 scripts/backup/test-snapshot-counts.py
+
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
     - name: Check the kind installer

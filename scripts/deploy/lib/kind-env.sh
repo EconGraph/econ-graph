@@ -455,13 +455,13 @@ backup_databases() {
     # This is only disposable RAM staging, never a backup directory.
     printf -v cleanup 'rm -rf -- %q' "$scratch"
     add_exit_cleanup "$cleanup"
-    backup_databases_plain "$scratch/payload"
+    backup_databases_plain "$scratch/payload" || return
     # Migration-specific recovery metadata must be inside the sealed payload,
     # rather than appended to the ciphertext directory after publication.
     if declare -F backup_prepare_payload >/dev/null; then
-        backup_prepare_payload "$scratch/payload"
+        backup_prepare_payload "$scratch/payload" || return
     fi
-    backup_seal_dir "$scratch/payload" "$output"
+    backup_seal_dir "$scratch/payload" "$output" || return
     BACKUP_ACTIVE_OUTPUT="$output"
     BACKUP_ACTIVE_DIR="$scratch/payload"
     log "Encrypted backup complete: $output (no identity used)"
@@ -491,105 +491,120 @@ backup_databases_plain() {
         echo "+ save row counts to $dir/counts.env and Secrets to $dir/secrets/"
         return 0
     fi
-    (umask 077 && mkdir -p "$dir")
+    (umask 077 && mkdir -p "$dir") || return
 
-    dump_one postgresql-0 postgresql postgres econ_graph "$dir/econ_graph.dump"
+    dump_one postgresql-0 postgresql postgres econ_graph "$dir/econ_graph.dump" || return
     if pod_running app-postgres-0; then
-        dump_one app-postgres-0 postgres postgres econ_graph_app "$dir/econ_graph_app.dump"
+        dump_one app-postgres-0 postgres postgres econ_graph_app "$dir/econ_graph_app.dump" || return
     else
         require_not_deployed app-postgres "the app database" ALLOW_MISSING_APP_DUMP
     fi
     if pod_running keycloak-postgres-0; then
-        dump_one keycloak-postgres-0 postgres keycloak keycloak "$dir/keycloak.dump"
+        dump_one keycloak-postgres-0 postgres keycloak keycloak "$dir/keycloak.dump" || return
     else
         require_not_deployed keycloak-postgres "Keycloak's database" ALLOW_MISSING_KEYCLOAK_DUMP
     fi
 
-    # Each count is taken (and checked) on its own before counts.env is
-    # written: inside echo "...$(...)" a failed query would leave an empty
-    # value and the backup would still be reported complete.
-    local series points realms="" users="" app_users="" app_annotations="" app_tables
-    series="$(count_rows econ_graph 'select count(*) from economic_series')" \
-        || die "counting economic_series failed; backup in $dir is incomplete"
-    points="$(count_rows econ_graph 'select count(*) from data_points')" \
-        || die "counting data_points failed; backup in $dir is incomplete"
-    [[ "$series" =~ ^[0-9]+$ && "$points" =~ ^[0-9]+$ ]] \
-        || die "non-numeric row counts '$series' '$points'; backup in $dir is incomplete"
-    if [ -s "$dir/econ_graph_app.dump" ]; then
-        # Before the backend's first start the app database has no tables; its
-        # dump is kept, with no counts, and there is nothing to restore from it.
-        app_tables="$(count_rows econ_graph_app "select to_regclass('public.users') is not null")" \
-            || die "inspecting the app database failed; backup in $dir is incomplete"
-        if [ "$app_tables" = "t" ]; then
-            app_users="$(count_rows econ_graph_app 'select count(*) from users')" \
-                || die "counting app users failed; backup in $dir is incomplete"
-            app_annotations="$(count_rows econ_graph_app 'select count(*) from chart_annotations')" \
-                || die "counting chart_annotations failed; backup in $dir is incomplete"
-            [[ "$app_users" =~ ^[0-9]+$ && "$app_annotations" =~ ^[0-9]+$ ]] \
-                || die "non-numeric app row counts '$app_users' '$app_annotations'; backup in $dir is incomplete"
-        else
-            warn "the app database has no tables yet; its dump holds no rows"
-        fi
-    fi
-    if [ -s "$dir/keycloak.dump" ]; then
-        realms="$(count_rows keycloak 'select count(*) from realm')" \
-            || die "counting Keycloak realms failed; backup in $dir is incomplete"
-        users="$(count_rows keycloak 'select count(*) from user_entity')" \
-            || die "counting Keycloak users failed; backup in $dir is incomplete"
-        [[ "$realms" =~ ^[0-9]+$ && "$users" =~ ^[0-9]+$ ]] \
-            || die "non-numeric Keycloak row counts '$realms' '$users'; backup in $dir is incomplete"
-    fi
-    {
-        echo "# Row counts at backup time, compared after a restore."
-        echo "SERIES_COUNT=$series"
-        echo "DATA_POINTS_COUNT=$points"
-        if [ -n "$app_users" ]; then
-            echo "APP_USER_COUNT=$app_users"
-            echo "APP_ANNOTATION_COUNT=$app_annotations"
-        fi
-        if [ -n "$realms" ]; then
-            echo "KEYCLOAK_REALM_COUNT=$realms"
-            echo "KEYCLOAK_USER_COUNT=$users"
-        fi
-    } >"$dir/counts.env"
+    # Each .counts file was read from the exact exported snapshot used by its
+    # archive, even while nightly backups run alongside live writers.
+    cat "$dir"/*.dump.counts > "$dir/counts.env" || return
+    read_counts "$dir" || return
+    local series="$SERIES_COUNT" points="$DATA_POINTS_COUNT"
+    local app_users="$APP_USER_COUNT" app_annotations="$APP_ANNOTATION_COUNT"
 
     # One minimal manifest per Secret (name, type, labels, data) without the
     # server-set fields, so it can be created in a new cluster. Rendered by
     # kubectl itself: values stay base64, and no yq/jq flavour is assumed.
-    (umask 077 && mkdir -p "$dir/secrets")
+    (umask 077 && mkdir -p "$dir/secrets") || return
     for name in "${APP_SECRETS[@]}"; do
         found="$(k get secret "$name" -o name --ignore-not-found)" ||
             die "could not inspect secret/$name; refusing to publish a recovery bundle without its credentials"
         if [ -n "$found" ]; then
-            (umask 077 && k get secret "$name" -o go-template="${SECRET_TEMPLATE}" >"$dir/secrets/$name.yaml")
+            (umask 077 && k get secret "$name" -o go-template="${SECRET_TEMPLATE}" >"$dir/secrets/$name.yaml") || return
         fi
     done
-    chmod 0600 "$dir"/*.dump "$dir"/counts.env
+    chmod 0600 "$dir"/*.dump "$dir"/counts.env || return
     {
         echo "econ_graph.series=$series"
         echo "econ_graph.data_points=$points"
         [[ -z "$app_users" ]] || echo "econ_graph_app.users=$app_users"
         [[ -z "$app_annotations" ]] || echo "econ_graph_app.chart_annotations=$app_annotations"
-    } > "$dir/MANIFEST"
-    (cd "$dir" && sha256sum -- *.dump > SHA256SUMS)
-    date -u +%Y-%m-%dT%H:%M:%SZ > "$dir/VERIFIED"
+    } > "$dir/MANIFEST" || return
+    (cd "$dir" && sha256sum -- *.dump > SHA256SUMS) || return
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$dir/VERIFIED" || return
     log "Backup complete:"
     ls -la "$dir" "$dir/secrets"
     sed 's/^/    /' "$dir/counts.env"
 }
 
-# dump_one POD CONTAINER USER DB FILE
-dump_one() {
+# dump_one POD CONTAINER USER DB FILE: one exported snapshot for the archive
+# and its row counts. The exporter stays alive until both readers finish.
+# Each database is consistent internally; there is no cross-database snapshot.
+dump_one() (
     local pod="$1" container="$2" user="$3" db="$4" file="$5"
-    echo "  pg_dump $db from $pod"
-    k exec "$pod" -c "$container" -- pg_dump -Fc -U "$user" -d "$db" >"$file.partial"
-    # A truncated or corrupt archive fails to read back in full (as the nightly
-    # backup job checks it). Not `pg_restore -l`: that stops reading stdin
-    # after the TOC, and kubectl exec then hangs pushing the rest.
+    local snapshot snapshot_input snapshot_output snapshot_pid
+    echo "  pg_dump $db from $pod (snapshot-consistent counts)"
+    coproc BACKUP_SNAPSHOT {
+        k exec -i "$pod" -c "$container" -- psql -X -qAt -v ON_ERROR_STOP=1 -U "$user" -d "$db"
+    }
+    snapshot_input="${BACKUP_SNAPSHOT[1]}"
+    snapshot_output="${BACKUP_SNAPSHOT[0]}"
+    snapshot_pid="$BACKUP_SNAPSHOT_PID"
+    # shellcheck disable=SC2329 # invoked by the EXIT trap
+    close_snapshot() {
+        local status=$?
+        # Close only this function's session. The 8h server-side idle bound
+        # also releases an exporter abandoned by a killed client process.
+        printf 'ROLLBACK;\n\\q\n' 2>/dev/null 1>&"$snapshot_input" || true
+        exec {snapshot_input}>&-
+        exec {snapshot_output}<&-
+        wait "$snapshot_pid" || true
+        exit "$status"
+    }
+    trap close_snapshot EXIT
+    printf '%s\n' "SET idle_in_transaction_session_timeout='8h'; BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT pg_export_snapshot();" >&"$snapshot_input" || die "could not start snapshot exporter for $db"
+    read -r -t 30 -u "$snapshot_output" snapshot || die "could not export a snapshot for $db"
+    [[ "$snapshot" =~ ^[[:xdigit:]]+-[[:xdigit:]]+-[0-9]+$ ]] || die "invalid snapshot identifier for $db"
+    snapshot_query() {
+        k exec -i "$pod" -c "$container" -- psql -X -qAt -v ON_ERROR_STOP=1 -U "$user" -d "$db" \
+            <<<"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT '$snapshot'; $1; COMMIT;"
+    }
+    record_snapshot_count() {
+        local value
+        value="$(snapshot_query "$2")" || die "could not count $1 in the $db backup snapshot"
+        [[ "$value" =~ ^[0-9]+$ ]] || die "invalid $1 count in the $db backup snapshot"
+        printf '%s=%s\n' "$1" "$value" >> "$file.counts" || die "could not record $1"
+    }
+    : > "$file.counts" || die "could not create snapshot count metadata"
+    case "$db" in
+        econ_graph)
+            record_snapshot_count SERIES_COUNT 'select count(*) from economic_series'
+            record_snapshot_count DATA_POINTS_COUNT 'select count(*) from data_points'
+            ;;
+        econ_graph_app)
+            local has_tables
+            has_tables="$(snapshot_query "select to_regclass('public.users') is not null")" || die "could not inspect app snapshot"
+            case "$has_tables" in
+                t)
+                    record_snapshot_count APP_USER_COUNT 'select count(*) from users'
+                    record_snapshot_count APP_ANNOTATION_COUNT 'select count(*) from chart_annotations'
+                    ;;
+                f) warn "the app database has no tables yet; its dump holds no rows" ;;
+                *) die "invalid app snapshot table inspection" ;;
+            esac
+            ;;
+        keycloak)
+            record_snapshot_count KEYCLOAK_REALM_COUNT 'select count(*) from realm'
+            record_snapshot_count KEYCLOAK_USER_COUNT 'select count(*) from user_entity'
+            ;;
+        *) die "no snapshot count policy for database $db" ;;
+    esac
+    k exec "$pod" -c "$container" -- pg_dump -Fc -U "$user" -d "$db" --snapshot="$snapshot" >"$file.partial" ||
+        die "pg_dump of $db failed; refusing to publish the backup"
     k exec -i "$pod" -c "$container" -- pg_restore -f /dev/null <"$file.partial" ||
         die "$file.partial does not read back as a pg_dump archive"
-    mv "$file.partial" "$file"
-}
+    mv "$file.partial" "$file" || die "could not publish the verified $db archive"
+)
 
 # require_not_deployed STATEFULSET WHAT ALLOW_VAR: called when STATEFULSET's
 # pod isn't running, so its database can't be dumped. Every caller of
