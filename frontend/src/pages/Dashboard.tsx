@@ -20,7 +20,12 @@ const Dashboard: React.FC = () => {
         <Typography variant='h4' component='h1' gutterBottom>
           Economic Dashboard
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           The latest published value of key economic indicators
         </Typography>
       </Box>

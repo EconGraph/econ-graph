@@ -268,7 +268,12 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     chart = (
       <Paper sx={{ p: 3 }}>
         <Typography variant='body1'>No observations for this series yet.</Typography>
-        <Typography variant='body2' color='text.secondary'>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Data appears here after the next successful crawl of {series.source?.name ?? 'its source'}
           .
         </Typography>
@@ -289,7 +294,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         >
           Explore
         </Link>
-        <Typography color='text.primary'>{series.title}</Typography>
+        <Typography
+          sx={{
+            color: 'text.primary',
+          }}
+        >
+          {series.title}
+        </Typography>
       </Breadcrumbs>
 
       <Box sx={{ mb: 4 }}>
@@ -297,7 +308,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           {series.title}
         </Typography>
         {series.description && (
-          <Typography variant='body1' color='text.secondary' sx={{ mb: 2 }}>
+          <Typography
+            variant='body1'
+            sx={{
+              color: 'text.secondary',
+              mb: 2,
+            }}
+          >
             {series.description}
           </Typography>
         )}

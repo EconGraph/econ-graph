@@ -410,7 +410,13 @@ const SeriesExplorer: React.FC = () => {
               >
                 {series.title}
               </Typography>
-              <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                  mb: 2,
+                }}
+              >
                 {series.description}
               </Typography>
             </Box>
@@ -433,7 +439,12 @@ const SeriesExplorer: React.FC = () => {
           {dateRange(series) && (
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
               <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
-              <Typography variant='caption' color='text.secondary'>
+              <Typography
+                variant='caption'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 {dateRange(series)}
               </Typography>
             </Box>
@@ -462,7 +473,12 @@ const SeriesExplorer: React.FC = () => {
         <Typography variant='h4' component='h1' gutterBottom>
           Series Explorer
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Search and explore economic time series data from the available sources
         </Typography>
       </Box>
@@ -482,20 +498,22 @@ const SeriesExplorer: React.FC = () => {
               }}
               onKeyPress={e => e.key === 'Enter' && handleSearch()}
               inputRef={searchInputRef}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                endAdornment: searchQuery && (
-                  <IconButton
-                    size='small'
-                    aria-label='Clear search text'
-                    onClick={() => {
-                      setSearchQuery('');
-                      setCurrentPage(1);
-                    }}
-                  >
-                    <ClearIcon />
-                  </IconButton>
-                ),
+              slotProps={{
+                input: {
+                  startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                  endAdornment: searchQuery && (
+                    <IconButton
+                      size='small'
+                      aria-label='Clear search text'
+                      onClick={() => {
+                        setSearchQuery('');
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <ClearIcon />
+                    </IconButton>
+                  ),
+                },
               }}
             />
           </Grid>
@@ -647,7 +665,12 @@ const SeriesExplorer: React.FC = () => {
           <Typography variant='h6' gutterBottom>
             Search for a series
           </Typography>
-          <Typography variant='body2' color='text.secondary'>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+            }}
+          >
             Type at least 2 characters, such as GDP, unemployment or inflation, or pick a source to
             list its series
           </Typography>
@@ -657,7 +680,13 @@ const SeriesExplorer: React.FC = () => {
           <Typography variant='h6' gutterBottom>
             No series found
           </Typography>
-          <Typography variant='body2' color='text.secondary' sx={{ mb: 3 }}>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              mb: 3,
+            }}
+          >
             Try adjusting your search criteria
           </Typography>
           <Button variant='contained' onClick={handleClearSearch}>

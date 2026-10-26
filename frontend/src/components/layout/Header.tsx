@@ -215,7 +215,12 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                   <MenuItem disabled>
                     <Box>
                       <Typography variant='subtitle2'>{user?.name}</Typography>
-                      <Typography variant='caption' color='text.secondary'>
+                      <Typography
+                        variant='caption'
+                        sx={{
+                          color: 'text.secondary',
+                        }}
+                      >
                         {user?.email}
                       </Typography>
                     </Box>
