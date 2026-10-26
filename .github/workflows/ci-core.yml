@@ -270,6 +270,10 @@ jobs:
     - name: Check the teardown guards
       run: scripts/deploy/test-teardown-guards.sh
 
+    # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
+    - name: Check the Keycloak database backup and restore scripts
+      run: scripts/deploy/test-keycloak-db-scripts.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
