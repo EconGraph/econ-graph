@@ -785,7 +785,11 @@ bundle first. With the encrypted host-bundle tooling installed, use
 `open-backup.sh <bundle> -- scripts/deploy/deploy-branch.sh up <branch> ... --seed-dir @BACKUP@`;
 the wrapper authenticates the bundle and holds plaintext in private tmpfs only
 for that command. The branch tool receives no age identity. `pg_restore` is
-required locally for archive inspection. The dump
+required locally for archive inspection and must support the archive version:
+production PostgreSQL 18 dumps need a PostgreSQL 18-compatible client. After
+installing that client, select it for this command through `PATH` (for example,
+`PATH=/usr/lib/postgresql/18/bin:$PATH scripts/deploy/deploy-branch.sh ...`)
+instead of changing the system-wide client default. The dump
 is streamed exclusively into the branch's data Postgres before data migrations
 run. An existing nonempty, unmarked database is refused. Subsequent deploys
 require the same seed checksum and never restore over existing data. The data
