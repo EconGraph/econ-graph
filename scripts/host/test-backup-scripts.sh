@@ -127,6 +127,19 @@ check "the failed receive is kept as .incomplete-*" \
     bash -c "ls -d '${pool}'/data-plane.20261024T030000Z.incomplete-* >/dev/null"
 check "the status file records the failure" grep -qx "failures=[1-9][0-9]*" "${root}/var/lib/econgraph/backup-snapshots.status"
 
+# A local snapshot whose UUID cannot be read is a counted failure, not an
+# abort: the other dataset is still copied and the status file written.
+fake_subvol "${snaps}/app-prod.20261024T005000Z" true 11111111-0000-0000-0000-00000000000d
+echo "unreadable=true" >>"${snaps}/app-prod.20261024T005000Z/.fake-btrfs"
+fake_subvol "${pool}/app-prod.20261024T005000Z" true bbbbbbbb-0000-0000-0000-00000000000d 11111111-0000-0000-0000-00000000000d
+rm -f "${root}/var/lib/econgraph/backup-snapshots.status"
+run_script "backup-snapshots reports an unreadable local UUID and carries on" 1 \
+    "cannot read the UUID of ${snaps}/app-prod.20261024T005000Z" "${repo_root}/scripts/host/backup-snapshots.sh"
+check "... the other dataset is still copied" [ -d "${pool}/data-plane.20261024T030000Z" ]
+check "... the status file records the failure" grep -qx "failures=[1-9][0-9]*" "${root}/var/lib/econgraph/backup-snapshots.status"
+check "... the unreadable copy is not set aside" [ -z "$(find "${pool}" -maxdepth 1 -name 'app-prod.20261024T005000Z.*')" ]
+rm -rf "${snaps}/app-prod.20261024T005000Z" "${pool}/app-prod.20261024T005000Z"
+
 echo "== restore-snapshot.sh: --from-pool checks the Received UUID; --dry-run restores nothing"
 export SUDO_USER=tester
 echo "${FS_UUID} /@econgraph-snapshots" >"${snaps}/.fake-mount"
@@ -142,6 +155,10 @@ check "restore-snapshot --dry-run changes nothing" [ "$(tree_state "${root}")" =
 fake_subvol "${pool}/data-plane.20261023T000000Z" true bbbbbbbb-0000-0000-0000-000000000001 -
 run_script "restore-snapshot --from-pool refuses a never-received pool copy" 1 "has no Received UUID" \
     "${restore}" --dry-run --from-pool data-plane.20261023T000000Z
+fake_subvol "${pool}/data-plane.20261023T005000Z" true bbbbbbbb-0000-0000-0000-00000000000e "${L1}"
+echo "unreadable=true" >>"${pool}/data-plane.20261023T005000Z/.fake-btrfs"
+run_script "restore-snapshot --from-pool reports an unreadable pool copy" 1 "has no Received UUID" \
+    "${restore}" --dry-run --from-pool data-plane.20261023T005000Z
 # A local snapshot of the same name that the pool copy was not received from.
 fake_subvol "${pool}/data-plane.20261023T010000Z" true bbbbbbbb-0000-0000-0000-000000000002 "${STALE}"
 fake_subvol "${snaps}/data-plane.20261023T010000Z" true 11111111-0000-0000-0000-00000000000b

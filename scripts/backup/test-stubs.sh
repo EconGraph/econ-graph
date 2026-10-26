@@ -7,7 +7,8 @@
 # touch nothing outside the test's temporary directory:
 #
 #   - A directory is a fake btrfs subvolume when it holds a .fake-btrfs file
-#     of KEY=value lines: ro (true/false), uuid, received ("-" when unset).
+#     of KEY=value lines: ro (true/false), uuid, received ("-" when unset),
+#     and optionally unreadable=true (`btrfs subvolume show` then fails).
 #     `btrfs subvolume show` and `btrfs property get <p> ro` read it,
 #     `stat -c %i` reports inode 256 for it, `btrfs subvolume snapshot`
 #     creates one, and `btrfs send | btrfs receive` copies one, recording the
@@ -52,6 +53,7 @@ case "$1 ${2:-}" in
         echo "ro=$(meta "$3" ro)" ;;
     "subvolume show")
         [[ -f "$3/.fake-btrfs" ]] || { echo "ERROR: not a subvolume: $3" >&2; exit 1; }
+        [[ "$(meta "$3" unreadable)" != true ]] || { echo "ERROR: cannot read $3" >&2; exit 1; }
         printf '%s\n\tName: \t\t\t%s\n\tUUID: \t\t\t%s\n\tParent UUID: \t\t-\n\tReceived UUID: \t\t%s\n' \
             "$3" "$(basename "$3")" "$(meta "$3" uuid)" "$(meta "$3" received)" ;;
     "subvolume snapshot")

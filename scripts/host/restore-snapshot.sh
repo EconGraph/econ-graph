@@ -108,8 +108,10 @@ mounted_subvol() {
 # subvol_field <path> <field>: a field of `btrfs subvolume show <path>`
 # ("UUID" or "Received UUID"); "-" when unset, empty when unreadable.
 subvol_field() {
-    btrfs subvolume show "$1" 2>/dev/null \
-        | sed -nE "s/^[[:space:]]*$2:[[:space:]]+([^[:space:]]+).*/\1/p" | head -n 1
+    # || true: an unreadable subvolume must reach the callers' error
+    # messages, not abort the script under pipefail.
+    { btrfs subvolume show "$1" 2>/dev/null \
+        | sed -nE "s/^[[:space:]]*$2:[[:space:]]+([^[:space:]]+).*/\1/p" | head -n 1; } || true
 }
 # send_uuid <path>: the UUID a send of <path> carries (its Received UUID if
 # it was itself received, otherwise its UUID). Empty when unreadable.
