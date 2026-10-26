@@ -5,15 +5,17 @@
 #
 # Usage:
 #   scripts/deploy/precheck-db-migration.sh [--dry-run] [--stop-crawler]
-#       [--context CONTEXT]
+#
+# Run it immediately before scripts/deploy/deploy.sh, on the cluster deploy.sh
+# deploys to: context kind-econ-graph, always.
 #
 #   --dry-run       check, and show what --stop-crawler would change, but change
 #                   nothing
 #   --stop-crawler  scale deployment/crawler-worker to 0 and wait for its pods
-#                   to go (deploy.sh applies crawler-worker.yaml, which brings it
-#                   back at 1 replica on the new image)
-#   --context CONTEXT  the kubectl context (default kind-econ-graph); the
-#                   current context is not changed
+#                   to go. deploy.sh applies crawler-worker.yaml, bringing it
+#                   back at 1 replica on the new image, only after the new
+#                   backend (which applies the migrations) has rolled out. If a
+#                   later check fails, the command to scale it back is printed.
 #
 # Checks, in order; any failure exits non-zero:
 #   1. No postgres-backup Job is running (the nightly CronJob runs at 08:00
@@ -52,14 +54,12 @@ MAX_XACT_SECONDS=5
 
 DRY_RUN=false
 STOP_CRAWLER=false
+# The context deploy.sh deploys to.
 CONTEXT="kind-econ-graph"
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
         --stop-crawler) STOP_CRAWLER=true; shift ;;
-        --context)
-            [ $# -ge 2 ] || { echo "${SCRIPT}: error: --context needs a value" >&2; exit 2; }
-            CONTEXT="$2"; shift 2 ;;
         -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
         *) echo "${SCRIPT}: error: unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -84,13 +84,35 @@ contexts="$(command "$KUBECTL" config get-contexts -o name)" || die "could not l
 grep -qxF -- "$CONTEXT" <<<"$contexts" || die "$KUBECTL has no context $CONTEXT"
 CLUSTER_ROLE_CONTEXT="$CONTEXT"
 export CLUSTER_ROLE_CONTEXT
-cluster_role="not marked production"
-if cluster_is_marked_production; then
-    cluster_role="PRODUCTION"
-fi
+role_status=0
+cluster_is_marked_production || role_status=$?
+case "$role_status" in
+    0) cluster_role="PRODUCTION" ;;
+    1) cluster_role="not marked production" ;;
+    *) cluster_role="unknown: ${CLUSTER_ROLE_REASON}" ;;
+esac
 log "context ${CONTEXT} (${cluster_role}), kubectl ${KUBECTL}, KUBECONFIG=${KUBECONFIG:-default}"
 
 failed=false
+
+# Once this run has scaled the crawler down, a failed check says how to bring it back.
+SCALED_FROM=""
+crawler_restore_hint() {
+    local status=$?
+    if [ "$status" != 0 ] && [ -n "$SCALED_FROM" ]; then
+        echo "${SCRIPT}: crawler-worker was scaled from ${SCALED_FROM} to 0 by this run and stays" \
+            "stopped. To bring it back without deploying:" >&2
+        echo "  ${KUBECONFIG:+KUBECONFIG=${KUBECONFIG} }${KUBECTL} --context ${CONTEXT} -n ${NAMESPACE}" \
+            "scale deployment/${CRAWLER} --replicas=${SCALED_FROM}" >&2
+    fi
+    return "$status"
+}
+trap crawler_restore_hint EXIT
+
+# The crawler pods, one name per line.
+crawler_pods() {
+    kc -n "$NAMESPACE" get pods -l "app=${CRAWLER}" -o name
+}
 
 # 1. No backup running.
 jobs="$(kc -n "$NAMESPACE" get jobs \
@@ -109,8 +131,7 @@ log "ok: no postgres-backup Job is running"
 if [ "$STOP_CRAWLER" = true ]; then
     replicas="$(kc -n "$NAMESPACE" get deployment "$CRAWLER" --ignore-not-found \
         -o 'jsonpath={.spec.replicas}')" || die "could not read deployment/${CRAWLER}"
-    pods="$(kc -n "$NAMESPACE" get pods -l "app=${CRAWLER}" -o name)" ||
-        die "could not list the ${CRAWLER} pods"
+    pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
     if [ -z "$replicas" ]; then
         log "ok: there is no deployment/${CRAWLER}"
     elif [ "$DRY_RUN" = true ]; then
@@ -125,10 +146,15 @@ if [ "$STOP_CRAWLER" = true ]; then
             log "scaling deployment/${CRAWLER} from ${replicas} to 0"
             kc -n "$NAMESPACE" scale "deployment/${CRAWLER}" --replicas=0 ||
                 die "could not scale deployment/${CRAWLER} to 0"
+            SCALED_FROM="$replicas"
         fi
-        if [ -n "$pods" ] || [ "$replicas" != 0 ]; then
-            kc -n "$NAMESPACE" wait --for=delete pod -l "app=${CRAWLER}" --timeout=300s ||
-                die "the ${CRAWLER} pods did not go within 5 minutes"
+        # `wait --for=delete` fails when no pod matches, so only wait for pods still there,
+        # and count a failed wait as success when they are gone by then.
+        pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
+        if [ -n "$pods" ] &&
+            ! kc -n "$NAMESPACE" wait --for=delete pod -l "app=${CRAWLER}" --timeout=300s; then
+            pods="$(crawler_pods)" || die "could not list the ${CRAWLER} pods"
+            [ -z "$pods" ] || die "the ${CRAWLER} pods did not go within 5 minutes: ${pods}"
         fi
         log "ok: ${CRAWLER} is stopped; deploy.sh brings it back at 1 replica on the new image"
     fi

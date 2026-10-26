@@ -299,6 +299,28 @@ for d in "$srv/data-plane/pg" "$srv/app-prod/keycloak-pg"; do
   [ -d "$d" ] || fail "deploy.sh: $d is gone"
 done
 
+# The crawler worker is applied only after the backend, which applies the migrations at
+# startup, has rolled out (a worker stopped by precheck-db-migration.sh stays stopped
+# meanwhile). Without the Keycloak Secret, deploy.sh skips Keycloak; the stub stops it at
+# the frontend, after the worker.
+reset_host
+: >"$log"
+rc=0
+(cd "$scratch" && PUBLIC_HOST='' STUB_DB_PRESENT="pg" STUB_SECRETS="econ-graph-postgres" \
+  STUB_STOP_AT="apply -f k8s/manifests/frontend-deployment.yaml" \
+  "$proj/scripts/deploy/deploy.sh") >"$scratch/deploy2.out" 2>&1 || rc=$?
+[ "$rc" = 99 ] || { fail "deploy.sh: expected to stop at the frontend (99), exited $rc"; tail -20 "$scratch/deploy2.out"; }
+backend_rollout="$(line_of 'rollout status deployment/econ-graph-backend' || true)"
+worker="$(line_of 'apply -f k8s/manifests/crawler-worker.yaml' || true)"
+if [ -z "$backend_rollout" ] || [ -z "$worker" ]; then
+  fail "deploy.sh: missing the backend rollout wait ($backend_rollout) or the worker apply ($worker)"
+elif ! [ "$backend_rollout" -lt "$worker" ]; then
+  fail "deploy.sh: crawler-worker.yaml is applied before the backend has rolled out"
+fi
+grep -q "kubectl --context kind-econ-graph -n econ-graph rollout status deployment/econ-graph-backend " "$log" ||
+  fail "deploy.sh: the backend rollout wait is not on the pinned context"
+
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures failure(s)"
   exit 1

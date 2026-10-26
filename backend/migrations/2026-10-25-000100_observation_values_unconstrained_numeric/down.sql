@@ -19,15 +19,15 @@
 -- cast would round it), and the rollback waits for a worker instead of deadlocking with it.
 -- lock_timeout (per lock) and statement_timeout (for the whole LOCK statement) make it fail
 -- after about 10 seconds rather than stall reads while long transactions hold the tables;
--- statement_timeout is reset once the locks are held, so the checks and the rewrite aren't
--- cut short.
+-- statement_timeout is set to 0 (no limit) once the locks are held, not reset to a role or
+-- database default, so the checks and the rewrite aren't cut short.
 
 SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '10s';
 
 LOCK TABLE crawl_queue, data_points, global_indicator_data IN ACCESS EXCLUSIVE MODE;
 
-RESET statement_timeout;
+SET LOCAL statement_timeout = 0;
 
 DO $$
 DECLARE

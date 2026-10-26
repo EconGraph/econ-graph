@@ -23,14 +23,15 @@
 -- the three locks one after another, each under lock_timeout, and statement_timeout caps
 -- the statement as a whole. If long transactions hold the tables, the migration fails after
 -- about 10 seconds with nothing changed (and the backend retries it on its next start)
--- rather than stalling the API. statement_timeout is reset once the locks are held.
+-- rather than stalling the API. Once the locks are held, statement_timeout is set to 0 (no
+-- limit) for the rest of the migration, not reset to a role or database default.
 
 SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '10s';
 
 LOCK TABLE crawl_queue, data_points, global_indicator_data IN ACCESS EXCLUSIVE MODE;
 
-RESET statement_timeout;
+SET LOCAL statement_timeout = 0;
 
 ALTER TABLE crawl_queue DROP CONSTRAINT check_crawl_queue_kind;
 

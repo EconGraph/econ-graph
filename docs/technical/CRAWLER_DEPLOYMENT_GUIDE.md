@@ -53,7 +53,8 @@ Locally, from `backend/` with `DATABASE_URL` and provider API keys exported:
 Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `econ-graph-crawler-worker:<version>` built from `backend/Dockerfile --target crawler-worker`).
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
-does not run migrations; the backend applies them at startup.
+does not run migrations; the backend applies them at startup, and `deploy.sh` applies the
+worker only after the new backend has rolled out.
 
 Configuration (flags or environment):
 

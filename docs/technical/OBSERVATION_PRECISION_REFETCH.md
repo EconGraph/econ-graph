@@ -79,26 +79,34 @@ The backend applies migration `2026-10-25-000100_observation_values_unconstraine
 so the deploy goes in this order. `KC` below stands for the kind cluster's kubectl:
 `KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph`.
 
-1. **Pick the time.** Deploy outside 08:00 UTC, when the nightly `postgres-backup` CronJob
-   starts and holds a long transaction on the database.
-2. **Check the database.** `scripts/deploy/precheck-db-migration.sh --stop-crawler` (first with
-   `--dry-run`, which changes nothing). It refuses while a `postgres-backup` Job runs, scales
-   `crawler-worker` to 0 and waits for its pods, and lists any session in a transaction for
-   more than 5 seconds or idle in one, exiting non-zero while there are any. It never ends a
-   session: find the owner it names, stop or finish that work, and run it again until it
-   passes.
-3. **Deploy and confirm.** Run `scripts/deploy/deploy.sh`, then check that the migration is
+1. **Pick the time.** The whole deploy, from the check below until the backend has rolled out,
+   stays clear of 08:00 UTC, when the nightly `postgres-backup` CronJob starts and holds a long
+   transaction on the database.
+2. **Check the database, immediately before deploying.** Run
+   `scripts/deploy/precheck-db-migration.sh --stop-crawler` (first with `--dry-run`, which
+   changes nothing) right before `deploy.sh`, so nothing new starts in between. It works on
+   context `kind-econ-graph`, the cluster `deploy.sh` deploys to. It refuses while a
+   `postgres-backup` Job runs, scales `crawler-worker` to 0 and waits for its pods, and lists
+   any session in a transaction for more than 5 seconds or idle in one, exiting non-zero while
+   there are any. It never ends a session: find the owner it names, stop or finish that work,
+   and run it again until it passes. If a check fails after it stopped the worker, it prints
+   the command that scales the worker back.
+3. **Deploy and confirm.** Run `scripts/deploy/deploy.sh`. It waits for the new backend, which
+   applies the migration at startup, to roll out before it applies `crawler-worker.yaml`, so
+   the worker stays stopped while the migration runs. Then check that the migration is
    recorded:
    `KC -n econ-graph exec postgresql-0 -- psql -U postgres -d econ_graph -Atc "SELECT version FROM __diesel_schema_migrations WHERE version = '20261025000100'"`
    prints `20261025000100`. If the new backend pod restarts with `Failed to run migrations`
    and a lock or statement timeout in its log (`KC -n econ-graph logs deployment/econ-graph-backend`),
-   something held the tables: don't leave it restarting. Run
+   something held the tables, and `deploy.sh` stops when the backend rollout times out, with
+   the worker still stopped: don't leave the backend restarting. Run
    `scripts/deploy/precheck-db-migration.sh --dry-run` to list the sessions holding
-   transactions open, deal with their owner, then `KC -n econ-graph rollout restart deployment/econ-graph-backend`.
-   The previous backend pod keeps serving until the new one is ready.
-4. **Crawler back on the new image.** `deploy.sh` applies `crawler-worker.yaml`, which brings
-   the worker back at 1 replica with the new image. Check with
-   `KC -n econ-graph get deployment crawler-worker -o jsonpath='{.status.readyReplicas} {..image}'`;
+   transactions open, deal with their owner, then
+   `KC -n econ-graph rollout restart deployment/econ-graph-backend` and run `deploy.sh`
+   again. The previous backend pod keeps serving until the new one is ready.
+4. **Crawler back on the new image.** Once the backend has rolled out, `deploy.sh` applies
+   `crawler-worker.yaml`, which brings the worker back at 1 replica with the new image. Check
+   with `KC -n econ-graph get deployment crawler-worker -o jsonpath='{.status.readyReplicas} {..image}'`;
    if the backend was deployed some other way, `KC -n econ-graph scale deployment/crawler-worker --replicas=1`.
 5. **Only then re-fetch,** as below.
 

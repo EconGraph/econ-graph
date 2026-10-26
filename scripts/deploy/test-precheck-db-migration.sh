@@ -2,12 +2,17 @@
 # Tests for scripts/deploy/precheck-db-migration.sh against a stub kubectl, no cluster:
 #   - a running postgres-backup Job blocks (exit 1) before anything else, a finished one doesn't;
 #   - --stop-crawler scales crawler-worker to 0 and waits for its pods; with --dry-run it only
-#     says so; a worker already at 0 with no pods is left alone;
+#     says so; a worker already at 0 with no pods is left alone; pods already gone, or gone by
+#     the time a failed wait returns, are not an error; pods that stay are;
+#   - a check failing after this run scaled the worker down prints the exact command to scale
+#     it back, through the same kubectl and context;
 #   - long or idle-in-transaction sessions on the data database are listed and exit 1; the
 #     script never cancels or terminates a session; a quiet database exits 0;
-#   - every kubectl call goes to $KUBECTL with --context (default kind-econ-graph), never the
-#     kubectl on PATH, and the current context is not changed; run with no KUBECTL or
-#     KUBECONFIG it uses the kind cluster's kubectl and kubeconfig in ~/.cache/econgraph.
+#   - every kubectl call goes to $KUBECTL with --context kind-econ-graph, never the kubectl on
+#     PATH, and the current context is not changed; without that context it stops; run with
+#     no KUBECTL or KUBECONFIG it uses the kind cluster's kubectl and kubeconfig in
+#     ~/.cache/econgraph;
+#   - a production marker that can't be read is reported as unknown, with the reason.
 #
 # Usage: scripts/deploy/test-precheck-db-migration.sh (from anywhere)
 set -euo pipefail
@@ -30,23 +35,35 @@ path_log="$work/path.log"
 #   STUB_BACKUP_ACTIVE=1  a postgres-backup Job is running (another, finished, always exists)
 #   STUB_REPLICAS         crawler-worker's replicas (default 1; "none": no Deployment)
 #   STUB_PODS=0           no crawler-worker pods
+#   STUB_GONE_AFTER=X     the pods are gone once a call matching X (scale, wait) was made
+#   STUB_WAIT_FAILS=1     `wait --for=delete` fails
 #   STUB_SESSIONS=1       pg_stat_activity reports a blocking session
+#   STUB_NO_KIND=1        there is no kind-econ-graph context
+#   STUB_MARKER_FAILS=1   reading the production marker fails
 cat >"$work/kubectl" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
 echo "kubectl ${args//$'\n'/ }" >>"$STUB_LOG"
 case "$*" in
-  *"config get-contexts -o name"*) printf 'kind-econ-graph\nother\n' ;;
+  *"config get-contexts -o name"*)
+    [ "${STUB_NO_KIND:-0}" = 1 ] || echo kind-econ-graph
+    echo other ;;
   *"config current-context"*) echo other ;;
   *"get namespace kube-system"*) printf 'uid-this-cluster' ;;
-  *"get configmap econgraph-cluster-role"*) printf 'production uid-this-cluster' ;;
+  *"get configmap econgraph-cluster-role"*)
+    [ "${STUB_MARKER_FAILS:-0}" != 1 ] || exit 1
+    printf 'production uid-this-cluster' ;;
   *"get jobs"*)
     echo "postgres-backup-29123456 "
     echo "keycloak-realm-import 1"
     [ "${STUB_BACKUP_ACTIVE:-0}" != 1 ] || echo "postgres-backup-manual-1761400000 1" ;;
   *"get deployment crawler-worker"*)
     r="${STUB_REPLICAS:-1}"; [ "$r" = none ] || printf '%s' "$r" ;;
-  *"get pods -l app=crawler-worker"*) [ "${STUB_PODS:-1}" = 0 ] || echo pod/crawler-worker-abc ;;
+  *"get pods -l app=crawler-worker"*)
+    if [ "${STUB_PODS:-1}" = 0 ]; then exit 0; fi
+    if [ -n "${STUB_GONE_AFTER:-}" ] && grep -q -- "$STUB_GONE_AFTER" "$STUB_LOG"; then exit 0; fi
+    echo pod/crawler-worker-abc ;;
+  *"wait --for=delete"*) [ "${STUB_WAIT_FAILS:-0}" != 1 ] || exit 1 ;;
   *"exec -i postgresql-0 -- psql"*)
     [ "${STUB_SESSIONS:-0}" != 1 ] ||
       printf '4242\tpostgres\tpsql\tlocal\tidle in transaction\t37\tClient\tSELECT * FROM data_points\n' ;;
@@ -111,13 +128,46 @@ if ! grep -q "4242" "$out" || ! grep -q "idle in transaction" "$out"; then
 fi
 if grep -qiE "pg_terminate_backend|pg_cancel_backend" "$log"; then fail "ended a session"; fi
 
-# Context: --context is passed on every cluster call, never a use-context; unknown contexts stop.
-run -- --context other
-[ "$status" = 0 ] || fail "--context other failed"
-if grep -v "config " "$log" | grep -qv -- "--context other"; then fail "a call without --context other"; fi
+# Pods already gone after the scale: no wait. Gone by the time a failed wait returns: fine.
+run STUB_GONE_AFTER="scale deployment" -- --stop-crawler
+[ "$status" = 0 ] || fail "pods gone after the scale failed: $(cat "$out")"
+if called "wait --for"; then fail "waited for pods that were already gone"; fi
+run STUB_GONE_AFTER="wait --for" STUB_WAIT_FAILS=1 -- --stop-crawler
+[ "$status" = 0 ] || fail "pods gone by a failed wait failed: $(cat "$out")"
+# Pods that stay fail, with the command to bring the worker back.
+run STUB_WAIT_FAILS=1 -- --stop-crawler
+[ "$status" = 1 ] || fail "pods that stayed did not fail"
+hint="$work/kubectl --context kind-econ-graph -n econ-graph scale deployment/crawler-worker --replicas=1"
+grep -qF "$hint" "$out" || fail "no command to scale the worker back: $(cat "$out")"
+
+# A failed check after the scale-down prints how to bring the worker back; without a
+# scale-down it doesn't.
+run STUB_SESSIONS=1 -- --stop-crawler
+[ "$status" = 1 ] || fail "sessions after a scale-down did not fail"
+grep -qF "$hint" "$out" || fail "no command to scale the worker back after the session check"
+run STUB_SESSIONS=1 STUB_REPLICAS=0 STUB_PODS=0 -- --stop-crawler
+if grep -q "scale deployment/crawler-worker --replicas" "$out"; then
+  fail "printed a scale-back command though nothing was scaled"
+fi
+
+# Context: kind-econ-graph on every cluster call, never a use-context; without it, stop.
+run --
+if grep -v "config " "$log" | grep -qv -- "--context kind-econ-graph"; then
+  fail "a call without --context kind-econ-graph"
+fi
 if called "use-context"; then fail "changed the current context"; fi
-run -- --context missing
-[ "$status" = 1 ] || fail "an unknown context did not stop"
+run STUB_NO_KIND=1 --
+[ "$status" = 1 ] || fail "a kubectl without kind-econ-graph did not stop"
+status=0; KUBECTL="$work/kubectl" "$script" --context other >/dev/null 2>&1 || status=$?
+[ "$status" = 2 ] || fail "--context is still accepted"
+
+# The production marker: read and shown; unreadable shows unknown and why.
+run --
+grep -q "(PRODUCTION)" "$out" || fail "a marked cluster is not shown as production"
+run STUB_MARKER_FAILS=1 --
+[ "$status" = 0 ] || fail "an unreadable marker failed the check"
+grep -q "unknown: could not read ConfigMap kube-system/econgraph-cluster-role" "$out" ||
+  fail "an unreadable marker is not reported as unknown with the reason: $(head -1 "$out")"
 
 # With no KUBECTL or KUBECONFIG, the kind cluster's kubectl kept in ~/.cache/econgraph is used.
 cache="$work/cache/econgraph"
