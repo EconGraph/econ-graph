@@ -52,7 +52,9 @@ python scripts/deploy/split-app-data.py \
 A dry run reads and locks the databases, computes content fingerprints, and rolls back. It
 creates no backup and changes no persistent rows. It can briefly block writers: the script
 locks every source table against writes and every app target table against access. Lock
-acquisition times out after ten seconds. Full sorted content hashing and a full source dump
+acquisition, including the separate dump connection, times out after ten seconds. This also
+prevents a queued schema change from leaving the dump waiting behind its own source locks.
+Full sorted content hashing and a full source dump
 cost time, temporary database sort space and backup space proportional to the data volume.
 
 ## Copy, verify, and remove the old app tables
@@ -104,8 +106,10 @@ objects cause a rollback. It removes only known app migration entries from the s
 history, preserving the data baseline and common initial setup. Every data table and the
 ordered series-ID checksum must remain unchanged before commit.
 
-If confirmation is refused or cleanup fails, the verified app copy remains committed and the
-source app tables remain. Keep writers stopped, inspect the evidence and rerun; do not resume
+If confirmation is refused or the cleanup transaction rolls back, the verified app copy
+remains committed and the source app tables remain. If the connection drops during commit,
+inspect the schema and use an evidence-backed rerun to establish the outcome; do not assume
+the commit failed. Keep writers stopped, inspect the evidence and rerun; do not resume
 writers against both copies. If the source already contains only the expected data schema,
 pass `--previous-evidence /path/to/the/previous/evidence.json`. The script requires that the
 source data and target app contents, series IDs and database identities match that verified

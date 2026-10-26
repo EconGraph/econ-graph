@@ -97,7 +97,7 @@ def private_dump(source, service, directory):
     with path.open('xb') as archive:
         path.chmod(0o600)
         subprocess.run(['pg_dump', '--no-password', '--dbname', f'service={service}',
-                        '--format=custom', '--snapshot', snapshot], check=True,
+                        '--format=custom', '--snapshot', snapshot, '--lock-wait-timeout=10s'], check=True,
                        stdout=archive, stderr=subprocess.DEVNULL)
     # Decode every data block, not just the archive's table of contents.
     with path.open('rb') as archive:
@@ -347,7 +347,8 @@ def main():
     except Exception as exc:
         # Database errors can include row values. Never echo them or connection strings.
         message = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        print(f'Conversion stopped: {message}. Transactions roll back; retained backups are never deleted.', file=sys.stderr)
+        print(f'Conversion stopped: {message}. Uncommitted work rolls back; inspect retained evidence '
+              'and committed database state before resuming writers. Backups are never deleted.', file=sys.stderr)
         return 1
     return 0
 
