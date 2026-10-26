@@ -21,8 +21,10 @@ pub const BEA_RULES_FILE: &str = "catalog_selection/bea.toml";
 #[serde(deny_unknown_fields)]
 pub struct BeaSelection {
     /// Maximum selected tables before any table's series are requested.
+    #[serde(skip_serializing)]
     pub max_tables: usize,
     /// Maximum expanded series before any are persisted or enqueued.
+    #[serde(skip_serializing)]
     pub max_series: usize,
     /// Optional table names excluded even when a rule matches.
     #[serde(default)]
@@ -74,7 +76,7 @@ impl BeaSelection {
         Ok(rules)
     }
 
-    /// Stable scope identifier; absence evidence never carries over a configuration change.
+    /// Stable selection scope; changing operational limits preserves absence evidence.
     pub fn fingerprint(&self) -> String {
         let digest = Sha256::digest(serde_json::to_vec(self).expect("serializable selection"));
         let hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
@@ -257,6 +259,10 @@ mod tests {
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].frequencies, [Frequency::Annual]);
         let fingerprint = r.fingerprint();
+        r.max_tables += 1;
+        assert_eq!(fingerprint, r.fingerprint());
+        r.max_series += 1;
+        assert_eq!(fingerprint, r.fingerprint());
         r.rule[0].prefix.push('N');
         assert_ne!(fingerprint, r.fingerprint());
     }

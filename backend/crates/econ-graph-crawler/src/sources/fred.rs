@@ -152,8 +152,11 @@ fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FredCatalogRules {
+    /// Operational guards do not change the selected catalog scope.
+    #[serde(skip_serializing)]
     max_series: usize,
     /// Bound the rows inspected, independently of how many match the selection predicates.
+    #[serde(skip_serializing)]
     max_catalog_series: usize,
     #[serde(default)]
     include: Vec<String>,
@@ -283,11 +286,13 @@ impl FredCatalogRule {
             .as_ref()
             .is_none_or(|prefix| series.id.starts_with(prefix))
             && (self.frequencies.is_empty()
-                || series
-                    .metadata
-                    .frequency
-                    .as_ref()
-                    .is_some_and(|f| self.frequencies.contains(f)))
+                || series.metadata.frequency.as_ref().is_some_and(|f| {
+                    self.frequencies.iter().any(|want| {
+                        f == want
+                            || f.strip_prefix(want.as_str())
+                                .is_some_and(|rest| rest.starts_with(','))
+                    })
+                }))
     }
 }
 
@@ -1570,6 +1575,28 @@ mod tests {
     }
 
     #[test]
+    fn catalog_frequency_rules_match_qualified_values_without_unrelated_prefixes() {
+        for frequency in ["Daily", "Weekly", "Biweekly"] {
+            let rules = FredCatalogRules::parse(&format!(
+                "max_series=10\nmax_catalog_series=20\n[[rules]]\nrelease_id=53\nfrequencies=['{frequency}']"
+            )).unwrap();
+            let mut row = catalog_row("A", "Example");
+            for (actual, expected) in [
+                (frequency.to_string(), true),
+                (format!("{frequency}, Ending Friday"), true),
+                (format!("{frequency}Extra"), false),
+                ("Annual".to_string(), false),
+            ] {
+                row["frequency"] = actual.clone().into();
+                let series = serde_json::from_value(row.clone()).unwrap();
+                assert_eq!(rules.rules[0].matches(&series), expected, "{actual}");
+            }
+            row["frequency"] = serde_json::Value::Null;
+            assert!(!rules.rules[0].matches(&serde_json::from_value(row).unwrap()));
+        }
+    }
+
+    #[test]
     fn catalog_scope_ignores_comments_and_rules_validate_before_any_request() {
         let text = "max_series=10\nmax_catalog_series=20\n[[rules]]\nrelease_id=53";
         assert_eq!(
@@ -1578,6 +1605,15 @@ mod tests {
                 .unwrap()
                 .fingerprint()
         );
+        for changed in [
+            text.replace("max_series=10", "max_series=20"),
+            text.replace("max_catalog_series=20", "max_catalog_series=30"),
+        ] {
+            assert_eq!(
+                FredCatalogRules::parse(text).unwrap().fingerprint(),
+                FredCatalogRules::parse(&changed).unwrap().fingerprint()
+            );
+        }
         let with_probe = format!("include=['GDP']\n{text}");
         assert_eq!(
             FredCatalogRules::parse(&with_probe).unwrap().fingerprint(),
