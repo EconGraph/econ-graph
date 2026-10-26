@@ -68,8 +68,10 @@ class DnsTokenTest(unittest.TestCase):
         for args in self.calls():
             if 'apply' in args and '--field-manager=create-secrets' in args:
                 self.assertIn('--server-side', args)
-            if '--context' in args:
-                self.assertEqual(args[args.index('--context') + 1], 'test-context')
+            if args == ['config', 'current-context']:
+                continue
+            self.assertIn('--context', args)
+            self.assertEqual(args[args.index('--context') + 1], 'test-context')
 
     def test_environment_token_reaches_only_dns_secret_without_argv_or_trace(self):
         result = self.run_script(SETUP, '--domain', 'econgraph.example.com', token=TOKEN)
