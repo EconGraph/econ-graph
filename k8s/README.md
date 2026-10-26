@@ -64,6 +64,9 @@ terraform/k8s/          # Terraform configuration
 
 scripts/deploy/         # Deployment scripts
 ├── build-images.sh    # Build Docker images
+├── load-release-images.sh     # Put a release candidate's GHCR images on the nodes
+├── verify-release-images.sh   # Restart and check the pods run them
+├── rollback-release-images.sh # Go back to what ran before the load
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── install-gateway.sh # Install the gateway (run by deploy.sh)
 ├── apply-gateway-routes.sh # Apply the routes, with the https host name (run by deploy.sh)
@@ -107,6 +110,22 @@ once instead.
 ```bash
 ./scripts/deploy/deploy.sh
 ```
+
+### Release images instead of local builds
+
+To run the images that `.github/workflows/release.yml` built for a release candidate tag,
+and not images built here, load them onto the nodes under the manifests' names before
+`deploy.sh`, then restart and check:
+
+```bash
+./scripts/deploy/load-release-images.sh --tag vX.Y.Z-rc.N
+./scripts/deploy/deploy.sh
+./scripts/deploy/verify-release-images.sh --tag vX.Y.Z-rc.N
+```
+
+`./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
+before the load. The load covers every workload that runs the three images, including the
+`crawler-migrate` Job. See [Release images on the kind cluster](../docs/deployment/RELEASE_IMAGES.md).
 
 ## 🔐 Keycloak
 
