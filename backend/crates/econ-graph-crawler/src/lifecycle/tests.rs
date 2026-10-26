@@ -326,3 +326,191 @@ async fn fetch_only_not_found_and_restriction_evidence_is_durable() {
     drop(conn);
     db.drop().await;
 }
+
+#[test]
+fn positive_legal_evidence_is_preserved_across_selection_changes() {
+    let mut old = tracked("same");
+    old.status = "restricted".into();
+    old.since = Some(Utc::now());
+    let mut superseded = tracked("linked");
+    superseded.status = "superseded".into();
+    superseded.successor_id = Some(Uuid::new_v4());
+    let original_link = superseded.successor_id;
+    let (states, guarded) = plan(
+        &[old, superseded],
+        &[found("same"), found("linked")],
+        &CatalogLifecycle::default(),
+        false,
+        Utc::now(),
+        LifecyclePolicy::default(),
+    );
+    assert!(!guarded);
+    assert_eq!(
+        states
+            .iter()
+            .find(|s| s.external_id == "same")
+            .unwrap()
+            .status,
+        "restricted"
+    );
+    let linked = states.iter().find(|s| s.external_id == "linked").unwrap();
+    assert_eq!(linked.status, "superseded");
+    assert_eq!(linked.successor_id, original_link);
+}
+
+#[tokio::test]
+async fn guarded_catalog_still_hides_explicitly_restricted_history() {
+    use crate::{persist::stable_id_tests::FreshDb, testkit::echo::EchoAdapter, DatasetCatalog};
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let db = FreshDb::create(&url, "eco464_guard_restricted").await;
+    let pool = &db.pool;
+    let mut catalog = DatasetCatalog::empty();
+    catalog
+        .load_adapter(&EchoAdapter::new("https://unused.invalid"))
+        .unwrap();
+    persist::sync_datasets(pool, &catalog).await.unwrap();
+    let mut initial: Vec<_> = (0..5).map(|i| found(&i.to_string())).collect();
+    for d in &mut initial {
+        d.dataset = SeriesDataset::new("FRED", Vec::<(String, String)>::new());
+    }
+    let now = Utc::now();
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        persist::persist_discovered_conn(conn, SourceId::Fred, &initial).await?;
+        reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &initial,
+            &CatalogLifecycle::default(),
+            "same",
+            now,
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let small = vec![initial[0].clone()];
+    let facts = CatalogLifecycle {
+        restricted_ids: vec!["0".into()],
+        ..Default::default()
+    };
+    conn.transaction::<(), AppError, _>(async |conn| {
+        let result = reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &small,
+            &facts,
+            "same",
+            now + chrono::Duration::seconds(1),
+        )
+        .await?;
+        assert!(result.guarded);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let rows:Vec<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle ORDER BY external_id").load(&mut conn).await.unwrap();
+    assert_eq!(rows[0].status, "restricted");
+    assert!(rows[1..]
+        .iter()
+        .all(|r| r.status == "active" && r.missing_refreshes == 0));
+    // An older full snapshot cannot reverse evidence committed by a newer guarded one.
+    conn.transaction::<(), AppError, _>(async |conn| {
+        let result = reconcile_conn(
+            conn,
+            SourceId::Fred,
+            &initial,
+            &CatalogLifecycle::default(),
+            "same",
+            now,
+        )
+        .await?;
+        assert_eq!(result, Reconciled::default());
+        Ok(())
+    })
+    .await
+    .unwrap();
+    drop(conn);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn bea_renamed_table_keeps_old_dimension_codes_labels_units_and_descriptions() {
+    use crate::{persist::stable_id_tests::FreshDb, DatasetCatalog};
+    use econ_graph_core::models::{Code, DatasetComponents};
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let db = FreshDb::create(&url, "eco464_dimension_retention").await;
+    let pool = &db.pool;
+    let mut catalog = DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::Bea,
+            &["bea_regional"],
+            crate::dataset::parse_dataset_file(
+                r#"
+[[dataset]]
+code="bea_regional"
+name="Regional"
+[[dataset.dimensions]]
+name="table_name"
+label="Table"
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    persist::sync_datasets(pool, &catalog).await.unwrap();
+    let mut old = Code::new("SAGDP2N", "Historic regional GDP");
+    old.unit = Some("Millions of dollars".into());
+    old.description = Some("Original upstream table".into());
+    persist::merge_dataset_dimension_code_entries(
+        pool,
+        SourceId::Bea,
+        "bea_regional",
+        "table_name",
+        &[old.clone()],
+    )
+    .await
+    .unwrap();
+    let new = Code::new("SAGDP2", "Current regional GDP");
+    persist::merge_dataset_dimension_code_entries(
+        pool,
+        SourceId::Bea,
+        "bea_regional",
+        "table_name",
+        &[new.clone()],
+    )
+    .await
+    .unwrap();
+    // Even an empty complete source catalog or later refreshed current title cannot
+    // prune the old code: historical series still need its original labels.
+    persist::merge_dataset_dimension_code_entries(
+        pool,
+        SourceId::Bea,
+        "bea_regional",
+        "table_name",
+        &[],
+    )
+    .await
+    .unwrap();
+    #[derive(QueryableByName)]
+    struct Dims {
+        #[diesel(sql_type=Jsonb)]
+        dimensions: DatasetComponents,
+    }
+    let mut conn = pool.get().await.unwrap();
+    let dims: Dims = diesel::sql_query("SELECT dimensions FROM datasets WHERE code='bea_regional'")
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    let codes = dims.dimensions.0[0].codes.as_ref().unwrap();
+    assert!(codes.contains(&old));
+    assert!(codes.contains(&new));
+    drop(conn);
+    db.drop().await;
+}

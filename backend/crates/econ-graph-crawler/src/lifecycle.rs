@@ -159,7 +159,7 @@ pub(crate) async fn reconcile_conn(
         })
         .count();
     write_states(conn, source_id, fingerprint, &states).await?;
-    if !guarded {
+    {
         diesel::sql_query(
             "INSERT INTO catalog_lifecycle_scopes(source_id,fingerprint,last_refresh_at) \
                       VALUES($1,$2,$3) ON CONFLICT(source_id) DO UPDATE SET \
@@ -210,7 +210,9 @@ fn plan(
     // gradual normal retirements look like one mass disappearance forever.
     let previously_listed: Vec<&State> = existing
         .iter()
-        .filter(|s| s.missing_refreshes == 0)
+        .filter(|s| {
+            s.missing_refreshes == 0 && matches!(s.status.as_str(), "active" | "discontinued")
+        })
         .collect();
     let newly_missing = previously_listed
         .iter()
