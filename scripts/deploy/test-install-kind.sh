@@ -258,6 +258,21 @@ else
     fail "require_kind_version refuses a pinned binary that reports an older kind (exit $RC)" "$OUT"
 fi
 
+# shellcheck disable=SC2016 # expanded by the inner shell
+in_kind_env "$empty" "" 'set -e
+    for pair in v0.33.0:v0.33.0 v0.33.1:v0.33.0 v0.34.0:v0.33.0 v1.0.0:v0.33.0 v0.100.0:v0.33.0 v0.34.0-alpha:v0.33.0; do
+        version_at_least "${pair%%:*}" "${pair#*:}" || echo "wrongly older: $pair"
+    done
+    for pair in v0.30.0:v0.33.0 v0.32.9:v0.33.0 v0.9.0:v0.33.0 garbage:v0.33.0; do
+        ! version_at_least "${pair%%:*}" "${pair#*:}" || echo "wrongly new enough: $pair"
+    done
+    echo compared'
+if [ "$RC" -eq 0 ] && [ "$OUT" = "compared" ]; then
+    pass "version_at_least compares versions numerically"
+else
+    fail "version_at_least compares versions numerically (exit $RC)" "$OUT"
+fi
+
 broken="${WORK}/data-broken"
 mkdir -p "${broken}/econgraph/bin"
 printf '#!/bin/sh\nexit 1\n' >"${broken}/econgraph/bin/kind-${KIND_VERSION}"

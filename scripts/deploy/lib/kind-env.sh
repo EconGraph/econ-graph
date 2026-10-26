@@ -202,9 +202,27 @@ require_kind_version() {
     # `set -e -o pipefail` caller here without a message.
     have="$("$bin" version 2>/dev/null | awk '{print $2}')" || have=""
     [ -n "$have" ] || die "${bin} does not run; reinstall it with scripts/deploy/install-kind.sh"
-    if [ "$(printf '%s\n%s\n' "${KIND_MIN_VERSION#v}" "${have#v}" | sort -V | head -1)" != "${KIND_MIN_VERSION#v}" ]; then
+    version_at_least "$have" "${KIND_MIN_VERSION}" ||
         die "${bin} is kind ${have}, older than ${KIND_MIN_VERSION}; run scripts/deploy/install-kind.sh"
-    fi
+}
+
+# version_at_least HAVE MIN: whether vX.Y.Z HAVE >= MIN, numerically per part.
+# Plain bash, so it needs no GNU `sort -V`; a pre-release suffix
+# (v0.34.0-alpha) is ignored, and a part that isn't a number fails.
+version_at_least() {
+    local -a have min
+    local i h m
+    IFS=. read -r -a have <<<"${1#v}"
+    IFS=. read -r -a min <<<"${2#v}"
+    for i in 0 1 2; do
+        h="${have[i]:-0}" m="${min[i]:-0}"
+        h="${h%%-*}" m="${m%%-*}"
+        [[ "$h" =~ ^[0-9]+$ && "$m" =~ ^[0-9]+$ ]] || return 1
+        if ((10#$h != 10#$m)); then
+            ((10#$h > 10#$m))
+            return
+        fi
+    done
 }
 
 kind_cluster_exists() {
