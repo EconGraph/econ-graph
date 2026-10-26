@@ -99,6 +99,50 @@ remember_backup() {
     fi
 }
 
+# The production marker (scripts/deploy/lib/cluster-role.sh) is bound to the
+# cluster's kube-system UID, so the recreated cluster is not production until
+# it is marked again, and restore_secrets leaves the saved tunnel token out of
+# a cluster that is not. So: note before the delete whether the old cluster was
+# production (kept in the state file for a resumed run), and have the new one
+# marked before anything is restored into it.
+WAS_PRODUCTION="false"
+note_production() {
+    local rc=0
+    kind_cluster_is_production || rc=$?
+    case "$rc" in
+        0)
+            WAS_PRODUCTION="true"
+            log "The cluster is marked production; the new one will be marked before the restore"
+            ;;
+        1) ;;
+        *)
+            # Unknown is not "not production": the new cluster would then not be
+            # marked, and production's tunnel token would be left out of it.
+            die "could not tell whether kind cluster '${KIND_CLUSTER}' is production: ${CLUSTER_ROLE_REASON}. Nothing was deleted."
+            ;;
+    esac
+}
+
+remember_production() {
+    if [ "${WAS_PRODUCTION}" = "true" ] && [ "${DRY_RUN}" != "true" ]; then
+        echo "WAS_PRODUCTION=true" >>"${STATE_FILE}"
+    fi
+}
+
+mark_if_was_production() {
+    if [ "${WAS_PRODUCTION}" != "true" ] && ! { [ -f "${STATE_FILE}" ] && grep -qx 'WAS_PRODUCTION=true' "${STATE_FILE}"; }; then
+        return 0
+    fi
+    if [ "${DRY_RUN}" = "true" ]; then
+        echo "+ scripts/deploy/mark-production-cluster.sh (the old cluster was production; asks for a typed confirmation)"
+        return 0
+    fi
+    kind_cluster_is_production && return 0
+    log "The old cluster was production: marking the new one before the restore, so its tunnel token is restored too"
+    "${PROJECT_ROOT}/scripts/deploy/mark-production-cluster.sh" ||
+        die "the new cluster is not marked production. Run scripts/deploy/mark-production-cluster.sh, then re-run this script; it resumes here."
+}
+
 recalled_backup() {
     if [ -n "${RESUME_FROM}" ]; then
         echo "${RESUME_FROM}"
@@ -276,9 +320,11 @@ forward() {
         echo "  live data: economic_series=$(count_rows econ_graph 'select count(*) from economic_series')" \
             "data_points=$(count_rows econ_graph 'select count(*) from data_points')"
         check_local_images
+        note_production
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
         stop_writers
         remember_backup "$(new_backup_dir)"
+        remember_production
         backup_databases "${BACKUP_DIR}"
         save_local_images
         recreate_cluster --yes --no-backup "${common_flags[@]}"
@@ -293,6 +339,7 @@ forward() {
     fi
 
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
+    mark_if_was_production
     load_local_images
     bootstrap_databases "${PROJECT_ROOT}" "${BACKUP_DIR}"
     restore_and_deploy "${PROJECT_ROOT}"
@@ -302,6 +349,17 @@ forward() {
         log "Dry run complete; nothing was changed"
     else
         log "Migration complete. Backup kept at ${BACKUP_DIR}"
+    fi
+    remind_public_host
+}
+
+# deploy.sh serves the public site only with PUBLIC_HOST set (and on a cluster
+# marked production); say so when this run deployed without it.
+remind_public_host() {
+    if [ -z "${PUBLIC_HOST:-}" ]; then
+        echo "  Note: PUBLIC_HOST was not set, so https://econgraph.com is not served from this"
+        echo "  cluster. On production: scripts/deploy/mark-production-cluster.sh (if not marked),"
+        echo "  then PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh"
     fi
 }
 
@@ -318,9 +376,11 @@ rollback() {
         BACKUP_DIR="${RESUME_FROM}"
     elif kind_cluster_exists && db_has_data; then
         check_local_images
+        note_production
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
         stop_writers
         remember_backup "$(new_backup_dir)"
+        remember_production
         backup_databases "${BACKUP_DIR}"
         save_local_images
     else
@@ -355,12 +415,14 @@ rollback() {
         recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
     fi
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
+    mark_if_was_production
     load_local_images
     bootstrap_databases "$src" "${BACKUP_DIR}"
     restore_and_deploy "$src"
     verify
     if [ "${DRY_RUN}" != "true" ]; then rm -f "${STATE_FILE}"; fi
     if [ "${DRY_RUN}" = "true" ]; then log "Dry run complete; nothing was changed"; else log "Rollback complete. Host subvolume contents were not touched."; fi
+    remind_public_host
 }
 
 if [ "${DRY_RUN}" = "true" ]; then

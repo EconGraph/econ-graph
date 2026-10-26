@@ -14,7 +14,7 @@ tests:
         values: '1x30'
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
         values: '1x30'
-      - series: 'cloudflared_tunnel_ha_connections{app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
         values: '4x30'
     alert_rule_test:
       - eval_time: 30m
@@ -32,7 +32,7 @@ tests:
         values: '1x30'
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
         values: '1x9 0x20'
-      - series: 'cloudflared_tunnel_ha_connections{app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
         values: '4x9'
     alert_rule_test:
       - eval_time: 14m
@@ -50,9 +50,12 @@ tests:
         alertname: CloudflareTunnelNoConnections
         exp_alerts: []
 
-  # No tunnel configured: deploy.sh scales cloudflared to 0. Nothing fires.
+  # No tunnel configured on a cluster that is not production: deploy.sh scales cloudflared
+  # to 0. Other kube-system ConfigMaps (coredns) are not the marker. Nothing fires.
   - interval: 1m
     input_series:
+      - series: 'kube_configmap_info{namespace="kube-system", configmap="coredns"}'
+        values: '1x30'
       - series: 'kube_deployment_spec_replicas{namespace="econ-graph", deployment="cloudflared"}'
         values: '0x30'
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
@@ -64,6 +67,62 @@ tests:
       - eval_time: 30m
         alertname: CloudflareTunnelNoConnections
         exp_alerts: []
+      - eval_time: 30m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts: []
+
+  # Production with the connector running: StoppedOnProduction stays quiet. Then a wholesale
+  # apply of k8s/manifests sets it to 0 replicas at 10m: Down and NoConnections stay quiet
+  # (nothing is wanted), StoppedOnProduction fires once that lasts 5 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'kube_configmap_info{namespace="kube-system", configmap="econgraph-cluster-role"}'
+        values: '1x30'
+      - series: 'kube_deployment_spec_replicas{namespace="econ-graph", deployment="cloudflared"}'
+        values: '1x9 0x20'
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
+        values: '1x9 0x20'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
+        values: '4x9'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: the production cluster runs no cloudflared; the public site is down
+              description: This cluster is marked production (ConfigMap kube-system/econgraph-cluster-role) but the cloudflared Deployment has asked for no replica for 5 minutes, so nothing serves the public hostnames. Deploy with scripts/deploy/deploy.sh and PUBLIC_HOST set, which scales it up. If this cluster is not production, run scripts/deploy/mark-production-cluster.sh --unmark.
+      - eval_time: 16m
+        alertname: CloudflareTunnelDown
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts: []
+
+  # Production without any cloudflared Deployment (never deployed, or deleted): fires too.
+  - interval: 1m
+    input_series:
+      - series: 'kube_configmap_info{namespace="kube-system", configmap="econgraph-cluster-role"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: CloudflareTunnelStoppedOnProduction
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: the production cluster runs no cloudflared; the public site is down
+              description: This cluster is marked production (ConfigMap kube-system/econgraph-cluster-role) but the cloudflared Deployment has asked for no replica for 5 minutes, so nothing serves the public hostnames. Deploy with scripts/deploy/deploy.sh and PUBLIC_HOST set, which scales it up. If this cluster is not production, run scripts/deploy/mark-production-cluster.sh --unmark.
 
   # The pod stays up but its connections drop to 0 at 10m (bad token, tunnel deleted).
   - interval: 1m
@@ -72,7 +131,7 @@ tests:
         values: '1x30'
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
         values: '1x30'
-      - series: 'cloudflared_tunnel_ha_connections{app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
         values: '4x9 0x20'
     alert_rule_test:
       - eval_time: 14m
@@ -89,6 +148,31 @@ tests:
       - eval_time: 16m
         alertname: CloudflareTunnelDown
         exp_alerts: []
+
+  # econ-graph's connector loses its connections at 10m while a healthy cloudflared in
+  # another namespace keeps 4: that one must not hide the outage. NoConnections fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="econ-graph", deployment="cloudflared"}'
+        values: '1x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}'
+        values: '1x30'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared", kubernetes_pod_name="cloudflared-1"}'
+        values: '4x9 0x20'
+      - series: 'cloudflared_tunnel_ha_connections{kubernetes_namespace="other-tunnel", app="cloudflared", kubernetes_pod_name="cloudflared-other"}'
+        values: '4x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: cloudflared is running but holds no tunnel connection; the public site is down
+              description: cloudflared has an available pod but has reported no connection to Cloudflare's edge for 5 minutes (or its :2000/metrics is not being scraped). Check `kubectl -n econ-graph logs deployment/cloudflared`; an invalid or revoked token, or a tunnel deleted in the dashboard, shows up there.
 
   # The pod is up but never scraped: no connection series at all. NoConnections fires.
   - interval: 1m

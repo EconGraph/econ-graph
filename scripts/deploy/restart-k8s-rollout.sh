@@ -94,11 +94,21 @@ if ! microk8s kubectl config view --raw > ~/.kube/config; then
     exit 1
 fi
 
-if ! kubectl config use-context microk8s; then
+# One kubectl, one cluster for the whole rollout: plain kubectl with the
+# kubeconfig just written from MicroK8s (a KUBECTL or KUBECONFIG from the
+# environment, say the kind cluster's, is not followed), switched to microk8s
+# and pinned (replacing any CLUSTER_ROLE_CONTEXT from the environment). Every
+# kubectl call below then goes through kc, the same binary and context the
+# production check uses (scripts/deploy/lib/cluster-role.sh).
+export KUBECTL=kubectl KUBECONFIG="$HOME/.kube/config"
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_use_context microk8s; then
     echo "❌ Failed to switch to microk8s context."
     echo "   Please check your kubectl configuration."
     exit 1
 fi
+kubectl() { kc "$@"; }
 
 # Rebuild Docker images with new version tag
 echo "🏗️  Building Docker images for ${VERSION}..."
@@ -228,7 +238,8 @@ public_host_init
 render_manifest k8s/manifests/ingress.yaml | kubectl apply -f -
 for f in k8s/manifests/*.yaml; do
     case "$(basename "$f")" in
-        # Applied by apply_cloudflared below, with 0 replicas without its Secret.
+        # Applied by apply_cloudflared below, which runs it only on a cluster marked
+        # production (scripts/deploy/mark-production-cluster.sh).
         cloudflared.yaml) continue ;;
     esac
     render_manifest "$f" | kubectl apply -f -

@@ -6,15 +6,23 @@
 # Metrics:
 #   kube_deployment_spec_replicas / kube_deployment_status_replicas_available
 #       from kube-state-metrics (deployed in k8s/monitoring).
+#   kube_configmap_info                 also from kube-state-metrics (its default resources
+#       include configmaps, and its ClusterRole lists them in every namespace); the series
+#       for kube-system/econgraph-cluster-role exists while the cluster carries the
+#       production marker.
 #   cloudflared_tunnel_ha_connections   gauge; open connections from this connector to the
 #       edge (normally 4 per replica). Served by cloudflared on :2000/metrics; its pod
 #       template carries prometheus.io/scrape|port|path annotations, so the annotation-based
 #       'kubernetes-pods' job in prometheus-config.yaml scrapes it and maps the pod label
-#       app=cloudflared onto the series.
+#       app=cloudflared and the pod's namespace (kubernetes_namespace) onto the series.
 #
-# deploy.sh runs cloudflared with replicas: 0 while the Secret cloudflare-tunnel is missing
-# (no tunnel configured); both alerts stay quiet then, since they only fire when the
-# Deployment asks for a replica.
+# deploy.sh runs cloudflared with replicas: 0 unless the cluster is marked production
+# (scripts/deploy/mark-production-cluster.sh) and has a PUBLIC_HOST and the Secret
+# cloudflare-tunnel; CloudflareTunnelDown and CloudflareTunnelNoConnections stay quiet then,
+# since they only fire when the Deployment asks for a replica. On the production cluster
+# that same quiet would hide a stopped connector (cloudflared.yaml is committed with 0
+# replicas, so a wholesale `kubectl apply -f k8s/manifests/` stops it), which
+# CloudflareTunnelStoppedOnProduction covers.
 #
 # Loading: like prometheus-rules-crawler.yaml, a plain ConfigMap projected into
 # /etc/prometheus/rules by prometheus-deployment.yaml. Tests: tests/tunnel.test.yaml, run by
@@ -45,15 +53,33 @@ data:
             description: The cloudflared Deployment wants a replica but has had none available for 5 minutes, so nothing serves the public hostnames. Check `kubectl -n econ-graph describe deployment cloudflared` and the pod's events (a missing cloudflare-tunnel Secret shows as CreateContainerConfigError).
 
         # Also fires when the pod runs but its metrics are not scraped, since then no
-        # connection count is known either.
+        # connection count is known either. Only econ-graph's connector counts: a
+        # cloudflared in another namespace (another tunnel) must not hide this one's outage.
         - alert: CloudflareTunnelNoConnections
           expr: |
             (max(kube_deployment_status_replicas_available{namespace="econ-graph", deployment="cloudflared"}) > 0)
             unless on()
-            (sum(cloudflared_tunnel_ha_connections{app="cloudflared"}) > 0)
+            (sum(cloudflared_tunnel_ha_connections{kubernetes_namespace="econ-graph", app="cloudflared"}) > 0)
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: cloudflared is running but holds no tunnel connection; the public site is down
             description: cloudflared has an available pod but has reported no connection to Cloudflare's edge for 5 minutes (or its :2000/metrics is not being scraped). Check `kubectl -n econ-graph logs deployment/cloudflared`; an invalid or revoked token, or a tunnel deleted in the dashboard, shows up there.
+
+        # The cluster carries the production marker (scripts/deploy/mark-production-cluster.sh)
+        # but cloudflared asks for no replica, or does not exist: nothing serves the public
+        # hostnames from it, and the two alerts above stay quiet. A wholesale
+        # `kubectl apply -f k8s/manifests/` (cloudflared.yaml is committed with 0 replicas)
+        # or a deploy with PUBLIC_HOST= (empty) does this.
+        - alert: CloudflareTunnelStoppedOnProduction
+          expr: |
+            (max(kube_configmap_info{namespace="kube-system", configmap="econgraph-cluster-role"}) > 0)
+            unless on()
+            (max(kube_deployment_spec_replicas{namespace="econ-graph", deployment="cloudflared"}) > 0)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: the production cluster runs no cloudflared; the public site is down
+            description: This cluster is marked production (ConfigMap kube-system/econgraph-cluster-role) but the cloudflared Deployment has asked for no replica for 5 minutes, so nothing serves the public hostnames. Deploy with scripts/deploy/deploy.sh and PUBLIC_HOST set, which scales it up. If this cluster is not production, run scripts/deploy/mark-production-cluster.sh --unmark.
