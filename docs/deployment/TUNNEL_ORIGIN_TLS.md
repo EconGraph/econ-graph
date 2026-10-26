@@ -19,7 +19,8 @@ scripts/deploy/stage-tunnel-origin-ca.sh --context kind-econ-graph --apply
 Staging creates the private CA and the `econ-graph-origin-ca` ClusterIssuer, waits for
 readiness, copies only the root's public `tls.crt` into ConfigMap
 `econ-graph/cloudflared-origin-ca`, and patches the connector's read-only mount. It leaves
-the connector's replicas and token intact. It does not select the gateway certificate
+the connector's replicas and token intact, then restarts it and waits for the rollout so
+existing Pods receive the CA file before staging completes. It does not select the gateway certificate
 issuer or change the remote tunnel configuration. The normal connector manifest has the
 same optional mount, so a later deployment preserves it.
 

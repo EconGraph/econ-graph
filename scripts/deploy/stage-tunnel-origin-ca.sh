@@ -68,6 +68,10 @@ kc -n econ-graph create configmap cloudflared-origin-ca --from-file="ca.crt=$wor
     --dry-run=client -o yaml | kc apply -f -
 kc -n econ-graph patch deployment cloudflared --type=strategic \
     --patch-file "$resources/cloudflared-mount.yaml"
+# The mount may already exist, so patching alone need not create new Pods. Restart
+# after publishing the ConfigMap so staging cannot finish before kubelet projects
+# the certificate into every running connector.
+kc -n econ-graph rollout restart deployment/cloudflared
 kc -n econ-graph rollout status deployment/cloudflared --timeout=120s
 cat <<'NEXT'
 Public CA staged. No gateway issuer or Cloudflare dashboard setting was changed.

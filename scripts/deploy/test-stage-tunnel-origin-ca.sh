@@ -61,6 +61,11 @@ elif 'patch' in args:
     assert all(command[:2]==['--context','scratch-only'] for command in commands)
     assert not any('delete' in command or 'scale' in command for command in commands)
     assert not any('gateway' in command or 'econ-graph-tls' in command for command in commands)
+    restart=next(i for i, command in enumerate(commands) if 'restart' in command)
+    status=next(i for i, command in enumerate(commands) if 'status' in command)
+    publish=next(i for i, command in enumerate(commands) if command[-3:] == ['apply','-f','-'])
+    assert publish < restart < status, 'must restart connectors after publishing the CA, then wait'
+
     patch=yaml.safe_load((root/'k8s/manifests/tunnel-trust/cloudflared-mount.yaml').read_text())
     assert set(patch['spec']) == {'template'}, 'mount patch must preserve replicas'
     pod=patch['spec']['template']['spec']
