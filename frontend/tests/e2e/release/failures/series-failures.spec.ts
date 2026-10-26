@@ -54,23 +54,20 @@ test.describe('search failures', () => {
     await expect(resultCards(page)).toHaveCount(0);
   });
 
-  // Browsing a source (no query) has no way to try again short of reloading the page: the
-  // explore page's error alert has no Retry action, and the Search button needs a query.
-  test.fixme(
-    'a failed source listing offers Retry, which recovers (ECO-264: SeriesExplorer has no retry for a failed browse)',
-    async ({ page }) => {
-      test.slow();
-      const fault = await failGraphQL(page, 'GetSeriesList');
-      await page.goto('/');
-      await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
-      const alert = page.getByRole('alert').filter({ hasText: 'Could not list series' });
-      await expect(alert).toBeVisible({ timeout: QUERY_ERROR_TIMEOUT });
+  test('a failed source listing offers Retry, which recovers', async ({ page }) => {
+    test.slow();
+    const fault = await failGraphQL(page, 'GetSeriesList');
+    await page.goto('/');
+    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'Could not list series' });
+    await expect(alert).toBeVisible({ timeout: QUERY_ERROR_TIMEOUT });
 
-      fault.heal();
-      await alert.getByRole('button', { name: 'Retry' }).click();
-      await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
-    }
-  );
+    fault.heal();
+    await alert.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(alert).toHaveCount(0);
+    expect(fault.failed()).toBeGreaterThan(0);
+  });
 });
 
 test.describe('series page failures', () => {

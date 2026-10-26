@@ -9,7 +9,7 @@ import { vi } from 'vitest';
 import { render, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
 import { setMockScenario, MockScenarios } from '../../test-utils/mocks/simpleServer';
 import SeriesExplorer, { resolveSourceId, DataSourceOption } from '../SeriesExplorer';
-import { useSeriesSearch } from '../../hooks/useSeriesData';
+import { useSeriesSearch, useSeriesBrowse } from '../../hooks/useSeriesData';
 
 // setupTests.vitest.ts mocks react-router-dom's useSearchParams to always return an empty
 // URLSearchParams, which is fine for tests that only interact with the page (they never need
@@ -1359,6 +1359,29 @@ describe('the explorer resolves a `source` URL param that names a source', () =>
     // Title order: GDP's card comes first
     expect(gdp.compareDocumentPosition(unemployment) & document.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/Type at least 2 characters/)).not.toBeInTheDocument();
+  });
+
+  test('Retry reissues a failed source browse without requiring a search query', async () => {
+    routerTestState.searchParams = new URLSearchParams({ source: 'Federal Reserve Economic Data' });
+    const browseHook = vi.mocked(useSeriesBrowse);
+    const original = browseHook.getMockImplementation()!;
+    const refetch = vi.fn();
+    browseHook.mockImplementation((...args) => ({
+      ...original(...args),
+      data: undefined,
+      error: new Error('temporarily unavailable'),
+      refetch,
+    }) as ReturnType<typeof useSeriesBrowse>);
+    try {
+      const user = userEvent.setup();
+      renderSeriesExplorer();
+      expect(await screen.findByText(/Could not list series/)).toBeInTheDocument();
+      expect(screen.queryByText('No series found')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(refetch).toHaveBeenCalledTimes(1);
+    } finally {
+      browseHook.mockImplementation(original);
+    }
   });
 
   test('an unknown source with no query still asks for a search', async () => {
