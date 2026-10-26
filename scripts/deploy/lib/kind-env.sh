@@ -456,6 +456,11 @@ backup_databases() {
     printf -v cleanup 'rm -rf -- %q' "$scratch"
     add_exit_cleanup "$cleanup"
     backup_databases_plain "$scratch/payload"
+    # Migration-specific recovery metadata must be inside the sealed payload,
+    # rather than appended to the ciphertext directory after publication.
+    if declare -F backup_prepare_payload >/dev/null; then
+        backup_prepare_payload "$scratch/payload"
+    fi
     backup_seal_dir "$scratch/payload" "$output"
     BACKUP_ACTIVE_OUTPUT="$output"
     BACKUP_ACTIVE_DIR="$scratch/payload"
@@ -564,6 +569,8 @@ backup_databases_plain() {
         [[ -z "$app_users" ]] || echo "econ_graph_app.users=$app_users"
         [[ -z "$app_annotations" ]] || echo "econ_graph_app.chart_annotations=$app_annotations"
     } > "$dir/MANIFEST"
+    (cd "$dir" && sha256sum -- *.dump > SHA256SUMS)
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$dir/VERIFIED"
     log "Backup complete:"
     ls -la "$dir" "$dir/secrets"
     sed 's/^/    /' "$dir/counts.env"
