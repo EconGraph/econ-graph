@@ -115,7 +115,10 @@ pub(crate) async fn reconcile_conn(
         "SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id \
          FROM series_lifecycle WHERE source_id=$1 AND (scope_fingerprint=$2 OR external_id=ANY($3))")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint)
-        .bind::<diesel::sql_types::Array<Text>,_>(found.iter().map(|d| d.external_id.clone()).collect::<Vec<_>>())
+        .bind::<diesel::sql_types::Array<Text>,_>(found.iter().map(|d| d.external_id.clone())
+            .chain(facts.restricted_ids.iter().cloned())
+            .chain(facts.discontinued_ids.iter().cloned())
+            .chain(facts.confirmed_missing_ids.iter().cloned()).collect::<Vec<_>>())
         .load(&mut *conn).await?;
     let policy = LifecyclePolicy::default();
     let (mut states, guarded) = plan(&existing, found, facts, same_scope, observed_at, policy);
