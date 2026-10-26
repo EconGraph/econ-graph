@@ -985,10 +985,10 @@ impl Worker {
         }
         // Most jobs only update fetch health. Periodic coverage polling already restores
         // lifecycle gauges after restart, so aggregate again only for an actual transition.
-        if pending.iter().any(|m| m.transitions > 0) {
-            if let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await {
-                tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
-            }
+        if pending.iter().any(|m| m.transitions > 0)
+            && let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await
+        {
+            tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
         }
         Ok(outcome)
     }
@@ -1026,33 +1026,30 @@ impl Worker {
         if let Err(e) = result
             && e.kind() == "not_found"
             && tracks_lifecycle
-        {
-            if let Some(status) =
+            && let Some(status) =
                 crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
-            {
-                pending_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(crate::lifecycle::Reconciled {
-                        guarded: false,
-                        transitions: 1,
-                        transition_statuses: vec![status],
-                    });
-            }
+        {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    guarded: false,
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                });
         }
-        if matches!(result, Err(CrawlError::Restricted(_))) {
-            if let Some(status) =
+        if matches!(result, Err(CrawlError::Restricted(_)))
+            && let Some(status) =
                 crate::lifecycle::record_restricted_conn(conn, source, &item.series_id).await?
-            {
-                pending_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(crate::lifecycle::Reconciled {
-                        guarded: false,
-                        transitions: 1,
-                        transition_statuses: vec![status],
-                    });
-            }
+        {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    guarded: false,
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                });
         }
         let series_id = match result {
             Ok(stats) => stats.series_id,
@@ -1065,12 +1062,11 @@ impl Worker {
         let Some(series_id) = series_id else {
             if let Err(e) = result
                 && e.kind() == "not_found"
+                && !tracks_lifecycle
             {
                 // Sources without catalog lifecycle tracking retain the legacy inactive
                 // metadata behavior; tracked histories stay browsable with a badge.
-                if !tracks_lifecycle {
-                    persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
-                }
+                persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
             }
             return Ok(());
         };

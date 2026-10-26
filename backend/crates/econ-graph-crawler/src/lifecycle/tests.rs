@@ -520,7 +520,7 @@ label="Table"
         SourceId::Bea,
         "bea_regional",
         "table_name",
-        &[new.clone()],
+        std::slice::from_ref(&new),
     )
     .await
     .unwrap();
