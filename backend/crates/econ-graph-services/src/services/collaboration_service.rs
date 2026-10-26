@@ -188,12 +188,11 @@ pub fn validate_idempotency_key(key: &str) -> AppResult<()> {
 pub const ANNOTATION_MIN_YEAR: i32 = 1000;
 /// How many years past today an annotation may be dated, for projections and scheduled events.
 pub const ANNOTATION_MAX_YEARS_AHEAD: i32 = 10;
-/// `annotation_value` is DECIMAL(20, 6), so its magnitude must stay below 10^14 once Postgres
-/// has rounded it to 6 decimal places.
-const ANNOTATION_VALUE_MAX_DIGITS: u32 = 14;
-/// Postgres rounds a numeric half away from zero, so any magnitude at or above this rounds up to
-/// 10^14 and overflows the column.
-const ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW: &str = "99999999999999.9999995";
+/// Match the observation-value limits in the crawler: annotations must be able to mark
+/// every stored observation, while rejecting enormous numbers from a broken client.
+const ANNOTATION_VALUE_MAX_INTEGER_DIGITS: i64 = 40;
+/// Trailing zeros do not count toward the fractional limit.
+const ANNOTATION_VALUE_MAX_FRACTION_DIGITS: i64 = 30;
 
 /// Checks an annotation's date (against `today`) and optional chart value.
 pub fn validate_annotation_point(
@@ -210,19 +209,44 @@ pub fn validate_annotation_point(
         )));
     }
     if let Some(value) = value {
-        // Compare against the rounding threshold rather than rounding the value itself, which
-        // would be costly for a value written with a huge number of decimal places.
-        let limit: BigDecimal = ANNOTATION_VALUE_ROUNDS_TO_OVERFLOW
-            .parse()
-            .expect("valid decimal");
-        if value.abs() >= limit {
+        let (digits, scale) = value.as_bigint_and_exponent();
+        if digits == 0.into() {
+            return Ok(());
+        }
+        // Inspect the exponent without expanding it or formatting the value. Check integer
+        // width before normalization, whose scale subtraction could overflow at i64::MIN.
+        let significant = i64::try_from(value.digits()).unwrap_or(i64::MAX);
+        let integer_digits = significant.saturating_sub(scale);
+        if integer_digits > ANNOTATION_VALUE_MAX_INTEGER_DIGITS {
             return Err(AppError::ValidationError(format!(
-                "Value {value} is too large; rounded to 6 decimal places it must be below \
-                 1e{ANNOTATION_VALUE_MAX_DIGITS}"
+                "Value has {integer_digits} integer digits (at most \
+                 {ANNOTATION_VALUE_MAX_INTEGER_DIGITS})"
+            )));
+        }
+        let (_, fractional_digits) = value.normalized().as_bigint_and_exponent();
+        if fractional_digits > ANNOTATION_VALUE_MAX_FRACTION_DIGITS {
+            return Err(AppError::ValidationError(format!(
+                "Value has {fractional_digits} fractional digits (at most \
+                 {ANNOTATION_VALUE_MAX_FRACTION_DIGITS})"
             )));
         }
     }
     Ok(())
+}
+
+/// Prepare a validated value for Diesel's NUMERIC serializer. Its scale conversion runs
+/// before its zero handling, so even a numerical zero with an extreme scale can fail.
+/// Preserve ordinary scales; remove redundant zeros only when the raw scale lies outside
+/// the observation limits. Validation must run first so normalization cannot overflow.
+fn annotation_value_for_storage(value: BigDecimal) -> BigDecimal {
+    let (_, scale) = value.as_bigint_and_exponent();
+    if (-ANNOTATION_VALUE_MAX_INTEGER_DIGITS..=ANNOTATION_VALUE_MAX_FRACTION_DIGITS)
+        .contains(&scale)
+    {
+        value
+    } else {
+        value.normalized()
+    }
 }
 
 /// Checks a comment's text.
@@ -293,6 +317,7 @@ impl CollaborationService {
             annotation_value.as_ref(),
             chrono::Utc::now().date_naive(),
         )?;
+        let annotation_value = annotation_value.map(annotation_value_for_storage);
         // `chart_annotations.series_id` is varchar with no foreign key (and the series may be
         // in another database), so nothing else stops an annotation on a series that doesn't
         // exist. A data plane that can't answer refuses the annotation rather than skipping
@@ -885,30 +910,78 @@ mod validation_tests {
     }
 
     #[test]
-    fn annotation_values_must_fit_the_column() {
+    fn annotation_values_accept_large_observations_without_rounding() {
         let today = date(2026, 10, 23);
         let day = date(2024, 1, 1);
-        let fits: BigDecimal = "99999999999999.999999".parse().unwrap();
-        validate_annotation_point(day, Some(&fits), today).unwrap();
-        validate_annotation_point(day, Some(&-fits), today).unwrap();
-        // Postgres would round these up to 10^14, which overflows DECIMAL(20, 6).
-        for rounds_up in ["99999999999999.9999995", "99999999999999.9999999"] {
-            let rounds_up: BigDecimal = rounds_up.parse().unwrap();
-            assert!(
-                refused(validate_annotation_point(day, Some(&rounds_up), today))
-                    .contains("too large")
-            );
-            refused(validate_annotation_point(day, Some(&-rounds_up), today));
+        for text in [
+            "190358563845627.40625",
+            "1.9e14",
+            "99999999999999.9999995",
+            "0.123456789012345678901234567890",
+            "1e39",
+            "1e-30",
+            "9999999999999999999999999999999999999999.123456789012345678901234567890",
+            "1.000000000000000000000000000000000000000000000000000000000000",
+        ] {
+            let value: BigDecimal = text.parse().unwrap();
+            validate_annotation_point(day, Some(&value), today).unwrap();
+            validate_annotation_point(day, Some(&-value), today).unwrap();
         }
-        // ...while this rounds down to the largest value the column holds.
-        let rounds_down: BigDecimal = "99999999999999.9999994999".parse().unwrap();
-        validate_annotation_point(day, Some(&rounds_down), today).unwrap();
-        validate_annotation_point(day, Some(&-rounds_down), today).unwrap();
-        let too_big: BigDecimal = "100000000000000".parse().unwrap();
-        assert!(
-            refused(validate_annotation_point(day, Some(&too_big), today)).contains("too large")
+    }
+
+    #[test]
+    fn annotation_values_enforce_observation_size_limits() {
+        let today = date(2026, 10, 23);
+        let day = date(2024, 1, 1);
+        for (text, reason) in [
+            ("1e40", "41 integer digits (at most 40)"),
+            ("1e-31", "31 fractional digits (at most 30)"),
+            (
+                "0.1234567890123456789012345678901",
+                "31 fractional digits (at most 30)",
+            ),
+            ("1e999999999", "integer digits"),
+            ("1e-999999999", "fractional digits"),
+        ] {
+            let value: BigDecimal = text.parse().unwrap();
+            assert!(refused(validate_annotation_point(day, Some(&value), today)).contains(reason));
+            assert!(refused(validate_annotation_point(day, Some(&-value), today)).contains(reason));
+        }
+        // Construct directly so the parser's own exponent bounds do not hide overflow bugs.
+        for scale in [i64::MIN, i64::MAX] {
+            let value = BigDecimal::new(10.into(), scale);
+            refused(validate_annotation_point(day, Some(&value), today));
+            let zero = BigDecimal::new(0.into(), scale);
+            validate_annotation_point(day, Some(&zero), today).unwrap();
+        }
+    }
+
+    #[test]
+    fn annotation_storage_preserves_normal_scales_and_normalizes_extreme_scales() {
+        let today = date(2026, 10, 23);
+        let day = date(2024, 1, 1);
+        for text in ["190358563845627.40625", "1.50", "0.000000", "1e39", "1e-30"] {
+            let value: BigDecimal = text.parse().unwrap();
+            validate_annotation_point(day, Some(&value), today).unwrap();
+            assert_eq!(
+                annotation_value_for_storage(value.clone()).as_bigint_and_exponent(),
+                value.as_bigint_and_exponent()
+            );
+        }
+        for scale in [i64::MIN, i64::MAX] {
+            let zero = BigDecimal::new(0.into(), scale);
+            validate_annotation_point(day, Some(&zero), today).unwrap();
+            assert_eq!(
+                annotation_value_for_storage(zero).as_bigint_and_exponent(),
+                BigDecimal::from(0).as_bigint_and_exponent()
+            );
+        }
+        let redundant: BigDecimal = format!("1.{}", "0".repeat(40_000)).parse().unwrap();
+        validate_annotation_point(day, Some(&redundant), today).unwrap();
+        assert_eq!(
+            annotation_value_for_storage(redundant).as_bigint_and_exponent(),
+            BigDecimal::from(1).as_bigint_and_exponent()
         );
-        refused(validate_annotation_point(day, Some(&-too_big), today));
     }
 }
 

@@ -1,5 +1,4 @@
-//! Integration tests for ECO-439: retrying `createAnnotation` with the same idempotency key
-//! stores one annotation.
+//! Integration tests for annotation creation: ECO-439 idempotency and ECO-520 exact values.
 //!
 //! Real Postgres and the real schema, end to end. "Replicas" are separate schemas on separate
 //! connection pools, which share nothing but the database, as separate backend pods do.
@@ -227,4 +226,97 @@ async fn keys_are_scoped_per_user_and_optional() {
         refused.errors[0].message
     );
     assert_eq!(stored_for(&pool, &bob).await, 3);
+}
+
+/// Annotation Y values must preserve the large aggregates and fractional precision that
+/// observations can hold, through GraphQL input, Postgres storage, and a subsequent query.
+#[tokio::test]
+async fn annotation_values_round_trip_large_and_precise_decimals() {
+    use diesel::sql_types::{Text, Uuid as SqlUuid};
+    use diesel_async::RunQueryDsl;
+
+    #[derive(diesel::QueryableByName)]
+    struct StoredValue {
+        #[diesel(sql_type = Text)]
+        value: String,
+    }
+
+    let Some((_url, pool, _guard)) = db().await else {
+        return;
+    };
+    let alice = make_user(&pool, "exact-values").await;
+    let series = make_series(&pool).await;
+
+    let redundant_zeros = format!("1.{}", "0".repeat(40_000));
+    for (value, expected) in [
+        ("190358563845627.40625", "190358563845627.40625"),
+        ("-190358563845627.40625", "-190358563845627.40625"),
+        (
+            "0.123456789012345678901234567890",
+            "0.123456789012345678901234567890",
+        ),
+        ("0e-999999999", "0"),
+        (redundant_zeros.as_str(), "1"),
+    ] {
+        let mutation = format!(
+            r#"mutation {{ createAnnotation(input: {{ seriesId: "{series}", annotationDate: "2024-01-01", annotationValue: "{value}", title: "Exact value", content: "c", annotationType: "note" }}) {{ id annotationValue }} }}"#
+        );
+        let response = run_as(&pool, &alice, &mutation).await;
+        let id = created_id(&response);
+        assert_eq!(
+            response.data.into_json().unwrap()["createAnnotation"]["annotationValue"],
+            expected,
+            "create response must preserve the exact value"
+        );
+
+        let stored: StoredValue = diesel::sql_query(
+            "SELECT annotation_value::text AS value FROM chart_annotations WHERE id = $1",
+        )
+        .bind::<SqlUuid, _>(uuid::Uuid::parse_str(&id).unwrap())
+        .get_result(&mut pool.get().await.unwrap())
+        .await
+        .expect("read stored annotation value");
+        assert_eq!(
+            stored.value, expected,
+            "Postgres must store the exact decimal"
+        );
+
+        let query =
+            format!(r#"{{ annotationsForSeries(seriesId: "{series}") {{ id annotationValue }} }}"#);
+        let response = run_as(&pool, &alice, &query).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let data = response.data.into_json().unwrap();
+        let annotation = data["annotationsForSeries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|annotation| annotation["id"] == id)
+            .expect("query returns the created annotation");
+        assert_eq!(annotation["annotationValue"], expected);
+    }
+    assert_eq!(stored_for(&pool, &alice).await, 5);
+}
+
+/// Unconstrained NUMERIC storage still enforces the observation value limits at the API.
+#[tokio::test]
+async fn annotation_values_outside_observation_limits_store_nothing() {
+    let Some((_url, pool, _guard)) = db().await else {
+        return;
+    };
+    let alice = make_user(&pool, "value-limits").await;
+    let series = make_series(&pool).await;
+
+    for value in ["1e40", "-1e40", "1e-31", "-1e-31"] {
+        let mutation = format!(
+            r#"mutation {{ createAnnotation(input: {{ seriesId: "{series}", annotationDate: "2024-01-01", annotationValue: "{value}", title: "Out of bounds", content: "c", annotationType: "note" }}) {{ id }} }}"#
+        );
+        let response = run_as(&pool, &alice, &mutation).await;
+        assert_eq!(response.errors.len(), 1, "{value}: {:?}", response.errors);
+        assert!(
+            response.errors[0].message.contains("digits"),
+            "{value}: {}",
+            response.errors[0].message
+        );
+        assert_eq!(stored_for(&pool, &alice).await, 0);
+    }
 }
