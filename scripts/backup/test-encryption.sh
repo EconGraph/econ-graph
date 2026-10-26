@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Exercise public-key backup publication and hostile-archive handling with a
+# fresh test identity. No cluster, production data, identity or network is used.
+# The following negative cases intentionally isolate configuration in subshells.
+# shellcheck disable=SC2030,SC2031
+set -euo pipefail
+umask 077
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+scratch="$(mktemp -d)"
+trap 'rm -rf -- "$scratch" "${payload:-}"' EXIT
+die() { echo "error: $*" >&2; exit 1; }
+# shellcheck source=scripts/backup/encryption.sh
+source "$root/scripts/backup/encryption.sh"
+command -v age-keygen >/dev/null || die "test requires age and age-keygen"
+age-keygen -o "$scratch/identity" 2>/dev/null
+BACKUP_AGE_RECIPIENT="$(age-keygen -y "$scratch/identity")"
+export BACKUP_AGE_RECIPIENT
+backup_encryption_preflight
+payload="$(backup_plaintext_dir)"
+mkdir "$payload/secrets"
+printf 'PGDMP test data\n' > "$payload/econ_graph.dump"
+printf 'test-only-secret\n' > "$payload/secrets/example.yaml"
+printf 'SERIES_COUNT=1\n' > "$payload/counts.env"
+backup_seal_dir "$payload" "$scratch/bundle"
+[[ "$(stat -c %a "$scratch/bundle")" == 700 ]]
+[[ "$(stat -c %a "$scratch/bundle/backup.tar.age")" == 600 ]]
+[[ ! -e "$scratch/bundle/secrets" && ! -e "$scratch/bundle/econ_graph.dump" ]]
+if grep -q 'test-only-secret' "$scratch/bundle/backup.tar.age"; then die 'stored plaintext'; fi
+mkdir "$scratch/opened"
+age -d -i "$scratch/identity" "$scratch/bundle/backup.tar.age" |
+    python3 "$root/scripts/backup/unpack-backup.py" "$scratch/opened"
+cmp "$payload/econ_graph.dump" "$scratch/opened/econ_graph.dump"
+cmp "$payload/secrets/example.yaml" "$scratch/opened/secrets/example.yaml"
+[[ "$(stat -c %a "$scratch/opened/secrets/example.yaml")" == 600 ]]
+if (backup_seal_dir "$payload" "$scratch/bundle") 2>/dev/null; then die 'overwrote backup'; fi
+if (unset BACKUP_AGE_RECIPIENT; export ECONGRAPH_CONFIG_DIR="$scratch/missing"; backup_encryption_preflight) 2>/dev/null; then
+    die 'allowed missing recipient'
+fi
+if (export BACKUP_PLAINTEXT_ROOT=/etc; backup_encryption_preflight) 2>/dev/null; then
+    die 'allowed disk staging'
+fi
+# Exercise the shared host writer without a cluster. Its disposable payload
+# remains available to same-process migration consumers and disappears on exit.
+(
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    backup_databases_plain() {
+        mkdir -p "$1/secrets"
+        printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"
+        printf 'synthetic secret' > "$1/secrets/example.yaml"
+        printf 'SERIES_COUNT=1\nDATA_POINTS_COUNT=1\n' > "$1/counts.env"
+    }
+    backup_databases "$scratch/shared"
+    [[ -f "$(backup_source_dir "$scratch/shared")/econ_graph.dump" ]]
+    printf '%s' "$BACKUP_ACTIVE_DIR" > "$scratch/staging-path"
+)
+[[ -f "$scratch/shared/backup.tar.age" ]]
+[[ ! -e "$(cat "$scratch/staging-path")" ]]
+# A failed encryptor must never publish VERIFIED or final output.
+mkdir "$scratch/bin"
+printf '#!/bin/sh\nexit 42\n' > "$scratch/bin/age"
+chmod +x "$scratch/bin/age"
+if (PATH="$scratch/bin:$PATH"; backup_seal_dir "$payload" "$scratch/failure"); then die 'ignored encryption failure'; fi
+[[ ! -e "$scratch/failure" && ! -e "$scratch/failure.partial/VERIFIED" ]]
+# Malicious paths and links must not escape disposable staging.
+for attack in traversal symlink hardlink duplicate; do
+    mkdir "$scratch/$attack"
+    python3 - "$attack" <<'PY' | python3 "$root/scripts/backup/unpack-backup.py" "$scratch/$attack" > "$scratch/$attack.log" 2>&1 && exit 1
+import io
+import sys
+import tarfile
+attack = sys.argv[1]
+with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as tar:
+    item = tarfile.TarInfo('../escape' if attack == 'traversal' else 'entry')
+    if attack in ('symlink', 'hardlink'):
+        item.type = tarfile.SYMTYPE if attack == 'symlink' else tarfile.LNKTYPE
+        item.linkname = '../escape'
+    tar.addfile(item, io.BytesIO())
+    if attack == 'duplicate':
+        tar.addfile(item, io.BytesIO())
+PY
+    [[ ! -e "$scratch/escape" ]]
+done
+# The public operator entry point must refuse unattended identity access.
+if "$root/scripts/backup/open-backup.sh" "$scratch/bundle" -- true ignored </dev/null 2>"$scratch/refused"; then
+    die 'allowed unattended decryption'
+fi
+grep -q 'operator terminal' "$scratch/refused"
+echo 'encrypted backup tests passed'

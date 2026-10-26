@@ -735,6 +735,12 @@ jobs:
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
 
+    - name: Check public-key backup encryption and safe recovery
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y age
+        scripts/backup/test-encryption.sh
+
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh
 

@@ -435,10 +435,37 @@ new_backup_dir() {
     echo "${BACKUP_ROOT}/$(date -u +%Y%m%dT%H%M%SZ)"
 }
 
+# shellcheck source=scripts/backup/encryption.sh
+backup_encryption_lib="$(dirname "${BASH_SOURCE[0]}")/../../backup/encryption.sh"
+[[ -f "$backup_encryption_lib" ]] || backup_encryption_lib="$(dirname "${BASH_SOURCE[0]}")/../encryption.sh"
+# shellcheck source=scripts/backup/encryption.sh
+source "$backup_encryption_lib"
+
+backup_databases() {
+    local output="$1" scratch cleanup
+    umask 077
+    backup_encryption_preflight
+    if [[ "${DRY_RUN}" == true ]]; then
+        backup_databases_plain "$output"
+        echo "+ encrypt the verified dumps, counts and Secrets into $output/backup.tar.age"
+        return
+    fi
+    [[ ! -e "$output" && ! -e "${output}.partial" ]] || die "$output already exists"
+    scratch="$(backup_plaintext_dir)"
+    # This is only disposable RAM staging, never a backup directory.
+    printf -v cleanup 'rm -rf -- %q' "$scratch"
+    add_exit_cleanup "$cleanup"
+    backup_databases_plain "$scratch/payload"
+    backup_seal_dir "$scratch/payload" "$output"
+    BACKUP_ACTIVE_OUTPUT="$output"
+    BACKUP_ACTIVE_DIR="$scratch/payload"
+    log "Encrypted backup complete: $output (no identity used)"
+}
+
 # pg_dump the data, app and Keycloak databases, verify the archives, record
 # row counts and save the app Secrets into $1, which must not exist yet.
 # Needs use_kind_kubectl first.
-backup_databases() {
+backup_databases_plain() {
     local dir="$1" name
     [ ! -e "$dir" ] || die "$dir already exists; refusing to overwrite a backup"
     log "Backing up to $dir"
@@ -531,6 +558,12 @@ backup_databases() {
         fi
     done
     chmod 0600 "$dir"/*.dump "$dir"/counts.env
+    {
+        echo "econ_graph.series=$series"
+        echo "econ_graph.data_points=$points"
+        [[ -z "$app_users" ]] || echo "econ_graph_app.users=$app_users"
+        [[ -z "$app_annotations" ]] || echo "econ_graph_app.chart_annotations=$app_annotations"
+    } > "$dir/MANIFEST"
     log "Backup complete:"
     ls -la "$dir" "$dir/secrets"
     sed 's/^/    /' "$dir/counts.env"
@@ -616,6 +649,9 @@ restore_secrets() {
 # and KEYCLOAK_USER_COUNT. Parsed, not sourced, and every value must be a
 # number. Keys the file lacks stay empty.
 read_counts() {
+    local resolved
+    resolved="$(backup_source_dir "$1")"
+    set -- "$resolved"
     local file="$1/counts.env" key value
     SERIES_COUNT="" DATA_POINTS_COUNT="" KEYCLOAK_REALM_COUNT="" KEYCLOAK_USER_COUNT=""
     APP_USER_COUNT="" APP_ANNOTATION_COUNT=""
@@ -638,7 +674,8 @@ read_counts() {
 # migrations, Keycloak) starts against an empty database. Idempotent: existing
 # Secrets are kept, the rest is applied.
 bootstrap_databases() {
-    local src="$1" backup="$2"
+    local src="$1" backup
+    backup="$(backup_source_dir "$2")"
     log "Creating namespace, Secrets and databases from ${src}"
     if [ "${DRY_RUN}" = "true" ]; then
         echo "+ kubectl apply -f $src/k8s/manifests/namespace.yaml"
