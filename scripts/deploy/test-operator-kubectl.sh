@@ -10,8 +10,8 @@
 #
 # Runs offline against stubs, never a cluster: a plain `kubectl` first on PATH
 # that records any call and fails, and a fake kind kubectl and kubeconfig in a
-# scratch ~/.cache/econgraph, which records every call and knows one context,
-# kind-econ-graph.
+# scratch ~/.cache/econgraph, which records every call and knows two contexts,
+# kind-econ-graph and kind-other.
 #
 # Usage: scripts/deploy/test-operator-kubectl.sh
 
@@ -32,12 +32,12 @@ echo "plain kubectl stub: refusing" >&2
 exit 1
 EOF
 
-# The kind kubectl: only context kind-econ-graph exists.
+# The kind kubectl: contexts kind-econ-graph and kind-other exist.
 cat >"$CACHE/bin/kubectl" <<EOF
 #!/bin/sh
 echo "\$*" >>"$CALLS"
 case " \$* " in
-    *" --context kind-econ-graph "*) ;;
+    *" --context kind-econ-graph "*|*" --context kind-other "*) ;;
     *) echo "error: context not found" >&2; exit 1 ;;
 esac
 case " \$* " in
@@ -83,12 +83,34 @@ expect() {
     if [ -s "$PLAIN" ]; then
         fail "$name called plain kubectl:"; sed 's/^/     /' "$PLAIN"
     fi
-    bad="$(grep -v -- '--context kind-econ-graph ' "$CALLS" | grep -v -- '--context missing ' || true)"
+    bad="$(grep -v -e '--context kind-econ-graph ' -e '--context kind-other ' -e '--context missing ' "$CALLS" || true)"
     [ -z "$bad" ] || { fail "$name made kind kubectl calls without an explicit --context:"; printf '     %s\n' "$bad"; }
     if [ "$changes" = none ] && grep -qE '(^| )(create|apply|run|delete|patch|wait) ' "$CALLS"; then
         fail "$name changed something:"; sed 's/^/     /' "$CALLS"
     fi
 }
+
+# only_context NAME CONTEXT: the last run called the kind kubectl, and only
+# with --context CONTEXT.
+only_context() {
+    local name="$1" context="$2" bad
+    grep -q -- "--context ${context} " "$CALLS" || fail "$name did not use context ${context}"
+    bad="$(grep -v -- "--context ${context} " "$CALLS" || true)"
+    [ -z "$bad" ] || { fail "$name used another context:"; printf '     %s\n' "$bad"; }
+}
+
+# A non-default --context reaches every call, in each script.
+for script in backup-postgres-now.sh restore-postgres-backup.sh; do
+    reset; out="$(run "$script" --dry-run --context kind-other)"; rc=$?
+    expect "$script --dry-run --context kind-other" 0 "context         kind-other" none
+    only_context "$script --context kind-other" kind-other
+done
+reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --dry-run --context kind-other)"; rc=$?
+expect "setup-letsencrypt-cloudflare.sh --dry-run --context kind-other" 0 "Dry run: on context kind-other" none
+only_context "setup-letsencrypt-cloudflare.sh --context kind-other" kind-other
+reset; out="$(run test-letsencrypt-cloudflare.sh -d example.invalid --dry-run --context kind-other)"; rc=$?
+expect "test-letsencrypt-cloudflare.sh --dry-run --context kind-other" 0 "Dry run: on context kind-other" none
+only_context "test-letsencrypt-cloudflare.sh --context kind-other" kind-other
 
 reset; out="$(run backup-postgres-now.sh --dry-run)"; rc=$?
 expect "backup-postgres-now.sh --dry-run" 0 "kube-system UID 11111111-2222-3333-4444-555555555555" none
