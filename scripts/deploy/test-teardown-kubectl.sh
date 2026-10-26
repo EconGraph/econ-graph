@@ -9,8 +9,9 @@
 #     current context other than kind-econ-graph).
 #
 # Runs offline against stubs, never a cluster: a plain `kubectl` first on PATH
-# that records any call and fails; `docker` and `kind` stubs that pretend a kind
-# cluster econ-graph exists and hand out a fake "kind kubectl"; and that fake,
+# that records any call and fails; a `docker` stub on PATH and a pinned `kind`
+# stub under a temporary home that pretend cluster econ-graph exists and hand
+# out a fake "kind kubectl"; and that fake,
 # which records every call and answers the few reads teardown makes.
 #
 # Usage: scripts/deploy/test-teardown-kubectl.sh
@@ -24,6 +25,15 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp"
 PLAIN="$WORK/plain-kubectl.log"
 KIND_CALLS="$WORK/kind-kubectl.log"
 OTHER="$WORK/other.log"
+# Teardown checks the pinned installation for cluster deletion, regardless of PATH.
+# Read its version from the same source and install the stub under the fake home.
+KIND_TEST_VERSION="$(
+    # shellcheck source=scripts/deploy/lib/kind-version.sh
+    source "$PROJECT_ROOT/scripts/deploy/lib/kind-version.sh"
+    printf '%s' "$KIND_VERSION"
+)"
+FAKE_KIND_BIN="$WORK/home/.local/share/econgraph/bin/kind-${KIND_TEST_VERSION}"
+mkdir -p "$(dirname "$FAKE_KIND_BIN")"
 
 # Plain kubectl: must never run.
 cat >"$WORK/bin/kubectl" <<EOF
@@ -61,21 +71,22 @@ esac
 exit 0
 EOF
 
-cat >"$WORK/bin/kind" <<EOF
+cat >"$FAKE_KIND_BIN" <<EOF
 #!/bin/sh
 echo "kind \$*" >>"$OTHER"
 case "\$1 \$2" in
+    "version ") echo "kind ${KIND_TEST_VERSION} go1.26 linux/amd64" ;;
     "get clusters") echo econ-graph ;;
     "get kubeconfig") echo "apiVersion: v1" ;;
 esac
 exit 0
 EOF
-chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
+chmod +x "$WORK/bin/"* "$WORK/kind-kubectl" "$FAKE_KIND_BIN"
 
 # teardown CMD-ARGS...: teardown.sh with the stubs first on PATH and no kube
 # config, stdin not a terminal. Prints its output; returns its exit status.
 teardown() {
-    env -u KUBECONFIG -u KUBECTL -u CLUSTER_ROLE_CONTEXT -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER \
+    env -u KUBECONFIG -u KUBECTL -u CLUSTER_ROLE_CONTEXT -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER -u XDG_DATA_HOME \
         HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp" \
         ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
         "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
