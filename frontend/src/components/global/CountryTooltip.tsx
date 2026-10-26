@@ -65,12 +65,22 @@ const CountryTooltip: React.FC<CountryTooltipProps> = ({
           {formatMapValue(entry.value)}
           {unit ? ` ${unit}` : ''}
         </Typography>
-        <Typography variant='caption' color='text.secondary'>
+        <Typography
+          variant='caption'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           {formatMapDate(entry.date, frequency)}
         </Typography>
       </>
     ) : (
-      <Typography variant='body2' color='text.secondary'>
+      <Typography
+        variant='body2'
+        sx={{
+          color: 'text.secondary',
+        }}
+      >
         No data
       </Typography>
     )}

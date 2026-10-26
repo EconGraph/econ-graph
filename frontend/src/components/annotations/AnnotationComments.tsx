@@ -87,7 +87,12 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
     );
   } else if (!comments.data?.length) {
     body = (
-      <Typography variant='body2' color='text.secondary'>
+      <Typography
+        variant='body2'
+        sx={{
+          color: 'text.secondary',
+        }}
+      >
         No comments yet.
       </Typography>
     );
@@ -98,8 +103,10 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
           <ListItem key={comment.id} disableGutters>
             <ListItemText
               primary={comment.content}
-              primaryTypographyProps={{ sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } }}
               secondary={`${comment.userId === viewerId ? 'You' : 'Another user'} · ${formatTimestamp(comment.createdAt)}`}
+              slotProps={{
+                primary: { sx: { whiteSpace: 'pre-wrap', ...wrapAnywhere } },
+              }}
             />
           </ListItem>
         ))}
@@ -120,7 +127,6 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
           <TextField
             id={`comment-draft-${annotationId}`}
             label='Add a comment'
-            inputProps={{ 'aria-label': `Add a comment on ${title}` }}
             value={draft}
             error={draftTooLong}
             helperText={
@@ -133,6 +139,9 @@ const AnnotationComments: React.FC<AnnotationCommentsProps> = ({
             fullWidth
             multiline
             maxRows={4}
+            slotProps={{
+              htmlInput: { 'aria-label': `Add a comment on ${title}` },
+            }}
           />
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
             <Button

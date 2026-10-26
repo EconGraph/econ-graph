@@ -1236,13 +1236,13 @@ impl BlsAdapter {
             // than completing with no data.
             let partial = resp.status != STATUS_SUCCEEDED;
             for m in &resp.message {
-                if let Some(id) = missing_series_id(m) {
-                    if let Some(s) = state.get_mut(id) {
-                        s.end_or_fail(CrawlError::NotFound(format!(
-                            "BLS series {id}: {}",
-                            scrub(m, key)
-                        )));
-                    }
+                if let Some(id) = missing_series_id(m)
+                    && let Some(s) = state.get_mut(id)
+                {
+                    s.end_or_fail(CrawlError::NotFound(format!(
+                        "BLS series {id}: {}",
+                        scrub(m, key)
+                    )));
                 }
             }
             let mut returned: HashMap<&str, SeriesBody> = HashMap::new();

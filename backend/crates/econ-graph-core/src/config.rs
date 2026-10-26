@@ -388,86 +388,56 @@ impl Default for Config {
 mod tests {
     use super::*;
 
-    #[serial_test::serial]
-    #[test]
-    fn test_config_default() {
-        // REQUIREMENT: The application should have sensible defaults for development
-        // PURPOSE: Verify that default configuration values are set correctly for local development
-        // This ensures developers can run the app without extensive configuration setup
-
-        // Store original values to restore later
-        let original_backend_port = env::var("BACKEND_PORT").ok();
-        let original_frontend_port = env::var("FRONTEND_PORT").ok();
-        let original_cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS").ok();
-
-        // Clear environment variables to test true defaults
-        env::remove_var("BACKEND_PORT");
-        env::remove_var("FRONTEND_PORT");
-        env::remove_var("CORS_ALLOWED_ORIGINS");
-
-        let config = Config::default();
-
-        // Verify default server binds to localhost - safe for development
-        assert_eq!(config.server.host, "127.0.0.1");
-        // Verify default port 9876 - non-traditional port to avoid conflicts
-        assert_eq!(config.server.port, 9876);
-        // Verify CORS allows React dev server - required for frontend development
-        assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
-
-        // Restore original environment variables
-        if let Some(val) = original_backend_port {
-            env::set_var("BACKEND_PORT", val);
-        } else {
-            env::remove_var("BACKEND_PORT");
+    /// Run the real environment-reading entry points in a fresh process. Command's
+    /// environment belongs only to the child, so parallel tests never mutate the
+    /// current process's environment (which is unsafe in Rust 2024).
+    fn in_environment(test: &str, vars: &[(&str, &str)], check: impl FnOnce()) {
+        const CHILD_TEST: &str = "ECON_GRAPH_CONFIG_CHILD_TEST";
+        if env::var(CHILD_TEST).as_deref() == Ok(test) {
+            check();
+            return;
         }
-        if let Some(val) = original_frontend_port {
-            env::set_var("FRONTEND_PORT", val);
-        } else {
-            env::remove_var("FRONTEND_PORT");
-        }
-        if let Some(val) = original_cors_allowed_origins {
-            env::set_var("CORS_ALLOWED_ORIGINS", val);
-        } else {
-            env::remove_var("CORS_ALLOWED_ORIGINS");
-        }
+
+        let directory = tempfile::tempdir().unwrap();
+        // Stop dotenv from loading developer settings from a parent directory.
+        std::fs::write(directory.path().join(".env"), "").unwrap();
+        let output = std::process::Command::new(env::current_exe().unwrap())
+            .args(["--exact", &format!("config::tests::{test}"), "--nocapture"])
+            .current_dir(directory.path())
+            .env_clear()
+            .env(CHILD_TEST, test)
+            .envs(vars.iter().copied())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{test} failed: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
-    #[serial_test::serial]
+    #[test]
+    fn test_config_default() {
+        in_environment("test_config_default", &[], || {
+            let config = Config::default();
+            assert_eq!(config.server.host, "127.0.0.1");
+            assert_eq!(config.server.port, 9876);
+            assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
+        });
+    }
+
     #[test]
     fn test_config_from_env() {
-        // REQUIREMENT: The application should be configurable via environment variables for deployment
-        // PURPOSE: Verify that configuration can be overridden using environment variables
-        // This is essential for containerized deployments and different environments
-
-        // Store original values to restore later
-        let original_backend_port = env::var("BACKEND_PORT").ok();
-        let original_frontend_port = env::var("FRONTEND_PORT").ok();
-
-        // Clear any existing environment variables first to ensure clean test state
-        env::remove_var("BACKEND_PORT");
-        env::remove_var("FRONTEND_PORT");
-
-        // Set test environment variables
-        env::set_var("BACKEND_PORT", "9000");
-        env::set_var("FRONTEND_PORT", "4000");
-
-        let config = Config::from_env().unwrap();
-
-        // Verify environment variables override defaults - required for deployment flexibility
-        assert_eq!(config.server.port, 9000);
-        assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
-
-        // Restore original environment variables
-        if let Some(val) = original_backend_port {
-            env::set_var("BACKEND_PORT", val);
-        } else {
-            env::remove_var("BACKEND_PORT");
-        }
-        if let Some(val) = original_frontend_port {
-            env::set_var("FRONTEND_PORT", val);
-        } else {
-            env::remove_var("FRONTEND_PORT");
-        }
+        in_environment(
+            "test_config_from_env",
+            &[("BACKEND_PORT", "9000"), ("FRONTEND_PORT", "4000")],
+            || {
+                let config = Config::from_env().unwrap();
+                assert_eq!(config.server.port, 9000);
+                assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
+            },
+        );
     }
 
     /// Pool sizes default to 10 each, read positive whole numbers, and refuse anything else.
@@ -601,35 +571,29 @@ mod tests {
         );
     }
 
-    /// The process-environment entry points read the same variables. `DATABASE_URL` is left
-    /// alone: other tests in this binary connect through it.
-    #[serial_test::serial]
+    /// The process-environment entry points read the app and data URL variables.
     #[test]
     fn database_urls_read_the_process_environment() {
-        let saved: Vec<_> = [APP_DATABASE_URL, DATA_DATABASE_URL]
-            .into_iter()
-            .map(|k| (k, env::var(k).ok()))
-            .collect();
-
-        env::set_var(APP_DATABASE_URL, "postgres://app/econ_graph_app");
-        env::set_var(DATA_DATABASE_URL, "postgres://data/econ_graph");
-        let set = (backend_database_urls(), data_database_url());
-
-        for (k, v) in saved {
-            match v {
-                Some(v) => env::set_var(k, v),
-                None => env::remove_var(k),
-            }
-        }
-
-        assert_eq!(
-            set.0.map(|u| (u.app, u.data)),
-            Ok((
-                "postgres://app/econ_graph_app".to_string(),
-                Some("postgres://data/econ_graph".to_string())
-            ))
+        in_environment(
+            "database_urls_read_the_process_environment",
+            &[
+                (APP_DATABASE_URL, "postgres://app/econ_graph_app"),
+                (DATA_DATABASE_URL, "postgres://data/econ_graph"),
+            ],
+            || {
+                assert_eq!(
+                    backend_database_urls().map(|u| (u.app, u.data)),
+                    Ok((
+                        "postgres://app/econ_graph_app".to_string(),
+                        Some("postgres://data/econ_graph".to_string())
+                    ))
+                );
+                assert_eq!(
+                    data_database_url().as_deref(),
+                    Ok("postgres://data/econ_graph")
+                );
+            },
         );
-        assert_eq!(set.1.as_deref(), Ok("postgres://data/econ_graph"));
     }
 
     /// `var` for [`data_graphql_config_from`], reading `pairs`.

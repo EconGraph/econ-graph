@@ -400,10 +400,10 @@ impl SecEdgarCrawler {
 
         for filing in filings {
             // Check form type filter
-            if let Some(ref form_types) = self.config.form_types {
-                if !form_types.iter().any(|f| f == first(&filing.form)) {
-                    continue;
-                }
+            if let Some(ref form_types) = self.config.form_types
+                && !form_types.iter().any(|f| f == first(&filing.form))
+            {
+                continue;
             }
 
             // Check date range filter
@@ -430,16 +430,16 @@ impl SecEdgarCrawler {
             }
 
             // Check file size limit
-            if let Some(&size) = filing.size.first() {
-                if size > self.config.max_file_size_bytes {
-                    warn!(
-                        "Skipping filing {}: size {} exceeds limit {}",
-                        first(&filing.accession_number),
-                        size,
-                        self.config.max_file_size_bytes
-                    );
-                    continue;
-                }
+            if let Some(&size) = filing.size.first()
+                && size > self.config.max_file_size_bytes
+            {
+                warn!(
+                    "Skipping filing {}: size {} exceeds limit {}",
+                    first(&filing.accession_number),
+                    size,
+                    self.config.max_file_size_bytes
+                );
+                continue;
             }
 
             filtered.push(filing);

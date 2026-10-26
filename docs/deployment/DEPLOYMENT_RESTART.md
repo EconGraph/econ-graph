@@ -64,14 +64,12 @@ kind load docker-image econ-graph-frontend:latest --name econ-graph
 
 ### 3. **Apply Updated Manifests**
 ```bash
-# Set kubectl context
-kubectl config use-context kind-econ-graph
-
-# Apply all manifests (includes updated image tags). ingress.yaml goes first:
-# graphql-ingress.yaml sorts before it and would clash with an older
-# ingress.yaml that still routes /graphql
-kubectl apply -f k8s/manifests/ingress.yaml
-kubectl apply -f k8s/manifests/
+# Apply all manifests (includes updated image tags) through deploy.sh, which
+# switches to kind-econ-graph. Don't run `kubectl apply -f k8s/manifests/`:
+# cloudflared.yaml is committed with 0 replicas, so that stops the tunnel
+# connector on the production cluster, and the public host is dropped.
+PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh   # production cluster
+PUBLIC_HOST= ./scripts/deploy/deploy.sh                # any other cluster
 ```
 
 ### 4. **Restart Rollouts**

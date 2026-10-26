@@ -102,7 +102,9 @@ const AnnotationFormDialog: React.FC<AnnotationFormDialogProps> = ({
               disabled={mode === 'edit'}
               helperText={mode === 'edit' ? "An annotation's date can't be changed." : undefined}
               required
-              InputLabelProps={{ shrink: true }}
+              slotProps={{
+                inputLabel: { shrink: true },
+              }}
             />
             <TextField
               id={`annotation-form-${mode}-title-field`}

@@ -93,10 +93,10 @@ impl Gcra {
         let mut tat = self.tat.lock().await;
         if let Some(t) = *tat {
             // Earliest conforming time: tat - (burst - 1) * T.
-            if let Some(allowed_at) = t.checked_sub(self.tolerance) {
-                if allowed_at > Instant::now() {
-                    tokio::time::sleep_until(allowed_at).await;
-                }
+            if let Some(allowed_at) = t.checked_sub(self.tolerance)
+                && allowed_at > Instant::now()
+            {
+                tokio::time::sleep_until(allowed_at).await;
             }
         }
         let now = Instant::now();

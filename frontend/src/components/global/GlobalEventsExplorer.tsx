@@ -381,7 +381,13 @@ const GlobalEventsExplorer: React.FC = () => {
                             />
                           </Box>
 
-                          <Typography variant='body2' color='textSecondary' paragraph>
+                          <Typography
+                            variant='body2'
+                            color='textSecondary'
+                            sx={{
+                              marginBottom: '16px',
+                            }}
+                          >
                             {event.description}
                           </Typography>
 
@@ -452,7 +458,12 @@ const GlobalEventsExplorer: React.FC = () => {
                                         alignItems: 'center',
                                       }}
                                     >
-                                      <Typography variant='body2' fontWeight='medium'>
+                                      <Typography
+                                        variant='body2'
+                                        sx={{
+                                          fontWeight: 'medium',
+                                        }}
+                                      >
                                         {impact.country.name}
                                       </Typography>
                                       <Box sx={{ display: 'flex', gap: 1 }}>
@@ -513,7 +524,12 @@ const GlobalEventsExplorer: React.FC = () => {
 
           <Grid item xs={12} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant='h4' color='warning.main'>
+              <Typography
+                variant='h4'
+                sx={{
+                  color: 'warning.main',
+                }}
+              >
                 {filteredEvents.reduce((sum, e) => sum + e.affectedCountryCount, 0)}
               </Typography>
               <Typography variant='body2' color='textSecondary'>
@@ -524,7 +540,12 @@ const GlobalEventsExplorer: React.FC = () => {
 
           <Grid item xs={12} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant='h4' color='error.main'>
+              <Typography
+                variant='h4'
+                sx={{
+                  color: 'error.main',
+                }}
+              >
                 {Math.round(
                   (filteredEvents.reduce((sum, e) => sum + e.event.severity, 0) /
                     filteredEvents.length) *
@@ -539,7 +560,12 @@ const GlobalEventsExplorer: React.FC = () => {
 
           <Grid item xs={12} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant='h4' color='success.main'>
+              <Typography
+                variant='h4'
+                sx={{
+                  color: 'success.main',
+                }}
+              >
                 {filteredEvents.reduce(
                   (sum, e) =>
                     sum + e.countryImpacts.filter(i => i.recoveryStatus === 'recovered').length,

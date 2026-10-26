@@ -66,6 +66,7 @@ struct Upstream {
     log: Arc<Mutex<Vec<(Instant, String, u16)>>>,
     fred_series: String,
     fred_obs: String,
+    fred_vintages: String,
     /// Template `data` points from `bls/cpi_monthly.json`'s one series, replayed under each
     /// requested id ([`bls_response`](Self::bls_response)): `BlsAdapter::fetch_group` matches a
     /// response's `seriesID` against the id it requested and ignores anything else, so a canned
@@ -144,10 +145,12 @@ impl Respond for Upstream {
                     .insert_header("Retry-After", QUEUE_RETRY_AFTER_SECS.to_string().as_str()),
             )
         } else {
-            let body = match (self.api, req.url.path().ends_with("/observations")) {
-                (Api::Fred, true) => self.fred_obs.clone(),
-                (Api::Fred, false) => self.fred_series.clone(),
-                (Api::Bls, _) => self.bls_response(req),
+            let path = req.url.path();
+            let body = match self.api {
+                Api::Fred if path.ends_with("/observations") => self.fred_obs.clone(),
+                Api::Fred if path.ends_with("/vintagedates") => self.fred_vintages.clone(),
+                Api::Fred => self.fred_series.clone(),
+                Api::Bls => self.bls_response(req),
             };
             (
                 200,
@@ -184,6 +187,7 @@ async fn start_upstream(api: Api, flaky: HashSet<String>, seed: u64) -> Mocked {
             log: log.clone(),
             fred_series: read("fred/series_gdp.json"),
             fred_obs: read("fred/observations_gdp.json"),
+            fred_vintages: read("fred/vintagedates_gdp.json"),
             bls_data,
         })
         .mount(&server)

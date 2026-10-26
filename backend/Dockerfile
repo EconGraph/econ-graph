@@ -20,9 +20,9 @@
 # `--locked`, so a lockfile out of sync with Cargo.toml fails the build instead
 # of silently re-resolving.
 
-# Keep in sync with rust-toolchain.toml at the repository root (channel = "1.98.1").
+# Keep in sync with rust-toolchain.toml at the repository root (channel = "1.99.1").
 # Trixie to match the runtime image's glibc/OpenSSL/libpq.
-ARG RUST_VERSION=1.98.1
+ARG RUST_VERSION=1.99.1
 
 ############################
 # Build stage
