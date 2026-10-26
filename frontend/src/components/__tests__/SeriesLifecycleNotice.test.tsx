@@ -12,12 +12,23 @@ const missing: SeriesLifecycle = {
 };
 
 describe('SeriesLifecycleNotice', () => {
-  it('uses the confirmation date and keeps the source name in the notice', () => {
-    renderWithProviders(<SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' />);
-    expect(screen.getByRole('alert')).toHaveTextContent(
+  it.each([false, true])('announces publication changes politely (compact=%s)', compact => {
+    renderWithProviders(
+      <SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' compact={compact} />
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
       'No longer published by FRED since 2026-10-25'
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('Stored history remains available');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+
+  it('uses the confirmation date and keeps the source name in the notice', () => {
+    renderWithProviders(<SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'No longer published by FRED since 2026-10-25'
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Stored history remains available');
   });
 
   it('does not claim that an unconfirmed successor replaces the series', () => {
@@ -57,6 +68,6 @@ describe('SeriesLifecycleNotice', () => {
   it('does not show a disappearance notice for active series', () => {
     renderWithProviders(<SeriesLifecycleNotice lifecycle={{ ...missing, status: 'active' }} />);
     expect(screen.queryByText(/No longer published/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

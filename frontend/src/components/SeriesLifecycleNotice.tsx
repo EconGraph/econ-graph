@@ -46,14 +46,14 @@ const SeriesLifecycleNotice: React.FC<{
   );
 
   return compact ? (
-    <Box sx={{ mb: 2 }}>
+    <Box role='status' sx={{ mb: 2 }}>
       <Typography variant='body2' color='text.secondary'>
         {message}
       </Typography>
       {links}
     </Box>
   ) : (
-    <Alert severity='info' sx={{ my: 2 }}>
+    <Alert role='status' severity='info' sx={{ my: 2 }}>
       {message}. Stored history remains available.
       {(successor || proposed) && <Box sx={{ mt: 1 }}>{links}</Box>}
     </Alert>
