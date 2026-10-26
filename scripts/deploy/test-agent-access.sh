@@ -57,6 +57,20 @@ allowed = {"pods", "pods/log", "services", "configmaps", "persistentvolumeclaims
            "jobs", "cronjobs", "networkpolicies", "ingresses"}
 assert {r for rule in role["rules"] for r in rule["resources"]} <= allowed
 assert all("*" not in rule["verbs"] and "*" not in rule["apiGroups"] for rule in role["rules"])
+permissions = {(group, resource, verb) for rule in role["rules"]
+               for group in rule["apiGroups"] for resource in rule["resources"]
+               for verb in rule["verbs"]}
+workload_verbs = {"get", "list", "watch", "create", "update", "patch", "delete"}
+required = {
+    "": {"pods", "services", "configmaps", "persistentvolumeclaims", "events"},
+    "apps": {"deployments", "replicasets", "statefulsets", "daemonsets"},
+    "batch": {"jobs", "cronjobs"},
+    "networking.k8s.io": {"networkpolicies", "ingresses"},
+}
+expected = {(group, resource, verb) for group, names in required.items()
+            for resource in names for verb in workload_verbs}
+expected.add(("", "pods/log", "get"))
+assert permissions == expected, "Role must grant exactly the documented workload/log permissions"
 PY
 "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
     --kubectl "$KUBECTL" --output-dir "$scratch/agent" >"$scratch/output"
