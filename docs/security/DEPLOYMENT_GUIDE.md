@@ -529,6 +529,9 @@ spec:
 
 ### Ingress
 
+The host `api.example.com` below is a placeholder. Replace it with a domain you
+control and configure its DNS and TLS certificate before deploying.
+
 Create `k8s/ingress.yaml`:
 
 ```yaml
@@ -545,10 +548,10 @@ metadata:
 spec:
   tls:
   - hosts:
-    - api.econ-graph.com
+    - api.example.com
     secretName: econ-graph-tls
   rules:
-  - host: api.econ-graph.com
+  - host: api.example.com
     http:
       paths:
       - path: /
@@ -580,6 +583,8 @@ kubectl scale deployment econ-graph-graphql --replicas=5 -n econ-graph
 
 ### Nginx Configuration
 
+Use your own domain in place of the `api.example.com` placeholder here as well.
+
 Create `nginx.conf`:
 
 ```nginx
@@ -591,7 +596,7 @@ upstream econ_graph_backend {
 
 server {
     listen 80;
-    server_name api.econ-graph.com;
+    server_name api.example.com;
 
     # Rate limiting
     limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
