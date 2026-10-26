@@ -20,9 +20,10 @@
 #   - restore.sh, with the restore Job's environment (RESTORE_OWNER=econgraph),
 #     puts econ_graph back with econgraph owning everything but the
 #     extensions and able to write its tables, and every extension untouched;
-#     on a newly initialised server (postgres-init.yaml's script only, and
-#     RESTORE_OWNER unset) it creates and logs the extension that server
-#     lacks and leaves everything else econgraph's; a restore that fails at
+#     an existing extension keeps the target's own comment; on a newly
+#     initialised server (postgres-init.yaml's script, uuid-ossp dropped, and
+#     RESTORE_OWNER unset) it creates and logs the two extensions that server
+#     lacks, with the dump's comments, and leaves everything else econgraph's; a restore that fails at
 #     its last drop rolls every table back; latest.dump moved to another dump
 #     right after the list doesn't change which dump is restored; it refuses
 #     a dump with no table, a missing owner role, and an app or Keycloak dump;
@@ -47,7 +48,9 @@
 #   - a table locked past PG_DUMP_LOCK_WAIT_TIMEOUT fails that dump promptly
 #     and keeps the others;
 #   - the Job has a deadline and does not retry a pod whose container failed;
-#   - no run deletes a dump, and no output shows any password.
+#   - no run deletes a dump, and a dump removed from the volume by hand stays
+#     in S3 after the next sync;
+#   - no output shows any password.
 #
 # Needs docker (DOCKER_HOST is honoured) and python3 with PyYAML.
 # Usage: scripts/deploy/test-postgres-backup-scripts.sh
@@ -263,6 +266,10 @@ INSERT INTO audit.events (note) VALUES ('a'), ('b'), ('c');
 ALTER TABLE data_points ADD CONSTRAINT data_points_value_nonnegative CHECK (value >= 0);
 CREATE FUNCTION audit.note_upper(t text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT upper(t)';
 CREATE VIEW series_point_counts AS SELECT series_id, count(*) AS points FROM data_points GROUP BY series_id;"
+# Comments of their own on two extensions, so a restore that creates them can
+# be told to have carried the dump's comment over.
+psql_in "$ECON" postgres econ_graph "COMMENT ON EXTENSION pgcrypto IS 'econ_graph''s pgcrypto';
+COMMENT ON EXTENSION \"uuid-ossp\" IS 'econ_graph''s uuid-ossp';"
 
 # As in the cluster: app-postgres-init.yaml creates the role econgraph and gives
 # it the public schema, and the backend's app migrations, run as econgraph,
@@ -524,6 +531,9 @@ FOREIGN_OWNED_SQL="SELECT kind || ' ' || name || ' ' || owner FROM (
    AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = o.cls AND d.objid = o.oid AND d.deptype = 'e')
  ORDER BY 1"
 EXTENSIONS_SQL="SELECT string_agg(extname || ':' || extowner::regrole::text, ' ' ORDER BY extname) FROM pg_extension"
+# The comments the source gives the two extensions a new server lacks.
+EXT_COMMENTS_SQL="SELECT string_agg(extname || '=' || coalesce(obj_description(oid, 'pg_extension'), '<none>'), ' | ' ORDER BY extname)
+  FROM pg_extension WHERE extname IN ('pgcrypto', 'uuid-ossp')"
 # What the app does with econ_graph: write rows (sequences, defaults,
 # constraints) in every schema, and read the view and the function.
 APP_WRITE_SQL="INSERT INTO economic_series (title) VALUES ('new'); INSERT INTO audit.events (note) VALUES ('new');
@@ -536,6 +546,9 @@ app_writes() { psql_in "$1" econgraph econ_graph "$APP_WRITE_SQL" >/dev/null; }
 check "the source econ_graph is all econgraph's, but for extensions" \
     [ -z "$(psql_in "$ECON" postgres econ_graph "$FOREIGN_OWNED_SQL")" ]
 psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL" >"$tmp/econ.extensions"
+psql_in "$ECON" postgres econ_graph "$EXT_COMMENTS_SQL" >"$tmp/econ.ext-comments"
+check "the source's comments on pgcrypto and uuid-ossp are its own ($(cat "$tmp/econ.ext-comments"))" \
+    [ "$(cat "$tmp/econ.ext-comments")" = "pgcrypto=econ_graph's pgcrypto | uuid-ossp=econ_graph's uuid-ossp" ]
 echo "# source econ_graph extensions: $(cat "$tmp/econ.extensions")"
 
 echo "# restore.sh over the existing database"
@@ -567,6 +580,15 @@ check "  (and that comparison fails for a restore that lost an index)" \
 psql_in "$ECON" postgres postgres "DROP DATABASE econ_noindex"
 check "  and every extension is untouched, owner included ($(cat "$tmp/econ.extensions"))" \
     [ "$(psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL")" = "$(cat "$tmp/econ.extensions")" ]
+# An extension already there keeps its comment: the dump has pg_trgm's
+# default one, the target a comment of its own.
+PG_TRGM_DEFAULT_COMMENT="$(psql_in "$ECON" postgres econ_graph "SELECT obj_description(oid, 'pg_extension') FROM pg_extension WHERE extname = 'pg_trgm'")"
+psql_in "$ECON" postgres econ_graph "COMMENT ON EXTENSION pg_trgm IS 'set on the target only'"
+rc="$(run_restore)"
+check "restore.sh over a target with its own pg_trgm comment exits 0" [ "$rc" = 0 ]
+check "  and the target's comment survives" \
+    [ "$(psql_in "$ECON" postgres econ_graph "SELECT obj_description(oid, 'pg_extension') FROM pg_extension WHERE extname = 'pg_trgm'")" = "set on the target only" ]
+psql_in "$ECON" postgres econ_graph "COMMENT ON EXTENSION pg_trgm IS '$PG_TRGM_DEFAULT_COMMENT'"
 
 # A newly initialised server: postgres-init.yaml's script only, which creates
 # uuid-ossp, pg_stat_statements and pg_trgm, but not pgcrypto (the data
@@ -591,13 +613,21 @@ wait_pg "$FRESH" postgres econ_graph
 fresh_before="$(psql_in "$FRESH" postgres econ_graph "$EXTENSIONS_SQL")"
 check "the new server lacks pgcrypto ($fresh_before)" \
     [ "$fresh_before" = "pg_stat_statements:postgres pg_trgm:postgres plpgsql:postgres uuid-ossp:postgres" ]
+# Without uuid-ossp too: the dump's TOC quotes that name in its comment entry
+# ("uuid-ossp"), not in its extension entry.
+psql_in "$FRESH" postgres econ_graph 'DROP EXTENSION "uuid-ossp"'
 rc="$(RESTORE_ENV="$tmp/restore-default-owner.env" run_restore -e PGHOST=postgres-fresh)"
 check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
 check "  restoring as econgraph, the default owner" grep -q "owned by econgraph" "$tmp/out"
 check "  creating pgcrypto, and logging it" grep -qx "Created extension pgcrypto" "$tmp/out"
-check "  and no other extension" [ "$(grep -c '^Created extension ' "$tmp/out")" = 1 ]
-check "  the extensions are those already there plus pgcrypto, owned by the superuser" \
+check "  creating uuid-ossp, and logging it" grep -qx "Created extension uuid-ossp" "$tmp/out"
+check "  and no other extension" [ "$(grep -c '^Created extension ' "$tmp/out")" = 2 ]
+check "  the extensions are those already there plus the two, owned by the superuser" \
     [ "$(psql_in "$FRESH" postgres econ_graph "$EXTENSIONS_SQL")" = "pg_stat_statements:postgres pg_trgm:postgres pgcrypto:postgres plpgsql:postgres uuid-ossp:postgres" ]
+check "  each created extension has the dump's comment ($(cat "$tmp/econ.ext-comments"))" \
+    [ "$(psql_in "$FRESH" postgres econ_graph "$EXT_COMMENTS_SQL")" = "$(cat "$tmp/econ.ext-comments")" ]
+check "  and pg_trgm, already there, keeps the init script's" \
+    [ "$(psql_in "$FRESH" postgres econ_graph "SELECT obj_description(oid, 'pg_extension') FROM pg_extension WHERE extname = 'pg_trgm'")" = "$PG_TRGM_DEFAULT_COMMENT" ]
 check "  the row counts are the source's" diff <(counts "$FRESH" postgres econ_graph) "$tmp/econ.counts"
 psql_in "$FRESH" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
 check "  everything else is econgraph's" [ ! -s "$tmp/foreign-owned" ]
@@ -1000,6 +1030,19 @@ psql_in "$ECON" postgres econ_graph \
 new_status
 rc="$(run_sync run7)"
 check "sync.sh fails when backup.sh wrote no status" [ "$rc" = 1 ]
+
+# --- 8. a dump removed from the volume by hand stays off-site ------------------------
+
+echo "# a dump removed from the volume, then synced again"
+check "the first keycloak dump is in S3 ($kc_dump)" grep -qx "$kc_dump" <(s3_keys run7)
+rm -f "$tmp/backups/$kc_dump"
+grep -vx "$kc_dump" "$SEEN" >"$tmp/seen.new" || true
+mv "$tmp/seen.new" "$SEEN"
+new_status
+printf '\n' >"$tmp/status/failed"
+rc="$(run_sync run7)"
+check "sync.sh exits 0" [ "$rc" = 0 ]
+check "  and the removed dump is still in S3" grep -qx "$kc_dump" <(s3_keys run7)
 
 # --- credentials ---------------------------------------------------------------------
 

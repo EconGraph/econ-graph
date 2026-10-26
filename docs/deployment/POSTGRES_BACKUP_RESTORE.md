@@ -392,10 +392,12 @@ tables and able to write them, with the source's schema; that `restore.sh`,
 with the restore Job's environment, puts `econ_graph` back with `econgraph`
 owning everything but the extensions and able to write its tables, the
 schema (tables, indexes, constraints, views, functions, extensions) equal to
-the source's and every extension untouched, owner included; that on a newly
-initialised server (the init script only, `RESTORE_OWNER` unset) it creates
-and logs the one extension that server lacks, `pgcrypto`, and leaves
-everything else owned by `econgraph`; that a restore failing at its last drop
+the source's and every extension untouched, owner and comment included (a
+comment set on the target survives); that on a newly initialised server (the
+init script, with `uuid-ossp` then dropped, and `RESTORE_OWNER` unset) it
+creates and logs the two extensions that server lacks, `pgcrypto` and
+`uuid-ossp`, each with the dump's comment, and leaves everything else owned
+by `econgraph`; that a restore failing at its last drop
 (a schema owned by `postgres`) rolls every table and row back; that with
 `latest.dump` moved to another dump right after the list, the listed dump is
 the one restored; and that it refuses a dump with no table, a missing
@@ -414,7 +416,8 @@ syncs the others and fails the Job; that a missing app password in separate mode
 Keycloak password is a failure with `KEYCLOAK_REQUIRED=true` and a skip with
 `false`; that the Job has a
 deadline and a `podFailurePolicy` that doesn't retry a failed container;
-that no run deletes a dump; and that no output contains a password. It needs Docker and
+that no run deletes a dump, and that a dump removed from the volume by hand
+stays in S3 after the next sync; and that no output contains a password. It needs Docker and
 python3 with PyYAML, and runs in CI ("PostgreSQL Backup Scripts").
 
 It does not cover the in-cluster wiring (the PVC mounts, the Secrets, the

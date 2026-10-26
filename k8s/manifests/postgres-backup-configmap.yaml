@@ -330,9 +330,9 @@ data:
 
     # The backup volume also holds the app database's and Keycloak's dumps;
     # restoring one of those here would add their tables to ${PGDATABASE}.
-    # (econ_graph_app-<stamp>.dump doesn't match econ_graph-*.)
+    # (econ_graph_app-<stamp>.dump doesn't match econ_graph-*.dump.)
     case "$(basename "${FILE}")" in
-      "${PGDATABASE}"-*) ;;
+      "${PGDATABASE}"-*.dump) ;;
       *)
         echo "${FILE} is not a ${PGDATABASE} dump (expected ${PGDATABASE}-<stamp>.dump)" >&2
         exit 1
@@ -377,9 +377,12 @@ data:
     done
     if [ -n "${MISSING}" ]; then
       echo "Creating the extensions '${PGDATABASE}' lacks, as ${PGUSER}:${MISSING}"
+      # A comment entry quotes a name that needs it ("uuid-ossp"); the
+      # extension entry doesn't.
       printf '%s\n' "${EXTENSIONS}" |
         awk -v missing="${MISSING} " '
           { name = ($4 == "EXTENSION") ? $6 : $7 }
+          name ~ /^".*"$/ { name = substr(name, 2, length(name) - 2); gsub(/""/, "\"", name) }
           index(missing, " " name " ")' |
         pg_restore --use-list=/dev/stdin --no-owner --no-privileges \
           --single-transaction --exit-on-error \
