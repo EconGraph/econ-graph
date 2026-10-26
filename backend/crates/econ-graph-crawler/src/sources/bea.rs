@@ -528,6 +528,93 @@ impl BeaAdapter {
             .unwrap_or_default()
     }
 
+    /// Positively enroll existing histories matching the current configured selection scope.
+    /// This also finds a table renamed before the first catalog-driven crawl. It never treats
+    /// every BEA series as selected, and a title predicate requires a retained upstream title.
+    async fn stored_scope_members(&self, ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        use diesel::sql_types::{Array, Text, Uuid as SqlUuid};
+        use diesel_async::RunQueryDsl;
+        use futures::TryStreamExt;
+
+        #[derive(diesel::QueryableByName)]
+        struct StoredId {
+            #[diesel(sql_type = Text)]
+            external_id: String,
+        }
+
+        let rules = self.selection()?;
+        let mut titles = HashMap::new();
+        for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
+            titles.insert(
+                dataset,
+                persist::dataset_dimension_labels(
+                    &ctx.pool,
+                    SourceId::Bea,
+                    dataset.code(),
+                    "table_name",
+                )
+                .await
+                .map_err(db_err)?,
+            );
+        }
+        let source_id = persist::data_source_id(&ctx.pool, SourceId::Bea)
+            .await
+            .map_err(db_err)?;
+        // Prefixes are validated alphanumeric, so these SQL LIKE patterns contain only the
+        // intended suffix wildcard. Apply them before loading histories from either store.
+        let patterns: Vec<String> = rules
+            .rule
+            .iter()
+            .map(|rule| {
+                let code = if rule.dataset == "NIPA" {
+                    NIPA_DATASET
+                } else {
+                    REGIONAL_DATASET
+                };
+                format!("{}/{}%", code.replace('_', "\\_"), rule.prefix)
+            })
+            .collect();
+        let mut conn = ctx
+            .pool
+            .get()
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?;
+        let query = diesel::sql_query(
+            "SELECT external_id FROM economic_series WHERE source_id = $1 AND external_id LIKE ANY($2) \
+             UNION SELECT external_id FROM series_metadata WHERE source_id = $1 AND external_id LIKE ANY($2) \
+             ORDER BY external_id"
+        ).bind::<SqlUuid, _>(source_id).bind::<Array<Text>, _>(patterns);
+        let mut rows = query
+            .load_stream::<StoredId>(&mut conn)
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?;
+        let mut members = Vec::new();
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?
+        {
+            let Some(key) = SeriesKey::parse(&row.external_id) else {
+                continue;
+            };
+            let (dataset, table, frequency) = match &key {
+                SeriesKey::Nipa {
+                    table, frequency, ..
+                } => (BeaDataset::Nipa, table, *frequency),
+                SeriesKey::Regional { table, geo, .. } if is_state_level_geo(geo) => {
+                    (BeaDataset::Regional, table, Frequency::Annual)
+                }
+                SeriesKey::Regional { .. } => continue,
+            };
+            let title = titles[&dataset].get(table).map(String::as_str);
+            if rules.includes_stored_series(dataset, table, frequency, title) {
+                rules.check_series_count(members.len().saturating_add(1))?;
+                members.push(row.external_id);
+            }
+        }
+        Ok(members)
+    }
+
     async fn discover_nipa(
         &self,
         ctx: &CrawlCtx,
@@ -884,6 +971,10 @@ impl SourceAdapter for BeaAdapter {
 
     fn catalog_scope(&self) -> Option<String> {
         self.selection().ok().map(BeaSelection::fingerprint)
+    }
+
+    async fn catalog_scope_members(&self, ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        self.stored_scope_members(ctx).await
     }
 
     /// BEA's titles for every NIPA and Regional `TableName`, one [`CodeList`] per dataset.
@@ -2674,6 +2765,122 @@ mod tests {
             Some(&"SAGDP2 Gross domestic product (GDP) by state".to_string())
         );
 
+        db.drop().await;
+    }
+
+    /// The first catalog-driven crawl can already be missing an old table. Enroll only
+    /// positively matched retained histories from either store; don't adopt the whole source.
+    #[tokio::test]
+    async fn initial_scope_enrolls_matching_retained_series_from_both_stores_and_bounds_them() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bea_initial_rule_scope",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog.load_adapter(&BeaAdapter::default()).unwrap();
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            REGIONAL_DATASET,
+            "table_name",
+            &[
+                ("SAGDP2N".into(), "Historic GDP by state".into()),
+                ("SAGDP2EXCLUDED".into(), "GDP excluded".into()),
+                ("SAGDP2BADTITLE".into(), "Personal income".into()),
+            ],
+        )
+        .await
+        .unwrap();
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            NIPA_DATASET,
+            "table_name",
+            &[("T10105".into(), "Gross Domestic Product".into())],
+        )
+        .await
+        .unwrap();
+        let metadata = |id: &str| {
+            let key = SeriesKey::parse(id).unwrap();
+            DiscoveredSeries {
+                external_id: id.into(),
+                title: "Stored history".into(),
+                description: None,
+                units: None,
+                frequency: Some("Annual".into()),
+                data_url: None,
+                dataset: key.dataset(),
+            }
+        };
+        let ids = [
+            "bea_regional/SAGDP2N.1.06000", // a table removed before rollout
+            "bea_regional/SAINC1.1.06000",  // unselected table family
+            "bea_regional/SAGDP2UNTITLED.1.06000", // cannot establish title predicate
+            "bea_regional/SAGDP2EXCLUDED.1.06000",
+            "bea_regional/SAGDP2BADTITLE.1.06000",
+            "bea_regional/SAGDP2N.1.06037", // counties are outside state-level discovery
+            "bea_nipa/T10105.1.A",          // unselected frequency
+            "bea_nipa/T10105.1.Q",
+        ];
+        persist::persist_discovered(
+            &db.pool,
+            SourceId::Bea,
+            &ids.iter().map(|id| metadata(id)).collect::<Vec<_>>(),
+        )
+        .await
+        .unwrap();
+        // A history may exist without a metadata row; a duplicated id in both stores is one
+        // membership entry. Neither case may lose a user's retained history on first rollout.
+        for id in [
+            "bea_regional/SAGDP2N.1.06000",
+            "bea_regional/SAGDP2N.2.00000",
+        ] {
+            persist::persist_series(
+                &db.pool,
+                SourceId::Bea,
+                id,
+                &FetchedSeries {
+                    metadata: Some(NewSeriesMetadataLite {
+                        title: "Stored history".into(),
+                        frequency: Some("Annual".into()),
+                        ..Default::default()
+                    }),
+                    points: Vec::new(),
+                    dataset: SeriesKey::parse(id).unwrap().dataset(),
+                    validators: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let config = "max_tables=8\nmax_series=3\nexclude=['SAGDP2EXCLUDED']\n[[rule]]\ndataset='Regional'\nprefix='SAGDP2'\ntitle_contains='GDP'\nfrequencies=['A']\n[[rule]]\ndataset='NIPA'\nprefix='T10105'\ntitle_contains='Gross Domestic Product'\nfrequencies=['Q']";
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let adapter = BeaAdapter::default().with_selection(BeaSelection::parse(config).unwrap());
+        let members = adapter.catalog_scope_members(&ctx).await.unwrap();
+        assert_eq!(
+            members,
+            [
+                "bea_nipa/T10105.1.Q",
+                "bea_regional/SAGDP2N.1.06000",
+                "bea_regional/SAGDP2N.2.00000"
+            ]
+        );
+        // The same rules are still bounded when enrolling pre-existing histories.
+        let adapter = BeaAdapter::default().with_selection(
+            BeaSelection::parse(&config.replace("max_series=3", "max_series=2")).unwrap(),
+        );
+        assert!(adapter
+            .catalog_scope_members(&ctx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("volume guard"));
         db.drop().await;
     }
 

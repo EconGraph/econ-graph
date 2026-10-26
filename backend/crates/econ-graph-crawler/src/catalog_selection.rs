@@ -145,6 +145,28 @@ impl BeaSelection {
             .collect())
     }
 
+    /// Whether an already-stored canonical series belongs to these rules. Retained titles
+    /// may positively establish a title predicate, but cannot invent current membership.
+    pub fn includes_stored_series(
+        &self,
+        dataset: BeaDataset,
+        table: &str,
+        frequency: Frequency,
+        retained_title: Option<&str>,
+    ) -> bool {
+        !self.exclude.iter().any(|excluded| excluded == table)
+            && self.rule.iter().any(|rule| {
+                rule.dataset == dataset.api_name()
+                    && table.starts_with(&rule.prefix)
+                    && rule.frequencies.iter().any(|f| f == frequency.code())
+                    && rule.title_contains.as_ref().is_none_or(|needle| {
+                        retained_title.is_some_and(|title| {
+                            title.to_lowercase().contains(&needle.to_lowercase())
+                        })
+                    })
+            })
+    }
+
     pub fn check_series_count(&self, count: usize) -> Result<(), CrawlError> {
         if count > self.max_series {
             Err(volume_error("series", count, self.max_series))
@@ -238,6 +260,55 @@ mod tests {
         r.rule[0].prefix.push('N');
         assert_ne!(fingerprint, r.fingerprint());
     }
+    #[test]
+    fn stored_scope_membership_requires_every_rule_predicate() {
+        let mut r = rules();
+        r.rule[0].title_contains = Some("GDP".into());
+        assert!(r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("Historic GDP by state")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            None
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("Personal income")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Nipa,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAINC1",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Quarterly,
+            Some("GDP")
+        ));
+        r.exclude.push("SAGDP2N".into());
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+    }
+
     #[test]
     fn invalid_config_and_missing_catalog_fail_closed() {
         for text in ["max_tables=0\nmax_series=1\nrule=[]", "max_tables=1\nmax_series=1\n[[rule]]\ndataset='Regional'\nprefix=''\nfrequencies=['A']"] {
