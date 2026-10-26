@@ -18,6 +18,8 @@
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/deploy/lib/kind-version.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-version.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp"
@@ -65,18 +67,22 @@ cat >"$WORK/bin/kind" <<EOF
 #!/bin/sh
 echo "kind \$*" >>"$OTHER"
 case "\$1 \$2" in
+    "version ") echo "kind ${KIND_VERSION} go1.26.0 linux/amd64" ;;
     "get clusters") echo econ-graph ;;
     "get kubeconfig") echo "apiVersion: v1" ;;
 esac
 exit 0
 EOF
 chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
+# Destructive kind commands require the pinned binary, even in a dry run.
+mkdir -p "$WORK/data/econgraph/bin"
+cp "$WORK/bin/kind" "$WORK/data/econgraph/bin/kind-${KIND_VERSION}"
 
 # teardown CMD-ARGS...: teardown.sh with the stubs first on PATH and no kube
 # config, stdin not a terminal. Prints its output; returns its exit status.
 teardown() {
     env -u KUBECONFIG -u KUBECTL -u CLUSTER_ROLE_CONTEXT -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER \
-        HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp" \
+        HOME="$WORK/home" XDG_DATA_HOME="$WORK/data" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp" \
         ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
         "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
 }
