@@ -95,22 +95,28 @@ removed, and the `latest` link keeps pointing at the previous good one.
 ### Which app database
 
 `backup.sh` decides whether there is a separate app database to dump from
-the same URLs the backend uses: `app-database-url` and `data-database-url`
-in the Secret `econ-graph-secrets` (both read with `optional: true`). It
-reads only their host and database name (the host cut to its first DNS
-label, `postgres-service` read as `data-postgres-service`), and never prints
-either URL.
+the URL the backend uses for it: `app-database-url` in the Secret
+`econ-graph-secrets` (read with `optional: true`). It compares that URL's
+host, port and database name with the database it dumps as `econ_graph`
+(`PGHOST`, `PGPORT`, `PGDATABASE`: `data-postgres-service:5432/econ_graph`)
+and with the app database (`APP_PGHOST`, `APP_PGPORT`, `APP_PGDATABASE`:
+`app-postgres-service:5432/econ_graph_app`), and never prints the URL. Hosts
+are compared in lower case, without this namespace's Service suffix
+(`.econ-graph`, `.econ-graph.svc`, `.econ-graph.svc.cluster.local`), with
+`postgres-service` read as `data-postgres-service`; an IP literal is
+compared whole. A URL with several hosts, without a database, or with
+`host`, `hostaddr`, `port`, `dbname` or `service` in its options can't be
+read this way.
 
-| `app-database-url` names | What the run does |
-|--------------------------|-------------------|
-| the data database: the same host and database as `data-database-url` (`APP_DATABASE=shared`) | skips the app dump with one log line; the app tables are in the `econ_graph` dump |
-| `app-postgres-service/econ_graph_app` (`APP_DATABASE=separate`) | dumps `econ_graph_app` with the checks above; a missing password, an unreachable server or a database without tables fails it |
-| nothing (Secret or key missing), or some other database | skips the app dump with one log line |
+| `app-database-url` | What the run does |
+|--------------------|-------------------|
+| names the database dumped as `econ_graph` (`APP_DATABASE=shared`) | skips the app dump with one log line; the app tables are in the `econ_graph` dump |
+| names `app-postgres-service:5432/econ_graph_app` (`APP_DATABASE=separate`) | dumps `econ_graph_app` with the checks above; a missing password, an unreachable server or a database without tables fails it |
+| names any other database (another host or IP, the same host with another database), or can't be read | fails the app dump: the database the backend keeps its users in would otherwise go unbacked |
+| is missing (Secret or key missing) | skips the app dump with one log line, or fails it with `APP_REQUIRED=true` |
 
 `APP_REQUIRED` is `false` in the manifest. Set it to `true` on a cluster that
-is meant to have a separate app database: every skip in the table then
-fails the run, so a cluster that drifted back to `shared`, or lost
-`app-database-url`, is noticed.
+must have `app-database-url`, so that losing it is noticed:
 
 ```sh
 kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
@@ -184,9 +190,9 @@ dumps' timestamps.
 
 The `econ_graph` dump and restore read `postgres-password` from the same
 `econ-graph-postgres` Secret as the `postgresql` StatefulSet. The CronJob
-also reads `app-database-url` and `data-database-url` from
-`econ-graph-secrets`, which hold `econgraph`'s passwords; it uses only the
-host and database name from them and never prints them. The
+also reads `app-database-url` from `econ-graph-secrets`, which holds the
+app role's password; it uses only the host, port and database name from it
+and never prints it. The
 `econ_graph_app` dump connects as `postgres` with `postgres-password` from
 `econ-graph-app-postgres`, the Secret of the `app-postgres` StatefulSet. The
 Keycloak dump connects as `keycloak` with `db-password` from
@@ -346,15 +352,20 @@ are written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in its step 3 above) and sync
 without the `latest` links; that the app dump, restored as in
 [econ_graph_app](#econ_graph_app) step 3, leaves `econgraph` owning its
-tables and able to write them; that `restore.sh`, as the restore Job runs it,
+tables and able to write them, with the source's schema; that `restore.sh`, as the restore Job runs it,
 puts `econ_graph` back with `econgraph` still owning and able to write its
-tables and the superuser's extensions untouched, refuses a database lacking
-one of the dump's extensions, and refuses an app or Keycloak dump; that the
-app database is dumped when `app-database-url` names
-`app-postgres-service/econ_graph_app`, and skipped with one log line, the run
-succeeding, when it names the data database (also as `postgres-service` with
-a full DNS name and options), is missing or names another database, unless
-`APP_REQUIRED=true`; that a failure of any dump (server down,
+tables, the schema (tables, indexes, constraints, views, functions,
+extensions) equal to the source's and the superuser's extensions untouched, refuses a database lacking
+one of the dump's extensions, and refuses an app or Keycloak dump; that `backup.sh` reads
+each kind of `app-database-url` as intended (case, Service suffixes, IP
+literals, options, unreadable URLs); that the app database is dumped when
+`app-database-url` names `app-postgres-service:5432/econ_graph_app` (also in
+upper case with the full Service name and options), skipped with one log
+line, the run succeeding, when it names the database dumped as `econ_graph`,
+and failed when it names any other database (another host, the same host
+with another database, an IP, a host in the options) or can't be read,
+whatever `APP_REQUIRED` says; that a missing `app-database-url` is skipped,
+or failed with `APP_REQUIRED=true`; that a failure of any dump (server down,
 wrong password, no tables, a table locked past the lock wait) keeps and
 syncs the others and fails the Job; that a missing app password in separate mode fails the run; that a missing
 Keycloak password is a failure with `KEYCLOAK_REQUIRED=true` and a skip with

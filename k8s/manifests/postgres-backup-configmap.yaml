@@ -14,20 +14,21 @@ data:
     # econ_graph_app (APP_PG* env) and Keycloak's database (KEYCLOAK_PG* env)
     # to ${BACKUP_DIR} as <name>-<UTC stamp>.dump, with one stamp per run.
     #
-    # Whether there is a separate app database to dump comes from the URLs the
-    # backend uses (APP_DATABASE_URL and DATA_DATABASE_URL, from the Secret
-    # econ-graph-secrets); only their host and database name are read, and
-    # neither is ever printed:
-    #   - the app URL names the same host and database as the data URL
-    #     (APP_DATABASE=shared): the app tables are in the econ_graph dump, and
-    #     the app database is skipped with one log line;
-    #   - it names ${APP_PGHOST}/${APP_PGDATABASE} (a separate app database):
-    #     the app database is dumped like the others, and a missing password or
-    #     a failed dump fails the run;
-    #   - there is no app URL, or it names some other database: skipped with
-    #     one log line.
-    # APP_REQUIRED=true turns every skip into a failure: set it once a separate
-    # app database is expected, so that losing it is noticed.
+    # Whether there is a separate app database to dump comes from the URL the
+    # backend uses for it (APP_DATABASE_URL, from app-database-url in the
+    # Secret econ-graph-secrets). Only its host, port and database name are
+    # read (see db_target), and it is never printed:
+    #   - it names the database dumped as econ_graph (PGHOST, PGPORT,
+    #     PGDATABASE; APP_DATABASE=shared): the app tables are in the
+    #     econ_graph dump, and the separate app dump is skipped with one log
+    #     line;
+    #   - it names ${APP_PGHOST}:${APP_PGPORT}/${APP_PGDATABASE} (a separate
+    #     app database): the app database is dumped like the others, and a
+    #     missing password or a failed dump fails the run;
+    #   - it names anything else, or can't be read: a failed dump, since the
+    #     database the backend keeps its users in would go unbacked;
+    #   - there is none: skipped with one log line, unless APP_REQUIRED=true,
+    #     which makes that a failed dump.
     # Keycloak is skipped when KEYCLOAK_PGPASSWORD is unset or empty, unless
     # KEYCLOAK_REQUIRED=true, which makes that a failed dump.
     #
@@ -87,23 +88,65 @@ data:
       echo "[${name}] Backup OK: ${tables} tables, $(du -h "${dest}" | cut -f1) in ${dest}"
     }
 
-    # db_target URL: "host/dbname" of a postgresql://user:password@host:port/dbname?options
-    # URL, with the host cut to its first label (app-postgres-service.econ-graph.svc
-    # is app-postgres-service) and the data database's alias postgres-service
-    # read as data-postgres-service. Nothing else of the URL is kept.
+    # db_target URL: prints "host:port/dbname" for a
+    # postgresql://[user[:password]@]host[:port]/dbname[?options] URL, and
+    # nothing for a URL it can't read that way (another scheme, no database,
+    # several hosts, a host, port or database given in the options instead).
+    # The host is lower-cased and loses only this namespace's Service suffix
+    # (.econ-graph, .econ-graph.svc, .econ-graph.svc.cluster.local); an IP
+    # literal is kept whole, an IPv6 one in its brackets. The data database's
+    # alias postgres-service reads as data-postgres-service, and a missing
+    # port as 5432. Nothing else of the URL is kept, and nothing is printed
+    # but the result.
     db_target() {
-      rest="${1#*://}"
-      rest="${rest##*@}"
-      host="${rest%%/*}"
-      host="${host%%:*}"
-      host="${host%%.*}"
-      case "${rest}" in
-        */*) db="${rest#*/}" ;;
-        *) db="" ;;
+      case "$1" in
+        postgresql://*|postgres://*) ;;
+        *) return 0 ;;
       esac
-      db="${db%%\?*}"
-      [ "${host}" = "postgres-service" ] && host="data-postgres-service"
-      printf '%s/%s\n' "${host}" "${db}"
+      rest="${1#*://}"
+      query=""
+      case "${rest}" in
+        *\?*) query="${rest#*\?}"; rest="${rest%%\?*}" ;;
+      esac
+      case "&${query}" in
+        *"&host="*|*"&hostaddr="*|*"&port="*|*"&dbname="*|*"&service="*) return 0 ;;
+      esac
+      case "${rest}" in
+        */*) ;;
+        *) return 0 ;;
+      esac
+      # The path is cut at the first '/' after the authority; any '@' left is
+      # the userinfo's (create-secrets.sh percent-encodes the password).
+      authority="${rest%%/*}"
+      db="${rest#*/}"
+      hostport="${authority##*@}"
+      case "${hostport}" in
+        \[*\]) host="${hostport}"; port="" ;;
+        \[*\]:*) host="${hostport%%\]*}]"; port="${hostport##*\]:}" ;;
+        *\[*|*\]*|*,*) return 0 ;;
+        *:*) host="${hostport%%:*}"; port="${hostport#*:}" ;;
+        *) host="${hostport}"; port="" ;;
+      esac
+      port="${port:-5432}"
+      case "${port}" in
+        *[!0-9]*) return 0 ;;
+      esac
+      case "${db}" in
+        ''|*/*|*#*) return 0 ;;
+      esac
+      host="$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')"
+      for suffix in .econ-graph.svc.cluster.local .econ-graph.svc .econ-graph; do
+        case "${host}" in
+          *"${suffix}") host="${host%"${suffix}"}"; break ;;
+        esac
+      done
+      if [ "${host}" = "postgres-service" ]; then
+        host="data-postgres-service"
+      fi
+      if [ -z "${host}" ]; then
+        return 0
+      fi
+      printf '%s:%s/%s\n' "${host}" "${port}" "${db}"
     }
 
     FAILED=""
@@ -113,18 +156,16 @@ data:
     fi
 
     APP_HOST="${APP_PGHOST:-app-postgres-service}"
+    APP_PORT="${APP_PGPORT:-5432}"
     APP_DB="${APP_PGDATABASE:-econ_graph_app}"
     APP_MODE="none"
     if [ -n "${APP_DATABASE_URL:-}" ]; then
       app_target="$(db_target "${APP_DATABASE_URL}")"
-      if [ -n "${DATA_DATABASE_URL:-}" ]; then
-        data_target="$(db_target "${DATA_DATABASE_URL}")"
-      else
-        data_target="$(db_target "postgresql://${PGHOST}/${PGDATABASE}")"
-      fi
-      if [ "${app_target}" = "${data_target}" ]; then
+      if [ -z "${app_target}" ]; then
+        APP_MODE="other"
+      elif [ "${app_target}" = "$(db_target "postgresql://${PGHOST}:${PGPORT:-5432}/${PGDATABASE}")" ]; then
         APP_MODE="shared"
-      elif [ "${app_target}" = "$(db_target "postgresql://${APP_HOST}/${APP_DB}")" ]; then
+      elif [ "${app_target}" = "$(db_target "postgresql://${APP_HOST}:${APP_PORT}/${APP_DB}")" ]; then
         APP_MODE="separate"
       else
         APP_MODE="other"
@@ -140,7 +181,7 @@ data:
         # rest of the script.
         elif ! (
           export PGHOST="${APP_HOST}"
-          export PGPORT="${APP_PGPORT:-5432}"
+          export PGPORT="${APP_PORT}"
           export PGUSER="${APP_PGUSER:-postgres}"
           export PGDATABASE="${APP_DB}"
           export PGPASSWORD="${APP_PGPASSWORD}"
@@ -149,17 +190,19 @@ data:
           FAILED="${FAILED} econ_graph_app"
         fi
         ;;
+      shared)
+        echo "[econ_graph_app] app-database-url names the data database (APP_DATABASE=shared): the app tables are in the econ_graph dump; skipping the separate app dump"
+        ;;
+      other)
+        echo "[econ_graph_app] app-database-url names neither the data database (${PGHOST}:${PGPORT:-5432}/${PGDATABASE}) nor ${APP_HOST}:${APP_PORT}/${APP_DB}, or can't be read; the app database it names is not backed up" >&2
+        FAILED="${FAILED} econ_graph_app"
+        ;;
       *)
-        case "${APP_MODE}" in
-          shared) why="app-database-url names the data database (APP_DATABASE=shared): the app tables are in the econ_graph dump" ;;
-          other) why="app-database-url names neither the data database nor ${APP_HOST}/${APP_DB}" ;;
-          *) why="APP_DATABASE_URL is empty (Secret econ-graph-secrets or its key app-database-url is missing)" ;;
-        esac
         if [ "${APP_REQUIRED:-false}" = "true" ]; then
-          echo "[econ_graph_app] ${why}, but APP_REQUIRED=true expects a separate app database" >&2
+          echo "[econ_graph_app] APP_DATABASE_URL is empty (Secret econ-graph-secrets or its key app-database-url is missing), but APP_REQUIRED=true expects an app database" >&2
           FAILED="${FAILED} econ_graph_app"
         else
-          echo "[econ_graph_app] ${why}; skipping the separate app dump"
+          echo "[econ_graph_app] APP_DATABASE_URL is empty (Secret econ-graph-secrets or its key app-database-url is missing); skipping the separate app dump"
         fi
         ;;
     esac
@@ -301,7 +344,11 @@ data:
         fi
       done
       echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT} as role ${RESTORE_ROLE}"
-      printf '%s\n' "${TOC}" | grep -v ' EXTENSION ' |
+      # TOC entry lines read "<id>; <catalog> <oid> <TYPE> <schema> <name> <owner>";
+      # an extension's comment is "COMMENT - EXTENSION <name>". Only those
+      # two kinds of entry are left out, by their type column.
+      printf '%s\n' "${TOC}" |
+        awk '!($4 == "EXTENSION" || ($4 == "COMMENT" && $6 == "EXTENSION"))' |
         pg_restore --clean --if-exists --no-owner --no-privileges \
           --role="${RESTORE_ROLE}" --use-list=/dev/stdin \
           --single-transaction --exit-on-error \

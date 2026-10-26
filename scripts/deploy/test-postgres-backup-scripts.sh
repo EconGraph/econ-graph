@@ -24,13 +24,18 @@
 #   - when any database's dump fails (server down, wrong password, no tables)
 #     the others are still written and synced, and sync.sh fails the Job;
 #     without BACKUP_STATUS_FILE, backup.sh itself exits 1;
-#   - the app database is dumped only when app-database-url names
-#     app-postgres-service/econ_graph_app (APP_DATABASE=separate); when it
-#     names the data database (APP_DATABASE=shared, also through the alias
-#     postgres-service and a full DNS name), is missing, or names another
-#     database, it is skipped with one log line and the run succeeds, unless
-#     APP_REQUIRED=true, which fails it; in separate mode a missing password
-#     or an unreachable server fails it;
+#   - backup.sh's db_target reads each kind of app-database-url as intended
+#     (case, Service suffixes, IP literals, options, unreadable URLs);
+#   - the app database is dumped when app-database-url names
+#     app-postgres-service:5432/econ_graph_app (APP_DATABASE=separate, also in
+#     upper case with the full Service name and options); when it names the
+#     database dumped as econ_graph (APP_DATABASE=shared, also through the
+#     alias postgres-service) it is skipped with one log line and the run
+#     succeeds; when it names any other database (another host, the same host
+#     with another database, an IP, a host in the options) or can't be read,
+#     the run fails, whatever APP_REQUIRED says; a missing app-database-url
+#     is skipped, or fails with APP_REQUIRED=true; in separate mode a missing
+#     password or an unreachable server fails it;
 #   - without the Keycloak password, Keycloak is a failed dump when
 #     KEYCLOAK_REQUIRED=true (the manifest's value) and skipped when it is
 #     false, with the others backed up either way;
@@ -152,6 +157,44 @@ first_fail = next((i for i, r in enumerate(rules) if r.get("action") == "FailJob
 sys.exit(0 if any(disruption(r) for r in rules[:first_fail]) else 1)
 PY
 
+# backup.sh's db_target, on its own in a POSIX sh: what it makes of each
+# app-database-url ("" is a URL it can't read, which fails the app dump).
+awk '/^db_target\(\) \{/,/^}/' "$tmp/scripts/backup.sh" >"$tmp/db_target.sh"
+check "db_target found in backup.sh" grep -q '^db_target() {' "$tmp/db_target.sh"
+db_target_of() { # db_target_of URL: db_target's output, under sh
+    sh -c '. "$1"; db_target "$2"' sh "$tmp/db_target.sh" "$1"
+}
+while IFS='|' read -r url want; do
+    [ -n "$url" ] || continue
+    got="$(db_target_of "$url")"
+    check "db_target ${url#*@} -> '${want}'" [ "$got" = "$want" ]
+done <<'CASES'
+postgresql://econgraph:p%40x%3Ay@app-postgres-service:5432/econ_graph_app|app-postgres-service:5432/econ_graph_app
+postgres://econgraph:pw@app-postgres-service/econ_graph_app|app-postgres-service:5432/econ_graph_app
+postgresql://econgraph:pw@APP-Postgres-Service.econ-graph.svc.cluster.local:5432/econ_graph_app?sslmode=disable|app-postgres-service:5432/econ_graph_app
+postgresql://econgraph:pw@app-postgres-service.econ-graph.svc/econ_graph_app|app-postgres-service:5432/econ_graph_app
+postgresql://econgraph:pw@app-postgres-service.econ-graph/econ_graph_app|app-postgres-service:5432/econ_graph_app
+postgresql://econgraph:pw@postgres-service:5432/econ_graph|data-postgres-service:5432/econ_graph
+postgresql://econgraph:pw@data-postgres-service:5432/econ_graph?application_name=a@b|data-postgres-service:5432/econ_graph
+postgresql://econgraph:pw@app-postgres-service:5432/other_db|app-postgres-service:5432/other_db
+postgresql://econgraph:pw@app-postgres-service:5433/econ_graph_app|app-postgres-service:5433/econ_graph_app
+postgresql://econgraph:pw@app-postgres-service.other-ns.svc/econ_graph_app|app-postgres-service.other-ns.svc:5432/econ_graph_app
+postgresql://econgraph:pw@10.96.0.5:5432/econ_graph_app|10.96.0.5:5432/econ_graph_app
+postgresql://econgraph:pw@[FD00::5]:5432/econ_graph_app|[fd00::5]:5432/econ_graph_app
+postgresql://econgraph:pw@[fd00::5]/econ_graph_app|[fd00::5]:5432/econ_graph_app
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app?host=elsewhere|
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app?sslmode=require&hostaddr=10.0.0.1|
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app?dbname=other|
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app?port=6543|
+postgresql://econgraph:pw@a:5432,b:5432/econ_graph_app|
+postgresql://econgraph:pw@app-postgres-service:5432|
+postgresql://econgraph:pw@app-postgres-service:5432/|
+postgresql://econgraph:pw@app-postgres-service:x/econ_graph_app|
+mysql://econgraph:pw@app-postgres-service/econ_graph_app|
+CASES
+check "10.96.0.5 and 10.96.0.9 are different databases" \
+    [ "$(db_target_of postgresql://u:p@10.96.0.5/x)" != "$(db_target_of postgresql://u:p@10.96.0.9/x)" ]
+
 # The S3 mock wants path-style requests; the bucket host name wouldn't resolve.
 printf '[default]\ns3 =\n    addressing_style = path\n' >"$tmp/aws/config"
 
@@ -210,7 +253,10 @@ CREATE SCHEMA audit;
 CREATE TABLE audit.events (id serial PRIMARY KEY, note text);
 INSERT INTO economic_series (title) SELECT 'series ' || g FROM generate_series(1, 25) g;
 INSERT INTO data_points (series_id, value) SELECT 1 + g % 25, g * 1.5 FROM generate_series(1, 5000) g;
-INSERT INTO audit.events (note) VALUES ('a'), ('b'), ('c');"
+INSERT INTO audit.events (note) VALUES ('a'), ('b'), ('c');
+ALTER TABLE data_points ADD CONSTRAINT data_points_value_nonnegative CHECK (value >= 0);
+CREATE FUNCTION audit.note_upper(t text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT upper(t)';
+CREATE VIEW series_point_counts AS SELECT series_id, count(*) AS points FROM data_points GROUP BY series_id;"
 
 # As in the cluster: app-postgres-init.yaml creates the role econgraph and gives
 # it the public schema, and the backend's app migrations, run as econgraph,
@@ -245,6 +291,23 @@ counts() { psql_in "$1" "$2" "$3" "$COUNTS_SQL"; }
 
 counts "$ECON" postgres econ_graph >"$tmp/econ.counts"
 counts "$APP" postgres econ_graph_app >"$tmp/app.counts"
+
+# The schema without owners or grants: every table, index, constraint, view,
+# function and extension, in pg_dump's stable order. A restore that loses any
+# of them (say, an over-wide filter on the dump's TOC) differs from the source.
+# pg_dump's comments and its per-run \restrict key lines are left out.
+schema() { # schema CONTAINER USER DB
+    docker exec "$1" pg_dump -U "$2" -d "$3" --schema-only --no-owner --no-privileges |
+        grep -v -e '^--' -e '^\\restrict ' -e '^\\unrestrict ' -e '^$'
+}
+schema "$ECON" postgres econ_graph >"$tmp/econ.schema"
+schema "$APP" postgres econ_graph_app >"$tmp/app.schema"
+check "the source schema has the trigram index" \
+    grep -q 'CREATE INDEX economic_series_title_trgm' "$tmp/econ.schema"
+check "  the CHECK constraint" grep -q 'data_points_value_nonnegative' "$tmp/econ.schema"
+check "  the function" grep -q 'CREATE FUNCTION audit.note_upper' "$tmp/econ.schema"
+check "  the view" grep -q 'CREATE VIEW public.series_point_counts' "$tmp/econ.schema"
+check "  and the extensions" grep -q 'CREATE EXTENSION IF NOT EXISTS pg_trgm' "$tmp/econ.schema"
 counts "$KC" keycloak keycloak >"$tmp/kc.counts"
 
 # --- running the CronJob's containers -----------------------------------------
@@ -328,6 +391,7 @@ restore_app_as_documented() { # restore_app_as_documented DUMP SCRATCH_DB
             --no-owner --no-privileges --exit-on-error --single-transaction \
             <"$tmp/backups/$1" &&
         diff <(counts "$APP" postgres "$2") "$tmp/app.counts" &&
+        diff <(schema "$APP" postgres "$2") "$tmp/app.schema" &&
         [ "$(psql_in "$APP" postgres "$2" "SELECT count(*) FROM pg_tables
               WHERE schemaname = 'public' AND tableowner <> 'econgraph'")" = 0 ] &&
         psql_in "$APP" econgraph "$2" "INSERT INTO users (email) VALUES ('new@example.com');
@@ -402,6 +466,20 @@ check "  econgraph still owns every table and schema" \
 check "  and can write to them" psql_in "$ECON" econgraph econ_graph \
     "INSERT INTO economic_series (title) VALUES ('new'); INSERT INTO audit.events (note) VALUES ('new');
      DELETE FROM audit.events WHERE note = 'new'; DELETE FROM economic_series WHERE title = 'new';"
+check "  and the schema is the source's (tables, indexes, constraints, views, functions, extensions)" \
+    diff <(schema "$ECON" postgres econ_graph) "$tmp/econ.schema"
+# The schema comparison itself catches a lost index: a restore from a TOC
+# without the INDEX entries differs.
+psql_in "$ECON" postgres postgres "DROP DATABASE IF EXISTS econ_noindex"
+psql_in "$ECON" postgres postgres "CREATE DATABASE econ_noindex"
+docker exec -i "$ECON" sh -c 'cat >/tmp/econ.dump && pg_restore --list /tmp/econ.dump |
+    awk "\$4 != \"INDEX\"" >/tmp/econ.list &&
+    pg_restore -U postgres -d econ_noindex --no-owner --no-privileges --exit-on-error \
+        --single-transaction --use-list=/tmp/econ.list /tmp/econ.dump' <"$tmp/backups/$econ_dump"
+differs() { ! diff -q "$1" "$2" >/dev/null; }
+check "  (and that comparison fails for a restore that lost an index)" \
+    differs <(schema "$ECON" postgres econ_noindex) "$tmp/econ.schema"
+psql_in "$ECON" postgres postgres "DROP DATABASE econ_noindex"
 check "  and the superuser's extensions are untouched" \
     [ "$(psql_in "$ECON" postgres econ_graph "SELECT string_agg(extname || ':' || extowner::regrole, ' ' ORDER BY extname)
           FROM pg_extension WHERE extname IN ('pg_trgm', 'uuid-ossp')")" = "pg_trgm:postgres uuid-ossp:postgres" ]
@@ -565,17 +643,17 @@ app_lines() { grep -c '^\[econ_graph_app\]' "$tmp/out" || true; }
 
 check "the manifest sets APP_REQUIRED=false" grep -qx 'APP_REQUIRED=false' "$tmp/dump.env"
 check "the manifest reads app-database-url" grep -qx "APP_DATABASE_URL=$APP_URL" "$tmp/dump.env"
-check "the manifest reads data-database-url" grep -qx "DATA_DATABASE_URL=$DATA_URL" "$tmp/dump.env"
+check "the data side is the dumped target (PG* env), not a second URL" \
+    bash -c "! grep -q '^DATA_DATABASE_URL=' '$tmp/dump.env'"
 
-echo "# APP_DATABASE=shared: app-database-url names the data database"
-for shared_url in "$SHARED_APP_URL" \
-    "postgresql://econgraph:pw%40x@postgres-service.econ-graph.svc.cluster.local:5432/econ_graph?sslmode=disable"; do
+echo "# APP_DATABASE=shared: app-database-url names the database dumped as econ_graph"
+while read -r shared_url required; do
     sleep 1
     new_status
     before_econ="$(newest econ_graph)"
     before_kc="$(newest keycloak)"
-    rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$shared_url")"
-    check "backup.sh exits 0" [ "$rc" = 0 ]
+    rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$shared_url" -e APP_REQUIRED="$required")"
+    check "backup.sh exits 0 (APP_REQUIRED=$required)" [ "$rc" = 0 ]
     check "nothing recorded as failed" [ "$(status)" = "" ]
     check "one log line for the app database" [ "$(app_lines)" = 1 ]
     check "  saying it is in the econ_graph dump" \
@@ -583,18 +661,22 @@ for shared_url in "$SHARED_APP_URL" \
     check "no app dump" [ "$(newest econ_graph_app)" = "$before_app" ]
     check "a new econ_graph dump is kept" [ "$(newest econ_graph)" != "$before_econ" ]
     check "a new keycloak dump is kept" [ "$(newest keycloak)" != "$before_kc" ]
-done
+done <<SHARED
+$SHARED_APP_URL false
+postgresql://econgraph:pw%40x@Postgres-Service.econ-graph.svc.cluster.local:5432/econ_graph?sslmode=disable&application_name=a@b false
+$SHARED_APP_URL true
+SHARED
 rc="$(run_sync run4c)"
 check "sync.sh exits 0" [ "$rc" = 0 ]
 check "no dump deleted" nothing_deleted
 
+echo "# APP_DATABASE=separate, named in upper case with the full Service name and options"
 sleep 1
 new_status
-rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$SHARED_APP_URL" -e APP_REQUIRED=true)"
-check "shared with APP_REQUIRED=true: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
-check "  and says a separate app database is expected" \
-    grep -q "APP_REQUIRED=true expects a separate app database" "$tmp/out"
-check "no dump deleted" nothing_deleted
+rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="postgresql://econgraph:pw%40x@APP-Postgres-Service.econ-graph.svc.cluster.local:5432/econ_graph_app?sslmode=disable&application_name=a@b")"
+check "backup.sh exits 0, nothing failed" [ "$rc:$(status)" = "0:" ]
+check "  and a new app dump is kept" [ "$(newest econ_graph_app)" != "$before_app" ]
+before_app="$(newest econ_graph_app)"
 
 echo "# no app-database-url (Secret econ-graph-secrets or its key missing)"
 grep -v '^APP_DATABASE_URL=' "$tmp/dump.env" >"$tmp/dump-no-url.env"
@@ -609,13 +691,32 @@ new_status
 rc="$(backup_with "$tmp/dump-no-url.env" -e APP_REQUIRED=true)"
 check "  with APP_REQUIRED=true: econ_graph_app recorded as failed" [ "$(status)" = "econ_graph_app" ]
 
-echo "# app-database-url names some other database"
-sleep 1
-new_status
-rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="postgresql://u:p@elsewhere:5432/other")"
-check "backup.sh exits 0, nothing failed" [ "$rc:$(status)" = "0:" ]
-check "  skipped with one log line" grep -q "names neither the data database nor app-postgres-service/econ_graph_app; skipping" "$tmp/out"
-check "no app dump" [ "$(newest econ_graph_app)" = "$before_app" ]
+echo "# app-database-url names some other database, or can't be read: always a failure"
+while read -r other_url; do
+    sleep 1
+    new_status
+    before_econ="$(newest econ_graph)"
+    before_kc="$(newest keycloak)"
+    rc="$(backup_with "$tmp/dump.env" -e APP_DATABASE_URL="$other_url")"
+    check "${other_url#*@}: econ_graph_app recorded as failed (APP_REQUIRED=false)" \
+        [ "$rc:$(status)" = "0:econ_graph_app" ]
+    check "  saying the database it names is not backed up" \
+        grep -q "^\[econ_graph_app\] app-database-url names neither the data database (data-postgres-service:5432/econ_graph) nor app-postgres-service:5432/econ_graph_app, or can't be read; the app database it names is not backed up" "$tmp/out"
+    check "  no app dump" [ "$(newest econ_graph_app)" = "$before_app" ]
+    check "  new econ_graph and keycloak dumps are kept" \
+        [ "$(newest econ_graph)/$(newest keycloak)" != "$before_econ/$before_kc" ]
+done <<'OTHER'
+postgresql://u:p@elsewhere:5432/other
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app_old
+postgresql://econgraph:pw@data-postgres-service:5432/econ_graph_app
+postgresql://econgraph:pw@app-postgres-service:5432/econ_graph_app?host=elsewhere
+postgresql://econgraph:pw@10.96.0.5:5432/econ_graph_app
+postgresql://econgraph:pw@[fd00::5]:5432/econ_graph_app
+not a URL at all
+OTHER
+rc="$(run_sync run4cx)"
+check "sync.sh fails the Job" [ "$rc" = 1 ]
+check "no dump deleted" nothing_deleted
 
 echo "# APP_DATABASE=separate without the app database's password"
 # Without the Secret, the optional secretKeyRef leaves the variable unset.

@@ -20,9 +20,9 @@
 # The app database is dumped only when the backend's app-database-url names it
 # (APP_DATABASE=separate). With APP_DATABASE=shared, app-database-url names the
 # data database, the app tables are in the econ_graph dump, and backup.sh logs
-# that and skips the separate app dump. APP_REQUIRED=true makes that skip (or
-# a missing app-database-url) a failure, for a cluster that is expected to have
-# a separate app database:
+# that and skips the separate app dump. An app-database-url that names any other
+# database, or can't be read, fails the run. A missing one is skipped, unless
+# APP_REQUIRED=true, which makes it a failure:
 #   kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
 #
 # KEYCLOAK_REQUIRED is true: a missing Secret econ-graph-keycloak (or key
@@ -111,22 +111,16 @@ spec:
             - name: PGDATABASE
               value: "econ_graph"
             # The app database (k8s/manifests/app-postgres.yaml), as its
-            # superuser, when app-database-url names it (see the top). The
-            # backend's two URLs say whether it does; backup.sh reads only
-            # their host and database name, and never prints them. All the
-            # Secrets are optional so that the pod still starts, and the other
-            # databases are still dumped, when one is missing.
+            # superuser, when app-database-url names it (see the top).
+            # backup.sh reads only its host, port and database name, and never
+            # prints it. All the Secrets are optional so that the pod still
+            # starts, and the other databases are still dumped, when one is
+            # missing.
             - name: APP_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: econ-graph-secrets
                   key: app-database-url
-                  optional: true
-            - name: DATA_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: econ-graph-secrets
-                  key: data-database-url
                   optional: true
             - name: APP_REQUIRED
               value: "false"
