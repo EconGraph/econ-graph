@@ -99,6 +99,11 @@ echo "📋 Applying Kubernetes manifests..."
 
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
+# The StorageClass and static PVs on the host btrfs subvolumes that both Postgres
+# StatefulSets claim (docs/deployment/HOST_STORAGE.md). It runs on the context
+# pinned above (exported CLUSTER_ROLE_CONTEXT), before create-secrets.sh: it stops
+# if a host data directory already holds a database whose Secret is missing.
+./scripts/deploy/apply-host-storage.sh
 render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
@@ -112,7 +117,9 @@ kubectl apply -f k8s/manifests/postgres.yaml
 
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
-kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+# rollout status, not `wait ... pod -l app=postgresql`: when the pod template
+# changed, the old pod may still be ready (terminating) and would satisfy a wait.
+kubectl -n econ-graph rollout status statefulset/postgresql --timeout=600s
 
 # Deploy PostgreSQL backups
 echo "🗄️  Deploying PostgreSQL backup CronJob..."

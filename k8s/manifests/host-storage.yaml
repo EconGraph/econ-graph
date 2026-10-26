@@ -1,0 +1,95 @@
+# Static storage for the production PostgreSQL databases, on host btrfs
+# subvolumes instead of dynamically provisioned local-path volumes.
+#
+# Host layout (scripts/host/setup-subvolumes.sh, with sudo; see
+# docs/deployment/HOST_STORAGE.md):
+#   /srv/econgraph/data-plane   subvolume @econgraph-data-plane
+#     pg/                       postgresql-0 (database econ_graph)
+#   /srv/econgraph/app-prod     subvolume @econgraph-app-prod
+#     keycloak-pg/              keycloak-postgres-0
+#   /srv/econgraph/snapshots    subvolume @econgraph-snapshots (read-only snapshots)
+#
+# The kind worker labelled econgraph.io/host-storage=true bind-mounts the first
+# two at the same paths (terraform/k8s/kind-config.yaml), so these hostPath
+# volumes reach the host directories and survive `kind delete cluster`.
+#
+# Safety properties:
+#   - persistentVolumeReclaimPolicy: Retain, and no provisioner, so deleting a
+#     PVC (or the namespace) never deletes data; the PV just goes Released.
+#     scripts/deploy/apply-host-storage.sh re-arms a Released PV on the next
+#     deploy so the StatefulSet's new PVC binds to the same directory.
+#   - hostPath type: Directory (not DirectoryOrCreate): if the bind mount is
+#     missing from the node, the pod fails to start instead of initialising an
+#     empty database inside the node container.
+#   - claimRef pre-binds each PV to exactly one StatefulSet PVC.
+#   - No script deletes these PVs or their directories (teardown.sh deliberately
+#     leaves them; don't add this file to its delete list).
+#
+# Capacity is informational: hostPath volumes aren't size-limited; the real
+# limit is the free space on the btrfs filesystem.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: econgraph-host
+  labels:
+    app: econ-graph
+    econgraph.io/protected: "true"
+provisioner: kubernetes.io/no-provisioner
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: econgraph-data-plane-pg
+  labels:
+    app: postgresql
+    econgraph.io/protected: "true"
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: econgraph-host
+  volumeMode: Filesystem
+  hostPath:
+    path: /srv/econgraph/data-plane/pg
+    type: Directory
+  claimRef:
+    namespace: econ-graph
+    name: postgresql-data-postgresql-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: econgraph.io/host-storage
+          operator: In
+          values: ["true"]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: econgraph-app-prod-keycloak-pg
+  labels:
+    app: keycloak-postgres
+    econgraph.io/protected: "true"
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: econgraph-host
+  volumeMode: Filesystem
+  hostPath:
+    path: /srv/econgraph/app-prod/keycloak-pg
+    type: Directory
+  claimRef:
+    namespace: econ-graph
+    name: keycloak-postgres-data-keycloak-postgres-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: econgraph.io/host-storage
+          operator: In
+          values: ["true"]
