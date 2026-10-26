@@ -170,6 +170,15 @@ namespace that owns a data database: one whose Secret `econ-graph-secrets` has t
 `data-database-url`. Without that key it skips the Job. `deploy.sh --dry-run` lists the Job with
 the rest of the deploy.
 
+A data migration that bounds its table locks (`lock_timeout`, `statement_timeout`) fails its
+run, changing nothing, when other transactions hold its tables. The Job gives it one more pod
+(`backoffLimit: 1`) and then fails, and `deploy.sh` stops before the backend and the
+crawler-worker are applied. `scripts/deploy/precheck-db-migration.sh`, run immediately before
+`deploy.sh`, checks the data database for such transactions and can stop the crawler-worker
+first; see
+[Deploying the migration](../technical/OBSERVATION_PRECISION_REFETCH.md#deploying-the-migration)
+for the observation-values migration, which does this.
+
 Besides `crawler migrate`, only `seed-fixtures` (which loads recorded fixtures into a test
 database) and tests apply the data set.
 

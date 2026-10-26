@@ -791,6 +791,49 @@ mod tests {
         assert_eq!(DATA_BASELINE_VERSION, "20261021000100");
     }
 
+    /// Both sets record into one `__diesel_schema_migrations` table when one database holds
+    /// both, so a version in both sets would be one migration to Diesel and one of them would
+    /// never run (docs/development/MIGRATIONS.md, rule 4). Only `00000000000000` is in both, and
+    /// each release/v4.0 migration listed below is in exactly the set its list names.
+    #[test]
+    fn embedded_versions_are_unique_across_both_sets() {
+        let app = super::embedded_versions(MigrationSet::App).expect("app versions");
+        let data = super::embedded_versions(MigrationSet::Data).expect("data versions");
+        for (set, versions) in [("app", &app), ("data", &data)] {
+            let mut unique = versions.clone();
+            unique.sort();
+            unique.dedup();
+            assert_eq!(
+                unique.len(),
+                versions.len(),
+                "duplicate {set} version: {versions:?}"
+            );
+        }
+        let shared: Vec<&String> = app.iter().filter(|v| data.contains(v)).collect();
+        assert_eq!(shared, ["00000000000000"]);
+
+        for (version, _) in RELEASE_V4_0_APP_MIGRATIONS {
+            assert!(
+                app.iter().any(|v| v == version),
+                "{version} not in the app set"
+            );
+            assert!(
+                !data.iter().any(|v| v == version),
+                "{version} in the data set"
+            );
+        }
+        for (version, _) in RELEASE_V4_0_DATA_MIGRATIONS {
+            assert!(
+                data.iter().any(|v| v == version),
+                "{version} not in the data set"
+            );
+            assert!(
+                !app.iter().any(|v| v == version),
+                "{version} in the app set"
+            );
+        }
+    }
+
     use crate::test_utils::ScratchDatabase;
 
     #[derive(diesel::QueryableByName)]
@@ -1046,9 +1089,11 @@ mod tests {
         )
     }
 
-    /// App migrations that release/v4.0 ships after its single baseline, as (version, up.sql).
-    /// A database migrated on release/v4.0 has these applied and recorded. Each forward-port of
-    /// such a migration adds one entry here.
+    /// Migrations that release/v4.0 ships after its single baseline, as (version, up.sql), one
+    /// list per set. release/v4.0 keeps every migration in one directory; these are the same
+    /// migrations, with the same versions and byte-identical up.sql, in the set that owns their
+    /// tables. A database migrated on release/v4.0 has all of them applied and recorded. Each
+    /// forward-port of such a migration adds one entry to the list for its set.
     const RELEASE_V4_0_APP_MIGRATIONS: &[(&str, &str)] = &[(
         "20261024000100",
         include_str!(
@@ -1056,19 +1101,38 @@ mod tests {
         ),
     )];
 
+    /// See [`RELEASE_V4_0_APP_MIGRATIONS`].
+    const RELEASE_V4_0_DATA_MIGRATIONS: &[(&str, &str)] = &[(
+        "20261025000100",
+        include_str!(
+            "../../../migrations/data/2026-10-25-000100_observation_values_unconstrained_numeric/up.sql"
+        ),
+    )];
+
+    /// The release/v4.0 data migration that widens the observation values (ECO-501).
+    const OBSERVATION_NUMERIC_VERSION: &str = "20261025000100";
+
     /// Rebuilds a database created by the single v4.0.0 baseline, before the split, from its two
-    /// halves: the data baseline through Diesel, and the app baseline's SQL run directly so its
-    /// version is not recorded. It also adds the three foreign keys the split dropped, under
-    /// their original names. scripts/compare_migrations.sh checks that the halves are the single
-    /// baseline less those keys.
+    /// halves: the data set through its baseline (no later data migration) through Diesel, and
+    /// the app baseline's SQL run directly so its version is not recorded. It also adds the
+    /// three foreign keys the split dropped, under their original names.
+    /// scripts/compare_migrations.sh checks that the halves are the single baseline less those
+    /// keys.
     async fn single_baseline_database(name: &str) -> (ScratchDatabase, diesel::PgConnection) {
         use diesel::connection::SimpleConnection;
+        use diesel_migrations::MigrationHarness;
 
         let db = ScratchDatabase::create(name);
-        run_migration_sets(&db.url, &[MigrationSet::Data])
-            .await
-            .expect("the data set should apply");
         let mut conn = db.connect();
+        let pending = conn
+            .pending_migrations(MigrationSet::Data.migrations())
+            .expect("should read the data migrations");
+        for migration in pending {
+            if migration.name().version().to_string().as_str() <= DATA_BASELINE_VERSION {
+                conn.run_migration(&migration)
+                    .expect("the data set through its baseline should apply");
+            }
+        }
         conn.batch_execute(include_str!(
             "../../../migrations/app/2026-10-21-000200_v4_0_app_baseline/up.sql"
         ))
@@ -1095,18 +1159,39 @@ mod tests {
         (db, conn)
     }
 
-    /// Applies and records `RELEASE_V4_0_APP_MIGRATIONS`, as release/v4.0 has.
-    fn apply_release_v4_0_app_migrations(conn: &mut diesel::PgConnection) {
+    /// Applies and records `RELEASE_V4_0_APP_MIGRATIONS` and, unless `with_data` is false,
+    /// `RELEASE_V4_0_DATA_MIGRATIONS`, merged in version order, as release/v4.0 does: each in
+    /// its own transaction, as Diesel runs them. `with_data: false` is a release candidate from
+    /// before the data migrations.
+    fn apply_release_v4_0_migrations(conn: &mut diesel::PgConnection, with_data: bool) {
         use diesel::connection::SimpleConnection;
+        use diesel::Connection;
 
-        for (version, up) in RELEASE_V4_0_APP_MIGRATIONS {
-            conn.batch_execute(up)
-                .unwrap_or_else(|e| panic!("release migration {version} should run: {e}"));
-            conn.batch_execute(&format!(
-                "INSERT INTO __diesel_schema_migrations (version) VALUES ('{version}')"
-            ))
-            .unwrap_or_else(|e| panic!("release migration {version} should be recorded: {e}"));
+        let mut migrations: Vec<(&str, &str)> = RELEASE_V4_0_APP_MIGRATIONS.to_vec();
+        if with_data {
+            migrations.extend_from_slice(RELEASE_V4_0_DATA_MIGRATIONS);
         }
+        migrations.sort_by_key(|(version, _)| *version);
+        for (version, up) in migrations {
+            conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                conn.batch_execute(up)?;
+                conn.batch_execute(&format!(
+                    "INSERT INTO __diesel_schema_migrations (version) VALUES ('{version}')"
+                ))
+            })
+            .unwrap_or_else(|e| panic!("release migration {version} should apply: {e}"));
+        }
+    }
+
+    /// The app versions this binary embeds that a release/v4.0 database lacks, oldest first:
+    /// what the app set applies to it (the app baseline is recorded without running, so it is
+    /// not among them).
+    fn app_versions_missing_from_release_v4_0() -> Vec<String> {
+        embedded_versions(&[MigrationSet::App])
+            .into_iter()
+            .filter(|v| v.as_str() > APP_BASELINE_VERSION)
+            .filter(|v| !RELEASE_V4_0_APP_MIGRATIONS.iter().any(|(r, _)| r == v))
+            .collect()
     }
 
     /// Bring a reference schema forward by running only pending app incrementals.
@@ -1130,15 +1215,24 @@ mod tests {
         );
     }
 
-    /// A single-baseline database without the later app migrations (a release candidate from
-    /// before them): the app baseline is recorded, not run, and the later app migrations run.
-    /// The schema ends up exactly as the single baseline plus those migrations.
+    /// Runs the data set's pending migrations on a reference schema, through Diesel.
+    fn apply_pending_data_migrations(conn: &mut diesel::PgConnection) {
+        use diesel_migrations::MigrationHarness;
+
+        conn.run_pending_migrations(MigrationSet::Data.migrations())
+            .expect("pending data migrations should run");
+    }
+
+    /// A single-baseline database without the later migrations (a release candidate from
+    /// before them): the app baseline is recorded, not run, and the later app and data
+    /// migrations run. The schema ends up exactly as the single baseline plus those migrations.
     #[tokio::test]
     #[serial_test::serial]
     async fn run_migrations_records_the_app_baseline_and_applies_later_app_migrations() {
         let (db, mut conn) = single_baseline_database("single_baseline_rc").await;
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_rc_reference").await;
+        apply_pending_data_migrations(&mut reference_conn);
         apply_pending_app_incrementals(&mut reference_conn);
         let before = schema_signature(&mut conn);
         let expected_schema = schema_signature(&mut reference_conn);
@@ -1173,10 +1267,10 @@ mod tests {
     #[serial_test::serial]
     async fn run_migrations_records_the_app_baseline_on_a_single_baseline_database() {
         let (db, mut conn) = single_baseline_database("single_baseline").await;
-        apply_release_v4_0_app_migrations(&mut conn);
+        apply_release_v4_0_migrations(&mut conn, true);
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_reference").await;
-        apply_release_v4_0_app_migrations(&mut reference_conn);
+        apply_release_v4_0_migrations(&mut reference_conn, true);
         apply_pending_app_incrementals(&mut reference_conn);
         let expected_schema = schema_signature(&mut reference_conn);
 
@@ -1198,6 +1292,170 @@ mod tests {
             .await
             .expect("a second run should succeed");
         assert_eq!(schema_signature(&mut conn), expected_schema);
+    }
+
+    /// A release/v4.0 database (the single baseline plus both release migrations, applied and
+    /// recorded), one set at a time as a deploy applies them: the data set has nothing pending
+    /// and applies nothing, since 20261025000100 is recorded under the same version; the app set
+    /// records the app baseline without running it and applies only the app migrations
+    /// release/v4.0 lacks, never a data migration. The schema matches a reference built from the
+    /// same release database by running only those app migrations.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_release_v4_0_database_has_no_data_migration_pending() {
+        let (db, mut conn) = single_baseline_database("release_v4_0").await;
+        apply_release_v4_0_migrations(&mut conn, true);
+        let (_reference, mut reference_conn) =
+            single_baseline_database("release_v4_0_reference").await;
+        apply_release_v4_0_migrations(&mut reference_conn, true);
+        apply_pending_app_incrementals(&mut reference_conn);
+        let expected_schema = schema_signature(&mut reference_conn);
+
+        assert_eq!(
+            pending_migration_versions(&db.url, MigrationSet::Data)
+                .await
+                .expect("should read the pending data migrations"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            run_migration_set(&db.url, MigrationSet::Data)
+                .await
+                .expect("the data set should be current"),
+            Vec::<String>::new()
+        );
+
+        let applied = run_migration_set(&db.url, MigrationSet::App)
+            .await
+            .expect("the app set should apply to a release/v4.0 database");
+        assert_eq!(applied, app_versions_missing_from_release_v4_0());
+        assert!(!applied.contains(&OBSERVATION_NUMERIC_VERSION.to_string()));
+        assert!(recorded_versions(&mut conn).contains(&APP_BASELINE_VERSION.to_string()));
+        assert_eq!(
+            recorded_versions(&mut conn),
+            embedded_versions(&[MigrationSet::Data, MigrationSet::App])
+        );
+        assert_eq!(schema_signature(&mut conn), expected_schema);
+    }
+
+    /// A release candidate from before ECO-501 (the single baseline plus the release app
+    /// migration only): the data set lists 20261025000100 as pending and applies exactly it;
+    /// the app set, applied first, never applies or records it. The schema ends up as the
+    /// release/v4.0 database's plus the app migrations release/v4.0 lacks.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_data_set_applies_the_observation_numeric_migration_to_an_older_release() {
+        let (db, mut conn) = single_baseline_database("pre_eco_501").await;
+        apply_release_v4_0_migrations(&mut conn, false);
+        let (_reference, mut reference_conn) =
+            single_baseline_database("pre_eco_501_reference").await;
+        apply_release_v4_0_migrations(&mut reference_conn, true);
+        apply_pending_app_incrementals(&mut reference_conn);
+        let expected_schema = schema_signature(&mut reference_conn);
+
+        assert_eq!(
+            pending_migration_versions(&db.url, MigrationSet::Data)
+                .await
+                .expect("should read the pending data migrations"),
+            [OBSERVATION_NUMERIC_VERSION]
+        );
+        assert!(!pending_migration_versions(&db.url, MigrationSet::App)
+            .await
+            .expect("should read the pending app migrations")
+            .contains(&OBSERVATION_NUMERIC_VERSION.to_string()));
+
+        let applied = run_migration_set(&db.url, MigrationSet::App)
+            .await
+            .expect("the app set should apply");
+        assert_eq!(applied, app_versions_missing_from_release_v4_0());
+        assert!(!recorded_versions(&mut conn).contains(&OBSERVATION_NUMERIC_VERSION.to_string()));
+        assert_eq!(
+            pending_migration_versions(&db.url, MigrationSet::Data)
+                .await
+                .expect("should read the pending data migrations"),
+            [OBSERVATION_NUMERIC_VERSION],
+            "applying the app set leaves the data migration pending"
+        );
+
+        assert_eq!(
+            run_migration_set(&db.url, MigrationSet::Data)
+                .await
+                .expect("the data set should apply"),
+            [OBSERVATION_NUMERIC_VERSION]
+        );
+        assert_eq!(
+            recorded_versions(&mut conn),
+            embedded_versions(&[MigrationSet::Data, MigrationSet::App])
+        );
+        assert_eq!(schema_signature(&mut conn), expected_schema);
+    }
+
+    /// In a database holding both sets, a version recorded for one set is neither pending nor an
+    /// unknown version for the other: removing the data set's newest record leaves the app set
+    /// current, ready and with nothing to apply, and only the data set pending and not ready.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_version_of_one_set_is_not_pending_or_unknown_for_the_other() {
+        use diesel::connection::SimpleConnection;
+
+        let db = ScratchDatabase::create("cross_set");
+        run_migrations(&db.url)
+            .await
+            .expect("both sets should apply");
+        let pool = create_pool(&db.url).await.expect("pool");
+        let mut conn = db.connect();
+
+        for set in [MigrationSet::Data, MigrationSet::App] {
+            assert_eq!(
+                pending_migration_versions(&db.url, set)
+                    .await
+                    .expect("should read pending migrations"),
+                Vec::<String>::new(),
+                "{set:?}"
+            );
+            readiness_check_set(&pool, set)
+                .await
+                .unwrap_or_else(|e| panic!("the {set:?} set should be ready: {e}"));
+            assert_eq!(
+                run_migration_set(&db.url, set)
+                    .await
+                    .unwrap_or_else(|e| panic!("the {set:?} set should be current: {e}")),
+                Vec::<String>::new(),
+                "the other set's recorded versions are not unknown to {set:?}"
+            );
+        }
+
+        let newest_data = minimum_schema_version(MigrationSet::Data).expect("embedded versions");
+        assert_eq!(newest_data, OBSERVATION_NUMERIC_VERSION);
+        conn.batch_execute(&format!(
+            "DELETE FROM __diesel_schema_migrations WHERE version = '{newest_data}'"
+        ))
+        .expect("should delete the data set's newest record");
+
+        assert_eq!(
+            pending_migration_versions(&db.url, MigrationSet::Data)
+                .await
+                .expect("should read pending data migrations"),
+            [newest_data.clone()]
+        );
+        assert_eq!(
+            pending_migration_versions(&db.url, MigrationSet::App)
+                .await
+                .expect("should read pending app migrations"),
+            Vec::<String>::new()
+        );
+        readiness_check_set(&pool, MigrationSet::App)
+            .await
+            .expect("the app set should stay ready");
+        assert!(readiness_check_set(&pool, MigrationSet::Data)
+            .await
+            .is_err());
+        assert_eq!(
+            run_migration_set(&db.url, MigrationSet::App)
+                .await
+                .expect("the app set should be current"),
+            Vec::<String>::new()
+        );
+        assert!(!recorded_versions(&mut conn).contains(&newest_data));
     }
 
     /// A database with a stray `users` table and no migrations is not a single-baseline database,
