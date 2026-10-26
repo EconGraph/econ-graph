@@ -117,8 +117,12 @@ kind (check `kubectl -n econ-graph get pods -l app=crawler-worker -o
 jsonpath='{..image}'`). A worker from an earlier image fails each `refetch_series` job it claims
 as an unknown job kind; running the command again after the rollout re-enqueues those series.
 
-Run from a checkout with `kubectl` access to the cluster. The script runs the crawler CLI in the
-`crawler-worker` pod (`/app/crawler`), which uses the worker's own database URL:
+Run from a checkout with `kubectl` access to the cluster. Every kubectl call goes to context
+`kind-econ-graph` (with `KUBECTL`/`KUBECONFIG` unset, the kind cluster's own kubectl and
+kubeconfig in `~/.cache/econgraph` when present), never plain `kubectl`'s current context, and
+the script prints the cluster's context, `kube-system` UID and production marker first. It runs
+the crawler CLI in the `crawler-worker` pod (`/app/crawler`), which uses the worker's own
+database URL:
 
 ```bash
 # What would be enqueued, per source (writes nothing).
@@ -136,7 +140,7 @@ scripts/deploy/refetch-full-history.sh --all --completed-since 2026-10-26T00:00:
 ```
 
 After enqueuing, the script prints the matching progress and resume commands with the start
-time filled in. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
+time filled in; the resume command keeps `--include-inactive` and `--priority N`. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
 `crawler --help`); `--json` gives machine-readable output.
 
 - **Which series.** The series the refresh scheduler refreshes: active `economic_series` rows
