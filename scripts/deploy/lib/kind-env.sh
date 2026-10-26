@@ -272,7 +272,7 @@ try_use_kind_kubectl() {
             return 1
         }
         "$agent_dir/bin/kubectl" --kubeconfig "$KUBECONFIG" \
-            version --request-timeout=15s >/dev/null 2>&1
+            auth can-i get pods -n "${NAMESPACE}" --request-timeout=15s >/dev/null 2>&1
         return
     fi
     kind_cluster_exists || {

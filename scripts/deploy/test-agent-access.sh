@@ -13,10 +13,11 @@ printf '%s\n' "$*" >>"$AGENT_TEST_CALLS"
 case "$*" in
     *'config view --minify --flatten --raw'*)
         printf '[{"name":"operator-cluster","cluster":{"server":"https://example.invalid","certificate-authority-data":"Y2E="}}]' ;;
+    *'config view --minify'*'.namespace}'*) printf econ-graph ;;
     *'config view --minify'*) printf '%s' "${AGENT_TEST_USER:-econgraph-agent}" ;;
     *'apply -f -'*) cat >/dev/null ;;
     *'create token econgraph-agent'*) printf 'test-bearer-token\n' ;;
-    *version*) [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
+    *'auth can-i get pods'*) [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
     *) echo "unexpected kubectl call: $*" >&2; exit 1 ;;
 esac
 STUB

@@ -26,6 +26,9 @@ export KUBECTL="$config_dir/bin/kubectl"
 }
 user="$("$KUBECTL" --kubeconfig "$KUBECONFIG" config view --minify -o 'jsonpath={.contexts[0].context.user}')"
 [ "$user" = econgraph-agent ] || { echo 'error: refusing a non-agent kubeconfig' >&2; exit 1; }
+NAMESPACE="$("$KUBECTL" --kubeconfig "$KUBECONFIG" config view --minify -o 'jsonpath={.contexts[0].context.namespace}')"
+[ -n "$NAMESPACE" ] || { echo 'error: agent kubeconfig must select a namespace' >&2; exit 1; }
+export NAMESPACE
 export PATH="$config_dir/bin:$PATH"
 unset CLUSTER_ROLE_CONTEXT
 exec "$@"
