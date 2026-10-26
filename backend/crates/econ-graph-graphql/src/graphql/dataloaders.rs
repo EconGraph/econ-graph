@@ -220,6 +220,7 @@ impl BatchFn<Uuid, Vec<EconomicSeries>> for SeriesBySourceBatcher {
                 .filter(dsl::source_id.eq_any(&keys))
                 .filter(dsl::is_active.eq(true))
                 .filter(dsl::end_date.is_not_null())
+                .filter(econ_graph_services::services::series_service::public_series_predicate())
                 .order(dsl::title.asc())
                 .load::<EconomicSeries>(&mut conn)
                 .await
@@ -274,6 +275,7 @@ impl BatchFn<Uuid, i32> for SeriesCountBatcher {
                 .filter(dsl::source_id.eq_any(&keys))
                 .filter(dsl::is_active.eq(true))
                 .filter(dsl::end_date.is_not_null())
+                .filter(econ_graph_services::services::series_service::public_series_predicate())
                 .group_by(dsl::source_id)
                 .select((dsl::source_id, diesel::dsl::count(dsl::id)))
                 .load::<(Uuid, i64)>(&mut conn)

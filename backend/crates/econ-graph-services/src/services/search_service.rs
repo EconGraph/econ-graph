@@ -134,16 +134,23 @@ impl SearchService {
                                     + similarity(es.title, $1))::float4 AS rank,
                                 similarity(es.title, $1)::float4 AS similarity_score,
                                 count(*) OVER () AS total_count
-                         FROM economic_series es, q
+                         FROM economic_series es
+                         LEFT JOIN series_lifecycle lifecycle
+                           ON lifecycle.source_id = es.source_id
+                          AND lifecycle.external_id = es.external_id
+                         CROSS JOIN q
                          WHERE NOT q.vacuous
                          AND (es.search_vector @@ q.tsq
                               OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
                          AND es.end_date IS NOT NULL
+                         AND coalesce(lifecycle.status, 'active') <> 'restricted'
                          AND ($2::uuid IS NULL OR es.source_id = $2)
                          AND (($3::text[] IS NULL AND $8::text IS NULL)
                               OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
-                         ORDER BY lower(es.external_id) IN (lower(btrim($1)), lower($10)) DESC,
+                         ORDER BY coalesce(lifecycle.status, 'active') IN
+                                      ('discontinued', 'missing_from_catalog', 'retired', 'superseded') ASC,
+                                  lower(es.external_id) IN (lower(btrim($1)), lower($10)) DESC,
                                   rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
                         )
@@ -240,7 +247,11 @@ impl SearchService {
                         AS suggestion_type,
                     COUNT(*) AS match_count
              FROM economic_series
-             WHERE is_active = true AND end_date IS NOT NULL AND (title ILIKE $3 OR title % $1)
+             WHERE NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle
+                               WHERE lifecycle.source_id = economic_series.source_id
+                                 AND lifecycle.external_id = economic_series.external_id
+                                 AND lifecycle.status = 'restricted')
+               AND is_active = true AND end_date IS NOT NULL AND (title ILIKE $3 OR title % $1)
              GROUP BY title
              ORDER BY (title ILIKE $3) DESC, rank DESC, title ASC
              LIMIT $2",

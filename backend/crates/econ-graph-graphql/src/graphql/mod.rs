@@ -46,3 +46,6 @@ mod datasets_db_tests;
 pub use mutation::Mutation;
 pub use query::Query;
 pub use schema::{create_schema, create_schema_with_data, sdl, SchemaResources};
+
+#[cfg(test)]
+mod lifecycle_visibility_tests;

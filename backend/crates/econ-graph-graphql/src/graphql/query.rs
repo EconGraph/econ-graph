@@ -95,6 +95,7 @@ impl Query {
             .inner_join(data_sources::table)
             .filter(data_sources::name.eq(&source_name))
             .filter(economic_series::external_id.eq(&external_id))
+            .filter(series_service::public_series_predicate())
             .select(EconomicSeries::as_select())
             .first::<EconomicSeries>(&mut conn)
             .await
@@ -202,11 +203,13 @@ impl Query {
         // was removed before any series it discovered ever got data points).
         let sources = data_sources::table
             .filter(exists(
-                economic_series::table.filter(
-                    economic_series::source_id
-                        .eq(data_sources::id)
-                        .and(economic_series::end_date.is_not_null()),
-                ),
+                economic_series::table
+                    .filter(series_service::public_series_predicate())
+                    .filter(
+                        economic_series::source_id
+                            .eq(data_sources::id)
+                            .and(economic_series::end_date.is_not_null()),
+                    ),
             ))
             .order_by(data_sources::name.asc())
             .select(DataSource::as_select())
