@@ -112,6 +112,16 @@ ok = any(r.get("action") == "FailJob"
          and r["onExitCodes"].get("values") == [0] for r in rules)
 sys.exit(0 if ok and job["template"]["spec"]["restartPolicy"] == "Never" else 1)
 PY
+check "a disrupted pod (eviction, drain, preemption) is retried, not failed" python3 - "$CRONJOB" <<'PY'
+import sys, yaml
+job = yaml.safe_load(open(sys.argv[1]))["spec"]["jobTemplate"]["spec"]
+rules = job.get("podFailurePolicy", {}).get("rules", [])
+def disruption(r):
+    return r.get("action") in ("Count", "Ignore") and any(
+        c.get("type") == "DisruptionTarget" for c in r.get("onPodConditions", []))
+first_fail = next((i for i, r in enumerate(rules) if r.get("action") == "FailJob"), len(rules))
+sys.exit(0 if any(disruption(r) for r in rules[:first_fail]) else 1)
+PY
 
 # The S3 mock wants path-style requests; the bucket host name wouldn't resolve.
 printf '[default]\ns3 =\n    addressing_style = path\n' >"$tmp/aws/config"

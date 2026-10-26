@@ -45,14 +45,20 @@ spec:
       # takes about 40 minutes. The Keycloak dump is small. backup.sh's
       # 10-minute lock wait per dump fits as well, with room for the sync.
       activeDeadlineSeconds: 14400
-      # Retries only for pod disruptions (eviction, node loss), which end the
-      # pod without a container exit code. A container that exits non-zero
+      # Retries only for pod disruptions (eviction, node drain, preemption, node
+      # loss; the DisruptionTarget rule below). A container that exits non-zero
       # fails the Job at once: a dump that failed (pg-dump recorded it, then
       # backup-sync exits 1) would fail again, and each retry writes another
       # full dump of every database that did succeed, which nothing prunes.
       backoffLimit: 2
       podFailurePolicy:
         rules:
+        # An eviction, node drain or preemption kills the containers (exit 137
+        # once SIGTERM is ignored by sh as PID 1), so it is matched first by its
+        # DisruptionTarget condition and retried within backoffLimit.
+        - action: Count
+          onPodConditions:
+          - type: DisruptionTarget
         - action: FailJob
           onExitCodes:
             operator: NotIn

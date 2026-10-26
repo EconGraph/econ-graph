@@ -99,8 +99,10 @@ A container that exits non-zero fails the Job at once, without a retry
 (`podFailurePolicy`: `FailJob` on any non-zero exit code). A retry is a full
 run with its own timestamp: it would most likely fail the same way, and would
 write another full `econ_graph` dump each time, which nothing prunes. Only a
-pod ended by a disruption (eviction, node loss), which has no container exit
-code, is retried, up to twice (`backoffLimit: 2`). So a night where a dump
+pod ended by a disruption (eviction, node drain, preemption, node loss) is
+retried, up to twice (`backoffLimit: 2`): a `Count` rule for the pod's
+`DisruptionTarget` condition comes before the `FailJob` rule, because a
+disrupted container still ends with an exit code (137). So a night where a dump
 fails costs one extra dump of the other database at most, and the next try
 is the next night's run.
 
