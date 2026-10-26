@@ -4,7 +4,9 @@
  * Each row names the series' source and the source's own series id (`NY.GDP.PCAP.CD`, `GDP`),
  * so an exported row can be matched back to the source, and carries our id as `id`. Both
  * formats have the same fields in the same order, and a field the backend didn't send is empty
- * (null in JSON) rather than left out.
+ * (null in JSON) rather than left out. CSV protects every text column, including IDs,
+ * with a leading apostrophe when it could start a spreadsheet formula. JSON preserves
+ * the exact source IDs; use it for programmatic matching.
  */
 import { csvTextField } from './seriesCsv';
 

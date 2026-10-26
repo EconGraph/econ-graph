@@ -35,6 +35,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSeriesSearch, useSeriesBrowse, useDataSources } from '../hooks/useSeriesData';
 import { buildSearchResultsCsv, buildSearchResultsJson } from '../utils/searchResultsExport';
+import { downloadCsv } from '../utils/seriesCsv';
 
 interface EconomicSeries {
   id: string;
@@ -345,13 +346,7 @@ const SeriesExplorer: React.FC = () => {
     const data = filteredSeries;
 
     if (format === 'csv') {
-      const blob = new Blob([buildSearchResultsCsv(data)], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'economic-series.csv';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadCsv('economic-series.csv', buildSearchResultsCsv(data));
     } else if (format === 'json') {
       const blob = new Blob([buildSearchResultsJson(data)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);

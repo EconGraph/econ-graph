@@ -38,6 +38,9 @@ describe('csvTextField', () => {
     expect(csvTextField('+1')).toBe("'+1");
     expect(csvTextField('-1')).toBe("'-1");
     expect(csvTextField('@SUM(A1)')).toBe("'@SUM(A1)");
+    expect(csvTextField('\n=SUM(A1)')).toBe("\"'\n=SUM(A1)\"");
+    expect(csvTextField('\r=SUM(A1)')).toBe("\"'\r=SUM(A1)\"");
+    expect(csvTextField('\t=SUM(A1)')).toBe("'\t=SUM(A1)");
   });
 
   it('leaves ordinary text alone', () => {
@@ -139,14 +142,14 @@ describe('downloadCsv', () => {
       .spyOn(window.HTMLAnchorElement.prototype, 'click')
       .mockImplementation(() => undefined);
 
-    downloadCsv('a.csv', 'x,y\r\n');
+    downloadCsv('a.csv', 'title,value\r\nÉconomie 日本,2\r\n');
 
     expect(click).toHaveBeenCalledTimes(1);
     expect(document.querySelector('a[download]')).toBeNull();
     expect(blob?.type).toBe('text/csv;charset=utf-8');
     const bytes = new Uint8Array(await blob!.arrayBuffer());
     expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
-    expect(new window.TextDecoder().decode(bytes.slice(3))).toBe('x,y\r\n');
+    expect(new window.TextDecoder().decode(bytes.slice(3))).toBe('title,value\r\nÉconomie 日本,2\r\n');
 
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
     vi.advanceTimersByTime(REVOKE_DELAY_MS);
