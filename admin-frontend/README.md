@@ -265,7 +265,7 @@ __tests__/
 ### Environment Configuration
 
 The admin frontend uses Vite. Its development settings are in
-[`vite.config.js`](vite.config.js) and [`vite.config.ts`](vite.config.ts):
+[`vite.config.ts`](vite.config.ts):
 
 - Development server: port `3000`, with base path `/admin/`.
 - Development proxy: `/api` and `/graphql` forward to `http://localhost:8081`.

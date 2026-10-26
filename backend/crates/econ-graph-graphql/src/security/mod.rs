@@ -177,14 +177,14 @@ impl SecurityMiddleware {
         let mut errors = Vec::new();
 
         // 1. Rate limiting check
-        if self.config.rate_limit.enabled {
-            if let Err(e) = self.rate_limiter.check_rate_limit(client_ip).await {
-                error!("Rate limit exceeded for IP {}: {}", client_ip, e);
-                errors.push(ServerError::new(
-                    "Rate limit exceeded. Please try again later.",
-                    None,
-                ));
-            }
+        if self.config.rate_limit.enabled
+            && let Err(e) = self.rate_limiter.check_rate_limit(client_ip).await
+        {
+            error!("Rate limit exceeded for IP {}: {}", client_ip, e);
+            errors.push(ServerError::new(
+                "Rate limit exceeded. Please try again later.",
+                None,
+            ));
         }
 
         // 2. Query size check

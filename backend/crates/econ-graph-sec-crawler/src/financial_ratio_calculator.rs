@@ -358,29 +358,29 @@ impl FinancialRatioCalculator {
         let shareholders_equity =
             self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
 
-        if let (Some(ni), Some(se)) = (net_income, shareholders_equity) {
-            if se != 0.0 {
-                let roe = ni / se;
-                return Ok(Some(CalculatedRatio {
-                    id: Uuid::new_v4(),
-                    statement_id: Uuid::new_v4(), // Will be set by caller
-                    ratio_name: "return_on_equity".to_string(),
-                    ratio_display_name: "Return on Equity (ROE)".to_string(),
-                    value: roe,
-                    category: "profitability".to_string(),
-                    formula: "Net Income / Shareholders' Equity".to_string(),
-                    interpretation: self
-                        .analysis_config
-                        .get_ratio_interpretation("return_on_equity", roe)
-                        .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
-                    benchmark_percentile: None,
-                    period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-                    fiscal_year: 2023,
-                    fiscal_quarter: None,
-                    calculated_at: Utc::now(),
-                    data_quality_score: self.calculate_data_quality_score(&[ni, se]),
-                }));
-            }
+        if let (Some(ni), Some(se)) = (net_income, shareholders_equity)
+            && se != 0.0
+        {
+            let roe = ni / se;
+            return Ok(Some(CalculatedRatio {
+                id: Uuid::new_v4(),
+                statement_id: Uuid::new_v4(), // Will be set by caller
+                ratio_name: "return_on_equity".to_string(),
+                ratio_display_name: "Return on Equity (ROE)".to_string(),
+                value: roe,
+                category: "profitability".to_string(),
+                formula: "Net Income / Shareholders' Equity".to_string(),
+                interpretation: self
+                    .analysis_config
+                    .get_ratio_interpretation("return_on_equity", roe)
+                    .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
+                benchmark_percentile: None,
+                period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                fiscal_year: 2023,
+                fiscal_quarter: None,
+                calculated_at: Utc::now(),
+                data_quality_score: self.calculate_data_quality_score(&[ni, se]),
+            }));
         }
 
         Ok(None)
@@ -394,29 +394,29 @@ impl FinancialRatioCalculator {
         let net_income = self.get_numeric_value(line_items, "us-gaap:NetIncomeLoss")?;
         let total_assets = self.get_numeric_value(line_items, "us-gaap:Assets")?;
 
-        if let (Some(ni), Some(ta)) = (net_income, total_assets) {
-            if ta != 0.0 {
-                let roa = ni / ta;
-                return Ok(Some(CalculatedRatio {
-                    id: Uuid::new_v4(),
-                    statement_id: Uuid::new_v4(),
-                    ratio_name: "return_on_assets".to_string(),
-                    ratio_display_name: "Return on Assets (ROA)".to_string(),
-                    value: roa,
-                    category: "profitability".to_string(),
-                    formula: "Net Income / Total Assets".to_string(),
-                    interpretation: self
-                        .analysis_config
-                        .get_ratio_interpretation("return_on_assets", roa)
-                        .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
-                    benchmark_percentile: None,
-                    period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-                    fiscal_year: 2023,
-                    fiscal_quarter: None,
-                    calculated_at: Utc::now(),
-                    data_quality_score: self.calculate_data_quality_score(&[ni, ta]),
-                }));
-            }
+        if let (Some(ni), Some(ta)) = (net_income, total_assets)
+            && ta != 0.0
+        {
+            let roa = ni / ta;
+            return Ok(Some(CalculatedRatio {
+                id: Uuid::new_v4(),
+                statement_id: Uuid::new_v4(),
+                ratio_name: "return_on_assets".to_string(),
+                ratio_display_name: "Return on Assets (ROA)".to_string(),
+                value: roa,
+                category: "profitability".to_string(),
+                formula: "Net Income / Total Assets".to_string(),
+                interpretation: self
+                    .analysis_config
+                    .get_ratio_interpretation("return_on_assets", roa)
+                    .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
+                benchmark_percentile: None,
+                period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                fiscal_year: 2023,
+                fiscal_quarter: None,
+                calculated_at: Utc::now(),
+                data_quality_score: self.calculate_data_quality_score(&[ni, ta]),
+            }));
         }
 
         Ok(None)
@@ -482,29 +482,29 @@ impl FinancialRatioCalculator {
         let current_liabilities =
             self.get_numeric_value(line_items, "us-gaap:LiabilitiesCurrent")?;
 
-        if let (Some(ca), Some(cl)) = (current_assets, current_liabilities) {
-            if cl != 0.0 {
-                let current_ratio = ca / cl;
-                return Ok(Some(CalculatedRatio {
-                    id: Uuid::new_v4(),
-                    statement_id: Uuid::new_v4(),
-                    ratio_name: "current_ratio".to_string(),
-                    ratio_display_name: "Current Ratio".to_string(),
-                    value: current_ratio,
-                    category: "liquidity".to_string(),
-                    formula: "Current Assets / Current Liabilities".to_string(),
-                    interpretation: self
-                        .analysis_config
-                        .get_ratio_interpretation("current_ratio", current_ratio)
-                        .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
-                    benchmark_percentile: None,
-                    period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-                    fiscal_year: 2023,
-                    fiscal_quarter: None,
-                    calculated_at: Utc::now(),
-                    data_quality_score: self.calculate_data_quality_score(&[ca, cl]),
-                }));
-            }
+        if let (Some(ca), Some(cl)) = (current_assets, current_liabilities)
+            && cl != 0.0
+        {
+            let current_ratio = ca / cl;
+            return Ok(Some(CalculatedRatio {
+                id: Uuid::new_v4(),
+                statement_id: Uuid::new_v4(),
+                ratio_name: "current_ratio".to_string(),
+                ratio_display_name: "Current Ratio".to_string(),
+                value: current_ratio,
+                category: "liquidity".to_string(),
+                formula: "Current Assets / Current Liabilities".to_string(),
+                interpretation: self
+                    .analysis_config
+                    .get_ratio_interpretation("current_ratio", current_ratio)
+                    .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
+                benchmark_percentile: None,
+                period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                fiscal_year: 2023,
+                fiscal_quarter: None,
+                calculated_at: Utc::now(),
+                data_quality_score: self.calculate_data_quality_score(&[ca, cl]),
+            }));
         }
 
         Ok(None)
@@ -525,29 +525,29 @@ impl FinancialRatioCalculator {
         let shareholders_equity =
             self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
 
-        if let Some(se) = shareholders_equity {
-            if se != 0.0 {
-                let debt_to_equity = total_debt / se;
-                return Ok(Some(CalculatedRatio {
-                    id: Uuid::new_v4(),
-                    statement_id: Uuid::new_v4(),
-                    ratio_name: "debt_to_equity".to_string(),
-                    ratio_display_name: "Debt-to-Equity Ratio".to_string(),
-                    value: debt_to_equity,
-                    category: "leverage".to_string(),
-                    formula: "Total Debt / Shareholders' Equity".to_string(),
-                    interpretation: self
-                        .analysis_config
-                        .get_ratio_interpretation("debt_to_equity", debt_to_equity)
-                        .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
-                    benchmark_percentile: None,
-                    period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-                    fiscal_year: 2023,
-                    fiscal_quarter: None,
-                    calculated_at: Utc::now(),
-                    data_quality_score: self.calculate_data_quality_score(&[total_debt, se]),
-                }));
-            }
+        if let Some(se) = shareholders_equity
+            && se != 0.0
+        {
+            let debt_to_equity = total_debt / se;
+            return Ok(Some(CalculatedRatio {
+                id: Uuid::new_v4(),
+                statement_id: Uuid::new_v4(),
+                ratio_name: "debt_to_equity".to_string(),
+                ratio_display_name: "Debt-to-Equity Ratio".to_string(),
+                value: debt_to_equity,
+                category: "leverage".to_string(),
+                formula: "Total Debt / Shareholders' Equity".to_string(),
+                interpretation: self
+                    .analysis_config
+                    .get_ratio_interpretation("debt_to_equity", debt_to_equity)
+                    .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
+                benchmark_percentile: None,
+                period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                fiscal_year: 2023,
+                fiscal_quarter: None,
+                calculated_at: Utc::now(),
+                data_quality_score: self.calculate_data_quality_score(&[total_debt, se]),
+            }));
         }
 
         Ok(None)
@@ -563,10 +563,10 @@ impl FinancialRatioCalculator {
         line_items: &HashMap<String, &FinancialLineItem>,
         concept: &str,
     ) -> Result<Option<f64>> {
-        if let Some(line_item) = line_items.get(concept) {
-            if let Some(value) = &line_item.value {
-                return Ok(Some(value.to_f64().unwrap_or(0.0)));
-            }
+        if let Some(line_item) = line_items.get(concept)
+            && let Some(value) = &line_item.value
+        {
+            return Ok(Some(value.to_f64().unwrap_or(0.0)));
         }
         Ok(None)
     }

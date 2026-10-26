@@ -28,6 +28,16 @@ Defaults from `SourcePolicy::default_for` (`src/policy.rs`); an adapter may over
 
 Queue retries: `max_retries` 3, backoff 30 s doubling up to 30 min.
 
+## Request patterns
+
+- **FRED**: each series fetch whose `last_updated` changed is one `/series` request, one
+  `/series/vintagedates` request, and one paged `/series/observations` request per real-time
+  window of at most 1,000 vintage dates (half FRED's documented 2,000). Most series are a
+  single window; a daily series with its full revision history takes a few (DFF about six).
+  The windows run one after another under the FRED rate limit. A window FRED still rejects
+  for too many vintage dates is split in half and retried with a warning logged; no other
+  HTTP 400 is retried. See [FRED](../data-sources/fred.md#vintage-date-limit).
+
 ## Tuning
 
 - Change a default in `SourcePolicy::default_for`, or override `SourceAdapter::policy` in the

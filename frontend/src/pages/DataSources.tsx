@@ -76,7 +76,12 @@ const DataSourcesContent: React.FC = () => {
         <Typography variant='h4' component='h1' gutterBottom>
           Data Sources
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Where EconGraph's data comes from
         </Typography>
       </Box>
@@ -97,7 +102,12 @@ const DataSourcesContent: React.FC = () => {
               <Typography variant='h3' color='primary'>
                 {dataSources.length}
               </Typography>
-              <Typography variant='body2' color='text.secondary'>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 Sources
               </Typography>
             </Box>
@@ -107,7 +117,12 @@ const DataSourcesContent: React.FC = () => {
               <Typography variant='h3' color='primary'>
                 {totalSeries.toLocaleString()}
               </Typography>
-              <Typography variant='body2' color='text.secondary'>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 Total Series
               </Typography>
             </Box>
@@ -137,19 +152,35 @@ const DataSourcesContent: React.FC = () => {
                   </Typography>
                 </Box>
 
-                <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+                <Typography
+                  variant='body2'
+                  sx={{
+                    color: 'text.secondary',
+                    mb: 2,
+                  }}
+                >
                   {source.description || 'Economic data source'}
                 </Typography>
 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant='body2'>Series</Typography>
-                  <Typography variant='body2' fontWeight='bold'>
+                  <Typography
+                    variant='body2'
+                    sx={{
+                      fontWeight: 'bold',
+                    }}
+                  >
                     {source.seriesCount.toLocaleString()}
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant='body2'>Crawl rate limit</Typography>
-                  <Typography variant='body2' fontWeight='bold'>
+                  <Typography
+                    variant='body2'
+                    sx={{
+                      fontWeight: 'bold',
+                    }}
+                  >
                     {source.rateLimitPerMinute.toLocaleString()}/min
                   </Typography>
                 </Box>

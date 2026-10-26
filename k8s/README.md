@@ -55,6 +55,7 @@ scripts/deploy/         # Deployment scripts
 ├── build-images.sh    # Build Docker images
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── deploy.sh          # Deploy to K8s
+├── mark-production-cluster.sh # Mark the cluster that serves the public site
 ├── teardown.sh        # Remove the app plane (the data plane only on request)
 └── released-pvs.sh    # List Released PVs; delete one on typed confirmation
 ```
@@ -69,6 +70,15 @@ If you prefer to run each step manually:
 cd terraform/k8s
 terraform init
 terraform apply
+```
+
+Only on the production cluster (the one that serves <https://econgraph.com>), mark it as
+production once, after creating it and again after every recreate. See
+[Production marker](#production-marker). On every other cluster, run it with `--unmark`
+once instead.
+
+```bash
+./scripts/deploy/mark-production-cluster.sh
 ```
 
 ### 2. Build Docker Images
@@ -159,7 +169,9 @@ apply it through `scripts/deploy/lib/public-host.sh` and
 `PUBLIC_HOST=` (empty) removes every piece again: the public Ingresses, the controller
 settings, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no
 public host is deployed localhost-only, and on one that does, the scripts stop rather than
-take the site down.
+take the site down. A non-empty `PUBLIC_HOST` is accepted only on a cluster marked
+production (see [Production marker](#production-marker)); anywhere else the deploy stops
+before applying anything.
 
 **What comes from client headers.** Only the visitor's address, from `CF-Connecting-IP`,
 and only when the request comes from a pod address (cloudflared). `use-forwarded-headers`
@@ -185,16 +197,28 @@ the `/graphql` rate limits, and the deploy scripts delete its Ingress
 (`econ-graph-ssl-ingress`) if a cluster still has it.
 
 **Tunnel token.** The token is the Secret `cloudflare-tunnel` (key `token`). Enter it
-yourself with hidden input. It is never committed, printed, or given to an agent:
+yourself with hidden input, on the production cluster only, after marking it. It is never
+committed, printed, or given to an agent:
 
 ```bash
-scripts/deploy/create-secrets.sh --prompt-tunnel-token
+scripts/deploy/set-crawler-keys.sh --tunnel
 ```
 
-It reads from the terminal only and refuses piped input. On the ops branch (#421),
-`scripts/deploy/set-crawler-keys.sh --tunnel` does the same and then starts cloudflared.
-Don't put the token on a command line (`CLOUDFLARE_TUNNEL_TOKEN=...`), where shell history
-keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0 replicas and says so.
+It works on the kind cluster through its own kubectl (`scripts/deploy/lib/kind-env.sh`),
+reads from the terminal only, refuses piped input, refuses a cluster that is not marked
+production before it asks, and then starts cloudflared through `apply_cloudflared`, for
+the public host the cluster serves. `scripts/deploy/create-secrets.sh --prompt-tunnel-token`
+writes the token only, with `${KUBECTL:-kubectl}` on its current context. Run by hand
+with neither `KUBECTL` nor `KUBECONFIG` set, it uses the kind cluster's own kubectl and
+kubeconfig when copies are kept at `~/.cache/econgraph/bin/kubectl` and
+`~/.cache/econgraph/kubeconfig-econ-graph`, and says so; plain `kubectl` may be another
+cluster's (the microk8s snap wrapper ignores `~/.kube/config`). An exported `KUBECONFIG`
+(some runbooks export one) turns that off, which it says, and with only one of the two
+files it warns which is missing and uses plain `kubectl`. Don't put the token on a command line
+(`CLOUDFLARE_TUNNEL_TOKEN=...`), where shell history keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0
+replicas and says so. If a cluster that is not marked already holds the Secret,
+`create-secrets.sh` keeps it and warns; delete it there with
+`scripts/deploy/mark-production-cluster.sh --unmark`.
 
 **Cloudflare dashboard** (Zero Trust > Networks > Tunnels > the tunnel > Public hostnames),
 one entry per host name:
@@ -226,6 +250,82 @@ Add `--via-cloudflare` to go through Cloudflare the way a visitor does. The Prom
 
 **Google sign-in** needs `https://econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
 as an authorized redirect URI of the Google OAuth client (ECO-13).
+
+### Production marker
+
+Only the production cluster may run cloudflared or hold the tunnel token. The tunnel is
+token-authenticated, and every cloudflared that runs with the token becomes one more
+connector of the same tunnel: Cloudflare spreads the site's traffic across all of them
+without any error, so a test cluster with the token would silently serve part of the real
+site.
+
+A cluster is production while it carries the marker written by:
+
+```bash
+./scripts/deploy/mark-production-cluster.sh            # mark this cluster
+./scripts/deploy/mark-production-cluster.sh --dry-run  # show what it would do
+./scripts/deploy/mark-production-cluster.sh --unmark   # stop cloudflared, remove the marker, offer to delete the token
+```
+
+Run bare, it works on the kind cluster `econ-graph` through that cluster's own kubectl and
+kubeconfig (`scripts/deploy/lib/kind-env.sh`), context `kind-econ-graph`. For another
+cluster, give its kubectl: `KUBECTL=/path/to/kubectl` (its current context). An exported
+`KUBECONFIG` other than the kind cluster's (some runbooks export one) also selects plain
+`kubectl` with it, and the script says so; unset it to reach the kind cluster. Every run,
+dry runs included, shows the kubectl, `KUBECONFIG`, context, API server, nodes and
+kube-system UID it reached.
+
+The marker is the ConfigMap `kube-system/econgraph-cluster-role`, with `role: production`
+and the UID of the cluster's `kube-system` namespace when it was marked. It counts only
+while that UID matches the live one, so a marker copied or restored into another cluster
+does not count, and neither does one on a recreated cluster: **mark the production cluster
+again after creating or recreating it.** A node or etcd snapshot of production restored
+elsewhere keeps the UID, the marker and the token, so run `--unmark` on such a clone before
+starting its workloads, or don't restore it while production runs.
+
+Before it changes anything, the script shows the cluster's identity (this host's name, the
+nodes, the API server and the kube-system UID) and asks, at a terminal, for the first 8
+characters of the kube-system UID: context names such as `kind-econ-graph` are the same on
+every machine, the UID is not. It is idempotent (a marked cluster is left alone) and
+deletes no data, volumes or clusters. `--unmark` scales cloudflared in `econ-graph` to 0
+first, then removes the marker (kept if scaling fails), then offers to delete the Secret
+`cloudflare-tunnel`, only if you type `delete`.
+
+**Once on every cluster that is not production** (test, QA, integration, or anything that
+ever got the token), run `--unmark` and delete the token when it offers to:
+
+```bash
+./scripts/deploy/mark-production-cluster.sh --unmark
+```
+
+How the scripts use the marker:
+
+- `k8s/manifests/cloudflared.yaml` is committed with `replicas: 0`, so applying it, or all
+  of `k8s/manifests`, never starts the connector, and on production stops it: run
+  `deploy.sh` or `restart-k8s-rollout.sh` instead, or leave `cloudflared.yaml` out.
+  `apply_cloudflared` in `scripts/deploy/lib/public-host.sh`, used by both scripts, is the
+  only thing that scales it up, and only on a marked cluster with a `PUBLIC_HOST` and the
+  token. On a cluster that is not marked it applies it with 0 replicas and says why. The
+  alert `CloudflareTunnelStoppedOnProduction` fires when a marked cluster's cloudflared asks
+  for no replica for 5 minutes.
+- A non-empty `PUBLIC_HOST` on a cluster that is not marked stops the deploy before
+  anything is applied, so it does not reach `apply_cloudflared` either: a connector already
+  running there keeps running until `--unmark` or a deploy with `PUBLIC_HOST=` (empty).
+- `create-secrets.sh` refuses to write `CLOUDFLARE_TUNNEL_TOKEN` (or
+  `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
+- The check and every kubectl call of `deploy.sh`, `restart-k8s-rollout.sh`, the deploy
+  library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
+  context: `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own
+  kubectl (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`;
+  `restart-k8s-rollout.sh` uses plain `kubectl` with the kubeconfig it writes from
+  MicroK8s and pins `microk8s`. Each replaces any `CLUSTER_ROLE_CONTEXT` in the
+  environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
+  inherited one only while it is its kubectl's current context. So the check and the
+  writes it allows cannot reach different clusters.
+- If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not
+  production, and the scripts say so. The deploy then stops with cloudflared left as it is,
+  as it does when the Secret `cloudflare-tunnel` cannot be looked up: a failed lookup never
+  starts the connector, and never scales a running one to 0 either.
 
 ## 📊 Monitoring
 

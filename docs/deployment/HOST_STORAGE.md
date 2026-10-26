@@ -187,9 +187,13 @@ prompt). It then does the following:
    (row counts) and `secrets/` (the app Secrets: the database passwords the
    data was initialised with, plus any API keys). All files are owner-only.
 4. **Recreates the cluster** with `recreate-kind-cluster.sh` from the new kind
-   config. This is the destructive step.
-5. **Bootstraps the databases.** Creates the namespace and the saved Secrets,
-   then runs `create-secrets.sh` (which keeps them), `apply-host-storage.sh`,
+   config. This is the destructive step. If the old cluster was marked
+   production, the new one is marked right after with
+   `mark-production-cluster.sh`, which asks for a typed confirmation: the new
+   cluster has a new kube-system UID, so the old marker does not count, and
+   the saved tunnel token is only restored into a marked cluster.
+5. **Bootstraps the databases.** Creates the namespace and the saved Secrets
+   (`cloudflare-tunnel` only on a cluster marked production), then runs `create-secrets.sh` (which keeps them), `apply-host-storage.sh`,
    and both Postgres StatefulSets. The initContainers set ownership and
    Postgres initialises empty directories on the subvolumes.
 6. **Restores** both dumps with `restore-kind-databases.sh`. This runs before
@@ -212,6 +216,9 @@ re-run only verifies.
 
 **If `deploy.sh` fails in step 7**, the databases are already restored on the
 subvolumes. Fix the cause and re-run the migration script, or run `deploy.sh`.
+Without `PUBLIC_HOST` the site is not served publicly from the new cluster; the
+script says so at the end. Deploy again with `PUBLIC_HOST=econgraph.com` on the
+marked production cluster (see "Production marker" in `k8s/README.md`).
 
 ### Rollback
 
@@ -255,7 +262,17 @@ Run each step with `--dry-run` first. Every step can be re-run.
    scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/20261024T052524Z/local-images.txt
    ```
 
-3. Databases: namespace, the saved Secrets, PVs and the Postgres
+3. Mark the new cluster as production, before anything is restored into it.
+   It has a new kube-system UID, so no earlier marker counts; without one the
+   restore leaves the saved tunnel token out, `deploy.sh` refuses `PUBLIC_HOST`
+   and cloudflared stays at 0 replicas (see "Production marker" in
+   `k8s/README.md`):
+
+   ```bash
+   scripts/deploy/mark-production-cluster.sh
+   ```
+
+4. Databases: namespace, the saved Secrets, PVs and the Postgres
    StatefulSets, then the restores. It stops with
    `RESTORE VERIFICATION FAILED` unless `counts.env` says 10,528 series and
    503,001 data points and the restored database has exactly the counts in
@@ -265,10 +282,10 @@ Run each step with `--dry-run` first. Every step can be re-run.
    scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/20261024T052524Z --expect-series 10528 --expect-data-points 503001
    ```
 
-4. Everything else:
+5. Everything else:
 
    ```bash
-   scripts/deploy/deploy.sh
+   PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh
    ```
 
 The rootful daemon still had a kind cluster named `econ-graph` from

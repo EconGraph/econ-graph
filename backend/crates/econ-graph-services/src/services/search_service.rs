@@ -13,6 +13,15 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use validator::Validate;
 
+/// One page of search results and the number of series that match in all.
+#[derive(Debug, Clone)]
+pub struct SearchPage {
+    /// This page's results, best match first.
+    pub results: Vec<SeriesSearchResult>,
+    /// How many series match the query and filters, on every page.
+    pub total_count: i64,
+}
+
 /// Service for handling full-text search operations
 pub struct SearchService {
     pool: Arc<DatabasePool>,
@@ -29,6 +38,12 @@ impl SearchService {
         &self,
         params: &SearchParams,
     ) -> Result<Vec<SeriesSearchResult>, AppError> {
+        Ok(self.search_series_page(params).await?.results)
+    }
+
+    /// One page of [`Self::search_series`]'s results, with the number of series that match
+    /// in all (on every page, not just this one).
+    pub async fn search_series_page(&self, params: &SearchParams) -> Result<SearchPage, AppError> {
         // REQUIREMENT: Full-text search with spelling correction and synonyms
         // PURPOSE: Find economic series using advanced PostgreSQL search capabilities
 
@@ -87,8 +102,11 @@ impl SearchService {
         // none), so "gdp" finds a title that only says "gross domestic product". A series whose
         // external id is the whole query, or its one word ($10), ranks first (FRED's GDP for
         // "gdp" or "GDP.").
-        let results = conn
-            .transaction::<Vec<SeriesSearchResultRow>, diesel::result::Error, _>(
+        // The total is a window count over the same rows the page is cut from, so it uses
+        // exactly the page's matching rules. A page past the end has no row to carry it, so
+        // then the first row is read again for the total.
+        let (results, total_count) = conn
+            .transaction::<(Vec<SeriesSearchResultRow>, i64), diesel::result::Error, _>(
                 async move |conn| {
                     diesel::sql_query(
                         "SELECT set_config('pg_trgm.similarity_threshold', $1::text, true)",
@@ -97,10 +115,11 @@ impl SearchService {
                     .execute(conn)
                     .await?;
 
-                    diesel::sql_query(
-                        // External ids are indexed with the `simple` configuration, so the query
-                        // is parsed with both `english` (titles, descriptions) and `simple`.
-                        "WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
+                    let page_query = |limit: i32, offset: i32| {
+                        diesel::sql_query(
+                            // External ids are indexed with the `simple` configuration, so the query
+                            // is parsed with both `english` (titles, descriptions) and `simple`.
+                            "WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
                                  SELECT websearch_to_tsquery('english', $7)
                                      || websearch_to_tsquery('simple', $7)
                                      -- With no expansion, repeat a disjunct already
@@ -113,7 +132,8 @@ impl SearchService {
                                 es.last_updated, es.is_active,
                                 (ts_rank_cd(es.search_vector, q.tsq, 32)
                                     + similarity(es.title, $1))::float4 AS rank,
-                                similarity(es.title, $1)::float4 AS similarity_score
+                                similarity(es.title, $1)::float4 AS similarity_score,
+                                count(*) OVER () AS total_count
                          FROM economic_series es, q
                          WHERE NOT q.vacuous
                          AND (es.search_vector @@ q.tsq
@@ -126,23 +146,41 @@ impl SearchService {
                          ORDER BY lower(es.external_id) IN (lower(btrim($1)), lower($10)) DESC,
                                   rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
-                    )
-                    .bind::<diesel::sql_types::Text, _>(&search_query)
-                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Uuid>, _>(source_filter)
-                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Array<diesel::sql_types::Text>>, _>(
-                        frequency_patterns,
-                    )
-                    .bind::<diesel::sql_types::Bool, _>(include_inactive)
-                    .bind::<diesel::sql_types::Integer, _>(limit)
-                    .bind::<diesel::sql_types::Integer, _>(offset)
-                    .bind::<diesel::sql_types::Text, _>(&fulltext_query)
-                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(exact_frequency)
-                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
-                        expanded_query,
-                    )
-                    .bind::<diesel::sql_types::Text, _>(&term)
-                    .load::<SeriesSearchResultRow>(conn)
-                    .await
+                        )
+                        .bind::<diesel::sql_types::Text, _>(&search_query)
+                        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Uuid>, _>(
+                            source_filter,
+                        )
+                        .bind::<diesel::sql_types::Nullable<
+                            diesel::sql_types::Array<diesel::sql_types::Text>,
+                        >, _>(frequency_patterns.clone())
+                        .bind::<diesel::sql_types::Bool, _>(include_inactive)
+                        .bind::<diesel::sql_types::Integer, _>(limit)
+                        .bind::<diesel::sql_types::Integer, _>(offset)
+                        .bind::<diesel::sql_types::Text, _>(&fulltext_query)
+                        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
+                            exact_frequency.clone(),
+                        )
+                        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
+                            expanded_query.clone(),
+                        )
+                        .bind::<diesel::sql_types::Text, _>(&term)
+                    };
+
+                    let rows = page_query(limit, offset)
+                        .load::<SeriesSearchResultRow>(conn)
+                        .await?;
+                    let total_count = match <[_]>::first(&rows) {
+                        Some(row) => row.total_count,
+                        None if offset > 0 => page_query(1, 0)
+                            .load::<SeriesSearchResultRow>(conn)
+                            .await?
+                            .into_iter()
+                            .next()
+                            .map_or(0, |row| row.total_count),
+                        None => 0,
+                    };
+                    Ok((rows, total_count))
                 },
             )
             .await
@@ -161,13 +199,17 @@ impl SearchService {
 
         // Log search analytics
         info!(
-            "Search completed: query='{}', results={}, time={}ms",
+            "Search completed: query='{}', results={}, total={}, time={}ms",
             params.query,
             search_results.len(),
+            total_count,
             execution_time.as_millis()
         );
 
-        Ok(search_results)
+        Ok(SearchPage {
+            results: search_results,
+            total_count,
+        })
     }
 
     /// Get search suggestions for query completion and spelling correction
@@ -347,6 +389,9 @@ struct SeriesSearchResultRow {
     pub rank: f32,
     #[diesel(sql_type = diesel::sql_types::Float4)]
     pub similarity_score: f32,
+    /// How many rows match in all, across every page.
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub total_count: i64,
 }
 
 impl SeriesSearchResultRow {

@@ -858,6 +858,10 @@ type Query {
 	queueStatistics: QueueStatistics!
 	"""
 	Search economic series using full-text search with spelling correction
+	
+	`source` is a data source id; a value that isn't a UUID is rejected with a
+	`BAD_USER_INPUT` error. `totalCount` counts every matching series, not just this page;
+	read the next page with `after` set to the number of series already read.
 	"""
 	searchSeries(query: String!, source: String, frequency: SeriesFrequency, first: Int, after: String): SearchResult!
 	"""
@@ -919,6 +923,9 @@ Search result type
 """
 type SearchResult {
 	series: [EconomicSeriesType!]!
+	"""
+	How many series match the query and filters in all, on every page
+	"""
 	totalCount: Int!
 	query: String!
 	tookMs: Int!

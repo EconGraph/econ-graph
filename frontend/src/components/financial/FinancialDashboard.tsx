@@ -223,7 +223,12 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     ratios.slice(0, 6).map((ratio: any) => (
                       <div key={ratio.id} className='flex items-center justify-between'>
                         <Typography variant='body2'>{ratio.ratioDisplayName}</Typography>
-                        <Typography variant='body2' color='text.secondary'>
+                        <Typography
+                          variant='body2'
+                          sx={{
+                            color: 'text.secondary',
+                          }}
+                        >
                           {ratio.value.toFixed(2)}
                         </Typography>
                       </div>

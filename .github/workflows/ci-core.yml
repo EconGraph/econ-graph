@@ -201,7 +201,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -368,7 +368,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -473,7 +473,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
@@ -537,7 +537,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -572,7 +572,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
@@ -663,7 +663,7 @@ jobs:
         persist-credentials: false
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -748,8 +748,8 @@ jobs:
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
     # needed; default build and with the xbrl-parser feature), then the core financial ratio,
-    # crawl_queue, dataset model, dataset GraphQL, queue service and cross-section tests
-    # (against this job's Postgres). These must pass for the job (and the PR) to go green.
+    # crawl_queue, dataset model, dataset GraphQL, queue service, cross-section and series
+    # search tests (against this job's Postgres). These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
@@ -773,6 +773,8 @@ jobs:
         cargo test -p econ-graph-services queue_service -- --test-threads=1
         cargo test -p econ-graph-services cross_section -- --test-threads=1
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
+        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
     # backend/.cargo/config.toml defaults FLAGS_PROFILE to dev, which keeps the static_catalogs
@@ -861,7 +863,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -998,7 +1000,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: admin-frontend/package-lock.json
 
@@ -1044,7 +1046,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1087,7 +1089,7 @@ jobs:
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -1117,7 +1119,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1157,7 +1159,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1181,7 +1183,7 @@ jobs:
     - name: Setup Node.js for npm audit
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1224,7 +1226,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1237,7 +1239,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1333,7 +1335,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1382,7 +1384,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1494,7 +1496,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1612,7 +1614,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1815,7 +1817,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 

@@ -222,7 +222,13 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
           backgroundColor: theme.palette.background.paper,
         }}
       >
-        <Typography data-testid='sidebar-footer-text' variant='caption' color='text.secondary'>
+        <Typography
+          data-testid='sidebar-footer-text'
+          variant='caption'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Built with modern web technologies
         </Typography>
       </Box>

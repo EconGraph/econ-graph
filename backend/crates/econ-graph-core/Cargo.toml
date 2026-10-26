@@ -68,6 +68,7 @@ async-graphql.workspace = true
 
 # Test dependencies
 [dev-dependencies]
+tempfile.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true
