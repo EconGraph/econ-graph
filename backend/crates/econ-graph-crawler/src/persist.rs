@@ -169,7 +169,10 @@ pub async fn data_source_id(pool: &DatabasePool, source: SourceId) -> AppResult<
     data_source_id_conn(&mut conn, source).await
 }
 
-async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> AppResult<Uuid> {
+pub(crate) async fn data_source_id_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+) -> AppResult<Uuid> {
     use data_sources::dsl;
     let template = data_source_template(source);
     if let Some(id) = dsl::data_sources
@@ -977,8 +980,11 @@ pub(crate) async fn persist_series_conn(
                  SELECT $9, $1, $2, COALESCE($3, (SELECT title FROM discovered), $2), \
                      COALESCE($4, (SELECT description FROM discovered)), \
                      COALESCE($5, (SELECT units FROM discovered)), \
-                     COALESCE($6, (SELECT frequency FROM discovered), $7), $8, TRUE, NOW(), \
-                     NOW(), NOW(), 'success', NULL, $10, $11 \
+                     COALESCE($6, (SELECT frequency FROM discovered), $7), $8, \
+                     COALESCE((SELECT l.status <> 'restricted' FROM series_lifecycle l \
+                         WHERE l.source_id=$1 AND l.external_id=$2), TRUE), NOW(), \
+                     NOW(), NOW(), COALESCE((SELECT NULLIF(l.status, 'active') FROM series_lifecycle l \
+                         WHERE l.source_id=$1 AND l.external_id=$2), 'success'), NULL, $10, $11 \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, (SELECT title FROM discovered), economic_series.title), \
                      description = COALESCE($4, (SELECT description FROM discovered), \
@@ -989,7 +995,9 @@ pub(crate) async fn persist_series_conn(
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
                      dataset_id = $10, dimensions = $11, \
                      last_crawled_at = NOW(), last_updated = NOW(), \
-                     crawl_status = 'success', crawl_error_message = NULL \
+                     crawl_status = COALESCE((SELECT NULLIF(l.status, 'active') \
+                         FROM series_lifecycle l WHERE l.source_id = $1 AND l.external_id = $2), 'success'), \
+                     crawl_error_message = NULL \
                  RETURNING id, (old.id IS NULL) AS inserted",
     )
     .bind::<SqlUuid, _>(source_id)
@@ -1120,7 +1128,9 @@ pub(crate) async fn persist_discovered_conn(
                 sm::data_url.eq(excluded(sm::data_url)),
                 sm::dataset_id.eq(excluded(sm::dataset_id)),
                 sm::dimensions.eq(excluded(sm::dimensions)),
-                sm::is_active.eq(true),
+                sm::is_active.eq(diesel::dsl::sql::<Bool>(
+                    "NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id = series_metadata.source_id AND l.external_id = series_metadata.external_id AND l.status = 'restricted')"
+                )),
                 sm::last_discovered_at.eq(now),
                 sm::updated_at.eq(now),
             ))
@@ -1323,8 +1333,10 @@ pub(crate) async fn record_attempt_conn(
             "failed"
         };
         diesel::sql_query(
-            "UPDATE economic_series SET crawl_status = $3, crawl_error_message = $2 \
-             WHERE id = $1",
+            "UPDATE economic_series es SET crawl_status = COALESCE( \
+                (SELECT NULLIF(l.status, 'active') FROM series_lifecycle l \
+                 WHERE l.source_id=es.source_id AND l.external_id=es.external_id), $3), \
+                crawl_error_message = $2 WHERE es.id = $1",
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())

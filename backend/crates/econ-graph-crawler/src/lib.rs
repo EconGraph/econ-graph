@@ -63,11 +63,14 @@
 //! ```
 
 pub mod adapter;
+pub mod catalog_reference;
+pub mod catalog_selection;
 pub mod cli;
 pub mod coverage;
 pub mod dataset;
 pub mod error;
 pub mod http;
+pub mod lifecycle;
 pub mod persist;
 pub mod policy;
 pub mod rate_limit;

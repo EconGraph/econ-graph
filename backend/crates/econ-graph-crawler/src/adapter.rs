@@ -261,6 +261,19 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Verified publication facts from the last complete successful catalog. Facts are kept
+    /// separate from fetch health, so a successful history fetch cannot revive a retired id.
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        crate::lifecycle::CatalogLifecycle::default()
+    }
+
+    /// Stable fingerprint of the declarative catalog selection rules. Only adapters that
+    /// return this opt into conservative publication lifecycle tracking. Changing the rules
+    /// establishes a new baseline rather than treating deselected series as upstream removals.
+    fn catalog_scope(&self) -> Option<String> {
+        None
+    }
+
     /// Curated or configured entries (BEA tables, FRED series ids, ...) that the last successful
     /// [`discover`](Self::discover) on this adapter instance skipped because the source no longer
     /// lists them, each named as the skip warning names it. The worker reads this after each
