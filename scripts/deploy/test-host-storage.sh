@@ -14,7 +14,9 @@
 #     Released PV, changes nothing under --dry-run, never deletes anything and never
 #     changes ownership;
 #   - deploy.sh runs it, on the pinned context, after the namespace and before
-#     create-secrets.sh and both Postgres StatefulSets.
+#     create-secrets.sh and both Postgres StatefulSets, waits for the postgresql
+#     rollout (not for any ready pod), and protect-postgres-pv.sh sets the backup PV
+#     to Retain through the same pinned kubectl.
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-host-storage.sh (from anywhere)
 set -euo pipefail
@@ -75,9 +77,13 @@ log="$scratch/calls.log"
 export STUB_LOG="$log"
 
 # The stub cluster. Every call is logged; nothing is written anywhere else.
-#   STUB_NO_LABEL=1        no node carries econgraph.io/host-storage=true
+#   STUB_LABELLED          the nodes carrying econgraph.io/host-storage=true, one per
+#                          line (default node/econ-graph-worker)
 #   STUB_SECRETS           Secrets that exist (default: both database Secrets)
-#   STUB_PV_PHASE          phase of both PVs (default Bound)
+#   STUB_PV_PHASE          phase of both host PVs (default Bound); either way their
+#                          claimRef has uid $STUB_UID and a resourceVersion
+#   STUB_BACKUP_RECLAIM    reclaim policy of the backup PVC's PV (default Delete, as
+#                          production's); the database PVs are Retain
 #   STUB_STOP_AT           a substring of the call at which to exit 99 (ends deploy.sh)
 cat >"$stub/kubectl" <<'STUB'
 #!/usr/bin/env bash
@@ -87,14 +93,16 @@ case "$*" in
   *"config current-context"*) echo kind-econ-graph ;;
   *"config use-context"*) ;;
   *"get nodes -l econgraph.io/host-storage=true"*)
-    [ "${STUB_NO_LABEL:-0}" = 1 ] || echo node/econ-graph-worker ;;
+    printf '%b' "${STUB_LABELLED-node/econ-graph-worker}" ;;
   *"get secret "*)
     for s in ${STUB_SECRETS-econ-graph-postgres econ-graph-keycloak}; do
       [[ "$*" == *"get secret $s "* ]] && echo "secret/$s"
     done ;;
-  *"get pv "*"status.phase"*) echo "${STUB_PV_PHASE:-Bound}" ;;
+  *"get pv "*"status.phase"*) echo "${STUB_PV_PHASE:-Bound} $STUB_UID 4242" ;;
+  *"get pv pv-backup "*"persistentVolumeReclaimPolicy"*) echo "${STUB_BACKUP_RECLAIM:-Delete}" ;;
   *"get pv "*"persistentVolumeReclaimPolicy"*) echo Retain ;;
   *"get pvc "*"-o name"*) echo persistentvolumeclaim/claim ;;
+  *"get pvc postgres-backup-data "*"volumeName"*) echo pv-backup ;;
   *"get pvc "*"volumeName"*) echo pv-of-claim ;;
   *"create configmap"*) printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: keycloak-realm\n' ;;
   *"apply -f -"*) cat >/dev/null ;;
@@ -106,11 +114,16 @@ printf '#!/usr/bin/env bash\necho "kind $*" >>"$STUB_LOG"\necho econ-graph\n' >"
 # docker: only `docker exec econ-graph-worker mountpoint|test`.
 #   STUB_NODE_UNMOUNTED=1  the node does not bind-mount the subvolumes
 #   STUB_DB_PRESENT        "pg", "keycloak-pg", both or empty: which PGDATA exists
+#   STUB_NODE_OTHER_INODE=1  the node's data directories are other directories than
+#                          the host's (different inode numbers)
 cat >"$stub/docker" <<'STUB'
 #!/usr/bin/env bash
 echo "docker $*" >>"$STUB_LOG"
 case "$*" in
   "exec econ-graph-worker mountpoint -q /srv/econgraph/"*) [ "${STUB_NODE_UNMOUNTED:-0}" != 1 ] ;;
+  "exec econ-graph-worker stat -c %i /srv/econgraph/"*)
+    if [ "${STUB_NODE_OTHER_INODE:-0}" = 1 ]; then echo 1; else
+      /usr/bin/stat -c %i "$ECONGRAPH_HOST_ROOT/${6#/srv/econgraph/}"; fi ;;
   "exec econ-graph-worker test -e /srv/econgraph/data-plane/pg/"*) [[ " ${STUB_DB_PRESENT-} " == *" pg "* ]] ;;
   "exec econ-graph-worker test -e /srv/econgraph/app-prod/keycloak-pg/"*) [[ " ${STUB_DB_PRESENT-} " == *" keycloak-pg "* ]] ;;
   *) exit 1 ;;
@@ -118,13 +131,15 @@ esac
 STUB
 # Host mounts: the scratch subvolumes count as mounted btrfs unless STUB_HOST_UNMOUNTED=1.
 printf '#!/usr/bin/env bash\necho "mountpoint $*" >>"$STUB_LOG"\n[ "${STUB_HOST_UNMOUNTED:-0}" != 1 ]\n' >"$stub/mountpoint"
-printf '#!/usr/bin/env bash\necho btrfs\n' >"$stub/findmnt"
+printf '#!/usr/bin/env bash\necho "${STUB_FSTYPE:-btrfs}"\n' >"$stub/findmnt"
+# STUB_USER: the account `id -un` reports (default: the real one, who owns the scratch dirs).
+printf '#!/usr/bin/env bash\nif [ "$*" = -un ] && [ -n "${STUB_USER:-}" ]; then echo "$STUB_USER"; else exec /usr/bin/id "$@"; fi\n' >"$stub/id"
 # Anything that would change ownership or need root fails the test.
 for cmd in sudo chown chmod rm rmdir; do
   printf '#!/usr/bin/env bash\necho "FORBIDDEN %s $*" >>"$STUB_LOG"\nexit 1\n' "$cmd" >"$stub/$cmd"
 done
 chmod +x "$stub"/*
-export PATH="$stub:$PATH" KUBECTL="$stub/kubectl"
+export PATH="$stub:$PATH" KUBECTL="$stub/kubectl" STUB_UID=0a1b2c3d-0000-4000-8000-000000000001
 
 srv="$ECONGRAPH_HOST_ROOT"
 reset_host() {
@@ -147,7 +162,7 @@ run_apply() {
   if grep -Eq 'FORBIDDEN|kubectl .*delete' "$log"; then
     fail "$name: deleted something or changed ownership:"; grep -E 'FORBIDDEN|delete' "$log"
   fi
-  if grep -v -e '--context kind-econ-graph' "$log" | grep -q '^kubectl'; then
+  if grep -v -e '--context kind-econ-graph' -e '^kubectl config ' "$log" | grep -q '^kubectl'; then
     fail "$name: a kubectl call left the pinned context"
   fi
 }
@@ -168,8 +183,21 @@ STUB_HOST_UNMOUNTED=1 run_apply "host subvolumes not mounted" fail
 applied && fail "host subvolumes not mounted: applied anyway"
 grep -q 'setup-subvolumes.sh' "$scratch/out" || fail "host subvolumes not mounted: no pointer to setup-subvolumes.sh"
 
-STUB_NO_LABEL=1 run_apply "no labelled node" fail
+STUB_LABELLED='' run_apply "no labelled node" fail
 applied && fail "no labelled node: applied anyway"
+
+STUB_LABELLED='node/econ-graph-worker\nnode/econ-graph-worker2\n' run_apply "two labelled nodes" fail
+applied && fail "two labelled nodes: applied anyway"
+
+STUB_FSTYPE=ext4 run_apply "subvolumes not btrfs" fail
+applied && fail "subvolumes not btrfs: applied anyway"
+
+STUB_USER=someone-else run_apply "subvolumes owned by another account" fail
+applied && fail "subvolumes owned by another account: applied anyway"
+
+STUB_NODE_OTHER_INODE=1 run_apply "node mounts other directories" fail
+applied && fail "node mounts other directories: applied anyway"
+grep -q 'is not the host' "$scratch/out" || fail "node mounts other directories: not explained"
 
 STUB_NODE_UNMOUNTED=1 run_apply "node without the bind mounts" fail
 applied && fail "node without the bind mounts: applied anyway"
@@ -199,8 +227,11 @@ run_apply "--create-dirs" ok --create-dirs
 applied || fail "--create-dirs: not applied"
 
 STUB_PV_PHASE=Released run_apply "Released PVs" ok
-[ "$(grep -c 'patch pv econgraph-.* --type merge -p {"spec":{"claimRef":{"uid":null,"resourceVersion":null}}}' "$log")" = 2 ] ||
-  fail "Released PVs: not both re-armed"
+rearm='--type json -p [{"op":"test","path":"/spec/claimRef/uid","value":"'"$STUB_UID"'"},{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'
+for pv in econgraph-data-plane-pg econgraph-app-prod-keycloak-pg; do
+  grep -qF "kubectl --context kind-econ-graph patch pv $pv $rearm" "$log" ||
+    fail "Released PVs: $pv not re-armed with a uid test"
+done
 
 STUB_PV_PHASE=Released run_apply "Released PVs, --dry-run" ok --dry-run
 grep -q 'patch pv' "$log" && fail "Released PVs, --dry-run: patched"
@@ -247,6 +278,23 @@ grep -q "create-secrets.sh context=kind-econ-graph" "$log" || fail "deploy.sh: c
 if grep -Eq 'FORBIDDEN|delete (pv|pvc|persistentvolume|storageclass|-f k8s/manifests/host-storage)' "$log"; then
   fail "deploy.sh: deleted storage or changed ownership"
 fi
+# Every kubectl call, protect-postgres-pv.sh's included, goes to $KUBECTL on the pinned
+# context; the stub is also first on PATH, so a plain `kubectl` would show up here.
+if grep -v -e '--context kind-econ-graph' -e '^kubectl config ' "$log" | grep -q '^kubectl'; then
+  fail "deploy.sh: a kubectl call left the pinned context:"
+  grep -v -e '--context kind-econ-graph' -e '^kubectl config ' "$log" | grep '^kubectl'
+fi
+for pvc in postgresql-data-postgresql-0 keycloak-postgres-data-keycloak-postgres-0 postgres-backup-data; do
+  grep -q "kubectl --context kind-econ-graph get pvc $pvc " "$log" ||
+    fail "deploy.sh: protect-postgres-pv.sh did not check $pvc"
+done
+grep -qF 'kubectl --context kind-econ-graph patch pv pv-backup -p {"spec":{"persistentVolumeReclaimPolicy":"Retain"}}' "$log" ||
+  fail "deploy.sh: the backup PV was not set to Retain"
+[ "$(grep -c 'patch pv' "$log")" = 1 ] || fail "deploy.sh: patched a PV that was already Retain"
+grep -q "kubectl --context kind-econ-graph -n econ-graph rollout status statefulset/postgresql " "$log" ||
+  fail "deploy.sh: does not wait for the postgresql rollout"
+grep -q 'wait --for=condition=ready pod -l app=postgresql' "$log" &&
+  fail "deploy.sh: waits on postgresql pods, which an old ready pod can satisfy"
 for d in "$srv/data-plane/pg" "$srv/app-prod/keycloak-pg"; do
   [ -d "$d" ] || fail "deploy.sh: $d is gone"
 done

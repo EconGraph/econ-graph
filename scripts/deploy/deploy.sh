@@ -117,7 +117,9 @@ kubectl apply -f k8s/manifests/postgres.yaml
 
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
-kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+# rollout status, not `wait ... pod -l app=postgresql`: when the pod template
+# changed, the old pod may still be ready (terminating) and would satisfy a wait.
+kubectl -n econ-graph rollout status statefulset/postgresql --timeout=600s
 
 # Deploy PostgreSQL backups
 echo "🗄️  Deploying PostgreSQL backup CronJob..."

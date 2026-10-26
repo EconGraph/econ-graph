@@ -54,15 +54,19 @@ kubectl and context as the rest of the deploy. It:
    mounted btrfs filesystems owned by the account running the deploy;
 2. checks that `pg/` and `keycloak-pg/` exist, and stops if one is missing
    (it creates them only with `--create-dirs`);
-3. checks that exactly `econ-graph-worker` carries the label and that it
-   bind-mounts both subvolumes (`docker exec econ-graph-worker mountpoint`,
-   through the caller's `DOCKER_HOST`, as `kind` in `deploy.sh` uses);
+3. checks that exactly one node, `econ-graph-worker`, carries the label, that
+   it bind-mounts both subvolumes, and that `pg/` and `keycloak-pg/` have the
+   same inode numbers in the node as on the host (`docker exec
+   econ-graph-worker`, through the caller's `DOCKER_HOST`, as `kind` in
+   `deploy.sh` uses);
 4. stops if a data directory already holds a database while the Secret with
    its passwords (`econ-graph-postgres`, `econ-graph-keycloak`) is missing:
    `create-secrets.sh` would generate new passwords that don't match it;
 5. `kubectl apply`s `host-storage.yaml`, and re-arms a PV left `Released` by
-   a deleted PVC (clears the old PVC's uid in its `claimRef`), so the new PVC
-   binds to the same directory.
+   a deleted PVC, so the new PVC binds to the same directory. It removes the
+   old PVC's uid from the PV's `claimRef` with a JSON patch whose `test`
+   operation names that uid, so the patch fails instead of unbinding a claim
+   that changed after it was read.
 
 On a cluster that already runs these objects, the apply changes nothing.
 `scripts/deploy/apply-host-storage.sh --dry-run` runs the same checks and
@@ -70,8 +74,22 @@ shows `kubectl diff` for `host-storage.yaml` (no diff output means no change)
 and what it would create or re-arm, without changing anything.
 
 It never deletes a PV, a PVC or a directory and never changes ownership on
-the host. `teardown.sh` does not delete these PVs; deleting the namespace
-leaves them `Released`, and the next deploy re-arms them.
+the host.
+
+`teardown.sh` does not delete these PVs: deleting the namespace leaves them
+`Released`, with the data in place. It does delete the Secrets
+`econ-graph-postgres` and `econ-graph-keycloak`, which hold the passwords the
+databases were initialised with, and nothing else keeps a copy. Before a
+teardown, write down `postgres-password` and `app-password` from
+`econ-graph-postgres` and `admin-password` and `db-password` from
+`econ-graph-keycloak`. Before the next deploy, apply
+`k8s/manifests/namespace.yaml` and run `scripts/deploy/create-secrets.sh` by
+hand with those values in `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`,
+`KEYCLOAK_ADMIN_PASSWORD` and `KEYCLOAK_DB_PASSWORD` (see the header of that
+script). The deploy checks the Secrets before it runs `create-secrets.sh`
+itself, so without them it stops at the Secret check (step 4) and changes
+nothing. With them, it re-arms the PVs, and the databases come
+back as they were.
 
 Run the deploy scripts against the rootful daemon
 (`DOCKER_HOST=unix:///var/run/docker.sock`) so that `kind` and `docker` see
@@ -91,6 +109,10 @@ the cluster.
    the default is the production host's.
 2. Create the kind cluster from `terraform/k8s/kind-config.yaml`
    (`terraform apply` in `terraform/k8s`, which uses the rootful daemon).
+   `terraform destroy` does not delete the cluster: deleting it deletes what
+   its nodes hold (the backup volume, Grafana's data), so that is left to
+   `teardown.sh`, which asks first, or an explicit
+   `kind delete cluster --name econ-graph`.
    `scripts/deploy/recreate-kind-cluster.sh` uses the same config; it deletes
    any existing `econ-graph` cluster first, and refuses to start unless both
    subvolumes are mounted. Docker would otherwise create a missing bind-mount

@@ -7,8 +7,10 @@
 #
 #   1. /srv/econgraph/data-plane and /srv/econgraph/app-prod are mounted btrfs
 #      subvolumes owned by you (scripts/host/setup-subvolumes.sh creates them).
-#   2. A node is labelled econgraph.io/host-storage=true and bind-mounts both
-#      (the cluster was created from terraform/k8s/kind-config.yaml).
+#   2. Exactly one node, econ-graph-worker, is labelled
+#      econgraph.io/host-storage=true and bind-mounts both, so that the data
+#      directories have the same inode numbers there as on the host (the
+#      cluster was created from terraform/k8s/kind-config.yaml).
 #   3. The data directories pg/ and keycloak-pg/ exist. They are created only
 #      with --create-dirs; otherwise a missing one stops the deploy.
 #   4. If a data directory already holds a database but the Secret with the
@@ -135,6 +137,17 @@ for sub in "${SUBVOLUMES[@]}"; do
   The cluster predates the host-storage kind config (terraform/k8s/kind-config.yaml);
   see docs/deployment/HOST_STORAGE.md."
 done
+# The same directories, not just something mounted at those paths: each data
+# directory has the same inode number on the host and in the node.
+for db in "${DATABASES[@]}"; do
+    read -r datadir _ _ _ <<<"$db"
+    [ -d "${HOST_ROOT}/${datadir}" ] || continue # only under --dry-run --create-dirs
+    host_inode="$(stat -c %i "${HOST_ROOT}/${datadir}")"
+    node_inode="$(docker exec "$KIND_STORAGE_NODE" stat -c %i "${NODE_ROOT}/${datadir}")" ||
+        die "node ${KIND_STORAGE_NODE} has no ${NODE_ROOT}/${datadir}"
+    [ "$host_inode" = "$node_inode" ] ||
+        die "${NODE_ROOT}/${datadir} in node ${KIND_STORAGE_NODE} (inode ${node_inode}) is not the host's ${HOST_ROOT}/${datadir} (inode ${host_inode})"
+done
 echo "  ok: ${KIND_STORAGE_NODE} is labelled ${STORAGE_LABEL} and bind-mounts ${SUBVOLUMES[*]}"
 
 # Once Postgres has run, its directory belongs to uid 999, mode 0700, so look
@@ -167,12 +180,21 @@ fi
 
 for db in "${DATABASES[@]}"; do
     read -r _ _ _ pv <<<"$db"
-    phase="$(kc get pv "$pv" -o jsonpath='{.status.phase}' --ignore-not-found)" ||
+    state="$(kc get pv "$pv" --ignore-not-found \
+        -o jsonpath='{.status.phase} {.spec.claimRef.uid} {.spec.claimRef.resourceVersion}')" ||
         die "could not read PV ${pv}"
-    if [ "$phase" = Released ]; then
+    read -r phase old_uid old_rv <<<"$state" || true
+    if [ "$phase" = Released ] && [ -n "$old_uid" ]; then
         # The PVC it was bound to is gone; forget that PVC's uid so the new PVC
         # of the same name (the claimRef) can bind. The data is not touched.
-        run kc patch pv "$pv" --type merge -p '{"spec":{"claimRef":{"uid":null,"resourceVersion":null}}}'
+        # The test op makes the patch fail instead of unbinding a claim that
+        # changed since it was read (say, a new PVC bound in between).
+        [[ "$old_uid" =~ ^[0-9a-f-]+$ ]] || die "PV ${pv}: unexpected claimRef uid '${old_uid}'"
+        ops='{"op":"test","path":"/spec/claimRef/uid","value":"'"$old_uid"'"},{"op":"remove","path":"/spec/claimRef/uid"}'
+        if [ -n "$old_rv" ]; then
+            ops+=',{"op":"remove","path":"/spec/claimRef/resourceVersion"}'
+        fi
+        run kc patch pv "$pv" --type json -p "[${ops}]"
     fi
     echo "  ${pv}: ${phase:-not created yet}"
 done

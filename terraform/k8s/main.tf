@@ -133,13 +133,10 @@ resource "null_resource" "kind_cluster" {
     EOT
   }
 
-  provisioner "local-exec" {
-    when = destroy
-    environment = {
-      DOCKER_HOST = "unix:///var/run/docker.sock"
-    }
-    command = "kind delete cluster --name econ-graph"
-  }
+  # No destroy provisioner: `terraform destroy` leaves the cluster running.
+  # Deleting it deletes everything stored in its nodes (the backup volume,
+  # Grafana's data), so it is done only on purpose: scripts/deploy/teardown.sh
+  # (asks first) or `kind delete cluster --name econ-graph`.
 }
 
 # Install NGINX Ingress Controller
