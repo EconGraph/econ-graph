@@ -287,6 +287,7 @@ jobs:
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.

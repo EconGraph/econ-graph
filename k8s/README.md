@@ -714,3 +714,12 @@ For production use, consider:
 Admin audit client-IP attribution depends on the verified proxy chain. See
 [Admin audit and trusted proxies](../docs/security/ADMIN_AUDIT.md) before setting
 `TRUSTED_PROXIES`; the manifests default to the backend TCP peer.
+
+## Tunnel origin certificate verification
+
+The optional private-CA flow authenticates the tunnel connector's TLS connection to the
+gateway. Stage only its public trust certificate with
+`scripts/deploy/stage-tunnel-origin-ca.sh --context <context> --dry-run`, then follow
+[Tunnel origin TLS](../docs/deployment/TUNNEL_ORIGIN_TLS.md) for issuer selection,
+certificate checks, the remote dashboard transition and rollback. Staging does not change
+the gateway issuer or disable the dashboard's existing No TLS Verify setting.
