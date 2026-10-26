@@ -41,9 +41,12 @@ The script does five things:
    `APP_DATABASE_URL` and `DATA_DATABASE_URL` you export, so neither migrates
    or seeds your dev database. The one database is both the app and the data
    database.
-3. It builds `econ-graph-backend` and `seed-fixtures` in one cargo invocation,
-   with `FLAGS_PROFILE=release`, so the backend has the build flags that ship
-   (no `/mcp`, no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404.
+3. It builds `econ-graph-backend` with `--release --locked`, matching the shipping
+   build, then builds `seed-fixtures` separately in the dev profile with `--locked`
+   and the crawler `testkit` feature. Separate invocations keep the seed's mock
+   dependencies out of the backend. Both use `FLAGS_PROFILE=release` (no `/mcp`,
+   no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404. Build durations
+   are printed separately; CI caches both profiles for subsequent runs.
 4. It runs `seed-fixtures`, which applies the data migrations and loads the series listed
    in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
 5. It runs Playwright. Playwright starts the backend (which applies the app
@@ -62,7 +65,7 @@ Environment overrides:
 - `RELEASE_BACKEND_PORT` changes the backend port. `RELEASE_FRONTEND_PORT`
   changes the frontend port.
 - `RELEASE_BACKEND_BIN` points at a different backend binary. The script
-  respects `CARGO_TARGET_DIR`.
+  defaults to `target/release/econ-graph-backend` and respects `CARGO_TARGET_DIR`.
 - `RELEASE_CHROMIUM_PATH` sets a Chromium executable, for machines whose
   preinstalled browser doesn't match this Playwright version. For example, use
   `/opt/pw-browsers/chromium` in Claude Code cloud containers.
