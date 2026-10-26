@@ -427,6 +427,10 @@ including the Job, and changes nothing.
 
 ### Secrets
 
+Secret setup and value retrieval are human-only operations; agents never handle
+secret values. See [Secrets Management](../docs/technical/SECRETS_MANAGEMENT.md)
+for handling tiers and the current setup workflow.
+
 Current manifests contain no credentials. Google and Facebook credentials committed in earlier versions remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
 `econ-graph` namespace from environment variables; `deploy.sh` runs it on every deploy. It is
 idempotent: internal passwords are generated with `openssl rand` on the first run and kept on
@@ -435,8 +439,7 @@ placeholders such as `password` or `your-...` are refused. A variable set to the
 counts as unset.
 
 ```bash
-FRED_API_KEY=... ./scripts/deploy/create-secrets.sh
-kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/crawler-worker
+scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts the worker
 ```
 
 | Secret | Keys (environment variable) | Used by |

@@ -1,3 +1,0 @@
-[submodule "k8s/secrets"]
-	path = k8s/secrets
-	url = https://github.com/jmalicki/econ-graph-secrets.git

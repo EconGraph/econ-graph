@@ -1,5 +1,8 @@
 # EconGraph Security Assessment Findings Report
 
+**Historical assessment:** the Sealed Secrets/submodule design below was never
+deployed and is retired. See [current secrets management](../../technical/SECRETS_MANAGEMENT.md).
+
 > **Project**: EconGraph Platform Security Assessment  
 > **Date**: December 2024  
 > **Assessor**: Security Engineer AI Agent  
