@@ -258,12 +258,14 @@ jobs:
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
-    # rendering against the manifests and the library against a stub kubectl.
+    # rendering against the manifests, and the library and the cut-over's rollback
+    # NetworkPolicy step against a stub kubectl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        scripts/deploy/test-cutover-rollback-policy.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.

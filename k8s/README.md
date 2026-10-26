@@ -223,7 +223,11 @@ that a pod in `econ-graph` reaches the proxy, asks for confirmation, removes the
 ingress-nginx, moves the proxy onto ports 80/443 and checks the routes again. First it saves
 everything a rollback needs, including ingress-nginx's manifest, ConfigMaps, Deployment and
 Secrets and the gateway's release manifests, so neither direction needs the network once
-ingress-nginx is gone; `--rollback <dir>` restores ingress-nginx and the Ingresses. On a
+ingress-nginx is gone; `--rollback <dir>` restores ingress-nginx, the Ingresses and the saved
+NetworkPolicies. When `econ-graph` has any NetworkPolicy, the rollback also adds
+`econ-graph-ingress-nginx-rollback`, which admits ingress-nginx on ports 3000, 8080 and 9876
+(the next cut-over deletes it). It then checks that the frontend answers and that a GraphQL
+query gets data from the database. On a
 cluster with the tunnel it keeps the dashboard's old origin name answering (an ExternalName
 Service `ingress-nginx/ingress-nginx-controller` pointing at the gateway) and prints the
 dashboard change that retires it. Its header lists every step.

@@ -78,15 +78,19 @@
 #      selector included) and Secrets. The admission webhook's certificate
 #      Secret is the exception: the manifest's own Job issues a new one that
 #      matches the new webhook configuration.
-#   3. Re-create the saved Ingresses, put back the saved NetworkPolicies, and
-#      add NetworkPolicy econ-graph-ingress-nginx-rollback, which admits the
-#      ingress-nginx controller to every pod in the namespace on the ports the
-#      Ingresses use (3000, 8080, 9876; never Postgres). It is needed when
+#   3. Re-create the saved Ingresses, put back the saved NetworkPolicies, and,
+#      when the namespace then has any NetworkPolicy, add
+#      econ-graph-ingress-nginx-rollback, which admits the ingress-nginx
+#      controller to every pod in the namespace on the ports the Ingresses use
+#      (3000, 8080, 9876; never Postgres). It is needed when
 #      k8s/manifests/network-policy.yaml, which admits only the gateway's
-#      proxy, was applied before the cut-over (and so saved) or after it; the
-#      next cut-over deletes it. A policy that did not exist at the cut-over
-#      is reported, not deleted.
-#   4. Check that --host-url serves the frontend again.
+#      proxy, was applied before the cut-over (and so saved) or after it.
+#      Without any other policy nothing blocks ingress-nginx, and it is not
+#      added: alone, it would deny every other connection to the namespace's
+#      pods (the backend's to Postgres among them). The next cut-over deletes
+#      it. A policy that did not exist at the cut-over is reported, not deleted.
+#   4. Check that --host-url serves the frontend again, and that a GraphQL
+#      query through ingress-nginx gets an answer from the database.
 #   The same steps by hand, if this script is not usable:
 #     GATEWAY_HOST_PORTS=false scripts/deploy/install-gateway.sh --context kind-econ-graph --manifests-dir DIR/gateway-manifests
 #     kubectl apply -f DIR/ingress-nginx.yaml
@@ -94,7 +98,8 @@
 #     kubectl create -f DIR/ingress-nginx-objects/<each secret-* file>
 #     kubectl apply -f DIR/ingresses.yaml
 #     kubectl apply -f DIR/networkpolicies.yaml       # if it lists any
-#     (and the policy econ-graph-ingress-nginx-rollback, printed by a --dry-run rollback)
+#     (and, if the namespace has any NetworkPolicy, econ-graph-ingress-nginx-rollback,
+#     printed by a --dry-run rollback)
 #
 # Never touches PersistentVolumes, databases or the Secrets of econ-graph;
 # the only Secrets it deletes are those in namespace ingress-nginx, after
@@ -290,6 +295,56 @@ spec:
 EOF
 }
 
+# Add ROLLBACK_POLICY when NAMESPACE has any other NetworkPolicy (the live
+# ones; in a dry run also those in the saved file SAVED, which a real run
+# would have applied by now). Without one, nothing blocks ingress-nginx, and a
+# podSelector {} policy would become the only ingress policy of every pod,
+# denying all other connections to them; a left-over one is deleted then.
+apply_rollback_policy() {
+    local saved="$1" live others
+    live="$(kc -n "$NAMESPACE" get networkpolicy -o name)" ||
+        die "could not list the NetworkPolicies of ${NAMESPACE}"
+    others="$(
+        {
+            printf '%s\n' "$live" | sed 's|^[^/]*/||'
+            if [ "$DRY_RUN" = true ] && [ -f "$saved" ]; then
+                sed -n 's/^  \{0,2\}  name: //p' "$saved"
+            fi
+        } | grep -v -x -e "$ROLLBACK_POLICY" -e '' | sort -u | tr '\n' ' '
+    )" || true
+    if [ -n "$others" ]; then
+        echo "  NetworkPolicies in ${NAMESPACE} (${others% }): adding ${ROLLBACK_POLICY} so ingress-nginx gets through"
+        if [ "$DRY_RUN" = true ]; then
+            echo "+ kubectl --context ${KUBE_CONTEXT} apply -f - <<"
+            rollback_policy_yaml | sed 's/^/    /'
+        else
+            rollback_policy_yaml | kc apply -f -
+        fi
+    else
+        echo "  no NetworkPolicy in ${NAMESPACE}: nothing blocks ingress-nginx, so ${ROLLBACK_POLICY} is not added"
+        run kc -n "$NAMESPACE" delete networkpolicy "$ROLLBACK_POLICY" --ignore-not-found
+    fi
+}
+
+# Whether a GraphQL query sent to HOST_URL (through ingress-nginx after a
+# rollback) gets an answer the backend read from the database: the frontend's
+# root alone would not show a NetworkPolicy that keeps the backend from
+# Postgres.
+wait_backend_db() {
+    local body
+    [ "$DRY_RUN" = true ] && { echo "+ POST ${HOST_URL}/graphql {dataSources {id}} until it answers from the database"; return 0; }
+    for _ in $(seq 1 60); do
+        body="$(curl -s --max-time 10 -H "Host: ${ROUTE_HOST:-localhost}" -H 'Content-Type: application/json' \
+            --data '{"query":"{ dataSources { id } }"}' "${HOST_URL}/graphql" || true)"
+        case "$body" in
+            *'"dataSources"'*) case "$body" in *'"errors"'*) ;; *) return 0 ;; esac ;;
+        esac
+        sleep 2
+    done
+    echo "  last answer: $(printf '%s' "$body" | head -c 300)" >&2
+    return 1
+}
+
 check_pod_reaches_proxy() {
     local url="$1" host="$2" out
     if [ "$DRY_RUN" = true ]; then
@@ -427,20 +482,16 @@ if [ -n "$ROLLBACK_DIR" ]; then
     fi
     # NetworkPolicies add up: this one lets ingress-nginx through whatever the
     # others admit (a saved or later network-policy.yaml admits only Envoy).
-    if [ "$DRY_RUN" = true ]; then
-        echo "+ kubectl --context ${KUBE_CONTEXT} apply -f - <<"
-        rollback_policy_yaml | sed 's/^/    /'
-    else
-        rollback_policy_yaml | kc apply -f -
-    fi
+    apply_rollback_policy "$ROLLBACK_DIR/networkpolicies.yaml"
     for policy in $(kc -n "$NAMESPACE" get networkpolicy -o name 2>/dev/null); do
         [ "${policy#*/}" != "$ROLLBACK_POLICY" ] || continue
         grep -qx "  name: ${policy#*/}" <(sed -n 's/^  \{0,2\}  name: /  name: /p' "$ROLLBACK_DIR/networkpolicies.yaml" 2>/dev/null) ||
             warn "${policy} did not exist at the cut-over and was kept; ${ROLLBACK_POLICY} admits ingress-nginx on 3000/8080/9876, check it allows anything else the Ingresses need (kubectl -n ${NAMESPACE} describe ${policy})"
     done
 
-    log "4/4 ${HOST_URL}/ answers"
+    log "4/4 ${HOST_URL}/ answers, and the backend reaches its database"
     wait_host_url || die "${HOST_URL}/ does not answer 200 after the rollback (check the NetworkPolicies in ${NAMESPACE} and the ingress-nginx controller's log)"
+    wait_backend_db || die "POST ${HOST_URL}/graphql gets no answer from the database after the rollback (check the NetworkPolicies in ${NAMESPACE}: the backend must reach Postgres)"
     echo "Rolled back: ${HOST_URL} is served by ingress-nginx again."
     exit 0
 fi
