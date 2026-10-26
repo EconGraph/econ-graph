@@ -1435,7 +1435,7 @@ mod tests {
             pending_migration_versions(&db.url, MigrationSet::Data)
                 .await
                 .expect("should read pending data migrations"),
-            [newest_data.clone()]
+            [newest_data.as_str()]
         );
         assert_eq!(
             pending_migration_versions(&db.url, MigrationSet::App)
