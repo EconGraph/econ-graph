@@ -12,7 +12,7 @@ script_dir="$(dirname "$(readlink -f "$0")")"
 die() { echo "error: $*" >&2; exit 1; }
 # shellcheck source=scripts/backup/encryption.sh
 source "$script_dir/encryption.sh"
-[[ $# -ge 4 && "$2" == -- ]] || die "usage: $0 BUNDLE_DIR -- COMMAND [ARGS containing @BACKUP@]"
+[[ $# -ge 3 && "$2" == -- ]] || die "usage: $0 BUNDLE_DIR -- COMMAND [ARGS containing @BACKUP@]"
 bundle="$(readlink -e -- "$1")" || die "bundle directory not found"
 shift 2
 [[ -t 0 ]] || die "opening a backup requires an operator terminal; unattended decryption is refused"
