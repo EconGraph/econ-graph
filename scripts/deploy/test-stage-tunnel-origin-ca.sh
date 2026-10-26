@@ -51,7 +51,8 @@ elif 'patch' in args:
     def run(*args, **updates):
         return subprocess.run([str(script),*args],env=dict(env,**updates),text=True,capture_output=True)
     assert run('--apply').returncode == 2
-    assert run('--context','scratch-only').returncode == 0
+    plan=run('--context','scratch-only')
+    assert plan.returncode == 0 and 'Restart cloudflared' in plan.stdout
     assert not calls.exists(), 'default dry run contacted the cluster'
     assert run('--context','scratch-only','--dry-run').returncode == 0
     assert not calls.exists(), 'explicit dry run contacted the cluster'

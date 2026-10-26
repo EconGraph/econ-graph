@@ -2,7 +2,8 @@
 # Stage a private origin CA and public trust bundle for the remotely managed tunnel.
 # Dry run is the default and contacts no cluster. --apply creates the cert-manager
 # resources, copies only the public CA certificate into a ConfigMap, and patches
-# the cloudflared mount without changing its replicas or token. It does not switch
+# the cloudflared mount, then restarts connectors and waits for their rollout. It
+# leaves replicas and token intact. It does not switch
 # the gateway issuer or Cloudflare dashboard TLS settings.
 #
 # Usage: stage-tunnel-origin-ca.sh --context NAME [--dry-run | --apply]
@@ -34,6 +35,7 @@ if [[ "$apply" != true ]]; then
     printf 'Dry run on context %q: apply %q\n' "$context" "$resources/ca.yaml"
     echo 'Wait for cert-manager CA readiness; copy only Secret tls.crt to ConfigMap econ-graph/cloudflared-origin-ca.'
     echo 'Patch only the cloudflared public-CA mount; leave replicas, token, gateway issuer and dashboard unchanged.'
+    echo 'Restart cloudflared and wait for its rollout so every connector receives the public CA file.'
     echo 'After staging, follow docs/deployment/TUNNEL_ORIGIN_TLS.md for the verified cutover.'
     exit 0
 fi
