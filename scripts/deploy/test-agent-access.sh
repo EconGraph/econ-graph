@@ -20,7 +20,11 @@ case "$*" in
     *'get namespaces -o'*) printf 'econ-graph\nkube-system\n' ;;
     *'auth can-i get pods'*) printf yes; [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
     *'auth can-i'*secrets*)
-        if [ "${AGENT_TEST_ALLOW_SECRETS:-false}" = true ]; then printf yes; else printf no; exit 1; fi ;;
+        if [ "${AGENT_TEST_ALLOW_SECRETS:-false}" = true ] && [[ "$*" == *' -n kube-system' ]]; then
+            printf yes
+        else
+            printf no; exit 1
+        fi ;;
     *'auth can-i'*) printf no; exit 1 ;;
     *) echo "unexpected kubectl call: $*" >&2; exit 1 ;;
 esac
