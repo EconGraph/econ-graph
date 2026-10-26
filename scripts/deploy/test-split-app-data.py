@@ -217,6 +217,19 @@ class ConversionRehearsal(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Unstable series IDs'):
             self.run_conversion()
 
+    def test_dry_run_refuses_app_column_mismatch_before_backup(self):
+        """Reject schema drift in rehearsal before producing a backup or modifying app rows."""
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute('ALTER TABLE users ADD COLUMN unsupported text')
+        self.args.dry_run = True
+        with self.assertRaisesRegex(RuntimeError, 'Column inventory differs for users'):
+            self.run_conversion()
+        self.assertFalse(self.args.backup_dir.exists())
+        with psycopg.connect(service='conversion_app') as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 1)
+
     def test_copy_failure_retains_backup_and_rolls_back_both_databases(self):
         """Keep recovery artifacts and both original schemas when the app copy fails."""
         with psycopg.connect(service='conversion_app') as db:

@@ -262,6 +262,9 @@ def convert(args):
         require(data_versions <= versions(source), 'Source data migration history is incomplete')
         require(versions(source) <= app_versions | data_versions, 'Source has migration versions unknown to this checkout')
         require(tables(source) == source_tables and tables(target) == target_tables, 'Table inventory changed during locking')
+        if source_app:
+            for name in app_tables:
+                require(columns(source, name) == columns(target, name), f'Column inventory differs for {name}')
         series = stable_ids(source, mapping)
         print(f"Stable series ID mismatches: {series['mismatches']}")
         require(series['mismatches'] == 0, 'Unstable series IDs: stop for operator investigation')
