@@ -41,7 +41,7 @@ const getDataSourceIcon = (name: string): React.ReactElement => {
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
-  const { data: backendDataSources, isLoading, error } = useDataSources();
+  const { data: backendDataSources, isPending, error } = useDataSources();
   const dataSources: DataSource[] = useMemo(() => backendDataSources ?? [], [backendDataSources]);
 
   const totalSeries = useMemo(
@@ -51,7 +51,7 @@ const DataSourcesContent: React.FC = () => {
 
   // A blocking spinner only while there is nothing to show yet; once sources have loaded
   // once, a later refetch error stays a nonblocking banner and the cached list stays up
-  if (isLoading && !backendDataSources) {
+  if (isPending && !backendDataSources) {
     return (
       <Box
         sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
@@ -76,7 +76,12 @@ const DataSourcesContent: React.FC = () => {
         <Typography variant='h4' component='h1' gutterBottom>
           Data Sources
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Where EconGraph's data comes from
         </Typography>
       </Box>
@@ -92,22 +97,32 @@ const DataSourcesContent: React.FC = () => {
       {/* Summary statistics */}
       <Paper sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={3}>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
                 {dataSources.length}
               </Typography>
-              <Typography variant='body2' color='text.secondary'>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 Sources
               </Typography>
             </Box>
           </Grid>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
                 {totalSeries.toLocaleString()}
               </Typography>
-              <Typography variant='body2' color='text.secondary'>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 Total Series
               </Typography>
             </Box>
@@ -118,7 +133,7 @@ const DataSourcesContent: React.FC = () => {
       {/* Data sources grid */}
       <Grid container spacing={3}>
         {dataSources.map(source => (
-          <Grid item xs={12} md={6} key={source.id}>
+          <Grid key={source.id} size={{ xs: 12, md: 6 }}>
             <Card
               component='section'
               aria-labelledby={`source-${source.id}`}
@@ -137,19 +152,35 @@ const DataSourcesContent: React.FC = () => {
                   </Typography>
                 </Box>
 
-                <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+                <Typography
+                  variant='body2'
+                  sx={{
+                    color: 'text.secondary',
+                    mb: 2,
+                  }}
+                >
                   {source.description || 'Economic data source'}
                 </Typography>
 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant='body2'>Series</Typography>
-                  <Typography variant='body2' fontWeight='bold'>
+                  <Typography
+                    variant='body2'
+                    sx={{
+                      fontWeight: 'bold',
+                    }}
+                  >
                     {source.seriesCount.toLocaleString()}
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant='body2'>Crawl rate limit</Typography>
-                  <Typography variant='body2' fontWeight='bold'>
+                  <Typography
+                    variant='body2'
+                    sx={{
+                      fontWeight: 'bold',
+                    }}
+                  >
                     {source.rateLimitPerMinute.toLocaleString()}/min
                   </Typography>
                 </Box>

@@ -1313,11 +1313,11 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "ix:nonNumeric" || e.name().as_ref() == "ix:nonFraction"
+                    if (e.name().as_ref() == "ix:nonNumeric"
+                        || e.name().as_ref() == "ix:nonFraction")
+                        && let Some(fact) = self.parse_ixbrl_fact_element(e, &mut reader)?
                     {
-                        if let Some(fact) = self.parse_ixbrl_fact_element(e, &mut reader)? {
-                            facts.push(fact);
-                        }
+                        facts.push(fact);
                     }
                 }
                 Ok(quick_xml::events::Event::Eof) => break,
@@ -1399,10 +1399,10 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if XbrlXmlParser::structural_name(&reader, e) == Some("context") {
-                        if let Some(context) = xml_parser.parse_context_element(e, &mut reader)? {
-                            contexts.push(context);
-                        }
+                    if XbrlXmlParser::structural_name(&reader, e) == Some("context")
+                        && let Some(context) = xml_parser.parse_context_element(e, &mut reader)?
+                    {
+                        contexts.push(context);
                     }
                 }
                 Ok(quick_xml::events::Event::Eof) => break,
@@ -1426,10 +1426,10 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if XbrlXmlParser::structural_name(&reader, e) == Some("unit") {
-                        if let Some(unit) = xml_parser.parse_unit_element(e, &mut reader)? {
-                            units.push(unit);
-                        }
+                    if XbrlXmlParser::structural_name(&reader, e) == Some("unit")
+                        && let Some(unit) = xml_parser.parse_unit_element(e, &mut reader)?
+                    {
+                        units.push(unit);
                     }
                 }
                 Ok(quick_xml::events::Event::Eof) => break,
@@ -1485,52 +1485,51 @@ impl XbrlParser {
         let mut line_items = Vec::new();
 
         for fact in facts {
-            if let Some(value_str) = &fact.value {
-                if let Ok(value) = value_str.parse::<BigDecimal>() {
-                    let line_item = FinancialLineItem {
-                        id: Uuid::new_v4(),
-                        statement_id: Uuid::new_v4(), // This should be determined from context
-                        taxonomy_concept: fact.concept.clone(),
-                        standard_label: Some(self.map_concept_to_label(&fact.concept)),
-                        custom_label: None,
-                        value: Some(value),
-                        unit: self.extract_unit_from_fact(fact, contexts),
-                        context_ref: fact.context_ref.clone(),
-                        segment_ref: None,
-                        scenario_ref: None,
-                        precision: None,
-                        decimals: None,
-                        is_credit: None,
-                        is_debit: None,
-                        statement_type: match self.determine_statement_type(&fact.concept).as_str()
-                        {
-                            "income_statement" => StatementType::IncomeStatement,
-                            "balance_sheet" => StatementType::BalanceSheet,
-                            "cash_flow" => StatementType::CashFlow,
-                            "equity" => StatementType::Equity,
-                            _ => StatementType::IncomeStatement, // Default fallback
-                        },
-                        statement_section: match self
-                            .determine_statement_section(&fact.concept)
-                            .as_str()
-                        {
-                            "revenue" => StatementSection::Revenue,
-                            "expenses" => StatementSection::Expenses,
-                            "assets" => StatementSection::Assets,
-                            "liabilities" => StatementSection::Liabilities,
-                            "equity" => StatementSection::Equity,
-                            _ => StatementSection::Revenue, // Default fallback
-                        },
-                        parent_concept: None,
-                        level: 0,
-                        order_index: None,
-                        is_calculated: false,
-                        calculation_formula: None,
-                        created_at: Utc::now(),
-                        updated_at: Utc::now(),
-                    };
-                    line_items.push(line_item);
-                }
+            if let Some(value_str) = &fact.value
+                && let Ok(value) = value_str.parse::<BigDecimal>()
+            {
+                let line_item = FinancialLineItem {
+                    id: Uuid::new_v4(),
+                    statement_id: Uuid::new_v4(), // This should be determined from context
+                    taxonomy_concept: fact.concept.clone(),
+                    standard_label: Some(self.map_concept_to_label(&fact.concept)),
+                    custom_label: None,
+                    value: Some(value),
+                    unit: self.extract_unit_from_fact(fact, contexts),
+                    context_ref: fact.context_ref.clone(),
+                    segment_ref: None,
+                    scenario_ref: None,
+                    precision: None,
+                    decimals: None,
+                    is_credit: None,
+                    is_debit: None,
+                    statement_type: match self.determine_statement_type(&fact.concept).as_str() {
+                        "income_statement" => StatementType::IncomeStatement,
+                        "balance_sheet" => StatementType::BalanceSheet,
+                        "cash_flow" => StatementType::CashFlow,
+                        "equity" => StatementType::Equity,
+                        _ => StatementType::IncomeStatement, // Default fallback
+                    },
+                    statement_section: match self
+                        .determine_statement_section(&fact.concept)
+                        .as_str()
+                    {
+                        "revenue" => StatementSection::Revenue,
+                        "expenses" => StatementSection::Expenses,
+                        "assets" => StatementSection::Assets,
+                        "liabilities" => StatementSection::Liabilities,
+                        "equity" => StatementSection::Equity,
+                        _ => StatementSection::Revenue, // Default fallback
+                    },
+                    parent_concept: None,
+                    level: 0,
+                    order_index: None,
+                    is_calculated: false,
+                    calculation_formula: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                };
+                line_items.push(line_item);
             }
         }
 

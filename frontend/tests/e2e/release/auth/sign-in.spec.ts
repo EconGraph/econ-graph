@@ -52,7 +52,7 @@ test.describe('sign-in and annotation privacy', () => {
     const dialog = page.getByRole('dialog', { name: 'Add annotation' });
     await dialog.getByRole('textbox', { name: 'Title' }).fill(title);
     await dialog.getByRole('textbox', { name: 'Note' }).fill('Written by the release e2e suite.');
-    const publicSwitch = dialog.getByRole('checkbox', { name: 'Public' });
+    const publicSwitch = dialog.getByRole('switch', { name: 'Public' });
     await expect(publicSwitch).not.toBeChecked();
     if (isPublic) await publicSwitch.check();
     await dialog.getByRole('button', { name: 'Save' }).click();

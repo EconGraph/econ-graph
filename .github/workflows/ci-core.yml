@@ -85,6 +85,7 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
+      e2e_images: ${{ steps.filter.outputs.e2e_images }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -164,6 +165,26 @@ jobs:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
             - 'backend/scripts/check_migration_order.py'
+          # E2E Image Build builds the ci/docker/e2e images. Beyond the
+          # Dockerfiles: what decides the build context, the files they COPY
+          # by name, and what decides where the frontend build lands (the
+          # Vite output directory) or whether the backend compiles at all.
+          e2e_images:
+            - '.github/workflows/ci-core.yml'
+            - 'ci/docker/e2e/**'
+            - '.dockerignore'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+            - 'frontend/dev-server/package.json'
+            - 'frontend/dev-server/package-lock.json'
+            - 'frontend/vite.config.ts'
+            - 'frontend/playwright.mobile.config.ts'
+            - 'frontend/ci/**'
+            - 'rust-toolchain.toml'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'backend/crates/econ-graph-core/data/**'
+            - 'backend/crates/econ-graph-crawler/data/**'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
@@ -180,7 +201,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -248,6 +269,10 @@ jobs:
     # confirmation they need can't be typed.
     - name: Check the teardown guards
       run: scripts/deploy/test-teardown-guards.sh
+
+    # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
+    - name: Check the Keycloak database backup and restore scripts
+      run: scripts/deploy/test-keycloak-db-scripts.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -347,7 +372,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -452,13 +477,17 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
     - name: Install chart API dependencies
       working-directory: chart-api-service
       run: npm ci
+
+    - name: Lint chart API service
+      working-directory: chart-api-service
+      run: npm run lint
 
     - name: Build chart API service
       working-directory: chart-api-service
@@ -516,7 +545,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -551,7 +580,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: chart-api-service/package-lock.json
 
@@ -642,7 +671,7 @@ jobs:
         persist-credentials: false
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -727,8 +756,8 @@ jobs:
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
     # needed; default build and with the xbrl-parser feature), then the core financial ratio,
-    # crawl_queue, dataset model, dataset GraphQL, queue service and cross-section tests
-    # (against this job's Postgres). These must pass for the job (and the PR) to go green.
+    # crawl_queue, dataset model, dataset GraphQL, queue service, cross-section and series
+    # search tests (against this job's Postgres). These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
@@ -752,6 +781,8 @@ jobs:
         cargo test -p econ-graph-services queue_service -- --test-threads=1
         cargo test -p econ-graph-services cross_section -- --test-threads=1
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
+        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
     # backend/.cargo/config.toml defaults FLAGS_PROFILE to dev, which keeps the static_catalogs
@@ -840,7 +871,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -883,6 +914,8 @@ jobs:
           echo "::endgroup::"
         }
 
+        run_group pagination_cursors \
+          graphql::query::pagination_tests
         run_group models_basic \
           models::data_source::tests::simple_tests \
           models::economic_series::tests::simple_tests \
@@ -975,7 +1008,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: admin-frontend/package-lock.json
 
@@ -1021,7 +1054,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1064,7 +1097,7 @@ jobs:
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -1094,7 +1127,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1134,7 +1167,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1158,7 +1191,7 @@ jobs:
     - name: Setup Node.js for npm audit
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1201,7 +1234,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1214,7 +1247,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1310,7 +1343,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1359,7 +1392,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -1378,7 +1411,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs: [frontend-integration-tests]
-    if: ${{ github.event.inputs.run_e2e_tests == true }}
+    if: ${{ inputs.run_e2e_tests }}
 
     steps:
     - name: Checkout code
@@ -1417,7 +1450,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'core' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'core' || github.event.inputs.e2e_test_suite == '') }}
     # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
     # The DATABASE_URL in Docker containers should handle authentication
 
@@ -1471,7 +1504,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1565,7 +1598,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'comprehensive' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -1589,7 +1622,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@v2
@@ -1768,7 +1801,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-core' || github.event.inputs.e2e_test_suite == 'mobile-comprehensive' || github.event.inputs.e2e_test_suite == '') }}
+    if: ${{ inputs.run_e2e_tests && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-core' || github.event.inputs.e2e_test_suite == 'mobile-comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -1792,7 +1825,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
+      uses: dtolnay/rust-toolchain@1.99.1
       with:
         components: rustfmt, clippy
 
@@ -1971,6 +2004,43 @@ jobs:
       run: |
         docker stop backend-server || true
         docker stop frontend-server || true
+
+  e2e-image-build:
+    name: E2E Image Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [changes]
+    # Builds the E2E test images without running any tests, so a broken image
+    # fails the PR that breaks it. Runs on PRs that touch what the images are
+    # built from, and on every push and manual run.
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.e2e_images == 'true' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    # Plain docker build on the runner's daemon, not buildx with the GHA cache:
+    # the mobile image builds FROM the optimized image's local tag, and the
+    # repository's Actions cache is already at its size limit, where these
+    # multi-gigabyte layers would evict the Rust and npm caches other jobs use.
+    - name: Build E2E image
+      run: |
+        docker build -f ci/docker/e2e/Dockerfile -t econ-graph-e2e:ci .
+        # Free the disk for the optimized image's backend build
+        docker image rm econ-graph-e2e:ci
+        docker builder prune -af
+        df -h /
+
+    - name: Build optimized E2E image
+      run: |
+        docker build -f ci/docker/e2e/Dockerfile.optimized -t econ-graph-e2e-optimized:latest .
+        docker builder prune -af
+        df -h /
+
+    - name: Build optimized mobile E2E image
+      run: docker build -f ci/docker/e2e/Dockerfile.mobile.optimized -t econ-graph-e2e-mobile-optimized:ci .
 
   docker-build:
     name: Docker Build Test

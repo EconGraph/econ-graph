@@ -65,9 +65,9 @@ die() {
 }
 kc() {
     if [ -n "$KUBE_CONTEXT" ]; then
-        kubectl --context "$KUBE_CONTEXT" "$@"
+        command "${KUBECTL:-kubectl}" --context "$KUBE_CONTEXT" "$@"
     else
-        kubectl "$@"
+        command "${KUBECTL:-kubectl}" "$@"
     fi
 }
 # Run a changing kubectl command, or only print it under --dry-run.

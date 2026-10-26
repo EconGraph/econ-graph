@@ -115,9 +115,9 @@ die() {
 
 kc() {
     if [ -n "$KUBE_CONTEXT" ]; then
-        kubectl --context "$KUBE_CONTEXT" "$@"
+        command "${KUBECTL:-kubectl}" --context "$KUBE_CONTEXT" "$@"
     else
-        kubectl "$@"
+        command "${KUBECTL:-kubectl}" "$@"
     fi
 }
 
@@ -141,7 +141,7 @@ ssa() {
     kc apply --server-side --force-conflicts --field-manager="$manager" "$@" -f "$file"
 }
 
-command -v kubectl >/dev/null || die "kubectl not found on PATH"
+command -v "${KUBECTL:-kubectl}" >/dev/null || die "${KUBECTL:-kubectl} not found"
 command -v curl >/dev/null || die "curl not found on PATH"
 if command -v sha256sum >/dev/null; then
     SHA256=(sha256sum)

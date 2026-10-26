@@ -129,7 +129,10 @@ impl fmt::Debug for CodeList {
     }
 }
 
-fn db_err(source: SourceId, url: &str) -> impl Fn(econ_graph_core::error::AppError) -> CrawlError {
+fn db_err(
+    source: SourceId,
+    url: &str,
+) -> impl Fn(econ_graph_core::error::AppError) -> CrawlError + use<> {
     let what = format!("{source} reference file {url}");
     move |e| CrawlError::Transient(format!("{what}: {e}"))
 }

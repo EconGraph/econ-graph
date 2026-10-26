@@ -28,6 +28,18 @@ All notable changes to EconGraph are documented here. The format follows
   (`k8s/manifests/crawler-migrate-job.yaml`) before it applies the backend and crawler-worker,
   and stops if the Job fails. It skips the Job in a namespace whose `econ-graph-secrets` has no
   `data-database-url`. `deploy.sh --dry-run` prints the deploy's commands and applies nothing.
+- A backend with no `DATA_DATABASE_URL` checks a new annotation's series by asking the data
+  plane's GraphQL endpoint at `DATA_GRAPHQL_URL`, with no token, sending `DATA_GRAPHQL_HOST` as
+  `Host` and giving up after `DATA_GRAPHQL_TIMEOUT_MS` (default 2000). An unknown series is
+  refused with "Series not found" as before. If the data plane can't be reached, times out or
+  doesn't answer cleanly, nothing is written and `createAnnotation` fails with
+  `extensions.code = DATA_PLANE_UNAVAILABLE` ("Couldn't check the series right now; try again");
+  the annotation form stays open with what was typed and shows that message. With neither
+  `DATA_DATABASE_URL` nor `DATA_GRAPHQL_URL`, the check is skipped and the backend logs that once
+  at startup.
+- GraphQL query field `seriesExists(id: ID!): Boolean!`: whether a series exists, counting a
+  series with no observations (which `series(id)` returns as null). The remote annotation check
+  above asks it, so both checks accept the same series.
 
 ### Changed
 
@@ -76,9 +88,9 @@ All notable changes to EconGraph are documented here. The format follows
   pool gets their sum, so a backend opens at most 20 connections by default either way.
 - With no `DATA_DATABASE_URL`, app operations work as before and every data field fails with
   `extensions.code = DATA_SERVED_REMOTELY` (`Data is served by the data plane at /data/graphql`);
-  `createAnnotation` does not check that its series exists, `systemHealth`'s `queueItems` is
-  null, and `triggerCrawl` is refused but still audited (outcome `unavailable`). `queueItems` is
-  nullable in the schema for this.
+  `createAnnotation` checks its series through `DATA_GRAPHQL_URL` (see Added),
+  `systemHealth`'s `queueItems` is null, and `triggerCrawl` is refused but still audited
+  (outcome `unavailable`). `queueItems` is nullable in the schema for this.
 - docker-compose runs `crawler migrate` as a one-shot `crawler-migrate` service that the
   backends wait for.
 - The backend pod no longer gets `DATABASE_URL`.
@@ -93,6 +105,14 @@ All notable changes to EconGraph are documented here. The format follows
   `keycloak/ingress.yaml`, `ssl-ingress.yaml`, `frontend-ingress.yaml`,
   `ingress-cloudflare-dns01.yaml`), the unused `security-configmap.yaml`, the Terraform
   `ingress` and `admin-ingress` modules and the kind ingress-nginx installers.
+
+### Fixed
+
+- `searchSeries`'s `totalCount` is the number of series that match the query and filters, the
+  same on every page, instead of the length of the page returned (ECO-508).
+- A `source` on `searchSeries`, or a `filter.sourceId` on `seriesList`, that isn't a UUID
+  (including an empty string) fails with a `BAD_USER_INPUT` error naming the argument, instead
+  of being ignored and returning every source's series (ECO-509).
 
 ## [4.0.0] - 2026-10-08
 

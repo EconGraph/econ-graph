@@ -46,9 +46,9 @@ interface GetSeriesLatestObservationData {
  * @returns The react-query result; `data` is null when no such series exists.
  */
 export const useLatestObservation = (sourceName: string, externalId: string) => {
-  return useQuery(
-    ['seriesLatestObservation', sourceName, externalId],
-    async (): Promise<SeriesWithLatestObservation | null> => {
+  return useQuery({
+    queryKey: ['seriesLatestObservation', sourceName, externalId],
+    queryFn: async (): Promise<SeriesWithLatestObservation | null> => {
       const result = await executeGraphQL<GetSeriesLatestObservationData>({
         query: GET_SERIES_LATEST_OBSERVATION,
         variables: { sourceName, externalId },
@@ -56,8 +56,6 @@ export const useLatestObservation = (sourceName: string, externalId: string) => 
       });
       return result.data?.seriesByExternalId ?? null;
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 };

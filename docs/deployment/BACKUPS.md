@@ -127,6 +127,7 @@ automatically.
 | daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
 | Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | operator | `econgraph-restore-drill.timer` (user) |
 | before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
+| before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: Keycloak scaled to 0, `pg_dump -Fc` of `keycloak` into `~/econgraph-backups/keycloak/<UTC stamp>/`, verified by a restore into a scratch database with equal row counts. `scripts/deploy/restore-keycloak-db.sh` restores it as a fresh database swapped in by rename, the only way to downgrade Keycloak; `restore-dump.sh`'s `--clean` would leave the newer version's tables behind. These dumps are on the data disk, not the backup pool, and `offsite-restic.sh` doesn't ship them: copy each one off the disk by hand. See the [v4.0.0 QA plan](../release/v4.0.0-qa.md) | operator | by hand |
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 

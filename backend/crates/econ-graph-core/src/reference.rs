@@ -234,10 +234,10 @@ fn parse_areas(text: &str) -> Result<Areas, String> {
             area.sdmx_ref_area.as_ref(),
             i,
         )?;
-        if let Some(n) = area.iso_numeric {
-            if areas.by_iso_numeric.insert(n, i).is_some() {
-                return Err(format!("duplicate iso_numeric {n:03}"));
-            }
+        if let Some(n) = area.iso_numeric
+            && areas.by_iso_numeric.insert(n, i).is_some()
+        {
+            return Err(format!("duplicate iso_numeric {n:03}"));
         }
         areas.rows.push(area);
     }

@@ -64,12 +64,12 @@ kind load docker-image econ-graph-frontend:latest --name econ-graph
 
 ### 3. **Apply Updated Manifests**
 ```bash
-# Set kubectl context
-kubectl config use-context kind-econ-graph
-
-# Apply all manifests (includes updated image tags), then the gateway's routes
-kubectl apply -f k8s/manifests/
-./scripts/deploy/apply-gateway-routes.sh
+# Apply all manifests (includes updated image tags) through deploy.sh, which
+# switches to kind-econ-graph. Don't run `kubectl apply -f k8s/manifests/`:
+# cloudflared.yaml is committed with 0 replicas, so that stops the tunnel
+# connector on the production cluster, and the public host is dropped.
+PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh   # production cluster
+PUBLIC_HOST= ./scripts/deploy/deploy.sh                # any other cluster
 ```
 
 ### 4. **Restart Rollouts**

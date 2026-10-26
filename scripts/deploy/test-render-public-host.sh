@@ -91,8 +91,8 @@ check "the realm import allows the public origin and localhost" \
   "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'http://localhost'"
 check "CORS allows the public origin first and keeps the local one" \
   "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,http://localhost,http://localhost:3000'"
-check "cloudflared is untouched" \
-  "docs[('Deployment', 'cloudflared')]['spec']['replicas'] == 1"
+check "cloudflared is untouched (0 replicas, as committed)" \
+  "docs[('Deployment', 'cloudflared')]['spec']['replicas'] == 0"
 
 # Rendering twice changes nothing more (deploy.sh may be re-run on rendered output).
 twice="$("$render" econgraph.com - <<<"$rendered")"

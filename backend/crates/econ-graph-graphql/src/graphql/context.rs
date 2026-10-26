@@ -10,6 +10,7 @@
 use crate::imports::*;
 use econ_graph_auth::{Caller, Principal, Role};
 pub use econ_graph_core::models::admin::ClientInfo;
+use econ_graph_services::services::series_check::{DataPlaneClient, SeriesCheck};
 use tracing::{debug, warn};
 
 /// GraphQL context containing the authenticated user and their fine-grained roles
@@ -159,6 +160,19 @@ pub fn app_pool<'a>(ctx: &Context<'a>) -> Result<&'a AppPool> {
 /// [`DATA_SERVED_REMOTELY`] error when this backend has none.
 pub fn data_pool<'a>(ctx: &Context<'a>) -> Result<&'a DataPool> {
     ctx.data_opt::<DataPool>().ok_or_else(data_served_remotely)
+}
+
+/// How a new annotation's series is checked: in the data database when this backend has one,
+/// otherwise through the data plane's GraphQL endpoint when it has `DATA_GRAPHQL_URL`, otherwise
+/// not at all (the backend logs that at startup).
+pub fn series_check(ctx: &Context<'_>) -> SeriesCheck {
+    if let Some(data) = ctx.data_opt::<DataPool>() {
+        SeriesCheck::Database(data.0.clone())
+    } else if let Some(client) = ctx.data_opt::<Arc<DataPlaneClient>>() {
+        SeriesCheck::DataPlane(client.clone())
+    } else {
+        SeriesCheck::Skip
+    }
 }
 
 /// The data database's DataLoaders, or the [`DATA_SERVED_REMOTELY`] error when this backend

@@ -27,6 +27,11 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { type NewSeriesAnnotation, useAnnotationMutations } from '../../hooks/useAnnotationEditing';
+import {
+  DATA_PLANE_UNAVAILABLE,
+  DATA_PLANE_UNAVAILABLE_MESSAGE,
+  GraphQLResponseError,
+} from '../../utils/graphql';
 import { newIdempotencyKey } from '../../utils/idempotencyKey';
 import type { SeriesAnnotation } from '../../hooks/useSeriesAnnotations';
 import type { SeriesChartPoint } from '../charts/SeriesChart';
@@ -59,8 +64,14 @@ type FormState =
   | { mode: 'create'; values: AnnotationFormValues }
   | { mode: 'edit'; id: string; values: AnnotationFormValues };
 
-const errorText = (error: unknown) =>
-  error instanceof Error && error.message ? error.message : 'Something went wrong.';
+const errorText = (error: unknown) => {
+  // The backend couldn't check the series with the data plane and wrote nothing: the form keeps
+  // what was typed so saving again retries.
+  if (error instanceof GraphQLResponseError && error.code === DATA_PLANE_UNAVAILABLE) {
+    return DATA_PLANE_UNAVAILABLE_MESSAGE;
+  }
+  return error instanceof Error && error.message ? error.message : 'Something went wrong.';
+};
 
 /**
  * Annotation create, edit, delete and comment controls for one series. Everything that
@@ -287,14 +298,14 @@ export function useSeriesAnnotationEditor({
         initialValues={
           form?.values ?? { date: defaultDate, title: '', description: '', isPublic: false }
         }
-        saving={activeMutation.isLoading}
+        saving={activeMutation.isPending}
         error={activeMutation.isError ? errorText(activeMutation.error) : null}
         onSubmit={submitForm}
         onClose={() => setFormOpen(false)}
       />
       <Dialog
         open={deleteOpen}
-        onClose={remove.isLoading ? undefined : () => setDeleteOpen(false)}
+        onClose={remove.isPending ? undefined : () => setDeleteOpen(false)}
         aria-labelledby='delete-annotation-title'
       >
         <DialogTitle id='delete-annotation-title'>Delete annotation?</DialogTitle>
@@ -309,11 +320,11 @@ export function useSeriesAnnotationEditor({
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteOpen(false)} disabled={remove.isLoading}>
+          <Button onClick={() => setDeleteOpen(false)} disabled={remove.isPending}>
             Cancel
           </Button>
-          <Button color='error' onClick={confirmDelete} disabled={remove.isLoading}>
-            {remove.isLoading ? 'Deleting…' : 'Delete'}
+          <Button color='error' onClick={confirmDelete} disabled={remove.isPending}>
+            {remove.isPending ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

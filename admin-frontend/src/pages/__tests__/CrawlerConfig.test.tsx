@@ -227,7 +227,7 @@ describe("CrawlerConfig", () => {
     it("handles enable crawler toggle", () => {
       renderWithTheme(<CrawlerConfig />);
 
-      const enableSwitch = screen.getByRole("checkbox", {
+      const enableSwitch = screen.getByRole("switch", {
         name: /enable crawler/i,
       });
       expect(enableSwitch).toBeChecked();
@@ -239,7 +239,7 @@ describe("CrawlerConfig", () => {
     it("handles maintenance mode toggle", () => {
       renderWithTheme(<CrawlerConfig />);
 
-      const maintenanceSwitch = screen.getByRole("checkbox", {
+      const maintenanceSwitch = screen.getByRole("switch", {
         name: /maintenance mode/i,
       });
       expect(maintenanceSwitch).not.toBeChecked();
@@ -385,7 +385,7 @@ describe("CrawlerConfig", () => {
     it("updates source enabled status", () => {
       renderWithTheme(<CrawlerConfig />);
 
-      const sourceSwitches = screen.getAllByRole("checkbox");
+      const sourceSwitches = screen.getAllByRole("switch");
       const fredSwitch = sourceSwitches.find((switchEl) =>
         switchEl.closest("tr")?.textContent?.includes("FRED"),
       );

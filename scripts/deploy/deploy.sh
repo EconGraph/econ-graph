@@ -101,15 +101,38 @@ if ! kind_cluster_exists; then
     exit 1
 fi
 ensure_kind_kubectl
-kubectl config use-context "kind-${KIND_CLUSTER}"
 
+# One kubectl, one cluster for the whole deploy: the kind kubectl that
+# ensure_kind_kubectl put first on PATH (exported as KUBECTL, so a KUBECTL from
+# the environment cannot point elsewhere), switched to kind-econ-graph and
+# pinned (replacing any CLUSTER_ROLE_CONTEXT from the environment). Every
+# kubectl call below, including kind-env.sh's, then goes through kc, the same
+# binary and context the production check uses (scripts/deploy/lib/cluster-role.sh).
+# Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
+# public routes and stop its tunnel connector.
+# In a dry run, kc only prints (CLUSTER_ROLE_DRY_RUN) and kubectl stays the
+# printing stub above: neither reaches the cluster in a dry run. The
+# libraries are sourced first: sourcing lib/cluster-role.sh resets
+# CLUSTER_ROLE_DRY_RUN to false, so only --dry-run, below, turns it on, never
+# a value from the environment.
+export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves
-# http://localhost only. See scripts/deploy/lib/public-host.sh, shared with
-# restart-k8s-rollout.sh, for the rules and render_manifest. The frontend image
-# needs no rebuild for it: it resolves its sign-in issuer against the page's origin.
+# http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
+# lib/cluster-role.sh), shared with restart-k8s-rollout.sh, for the rules and
+# render_manifest. The frontend image needs no rebuild for it: it resolves its
+# sign-in issuer against the page's origin.
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+CLUSTER_ROLE_DRY_RUN="$DRY_RUN"
+if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
+    echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
+    exit 1
+fi
+if [ "$DRY_RUN" != true ]; then
+    kubectl() { kc "$@"; }
+fi
+
 public_host_init
 
 # Apply all manifests
@@ -162,6 +185,17 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
+  # Wait for the new Keycloak pod, so the realm import below talks to the server this
+  # deploy just applied, after any schema migration it ran on start. The Deployment
+  # uses Recreate, so no old pod stays ready meanwhile. Under --dry-run kubectl only
+  # prints, so this is printed and not waited for.
+  echo "⏳ Waiting for the Keycloak rollout..."
+  if ! kubectl -n econ-graph rollout status deployment/keycloak --timeout=900s; then
+    echo "❌ Keycloak did not become ready; not applying the realm. Its pods:"
+    kubectl -n econ-graph get pods -l app=keycloak || true
+    kubectl -n econ-graph logs deployment/keycloak --tail=100 || true
+    exit 1
+  fi
   # The realm-import Job applies the realm file on every deploy; a Job cannot be
   # re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
@@ -229,7 +263,7 @@ kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
 # 80/443 (k8s/manifests/gateway/; idempotent). The routes, with the public
 # host's, follow once cert-manager is installed (apply_public_edge below).
-run_script ./scripts/deploy/install-gateway.sh
+run_script ./scripts/deploy/install-gateway.sh --context "$CLUSTER_ROLE_CONTEXT"
 # The tunnel connector (scripts/deploy/lib/public-host.sh).
 apply_cloudflared
 
@@ -273,8 +307,6 @@ echo "Waiting for chart API service deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/chart-api-service -n econ-graph
 
 if [ "$KEYCLOAK_DEPLOYED" = true ] && [ "$DRY_RUN" = false ]; then
-  echo "Waiting for Keycloak deployment..."
-  kubectl wait --for=condition=available --timeout=600s deployment/keycloak -n econ-graph
   echo "Waiting for the Keycloak realm import..."
   # `kubectl wait --for=condition=complete` alone would sit out its whole timeout on
   # a failed Job, so poll for either terminal condition.

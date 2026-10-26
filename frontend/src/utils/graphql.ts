@@ -92,6 +92,7 @@ export interface GraphQLResponse<T = any> {
     message: string;
     locations?: Array<{ line: number; column: number }>;
     path?: string[];
+    extensions?: { code?: string; [key: string]: unknown };
   }>;
 }
 
@@ -100,6 +101,29 @@ export interface GraphQLRequest {
   variables?: Record<string, any>;
   operationName?: string;
 }
+
+/**
+ * Thrown by `executeGraphQL` when the response carries GraphQL errors: the first error's
+ * message, and its `extensions.code` when it has one.
+ */
+export class GraphQLResponseError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'GraphQLResponseError';
+    this.code = code;
+  }
+}
+
+/**
+ * `extensions.code` of the error a write returns when the backend couldn't ask the data plane
+ * whether its series exists. Nothing was written, so the same request can be retried.
+ */
+export const DATA_PLANE_UNAVAILABLE = 'DATA_PLANE_UNAVAILABLE';
+
+/** What the user is told for a `DATA_PLANE_UNAVAILABLE` error. */
+export const DATA_PLANE_UNAVAILABLE_MESSAGE = "Couldn't check the series right now; try again";
 
 /** Shown, and thrown by mutations, once the backend reports the account suspended. */
 export const ACCOUNT_SUSPENDED_MESSAGE = 'This account is suspended';
@@ -312,7 +336,8 @@ export async function executeGraphQL<T = any>(
 
   if (result.errors && result.errors.length > 0) {
     console.error('GraphQL errors:', result.errors);
-    throw new Error(result.errors[0].message);
+    const [first] = result.errors;
+    throw new GraphQLResponseError(first.message, first.extensions?.code);
   }
 
   return result;

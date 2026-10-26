@@ -18,11 +18,11 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
-const hooks = vi.hoisted(() => ({ isPreviousData: false, transformation: 'YEAR_OVER_YEAR' }));
+const hooks = vi.hoisted(() => ({ isPlaceholderData: false, transformation: 'YEAR_OVER_YEAR' }));
 
 vi.mock('../../hooks/useSeriesData', () => ({
   useSeriesDetail: () => ({
-    isLoading: false,
+    isPending: false,
     isError: false,
     data: {
       id: SERIES_ID,
@@ -40,9 +40,9 @@ vi.mock('../../hooks/useSeriesData', () => ({
     },
   }),
   useSeriesData: () => ({
-    isLoading: false,
+    isPending: false,
     isError: false,
-    isPreviousData: hooks.isPreviousData,
+    isPlaceholderData: hooks.isPlaceholderData,
     dataUpdatedAt: RETRIEVED_AT,
     data: {
       transformation: hooks.transformation,
@@ -88,7 +88,7 @@ describe('SeriesDetail CSV download', () => {
   let clicked: InstanceType<typeof window.HTMLAnchorElement>[];
 
   beforeEach(() => {
-    hooks.isPreviousData = false;
+    hooks.isPlaceholderData = false;
     hooks.transformation = 'YEAR_OVER_YEAR';
     blobs = [];
     clicked = [];
@@ -169,11 +169,11 @@ describe('SeriesDetail CSV download', () => {
 
 describe('SeriesDetail CSV download while a transformation loads', () => {
   afterEach(() => {
-    hooks.isPreviousData = false;
+    hooks.isPlaceholderData = false;
   });
 
   it('is disabled, so old values never get the new label', () => {
-    hooks.isPreviousData = true;
+    hooks.isPlaceholderData = true;
     render(
       <TestProviders>
         <SeriesDetail />

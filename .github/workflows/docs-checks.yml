@@ -24,7 +24,10 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version-file: '.nvmrc'
+
+    - name: Check Node.js version consistency
+      run: node scripts/check-node-version.mjs
 
     # Same markdownlint-cli version and rules (.markdownlint.json) as the pre-commit hook
     - name: Lint Markdown

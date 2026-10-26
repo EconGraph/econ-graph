@@ -185,7 +185,7 @@ const SeriesExplorer: React.FC = () => {
   // search waits for it.
   const resolvedSourceId = resolveSourceId(selectedSource, dataSources);
   const sourceListed = resolvedSourceId !== undefined;
-  const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isLoading);
+  const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isPending);
   const activeSource = sourceListed ? resolvedSourceId : waitingForSources ? selectedSource : '';
 
   // Send the search once typing pauses, not on every keystroke
@@ -219,7 +219,7 @@ const SeriesExplorer: React.FC = () => {
   const activeResult = browsing ? browseResult : searchResult;
   const searchResults = browsing ? browseResult?.data?.series : searchResult?.data;
   const browseTotal = browseResult?.data?.totalCount ?? 0;
-  const { isInitialLoading: isSearchLoading, error: searchError } = activeResult || {};
+  const { isLoading: isSearchLoading, error: searchError } = activeResult || {};
   // The Search button reflects the search request only, not a browse in the background
   const isSearchFetching = !browsing && Boolean(searchResult?.isFetching);
   const hasQuery = debouncedQuery.length >= 2 || browsing;
@@ -381,10 +381,10 @@ const SeriesExplorer: React.FC = () => {
     return undefined;
   };
 
-  // Each card sits in a Grid item: a Card placed straight in the container took the container's
-  // negative margin (no gutter at the sidebar edge) and a width sized by its own text.
+  // Each card sits in a sized Grid cell: a Card placed straight in the container would take a
+  // width sized by its own text instead of a column.
   const renderSeriesCard = (series: EconomicSeries) => (
-    <Grid item xs={12} sm={6} md={4} key={series.id}>
+    <Grid key={series.id} size={{ xs: 12, sm: 6, md: 4 }}>
       <Card
         sx={{
           height: '100%',
@@ -410,7 +410,13 @@ const SeriesExplorer: React.FC = () => {
               >
                 {series.title}
               </Typography>
-              <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                  mb: 2,
+                }}
+              >
                 {series.description}
               </Typography>
             </Box>
@@ -433,7 +439,12 @@ const SeriesExplorer: React.FC = () => {
           {dateRange(series) && (
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
               <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
-              <Typography variant='caption' color='text.secondary'>
+              <Typography
+                variant='caption'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 {dateRange(series)}
               </Typography>
             </Box>
@@ -462,7 +473,12 @@ const SeriesExplorer: React.FC = () => {
         <Typography variant='h4' component='h1' gutterBottom>
           Series Explorer
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Search and explore economic time series data from the available sources
         </Typography>
       </Box>
@@ -471,7 +487,7 @@ const SeriesExplorer: React.FC = () => {
       <Paper sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={3}>
           {/* Search input */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               placeholder='Search economic series (e.g., GDP, unemployment, inflation)'
@@ -482,26 +498,28 @@ const SeriesExplorer: React.FC = () => {
               }}
               onKeyPress={e => e.key === 'Enter' && handleSearch()}
               inputRef={searchInputRef}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                endAdornment: searchQuery && (
-                  <IconButton
-                    size='small'
-                    aria-label='Clear search text'
-                    onClick={() => {
-                      setSearchQuery('');
-                      setCurrentPage(1);
-                    }}
-                  >
-                    <ClearIcon />
-                  </IconButton>
-                ),
+              slotProps={{
+                input: {
+                  startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                  endAdornment: searchQuery && (
+                    <IconButton
+                      size='small'
+                      aria-label='Clear search text'
+                      onClick={() => {
+                        setSearchQuery('');
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <ClearIcon />
+                    </IconButton>
+                  ),
+                },
               }}
             />
           </Grid>
 
           {/* Source filter */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <FormControl fullWidth>
               <InputLabel id='source-filter-label'>Source</InputLabel>
               <Select
@@ -524,7 +542,7 @@ const SeriesExplorer: React.FC = () => {
           </Grid>
 
           {/* Frequency filter */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <FormControl fullWidth>
               <InputLabel id='frequency-filter-label'>Frequency</InputLabel>
               <Select
@@ -547,7 +565,7 @@ const SeriesExplorer: React.FC = () => {
           </Grid>
 
           {/* Search button */}
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Button
               fullWidth
               variant='contained'
@@ -583,7 +601,7 @@ const SeriesExplorer: React.FC = () => {
         <Collapse in={showAdvancedSearch}>
           <Divider sx={{ my: 2 }} />
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel id='sort-by-label'>Sort By</InputLabel>
                 <Select
@@ -637,7 +655,7 @@ const SeriesExplorer: React.FC = () => {
       {showLoading ? (
         <Grid container spacing={3}>
           {Array.from({ length: 8 }).map((_, index) => (
-            <Grid item xs={12} sm={6} md={4} key={index}>
+            <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
               <Skeleton variant='rectangular' height={200} />
             </Grid>
           ))}
@@ -647,7 +665,12 @@ const SeriesExplorer: React.FC = () => {
           <Typography variant='h6' gutterBottom>
             Search for a series
           </Typography>
-          <Typography variant='body2' color='text.secondary'>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+            }}
+          >
             Type at least 2 characters, such as GDP, unemployment or inflation, or pick a source to
             list its series
           </Typography>
@@ -657,7 +680,13 @@ const SeriesExplorer: React.FC = () => {
           <Typography variant='h6' gutterBottom>
             No series found
           </Typography>
-          <Typography variant='body2' color='text.secondary' sx={{ mb: 3 }}>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              mb: 3,
+            }}
+          >
             Try adjusting your search criteria
           </Typography>
           <Button variant='contained' onClick={handleClearSearch}>

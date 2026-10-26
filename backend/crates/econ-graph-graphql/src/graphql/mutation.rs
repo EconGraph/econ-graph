@@ -89,11 +89,12 @@ impl Mutation {
         // The author is the signed-in caller, never an id from the request.
         let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
         let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
-        // The series is checked in the data database; with none, the check is skipped (the
-        // backend logs that at startup).
-        let series_pool = ctx.data_opt::<DataPool>().map(|data| data.0.clone());
-        let collaboration_service =
-            CollaborationService::with_series_pool(pool.clone(), series_pool);
+        // The series is checked in the data database, or through the data plane, or (with
+        // neither) not at all; a data plane that can't answer refuses the annotation.
+        let collaboration_service = CollaborationService::with_series_check(
+            pool.clone(),
+            crate::graphql::context::series_check(ctx),
+        );
 
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
         let is_public = input.is_public.unwrap_or(false);
@@ -440,10 +441,10 @@ fn plan_trigger_crawl(
 
     let mut jobs = Vec::new();
     let series_source = if series.is_empty() {
-        if let Some(id) = explicit {
-            if !sources.contains(&id) {
-                sources.push(id);
-            }
+        if let Some(id) = explicit
+            && !sources.contains(&id)
+        {
+            sources.push(id);
         }
         None
     } else {

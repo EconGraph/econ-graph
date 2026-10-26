@@ -18,6 +18,10 @@ ECONGRAPH_DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
 export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST}"
 unset DOCKER_CONTEXT
 
+# The production marker (ECO-468): kind_cluster_is_production below.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
+
 KIND_CLUSTER="${KIND_CLUSTER:-econ-graph}"
 # New clusters run Kubernetes 1.36: terraform/k8s/kind-config.yaml pins every
 # node's image by digest (from kind v0.33.0's image list). That image's
@@ -233,6 +237,14 @@ ensure_kind_kubectl_quietly() {
 }
 
 k() { kubectl -n "${NAMESPACE}" "$@"; }
+
+# True when the kind cluster is marked production (lib/cluster-role.sh), asked
+# with the kind kubectl on its own context, never another KUBECTL or context.
+# CLUSTER_ROLE_REASON says why not. Call after ensure_kind_kubectl.
+kind_cluster_is_production() {
+    KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl" CLUSTER_ROLE_CONTEXT="kind-${KIND_CLUSTER}" \
+        CLUSTER_ROLE_DRY_RUN=false cluster_is_marked_production
+}
 
 pod_running() {
     [ "$(k get pod "$1" -o jsonpath='{.status.phase}' --ignore-not-found 2>/dev/null)" = "Running" ]
@@ -478,6 +490,12 @@ restore_secrets() {
         name="$(basename "$file" .yaml)"
         if [ -n "$(k get secret "$name" -o name --ignore-not-found 2>/dev/null)" ]; then
             echo "  = secret $name already exists"
+        elif [ "$name" = cloudflare-tunnel ] && ! kind_cluster_is_production; then
+            # The tunnel token goes only into the production cluster (ECO-468):
+            # restoring production's backup elsewhere must not hand it over.
+            echo "  - secret $name skipped: ${CLUSTER_ROLE_REASON}. Only the production cluster"
+            echo "    may hold the tunnel token: mark it (scripts/deploy/mark-production-cluster.sh)"
+            echo "    and restore again, or enter the token with scripts/deploy/set-crawler-keys.sh --tunnel"
         elif [ "${DRY_RUN}" = "true" ]; then
             echo "+ create secret $name from $file"
         else
@@ -525,7 +543,11 @@ bootstrap_databases() {
         echo "+ create the Secrets saved in ${backup}/secrets/ that don't exist yet:"
         local f
         for f in "${backup}"/secrets/*.yaml; do
-            [ -e "$f" ] && echo "    $(basename "$f" .yaml)"
+            [ -e "$f" ] || continue
+            case "$(basename "$f" .yaml)" in
+                cloudflare-tunnel) echo "    cloudflare-tunnel (only if the cluster is marked production)" ;;
+                *) echo "    $(basename "$f" .yaml)" ;;
+            esac
         done
         echo "+ scripts/deploy/create-secrets.sh (keeps existing Secrets, generates missing ones)"
         [ -f "$src/k8s/manifests/host-storage.yaml" ] && echo "+ scripts/deploy/apply-host-storage.sh"

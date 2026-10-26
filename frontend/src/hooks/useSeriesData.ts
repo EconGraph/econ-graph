@@ -5,7 +5,7 @@
  * from various data sources including FRED, BLS, and other economic data providers.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { executeGraphQL, QUERIES, type SeriesListNode } from '../utils/graphql';
 import type { DataTransformation } from '../utils/transformations';
 
@@ -114,9 +114,9 @@ export interface CrawlerStatus {
 
 // Hook for fetching series detail. Resolves to null when the series doesn't exist.
 export const useSeriesDetail = (seriesId: string | null, enabled = true) => {
-  return useQuery(
-    ['seriesDetail', seriesId],
-    async (): Promise<SeriesDetail | null> => {
+  return useQuery({
+    queryKey: ['seriesDetail', seriesId],
+    queryFn: async (): Promise<SeriesDetail | null> => {
       if (!seriesId || !isSeriesId(seriesId)) return null;
 
       const result = await executeGraphQL<{ series: SeriesDetail | null }>({
@@ -125,11 +125,9 @@ export const useSeriesDetail = (seriesId: string | null, enabled = true) => {
       });
       return result.data?.series ?? null;
     },
-    {
-      enabled: enabled && !!seriesId,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    enabled: enabled && !!seriesId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 };
 
 export interface SeriesDataOptions {
@@ -204,7 +202,7 @@ export async function fetchAllSeriesData(
 /**
  * Fetch all of a series' observations (latest revision of each date), transformed on the
  * backend and read page by page. `points` is empty when the series has no observations.
- * While another transformation loads, the previous result stays (isPreviousData), labeled
+ * While another transformation loads, the previous result stays (isPlaceholderData), labeled
  * with its own transformation.
  * @param seriesId - The series id, or null while it isn't known yet.
  * @param options - Transformation, date range and enabled flag.
@@ -212,9 +210,9 @@ export async function fetchAllSeriesData(
  */
 export const useSeriesData = (seriesId: string | null, options: SeriesDataOptions = {}) => {
   const { transformation = 'NONE', startDate, endDate, enabled = true } = options;
-  return useQuery(
-    ['seriesData', seriesId, transformation, startDate, endDate],
-    async ({ signal }): Promise<SeriesObservations> => {
+  return useQuery({
+    queryKey: ['seriesData', seriesId, transformation, startDate, endDate],
+    queryFn: async ({ signal }): Promise<SeriesObservations> => {
       if (!seriesId || !isSeriesId(seriesId)) return { transformation, points: [] };
 
       const points = await fetchAllSeriesData(
@@ -223,12 +221,10 @@ export const useSeriesData = (seriesId: string | null, options: SeriesDataOption
       );
       return { transformation, points };
     },
-    {
-      enabled: enabled && !!seriesId,
-      keepPreviousData: true,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    enabled: enabled && !!seriesId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    placeholderData: keepPreviousData,
+  });
 };
 
 // Hook for searching series
@@ -242,9 +238,9 @@ export const useSeriesSearch = (
   enabled = true
 ) => {
   const trimmedQuery = query.trim();
-  return useQuery(
-    ['seriesSearch', trimmedQuery, filters],
-    async () => {
+  return useQuery({
+    queryKey: ['seriesSearch', trimmedQuery, filters],
+    queryFn: async () => {
       if (trimmedQuery.length < 2) return [];
 
       const result = await executeGraphQL({
@@ -258,11 +254,9 @@ export const useSeriesSearch = (
       });
       return result.data?.searchSeries?.series || [];
     },
-    {
-      enabled: enabled && trimmedQuery.length >= 2,
-      staleTime: 2 * 60 * 1000, // 2 minutes
-    }
-  );
+    enabled: enabled && trimmedQuery.length >= 2,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  });
 };
 
 /** One page of a source's (or a frequency's) series, and how many there are in all. */
@@ -284,9 +278,9 @@ export const useSeriesBrowse = (
   enabled = true
 ) => {
   const { sourceId, frequency, limit } = filters;
-  return useQuery<SeriesBrowsePage>(
-    ['seriesBrowse', sourceId, frequency, limit],
-    async () => {
+  return useQuery({
+    queryKey: ['seriesBrowse', sourceId, frequency, limit],
+    queryFn: async (): Promise<SeriesBrowsePage> => {
       const result = await executeGraphQL({
         query: QUERIES.GET_SERIES_LIST,
         variables: {
@@ -297,18 +291,16 @@ export const useSeriesBrowse = (
       const list = result.data?.seriesList;
       return { series: list?.nodes ?? [], totalCount: list?.totalCount ?? 0 };
     },
-    {
-      enabled: enabled && Boolean(sourceId || frequency),
-      staleTime: 2 * 60 * 1000, // 2 minutes
-    }
-  );
+    enabled: enabled && Boolean(sourceId || frequency),
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  });
 };
 
 // Hook for search suggestions
 export const useSearchSuggestions = (partialQuery: string, enabled = true) => {
-  return useQuery(
-    ['searchSuggestions', partialQuery],
-    async () => {
+  return useQuery({
+    queryKey: ['searchSuggestions', partialQuery],
+    queryFn: async () => {
       if (!partialQuery || partialQuery.trim().length < 2) return [];
 
       const result = await executeGraphQL({
@@ -317,11 +309,9 @@ export const useSearchSuggestions = (partialQuery: string, enabled = true) => {
       });
       return result.data?.searchSuggestions || [];
     },
-    {
-      enabled: enabled && partialQuery.trim().length >= 2,
-      staleTime: 10 * 60 * 1000, // 10 minutes
-    }
-  );
+    enabled: enabled && partialQuery.trim().length >= 2,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
 };
 
 // Hook for fetching data sources
@@ -341,18 +331,16 @@ export const useDataSources = () => {
 
 // Hook for crawler status
 export const useCrawlerStatus = (enabled = true) => {
-  return useQuery(
-    ['crawlerStatus'],
-    async () => {
+  return useQuery({
+    queryKey: ['crawlerStatus'],
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: QUERIES.GET_CRAWLER_STATUS,
       });
       return result.data?.crawlerStatus || null;
     },
-    {
-      enabled,
-      staleTime: 1 * 60 * 1000, // 1 minute
-      refetchInterval: 30 * 1000, // Refetch every 30 seconds
-    }
-  );
+    enabled,
+    staleTime: 1 * 60 * 1000, // 1 minute
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds
+  });
 };

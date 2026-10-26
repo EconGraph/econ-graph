@@ -93,6 +93,7 @@ const mockSearchResults = [
 vi.mock('../../hooks/useSeriesData', () => ({
   useDataSources: vi.fn(() => ({
     data: mockDataSources,
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -100,13 +101,11 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
   // Behaves like the backend search: series whose title or description contains the query,
   // from the chosen source if there is one
@@ -119,6 +118,7 @@ vi.mock('../../hooks/useSeriesData', () => ({
               `${series.title} ${series.description}`.toLowerCase().includes(query.toLowerCase()) &&
               (!filters?.sourceId || series.sourceId === filters.sourceId)
           ),
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -126,13 +126,11 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
   // Behaves like the backend's seriesList: the chosen source's series, by title
   useSeriesBrowse: vi.fn((filters: { sourceId?: string }, enabled = true) => {
@@ -144,7 +142,8 @@ vi.mock('../../hooks/useSeriesData', () => ({
         : undefined;
     return {
       data: series && { series, totalCount: series.length },
-      isInitialLoading: false,
+      isPending: !series,
+      isLoading: false,
       isFetching: false,
       error: null,
       refetch: vi.fn(),
@@ -152,6 +151,7 @@ vi.mock('../../hooks/useSeriesData', () => ({
   }),
   useSeriesDetail: vi.fn(() => ({
     data: null,
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -159,16 +159,15 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
   useSeriesData: vi.fn(() => ({
     data: null,
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -176,16 +175,15 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
   useSearchSuggestions: vi.fn(() => ({
     data: [],
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -193,16 +191,15 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
   useCrawlerStatus: vi.fn(() => ({
     data: null,
+    isPending: false,
     isLoading: false,
     error: null,
     isError: false,
@@ -210,13 +207,11 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isStale: false,
     isFetching: false,
     isRefetching: false,
-    isIdle: false,
     status: 'success',
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
     refetch: vi.fn(),
-    remove: vi.fn(),
   })),
 }));
 
@@ -833,7 +828,14 @@ describe('SeriesExplorer shows only what the backend returned', () => {
   });
 
   const searchReturning = (data: unknown[]) =>
-    ({ data, isLoading: false, isFetching: false, error: null, refetch: vi.fn() }) as any;
+    ({
+      data,
+      isPending: false,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }) as any;
 
   test('does not show a made-up search time', async () => {
     const user = userEvent.setup();
@@ -881,8 +883,8 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     expect(await screen.findByText('1948-01-01 - 2024-11-01')).toBeInTheDocument();
   });
 
-  // ECO-414: cards sat straight in the grid container, so they had no gutter at the sidebar
-  // and widths set by their text. jsdom has no layout, so check each card has a grid cell.
+  // ECO-414: a card placed straight in the grid container gets a width set by its text.
+  // jsdom has no layout, so check each card sits in a sized grid cell.
   test('each result card sits in its own fixed-width grid cell', async () => {
     const user = userEvent.setup();
     renderSeriesExplorer();
@@ -891,7 +893,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     const title = await screen.findByText('Unemployment Rate');
 
     const cell = title.closest('.MuiCard-root')?.parentElement;
-    expect(cell).toHaveClass('MuiGrid-item', 'MuiGrid-grid-xs-12', 'MuiGrid-grid-sm-6', 'MuiGrid-grid-md-4');
+    expect(cell).toHaveClass('MuiGrid-grid-xs-12', 'MuiGrid-grid-sm-6', 'MuiGrid-grid-md-4');
   });
 
   test('the source filter lists the data sources and sends the chosen id', async () => {
@@ -927,10 +929,9 @@ describe('SeriesExplorer shows only what the backend returned', () => {
   });
 
   test('shows no loading placeholders before anything is searched', () => {
-    // React Query v4 reports a disabled query with no data as loading; only
-    // isInitialLoading means a request is in flight
+    // A disabled query with no data is pending; only isLoading means a request is in flight
     searchHook.mockImplementation(
-      () => ({ ...searchReturning(undefined as any), isLoading: true, isInitialLoading: false }) as any
+      () => ({ ...searchReturning(undefined as any), isPending: true, isLoading: false }) as any
     );
     renderSeriesExplorer();
 
@@ -972,8 +973,9 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       () =>
         ({
           ...searchReturning(undefined as any),
+          isPending: true,
           isLoading: true,
-          isInitialLoading: true,
+          isFetching: true,
         }) as any
     );
     const user = userEvent.setup();

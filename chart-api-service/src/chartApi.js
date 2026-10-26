@@ -5,8 +5,6 @@
  * for the EconGraph MCP server integration.
  */
 
-const { Chart } = require('chart.js');
-
 /**
  * Generate chart configuration for Chart.js
  * This creates the same chart configuration used by the frontend components

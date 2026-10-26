@@ -95,7 +95,7 @@ const WorldMapTab: React.FC = () => {
 
   return (
     <Grid container spacing={3}>
-      <Grid item xs={12} lg={9}>
+      <Grid size={{ xs: 12, lg: 9 }}>
         <Paper elevation={2} sx={{ p: 2 }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mb: 2 }}>
             <FormControl size='small' sx={{ minWidth: 280, maxWidth: '100%' }} disabled={!dataset}>
@@ -105,7 +105,7 @@ const WorldMapTab: React.FC = () => {
                 value={indicator}
                 label='Indicator'
                 onChange={event => setPickedIndicator(event.target.value)}
-                MenuProps={{ PaperProps: { sx: { maxHeight: 400 } } }}
+                MenuProps={{ slotProps: { paper: { sx: { maxHeight: 400 } } } }}
               >
                 {indicators.map(code => (
                   <MenuItem key={code.code} value={code.code}>
@@ -154,7 +154,7 @@ const WorldMapTab: React.FC = () => {
             </Alert>
           )}
           {crossSectionQuery.isSuccess &&
-            !crossSectionQuery.isPreviousData &&
+            !crossSectionQuery.isPlaceholderData &&
             countriesWithData.length === 0 && (
               <Alert severity='info' sx={{ mb: 2 }}>
                 No country has a value for {indicatorLabel} yet.
@@ -176,7 +176,14 @@ const WorldMapTab: React.FC = () => {
             height={MAP_HEIGHT}
             projection={projection}
           />
-          <Typography variant='caption' color='text.secondary' component='p' sx={{ mt: 1 }}>
+          <Typography
+            variant='caption'
+            component='p'
+            sx={{
+              color: 'text.secondary',
+              mt: 1,
+            }}
+          >
             Hover over a country for its value; click it (tap twice on a touch screen) to open its
             series. Source: {dataset?.name ?? 'World Development Indicators'}, World Bank.
           </Typography>
@@ -185,7 +192,7 @@ const WorldMapTab: React.FC = () => {
           )}
         </Paper>
       </Grid>
-      <Grid item xs={12} lg={3}>
+      <Grid size={{ xs: 12, lg: 3 }}>
         {shown && shownLabel ? (
           <MapLegend
             colorScale={colorScale}
@@ -200,7 +207,12 @@ const WorldMapTab: React.FC = () => {
         ) : (
           crossSectionQuery.isFetching && (
             <Paper variant='outlined' sx={{ p: 2 }}>
-              <Typography variant='body2' color='text.secondary'>
+              <Typography
+                variant='body2'
+                sx={{
+                  color: 'text.secondary',
+                }}
+              >
                 Loading {indicatorLabel}…
               </Typography>
             </Paper>

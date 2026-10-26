@@ -67,10 +67,10 @@ const PageSkeleton: React.FC = () => (
     <Skeleton variant='text' width='60%' height={40} sx={{ mb: 2 }} />
     <Skeleton variant='text' width='80%' height={24} sx={{ mb: 4 }} />
     <Grid container spacing={3}>
-      <Grid item xs={12} lg={8}>
+      <Grid size={{ xs: 12, lg: 8 }}>
         <Skeleton variant='rectangular' height={500} />
       </Grid>
-      <Grid item xs={12} lg={4}>
+      <Grid size={{ xs: 12, lg: 4 }}>
         <Skeleton variant='rectangular' height={300} />
       </Grid>
     </Grid>
@@ -138,7 +138,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     onDeleted: id => setSelectedAnnotationId(selected => (selected === id ? null : selected)),
   });
 
-  if (detail.isLoading) {
+  if (detail.isPending) {
     return <PageSkeleton />;
   }
 
@@ -187,7 +187,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const levelDigits = levelFractionDigits(points?.map(p => p.value) ?? []);
 
   let chart: React.ReactNode;
-  if (data.isLoading) {
+  if (data.isPending) {
     chart = <Skeleton variant='rectangular' height={500} data-testid='series-chart-loading' />;
   } else if (data.isError) {
     chart = (
@@ -228,13 +228,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     };
     chart = (
       <Box>
-        {data.isPreviousData && <LinearProgress aria-label='Loading transformation' />}
+        {data.isPlaceholderData && <LinearProgress aria-label='Loading transformation' />}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
           <Button
             size='small'
             startIcon={<DownloadIcon />}
             onClick={downloadShownPoints}
-            disabled={data.isPreviousData || !exportedPoints.some(p => p.value !== null)}
+            disabled={data.isPlaceholderData || !exportedPoints.some(p => p.value !== null)}
           >
             Download CSV
           </Button>
@@ -268,7 +268,12 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     chart = (
       <Paper sx={{ p: 3 }}>
         <Typography variant='body1'>No observations for this series yet.</Typography>
-        <Typography variant='body2' color='text.secondary'>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Data appears here after the next successful crawl of {series.source?.name ?? 'its source'}
           .
         </Typography>
@@ -289,7 +294,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         >
           Explore
         </Link>
-        <Typography color='text.primary'>{series.title}</Typography>
+        <Typography
+          sx={{
+            color: 'text.primary',
+          }}
+        >
+          {series.title}
+        </Typography>
       </Breadcrumbs>
 
       <Box sx={{ mb: 4 }}>
@@ -297,7 +308,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           {series.title}
         </Typography>
         {series.description && (
-          <Typography variant='body1' color='text.secondary' sx={{ mb: 2 }}>
+          <Typography
+            variant='body1'
+            sx={{
+              color: 'text.secondary',
+              mb: 2,
+            }}
+          >
             {series.description}
           </Typography>
         )}
@@ -312,15 +329,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       </Box>
 
       <Grid container spacing={3}>
-        <Grid item xs={12} lg={8}>
-          {chart}
-        </Grid>
+        <Grid size={{ xs: 12, lg: 8 }}>{chart}</Grid>
 
-        <Grid item xs={12} lg={4}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <Box sx={{ mb: 3 }}>
             <SeriesAnnotationsPanel
               annotations={annotations.data ?? []}
-              isLoading={annotations.isLoading}
+              isLoading={annotations.isPending}
               error={annotations.isError ? (annotations.error as Error | null) : null}
               onRetry={() => annotations.refetch()}
               selectedId={selectedAnnotationId}

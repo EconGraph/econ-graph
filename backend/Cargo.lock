@@ -1401,6 +1401,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tempfile",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.21",
@@ -1500,6 +1501,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -1599,14 +1601,17 @@ dependencies = [
  "diesel",
  "diesel-async",
  "econ-graph-core",
+ "reqwest",
  "rust_decimal",
  "rust_decimal_macros",
  "serde_json",
  "serial_test",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "validator",
+ "wiremock",
 ]
 
 [[package]]

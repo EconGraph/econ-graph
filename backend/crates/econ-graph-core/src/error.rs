@@ -6,7 +6,7 @@ use warp::{http::StatusCode, reject::Reject, Reply};
 /// Usage: `log_and_return!(error, "context message")`
 #[macro_export]
 macro_rules! log_and_return {
-    ($error:expr, $context:expr) => {{
+    ($error:expr_2021, $context:expr_2021) => {{
         $error.log_with_context($context);
         return Err($error);
     }};
@@ -16,7 +16,7 @@ macro_rules! log_and_return {
 /// Usage: `log_error!(error, "context message")`
 #[macro_export]
 macro_rules! log_error {
-    ($error:expr, $context:expr) => {{
+    ($error:expr_2021, $context:expr_2021) => {{
         $error.log_with_context($context);
         Err($error)
     }};
@@ -117,7 +117,19 @@ pub enum AppError {
 
     #[error("Service unavailable: {0}")]
     ServiceUnavailable(String),
+
+    /// The data plane could not be asked whether a series exists (unreachable, timed out, or
+    /// an unusable answer), so the write that needed it was refused. The detail is for logs;
+    /// the message is [`DATA_PLANE_UNAVAILABLE_MESSAGE`].
+    #[error("Couldn't check the series right now; try again")]
+    DataPlaneUnavailable(String),
 }
+
+/// `extensions.code` of the GraphQL error for [`AppError::DataPlaneUnavailable`].
+pub const DATA_PLANE_UNAVAILABLE: &str = "DATA_PLANE_UNAVAILABLE";
+
+/// Message of [`AppError::DataPlaneUnavailable`], as clients see it.
+pub const DATA_PLANE_UNAVAILABLE_MESSAGE: &str = "Couldn't check the series right now; try again";
 
 impl Reject for AppError {}
 
@@ -282,6 +294,13 @@ pub fn handle_rejection(err: warp::Rejection) -> Result<impl Reply, std::convert
             AppError::ServiceUnavailable(msg) => {
                 tracing::error!("Service unavailable: {}", msg);
                 (StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
+            AppError::DataPlaneUnavailable(detail) => {
+                tracing::warn!("Data plane unavailable: {}", detail);
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    DATA_PLANE_UNAVAILABLE_MESSAGE.to_string(),
+                )
             }
         }
     } else if err
@@ -481,6 +500,7 @@ impl AppError {
             AppError::Conflict(_) => "Conflict",
             AppError::UnprocessableEntity(_) => "UnprocessableEntity",
             AppError::ServiceUnavailable(_) => "ServiceUnavailable",
+            AppError::DataPlaneUnavailable(_) => "DataPlaneUnavailable",
         }
     }
 }

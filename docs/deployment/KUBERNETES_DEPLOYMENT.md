@@ -174,11 +174,11 @@ kind load docker-image econ-graph-chart-api:latest --name econ-graph
 ### Step 5: Deploy Application
 
 ```bash
-# Set kubectl context
-kubectl config use-context kind-econ-graph
-
-# Apply manifests
-kubectl apply -f k8s/manifests/
+# Apply manifests through deploy.sh, which switches to kind-econ-graph. Don't run
+# `kubectl apply -f k8s/manifests/`: cloudflared.yaml is committed with 0
+# replicas, so that stops the tunnel connector on the production cluster.
+PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh   # production cluster
+PUBLIC_HOST= ./scripts/deploy/deploy.sh                # any other cluster
 
 # Deploy monitoring stack
 kubectl apply -f k8s/monitoring/

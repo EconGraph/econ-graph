@@ -35,11 +35,11 @@ import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_STATEMENT } from '../../test-utils/mocks/graphql/financial-queries';
 import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 import { GET_FINANCIAL_ANNOTATIONS } from '../../test-utils/mocks/graphql/financial-queries';
-import { useQuery } from '@tanstack/react-query';
+import { queryOptions, useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
 // GraphQL hooks for real data fetching with Suspense
 const useFinancialStatementQuery = (statementId: string) => {
-  return useQuery({
+  return useSuspenseQuery({
     queryKey: ['financial-statement', statementId],
     queryFn: async () => {
       const result = await executeGraphQL({
@@ -48,9 +48,39 @@ const useFinancialStatementQuery = (statementId: string) => {
       });
       return result.data;
     },
-    suspense: true,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
+};
+
+/**
+ * Query options for a statement's annotations.
+ * @param statementId - The statement whose annotations to load.
+ * @returns The options, shared by the reader and the suspender below.
+ */
+const financialAnnotationsQuery = (statementId: string) =>
+  queryOptions({
+    queryKey: ['financial-annotations', statementId],
+    queryFn: async () => {
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_ANNOTATIONS,
+        variables: { statementId },
+      });
+      return result.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+/**
+ * Suspends the viewer until a statement's annotations are loaded, and throws a load failure to
+ * the nearest error boundary. Rendered only while annotations are shown, as useSuspenseQuery
+ * can't be disabled.
+ * @param root0 - The component props.
+ * @param root0.statementId - The statement whose annotations to load.
+ * @returns Nothing; the viewer reads the annotations from the cache.
+ */
+const SuspendUntilAnnotationsLoaded: React.FC<{ statementId: string }> = ({ statementId }) => {
+  useSuspenseQuery(financialAnnotationsQuery(statementId));
+  return null;
 };
 
 const useMutation = (_mutation: any) => [() => Promise.resolve()];
@@ -95,22 +125,13 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
       return result.data;
     },
     enabled: showRatios,
-    suspense: true,
     staleTime: 5 * 60 * 1000,
   });
 
+  // Read from the cache; SuspendUntilAnnotationsLoaded below suspends the viewer while they load
   const { data: annotationsData } = useQuery({
-    queryKey: ['financial-annotations', statementId],
-    queryFn: async () => {
-      const result = await executeGraphQL({
-        query: GET_FINANCIAL_ANNOTATIONS,
-        variables: { statementId },
-      });
-      return result.data;
-    },
+    ...financialAnnotationsQuery(statementId),
     enabled: showAnnotations,
-    suspense: true,
-    staleTime: 5 * 60 * 1000,
   });
 
   // Real-time subscription for new annotations (mocked for now)
@@ -246,6 +267,7 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
 
   return (
     <div className='space-y-6'>
+      {showAnnotations && <SuspendUntilAnnotationsLoaded statementId={statementId} />}
       {/* Main Title */}
       <Card>
         <CardHeader>

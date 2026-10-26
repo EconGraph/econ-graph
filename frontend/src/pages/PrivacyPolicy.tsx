@@ -44,15 +44,26 @@ const PrivacyPolicy: React.FC = () => {
       icon: <DataUsage />,
       content: (
         <Box>
-          <Typography variant='body1' paragraph>
+          <Typography
+            variant='body1'
+            sx={{
+              marginBottom: '16px',
+            }}
+          >
             You can browse every chart and every public annotation on EconGraph without an account.
             We store information about you only when you sign in.
           </Typography>
 
-          <Typography variant='h6' gutterBottom>
+          <Typography variant='h6' component='h3' gutterBottom>
             Your account
           </Typography>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             Sign-in uses Keycloak with Google as the identity provider. When you sign in, Google
             shares your profile with Keycloak, and EconGraph keeps:
           </Typography>
@@ -82,12 +93,18 @@ const PrivacyPolicy: React.FC = () => {
               />
             </ListItem>
           </List>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             EconGraph never sees your Google password, and we do not ask Google for anything beyond
             your basic profile.
           </Typography>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             What you write
           </Typography>
           <List dense>
@@ -105,7 +122,7 @@ const PrivacyPolicy: React.FC = () => {
             </ListItem>
           </List>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             In your browser
           </Typography>
           <List dense>
@@ -123,10 +140,16 @@ const PrivacyPolicy: React.FC = () => {
             </ListItem>
           </List>
 
-          <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+          <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
             Server logs
           </Typography>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             Like any web server, ours records requests, including your IP address, for security and
             troubleshooting. We do not use analytics or advertising trackers.
           </Typography>
@@ -158,7 +181,13 @@ const PrivacyPolicy: React.FC = () => {
               />
             </ListItem>
           </List>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             We do not build profiles, send marketing email or use your data to train models.
           </Typography>
         </Box>
@@ -169,7 +198,12 @@ const PrivacyPolicy: React.FC = () => {
       icon: <Share />,
       content: (
         <Box>
-          <Typography variant='body1' paragraph>
+          <Typography
+            variant='body1'
+            sx={{
+              marginBottom: '16px',
+            }}
+          >
             Every annotation is either private or public. New annotations are private.
           </Typography>
           <List dense>
@@ -186,7 +220,13 @@ const PrivacyPolicy: React.FC = () => {
               />
             </ListItem>
           </List>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             You can switch an annotation between private and public at any time. A comment is
             visible exactly when the annotation it belongs to is visible.
           </Typography>
@@ -198,7 +238,12 @@ const PrivacyPolicy: React.FC = () => {
       icon: <Person />,
       content: (
         <Box>
-          <Typography variant='body1' paragraph>
+          <Typography
+            variant='body1'
+            sx={{
+              marginBottom: '16px',
+            }}
+          >
             We do not sell or share personal information. The parties involved in running the site
             are:
           </Typography>
@@ -222,7 +267,13 @@ const PrivacyPolicy: React.FC = () => {
               />
             </ListItem>
           </List>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             The economic data shown on EconGraph comes from public statistical sources (FRED, BLS,
             Census BDS, FHFA, BEA and the World Bank). Reading it sends nothing about you to those
             sources.
@@ -255,7 +306,13 @@ const PrivacyPolicy: React.FC = () => {
               />
             </ListItem>
           </List>
-          <Typography variant='body2' color='text.secondary' paragraph>
+          <Typography
+            variant='body2'
+            sx={{
+              color: 'text.secondary',
+              marginBottom: '16px',
+            }}
+          >
             You can also revoke EconGraph's access to your Google account from your Google account
             settings.
           </Typography>
@@ -271,16 +328,26 @@ const PrivacyPolicy: React.FC = () => {
         <Typography variant='h3' component='h1' gutterBottom>
           Privacy Policy
         </Typography>
-        <Typography variant='body1' color='text.secondary'>
+        <Typography
+          variant='body1'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Last updated: {LAST_UPDATED}
         </Typography>
       </Paper>
 
       <Paper elevation={1} sx={{ p: 3, mb: 4 }}>
-        <Typography variant='h5' gutterBottom>
+        <Typography variant='h5' component='h2' gutterBottom>
           In short
         </Typography>
-        <Typography variant='body1' paragraph>
+        <Typography
+          variant='body1'
+          sx={{
+            marginBottom: '16px',
+          }}
+        >
           EconGraph is an open-source economic data explorer. Browsing needs no account. If you sign
           in with Google, we keep your basic Google profile and the annotations and comments you
           write. Annotations are private unless you make them public. We use no trackers and share
@@ -289,10 +356,17 @@ const PrivacyPolicy: React.FC = () => {
       </Paper>
 
       {sections.map((section, index) => (
-        <Accordion key={section.title} defaultExpanded={index === 0} sx={{ mb: 2 }}>
+        <Accordion
+          key={section.title}
+          defaultExpanded={index === 0}
+          sx={{ mb: 2 }}
+          slotProps={{ heading: { component: 'h2' } }}
+        >
           <AccordionSummary expandIcon={<ExpandMore />}>
-            <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              <Box sx={{ color: 'primary.main', mr: 2 }}>{section.icon}</Box>
+            <Box component='span' sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+              <Box component='span' sx={{ display: 'flex', color: 'primary.main', mr: 2 }}>
+                {section.icon}
+              </Box>
               <Typography component='span' variant='h6'>
                 {section.title}
               </Typography>
@@ -303,10 +377,16 @@ const PrivacyPolicy: React.FC = () => {
       ))}
 
       <Paper elevation={1} sx={{ p: 3, mb: 4 }}>
-        <Typography variant='h5' gutterBottom>
+        <Typography variant='h5' component='h2' gutterBottom>
           Questions and requests
         </Typography>
-        <Typography variant='body2' color='text.secondary' paragraph>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+            marginBottom: '16px',
+          }}
+        >
           To ask about this policy, request a copy of your data or have your account deleted, open
           an issue in the project repository at <Link href={REPOSITORY_URL}>{REPOSITORY_URL}</Link>.
           If your request involves personal details you would rather not post publicly, say so in
@@ -315,12 +395,22 @@ const PrivacyPolicy: React.FC = () => {
       </Paper>
 
       <Paper elevation={1} sx={{ p: 3, textAlign: 'center' }}>
-        <Typography variant='body2' color='text.secondary'>
+        <Typography
+          variant='body2'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           We will update this page when the service changes what it stores. The date above tells you
           when it last changed.
         </Typography>
         <Divider sx={{ my: 2 }} />
-        <Typography variant='caption' color='text.secondary'>
+        <Typography
+          variant='caption'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           EconGraph Privacy Policy | Last updated: {LAST_UPDATED}
         </Typography>
       </Paper>

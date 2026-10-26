@@ -643,6 +643,7 @@ pub struct PageInfo {
 #[graphql(name = "SearchResult")]
 pub struct SearchResult {
     pub series: Vec<EconomicSeriesType>,
+    /// How many series match the query and filters in all, on every page
     pub total_count: i32,
     pub query: String,
     pub took_ms: i32,

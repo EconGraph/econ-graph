@@ -25,6 +25,19 @@ use crate::graphql::cross_section::{self, CrossSectionEntry, DimensionFilterInpu
 /// Root query object
 pub struct Query;
 
+/// Search/list cursors are nonnegative offsets within the services' i32 range.
+/// Only an omitted cursor starts at zero; invalid continuations must not repeat page one.
+fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
+    match after {
+        None => Ok(0),
+        Some(cursor) => cursor
+            .parse::<i32>()
+            .ok()
+            .filter(|offset| *offset >= 0)
+            .ok_or_else(|| async_graphql::Error::new(format!("Invalid cursor: {cursor}"))),
+    }
+}
+
 #[Object]
 impl Query {
     /// Get a specific economic series by ID
@@ -38,6 +51,16 @@ impl Query {
             Some(series) if series.end_date.is_some() => Ok(Some(series.into())),
             _ => Ok(None),
         }
+    }
+
+    /// Whether an economic series with this ID exists, observations or not
+    ///
+    /// Unlike `series`, a series with no data points counts. Backends without a data database
+    /// ask this before storing an annotation on the series.
+    async fn series_exists(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
+        let series_uuid = Uuid::parse_str(&id)?;
+        Ok(series_service::series_exists(pool, series_uuid).await?)
     }
 
     /// Get an economic series by its source's name and the source's own id for it
@@ -83,13 +106,9 @@ impl Query {
         // source's whole catalog can be paged through and its size reported.
         let pagination = pagination.unwrap_or_default();
         let first = pagination.first.unwrap_or(50).clamp(1, 100);
-        let offset = pagination
-            .after
-            .and_then(|cursor| cursor.parse::<i32>().ok())
-            .unwrap_or(0)
-            .max(0);
+        let offset = parse_series_cursor(pagination.after.as_deref())?;
 
-        let mut search_params = convert_series_filter_to_params(filter);
+        let mut search_params = convert_series_filter_to_params(filter)?;
         search_params.limit = Some(i64::from(first));
         search_params.offset = Some(i64::from(offset));
         let total_count = series_service::count_series(pool, &search_params).await?;
@@ -371,6 +390,10 @@ impl Query {
     }
 
     /// Search economic series using full-text search with spelling correction
+    ///
+    /// `source` is a data source id; a value that isn't a UUID is rejected with a
+    /// `BAD_USER_INPUT` error. `totalCount` counts every matching series, not just this page;
+    /// read the next page with `after` set to the number of series already read.
     async fn search_series(
         &self,
         ctx: &Context<'_>,
@@ -384,6 +407,10 @@ impl Query {
         // PURPOSE: Provide comprehensive search capabilities for economic time series
 
         let start_time = std::time::Instant::now();
+        let source_id = source
+            .as_deref()
+            .map(|id| parse_id_argument("source", id))
+            .transpose()?;
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let search_service = SearchService::new(Arc::new(pool.clone()));
 
@@ -392,20 +419,23 @@ impl Query {
             query: query.clone(),
             similarity_threshold: Some(0.3),
             limit: first,
-            offset: after.and_then(|cursor| cursor.parse::<i32>().ok()),
-            source_id: source.and_then(|s| uuid::Uuid::parse_str(&s).ok()),
+            offset: Some(parse_series_cursor(after.as_deref())?),
+            source_id,
             frequency: frequency.map(|f| format!("{:?}", f)),
             include_inactive: Some(false),
             sort_by: Some(SearchSortOrder::Relevance),
         };
 
-        let results = search_service.search_series(&search_params).await?;
+        let page = search_service.search_series_page(&search_params).await?;
         let took_ms = start_time.elapsed().as_millis() as i32;
-        let total_count = results.len() as i32;
 
         Ok(SearchResult {
-            series: results.into_iter().map(EconomicSeriesType::from).collect(),
-            total_count,
+            series: page
+                .results
+                .into_iter()
+                .map(EconomicSeriesType::from)
+                .collect(),
+            total_count: i32::try_from(page.total_count).unwrap_or(i32::MAX),
             query,
             took_ms,
         })
@@ -759,22 +789,31 @@ impl Query {
     }
 }
 
-/// Convert GraphQL series filter to service parameters
+/// Parses a UUID passed as the argument `name`. A malformed one is the client's mistake, so
+/// it's a `BAD_USER_INPUT` error naming the argument, never a filter silently dropped.
+fn parse_id_argument(name: &str, value: &str) -> Result<Uuid> {
+    Uuid::parse_str(value).map_err(|_| {
+        crate::graphql::errors::bad_user_input(format!("`{name}` is not a valid id: {value:?}"))
+    })
+}
+
+/// Convert GraphQL series filter to service parameters. Fails if `sourceId` isn't a UUID.
 fn convert_series_filter_to_params(
     filter: Option<SeriesFilterInput>,
-) -> econ_graph_core::models::SeriesSearchParams {
+) -> Result<econ_graph_core::models::SeriesSearchParams> {
     let filter = filter.unwrap_or_default();
 
-    econ_graph_core::models::SeriesSearchParams {
+    Ok(econ_graph_core::models::SeriesSearchParams {
         query: filter.search_query,
         source_id: filter
             .source_id
-            .and_then(|id| Uuid::parse_str(id.as_ref()).ok()),
+            .map(|id| parse_id_argument("filter.sourceId", id.as_ref()))
+            .transpose()?,
         frequency: filter.frequency.map(|f| format!("{:?}", f)),
         is_active: filter.is_active,
         limit: Some(50),
         offset: Some(0),
-    }
+    })
 }
 
 impl Default for SeriesFilterInput {
@@ -996,6 +1035,9 @@ impl Default for Query {
 mod series_data_tests;
 
 #[cfg(test)]
+mod pagination_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1123,7 +1165,7 @@ mod tests {
             search_query: Some("GDP".to_string()),
         };
 
-        let params = convert_series_filter_to_params(Some(filter));
+        let params = convert_series_filter_to_params(Some(filter)).unwrap();
 
         // Verify search query is preserved - required for text search functionality
         assert_eq!(params.query, Some("GDP".to_string()));
@@ -1136,6 +1178,25 @@ mod tests {
             params.source_id.is_some(),
             "Source ID should be parsed from GraphQL ID"
         );
+    }
+
+    /// A malformed or empty source id is an error naming the argument, not a dropped filter.
+    #[test]
+    fn convert_series_filter_rejects_a_malformed_source_id() {
+        for bad in ["not-a-uuid", ""] {
+            let filter = SeriesFilterInput {
+                source_id: Some(ID::from(bad)),
+                ..Default::default()
+            };
+            let error = convert_series_filter_to_params(Some(filter)).unwrap_err();
+            assert!(
+                error.message.contains("filter.sourceId"),
+                "{}",
+                error.message
+            );
+        }
+        let params = convert_series_filter_to_params(None).unwrap();
+        assert_eq!(params.source_id, None);
     }
 
     #[test]

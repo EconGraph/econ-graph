@@ -389,8 +389,14 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
           Chart Controls
         </Typography>
 
-        <Grid container spacing={2} alignItems='center'>
-          <Grid item xs={12} sm={6} md={3}>
+        <Grid
+          container
+          spacing={2}
+          sx={{
+            alignItems: 'center',
+          }}
+        >
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DatePicker
                 label='Start Date'
@@ -408,7 +414,7 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
             </LocalizationProvider>
           </Grid>
 
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DatePicker
                 label='End Date'
@@ -426,7 +432,7 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
             </LocalizationProvider>
           </Grid>
 
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <FormControl fullWidth size='small'>
               <InputLabel id='series-transformation-label'>Transformation</InputLabel>
               <Select
@@ -497,7 +503,12 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
       )}
 
       <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Typography variant='caption' color='text.secondary'>
+        <Typography
+          variant='caption'
+          sx={{
+            color: 'text.secondary',
+          }}
+        >
           Frequency: {frequency} • Data Points: {shownData.filter(d => d.value !== null).length}
         </Typography>
       </Box>

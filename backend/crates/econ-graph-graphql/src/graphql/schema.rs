@@ -11,6 +11,7 @@ use crate::graphql::errors::SanitizeErrors;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::{AppPool, DataPool};
+use econ_graph_services::services::series_check::DataPlaneClient;
 
 /// Shared resources every request of a schema sees (the per-request caller is
 /// [`crate::graphql::context::GraphQLContext`])
@@ -90,6 +91,19 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
     data: Option<DataPool>,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
+    create_schema_with_data_plane(app, data, None, additional_data)
+}
+
+/// Create a schema as [`create_schema_with_data`] does which, when it has no data database,
+/// asks `data_plane` (the data plane's GraphQL endpoint, `DATA_GRAPHQL_URL`) whether a new
+/// annotation's series exists. With neither, that check is skipped; see
+/// [`crate::graphql::context::series_check`].
+pub fn create_schema_with_data_plane<T: Send + Sync + 'static>(
+    app: AppPool,
+    data: Option<DataPool>,
+    data_plane: Option<Arc<DataPlaneClient>>,
+    additional_data: T,
+) -> Schema<Query, Mutation, EmptySubscription> {
     let security = Arc::new(SecurityMiddleware::new(SecurityConfig::default()));
     let resources = SchemaResources {
         data_loaders: data
@@ -98,16 +112,19 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
         security,
     };
 
-    let builder = schema_builder()
+    let mut builder = schema_builder()
         .limit_depth(MAX_QUERY_DEPTH)
         .limit_complexity(MAX_QUERY_COMPLEXITY)
         .data(resources)
         .data(app)
         .data(additional_data);
-    match data {
-        Some(data) => builder.data(data).finish(),
-        None => builder.finish(),
+    if let Some(data) = data {
+        builder = builder.data(data);
     }
+    if let Some(data_plane) = data_plane {
+        builder = builder.data(data_plane);
+    }
+    builder.finish()
 }
 
 #[cfg(test)]

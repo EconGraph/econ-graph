@@ -39,7 +39,7 @@ test.describe('public annotations for an anonymous viewer', () => {
     const dialog = page.getByRole('dialog', { name: 'Add annotation' });
     await dialog.getByRole('textbox', { name: 'Title' }).fill(title);
     await dialog.getByRole('textbox', { name: 'Note' }).fill(note);
-    await dialog.getByRole('checkbox', { name: 'Public' }).check();
+    await dialog.getByRole('switch', { name: 'Public' }).check();
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
     await expect(annotationsList(page).getByText(title, { exact: true })).toBeVisible();

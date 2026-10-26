@@ -59,9 +59,8 @@ const useFinancialDashboardData = (companyId: string) => {
       }
       return result.data.company;
     },
-    suspense: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
-    cacheTime: 10 * 60 * 1000, // 10 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 };
 
@@ -71,7 +70,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   showEducationalContent: _showEducationalContent = true,
   showCollaborativeFeatures: _showCollaborativeFeatures = true,
 }) => {
-  const { data, isLoading, isError, error } = useFinancialDashboardData(companyId);
+  const { data, isPending, isError, error } = useFinancialDashboardData(companyId);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, _setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
@@ -86,7 +85,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     setActiveTab(newValue);
   };
 
-  if (isLoading) {
+  if (isPending) {
     return (
       <Box
         sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}
@@ -224,7 +223,12 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     ratios.slice(0, 6).map((ratio: any) => (
                       <div key={ratio.id} className='flex items-center justify-between'>
                         <Typography variant='body2'>{ratio.ratioDisplayName}</Typography>
-                        <Typography variant='body2' color='text.secondary'>
+                        <Typography
+                          variant='body2'
+                          sx={{
+                            color: 'text.secondary',
+                          }}
+                        >
                           {ratio.value.toFixed(2)}
                         </Typography>
                       </div>

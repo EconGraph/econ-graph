@@ -58,6 +58,11 @@ metadata:
 spec:
   # One replica: several need Keycloak's distributed cache configured first.
   replicas: 1
+  # Recreate, not RollingUpdate: a new Keycloak version migrates the database schema on
+  # first start, and Keycloak supports old and new pods sharing a database only within
+  # one version stream. Recreate stops the old pod before the new one starts.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: keycloak
@@ -69,7 +74,7 @@ spec:
     spec:
       containers:
       - name: keycloak
-        image: quay.io/keycloak/keycloak:26.7.4
+        image: quay.io/keycloak/keycloak:26.8.1
         # Enable the Google identity provider only when its client id and secret are configured.
         command: ["/bin/bash", "-c"]
         args:
@@ -144,14 +149,16 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "1000m"
-        # The first start builds Keycloak's optimized image, which takes a while.
+        # The first start builds Keycloak's optimized image, and the first start of a new
+        # version migrates the database, which can take long on a big one. 180 x 5s = 900s,
+        # the same as deploy.sh's rollout wait, so a slow migration is not killed early.
         startupProbe:
           httpGet:
             path: /idp/health/started
             port: management
           periodSeconds: 5
           timeoutSeconds: 3
-          failureThreshold: 60
+          failureThreshold: 180
         livenessProbe:
           httpGet:
             path: /idp/health/live
