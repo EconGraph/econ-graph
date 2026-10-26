@@ -5,7 +5,8 @@
 #
 # This is DESTRUCTIVE: pg_restore --clean drops and recreates every object
 # in the backup before restoring it, overwriting current data. It prompts
-# for confirmation unless --yes is given.
+# for confirmation unless --yes is given. The job connects as postgres and
+# recreates the objects as econgraph, the app's role, which owns them.
 #
 # Usage:
 #   ./scripts/deploy/restore-postgres-backup.sh --list
@@ -91,6 +92,10 @@ spec:
               key: postgres-password
         - name: PGDATABASE
           value: "econ_graph"
+        # The role the restored objects are owned by: the one the backend and
+        # crawler-worker connect as (postgres-init.yaml creates it).
+        - name: RESTORE_OWNER
+          value: "econgraph"
         - name: BACKUP_DIR
           value: "/backups"
         - name: BACKUP_FILE

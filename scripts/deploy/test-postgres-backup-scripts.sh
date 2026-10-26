@@ -8,11 +8,19 @@
 # k8s/manifests/postgres-backup-cronjob.yaml, with test passwords in place of
 # the Secrets. Never touches a cluster.
 #
+# econ_graph is built as in production: the server runs the init script from
+# k8s/manifests/postgres-init.yaml (the econgraph role, which owns the public
+# schema, and the extensions), and the backend's migrations then run as
+# econgraph, so every object is owned by econgraph.
+#
 # Checks:
 #   - both dumps are written, read back, restore into scratch databases with
 #     every table's row count equal to the source, and are synced to S3
 #     without the latest*.dump links;
-#   - restore.sh puts econ_graph back, and refuses a Keycloak dump;
+#   - restore.sh puts econ_graph back, both over the existing database and on
+#     a newly initialised server, with every object owned by econgraph, the
+#     extensions in place, and econgraph able to read and write every table;
+#     it refuses a Keycloak dump, and a restore that fails rolls back;
 #   - when either database's dump fails (server down, wrong password, no
 #     tables) the other dump is still written and synced, and sync.sh fails
 #     the Job; without BACKUP_STATUS_FILE, backup.sh itself exits 1;
@@ -22,7 +30,7 @@
 #   - a table locked past PG_DUMP_LOCK_WAIT_TIMEOUT fails that dump promptly
 #     and keeps the other;
 #   - the Job has a deadline and does not retry a pod whose container failed;
-#   - no run deletes a dump, and no output shows either password.
+#   - no run deletes a dump, and no output shows a password.
 #
 # Needs docker (DOCKER_HOST is honoured) and python3 with PyYAML.
 # Usage: scripts/deploy/test-postgres-backup-scripts.sh
@@ -32,6 +40,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIGMAP="$ROOT/k8s/manifests/postgres-backup-configmap.yaml"
 CRONJOB="$ROOT/k8s/manifests/postgres-backup-cronjob.yaml"
+PG_INIT="$ROOT/k8s/manifests/postgres-init.yaml"
+MIGRATIONS="$ROOT/backend/migrations"
 
 PG_IMAGE="postgres:18"
 AWS_IMAGE="amazon/aws-cli:2.38.5"
@@ -40,9 +50,11 @@ S3MOCK_IMAGE="adobe/s3mock:4.7.0"
 ID="pgbackup-test-$$"
 NET="$ID"
 ECON="$ID-econ"
+FRESH="$ID-fresh"
 KC="$ID-keycloak"
 S3="$ID-s3"
 ECON_PW="econ-pw-$RANDOM$RANDOM"
+APP_PW="app-pw-$RANDOM$RANDOM"
 KC_PW="keycloak-pw-$RANDOM$RANDOM"
 
 tmp="$(mktemp -d)"
@@ -50,7 +62,7 @@ LOG="$tmp/all-output.log"
 : >"$LOG"
 
 cleanup() {
-    docker rm -f "$ECON" "$KC" "$S3" >/dev/null 2>&1 || true
+    docker rm -f "$ECON" "$FRESH" "$KC" "$S3" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
     rm -rf "$tmp" 2>/dev/null || true
 }
@@ -67,8 +79,10 @@ check() { # check DESCRIPTION COMMAND...
 
 # --- scripts and environment from the manifests ---------------------------
 
-mkdir -p "$tmp/scripts" "$tmp/backups" "$tmp/aws"
-python3 - "$CONFIGMAP" "$tmp/scripts" <<'PY'
+mkdir -p "$tmp/scripts" "$tmp/backups" "$tmp/aws" "$tmp/initdb"
+# A ConfigMap's scripts, as its volume mounts them.
+extract_configmap() { # extract_configmap MANIFEST DIR
+    python3 - "$1" "$2" <<'PY'
 import os, sys, yaml
 for key, text in yaml.safe_load(open(sys.argv[1]))["data"].items():
     path = os.path.join(sys.argv[2], key)
@@ -76,6 +90,9 @@ for key, text in yaml.safe_load(open(sys.argv[1]))["data"].items():
         f.write(text)
     os.chmod(path, 0o555)
 PY
+}
+extract_configmap "$CONFIGMAP" "$tmp/scripts"
+extract_configmap "$PG_INIT" "$tmp/initdb"
 
 # KEY=VALUE lines for docker --env-file, from the pg-dump init container.
 python3 - "$CRONJOB" "$ECON_PW" "$KC_PW" >"$tmp/dump.env" <<'PY'
@@ -132,8 +149,14 @@ chmod 0777 "$tmp/backups"
 # --- scratch servers ---------------------------------------------------------
 
 docker network create "$NET" >/dev/null
-docker run -d --name "$ECON" --network "$NET" --network-alias postgres-service \
-    -e POSTGRES_PASSWORD="$ECON_PW" -e POSTGRES_DB=econ_graph "$PG_IMAGE" >/dev/null
+# start_econ CONTAINER ALIAS: an econ_graph server as postgres-deployment.yaml
+# runs it, with the init script that creates the econgraph role.
+start_econ() {
+    docker run -d --name "$1" --network "$NET" --network-alias "$2" \
+        -e POSTGRES_PASSWORD="$ECON_PW" -e POSTGRES_DB=econ_graph -e APP_DB_PASSWORD="$APP_PW" \
+        -v "$tmp/initdb:/docker-entrypoint-initdb.d:ro" "$PG_IMAGE" >/dev/null
+}
+start_econ "$ECON" postgres-service
 docker run -d --name "$KC" --network "$NET" --network-alias keycloak-postgres-service \
     -e POSTGRES_USER=keycloak -e POSTGRES_PASSWORD="$KC_PW" -e POSTGRES_DB=keycloak "$PG_IMAGE" >/dev/null
 docker run -d --name "$S3" --network "$NET" --network-alias s3mock \
@@ -157,14 +180,97 @@ psql_in() { # psql_in CONTAINER USER DB SQL
     docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$1" psql -X -q -v ON_ERROR_STOP=1 -U "$2" -d "$3" -At -c "$4"
 }
 
-psql_in "$ECON" postgres econ_graph "
-CREATE TABLE economic_series (id serial PRIMARY KEY, title text NOT NULL);
-CREATE TABLE data_points (id bigserial PRIMARY KEY, series_id int REFERENCES economic_series(id), value numeric);
+# app_sql HOST: run the SQL on stdin as econgraph with its password, from
+# another container over the network, as the backend and crawler connect.
+app_sql() {
+    docker run --rm -i --network "$NET" -e PGPASSWORD="$APP_PW" \
+        -e PGOPTIONS="-c client_min_messages=warning" "$PG_IMAGE" \
+        psql -X -q -v ON_ERROR_STOP=1 -h "$1" -U econgraph -d econ_graph -At
+}
+
+# The backend runs the migrations as econgraph at startup, each in a
+# transaction, and records them in Diesel's table.
+for migration in "$MIGRATIONS"/*/up.sql; do
+    app_sql postgres-service <"$migration" >/dev/null 2>>"$LOG" || {
+        echo "migration $migration failed" >&2
+        exit 1
+    }
+done
+{
+    echo "CREATE TABLE __diesel_schema_migrations (version VARCHAR(50) PRIMARY KEY NOT NULL,
+          run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+    for migration in "$MIGRATIONS"/*/; do
+        version="$(basename "$migration" | cut -d_ -f1 | tr -d -)"
+        echo "INSERT INTO __diesel_schema_migrations (version) VALUES ('$version');"
+    done
+} | app_sql postgres-service
+
+app_sql postgres-service <<'SQL'
+CREATE TABLE backup_test_series (id serial PRIMARY KEY, title text NOT NULL);
+CREATE TABLE backup_test_points (id bigserial PRIMARY KEY, series_id int REFERENCES backup_test_series(id), value numeric);
 CREATE SCHEMA audit;
 CREATE TABLE audit.events (id serial PRIMARY KEY, note text);
-INSERT INTO economic_series (title) SELECT 'series ' || g FROM generate_series(1, 25) g;
-INSERT INTO data_points (series_id, value) SELECT 1 + g % 25, g * 1.5 FROM generate_series(1, 5000) g;
-INSERT INTO audit.events (note) VALUES ('a'), ('b'), ('c');"
+INSERT INTO backup_test_series (title) SELECT 'series ' || g FROM generate_series(1, 25) g;
+INSERT INTO backup_test_points (series_id, value) SELECT 1 + g % 25, g * 1.5 FROM generate_series(1, 5000) g;
+INSERT INTO audit.events (note) VALUES ('a'), ('b'), ('c');
+SQL
+
+# Objects in econ_graph's own schemas not owned by econgraph, one per line:
+# relations (tables, sequences, views, indexes), functions, types (not the
+# array types, which follow their element) and schemas. Extensions' members
+# don't count: the init script creates most extensions as the superuser.
+FOREIGN_OWNED_SQL="SELECT kind || ' ' || name || ' ' || owner FROM (
+    SELECT 'relation' AS kind, c.oid::regclass::text AS name, c.relowner::regrole::text AS owner,
+           c.oid, 'pg_class'::regclass AS cls, c.relnamespace AS nsp
+      FROM pg_class c
+    UNION ALL
+    SELECT 'function', p.oid::regprocedure::text, p.proowner::regrole::text, p.oid, 'pg_proc'::regclass, p.pronamespace
+      FROM pg_proc p
+    UNION ALL
+    SELECT 'type', t.oid::regtype::text, t.typowner::regrole::text, t.oid, 'pg_type'::regclass, t.typnamespace
+      FROM pg_type t
+     WHERE NOT EXISTS (SELECT 1 FROM pg_type e WHERE e.typarray = t.oid)
+    UNION ALL
+    SELECT 'schema', n.nspname::text, n.nspowner::regrole::text, n.oid, 'pg_namespace'::regclass, n.oid
+      FROM pg_namespace n
+  ) o
+  JOIN pg_namespace n ON n.oid = o.nsp
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%'
+   AND o.owner <> 'econgraph'
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = o.cls AND d.objid = o.oid AND d.deptype = 'e')
+ ORDER BY 1"
+TABLE_OWNERS_SQL="SELECT tableowner || ' ' || count(*) FROM pg_tables
+ WHERE schemaname NOT IN ('pg_catalog', 'information_schema') GROUP BY tableowner ORDER BY 1"
+EXTENSIONS_SQL="SELECT string_agg(extname, ' ' ORDER BY extname) FROM pg_extension"
+# What the app does: read every table, write rows (sequences, defaults,
+# triggers and the functions they call), record a migration.
+APP_ACCESS_SQL="DO \$\$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT schemaname, tablename FROM pg_tables
+            WHERE schemaname NOT IN ('pg_catalog', 'information_schema') LOOP
+    EXECUTE format('SELECT 1 FROM %I.%I LIMIT 1', r.schemaname, r.tablename);
+  END LOOP;
+END \$\$;
+BEGIN;
+INSERT INTO data_sources (name, base_url) VALUES ('backup test source', 'https://example.com');
+UPDATE data_sources SET description = 'updated by the app role' WHERE name = 'backup test source';
+INSERT INTO backup_test_series (title) VALUES ('written by the app role');
+INSERT INTO audit.events (note) VALUES ('written by the app role');
+INSERT INTO __diesel_schema_migrations (version) VALUES ('99999999999999');
+ROLLBACK;
+SELECT 'app access ok';"
+
+# The server is set up like production: all of it owned by econgraph.
+psql_in "$ECON" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
+if [ -s "$tmp/foreign-owned" ]; then
+    echo "the scratch econ_graph has objects not owned by econgraph:" >&2
+    cat "$tmp/foreign-owned" >&2
+    exit 1
+fi
+psql_in "$ECON" postgres econ_graph "$TABLE_OWNERS_SQL" >"$tmp/econ.owners"
+psql_in "$ECON" postgres econ_graph "$EXTENSIONS_SQL" >"$tmp/econ.extensions"
+echo "# scratch econ_graph tables by owner: $(tr '\n' ' ' <"$tmp/econ.owners"); extensions: $(cat "$tmp/econ.extensions")"
 
 psql_in "$KC" keycloak keycloak "
 CREATE TABLE user_entity (id text PRIMARY KEY, username text NOT NULL, email text);
@@ -288,26 +394,89 @@ nothing_deleted
 # --- 2. restore.sh ------------------------------------------------------------
 
 echo "# restore.sh"
-psql_in "$ECON" postgres econ_graph "DELETE FROM data_points WHERE id > 100; DELETE FROM audit.events;"
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
-    "$PG_IMAGE" /scripts/restore.sh >>"$LOG" 2>&1 || rc=$?
+
+# KEY=VALUE lines for docker --env-file, from the Job restore-postgres-backup.sh
+# applies (its shell variables blanked), with the test password for the Secret.
+python3 - "$ROOT/scripts/deploy/restore-postgres-backup.sh" "$ECON_PW" >"$tmp/restore.env" <<'PY'
+import re, sys, yaml
+text = open(sys.argv[1]).read()
+manifest = re.search(r"<<EOF \| kubectl apply -f -\n(.*?)\nEOF\n", text, re.S).group(1)
+manifest = re.sub(r"\$\{[A-Z_]+\}", "", manifest)
+(container,) = yaml.safe_load(manifest)["spec"]["template"]["spec"]["containers"]
+for env in container["env"]:
+    if "value" in env:
+        print(f"{env['name']}={env['value']}")
+    else:
+        ref = env["valueFrom"]["secretKeyRef"]
+        assert (ref["name"], ref["key"]) == ("econ-graph-postgres", "postgres-password"), ref
+        print(f"{env['name']}={sys.argv[2]}")
+PY
+
+# run_restore [docker run options...]: restore.sh as the restore Job runs it
+# (uid 999, read-only root, the backup volume read-only). Its output goes to
+# $tmp/out; prints its exit status.
+run_restore() {
+    local rc=0
+    docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
+        --security-opt no-new-privileges --env-file "$tmp/restore.env" "$@" \
+        -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
+        "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
+    cat "$tmp/out" >>"$LOG"
+    echo "$rc"
+}
+
+# restored_like_production CONTAINER HOST LABEL: econ_graph on that server
+# holds the dump's rows, owned by econgraph, which the app can use.
+restored_like_production() {
+    check "$3: row counts are back" diff <(counts "$1" postgres econ_graph) "$tmp/econ.counts"
+    check "$3: every table is owned by econgraph ($(tr '\n' ' ' <"$tmp/econ.owners"))" \
+        diff <(psql_in "$1" postgres econ_graph "$TABLE_OWNERS_SQL") "$tmp/econ.owners"
+    psql_in "$1" postgres econ_graph "$FOREIGN_OWNED_SQL" >"$tmp/foreign-owned"
+    check "$3: so is every sequence, view, index, function, type and schema" [ ! -s "$tmp/foreign-owned" ]
+    [ ! -s "$tmp/foreign-owned" ] || sed 's/^/    owned by another role: /' "$tmp/foreign-owned"
+    check "$3: the extensions are in place ($(cat "$tmp/econ.extensions"))" \
+        [ "$(psql_in "$1" postgres econ_graph "$EXTENSIONS_SQL")" = "$(cat "$tmp/econ.extensions")" ]
+    check "$3: econgraph, connecting as the app does, can read every table and write" \
+        [ "$(app_sql "$2" <<<"$APP_ACCESS_SQL" 2>>"$LOG")" = "app access ok" ]
+}
+
+psql_in "$ECON" postgres econ_graph "DELETE FROM backup_test_points WHERE id > 100; DELETE FROM audit.events;"
+rc="$(run_restore)"
 check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
-check "econ_graph row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
-rc=0
-docker run --rm --network "$NET" --user 999:999 --read-only --cap-drop ALL \
-    -e PGHOST=postgres-service -e PGPORT=5432 -e PGUSER=postgres -e PGPASSWORD="$ECON_PW" \
-    -e PGDATABASE=econ_graph -e BACKUP_DIR=/backups -e BACKUP_FILE="/backups/$kc_dump" \
-    -v "$tmp/scripts:/scripts:ro" -v "$tmp/backups:/backups:ro" \
-    "$PG_IMAGE" /scripts/restore.sh >"$tmp/out" 2>&1 || rc=$?
-cat "$tmp/out" >>"$LOG"
+restored_like_production "$ECON" postgres-service "over the existing database"
+
+echo "# restore.sh on a newly initialised server (the init script only)"
+start_econ "$FRESH" postgres-fresh
+wait_pg "$FRESH" postgres econ_graph
+rc="$(run_restore -e PGHOST=postgres-fresh)"
+check "restore.sh of latest.dump exits 0" [ "$rc" = 0 ]
+restored_like_production "$FRESH" postgres-fresh "on a new server"
+docker rm -f "$FRESH" >/dev/null
+
+echo "# restore.sh failures"
+# An object econgraph can't drop (as an earlier restore that ran as the
+# superuser leaves every table): the restore stops and rolls back.
+psql_in "$ECON" postgres econ_graph "DELETE FROM backup_test_points WHERE id > 100; ALTER TABLE audit.events OWNER TO postgres;"
+counts "$ECON" postgres econ_graph >"$tmp/before"
+rc="$(run_restore)"
+check "a table owned by another role: restore.sh exits non-zero" [ "$rc" != 0 ]
+check "  and says why" grep -q "must be owner of table events" "$tmp/out"
+check "  and rolls back, leaving every row as it was" diff <(counts "$ECON" postgres econ_graph) "$tmp/before"
+psql_in "$ECON" postgres econ_graph "ALTER TABLE audit.events OWNER TO econgraph;"
+rc="$(run_restore)"
+check "  once the table is econgraph's again, restore.sh exits 0" [ "$rc" = 0 ]
+check "  and the row counts are back" diff <(counts "$ECON" postgres econ_graph) "$tmp/econ.counts"
+
+rc="$(run_restore -e RESTORE_OWNER=no_such_role)"
+check "a missing RESTORE_OWNER: restore.sh exits 1" [ "$rc" = 1 ]
+check "  and says why" grep -q "Role no_such_role (RESTORE_OWNER) does not exist" "$tmp/out"
+
+rc="$(run_restore -e BACKUP_FILE="/backups/$kc_dump")"
 check "restore.sh refuses a keycloak dump for econ_graph" [ "$rc" = 1 ]
 check "  and says why" grep -q "is not a econ_graph dump" "$tmp/out"
 check "  and econ_graph is untouched" \
     [ "$(psql_in "$ECON" postgres econ_graph "SELECT count(*) FROM information_schema.tables WHERE table_name = 'user_entity'")" = 0 ]
+check "no dump deleted" nothing_deleted
 
 # --- 3. Keycloak's server down ----------------------------------------------------
 
@@ -467,6 +636,7 @@ check "sync.sh fails when backup.sh wrote no status" [ "$rc" = 1 ]
 
 check "no output shows the econ_graph password" bash -c "! grep -qF -- '$ECON_PW' '$LOG'"
 check "no output shows the keycloak password" bash -c "! grep -qF -- '$KC_PW' '$LOG'"
+check "no output shows the econgraph password" bash -c "! grep -qF -- '$APP_PW' '$LOG'"
 
 echo
 if [ "$failures" -ne 0 ]; then

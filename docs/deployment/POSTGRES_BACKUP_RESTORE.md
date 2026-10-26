@@ -1,7 +1,7 @@
 # PostgreSQL Backups and Restore
 
 The `econ-graph` namespace runs two PostgreSQL databases: `econ_graph` (the
-`postgres` StatefulSet, behind `postgres-service`) and Keycloak's `keycloak`
+`postgresql` StatefulSet, behind `postgres-service`) and Keycloak's `keycloak`
 database (the `keycloak-postgres` StatefulSet, behind
 `keycloak-postgres-service`), which holds user accounts and their linked
 Google identities. Both are dumped nightly to a separate volume, and can be
@@ -163,6 +163,43 @@ whatever is currently in `econ_graph`. That's why it prompts unless `--yes`
 is passed. `restore.sh` refuses a file that isn't an `econ_graph-*.dump`
 (such as a Keycloak dump).
 
+#### Ownership
+
+The restore job connects as `postgres`, but every object it recreates is
+owned by `econgraph`, the role the backend and crawler-worker connect as
+(the job's `RESTORE_OWNER`). The dumps carry no owners or grants (they are
+taken with `--no-owner --no-privileges`), so a plain `pg_restore` run as
+`postgres` would leave every table owned by `postgres`, and the app could
+neither read nor write it. `restore.sh` runs in two steps:
+
+1. **Extensions**, as `postgres`: the dump's `CREATE EXTENSION IF NOT EXISTS`
+   statements and their comments. This only adds an extension the database
+   lacks (on a newly initialised server, `pgcrypto`, which the migrations
+   create) and never drops one. `econgraph` can't do this step itself:
+   `pg_stat_statements` needs a superuser, and the extensions the init script
+   creates (`uuid-ossp`, `pg_stat_statements`, `pg_trgm`) are owned by
+   `postgres`, so `econgraph` can't drop them either.
+2. **Everything else**, with `pg_restore --role=econgraph --clean --if-exists
+   --single-transaction --exit-on-error`: after connecting, `pg_restore`
+   switches to `econgraph`, which drops and recreates the tables, sequences,
+   views, indexes, types, functions, triggers and `__diesel_schema_migrations`
+   as their owner, as the migrations created them. A failure rolls this step
+   back, leaving the database as it was.
+
+`restore.sh` checks that `RESTORE_OWNER` exists before changing anything.
+Every object in the dump must be owned by `econgraph` in the database being
+restored into, since that role drops them. If one isn't, the restore stops at
+`must be owner of ...` and rolls back. Give the object to `econgraph`
+(`ALTER TABLE ... OWNER TO econgraph`, or the matching `ALTER` for another
+kind of object), then restore again.
+
+To check the result:
+
+```sh
+kubectl -n econ-graph exec postgresql-0 -- psql -U postgres -d econ_graph -c \
+  "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
+```
+
 Before restoring into a real deployment, scale `backend-deployment` and
 `crawler-worker` to 0 replicas first: `--clean` waits on any lock they hold
 (a live connection mid-query can stall the restore indefinitely), and the
@@ -229,11 +266,19 @@ Runs `backup.sh`, `sync.sh` and `restore.sh` from the ConfigMap in the
 CronJob's images and security settings (uid 999, read-only root), with the
 `pg-dump` container's environment read from the CronJob manifest, against
 scratch `postgres:18` containers standing in for `postgres-service` and
-`keycloak-postgres-service`, and an S3 mock. It checks that both dumps are
+`keycloak-postgres-service`, and an S3 mock. The `econ_graph` server runs
+the init script from `postgres-init.yaml`, and the backend's migrations run
+as `econgraph`, so every object is owned by `econgraph`, as in production.
+It checks that both dumps are
 written, restore with every table's row count equal to the source (the
 Keycloak one through `pg_restore` on stdin, as in step 3 above) and sync
-without the `latest` links; that `restore.sh` puts `econ_graph` back and
-refuses a Keycloak dump; that a failure of either dump (server down, wrong
+without the `latest` links; that `restore.sh`, run with the restore job's
+environment, puts `econ_graph` back both over the existing database and on a
+newly initialised server, with every object owned by `econgraph`, the
+extensions in place, and `econgraph` (connecting with its password, as the
+app does) able to read every table and write; that it rolls back when it
+can't drop an object, stops when `RESTORE_OWNER` doesn't exist, and refuses a
+Keycloak dump; that a failure of either dump (server down, wrong
 password, no tables, a table locked past the lock wait) keeps and syncs the
 other and fails the Job; that a missing Keycloak password is a failure with
 `KEYCLOAK_REQUIRED=true` and a skip with `false`; that the Job has a
