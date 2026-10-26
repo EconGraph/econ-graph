@@ -34,13 +34,17 @@ shipped to object storage.
   `econ-graph` namespace (which owns the database and backup PVCs).
   Before removing resources, it sets both bound PVs to Retain and stops if
   that step fails.
-  Pass `--yes`/`-y` to skip that prompt non-interactively (e.g. in CI).
+  Pass `--yes`/`-y` to skip that prompt.
   This does **not** also delete the kind cluster: the cluster's nodes hold
   the backup volume (and Grafana's data), so deleting the cluster destroys
   the backups of both databases. That still needs its own confirmation, or an explicit
   `--delete-cluster` flag. Both databases live on host btrfs subvolumes
   outside the cluster ([HOST_STORAGE.md](HOST_STORAGE.md)), so they survive
-  it.
+  it. Every kubectl call goes to the kind cluster's kubectl on context
+  `kind-econ-graph`; it shows that cluster first and stops before any change
+  if the context doesn't reach the kind cluster. Without a terminal it needs
+  both `--yes` and `--delete-cluster` (or `--dry-run`, which changes nothing),
+  and otherwise stops before any change.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: restores `econ_graph`.
