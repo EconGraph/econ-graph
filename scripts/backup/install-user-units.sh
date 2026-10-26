@@ -61,7 +61,8 @@ for f in "$SRC_DIR"/*.sh "$SRC_DIR"/unpack-backup.py; do
 done
 # The nightly writer shares the deploy writer's verified payload and helpers.
 run mkdir -p "$LIB_DIR/kind-lib"
-for helper in kind-env.sh cluster-role.sh kind-version.sh; do
+for helper in kind-env.sh cluster-role.sh kind-version.sh agent-access.sh; do
+    [[ -f "$SRC_DIR/../deploy/lib/$helper" ]] || continue
     run install -m 0755 "$SRC_DIR/../deploy/lib/$helper" "$LIB_DIR/kind-lib/"
 done
 rev="$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
