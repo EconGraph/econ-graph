@@ -909,6 +909,7 @@ mod validation_tests {
         refused(validate_annotation_point(date(2099, 12, 31), None, today));
     }
 
+    /// Accept observation-sized values, including both signs and the precision boundaries.
     #[test]
     fn annotation_values_accept_large_observations_without_rounding() {
         let today = date(2026, 10, 23);
@@ -929,6 +930,7 @@ mod validation_tests {
         }
     }
 
+    /// Reject excess significant digits and hostile exponents without expanding them.
     #[test]
     fn annotation_values_enforce_observation_size_limits() {
         let today = date(2026, 10, 23);
@@ -956,6 +958,7 @@ mod validation_tests {
         }
     }
 
+    /// Preserve ordinary scales and make extreme redundant scales safe to serialize.
     #[test]
     fn annotation_storage_preserves_normal_scales_and_normalizes_extreme_scales() {
         let today = date(2026, 10, 23);

@@ -16,6 +16,7 @@ use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage, ImageEx
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/app");
 const NUMERIC_FIX: &str = "20261026000100";
 
+/// Start an isolated PostgreSQL database and retain its container for the test's lifetime.
 async fn database() -> (ContainerAsync<GenericImage>, PgConnection) {
     let container = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stderr(
@@ -44,6 +45,7 @@ struct ColumnType {
     typmod: i32,
 }
 
+/// Read the annotation column's type modifier; unconstrained NUMERIC reports -1.
 fn typmod(conn: &mut PgConnection) -> i32 {
     diesel::sql_query(
         "SELECT atttypmod AS typmod FROM pg_attribute \
@@ -54,6 +56,7 @@ fn typmod(conn: &mut PgConnection) -> i32 {
     .typmod
 }
 
+/// Insert an annotation from decimal text without converting through floating point.
 fn insert(conn: &mut PgConnection, value: Option<&str>) {
     diesel::sql_query(
         "WITH u AS (INSERT INTO users (email, name) \
@@ -73,6 +76,7 @@ struct Value {
     value: Option<String>,
 }
 
+/// Read stored coordinates as exact PostgreSQL text, preserving NULL and decimal scale.
 fn values(conn: &mut PgConnection) -> Vec<Option<String>> {
     diesel::sql_query("SELECT annotation_value::text AS value FROM chart_annotations ORDER BY id")
         .load::<Value>(conn)
@@ -82,6 +86,7 @@ fn values(conn: &mut PgConnection) -> Vec<Option<String>> {
         .collect()
 }
 
+/// Revert this specific migration, independently of any later app migrations.
 fn revert_numeric(conn: &mut PgConnection) -> Result<(), String> {
     let migrations = <EmbeddedMigrations as MigrationSource<Pg>>::migrations(&MIGRATIONS)
         .expect("embedded migrations");
@@ -96,6 +101,7 @@ fn revert_numeric(conn: &mut PgConnection) -> Result<(), String> {
     Ok(())
 }
 
+/// Verify widening and rollback preserve existing coordinates and optional NULL values.
 #[tokio::test]
 async fn annotation_numeric_migration_up_down_up_preserves_existing_values() {
     let (_container, mut conn) = database().await;
@@ -126,6 +132,7 @@ async fn annotation_numeric_migration_up_down_up_preserves_existing_values() {
     assert_eq!(values(&mut conn), before);
 }
 
+/// Verify large aggregates, long fractions, and source scale round trip without rounding.
 #[tokio::test]
 async fn annotation_numeric_keeps_large_values_and_fractional_precision() {
     let (_container, mut conn) = database().await;
@@ -145,6 +152,7 @@ async fn annotation_numeric_keeps_large_values_and_fractional_precision() {
     }
 }
 
+/// Verify unsafe rollback leaves coordinates, column type, and migration history intact.
 #[tokio::test]
 async fn annotation_numeric_rollback_refuses_rounding_and_overflow() {
     let (_container, mut conn) = database().await;

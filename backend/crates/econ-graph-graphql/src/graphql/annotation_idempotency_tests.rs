@@ -248,9 +248,17 @@ async fn annotation_values_round_trip_large_and_precise_decimals() {
     let series = make_series(&pool).await;
 
     let redundant_zeros = format!("1.{}", "0".repeat(40_000));
+    // Both API responses deserialize Postgres NUMERIC rows (including the mutation's
+    // INSERT ... RETURNING), so exponent inputs return expanded integers at scale zero.
     for (value, expected) in [
         ("190358563845627.40625", "190358563845627.40625"),
         ("-190358563845627.40625", "-190358563845627.40625"),
+        ("1.9e14", "190000000000000"),
+        ("1e39", "1000000000000000000000000000000000000000"),
+        (
+            "9999999999999999999999999999999999999999",
+            "9999999999999999999999999999999999999999",
+        ),
         (
             "0.123456789012345678901234567890",
             "0.123456789012345678901234567890",
@@ -294,7 +302,7 @@ async fn annotation_values_round_trip_large_and_precise_decimals() {
             .expect("query returns the created annotation");
         assert_eq!(annotation["annotationValue"], expected);
     }
-    assert_eq!(stored_for(&pool, &alice).await, 5);
+    assert_eq!(stored_for(&pool, &alice).await, 8);
 }
 
 /// Unconstrained NUMERIC storage still enforces the observation value limits at the API.
