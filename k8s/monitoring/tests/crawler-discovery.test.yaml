@@ -27,7 +27,7 @@ tests:
               source: BEA
             exp_annotations:
               summary: 1 curated BEA entries are missing upstream
-              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; review the selection rules and explicit overrides in data/catalog_selection/.
       - eval_time: 1h10m
         alertname: CrawlerCuratedEntriesMissing
         exp_alerts: []
@@ -50,7 +50,7 @@ tests:
               source: BEA
             exp_annotations:
               summary: 1 curated BEA entries are missing upstream
-              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; review the selection rules and explicit overrides in data/catalog_selection/.
       - eval_time: 100h
         alertname: CrawlerCuratedEntriesMissing
         exp_alerts:
@@ -59,7 +59,7 @@ tests:
               source: BEA
             exp_annotations:
               summary: 1 curated BEA entries are missing upstream
-              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; update the curated list (for BEA, data/bea_tables.csv).
+              description: The last BEA discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for BEA names them; review the selection rules and explicit overrides in data/catalog_selection/.
       - eval_time: 151h
         alertname: CrawlerCuratedEntriesMissing
         exp_alerts: []

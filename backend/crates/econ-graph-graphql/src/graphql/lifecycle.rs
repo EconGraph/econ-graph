@@ -166,6 +166,7 @@ mod tests {
             &pool,
             NewDataSource {
                 name: format!("lifecycle-api-{}", Uuid::new_v4()),
+                base_url: "https://example.test".into(),
                 ..Default::default()
             },
         )

@@ -1547,7 +1547,7 @@ mod tests {
     const REGIONAL_TABLE_TITLES: &str =
         include_str!("../../tests/fixtures/bea/regional_table_titles.json");
 
-    /// Every NIPA table and frequency in `bea_tables.csv`, with its fixture.
+    /// Every default NIPA table family and frequency, with its fixture.
     const NIPA_FIXTURES: &[(&str, &str, &str)] = &[
         (
             "T10101",

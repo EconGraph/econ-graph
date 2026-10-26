@@ -249,7 +249,7 @@ data:
             severity: warning
           annotations:
             summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
-            description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; update the curated list (for BEA, data/bea_tables.csv).
+            description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; review the selection rules and explicit overrides in data/catalog_selection/.
 
       # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
       # keeps series current), and crawl failures.

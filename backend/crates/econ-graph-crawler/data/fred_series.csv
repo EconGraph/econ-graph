@@ -1,4 +1,4 @@
-# Curated FRED (St. Louis Fed) discovery list, read at runtime by the FRED adapter's discover().
+# Legacy FRED headline list, retained for reference. Discovery uses catalog_selection/fred.toml.
 # Columns: series_id (FRED's own identifier, e.g. GDP). Lines starting with # are comments.
 # The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
 #

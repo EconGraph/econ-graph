@@ -10,7 +10,7 @@
 //! `CRAWLER_DATA_DIR` to it.
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
-//! worker checks them at startup ([`bls_series`], [`fred_series`], [`wdi_indicators`]) rather
+//! worker checks them at startup ([`bls_series`], [`wdi_indicators`]) rather
 //! than on its first job.
 //!
 //! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
@@ -230,12 +230,11 @@ fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
     Ok(series)
 }
 
-/// The curated FRED series ids from `fred_series.csv` in [`data_dir`], read on first use and
-/// cached. Replaces FRED's `/series/search` discovery (see the file's own header comment for
-/// why): the FRED adapter's `discover()` looks up each of these ids' live metadata instead of
-/// walking search terms, which keeps the first crawl's request count bounded and predictable.
+/// The legacy curated FRED ids, retained as a reference for existing integrations.
+/// Discovery and worker startup use `catalog_selection/fred.toml` instead. This loader
+/// does not control which upstream catalogs are selected.
 ///
-/// A missing or malformed file is a `Permanent` error, with the path in the message.
+/// A missing or malformed legacy file is a `Permanent` error with its path.
 pub fn fred_series() -> Result<&'static [String], CrawlError> {
     static SERIES: OnceLock<Result<Vec<String>, String>> = OnceLock::new();
     SERIES
