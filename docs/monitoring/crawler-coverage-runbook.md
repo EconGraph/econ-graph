@@ -90,6 +90,9 @@ previously present scope, or an empty scope, is guarded rather than treated as r
 On first adoption, retained BEA histories that match the configured rules establish a
 baseline without counting absence. Three subsequent complete snapshots are required for
 a missing badge. Histories outside those rules are not enrolled or retired by that scope.
+Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
+by a successful fetch. Fetch success never erases catalog absence evidence: a delisted
+series can still serve historical observations.
 
 | Status | Public behavior |
 |---|---|

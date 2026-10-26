@@ -12,7 +12,10 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/fred.rs`. Fixtures:
   Separate scan and selected-series bounds stop unexpected expansion before observation
   jobs are enqueued. A small include/exclude list handles explicit exceptions.
   The default scope is GDP release series plus headline overrides, including probes for two
-  previously curated retired ids. Existing stored series outside that scope stay retained
+  previously curated retired ids. `expected_missing` explicitly exempts those known retired
+  probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
+  ordinary included id that disappears still raises the warning.
+  Existing stored series outside that scope stay retained
   and scheduled; changing the discovery scope does not deactivate them. This is not a full
   FRED catalog crawl. Defaults are fixture-tested, not validated against the live API here.
 - **Publication state**: complete catalogs track repeated absences separately from fetch

@@ -924,6 +924,7 @@ mod tests {
     #[serial_test::serial]
     async fn reverting_catalog_evidence_preserves_the_schema_and_migration_record() {
         use diesel::connection::SimpleConnection;
+        use diesel::migration::MigrationSource;
         use diesel_migrations::MigrationHarness;
 
         let db = ScratchDatabase::create("catalog_forward_only");
@@ -936,7 +937,13 @@ mod tests {
             .unwrap();
         let versions = recorded_versions(&mut conn);
         let schema = schema_signature(&mut conn);
-        let error = conn.revert_last_migration(DATA_MIGRATIONS).unwrap_err();
+        // Exercise this specific down migration even after newer data migrations exist.
+        let snapshot = MigrationSource::<diesel::pg::Pg>::migrations(&DATA_MIGRATIONS)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.name().version().to_string() == "20261026000300")
+            .expect("the snapshot migration is embedded");
+        let error = conn.revert_migration(&snapshot).unwrap_err();
         assert!(error.to_string().contains("forward-only"), "{error}");
         assert_eq!(recorded_versions(&mut conn), versions);
         assert_eq!(schema_signature(&mut conn), schema);

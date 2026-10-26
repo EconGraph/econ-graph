@@ -327,7 +327,7 @@ async fn public_batchers_and_warmed_loaders_recheck_restrictions_without_deletin
     assert!(fields[&hidden.id].is_none());
     assert!(fields[&visible.id].is_some());
 
-    use diesel::prelude::*;
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use econ_graph_core::schema::data_points;
     assert_eq!(
         data_points::table
@@ -414,7 +414,7 @@ async fn held_series_nested_fields_recheck_restrictions_on_a_reused_schema() {
         })
     );
     // Underlying series-specific dimension metadata remains retained for internal use.
-    use diesel::prelude::*;
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use econ_graph_core::schema::economic_series;
     let stored = economic_series::table
         .find(hidden.id)
