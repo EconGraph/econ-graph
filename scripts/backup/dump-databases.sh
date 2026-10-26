@@ -17,6 +17,14 @@ while [[ $# -gt 0 ]]; do
         *) die "unknown argument: $1" ;;
     esac
 done
+# The recovery payload has fixed database names/containers. Never silently
+# ignore an older per-database override or back up another kind cluster.
+[[ "$BACKUP_DATABASES" == 'econ_graph:postgresql-0:postgres econ_graph_app:app-postgres-0:postgres keycloak:keycloak-postgres-0:keycloak' ]] ||
+    die "the unified host writer requires the canonical data/app/Keycloak BACKUP_DATABASES; remove the unsupported override"
+[[ "$KIND_NODE" == *-control-plane ]] || die "KIND_NODE must name a kind control-plane container"
+selected_cluster="${KIND_NODE%-control-plane}"
+[[ -z "${KIND_CLUSTER:-}" || "$KIND_CLUSTER" == "$selected_cluster" ]] || die "KIND_CLUSTER and KIND_NODE disagree"
+KIND_CLUSTER="$selected_cluster"
 export ECONGRAPH_BACKUP_ROOT="$BACKUP_ROOT"
 NAMESPACE="$K8S_NAMESPACE"
 # The installed timer uses reviewed copies of the same deploy libraries.
