@@ -282,3 +282,33 @@ tests:
               description: FRED has series whose last successful crawl is older than twice their refresh
                 interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler
                 coverage` shows the oldest successful crawl.
+
+  # A failed target must fail open even if a previous disabled-mode sample remains.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_scheduler_enabled{kubernetes_namespace="econ-graph", job="kubernetes-pods", instance="worker-1"}'
+        values: '0x24'
+      - series: 'up{kubernetes_namespace="econ-graph", app="crawler-worker", job="kubernetes-pods", instance="worker-1"}'
+        values: '0x24'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}'
+        values: '10x24'
+      - series: 'crawler_coverage_series_overdue{kubernetes_namespace="econ-graph", source="FRED"}'
+        values: '5x24'
+    alert_rule_test:
+      - eval_time: 1h40m
+        alertname: CrawlerNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: No crawler traffic detected
+              description: The crawler has made no upstream requests for over an hour (queue empty, all sources paused, or worker stuck).
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 5 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler coverage` shows the oldest successful crawl.

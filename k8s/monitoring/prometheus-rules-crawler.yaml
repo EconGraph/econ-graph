@@ -184,8 +184,12 @@ data:
               and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
               unless on()
               (
-                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
-                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+                or on(job, instance)
+                (
+                  up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                  unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                )
               )
             )
           for: 1h
@@ -279,8 +283,12 @@ data:
               and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
               unless on()
               (
-                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
-                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+                or on(job, instance)
+                (
+                  up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                  unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                )
               )
             )
           for: 30m
