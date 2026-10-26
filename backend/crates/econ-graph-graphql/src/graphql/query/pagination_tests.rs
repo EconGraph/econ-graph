@@ -13,6 +13,7 @@ enum Endpoint {
 }
 
 impl Endpoint {
+    /// Root response key for this resolver.
     fn field(self) -> &'static str {
         match self {
             Self::Search => "searchSeries",
@@ -20,6 +21,7 @@ impl Endpoint {
         }
     }
 
+    /// Collection key inside the resolver's result (search has no connection wrapper).
     fn nodes(self) -> &'static str {
         match self {
             Self::Search => "series",
@@ -27,6 +29,7 @@ impl Endpoint {
         }
     }
 
+    /// Build a source-scoped request, quoting the cursor as a GraphQL string literal.
     fn query(self, source: Uuid, first: i32, after: Option<&str>) -> String {
         let after = after
             .map(|cursor| format!(", after: {}", serde_json::to_string(cursor).unwrap()))
@@ -44,6 +47,7 @@ impl Endpoint {
         }
     }
 
+    /// Read returned series IDs in their pagination order.
     fn ids(self, data: &Value) -> Vec<String> {
         data[self.field()][self.nodes()]
             .as_array()
@@ -54,6 +58,7 @@ impl Endpoint {
     }
 }
 
+/// Invalid continuations return only errors; valid retries still traverse every series once.
 #[tokio::test]
 async fn pagination_cursors_reject_invalid_input_and_preserve_traversal() {
     // No silent skip: this regression needs an actual database to verify resolver behavior.
