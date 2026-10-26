@@ -20,7 +20,14 @@ const SeriesLifecycleNotice: React.FC<{
   }
 
   const since = lifecycle.since?.slice(0, 10);
-  const message = `No longer published by ${sourceName ?? 'the source'}${since ? ` since ${since}` : ''}`;
+  const source = sourceName ?? 'the source';
+  const publicationState =
+    lifecycle.status === 'missing_from_catalog'
+      ? `No longer listed by ${source}`
+      : lifecycle.status === 'superseded'
+        ? `Superseded series from ${source}`
+        : `No longer published by ${source}`;
+  const message = `${publicationState}${since ? ` since ${since}` : ''}`;
   const successor = lifecycle.successorId;
   const proposed = !successor && lifecycle.proposedSuccessorId;
 

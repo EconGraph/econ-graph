@@ -857,7 +857,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     await user.click(screen.getByRole('button', { name: /^search$/i }));
     expect(
       await screen.findByText(
-        'No longer published by Federal Reserve Economic Data (FRED) since 2026-10-25'
+        'No longer listed by Federal Reserve Economic Data (FRED) since 2026-10-25'
       )
     ).toBeInTheDocument();
     expect(

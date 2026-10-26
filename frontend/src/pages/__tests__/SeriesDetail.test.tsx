@@ -156,7 +156,7 @@ describe('SeriesDetail', () => {
     });
     renderPage(UNRATE_ID);
     expect(
-      await screen.findByText(/No longer published by .* since 2026-10-25/)
+      await screen.findByText(/Superseded series from .* since 2026-10-25/)
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Superseded by another series' })).toHaveAttribute(
       'href',

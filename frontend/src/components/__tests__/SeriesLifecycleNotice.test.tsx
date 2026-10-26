@@ -17,16 +17,34 @@ describe('SeriesLifecycleNotice', () => {
       <SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' compact={compact} />
     );
     expect(screen.getByRole('status')).toHaveTextContent(
-      'No longer published by FRED since 2026-10-25'
+      'No longer listed by FRED since 2026-10-25'
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it.each(['discontinued', 'retired'] as const)(
+    'uses confirmed publication wording for %s series',
+    status => {
+      renderWithProviders(
+        <SeriesLifecycleNotice lifecycle={{ ...missing, status }} sourceName='FRED' />
+      );
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'No longer published by FRED since 2026-10-25'
+      );
+      expect(screen.queryByText(/No longer listed/)).not.toBeInTheDocument();
+    }
+  );
+
+  it('does not infer publication has ended from catalog absence', () => {
+    renderWithProviders(<SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' />);
+    expect(screen.getByRole('status')).toHaveTextContent('No longer listed by FRED');
+    expect(screen.queryByText(/No longer published/)).not.toBeInTheDocument();
+  });
 
   it('uses the confirmation date and keeps the source name in the notice', () => {
     renderWithProviders(<SeriesLifecycleNotice lifecycle={missing} sourceName='FRED' />);
     expect(screen.getByRole('status')).toHaveTextContent(
-      'No longer published by FRED since 2026-10-25'
+      'No longer listed by FRED since 2026-10-25'
     );
     expect(screen.getByRole('status')).toHaveTextContent('Stored history remains available');
   });
@@ -57,11 +75,13 @@ describe('SeriesLifecycleNotice', () => {
       '/series/confirmed'
     );
     expect(screen.queryByText(/Possible successor/)).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Superseded series from the source');
+    expect(screen.queryByText(/No longer published/)).not.toBeInTheDocument();
   });
 
   it('does not manufacture a date when the API has none', () => {
     renderWithProviders(<SeriesLifecycleNotice lifecycle={{ ...missing, since: null }} compact />);
-    expect(screen.getByText('No longer published by the source')).toBeInTheDocument();
+    expect(screen.getByText('No longer listed by the source')).toBeInTheDocument();
     expect(screen.queryByText(/since/)).not.toBeInTheDocument();
   });
 
