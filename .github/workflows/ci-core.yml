@@ -885,12 +885,8 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
-    # Allowed to fail (owner decision): the full workspace run still has known
-    # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
-    # running so those failures stay visible in the log. TODO: drop
-    # continue-on-error once the pre-existing failures are fixed.
+    # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
-      continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
@@ -900,11 +896,9 @@ jobs:
         exit $status
       working-directory: backend
 
-    # TODO: ~45 doctests across the workspace do not compile (stale examples).
-    # Fix them, then drop continue-on-error (or fold into the step above by
-    # removing --lib --bins --tests).
+    # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
-      continue-on-error: true
+      if: ${{ !cancelled() }}
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0

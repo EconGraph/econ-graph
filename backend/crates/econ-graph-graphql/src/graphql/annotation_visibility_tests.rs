@@ -430,13 +430,12 @@ async fn annotations_on_unknown_series_or_absurd_dates_are_refused() {
             "Date 2099-12-31 is outside".to_string(),
         ),
         (
-            create(&series_id, "2024-01-01", "1e20"),
-            "is too large".to_string(),
+            create(&series_id, "2024-01-01", "1e40"),
+            "integer digits".to_string(),
         ),
         (
-            // Below 1e14, but Postgres would round it up to 1e14 and overflow DECIMAL(20, 6).
-            create(&series_id, "2024-01-01", "99999999999999.9999999"),
-            "is too large".to_string(),
+            create(&series_id, "2024-01-01", "1e-31"),
+            "fractional digits".to_string(),
         ),
     ] {
         let resp = run_as(&pool, Some(alice.clone()), &query).await;
@@ -456,6 +455,17 @@ async fn annotations_on_unknown_series_or_absurd_dates_are_refused() {
         .unwrap();
     assert_eq!(written, 0);
     drop(conn);
+
+    // Values that overflowed DECIMAL(20, 6) now fit the observation-aligned bounds.
+    for value in ["1e20", "99999999999999.9999999"] {
+        let resp = run_as(
+            &pool,
+            Some(alice.clone()),
+            &create(&series_id, "2024-01-01", value),
+        )
+        .await;
+        assert!(resp.errors.is_empty(), "{value}: {:?}", resp.errors);
+    }
 
     // The same request on the real series, a sane date and a value that fits is accepted.
     let resp = run_as(&pool, Some(alice), &create(&series_id, "2024-01-01", "1.5")).await;
