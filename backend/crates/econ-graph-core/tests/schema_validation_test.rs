@@ -35,7 +35,8 @@ fn run_both_migration_sets(
 async fn test_schema_compatibility() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -55,9 +56,6 @@ async fn test_schema_compatibility() {
         "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait a moment for the database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Establish connection
     let mut conn =
@@ -175,7 +173,8 @@ fn find_schema_differences(schema1: &str, schema2: &str) -> Vec<String> {
 async fn test_schema_generation_process() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -195,9 +194,6 @@ async fn test_schema_generation_process() {
         "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Apply migrations first
     let mut conn =
@@ -234,7 +230,8 @@ async fn test_schema_generation_process() {
 async fn test_migration_application() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -254,9 +251,6 @@ async fn test_migration_application() {
         "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Establish connection
     let mut conn =
@@ -280,7 +274,8 @@ async fn test_migration_application() {
 async fn test_schema_compatibility_comparison() {
     // Start PostgreSQL container
     let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-        .with_wait_for(WaitFor::message_on_stdout(
+        // Temporary init-server logs go to stdout; stderr readiness is the final TCP server.
+        .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_DB", "test_econ_graph")
@@ -300,9 +295,6 @@ async fn test_schema_compatibility_comparison() {
         "postgres://test_user:test_password@127.0.0.1:{}/test_econ_graph",
         host_port
     );
-
-    // Wait for database to be ready
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Apply migrations first
     let mut conn =
