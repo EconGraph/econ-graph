@@ -860,7 +860,8 @@ type Query {
 	Search economic series using full-text search with spelling correction
 	
 	`source` is a data source id; a value that isn't a UUID is rejected with a
-	`BAD_USER_INPUT` error. `totalCount` counts every matching series, not just this page;
+	`BAD_USER_INPUT` error. `after` must be a nonnegative integer in the i32 range,
+	or it is rejected with the same code. `totalCount` counts every matching series;
 	read the next page with `after` set to the number of series already read.
 	"""
 	searchSeries(query: String!, source: String, frequency: SeriesFrequency, first: Int, after: String): SearchResult!
