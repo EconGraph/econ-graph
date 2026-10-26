@@ -333,6 +333,7 @@ impl EconomicSeries {
 
         let series = diesel::update(dsl::economic_series.filter(dsl::id.eq(id)))
             .set(update_data)
+            .returning(Self::as_returning())
             .get_result::<Self>(&mut conn)
             .await?;
 

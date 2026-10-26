@@ -78,6 +78,7 @@ impl User {
 
         let user = diesel::update(users::table.find(user_id))
             .set(&updates)
+            .returning(User::as_returning())
             .get_result::<User>(&mut conn)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
@@ -93,6 +94,7 @@ impl User {
 
         let user = users::table
             .find(user_id)
+            .select(User::as_select())
             .first::<User>(&mut conn)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;

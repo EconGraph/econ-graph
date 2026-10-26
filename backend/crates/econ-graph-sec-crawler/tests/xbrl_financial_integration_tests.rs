@@ -13,6 +13,16 @@ mod tests {
     use serial_test::serial;
     use std::path::PathBuf;
 
+    /// A stored taxonomy must carry bytes or a large-object identifier, never neither.
+    fn stored_schema(mut schema: XbrlTaxonomySchema) -> XbrlTaxonomySchema {
+        let content = b"<schema xmlns=\"http://www.w3.org/2001/XMLSchema\"/>".to_vec();
+        schema.file_size_bytes = content.len() as i64;
+        schema.file_content = Some(content);
+        schema.is_compressed = false;
+        schema.compression_type = CompressionType::None;
+        schema
+    }
+
     /// Test XBRL taxonomy schema storage and retrieval with testcontainers
     #[tokio::test]
     #[serial]
@@ -22,7 +32,7 @@ mod tests {
         let pool = container.pool();
 
         // Test data for XBRL taxonomy schema
-        let test_schema = XbrlTaxonomySchema::new(
+        let test_schema = stored_schema(XbrlTaxonomySchema::new(
             "http://fasb.org/us-gaap/2023".to_string(),
             "us-gaap.xsd".to_string(),
             TaxonomySourceType::UsGaap,
@@ -30,7 +40,7 @@ mod tests {
             "sha256:abc123def456".to_string(),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
-        );
+        ));
 
         // Insert the schema
         let mut conn = pool.get().await.expect("Failed to get database connection");
@@ -48,7 +58,11 @@ mod tests {
         );
         assert_eq!(inserted_schema.schema_filename, "us-gaap.xsd");
         assert_eq!(inserted_schema.source_type, TaxonomySourceType::UsGaap);
-        assert_eq!(inserted_schema.file_size_bytes, 1024000);
+        assert_eq!(
+            inserted_schema.file_size_bytes,
+            inserted_schema.file_content.as_ref().unwrap().len() as i64
+        );
+        assert!(inserted_schema.is_bytea());
 
         // Retrieve the schema
         let retrieved_schema = xbrl_taxonomy_schemas::table
@@ -232,7 +246,7 @@ mod tests {
         let mut conn = pool.get().await.expect("Failed to get database connection");
 
         // Create test taxonomy schemas
-        let us_gaap_schema = XbrlTaxonomySchema::new(
+        let us_gaap_schema = stored_schema(XbrlTaxonomySchema::new(
             "http://fasb.org/us-gaap/2023".to_string(),
             "us-gaap.xsd".to_string(),
             TaxonomySourceType::UsGaap,
@@ -240,9 +254,9 @@ mod tests {
             "sha256:usgaap123".to_string(),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
-        );
+        ));
 
-        let sec_dei_schema = XbrlTaxonomySchema::new(
+        let sec_dei_schema = stored_schema(XbrlTaxonomySchema::new(
             "http://xbrl.sec.gov/dei/2023".to_string(),
             "dei.xsd".to_string(),
             TaxonomySourceType::SecDei,
@@ -250,7 +264,7 @@ mod tests {
             "sha256:secdei123".to_string(),
             Some("https://xbrl.sec.gov/dei/2023/dei.xsd".to_string()),
             Some("https://xbrl.sec.gov/dei/2023/dei.xsd".to_string()),
-        );
+        ));
 
         let inserted_us_gaap = diesel::insert_into(xbrl_taxonomy_schemas::table)
             .values(&us_gaap_schema)
@@ -351,7 +365,7 @@ mod tests {
             .expect("Failed to insert financial statement");
 
         // Create test taxonomy schema
-        let test_schema = XbrlTaxonomySchema::new(
+        let test_schema = stored_schema(XbrlTaxonomySchema::new(
             "http://fasb.org/us-gaap/2023".to_string(),
             "us-gaap.xsd".to_string(),
             TaxonomySourceType::UsGaap,
@@ -359,7 +373,7 @@ mod tests {
             "sha256:abc123def456".to_string(),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
             Some("https://xbrl.fasb.org/us-gaap/2023/us-gaap.xsd".to_string()),
-        );
+        ));
 
         let schema = diesel::insert_into(xbrl_taxonomy_schemas::table)
             .values(&test_schema)
