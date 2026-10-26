@@ -172,8 +172,12 @@ data:
         # The worker only makes requests when due jobs exist, so an empty queue also yields
         # zero traffic; this is a warning, not critical. Per-source "no traffic" alerts were
         # dropped: sources are crawled on their own schedules and an idle source is normal.
+        # An explicitly disabled scheduler holds the primary crawl static. Missing mode metrics
+        # keep the existing behavior (older worker images or broken scrapes must not mute alerts).
         - alert: CrawlerNoTraffic
-          expr: sum(rate(econgraph_crawler_requests_total[15m])) == 0
+          expr: |
+            (sum(rate(econgraph_crawler_requests_total[15m])) == 0)
+            unless on() (max(crawler_scheduler_enabled) == 0)
           for: 1h
           labels:
             severity: warning
@@ -255,8 +259,11 @@ data:
         # successful crawl is older than twice that. The scheduler retries a failed series only after
         # twice its interval, so one failed refresh is enough to make it overdue until a retry succeeds;
         # a series that always fails keeps it firing until it is fixed or deactivated (runbook).
+        # Suppress freshness only when every reporting scheduler is explicitly disabled.
         - alert: CrawlerSourceNotRefreshed
-          expr: max by (source) (crawler_coverage_series_overdue) > 0
+          expr: |
+            (max by (source) (crawler_coverage_series_overdue) > 0)
+            unless on() (max(crawler_scheduler_enabled) == 0)
           for: 30m
           labels:
             severity: warning

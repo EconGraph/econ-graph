@@ -261,6 +261,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(addr) = metrics_addr {
         metrics::init_metrics();
+        econ_graph_metrics::crawler::CRAWLER_SCHEDULER_METRICS
+            .enabled
+            .set(i64::from(args.scheduler));
         let mut server_stop = stop_rx.clone();
         let (bound, server) = metrics::bind(addr, alive.clone(), async move {
             let _ = server_stop.wait_for(|stop| *stop).await;
