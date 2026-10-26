@@ -25,17 +25,26 @@ use crate::graphql::cross_section::{self, CrossSectionEntry, DimensionFilterInpu
 /// Root query object
 pub struct Query;
 
-/// Search/list cursors are nonnegative offsets within the services' i32 range.
-/// Only an omitted cursor starts at zero; invalid continuations must not repeat page one.
-fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
+/// Offset cursors are nonnegative integers. Only an omitted cursor starts at zero.
+fn parse_offset_cursor(after: Option<&str>) -> Result<i64> {
     match after {
         None => Ok(0),
         Some(cursor) => cursor
-            .parse::<i32>()
+            .parse::<i64>()
             .ok()
             .filter(|offset| *offset >= 0)
-            .ok_or_else(|| async_graphql::Error::new(format!("Invalid cursor: {cursor}"))),
+            .ok_or_else(|| invalid_after(cursor)),
     }
+}
+
+fn invalid_after(cursor: &str) -> async_graphql::Error {
+    crate::graphql::errors::bad_user_input(format!("`after` is not a valid cursor: {cursor:?}"))
+}
+
+/// Search/list services accept offsets only within the i32 range.
+fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
+    i32::try_from(parse_offset_cursor(after)?)
+        .map_err(|_| invalid_after(after.expect("an omitted cursor is zero")))
 }
 
 #[Object]
@@ -281,17 +290,7 @@ impl Query {
         }
         // A cursor is the number of matching points up to and including the one it names, so
         // `after: endCursor` continues where the last page stopped.
-        let offset = match after {
-            Some(cursor) => match cursor.parse::<i64>() {
-                Ok(offset) if offset >= 0 => offset,
-                _ => {
-                    return Err(async_graphql::Error::new(format!(
-                        "Invalid cursor: {cursor}"
-                    )))
-                }
-            },
-            None => 0,
-        };
+        let offset = parse_offset_cursor(after.as_deref())?;
 
         let transformation =
             transformation.filter(|&transformation| transformation != DataTransformationType::None);
@@ -392,7 +391,8 @@ impl Query {
     /// Search economic series using full-text search with spelling correction
     ///
     /// `source` is a data source id; a value that isn't a UUID is rejected with a
-    /// `BAD_USER_INPUT` error. `totalCount` counts every matching series, not just this page;
+    /// `BAD_USER_INPUT` error. `after` must be a nonnegative integer in the i32 range,
+    /// or it is rejected with the same code. `totalCount` counts every matching series;
     /// read the next page with `after` set to the number of series already read.
     async fn search_series(
         &self,
@@ -625,11 +625,7 @@ impl Query {
             .unwrap_or(50)
             .min(100) as i64; // Cap at 100
 
-        let offset = pagination
-            .as_ref()
-            .and_then(|p| p.after.clone())
-            .and_then(|cursor| cursor.parse::<i64>().ok())
-            .unwrap_or(0);
+        let offset = parse_offset_cursor(pagination.as_ref().and_then(|p| p.after.as_deref()))?;
 
         let users_list: Vec<models::User> = query
             .select(models::User::as_select())
@@ -639,7 +635,7 @@ impl Query {
             .load(&mut conn)
             .await?;
 
-        let has_next_page = (offset + limit) < total_count;
+        let has_next_page = offset.saturating_add(limit) < total_count;
         let has_previous_page = offset > 0;
 
         Ok(UserConnection {
@@ -654,7 +650,7 @@ impl Query {
                     None
                 },
                 end_cursor: if has_next_page {
-                    Some((offset + limit).to_string())
+                    Some(offset.saturating_add(limit).to_string())
                 } else {
                     None
                 },
