@@ -1,0 +1,64 @@
+name: Actionlint
+
+# Lints workflow files with actionlint, which also runs shellcheck on every
+# `run:` script. Configuration: .github/actionlint.yaml.
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Bump version and checksum together. Checksums are the sha256 of the
+      # linux x86_64 release archives, as listed in each release's assets.
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Install actionlint and shellcheck
+      run: |
+        set -euo pipefail
+        bin="$RUNNER_TEMP/lint-bin"
+        mkdir -p "$bin"
+        cd "$RUNNER_TEMP"
+
+        actionlint_tgz="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+        curl -fsSLo "$actionlint_tgz" \
+          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${actionlint_tgz}"
+        echo "${ACTIONLINT_SHA256}  ${actionlint_tgz}" | sha256sum -c -
+        tar -xzf "$actionlint_tgz" -C "$bin" actionlint
+
+        shellcheck_tgz="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+        curl -fsSLo "$shellcheck_tgz" \
+          "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_tgz}"
+        echo "${SHELLCHECK_SHA256}  ${shellcheck_tgz}" | sha256sum -c -
+        tar -xzf "$shellcheck_tgz" -C "$bin" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+
+        echo "$bin" >> "$GITHUB_PATH"
+
+    - name: Run actionlint
+      run: |
+        actionlint -version
+        shellcheck --version
+        actionlint -color -shellcheck "$(command -v shellcheck)"
