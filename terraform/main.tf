@@ -305,6 +305,9 @@ module "admin_ingress" {
   admin_service_name = module.admin_frontend.service_name
   admin_service_port = module.admin_frontend.service_port
 
+  backend_service_host = "${module.backend.service_name}.${kubernetes_namespace.econgraph.metadata[0].name}.svc.cluster.local"
+  backend_service_port = module.backend.service_port
+
   # Access control
   allowed_admin_ips = var.allowed_admin_ips
   admin_tls_cert    = var.admin_tls_cert

@@ -5,7 +5,15 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  {
+    ignores: [
+      "dist",
+      "build",
+      "playwright-report",
+      "test-results",
+      "test-results-smoke",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -42,6 +50,20 @@ export default tseslint.config(
         { argsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-explicit-any": "off", // Disable to reduce warnings
+    },
+  },
+  {
+    files: ["src/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "process",
+          property: "env",
+          message:
+            "Use import.meta.env with VITE_* variables or MODE/DEV/PROD in browser code.",
+        },
+      ],
     },
   },
 );

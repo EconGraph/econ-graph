@@ -80,6 +80,24 @@ resource "kubernetes_secret" "admin_tls" {
   type = "kubernetes.io/tls"
 }
 
+# Ingress backends must be in the ingress namespace. Bridge the application
+# backend's Service DNS name into the isolated admin namespace.
+resource "kubernetes_service" "graphql_backend" {
+  metadata {
+    name      = "admin-graphql-backend"
+    namespace = var.admin_namespace
+  }
+
+  spec {
+    type          = "ExternalName"
+    external_name = var.backend_service_host
+
+    port {
+      port = var.backend_service_port
+    }
+  }
+}
+
 # Admin ingress with strict security
 resource "kubernetes_ingress_v1" "admin" {
   metadata {
@@ -158,6 +176,22 @@ resource "kubernetes_ingress_v1" "admin" {
       host = var.admin_domain
 
       http {
+        # The browser's same-origin GraphQL default must reach the backend,
+        # with the same access controls as the rest of the admin ingress.
+        path {
+          path      = "/graphql"
+          path_type = "Exact"
+
+          backend {
+            service {
+              name = kubernetes_service.graphql_backend.metadata[0].name
+              port {
+                number = var.backend_service_port
+              }
+            }
+          }
+        }
+
         path {
           path      = "/"
           path_type = "Prefix"

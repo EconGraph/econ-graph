@@ -30,6 +30,16 @@ variable "admin_service_port" {
   default     = 3000
 }
 
+variable "backend_service_host" {
+  description = "Cluster DNS name of the GraphQL backend Service (in the application namespace)"
+  type        = string
+}
+
+variable "backend_service_port" {
+  description = "Service port of the GraphQL backend"
+  type        = number
+}
+
 variable "allowed_admin_ips" {
   description = "List of IP ranges allowed to access admin interface"
   type        = list(string)

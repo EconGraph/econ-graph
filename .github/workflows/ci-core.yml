@@ -1032,6 +1032,14 @@ jobs:
       working-directory: admin-frontend
       run: npm run test:run -- --coverage --reporter=verbose --exclude="tests/**/*.spec.ts"
 
+    - name: Install Chromium for admin smoke test
+      working-directory: admin-frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: Smoke test the built admin frontend
+      working-directory: admin-frontend
+      run: npm run e2e:smoke
+
     - name: Upload admin frontend test coverage
       uses: actions/upload-artifact@v7
       with:

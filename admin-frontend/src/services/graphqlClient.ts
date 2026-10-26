@@ -39,8 +39,7 @@ declare module "@apollo/client" {
 /* eslint-enable @typescript-eslint/no-namespace */
 
 // GraphQL endpoint configuration
-const GRAPHQL_ENDPOINT =
-  process.env.REACT_APP_GRAPHQL_ENDPOINT || "http://localhost:8080/graphql";
+const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_ENDPOINT || "/graphql";
 
 // HTTP link for GraphQL requests
 const httpLink = createHttpLink({
@@ -178,7 +177,7 @@ export const apolloClient = new ApolloClient({
     },
   },
   // Enable request/response logging in development
-  ...(process.env.NODE_ENV === "development" && {
+  ...(import.meta.env.DEV && {
     connectToDevTools: true,
   }),
 });
