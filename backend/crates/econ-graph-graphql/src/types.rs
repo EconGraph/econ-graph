@@ -45,11 +45,9 @@ pub struct EconomicSeriesType {
 }
 
 impl EconomicSeriesType {
-    /// The series' dataset columns, from the row it was built from or loaded by id.
+    /// Read through the guarded, non-caching loader even for preloaded rows: a schema or
+    /// caller may hold this object after the series becomes legally restricted.
     async fn load_dataset_fields(&self, ctx: &Context<'_>) -> Result<SeriesDatasetFields> {
-        if let Some(fields) = &self.dataset_fields {
-            return Ok(fields.clone());
-        }
         let series_id = Uuid::parse_str(&self.id)?;
         Ok(load_series_dataset_fields(ctx, series_id)
             .await?
@@ -196,6 +194,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .filter(models::revision_filter(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
@@ -219,6 +218,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let count = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .count()
             .get_result::<i64>(&mut conn)
             .await?;
@@ -272,6 +272,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let mut query = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .into_boxed();
 
         if let Some(start_date) = filter.start_date {

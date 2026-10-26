@@ -199,3 +199,229 @@ async fn retained_series_stay_linkable_and_rank_after_current_matches_even_for_e
         assert_eq!(data["series"]["id"], old.id.to_string());
     }
 }
+
+#[tokio::test]
+async fn public_batchers_and_warmed_loaders_recheck_restrictions_without_deleting_history() {
+    use crate::graphql::dataloaders::{
+        DataLoaders, DataPointCountBatcher, DataPointsBySeriesBatcher, LatestObservationBatcher,
+    };
+    use crate::graphql::datasets::SeriesDatasetFieldsBatcher;
+    use dataloader::BatchFn;
+
+    let Some(pool) = pool().await else { return };
+    let source = source(&pool).await;
+    let hidden = series(&pool, &source, "WARM_HIDDEN", "Initially public series").await;
+    let visible = series(&pool, &source, "STILL_PUBLIC", "Still public series").await;
+    let loaders = DataLoaders::new(DataPool(pool.clone()));
+    // A single DataLoaders lives as long as a schema in MCP/security servers. Warm every
+    // series-dependent loader first, then change policy without recreating the loaders.
+    assert_eq!(
+        loaders
+            .data_points_by_series_loader
+            .try_load(hidden.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        loaders
+            .data_point_count_loader
+            .try_load(hidden.id)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(loaders
+        .latest_observation_loader
+        .try_load(hidden.id)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(loaders
+        .series_dataset_fields_loader
+        .try_load(hidden.id)
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        loaders
+            .series_by_source_loader
+            .try_load(source.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        loaders
+            .series_count_loader
+            .try_load(source.id)
+            .await
+            .unwrap(),
+        2
+    );
+
+    set_status(&pool, &hidden, "restricted", None).await;
+    assert!(loaders
+        .data_points_by_series_loader
+        .try_load(hidden.id)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        loaders
+            .data_point_count_loader
+            .try_load(hidden.id)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(loaders
+        .latest_observation_loader
+        .try_load(hidden.id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(loaders
+        .series_dataset_fields_loader
+        .try_load(hidden.id)
+        .await
+        .unwrap()
+        .is_none());
+    let public = loaders
+        .series_by_source_loader
+        .try_load(source.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        public.iter().map(|s| s.id).collect::<Vec<_>>(),
+        vec![visible.id]
+    );
+    assert_eq!(
+        loaders
+            .series_count_loader
+            .try_load(source.id)
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Exercise raw BatchFn implementations with both IDs too: returning empty defaults for
+    // every key would conceal public data and must fail this regression.
+    let keys = [hidden.id, visible.id];
+    let points = BatchFn::load(&mut DataPointsBySeriesBatcher { pool: pool.clone() }, &keys).await;
+    assert!(points[&hidden.id].is_empty());
+    assert_eq!(points[&visible.id].len(), 1);
+    let counts = BatchFn::load(&mut DataPointCountBatcher { pool: pool.clone() }, &keys).await;
+    assert_eq!(counts[&hidden.id], 0);
+    assert_eq!(counts[&visible.id], 1);
+    let latest = BatchFn::load(&mut LatestObservationBatcher { pool: pool.clone() }, &keys).await;
+    assert!(latest[&hidden.id].is_none());
+    assert!(latest[&visible.id].is_some());
+    let fields = BatchFn::load(
+        &mut SeriesDatasetFieldsBatcher { pool: pool.clone() },
+        &keys,
+    )
+    .await;
+    assert!(fields[&hidden.id].is_none());
+    assert!(fields[&visible.id].is_some());
+
+    use diesel::prelude::*;
+    use econ_graph_core::schema::data_points;
+    assert_eq!(
+        data_points::table
+            .filter(data_points::series_id.eq(hidden.id))
+            .count()
+            .get_result::<i64>(&mut pool.get().await.unwrap())
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+/// Holds the exact series object read before a policy change. This bypasses the root
+/// query's SQL deliberately, so nested field protection cannot hide behind the root filter.
+struct HeldSeriesQuery(crate::types::EconomicSeriesType);
+
+#[async_graphql::Object]
+impl HeldSeriesQuery {
+    async fn held(&self) -> crate::types::EconomicSeriesType {
+        self.0.clone()
+    }
+}
+
+#[tokio::test]
+async fn held_series_nested_fields_recheck_restrictions_on_a_reused_schema() {
+    use crate::graphql::{dataloaders::DataLoaders, schema::SchemaResources};
+    use crate::security::{SecurityConfig, SecurityMiddleware};
+
+    let Some(pool) = pool().await else { return };
+    let source = source(&pool).await;
+    let mut hidden = series(&pool, &source, "HELD_PUBLIC", "Previously public series").await;
+    hidden.dimensions = [("state", "06")].into_iter().collect();
+    hidden.default_measure = Some("value".into());
+    diesel::sql_query(
+        "UPDATE economic_series SET dimensions = $2, default_measure = 'value' WHERE id = $1",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(hidden.id)
+    .bind::<diesel::sql_types::Jsonb, _>(serde_json::to_value(&hidden.dimensions).unwrap())
+    .execute(&mut pool.get().await.unwrap())
+    .await
+    .unwrap();
+    let schema = async_graphql::Schema::build(
+        HeldSeriesQuery(hidden.clone().into()),
+        async_graphql::EmptyMutation,
+        async_graphql::EmptySubscription,
+    )
+    .data(DataPool(pool.clone()))
+    .data(SchemaResources {
+        data_loaders: Some(Arc::new(DataLoaders::new(DataPool(pool.clone())))),
+        security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
+    })
+    .finish();
+    let query = "{held { recentDataPoints {value} dataPointCount latestObservation {value} \
+        dataPoints {value} dataset {id} dimensions {name value} defaultMeasure }}";
+    let before = async_graphql::Schema::execute(&schema, query).await;
+    assert!(before.errors.is_empty(), "{:?}", before.errors);
+    let before = before.data.into_json().unwrap();
+    assert_eq!(before["held"]["dataPointCount"], 1);
+    assert_eq!(
+        before["held"]["recentDataPoints"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(before["held"]["dataPoints"].as_array().unwrap().len(), 1);
+    assert!(before["held"]["latestObservation"].is_object());
+    assert_eq!(
+        before["held"]["dataset"]["id"],
+        hidden.dataset_id.to_string()
+    );
+    assert_eq!(
+        before["held"]["dimensions"],
+        json!([{"name":"state", "value":"06"}])
+    );
+    assert_eq!(before["held"]["defaultMeasure"], "value");
+
+    set_status(&pool, &hidden, "restricted", None).await;
+    let after = async_graphql::Schema::execute(&schema, query).await;
+    assert!(after.errors.is_empty(), "{:?}", after.errors);
+    let after = after.data.into_json().unwrap();
+    assert_eq!(
+        after["held"],
+        json!({
+            "recentDataPoints": [], "dataPointCount": 0, "latestObservation": null,
+            "dataPoints": [], "dataset": null, "dimensions": [], "defaultMeasure": null,
+        })
+    );
+    // Underlying series-specific dimension metadata remains retained for internal use.
+    use diesel::prelude::*;
+    use econ_graph_core::schema::economic_series;
+    let stored = economic_series::table
+        .find(hidden.id)
+        .select(EconomicSeries::as_select())
+        .first::<EconomicSeries>(&mut pool.get().await.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(stored.dimensions, hidden.dimensions);
+    assert_eq!(stored.default_measure, hidden.default_measure);
+}

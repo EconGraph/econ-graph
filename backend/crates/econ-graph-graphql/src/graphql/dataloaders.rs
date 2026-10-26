@@ -27,6 +27,20 @@ use econ_graph_core::database::DataPool;
 use econ_graph_core::models::Dataset;
 use std::collections::HashMap;
 
+/// Restriction check for every public observation reader, including nested resolvers.
+/// This tests the durable lifecycle state rather than an independently updated activity flag.
+pub(crate) fn public_data_points_predicate(
+) -> diesel::expression::SqlLiteral<diesel::sql_types::Bool> {
+    diesel::dsl::sql::<diesel::sql_types::Bool>(
+        "EXISTS (SELECT 1 FROM economic_series public_series \
+         WHERE public_series.id = data_points.series_id \
+           AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
+               WHERE lifecycle.source_id = public_series.source_id \
+                 AND lifecycle.external_id = public_series.external_id \
+                 AND lifecycle.status = 'restricted'))",
+    )
+}
+
 /// DataLoader batcher for efficiently loading data sources by ID
 pub struct DataSourceBatcher {
     pub pool: DatabasePool,
@@ -108,6 +122,7 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
 
             let data_points = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
+                .filter(public_data_points_predicate())
                 .filter(econ_graph_core::models::revision_filter(None, false))
                 .order(dsl::date.desc())
                 .load::<DataPoint>(&mut conn)
@@ -161,6 +176,7 @@ impl BatchFn<Uuid, i32> for DataPointCountBatcher {
 
             let counts = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
+                .filter(public_data_points_predicate())
                 .group_by(dsl::series_id)
                 .select((dsl::series_id, diesel::dsl::count(dsl::id)))
                 .load::<(Uuid, i64)>(&mut conn)
@@ -357,7 +373,13 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                      WHERE series_id = k.id \
                      ORDER BY date DESC, revision_date DESC, is_original_release ASC \
                      LIMIT 1 \
-                 ) dp",
+                 ) dp \
+                 WHERE EXISTS (SELECT 1 FROM economic_series public_series \
+                     WHERE public_series.id = k.id \
+                       AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
+                           WHERE lifecycle.source_id = public_series.source_id \
+                             AND lifecycle.external_id = public_series.external_id \
+                             AND lifecycle.status = 'restricted'))",
             )
             .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)
             .load::<LatestObservationRow>(&mut conn)
@@ -397,10 +419,12 @@ pub struct DataLoaders {
         crate::graphql::lifecycle::SeriesLifecycleBatcher,
     >,
     pub data_source_loader: Loader<Uuid, Option<DataSource>, DataSourceBatcher>,
-    pub data_points_by_series_loader: Loader<Uuid, Vec<DataPoint>, DataPointsBySeriesBatcher>,
-    pub data_point_count_loader: Loader<Uuid, i32, DataPointCountBatcher>,
-    pub series_by_source_loader: Loader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
-    pub series_count_loader: Loader<Uuid, i32, SeriesCountBatcher>,
+    /// Non-caching: long-lived schemas must see legal restrictions on the next load.
+    pub data_points_by_series_loader:
+        NonCachedLoader<Uuid, Vec<DataPoint>, DataPointsBySeriesBatcher>,
+    pub data_point_count_loader: NonCachedLoader<Uuid, i32, DataPointCountBatcher>,
+    pub series_by_source_loader: NonCachedLoader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
+    pub series_count_loader: NonCachedLoader<Uuid, i32, SeriesCountBatcher>,
     /// Non-caching, so dataset edits show on the next request.
     pub dataset_loader: NonCachedLoader<Uuid, Option<Dataset>, DatasetBatcher>,
     /// Non-caching, so series moving between datasets show on the next request.
@@ -428,10 +452,12 @@ impl DataLoaders {
         let pool: DatabasePool = pool.0;
         let data_source_loader = Loader::new(DataSourceBatcher { pool: pool.clone() });
         let data_points_by_series_loader =
-            Loader::new(DataPointsBySeriesBatcher { pool: pool.clone() });
-        let data_point_count_loader = Loader::new(DataPointCountBatcher { pool: pool.clone() });
-        let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
-        let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
+            NonCachedLoader::new(DataPointsBySeriesBatcher { pool: pool.clone() });
+        let data_point_count_loader =
+            NonCachedLoader::new(DataPointCountBatcher { pool: pool.clone() });
+        let series_by_source_loader =
+            NonCachedLoader::new(SeriesBySourceBatcher { pool: pool.clone() });
+        let series_count_loader = NonCachedLoader::new(SeriesCountBatcher { pool: pool.clone() });
         // A page of datasets or search results can ask for `dataset`, `dimensions` and
         // `defaultMeasure` on many series at once; each is a separate load, so raise the batch
         // size well past the dataloader crate's default of 200 pending *requests* (not unique
