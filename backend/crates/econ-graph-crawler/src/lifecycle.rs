@@ -140,9 +140,11 @@ pub(crate) async fn reconcile_conn(
                     AND sm.frequency IS NOT DISTINCT FROM old.frequency \
                  LEFT JOIN economic_series es ON es.source_id=sm.source_id AND es.external_id=sm.external_id \
                  WHERE old.source_id=$1 AND old.external_id=$2 AND sm.external_id<>$2 \
-                   AND sm.external_id = ANY($3) ORDER BY id LIMIT 2")
+                   AND sm.external_id = ANY($3) AND NOT EXISTS (SELECT 1 FROM series_lifecycle candidate \
+                       WHERE candidate.source_id=sm.source_id AND candidate.external_id=sm.external_id \
+                         AND candidate.status IN ('restricted','superseded')) ORDER BY id LIMIT 2")
                 .bind::<SqlUuid,_>(source_id).bind::<Text,_>(&state.external_id)
-                .bind::<diesel::sql_types::Array<Text>,_>(found.iter().map(|d| d.external_id.clone()).collect::<Vec<_>>())
+                .bind::<diesel::sql_types::Array<Text>,_>(found.iter().filter(|d| !facts.restricted_ids.contains(&d.external_id)).map(|d| d.external_id.clone()).collect::<Vec<_>>())
                 .load::<Id>( &mut *conn).await?.into_iter().map(|r| r.id).collect();
             state.proposed_successor_id = (candidates.len() == 1).then(|| candidates[0]);
         }
@@ -506,12 +508,15 @@ pub async fn confirm_successor(
     conn.transaction::<(),AppError,_>(async move |conn| {
         let source_id=persist::data_source_id_conn(conn,source).await?;
         diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE").bind::<SqlUuid,_>(source_id).execute(&mut *conn).await?;
-        let successor=persist::find_series_id_conn(conn,source,successor_external_id).await?
-            .ok_or_else(||AppError::ValidationError("successor must have stored observations".into()))?;
-        let target_blocked: Option<Id> = diesel::sql_query("SELECT $3::uuid AS id FROM series_lifecycle
-            WHERE source_id=$1 AND external_id=$2 AND status IN ('restricted','superseded')")
-            .bind::<SqlUuid,_>(source_id).bind::<Text,_>(successor_external_id).bind::<SqlUuid,_>(successor).get_result(&mut *conn).await.optional()?;
-        if target_blocked.is_some() { return Err(AppError::ValidationError("successor must be public and cannot itself have a successor".into())); }
+        let successor:Id = diesel::sql_query("SELECT es.id FROM economic_series es
+            WHERE es.source_id=$1 AND es.external_id=$2 AND es.is_active
+                AND EXISTS(SELECT 1 FROM data_points dp WHERE dp.series_id=es.id)
+                AND NOT EXISTS(SELECT 1 FROM series_lifecycle l WHERE l.source_id=es.source_id
+                    AND l.external_id=es.external_id AND l.status<>'active')")
+            .bind::<SqlUuid,_>(source_id).bind::<Text,_>(successor_external_id)
+            .get_result(&mut *conn).await.optional()?
+            .ok_or_else(||AppError::ValidationError("successor must be actively published, public and have stored observations".into()))?;
+        let successor=successor.id;
         let changed=diesel::sql_query("UPDATE series_lifecycle SET successor_id=$3,status='superseded',since=NOW() \
             WHERE source_id=$1 AND external_id=$2 AND proposed_successor_id=$3 \
                 AND status IN ('missing_from_catalog','retired','discontinued') AND external_id<>$4")
@@ -526,7 +531,11 @@ pub async fn confirm_successor(
         .transitions_total
         .with_label_values(&[source.as_str(), "superseded"])
         .inc();
-    refresh_metrics(pool, &[source]).await
+    drop(conn);
+    if let Err(error) = refresh_metrics(pool, &[source]).await {
+        tracing::warn!(%source,%error,"publication metrics refresh failed after successor confirmation");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

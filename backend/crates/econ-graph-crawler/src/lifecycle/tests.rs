@@ -212,7 +212,11 @@ async fn retained_history_survives_discovery_fetch_and_confirmed_successor() {
     let mut new = initial[0].clone();
     new.external_id = "new".into();
     renamed.push(new);
-    persist::persist_series(pool, SourceId::Fred, "new", &sample)
+    let empty_target = FetchedSeries {
+        points: Vec::new(),
+        ..sample.clone()
+    };
+    persist::persist_series(pool, SourceId::Fred, "new", &empty_target)
         .await
         .unwrap();
     for _ in 0..3 {
@@ -263,6 +267,37 @@ async fn retained_history_survives_discovery_fetch_and_confirmed_successor() {
     assert!(confirm_successor(pool, SourceId::Fred, "0", "1")
         .await
         .is_err());
+    assert!(
+        confirm_successor(pool, SourceId::Fred, "0", "new")
+            .await
+            .is_err(),
+        "metadata/empty-history target is not a usable successor"
+    );
+    persist::persist_series(pool, SourceId::Fred, "new", &sample)
+        .await
+        .unwrap();
+    for blocked in [
+        "restricted",
+        "discontinued",
+        "missing_from_catalog",
+        "retired",
+    ] {
+        diesel::sql_query("UPDATE series_lifecycle SET status=$1 WHERE external_id='new'")
+            .bind::<Text, _>(blocked)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(
+            confirm_successor(pool, SourceId::Fred, "0", "new")
+                .await
+                .is_err(),
+            "non-published successor {blocked} was incorrectly accepted"
+        );
+    }
+    diesel::sql_query("UPDATE series_lifecycle SET status='active' WHERE external_id='new'")
+        .execute(&mut conn)
+        .await
+        .unwrap();
     confirm_successor(pool, SourceId::Fred, "0", "new")
         .await
         .unwrap();
