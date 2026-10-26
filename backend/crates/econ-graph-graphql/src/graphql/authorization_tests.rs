@@ -404,6 +404,7 @@ async fn read_user(pool: &DatabasePool, id: Uuid) -> Option<User> {
         .unwrap()
 }
 
+/// Execute an administration mutation with an actor present for the liveness recheck.
 async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> Vec<String> {
     let actor = insert_user(pool).await;
     let schema = create_schema_with_data(
@@ -870,6 +871,7 @@ async fn concurrent_admin_removals_leave_an_active_admin() {
         #[diesel(sql_type = BigInt)]
         count: i64,
     }
+    /// Build a mutation that deletes or deactivates the reciprocal request's actor.
     fn query(action: &str, target: Uuid) -> String {
         match action {
             "update" => format!(

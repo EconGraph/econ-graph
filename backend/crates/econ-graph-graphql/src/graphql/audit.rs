@@ -63,6 +63,7 @@ pub(crate) struct Failure {
 }
 
 impl From<diesel::result::Error> for Failure {
+    /// Audit transaction setup, commit, and rollback errors as database failures.
     fn from(error: diesel::result::Error) -> Self {
         fail(Outcome::Error, error)
     }
