@@ -1,255 +1,294 @@
-# 🚀 K8S RESTART COMMANDS
+# Restarting EconGraph on MicroK8s
 
-## ⚡ **ONE-COMMAND RESTART** (Recommended)
+Use this runbook for an existing MicroK8s deployment. A restart recreates pods using
+images already available to MicroK8s. To update application code without changing
+schemas or deployment configuration, build and import the images first, then restart
+the affected deployments. Provisioning, configuration changes, and database migrations
+require a separate deployment procedure.
+
+For MicroK8s installation and addon setup, see the
+[MicroK8s guide](MICROK8S_DEPLOYMENT.md#installation). For the separate kind workflow,
+see the [kind restart guide](DEPLOYMENT_RESTART.md).
+
+## Select the cluster and workloads
+
+Run the commands from the repository root on the MicroK8s host, in the same Bash
+session. Use MicroK8s' own kubectl explicitly so an unrelated current context or
+`KUBECONFIG` cannot send the restart to kind or another cluster.
 
 ```bash
-# Navigate to project root and run the automated restart script
-cd /path/to/EconGraph/FrontEnd-1
-./scripts/deploy/restart-k8s-rollout.sh
-```
-
-## 🔧 **MANUAL RESTART PROCEDURE** (If automation fails)
-
-### Step 1: Environment Setup
-```bash
-cd /path/to/EconGraph/FrontEnd-1
-export KUBECONFIG=~/.kube/config
-
-# Load port configuration
+cd /path/to/econ-graph
+set -euo pipefail
 source config/ports.env
+mk() { microk8s kubectl --context=microk8s "$@"; }
 
-# Verify MicroK8s is running
-microk8s status
-kubectl config current-context
+microk8s status --wait-ready
+mk get nodes -o wide
+mk -n econ-graph get deployments -o wide
 ```
 
-### Step 2: Build New Images
+Confirm the node addresses and deployment names belong to the intended installation
+before continuing. Select only workloads that are already deployed and should be
+restarted. The example covers the backend and frontend; add `crawler-worker` or
+`chart-api-service` to the array when updating those components. Leave a crawler
+that was deliberately scaled to zero stopped.
+
 ```bash
-# Use the automated build script
-./scripts/deploy/build-images.sh
-
-# Or build manually:
-cd backend
-docker build -t econ-graph-backend:latest .
-
-# Build frontend  
-cd ../frontend
-docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:latest .
-
-# Build admin frontend
-cd ../admin-frontend
-docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg NODE_ENV="production" \
-  -t econ-graph-admin-frontend:latest .
-
-# Build chart API service
-cd ../chart-api-service
-docker build -t econ-graph-chart-api:latest .
-
-cd ..
-```
-
-### Step 3: Load Images into MicroK8s
-```bash
-# Images are automatically loaded by the build script
-# No separate load commands needed for MicroK8s
-```
-
-### Step 4: Apply Updated Manifests
-```bash
-# Every manifest except cloudflared.yaml: it is committed with 0 replicas, so
-# applying it stops the tunnel connector. scripts/deploy/deploy.sh and
-# restart-k8s-rollout.sh start it, on the production cluster only.
-for f in k8s/manifests/*.yaml; do
-  [ "${f##*/}" = cloudflared.yaml ] || kubectl apply -f "$f"
+workloads=(econ-graph-backend econ-graph-frontend)
+for workload in "${workloads[@]}"; do
+  mk -n econ-graph get deployment "$workload" \
+    -o jsonpath='{.metadata.name}{"\t"}{.spec.replicas}{"\t"}{.spec.template.spec.containers[*].image}{"\n"}'
 done
-./scripts/deploy/apply-gateway-routes.sh
-kubectl apply -f k8s/monitoring/
 ```
 
-### Step 5: Force Restart Deployments
+The admin frontend uses retired authentication and cannot perform authenticated
+GraphQL operations. It is excluded here, as it is from the current kind builder
+and deployment script; see the [builder’s exclusion](../../scripts/deploy/build-images.sh).
+The Gateway does not provide an admin route, and the frontend NodePort does not
+route `/admin` to the legacy admin Service.
+
+## Restart existing images
+
+Skip the build section when reusing the images already installed on the cluster.
+After importing replacement images, use the same commands to recreate pods that
+still run the previous image contents.
+
 ```bash
-# Restart backend deployment
-kubectl rollout restart deployment/econ-graph-backend -n econ-graph
-
-# Restart frontend deployment  
-kubectl rollout restart deployment/econ-graph-frontend -n econ-graph
+for workload in "${workloads[@]}"; do
+  mk -n econ-graph rollout restart "deployment/$workload"
+  mk -n econ-graph rollout status "deployment/$workload" --timeout=300s
+done
+mk -n econ-graph get deployments -o wide
+mk -n econ-graph get pods -o wide
 ```
 
-### Step 6: Monitor Rollout Status
+Confirm each selected deployment has its desired replicas available. These commands
+leave database, Keycloak, monitoring, Gateway, and tunnel resources as configured. The backend applies app plane migrations at startup. No service
+applies data plane migrations at startup; restarting the worker does not replace
+the `crawler-migrate` Job. If updating code requires either plane's schema to
+change, stop here and follow the [migration requirements](../development/MIGRATIONS.md)
+and [database configuration](../../k8s/README.md#databases) before restarting it.
+
+## Build and import replacement images
+
+This path updates application images for an existing installation whose schema,
+Secrets, ConfigMaps, routing, and authentication settings already match the code.
+Use a Docker daemon on the MicroK8s host that builds for that host's architecture.
+The commands explicitly use Docker's `default` context; if your build daemon uses
+another context, substitute its name consistently. Review the context endpoint
+before building.
+
+The checked-in backend, worker, and frontend manifests use the version from
+`backend/Cargo.toml` (currently `v4.0.0`); the chart service uses `v1.0.0`. All four
+set `imagePullPolicy: Never`, so a local Docker build alone is insufficient.
+MicroK8s must have the exact tags requested by the deployments.
+
 ```bash
-# Wait for backend rollout
-kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
+docker context inspect default
+VERSION="v$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/p' backend/Cargo.toml | head -n 1)"
+test "$VERSION" != v
 
-# Wait for frontend rollout
-kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
+# Confirm the checked-in image tags before building.
+for spec in \
+  "backend-deployment.yaml:econ-graph-backend:$VERSION" \
+  "crawler-worker.yaml:econ-graph-crawler-worker:$VERSION" \
+  "frontend-deployment.yaml:econ-graph-frontend:$VERSION" \
+  "chart-api-deployment.yaml:econ-graph-chart-api:v1.0.0"; do
+  grep -F "image: ${spec#*:}" "k8s/manifests/${spec%%:*}"
+done
 ```
 
-### Step 7: Verify Deployment
+Compare these tags with the deployed images printed above. If they differ, this
+is a deployment change, not an image replacement under the existing configuration;
+do not continue with this procedure. Select the checkout and image contract that
+belong to the installed release instead.
+
+The two backend targets share a builder stage. The `backend` target contains the
+API; `crawler-worker` contains the worker and the crawler executable used by data
+plane migration Jobs. Frontend settings are baked into the Vite build. Preserve
+the installation's Vite settings when rebuilding, including `VITE_DATA_GRAPHQL_URL`,
+issuer, and client ID. Set any site-specific values in this shell before building;
+the examples below supply defaults for the same-origin setup.
+The default path issuer below resolves against the browser's origin and requires
+Keycloak to be served under `/idp` on that origin. An empty issuer hides sign-in.
+
 ```bash
-# Check pod status
-kubectl get pods -n econ-graph -o wide
+docker --context default build --target backend \
+  -t "econ-graph-backend:$VERSION" backend
+docker --context default build --target crawler-worker \
+  -t "econ-graph-crawler-worker:$VERSION" backend
 
-# Check deployment status
-kubectl get deployments -n econ-graph
+docker --context default build \
+  --build-arg VITE_API_URL="${VITE_API_URL:-http://localhost}" \
+  --build-arg VITE_GRAPHQL_URL="${VITE_GRAPHQL_URL:-/graphql}" \
+  --build-arg VITE_DATA_GRAPHQL_URL="${VITE_DATA_GRAPHQL_URL:-}" \
+  --build-arg VITE_WS_URL="${VITE_WS_URL:-ws://localhost/graphql}" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}" \
+  --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
+  --build-arg NODE_ENV=production \
+  -t "econ-graph-frontend:$VERSION" frontend
 
-# Check services
-kubectl get services -n econ-graph
+docker --context default build \
+  -t econ-graph-chart-api:v1.0.0 chart-api-service
 
-# Check routes
-kubectl get httproute -n econ-graph
+images=(
+  "econ-graph-backend:$VERSION"
+  "econ-graph-crawler-worker:$VERSION"
+  "econ-graph-frontend:$VERSION"
+  econ-graph-chart-api:v1.0.0
+)
+for image in "${images[@]}"; do
+  docker --context default save "$image" | microk8s ctr images import -
+done
+microk8s ctr images ls
 ```
 
----
+Check that all four imported references are present before restarting. On a
+multi-node installation, import the same images on every node where these pods
+can run; the local import does not distribute images to other nodes. Then run
+[Restart existing images](#restart-existing-images) for the components being updated.
+Reusing a tag replaces the image available to new pods; it does not change pods
+that are already running.
 
-## 📊 **WHAT'S BEING DEPLOYED**
+## Configuration and schema changes
 
-### ✅ **Test Quality Improvements:**
-- **173/173 frontend tests passing** (100% success rate)
-- **Professional Analysis page fixed** (type errors eliminated)
-- **Accessibility compliance** (WCAG standards met)
-- **Coverage improved** from 23.84% to 29.2%
+Do not apply `k8s/manifests/*.yaml` as a shortcut for restarting. That directory
+also contains database resources, migration Jobs, legacy admin resources, and a
+tunnel manifest committed with zero replicas. A complete deployment must order
+those operations and preserve the installation's public host and credentials.
 
-### ✅ **Critical Bug Fixes:**
-- **ProfessionalChart annotations error** resolved
-- **E2E workflow test failures** fixed
-- **Navigation landmarks** properly implemented
-- **Button selector issues** eliminated
+For configuration work, use the [Kubernetes configuration reference](../../k8s/README.md)
+and the MicroK8s installation guide linked above to prepare a procedure for the
+actual installation. Keep these constraints in that procedure:
 
-### ✅ **Technical Upgrades:**
-- **Rust toolchain** updated to 1.89.0
-- **Dependencies optimized** (OpenSSL, PostgreSQL libs)
-- **Type safety enhanced** across React components
-- **Error handling improved** in all workflows
+- Apply data plane migrations successfully before starting the backend and worker
+  against a changed data schema. The repository's `deploy.sh` and database precheck
+  scripts select kind; they are not MicroK8s commands.
+- Create or refresh required [Secrets](../../k8s/README.md#secrets) on the same
+  explicitly selected cluster. Do not overwrite existing database credentials or
+  expose Secret values in terminal output or logs.
+- Preserve `PUBLIC_HOST` when rendering backend, Keycloak, realm, and Gateway
+  configuration. Applying the committed localhost values directly can break the
+  public site's issuer, redirect URIs, CORS settings, and routes. The
+  [public-site configuration](../../k8s/README.md#-public-site-cloudflare-tunnel)
+  explains those relationships. The deployment helper
+  [`public-host.sh`](../../scripts/deploy/lib/public-host.sh) requires an explicit
+  `PUBLIC_HOST` if the cluster already serves a public host; an explicitly empty
+  value removes public access.
 
-### ✅ **Infrastructure Components:**
-- **Backend**: Rust API with GraphQL
-- **Frontend**: React application
-- **Admin Frontend**: Administrative interface
-- **Chart API Service**: Private chart generation service
-- **Monitoring Stack**: Grafana + Loki + Prometheus
+The HTTP entry point is Envoy Gateway. The Gateway `econ-graph-gateway` lives in
+namespace `econ-graph-gateway`; its controller and proxy run in
+`envoy-gateway-system`. Application HTTPRoutes live in `econ-graph`, which needs
+the label `econgraph.io/gateway-access: "true"` to attach routes to the Gateway.
+Configuration work installs prerequisites with
+[`install-gateway.sh --context microk8s`](../../scripts/deploy/install-gateway.sh)
+before applying routes with
+[`apply-gateway-routes.sh --context microk8s`](../../scripts/deploy/apply-gateway-routes.sh).
+Both helpers use a standalone `kubectl`, not the `mk` function: configure that
+kubectl's kubeconfig for this MicroK8s installation and confirm
+`kubectl --context microk8s get nodes -o wide` matches the nodes selected above
+before running either helper.
 
----
+The installer accepts Kubernetes v1.33–v1.36 and needs a node labelled
+`ingress-ready=true` for the proxy. Direct host access requires free host ports
+80/443 on that node. If the MicroK8s ingress addon holds them, the installer's
+default mode runs the proxy without host ports and reports the conflict. For that
+addon, prepare a maintenance switch that disables the addon with
+`microk8s disable ingress` and reruns the installer to give the Gateway those
+ports. The [Gateway setup and cutover reference](../../k8s/README.md#-gateway)
+describes the entry point; its `cutover-to-gateway.sh` helper removes kind's
+ingress-nginx and refuses the MicroK8s addon, so it cannot perform that addon
+switch. The installer discovers pod address ranges from node
+`spec.podCIDRs` or MicroK8s Calico IP pools; if neither is available, supply the
+installation's ranges through `GATEWAY_POD_CIDRS`.
 
-## 🌐 **Expected URLs After Restart**
+The routes helper applies HTTPRoutes and rate limits; it does not install the
+Gateway prerequisites. It preserves the current public host when `PUBLIC_HOST` is
+unset. An explicitly empty value or `none` removes public routes, the HTTPS
+listener, and its certificate. This differs from the deployment helper's
+requirement for an explicit host above. A public host also requires cert-manager
+before applying routes; preserve its configured `GATEWAY_TLS_ISSUER` (the helper
+uses the existing certificate's issuer by default).
 
-Load port configuration first:
+Manage the tunnel separately. Only the cluster marked production may hold its
+token or run a connector. Applying `cloudflared.yaml` directly stops the connector;
+the deployment helper starts it only with a production marker, a public host, and
+the token Secret. The routes helper does not enforce tunnel ownership or start a
+connector. Never start a second cluster's connector to test a deployment.
+
+`restart-k8s-rollout.sh` is not a restart-only shortcut: it replaces
+`~/.kube/config`, selects MicroK8s, rebuilds images, and reapplies infrastructure.
+Its builder selects kind and omits the admin image that the wrapper subsequently
+tries to import. Use the manual path above for image replacements; neither this
+wrapper nor kind's `deploy.sh` supplies a complete MicroK8s configuration deployment.
+
+## Verify access and behavior
+
+Use the installation's existing Gateway origin throughout verification: normally
+`http://localhost` on the MicroK8s host, or the configured HTTPS public host. This
+keeps `/graphql` and `/idp` on the same origin as the frontend and matches Keycloak's
+registered redirects. Set the origin to the one you intend to check:
+
 ```bash
-source ports.env
+APP_ORIGIN=http://localhost
+curl --fail --show-error "$APP_ORIGIN/health"
+curl --fail --show-error -H 'Content-Type: application/json' \
+  --data '{"query":"{ __typename }"}' "$APP_ORIGIN/graphql"
+mk -n econ-graph get deployments,services,httproutes
+mk -n econ-graph-gateway get gateway econ-graph-gateway
 ```
 
-- **Frontend**: http://localhost:${FRONTEND_NODEPORT}
-  - ✅ All 173 tests passing
-  - ✅ Professional Analysis page working
-  - ✅ Accessibility compliant
+Expect a successful health response and a GraphQL response with
+`data.__typename` equal to `Query`, without GraphQL errors. HTTP success alone is
+not sufficient for GraphQL. Open the same origin in a browser, load a series or
+chart, and check the browser console and network requests. Verify sign-in and
+sign-out through the configured issuer when authentication is enabled. These
+checks demonstrate the paths exercised; they do not establish test-suite success
+or accessibility compliance.
 
-- **Admin UI**: http://localhost:${FRONTEND_NODEPORT}/admin
-  - ✅ Administrative interface with security notice
-  - ✅ System health monitoring
-  - ✅ User management features
+For direct service diagnostics, the frontend is at
+`http://<node-address>:30000` and the backend is at
+`http://<node-address>:30080` (the `FRONTEND_NODEPORT` and `BACKEND_NODEPORT` values
+in `config/ports.env`). Use an address from `mk get nodes -o wide` that is reachable
+from your client. Direct NodePorts bypass Gateway routing; use the Gateway origin
+above for the integrated browser and authentication checks. The chart service is
+internal to the cluster.
 
-- **Backend API**: http://localhost:${BACKEND_NODEPORT}
-  - ✅ 72 unit tests passing
-  - ✅ GraphQL API optimized
-  - ✅ Health checks working
+For Grafana, forward the Service in a separate terminal, then open
+<http://localhost:3000>. The username is `admin`; retrieve its password through the
+[documented Secret procedure](../../k8s/README.md#secrets).
 
-- **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql
-  - ✅ Schema validated
-  - ✅ Query performance improved
-
-- **Health Check**: http://localhost:${BACKEND_NODEPORT}/health
-  - ✅ Service status monitoring
-
-- **Grafana**: `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`, then http://localhost:3000
-  - ✅ Monitoring dashboards (user admin, password in Secret `grafana-admin`, see k8s/README.md)
-
----
-
-## 📋 **Monitoring Commands** (Post-restart)
-
-### Real-time Status Monitoring:
 ```bash
-# Live pod status
-watch kubectl get pods -n econ-graph
-
-# Live deployment status
-kubectl get deployments -n econ-graph -o wide --watch
-
-# Resource usage
-kubectl top pods -n econ-graph
+microk8s kubectl --context=microk8s -n econ-graph \
+  port-forward service/grafana-service 3000:3000
 ```
 
-### Log Monitoring:
+## Logs and troubleshooting
+
+Inspect rollout failures before retrying. Backend logs describe API activity and
+errors; frontend logs are nginx access and error logs, not React build output.
+
 ```bash
-# Backend logs (shows API requests, GraphQL queries)
-kubectl logs -f deployment/econ-graph-backend -n econ-graph
+mk -n econ-graph logs deployment/econ-graph-backend --tail=100
+mk -n econ-graph logs deployment/econ-graph-frontend --tail=100
 
-# Frontend logs (shows React app startup, build info)
-kubectl logs -f deployment/econ-graph-frontend -n econ-graph
+# For optional components, only when deployed and running:
+mk -n econ-graph logs deployment/crawler-worker --tail=100
+mk -n econ-graph logs deployment/chart-api-service --tail=100
 
-# All logs together
-kubectl logs -f -l app.kubernetes.io/name=econ-graph -n econ-graph
+# Stream backend and frontend logs from matching pods, with pod prefixes.
+mk -n econ-graph logs -f -l 'app in (econ-graph-backend,econ-graph-frontend)' \
+  --all-containers=true --prefix=true --max-log-requests=10
+
+mk -n econ-graph get pods -o wide --watch
+mk -n econ-graph top pods
+mk -n econ-graph describe deployment econ-graph-backend
+mk -n econ-graph describe deployment econ-graph-frontend
+mk -n econ-graph get events --sort-by='.metadata.creationTimestamp'
 ```
 
-### Troubleshooting:
-```bash
-# Describe backend deployment
-kubectl describe deployment econ-graph-backend -n econ-graph
-
-# Describe frontend deployment  
-kubectl describe deployment econ-graph-frontend -n econ-graph
-
-# Check events
-kubectl get events -n econ-graph --sort-by='.metadata.creationTimestamp'
-```
-
----
-
-## 🎯 **Verification Steps**
-
-After restart, verify these key improvements:
-
-### 1. **Professional Analysis Page** 
-```bash
-# Navigate to: http://localhost:3000/analysis
-# Should see:
-# ✅ Page renders without type errors
-# ✅ Chart collaboration features working  
-# ✅ All technical analysis tools functional
-# ✅ Annotations display correctly
-```
-
-### 2. **Accessibility Testing**
-```bash  
-# Test keyboard navigation (Tab key)
-# Verify ARIA labels are present
-# Check screen reader compatibility  
-# ✅ All 173 tests passing confirms compliance
-```
-
-### 3. **API Functionality**
-```bash
-# Test GraphQL endpoint: http://localhost:8080/graphql
-# Verify health check: http://localhost:8080/health
-# ✅ Backend tests confirm API reliability
-```
-
----
-
-## ⚠️ **Current Environment Status**
-
-**Docker Status**: Installation complete, daemon setup in progress  
-**kubectl**: ✅ Installed and ready  
-**kind**: ✅ Installed and ready  
-**Manifests**: ✅ Updated with v3.6.0 image tags  
-**Scripts**: ✅ All restart automation ready
-
-**Ready to execute**: All commands prepared for immediate k8s restart when Docker daemon is fully operational.
+Stop streaming logs or the pod watch with Ctrl-C before continuing to the next
+command. Resource metrics require the MicroK8s metrics-server addon. For an image
+error, describe the affected pod and compare its requested image with `microk8s ctr images ls` on
+that pod's node. For a failed rollout, use the pod's events and container logs to
+identify the failure before restarting again.
