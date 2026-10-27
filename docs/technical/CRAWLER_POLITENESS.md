@@ -55,8 +55,8 @@ See [Retries](./CRAWLER_DEPLOYMENT_GUIDE.md#retries) for the queue's error class
 
 - Change a default in `SourcePolicy::default_for`, or override `SourceAdapter::policy` in the
   source's adapter. Rebuild and redeploy the worker.
-- `CRAWLER_CONCURRENCY` controls concurrent jobs across sources. Per-source limits still cap
-  each source.
+- `CRAWLER_CONCURRENCY` sets the number of concurrent worker claim loops across sources.
+  Each loop processes one job or a batch of compatible jobs. Per-source HTTP limits still apply.
 - A source that keeps returning 429 / auth errors is paused for `CRAWLER_PAUSE_SECS` after
   `CRAWLER_PAUSE_AFTER` consecutive failures.
 - To split sources across workers, use separate deployments with nonoverlapping
