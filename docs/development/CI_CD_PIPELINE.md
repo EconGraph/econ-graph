@@ -74,10 +74,11 @@ gh run view RUN_ID --repo EconGraph/econ-graph --json jobs
 gh workflow run ci-core.yml --repo EconGraph/econ-graph --ref BRANCH
 gh workflow run ci-core.yml --repo EconGraph/econ-graph --ref BRANCH -f run_e2e_tests=true -f e2e_test_suite=core
 gh workflow run release-e2e.yml --repo EconGraph/econ-graph --ref BRANCH
-gh workflow run playwright-tests-deployed.yml --repo EconGraph/econ-graph -f base_url=https://YOUR_DEPLOYED_TARGET
 ```
 
 Prefer `--ref` to select the workflow revision and checkout together. Core CI also exposes a `branch` input which overrides checkout, but dispatch-time conditions still use the event ref; mixing refs can select the wrong jobs.
+
+For deployed-target testing, use the [release suite’s deployed mode](../../frontend/tests/e2e/release/README.md#against-a-deployed-build-rel-qa-check-3) with `RELEASE_BASE_URL`. The legacy `playwright-tests-deployed.yml` workflow exports its `base_url` input as `PLAYWRIGHT_BASE_URL`, but the default Playwright configuration reads `FRONTEND_URL`. That input therefore does not select the test target.
 
 ## Diagnosing skipped or green jobs
 
