@@ -1,11 +1,12 @@
 # Release end-to-end suite
 
-The Playwright project `release` (`frontend/playwright.release.config.ts`) runs
-the frontend release build against the real backend on Postgres 18. The database
-is seeded from recorded fixtures through the crawler adapters, so nothing
-touches the network and no API keys are needed. This suite is the release exit
-check (exit criterion 5 in ECO-5). The other specs under `tests/e2e/` belong to
-the older configs, which skip this directory — except
+The Playwright project `release` ([configuration](../../../playwright.release.config.ts))
+runs the frontend release build against the real backend on Postgres 18. The
+database is seeded from recorded fixtures through the crawler adapters. The seed
+uses local mock upstreams and refuses requests to external data sources, so no
+upstream API keys are needed. The suite uses real local HTTP services. It is the
+release exit check (exit criterion 5 in ECO-5). The other specs under
+`tests/e2e/` belong to the older configs, which skip this directory — except
 `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`
 (ECO-282), which only mock GraphQL via `page.route` and so also run under the
 older `global-analysis` and default/mobile configs; everything else here needs
@@ -19,7 +20,8 @@ e.g. `scripts/release-e2e.sh --project release-mobile`.
 
 ## Run it
 
-From the repo root:
+Stop the development stack’s Keycloak before running the suite: both stacks bind
+port 8081. From the repo root, run the [release runner](../../../../scripts/release-e2e.sh):
 
 ```bash
 scripts/release-e2e.sh                        # everything
@@ -29,14 +31,17 @@ scripts/release-e2e.sh --headed series-ui/    # one area, with a visible browser
 
 The script does five things:
 
-1. It starts a fresh Keycloak container from `docker-compose.release-e2e.yml` on
-   port 8081, importing the auth area's dev realm (`config/keycloak/`). Always,
-   even when `RELEASE_E2E_DATABASE_URL` is set: CI has no service-container
-   equivalent for it, since the realm and users files come from the checkout
+1. It starts a fresh Keycloak container from the [release Compose file](../../../../docker-compose.release-e2e.yml)
+   on port 8081, importing the auth area’s [dev realm](../../../../config/keycloak/).
+   It does this even when `RELEASE_E2E_DATABASE_URL` is set: CI has no
+   service-container equivalent for it, since the realm and users files come from the checkout
    under test.
 2. It starts a fresh Postgres 18 container from `docker-compose.release-e2e.yml`
    on port 5439, with data in tmpfs. It skips this when
    `RELEASE_E2E_DATABASE_URL` is set, which CI points at a service container.
+   Any override must name a disposable test database: it bypasses recreation and
+   receives data plane migrations, fixture writes, app plane migrations and
+   test writes.
    The script and the Playwright config ignore the `DATABASE_URL`,
    `APP_DATABASE_URL` and `DATA_DATABASE_URL` you export, so neither migrates
    or seeds your dev database. The one database is both the app and the data
@@ -47,9 +52,9 @@ The script does five things:
    dependencies out of the backend. Both use `FLAGS_PROFILE=release` (no `/mcp`,
    no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404. Build durations
    are printed separately; CI caches both profiles for subsequent runs.
-4. It runs `seed-fixtures`, which applies the data migrations and loads the series listed
-   in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
-5. It runs Playwright. Playwright starts the backend (which applies the app
+4. It runs `seed-fixtures`, which applies the data plane migrations and loads
+   the series listed in the [seed manifest](../../../../backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json).
+5. It runs Playwright. Playwright starts the backend (which applies the app plane
    migrations) on port 18080, pointed at
    Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend
    with `FLAGS_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
@@ -68,10 +73,13 @@ Environment overrides:
   defaults to `target/release/econ-graph-backend` and respects `CARGO_TARGET_DIR`.
 - `RELEASE_CHROMIUM_PATH` sets a Chromium executable, for machines whose
   preinstalled browser doesn't match this Playwright version. For example, use
-  `/opt/pw-browsers/chromium` in Claude Code cloud containers.
+  `/opt/pw-browsers/chromium` when that executable is installed.
 
-CI runs the suite in `.github/workflows/release-e2e.yml`, in Chromium only, on
-every PR that touches `frontend/` or `backend/`.
+The [Release E2E workflow](../../../../.github/workflows/release-e2e.yml) runs
+the suite in Chromium on PRs into any branch when they touch `frontend/`,
+`backend/`, `config/keycloak/`, the release Compose file, the runner, its
+orchestration test or the workflow itself. It also supports GitHub’s **Run
+workflow** button (`workflow_dispatch`).
 
 ## Against a deployed build (REL-QA check 3)
 
@@ -86,25 +94,38 @@ RELEASE_QA_USER1_PASSWORD=... RELEASE_QA_USER2_PASSWORD=... \
   npx playwright test --config=playwright.release.config.ts
 ```
 
-In this mode (`env.ts`):
+In this mode ([environment and user mapping](env.ts)):
 
 - Playwright starts no backend or frontend and needs no database URL.
 - Specs that compare with fixture values check live data instead: the journey
   checks that GDP's newest point is within FRED's publication cadence
-  (`liveMaxAgeDays` in `fixtures.ts`) and that each transformation shows a
-  number. The six-source sweep checks each other source's newest point
-  against its own cadence (`liveMaxAgeDays` in `SWEPT_SOURCES`). Census BDS
-  series crawled before #316 have their external id as title until the crawler
-  fetches them again (weekly, since their frequency reads "Unknown"), and the
-  sweep searches by title, so run it once they have been re-fetched.
+  (`liveMaxAgeDays` in [fixture expectations](fixtures.ts)) and that each
+  transformation shows a number. The six-source sweep checks each source’s
+  newest point against its own cadence (`liveMaxAgeDays` in `SWEPT_SOURCES`). The deployed
+  database must contain those series with current catalog metadata, including
+  the Census BDS titles: the sweep searches by and asserts the expected title.
+  If metadata or observations are missing or stale, use the
+  [crawler discovery and fetch guidance](../../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
+  to populate them before running the sweep.
 - The signed-in specs use the two QA-only realm users, `qa-alice` and `qa-bob`
-  (`config/keycloak/qa/`). Their passwords come from `RELEASE_QA_USER1_PASSWORD`
-  and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
+  ([QA realm configuration](../../../../config/keycloak/qa/)). Their passwords
+  come from `RELEASE_QA_USER1_PASSWORD` and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
   override the username, display name and email.
 - Specs run one at a time, since two users are shared by every signed-in spec.
-- `RELEASE_SKIP_AUTH=1` drops the `auth/` folder and ends the journey before it
-  signs in, for a QA run while sign-in is broken. The config refuses to start
-  without the issuer and passwords unless it is set.
+- `RELEASE_SKIP_AUTH=1` excludes `auth/`, skips the annotation and sign-in
+  failure groups, and ends the journey before sign-in. It also bypasses the
+  configuration check for the issuer and passwords. The public-annotation
+  group in `series-ui/annotations.spec.ts` still signs in; exclude that group
+  too when running without authentication:
+
+  ```bash
+  RELEASE_BASE_URL=https://qa.example RELEASE_SKIP_AUTH=1 \
+    npx playwright test --config=playwright.release.config.ts \
+    --grep-invert 'public annotations for an anonymous viewer'
+  ```
+
+  Run this command from `frontend/`. It omits signed-in coverage; a full deployed
+  run requires the issuer and passwords shown above.
 
 ## What the suite covers
 
@@ -112,8 +133,8 @@ In this mode (`env.ts`):
   the frontend's `/graphql` proxy, and explore search finds one.
 - `journey.spec.ts`: exit criterion 5's cross-area journey in one
   browser session. Search for GDP, open it, check the chart's newest point,
-  apply every transformation and check the value it shows, then sign in and
-  annotate. The CSV download step joins it with UI-6 (#223).
+  apply every transformation and check the value it shows, download the CSV and
+  compare its newest row with the charted levels, then sign in and annotate.
 - `crawl/`: every visible control with a control's ARIA role (link, button, tab,
   checkbox, switch, combobox) on every route in `src/App.tsx` is clicked, signed
   out, starting from a freshly loaded page. The click must change the visible
@@ -169,11 +190,11 @@ In this mode (`env.ts`):
   once on retry; an unreachable sign-in service, a failed callback and a session
   ended at Keycloak leave the page signed out with a way to sign in again; a map
   whose values fail to load says so and Retry recovers. The detailed permutations
-  are the component tests'. The signed-in specs use `erin` and `frank`. Saving
-  an annotation again after a lost response stores it once. A failed source
+  are the component tests’. In fixture mode, the signed-in failure groups use
+  `USERS.failureAnnotator` and `USERS.failureSignIn`. Saving an annotation again after a lost response stores it once. A failed source
   listing offers Retry and loads the source’s series after recovery (ECO-440).
   The backend side of ECO-264 is mapped in
-  `docs/testing/failure-behavior-matrix.md`.
+  the [failure behavior matrix](../../../../docs/testing/failure-behavior-matrix.md).
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
   pages load with the phone nav drawer closed, the menu opens it and picking a
   page closes it, and the map's zoom controls leave the map uncovered (ECO-335).
@@ -185,39 +206,36 @@ Put them in `tests/e2e/release/<area>/`, for example
 
 - **Assert on seeded data.** Use the constants in `fixtures.ts`, not literals
   copied from a fixture file, so a fixture change shows up in one place.
-- **Need more data?** Add the recorded response under
-  `backend/crates/econ-graph-crawler/tests/fixtures/<source>/`. Then add an
-  entry to `e2e-seed.json` with the source, the external id, and each request
-  the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
+- **Need more data?** Add the recorded response to the source’s directory under
+  [crawler fixtures](../../../../backend/crates/econ-graph-crawler/tests/fixtures/).
+  Then add an entry to `e2e-seed.json` with the source, the external id, and each
+  request the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
   series to `fixtures.ts`. The seed fails on any request the manifest doesn't
   cover, so a stale fixture shows up there, not as an empty page. A source whose
   fetch response carries no title or units (Census BDS) also lists its catalog
   requests under `discovery`; the seed runs discovery first, as the crawler
   worker does, and the series takes its title, units and frequency from that.
-- **Need a signed-in user?** Use `signInOnKeycloak` from `auth/helpers.ts`,
-  which drives Keycloak's login page, with a user from `USERS` in `env.ts`, and
-  `uniqueTitle` for rows you create. Never sign the same dev user in from two
-  specs at once: the realm's brute-force detection can then lock that user out
-  (for a minute, by default). alice and bob belong to the auth area's serial
-  group in `auth/sign-in.spec.ts` and dave to the journey; an area that needs a
-  signed-in user adds its own dev user to `config/keycloak/dev/` and `USERS`, or
-  its test joins that file.
+- **Need a signed-in user?** Use `signInOnKeycloak` from [auth/helpers.ts](auth/helpers.ts),
+  which drives Keycloak’s login page. Choose a user from `USERS` in
+  [env.ts](env.ts), and use `uniqueTitle` for rows you create. Never sign the same
+  dev user in from two specs at once: the realm's brute-force detection can then lock that user out
+  (for a minute, by default). In fixture mode, the auth area’s serial group
+  uses `USERS.annotator` and `USERS.viewer`; the journey, public-annotation
+  group and failure groups each use their own entries in `USERS`. An area that
+  needs another signed-in user adds its own dev user to
+  [the dev realm](../../../../config/keycloak/dev/) and `USERS`, or joins an
+  existing serial group. Deployed mode shares two QA users and runs one test at
+  a time; configure any new user role for that mode too.
 - **Need a seeded series' id?** `seededSeriesId(request, SEEDED.x)` from
-  `auth/helpers.ts` finds it by search, so it works in deployed mode too.
-- **Keep specs independent.** They run in parallel against one shared database.
-  A spec that writes, such as an annotation, creates its own rows and must not
-  depend on rows another spec creates (the auth group's serial tests are the one
-  exception).
-- **Blocked by unmerged work?** Write the spec anyway and mark it `test.fixme`
-  with a reason that names the blocking PR. Change it to `test` when the blocker
-  merges.
+  [auth/helpers.ts](auth/helpers.ts) finds it by search, so it works in deployed
+  mode too.
+- **Keep specs independent.** In fixture mode, tests run in parallel against
+  one shared database except within explicitly serial groups, including auth,
+  public annotations and signed-in failures. A spec that writes, such as an
+  annotation, creates its own rows and must not depend on another spec’s rows.
+  Tests within a serial group may share that group’s rows. Deployed mode runs
+  one test at a time but still needs independent rows across groups.
 - **Live QA.** Each spec should name the live QA check it stands in for, so the
   same specs can run against the deployed build in the final QA phase. Where a
   spec asserts a fixture value, branch on `DEPLOYED` from `env.ts` and assert
   what holds live instead.
-
-## Known differences from the deployed build
-
-- **Test-only code in the backend binary.** The e2e backend is a debug build
-  that shares one cargo invocation with `seed-fixtures`. That means it links the
-  crawler's `testkit` feature. It is not the deployed image.
