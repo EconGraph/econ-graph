@@ -117,7 +117,8 @@ Main backend application providing server infrastructure, metrics collection, an
 
 ### **Local database and server**
 
-Run these commands from the repository root. Docker must be running.
+Run these commands from the repository root. Docker must be running. This setup uses one
+database for both the [app and data planes](#environment-configuration).
 
 ```bash
 docker run -d --name econ-graph-db \
