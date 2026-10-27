@@ -5,12 +5,15 @@
 ## Role Overview
 A Release Engineer (RelEng) is responsible for maintaining and improving the CI/CD pipeline, test systems, and deployment infrastructure. They ensure that code changes flow smoothly from development through testing to production deployment.
 
-### Cursor-native commands (use these instead of manual, ad-hoc steps)
-- Use `/workflow-audit` to validate GitHub Actions YAML (triggers, steps, names) and to run regular workflow hygiene audits.
-- Use `/ci-latest` to view the most recent CI runs for the current branch; use `/pr-checks` to watch PR checks in real time.
-- Use `/e2e` to run full-stack integration tests locally in the same shape as CI.
-- Use `/pr-ready` to push the branch and ensure a PR exists with an up-to-date description; use `/pr` to create curated PRs that follow Conventional Commits.
-- Use `/deploy` to execute the repository's standard deployment script when available.
+### Cursor-native commands
+
+Use these repository-defined commands as entry points, and inspect the linked definitions for their scope:
+
+- Use [`/workflow-audit`](../.cursor/commands/workflow-audit.md) for a guided workflow review and proposed fixes. Follow the validation and maintenance guidance below when assessing its suggestions.
+- Use [`/ci-latest`](../.cursor/commands/ci-latest.md) to view recent CI runs for the current branch; use [`/pr-checks`](../.cursor/commands/pr-checks.md) to watch PR checks in real time.
+- Use [`/e2e`](../.cursor/commands/e2e.md) to invoke `scripts/test-e2e.sh` with its backend, frontend, combined, or all selection. This integration runner is distinct from Core CI's optional containerized Playwright suites and Release E2E. Select the reproducer for the failed job using the [CI pipeline guide](../docs/development/CI_CD_PIPELINE.md); Release E2E uses [`scripts/release-e2e.sh`](../scripts/release-e2e.sh), with local setup in the [release suite guide](../frontend/tests/e2e/release/README.md).
+- Use [`/pr-ready`](../.cursor/commands/pr-ready.md) to push the branch and ensure a PR exists; use [`/pr`](../.cursor/commands/pr.md) to create or update a curated PR with a Conventional Commits title and a description explaining the change.
+- Use [`/deploy`](../.cursor/commands/deploy.md) to invoke the repository deployment script when available and deployment is authorized.
 
 ## Core Responsibilities
 
@@ -23,10 +26,8 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Docker Layer Caching**: Implement intelligent Docker layer caching to reduce build times
 - **Separated Build/Run**: Separate Docker image building from test execution for better performance
 - **Parallel Test Execution**: Design test suites to run in parallel for faster feedback
-- **Local Iteration Capability**: Design each CI step as a single command through a Dockerfile so containers can be run locally for debugging and iteration
-- **Workflow Hygiene**: Regularly audit and clean up unused or broken workflows
-- **Trigger Validation**: Ensure all workflows have proper trigger configurations
-- **Noise Reduction**: Eliminate CI noise by removing workflows that can't generate meaningful results
+- **Local Iteration Capability**: Provide documented commands to reproduce build and test operations locally, following the container design guidance below
+- **Workflow Maintenance**: Own workflow validation and hygiene as described in [Workflow Validation and Maintenance](#workflow-validation-and-maintenance)
 
 ### Test System Maintenance
 - **Test Infrastructure**: Maintain test runners, test databases, and test environments
@@ -37,9 +38,8 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **E2E Test Optimization**: Split comprehensive E2E tests into functional groups for parallel execution
 - **Mobile Testing**: Separate mobile browser testing from desktop testing for better stability
 - **Database Health Checks**: Implement robust database connection health checks for test reliability
-- **Service Dependencies**: Ensure proper service startup order and health verification
 - **E2E Test Debugging Infrastructure**: Implement comprehensive debugging tools for E2E test failures
-- **Service Health Verification**: Ensure all services are actually running and healthy before executing tests
+- **Service Readiness**: Start dependencies in order and verify database connections and service health before executing tests
 - **Exit Code Propagation**: Implement proper exit code propagation through script chains to ensure CI jobs reflect test results
 
 ### Quality Assurance
@@ -53,8 +53,6 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Test Metrics**: Track test execution times, failure rates, and coverage trends
 - **Deployment Monitoring**: Monitor deployment success rates and rollback frequency
 - **Alerting**: Set up alerts for critical failures and performance degradation
-- **Workflow Health**: Monitor workflow execution patterns and identify broken or unused workflows
-- **CI Noise Detection**: Identify and eliminate workflows that generate noise without value
 
 ### Developer Experience
 - **Documentation**: Maintain documentation for CI/CD processes and troubleshooting guides
@@ -91,14 +89,6 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 
 ## Common Challenges
 
-### Workflow Maintenance
-- **Broken Workflow Triggers**: Workflows with no active triggers (all commented out) causing immediate failures
-- **Workflow Redundancy**: Multiple workflows doing similar things causing confusion and resource waste
-- **GitHub Caching Issues**: GitHub showing non-existent workflows from deleted branches as active
-- **Invalid YAML Configuration**: Workflows with malformed trigger configurations that can't be parsed
-- **Orphaned Workflows**: Workflows that were created for testing but never cleaned up
-- **Trigger Conflicts**: Multiple workflows triggering on the same events causing resource contention
-
 ### Pipeline Reliability
 - **Flaky Tests**: Tests that intermittently fail due to timing, environment, or data issues
 - **Build Failures**: Infrastructure issues, dependency problems, resource constraints
@@ -134,18 +124,12 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Parallelization**: Run independent tests and builds in parallel
 - **Caching**: Implement intelligent caching for dependencies and build artifacts
 - **Incremental Builds**: Only rebuild what has changed
-- **Workflow Validation**: Ensure all workflows have valid trigger configurations
-- **Clean Workflow Structure**: Remove disabled workflows instead of commenting out triggers
-- **Single Source of Truth**: Avoid duplicate workflows that serve the same purpose
 
 ### Local Development and Debugging
-- **Docker-Based CI Steps**: Design each CI step as a single command through a Dockerfile
-- **Local Reproducibility**: Enable developers to run any CI step locally using the same Docker container
-- **Debugging Capability**: Allow developers to iterate on failing CI steps without pushing to remote
-- **Environment Consistency**: Ensure local Docker containers match CI environment exactly
-- **Single Command Execution**: Each CI step should be executable with a single `docker run` command
-- **Dependency Isolation**: Use Docker to isolate dependencies and avoid "works on my machine" issues
-- **Iterative Development**: Enable rapid iteration on CI steps without full pipeline execution
+
+For containerized build and test operations, define the required dependencies in a Dockerfile and build the image separately from running the check. Aim to expose each operation as one documented `docker run` command, or a wrapper that supplies its required configuration and services. Reuse the image, inputs, environment variables, and service versions used by the corresponding CI job so developers can isolate dependencies and iterate on failures without pushing a commit.
+
+This design goal concerns build and test execution. Runner setup, checkout, cache transfer, and artifact handling may remain workflow orchestration steps. Document the local reproducer and any relevant differences for each job rather than assuming every existing job already has an equivalent local command.
 
 ### Test Strategy
 - **Test Pyramid**: Maintain a healthy balance of unit, integration, and E2E tests
@@ -159,19 +143,11 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Monitoring**: Implement comprehensive monitoring and alerting
 - **Documentation**: Maintain clear deployment procedures and runbooks
 
-### Workflow Troubleshooting
-- **YAML Validation**: Prefer `/workflow-audit` to validate workflow syntax and structure before committing
-- **Trigger Verification**: Use `/workflow-audit` to detect missing/invalid triggers
-- **Cleanup Discipline**: Remove disabled workflows instead of commenting out triggers (verify with `/workflow-audit`)
-- **Regular Audits**: Run `/workflow-audit` periodically to find broken/unused workflows and naming issues
-- **GitHub Interface Monitoring**: Correlate with `/ci-latest` and `/pr-checks` when UI status looks inconsistent
-- **Branch Cleanup**: Clean up test branches that may leave orphaned workflows
-
 ## Success Metrics
 
 ### Pipeline Performance
 - **Build Success Rate**: Percentage of successful builds
-- **Build Duration**: Average time from commit to deployment
+- **Build Duration**: Average elapsed time from build start to build completion
 - **Deployment Frequency**: How often deployments occur
 - **Lead Time**: Time from code commit to production deployment
 
@@ -217,29 +193,19 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 
 ## Workflow Validation and Maintenance
 
-### Automated CI/CD Workflow Validation
-- **Validation Automation**: Create automated scripts in `ci/scripts/` to validate all GitHub Actions CI/CD workflows
-- **YAML Syntax Checking**: Ensure all workflow files have valid YAML syntax
-- **Job Structure Validation**: Verify all jobs have proper `steps` sections and valid configurations
-- **Orphaned Workflow Detection**: Identify workflows with no active triggers that may be causing CI noise
-- **Naming Consistency**: Ensure all workflows have descriptive names for better maintainability
+### Existing validation tools
 
-### Validation Principles
-1. **Syntax Validation**: Validate YAML syntax before deployment
-2. **Structure Validation**: Ensure every job has a non-empty `steps` section
-3. **Trigger Validation**: Check for active triggers (push, pull_request, schedule, workflow_dispatch, repository_dispatch)
-4. **Naming Validation**: Verify workflows have descriptive names
-5. **Error Reporting**: Provide clear, actionable error messages
+The [Actionlint workflow](../.github/workflows/actionlint.yml) checks workflow syntax and structure with actionlint, runs shellcheck on workflow `run:` scripts, and enforces immutable action references in workflows and composite actions. It runs on PRs and pushes to `main` or `develop` when the workflow's path filters match changes to workflows, local actions, actionlint configuration, or action-reference validation scripts. It also supports `workflow_dispatch`. Use its pinned tool versions and [actionlint configuration](../.github/actionlint.yaml) when reproducing checks locally; the [workflow index](../.github/workflows/README.md#validation) gives the local action-reference checks.
 
-### Integration with CI/CD
-- **Pre-commit Hooks**: Run workflow validation before committing changes
-- **CI Pipeline Integration**: Include validation in the main CI pipeline to catch issues early
-- **Automated Testing**: Treat workflow validation as a first-class test that must pass
-- **Documentation**: Maintain validation processes as part of the standard RelEng toolkit
+The supplemental [`ci/scripts/validate-ci-workflows.sh`](../ci/scripts/validate-ci-workflows.sh) checks YAML syntax, looks for job steps, and reports trigger and workflow-name findings. It is not the Actionlint CI entry point: its job check requires `steps` even for reusable-workflow calls, and its default PyYAML loader can interpret `on` as a boolean key. Verify those findings against the workflow definition. The [pre-commit configuration](../.pre-commit-config.yaml) includes generic YAML checking; it does not run the Actionlint workflow's full checks.
 
-### Common Issues to Detect
-- **Invalid Job Definitions**: Jobs without `steps` sections (causes 0s duration failures)
-- **Orphaned Workflows**: Workflows from deleted branches showing as active in GitHub
-- **Malformed YAML**: Syntax errors that prevent workflow parsing
-- **Missing Triggers**: Workflows that can't be executed
-- **Poor Naming**: Workflows without descriptive names making maintenance difficult
+### Maintenance expectations
+
+Use `/workflow-audit` periodically and when workflow behavior becomes unclear. Compare its proposed fixes with the workflow definitions and [pipeline guide](../docs/development/CI_CD_PIPELINE.md), then run the applicable validation checks before committing changes. Maintain the existing validation entry points and give failures clear file, job, and corrective-action context.
+
+- **Syntax and structure**: Check YAML and GitHub Actions semantics. Jobs that execute steps need a non-empty `steps` list and the appropriate runner configuration; jobs that call reusable workflows use job-level `uses` instead.
+- **Triggers and selection**: Verify intended events, branch and path filters, job conditions, and dependencies. Syntax checks alone do not establish which jobs will run; inspect actual PR and push runs when changing selection rules.
+- **Names**: Give workflows and jobs descriptive names so failures are easy to locate.
+- **Workflow hygiene**: Review execution patterns for redundant, unused, or broken workflows. Remove obsolete workflows instead of leaving their triggers commented out; retain intentional manual-only workflows with a clear purpose. Coordinate overlapping triggers and filters to avoid duplicate work without losing coverage.
+
+When a run fails immediately or GitHub shows an unexpected workflow, inspect the workflow at the run's ref and its logs before assigning a cause. Missing required job configuration, malformed triggers, and an old workflow retained in GitHub's interface require different responses. Correlate `/ci-latest` with `/pr-checks` and the checked-in workflow before changing configuration or cleaning up temporary branches.
