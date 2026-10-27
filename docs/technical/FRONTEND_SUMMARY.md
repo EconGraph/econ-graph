@@ -22,7 +22,7 @@ Submitting the header search opens the series explorer at `/explore?q=…`. In t
 
 ### Navigation and Mobile Layout
 
-React Router connects the dashboard, series explorer, series detail pages, data sources, and global analysis. Below 600px, navigation uses a modal drawer that starts closed and opens from the header menu button. At wider widths, the sidebar starts open beside the page and can be hidden to give the content more space. Charts resize to their container, and chart controls wrap on narrow screens.
+React Router connects the dashboard, series explorer, series detail pages, data sources, and global analysis. Below 600px, navigation uses a modal drawer that starts closed and opens from the header menu button. At wider widths, the sidebar starts open beside the page. Charts resize to their container, and chart controls wrap on narrow screens.
 
 Light and dark themes let readers choose the display they prefer, with the choice saved in the browser. Together, the search, chart controls, and responsive navigation support exploration from a single interface, while revision labels and source metadata keep the origin of the numbers in view.
 
@@ -107,7 +107,7 @@ The transport routes economic-data queries to `VITE_DATA_GRAPHQL_URL`, falling b
 | `GET_SERIES_LIST` | Browse series with filters and pagination. |
 | `GET_SERIES_DETAIL` | Retrieve series metadata, including source, frequency, units, and date coverage. |
 | `GET_SERIES_DATA` | Retrieve observations with a backend transformation and revision filter. |
-| `SEARCH_SERIES` | Search series with source and frequency filters and relevance information. |
+| `SEARCH_SERIES` | Search series with source and frequency filters. |
 | `GET_DATA_SOURCES` | Retrieve provider descriptions, series counts, and API requirements. |
 
 ## Design System
