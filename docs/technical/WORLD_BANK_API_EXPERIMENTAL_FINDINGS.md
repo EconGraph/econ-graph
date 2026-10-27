@@ -1,234 +1,215 @@
 # World Bank API Experimental Findings
 
-## Overview
+## Scope and provenance
 
-This document details the experimental findings from implementing dynamic discovery for the World Bank Open Data API. The World Bank API provides access to over 26,000 economic indicators from countries around the world, making it a valuable source for global economic data.
+These notes preserve an early experiment in finding economic indicators through the
+World Bank Indicators API. The [original report](https://github.com/EconGraph/econ-graph/blob/55fa715da9a1ebe8899de721d32075cc0e22a27d/backend/docs/WORLD_BANK_API_EXPERIMENTAL_FINDINGS.md)
+and its [discovery implementation](https://github.com/EconGraph/econ-graph/blob/55fa715da9a1ebe8899de721d32075cc0e22a27d/backend/src/services/series_discovery/world_bank.rs)
+entered repository history on September 13, 2025. That is the document's provenance;
+the report does not record a measurement date or raw responses for its catalog count.
 
-## API Structure
+The experiment combined topic lookup, known indicator IDs, and a bounded catalog search.
+The current crawler selects indicators from a curated WDI list and discovers the areas
+with observations for each one. The sections below distinguish the API interface, the
+historical experiment, and the current implementation. See the
+[World Bank source guide](../data-sources/world-bank.md) for current request, metadata,
+and revision behavior.
 
-### Base URL
-- **Production**: `https://api.worldbank.org/v2`
-- **No API Key Required**: The World Bank API is completely open and does not require authentication
+## API structure
 
-### Key Endpoints
+The API base is `https://api.worldbank.org/v2`. Append the paths below to that base;
+they do not repeat `/v2`. Requests need no API key. Include `format=json` to request
+JSON; the default is XML. The World Bank's
+[basic-call reference](https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures)
+describes format selection and the `page` and `per_page` parameters.
 
-#### 1. Indicators API
-- **Endpoint**: `/v2/indicator`
-- **Purpose**: Lists all available indicators
-- **Total Indicators**: 26,235 across 263 pages (100 per page)
-- **Response Format**: JSON array with metadata and data
+| Purpose | Path and example query |
+|---|---|
+| Indicator catalog across sources | `/indicator?format=json&per_page=100&page=1` |
+| Metadata for one indicator | `/indicator/NY.GDP.MKTP.CD?format=json` |
+| Topic categories | `/topic?format=json` |
+| Indicators within Economy & Growth (topic 3) | `/topic/3/indicator?format=json` |
+| Countries, territories, and aggregates | `/country?format=json&per_page=1000` |
+| Observations for one country and indicator | `/country/USA/indicator/NY.GDP.MKTP.CD?format=json` |
+
+Catalog metadata and observations are different resources: an indicator record names
+and describes a measure, while an observation identifies an area, period, and value.
+The [indicator reference](https://datahelpdesk.worldbank.org/knowledgebase/articles/898599-indicator-api-queries)
+also explains how to select a source when an indicator belongs to several sources.
+The unqualified catalog is broader than WDI (source 2), and broader still than
+EconGraph's curated WDI list.
+
+Successful JSON list responses use a two-element envelope, `[metadata, rows]`.
+This abbreviated indicator example follows the official reference's single-indicator
+response; descriptions are shortened and other fields omitted:
 
 ```json
 [
-  {
-    "page": 1,
-    "pages": 263,
-    "per_page": "100",
-    "total": "26235"
-  },
+  {"page": 1, "pages": 1, "per_page": "50", "total": 1},
   [
     {
       "id": "NY.GDP.MKTP.CD",
       "name": "GDP (current US$)",
-      "source": {
-        "id": "2",
-        "value": "World Development Indicators"
-      },
-      "sourceNote": "GDP is the sum of gross value added...",
-      "sourceOrganization": "World Bank national accounts data..."
+      "source": {"id": "2", "value": "World Development Indicators"},
+      "sourceNote": "GDP at purchaser's prices ...",
+      "sourceOrganization": "World Bank national accounts data ..."
     }
   ]
 ]
 ```
 
-#### 2. Topics API
-- **Endpoint**: `/v2/topic`
-- **Purpose**: Lists all available topics for categorization
-- **Key Topics**:
-  - ID 1: Agriculture & Rural Development
-  - ID 2: Aid Effectiveness
-  - ID 3: Economy & Growth (most relevant for economic indicators)
-  - ID 4: Education
-  - ID 5: Energy & Mining
+The [topic reference](https://datahelpdesk.worldbank.org/knowledgebase/articles/898611-topic-api-queries)
+describes topic and topic-indicator queries. Examples from the original report include
+Agriculture & Rural Development (1), Aid Effectiveness (2), Economy & Growth (3),
+Education (4), and Energy & Mining (5).
 
-#### 3. Topic Indicators API
-- **Endpoint**: `/v2/topic/{topic_id}/indicator`
-- **Purpose**: Get indicators for a specific topic
-- **Example**: `/v2/topic/3/indicator` returns Economy & Growth indicators
+The country endpoint also includes territories and regional aggregates. These are
+selected rows and fields from the original report's country example, with the envelope
+omitted:
 
-#### 4. Countries API
-- **Endpoint**: `/v2/country`
-- **Purpose**: Lists all countries and regions
-- **Example Response**:
 ```json
 [
-  {
-    "id": "ABW",
-    "name": "Aruba"
-  },
-  {
-    "id": "AFE", 
-    "name": "Africa Eastern and Southern"
-  }
+  {"id": "ABW", "name": "Aruba"},
+  {"id": "AFE", "name": "Africa Eastern and Southern"}
 ]
 ```
 
-#### 5. Data API
-- **Endpoint**: `/v2/country/{country}/indicator/{indicator}`
-- **Purpose**: Get actual time series data for a specific country and indicator
-- **Example**: `/v2/country/USA/indicator/NY.GDP.MKTP.CD`
+Aruba and the AFE aggregate illustrate why a country-list entry need not be a sovereign
+state. The [country reference](https://datahelpdesk.worldbank.org/knowledgebase/articles/898590-country-api-queries)
+shows the full envelope and explains the use of World Bank codes where ISO codes are
+unavailable.
 
-## Discovery Strategy Implementation
+## Historical discovery experiment
 
-### Multi-Strategy Approach
+### Strategies and coverage
 
-The enhanced World Bank discovery implementation uses three complementary strategies:
+The original report described three complementary approaches:
 
-#### Strategy 1: Topic-Based Discovery
-- Fetches indicators from the "Economy & Growth" topic (ID 3)
-- Provides focused economic indicators
-- More efficient than pagination for economic data
+1. **Topic lookup** requested the Economy & Growth topic to narrow the catalog by subject.
+   The implementation at the report's revision also requested Financial Sector (7) and
+   attempted topic 11.
+2. **Direct lookup** requested metadata for ten known economic indicators, avoiding a
+   catalog scan for those IDs.
+3. **Paginated search** requested the first ten catalog pages at 100 records per page and
+   retained records matching economic keywords or ID patterns.
 
-#### Strategy 2: Key Indicator Direct Lookup
-- Directly fetches known important economic indicators:
-  - `NY.GDP.MKTP.CD` - GDP (current US$)
-  - `NY.GDP.MKTP.KD.ZG` - GDP growth (annual %)
-  - `FP.CPI.TOTL.ZG` - Inflation, consumer prices (annual %)
-  - `SL.UEM.TOTL.ZS` - Unemployment, total (% of total labor force)
-  - `FR.INR.RINR` - Real interest rate (%)
-  - `NE.TRD.GNFS.ZS` - Trade (% of GDP)
-  - `GC.DOD.TOTL.GD.ZS` - Central government debt, total (% of GDP)
-  - `GC.REV.XGRT.GD.ZS` - Tax revenue (% of GDP)
-  - `GC.XPN.TOTL.GD.ZS` - Expense (% of GDP)
-  - `BN.CAB.XOKA.GD.ZS` - Current account balance (% of GDP)
+The same historical implementation also sampled five known indicators for 15 selected
+countries. It treated a nonempty observation array as availability evidence, then combined
+these candidates with the topic, direct-lookup, and paginated results. Candidates were
+sorted and deduplicated by indicator ID, so this still produced an indicator catalog,
+rather than a separate series for every country and indicator.
 
-#### Strategy 3: Paginated Search
-- Searches through paginated results (limited to first 10 pages for performance)
-- Filters results using economic keyword matching
-- Provides broader coverage of economic indicators
+The report recorded **26,235 catalog entries across 263 pages at 100 per page**. This is
+an undated reported snapshot, not a current catalog total, a WDI-only count, or a measured
+count of EconGraph series. The ten-page search examined at most 1,000 catalog records
+before filtering and deduplication. Topic and direct lookups could add candidates outside
+those pages, but the combined strategy did not establish complete economic-indicator
+coverage. Page counts depend on the requested page size and the catalog at request time.
 
-### Economic Indicator Filtering
+### Direct-lookup indicators
 
-The implementation includes sophisticated filtering logic to identify economic indicators:
+The experiment used these identifiers:
 
-#### Keyword-Based Filtering
-Economic keywords in indicator names:
-- GDP, gross domestic product
-- Inflation, unemployment, interest rate
-- Exchange rate, trade, debt
-- Revenue, expenditure, current account
-- Balance of payments, economic, financial
-- Monetary, fiscal, price, wage, income
-- Consumption, investment, savings
-- Export, import, balance, surplus, deficit, budget
+| Indicator ID | Measure |
+|---|---|
+| `NY.GDP.MKTP.CD` | GDP (current US$) |
+| `NY.GDP.MKTP.KD.ZG` | GDP growth (annual %) |
+| `FP.CPI.TOTL.ZG` | Inflation, consumer prices (annual %) |
+| `SL.UEM.TOTL.ZS` | Unemployment, total (% of total labor force) |
+| `FR.INR.RINR` | Real interest rate (%) |
+| `NE.TRD.GNFS.ZS` | Trade (% of GDP) |
+| `GC.DOD.TOTL.GD.ZS` | Central government debt, total (% of GDP) |
+| `GC.REV.XGRT.GD.ZS` | Revenue, excluding grants (% of GDP) |
+| `GC.XPN.TOTL.GD.ZS` | Expense (% of GDP) |
+| `BN.CAB.XOKA.GD.ZS` | Current account balance (% of GDP) |
 
-#### ID Pattern-Based Filtering
-Economic indicator ID patterns:
-- `ny.gdp` - National accounts GDP indicators
-- `fp.cpi` - Financial sector price indicators
-- `sl.uem` - Social labor unemployment indicators
-- `fr.inr` - Financial sector interest rate indicators
-- `ne.trd` - External sector trade indicators
-- `gc.rev`, `gc.xpn` - Government finance indicators
-- `bn.cab` - Balance of payments indicators
-- `dt.dod` - Debt indicators
-- `ic.*` - Investment climate indicators
-- `ie.*` - Infrastructure and environment indicators
+### Keyword and ID filtering
 
-## API Behavior Observations
+`is_economic_indicator()` lowercased the name and ID, then accepted an indicator if
+**either** contained a matching substring. Keyword matching and ID matching were
+alternative inclusion tests, not two required stages.
 
-### Pagination
-- **Total Pages**: 263 pages at 100 indicators per page
-- **Total Indicators**: 26,235 indicators
-- **Page Structure**: First element contains metadata, second element contains data
-- **Rate Limiting**: No official rate limits, but politeness delays implemented (100ms between requests)
+The name keywords were:
 
-### Data Quality
-- **Consistency**: High consistency in response format
-- **Completeness**: Most indicators have comprehensive metadata
-- **Currency**: Data is regularly updated
-- **Coverage**: Global coverage with country-specific data
+- GDP, gross domestic product, inflation, unemployment, interest rate;
+- exchange rate, trade, debt, revenue, expenditure, current account;
+- balance of payments, economic, financial, monetary, fiscal;
+- price, wage, income, consumption, investment, savings;
+- export, import, balance, surplus, deficit, budget.
 
-### Error Handling
-- **HTTP Status Codes**: Standard HTTP status codes
-- **Error Responses**: JSON error responses for API errors
-- **Network Issues**: Handled with retry logic and proper error propagation
+The ID substrings were:
 
-## Implementation Details
+- `ny.gdp`, `fp.cpi`, `sl.uem`, `fr.inr`, `ne.trd`;
+- `gc.rev`, `gc.xpn`, `bn.cab`, `dt.dod`;
+- `ic.tax`, `ic.bus`, `ic.reg`, `ic.gov`, `ic.lgl`;
+- `ie.tic`, `ie.tra`, `ie.tec`, `ie.eng`, `ie.ene`, `ie.env`, `ie.hea`, `ie.edu`;
+- `ie.agr`, `ie.fin`, `ie.inf`, `ie.urb`, `ie.rur`, `ie.gen`.
 
-### Code Structure
+The original report summarized the last groups as `ic.*` and `ie.*`; the code matched
+the specific substrings above, not every ID beginning with those prefixes. These
+heuristics selected candidates by vocabulary, without proving relevance or data coverage.
 
-#### Main Discovery Function
-```rust
-pub async fn discover_world_bank_series(
-    client: &Client,
-    pool: &DatabasePool,
-) -> AppResult<Vec<String>>
-```
+### Historical storage and pacing
 
-#### Helper Functions
-- `fetch_indicators_by_topic()` - Topic-based discovery
-- `fetch_key_economic_indicators()` - Direct indicator lookup
-- `fetch_indicators_paginated()` - Paginated search
-- `fetch_single_indicator()` - Individual indicator metadata
-- `extract_indicators_from_response()` - Response parsing
-- `is_economic_indicator()` - Economic filtering logic
-- `fetch_indicator_metadata()` - Metadata extraction
+`discover_world_bank_series()` called the topic, direct-lookup, country-sampling, and
+pagination helpers, then passed each retained indicator to `store_world_bank_series()`.
+That helper used `EconomicSeries::get_or_create()` with the indicator ID as its external
+ID. Its metadata helper supplied defaults such as annual frequency, units `Various`,
+and a 1960 start date; these were not measurements of each indicator's history.
 
-### Database Integration
+The implementation slept for 100 ms after each catalog page and after each sampled
+country, rather than enforcing a delay after every HTTP request. Its data-source template
+stored `rate_limit_per_minute = 1000`. Neither the sleeps nor that configuration value
+establish a provider rate allowance or measured throughput.
 
-#### Series Storage
-- Uses `EconomicSeries::get_or_create()` for deduplication
-- Stores comprehensive metadata including:
-  - External ID (World Bank indicator ID)
-  - Title and description
-  - Frequency (typically "Annual")
-  - Units (varies by indicator)
-  - Source information
-  - Date ranges
+## Current adapter and persistence
 
-#### Data Source Configuration
-- **Name**: "World Bank Open Data"
-- **API Key Required**: false
-- **Rate Limit**: 1000 requests per minute (conservative)
-- **Base URL**: "https://api.worldbank.org/v2"
-- **Description**: "Global economic indicators from World Bank Open Data"
+The [World Bank adapter](../../backend/crates/econ-graph-crawler/src/sources/world_bank.rs)
+uses [wdi_indicators.csv](../../backend/crates/econ-graph-crawler/data/wdi_indicators.csv)
+to select indicators. Full discovery requests observations for all areas of each selected
+indicator with `/country/all/indicator/{id}?format=json&per_page=20000&page=N`.
+It retains supported areas with at least one non-null value and emits one series per
+indicator and area. The [WDI dataset](../../backend/crates/econ-graph-crawler/data/datasets/world_bank.toml)
+defines dimensions `indicator` and `area`, giving canonical external IDs such as
+`wdi/NY.GDP.PCAP.CD.USA`. The adapter follows observation pages up to `MAX_PAGES` (10),
+a separate bound from the experiment's ten catalog pages. A response advertising more
+observation pages is truncated with a warning.
 
-## Performance Considerations
+Discovery returns series metadata, including title, description, units, frequency, data
+URL, and dataset dimensions. The [worker](../../backend/crates/econ-graph-crawler/src/worker.rs)
+persists those results through the shared
+[persistence layer](../../backend/crates/econ-graph-crawler/src/persist.rs): discovery
+upserts `series_metadata` by source and external ID; fetching upserts `economic_series`
+and `data_points`. Indicator names and descriptions come from refreshed dataset codes,
+with response-carried names as a fallback. The source guide explains the reference
+refresh, unchanged-version probes, and storage of `lastupdated` as the observation vintage.
 
-### Optimization Strategies
-1. **Deduplication**: Combines results from multiple strategies and removes duplicates
-2. **Pagination Limits**: Limits paginated search to first 10 pages to avoid overwhelming the API
-3. **Politeness Delays**: 100ms delays between requests to be respectful
-4. **Parallel Processing**: Could be enhanced with parallel requests for different strategies
+The adapter uses the World Bank defaults in
+[`SourcePolicy`](../../backend/crates/econ-graph-crawler/src/policy.rs): a sustained
+**1 request per second**, burst capacity 1, and at most 2 in-flight requests. These are
+EconGraph's local controls. The legacy 1,000-per-minute data-source field is not the
+crawler's request policy and is not a provider guarantee.
 
-### Scalability
-- **Current Approach**: Processes ~1000 indicators per discovery run
-- **Full Discovery**: Could process all 26,235 indicators with proper pagination
-- **Incremental Updates**: Could implement incremental discovery for new indicators
+## Evidence and tests
 
-## Testing
+The official references above establish request syntax and response fields. The
+[checked-in fixtures](../../backend/crates/econ-graph-crawler/tests/fixtures/world_bank/)
+and [adapter tests](../../backend/crates/econ-graph-crawler/src/sources/world_bank/tests.rs)
+provide reproducible examples of current handling:
 
-### Unit Tests
-- **Data Source Configuration**: Verifies World Bank data source setup
-- **Economic Filtering**: Tests indicator classification logic
-- **Metadata Storage**: Tests database integration
-- **Error Handling**: Tests API error scenarios
+- `discover_lists_areas_with_values_indicator_by_indicator` uses mocked responses to
+  check discovery, canonical IDs, titles, and omission of areas without values.
+- `follows_pages_and_takes_lastupdated_from_the_first` and `page_count_is_bounded`
+  check pagination and its cap against a local mock server.
+- `response_shapes` checks fixture parsing, null observations, malformed responses, and
+  API error messages. API errors can arrive inside HTTP 200 responses; an HTTP success
+  status alone does not establish a successful data response.
 
-### Integration Tests
-- **Full Discovery Workflow**: End-to-end discovery testing
-- **Database Integration**: Verifies data persistence
-- **API Politeness**: Tests rate limiting and delays
-
-## Conclusion
-
-The World Bank API provides excellent access to global economic data with over 26,000 indicators. The implemented multi-strategy discovery approach successfully identifies and catalogs economic indicators while being respectful to the API. The system is designed for scalability and can be enhanced with additional features as needed.
-
-The key success factors are:
-1. **Multi-strategy approach** ensures comprehensive coverage
-2. **Sophisticated filtering** identifies relevant economic indicators
-3. **Proper error handling** ensures robustness
-4. **Politeness measures** maintain good API citizenship
-5. **Database integration** provides persistent storage and deduplication
-
-This implementation provides a solid foundation for integrating World Bank data into the EconGraph system and can serve as a model for other international data sources.
+The [policy tests](../../backend/crates/econ-graph-crawler/src/policy.rs) check the built-in
+World Bank defaults. The [HTTP fetcher tests](../../backend/crates/econ-graph-crawler/src/http.rs)
+exercise retry and concurrency behavior with a local mock server. The separate
+[core World Bank integration tests](../../backend/crates/econ-graph-core/tests/world_bank_integration_tests.rs)
+exercise database storage of the legacy data-source configuration, including the
+1,000-per-minute field; they do not call the provider or validate its rate limits.
+These checks describe local behavior, not live API availability or completeness of the
+historical discovery experiment.
