@@ -320,8 +320,8 @@ table owned by `postgres`, and the services could neither read nor write it.
    created stays.
 
 `restore.sh` checks that `RESTORE_OWNER` exists before changing anything.
-Every object in the dump must be owned by `econgraph` in the database being
-restored into, since that role drops them. If one isn't, the restore stops at
+Every existing object that the second restore step drops must be owned by
+`econgraph` so that role can drop them. If one isn't, the restore stops at
 `must be owner of ...` and rolls back. Give the object to `econgraph`
 (`ALTER TABLE ... OWNER TO econgraph`, or the matching `ALTER` for another
 kind of object), then restore again. To check the result, as `postgres` in
@@ -358,26 +358,36 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
    The dump holds password hashes and client secrets; keep the local copy
    private and remove it when done.
 
-2. Stop Keycloak, so nothing writes to the database during the restore:
+2. Record Keycloak's replica count, then stop it so nothing writes to the
+   database during the restore. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph scale deployment/keycloak --replicas=0
-   # Until no Keycloak pod is left (returns at once if there was none)
-   while kubectl -n econ-graph get pods -l app=keycloak -o name | grep -q .; do sleep 2; done
+   kubectl -n econ-graph get deployment keycloak \
+     -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
+   kubectl -n econ-graph scale deployment/keycloak --replicas=0 || exit 1
+   while :; do
+     writer_pods="$(kubectl -n econ-graph get pods -l app=keycloak -o name)" || exit 1
+     [ -z "$writer_pods" ] && break
+     sleep 2
+   done
    ```
+
+   Do not proceed if recording the count, scaling or checking the pods fails.
 
 3. Recreate the database and restore the dump into it:
 
    ```sh
-   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak
-   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak
+   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak || exit 1
+   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak || exit 1
    kubectl -n econ-graph exec -i keycloak-postgres-0 -- \
      pg_restore -U keycloak -d keycloak --no-owner --no-privileges \
-     --exit-on-error --single-transaction < "./${DUMP}"
+     --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
 
-4. Start Keycloak again: `./scripts/deploy/deploy.sh`, or
-   `kubectl -n econ-graph scale deployment/keycloak --replicas=1`.
+4. Confirm that database deletion, creation and restoration all exited
+   successfully. If any command fails, keep Keycloak stopped and resolve the
+   failure before continuing. Only after a successful restore, scale
+   `deployment/keycloak` back to its recorded replica count.
 
 ### econ_graph_app
 
@@ -389,39 +399,50 @@ which replaces both app state and data plane contents. See
 
 A separate app database restore replaces every user and everything they
 created with the dump's. Take a manual backup first, as for Keycloak. The
-backend connects as the role `econgraph`, which owns the app database's
-tables (the backend creates them, running the app migrations as `econgraph`). The CronJob's dumps
-carry no owner (`--no-owner`), so the restore runs with
-`--role=econgraph`, into a database `econgraph` owns, to give the tables
-back to it; restored as `postgres` alone they would belong to `postgres`, and
-the backend could not use them. For the same reason,
-`scripts/backup/restore-dump.sh` (which restores the host-side dumps, which
-do keep their owners) is not for these dumps.
+backend connects as `econgraph`, which owns the tables it creates through
+app plane migrations. The CronJob's dumps omit ownership (`--no-owner`),
+so restore into
+an `econgraph`-owned database with `--role=econgraph` to give the restored
+tables to that role. Restoring as `postgres` alone would leave the tables
+owned by `postgres`, and the backend could not use them. The host-side
+`scripts/backup/restore-dump.sh` helper is for dumps that retain ownership;
+do not use it for these CronJob dumps.
 
 1. Copy the dump off the backup PVC as in step 1 above, with
    `DUMP=econ_graph_app-20260101-080000.dump`.
 
-2. Stop the backend, the only client of the app database:
+2. Record the replica count for the backend, the only client of the app
+   database, then stop it. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph scale deployment/econ-graph-backend --replicas=0
-   while kubectl -n econ-graph get pods -l app=econ-graph-backend -o name | grep -q .; do sleep 2; done
+   kubectl -n econ-graph get deployment econ-graph-backend \
+     -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
+   kubectl -n econ-graph scale deployment/econ-graph-backend --replicas=0 || exit 1
+   while :; do
+     writer_pods="$(kubectl -n econ-graph get pods -l app=econ-graph-backend -o name)" || exit 1
+     [ -z "$writer_pods" ] && break
+     sleep 2
+   done
    ```
+
+   Do not proceed if recording the count, scaling or checking the pods fails.
 
 3. Recreate the database, owned by `econgraph`, and restore the dump into it
    as `econgraph`:
 
    ```sh
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app
+   kubectl -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app || exit 1
+   kubectl -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app || exit 1
    kubectl -n econ-graph exec -i app-postgres-0 -c postgres -- \
      pg_restore -U postgres -d econ_graph_app --role=econgraph --no-owner --no-privileges \
-     --exit-on-error --single-transaction < "./${DUMP}"
+     --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
 
-4. Start the backend again: `./scripts/deploy/deploy.sh`, or scale
-   `deployment/econ-graph-backend` back to its replica count. It applies any
-   app migrations newer than the dump at startup.
+4. Confirm that database deletion, creation and restoration all exited
+   successfully. If any command fails, keep the backend stopped and resolve
+   the failure before continuing. Only after a successful restore, scale
+   `deployment/econ-graph-backend` back to its recorded replica count. It
+   applies any app plane migrations newer than the dump at startup.
 
 ## Testing
 
