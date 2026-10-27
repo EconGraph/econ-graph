@@ -64,6 +64,13 @@ pub(crate) struct Failure {
     error: GraphQLError,
 }
 
+impl From<diesel::result::Error> for Failure {
+    /// Audit transaction setup, commit, and rollback errors as database failures.
+    fn from(error: diesel::result::Error) -> Self {
+        fail(Outcome::Error, error)
+    }
+}
+
 /// Attach an [`Outcome`] to an error, for an admin mutation's audited body.
 pub(crate) trait OrOutcome<T> {
     fn or_outcome(self, outcome: Outcome) -> std::result::Result<T, Failure>;

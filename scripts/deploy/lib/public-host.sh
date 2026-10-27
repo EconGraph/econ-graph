@@ -14,7 +14,8 @@
 #   unset                      the same as empty on a cluster that serves no
 #                              public host; on one that does, the script stops
 #                              rather than silently taking the site down.
-# scripts/deploy/render-public-host.py lists what the host changes.
+# scripts/deploy/render-public-host.py lists what the host changes, and
+# scripts/deploy/apply-gateway-routes.sh applies the gateway's part of it.
 #
 # A public host is served only from a cluster marked production with
 # scripts/deploy/mark-production-cluster.sh (see lib/cluster-role.sh): on any
@@ -29,22 +30,24 @@
 source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
 
 PUBLIC_HOST_LABEL="econgraph.io/public-host"
-# Settings this file owns in the ingress-nginx controller ConfigMap. Listed so
-# that a deploy without a public host removes them again; use-forwarded-headers
-# is here only so that an older value is removed: it must never be set (it
-# makes ingress-nginx take the scheme, host and port from client headers).
-INGRESS_NGINX_PUBLIC_KEYS=(enable-real-ip forwarded-for-header proxy-real-ip-cidr use-forwarded-headers)
 
-# The public host the cluster serves now, from the public Ingresses or the
-# retired econ-graph-ssl-ingress, or nothing (also when the namespace does not
-# exist yet). Fails when the cluster cannot be asked: an error must not look
-# like "no public host" and lead to the public routes being removed.
+# The public host the cluster serves now: from the public HTTPRoutes, else (a
+# cluster still on ingress-nginx) the public Ingresses or the retired
+# econ-graph-ssl-ingress; nothing when there is none (also when the namespace
+# does not exist yet). Fails when the cluster cannot be asked: an error must
+# not look like "no public host" and lead to the public routes being removed.
 public_host_in_cluster() {
-    local ns hosts
+    local ns hosts=""
     ns="$(kc get namespace econ-graph --ignore-not-found -o name)" || return 1
     [ -n "$ns" ] || return 0
-    hosts="$(kc -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
-        -o jsonpath='{range .items[*]}{.spec.rules[0].host}{"\n"}{end}')" || return 1
+    if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+        hosts="$(kc -n econ-graph get httproute -l "${PUBLIC_HOST_LABEL}=true" \
+            -o jsonpath='{range .items[*]}{.spec.hostnames[0]}{"\n"}{end}')" || return 1
+    fi
+    if [ -z "$hosts" ]; then
+        hosts="$(kc -n econ-graph get ingress -l "${PUBLIC_HOST_LABEL}=true" \
+            -o jsonpath='{range .items[*]}{.spec.rules[0].host}{"\n"}{end}')" || return 1
+    fi
     if [ -z "$hosts" ]; then
         hosts="$(kc -n econ-graph get ingress econ-graph-ssl-ingress --ignore-not-found \
             -o jsonpath='{range .spec.rules[*]}{.host}{"\n"}{end}')" || return 1
@@ -54,7 +57,7 @@ public_host_in_cluster() {
 
 # Decide PUBLIC_HOST (see above) and validate it. Exits on a bad name, when the
 # cluster cannot be asked, or when it is unset while the cluster serves a
-# public host.
+# public host. Exports it for apply-gateway-routes.sh.
 public_host_init() {
     local current
     if ! cluster_role_pin_context; then
@@ -63,7 +66,7 @@ public_host_init() {
     fi
     echo "☸️  Context: ${CLUSTER_ROLE_CONTEXT} (${KUBECTL:-kubectl})"
     if ! current="$(public_host_in_cluster)"; then
-        echo "❌ Could not read the cluster's Ingresses to see which public host it serves"
+        echo "❌ Could not read the cluster's routes to see which public host it serves"
         exit 1
     fi
     if [ -z "${PUBLIC_HOST+x}" ] && [ -n "$current" ]; then
@@ -72,6 +75,7 @@ public_host_init() {
         exit 1
     fi
     PUBLIC_HOST="${PUBLIC_HOST:-}"
+    export PUBLIC_HOST
     if [ -n "$PUBLIC_HOST" ]; then
         ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" /dev/null >/dev/null || exit 1
         # Checked before anything is applied, so a refused deploy changes nothing.
@@ -83,11 +87,11 @@ public_host_init() {
         echo "🌐 No PUBLIC_HOST: serving http://localhost only"
     fi
     # The retired ssl-ingress.yaml's Ingress served the public host names without
-    # the /graphql rate limits. It goes before any Ingress is applied: it holds
-    # econgraph.com /, and the admission webhook refuses a second Ingress for the
-    # same host and path. --ignore-not-found also covers a new cluster without the
-    # namespace; any other failure stops the deploy, since the old Ingress would
-    # keep serving the public host names.
+    # the /graphql rate limits, on a cluster still on ingress-nginx. It goes
+    # first, so it never serves the public host names next to the gateway.
+    # --ignore-not-found also covers a new cluster without the namespace; any
+    # other failure stops the deploy, since the old Ingress would keep serving
+    # the public host names.
     if ! kc -n econ-graph delete ingress econ-graph-ssl-ingress --ignore-not-found; then
         echo "❌ Could not delete the retired Ingress econ-graph-ssl-ingress; it still serves the public host names"
         exit 1
@@ -103,42 +107,23 @@ render_manifest() {
     fi
 }
 
-# The edge in front of the app, both ways: run after the Ingresses are applied.
+# The gateway's side of the public host, both ways: run after install-gateway.sh
+# and cert-manager. With a public host: the https listener, its certificate
+# (Secret econ-graph-tls), the public copies of the routes and the http-to-https
+# and www redirects. Without one, all of that is removed. The localhost routes
+# are applied either way. See scripts/deploy/apply-gateway-routes.sh, which runs
+# on the context public_host_init pinned, with ${KUBECTL:-kubectl}.
 #
-# With a public host, ingress-nginx takes the visitor's address from
-# CF-Connecting-IP (the real_ip module, enable-real-ip), trusted only from pod
-# addresses, so graphql-ingress.yaml's per-client limits apply per visitor
-# instead of to every visitor as the cloudflared pod. That is all it takes from
-# client headers: use-forwarded-headers stays off, so X-Forwarded-Proto/-Host/
-# -Port sent by a client are ignored and overwritten with the connection's own
-# scheme, Host and port. Any pod can still claim an address in CF-Connecting-IP,
-# so addresses logged for in-cluster callers are not audit-grade.
-#
-# Without one, those settings and any public Ingress are removed again.
+# The visitor's address: cloudflared forwards it in X-Forwarded-For, which the
+# gateway trusts only from pod addresses (ClientTrafficPolicy
+# econ-graph-client-headers), so the GraphQL per-client limits apply per
+# visitor instead of to every visitor as the cloudflared pod. Any pod can still
+# claim an address that way, so addresses logged for in-cluster callers are not
+# audit-grade.
 apply_public_edge() {
-    local key patch pod_cidrs
-    if [ -n "$PUBLIC_HOST" ]; then
-        pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')"
-        # kc only prints in a dry run (lib/cluster-role.sh), so there are no CIDRs to show.
-        if [ -z "$pod_cidrs" ] && [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
-            pod_cidrs="<pod-cidrs>"
-        fi
-        if [ -z "$pod_cidrs" ]; then
-            echo "❌ Could not read the nodes' pod CIDRs for ingress-nginx's proxy-real-ip-cidr"
-            exit 1
-        fi
-        echo "🔧 ingress-nginx: client address from CF-Connecting-IP, trusted from ${pod_cidrs}"
-        kc -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
-            "{\"data\":{\"enable-real-ip\":\"true\",\"forwarded-for-header\":\"CF-Connecting-IP\",\"proxy-real-ip-cidr\":\"${pod_cidrs}\",\"use-forwarded-headers\":null}}"
-    else
-        patch=""
-        for key in "${INGRESS_NGINX_PUBLIC_KEYS[@]}"; do
-            patch+="\"${key}\":null,"
-        done
-        kc -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p \
-            "{\"data\":{${patch%,}}}"
-        kc -n econ-graph delete ingress -l "${PUBLIC_HOST_LABEL}=true" --ignore-not-found
-    fi
+    local args=(--context "$CLUSTER_ROLE_CONTEXT")
+    [ "${CLUSTER_ROLE_DRY_RUN:-false}" != true ] || args+=(--dry-run)
+    PUBLIC_HOST="${PUBLIC_HOST:-none}" ./scripts/deploy/apply-gateway-routes.sh "${args[@]}"
 }
 
 # Stop the deploy: PUBLIC_HOST is set on a cluster that is not production
@@ -196,7 +181,7 @@ apply_cloudflared() {
         echo "   scripts/deploy/create-secrets.sh --prompt-tunnel-token, then deploy again."
         yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kc apply -f -
     elif [ -z "$PUBLIC_HOST" ]; then
-        echo "⚠️  No PUBLIC_HOST: cloudflared applied with 0 replicas (no Ingress serves"
+        echo "⚠️  No PUBLIC_HOST: cloudflared applied with 0 replicas (no route serves"
         echo "   the tunnel's host names)."
         yq '.spec.replicas = 0' k8s/manifests/cloudflared.yaml | kc apply -f -
     else

@@ -663,22 +663,17 @@ bootstrap_databases() {
 
 # --- cluster add-ons -------------------------------------------------------------
 
-# ingress-nginx for kind. It binds hostPorts 80/443 on whatever node it runs
-# on, and only the control plane (labelled ingress-ready=true) has those ports
-# mapped to the host. The v1.13 kind manifest no longer selects that node, so
-# the controller can land on the worker and every request to localhost is
-# reset; pin it with a nodeSelector. Pinned version, so a recreate installs
-# what was tested. Idempotent (kubectl apply, merge patch).
-INGRESS_NGINX_MANIFEST="${INGRESS_NGINX_MANIFEST:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.3/deploy/static/provider/kind/deploy.yaml}"
-
-install_ingress_nginx() {
-    log "Installing ingress-nginx (${INGRESS_NGINX_MANIFEST##*/ingress-nginx/})"
-    run kubectl apply -f "${INGRESS_NGINX_MANIFEST}"
-    run kubectl -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
-    if [ "${DRY_RUN}" != "true" ]; then
-        kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
+# The gateway (Envoy Gateway, k8s/manifests/gateway/): its proxy takes host
+# ports 80/443 on the control-plane node (labelled ingress-ready=true), the
+# only node they are mapped to. Pinned versions, so a recreate installs what
+# was tested. Idempotent (scripts/deploy/install-gateway.sh).
+install_gateway() {
+    log "Installing the gateway (scripts/deploy/install-gateway.sh)"
+    if [ "${DRY_RUN}" = "true" ]; then
+        echo "+ scripts/deploy/install-gateway.sh"
+        return 0
     fi
+    "${PROJECT_ROOT}/scripts/deploy/install-gateway.sh"
 }
 
 # Will the cluster come back by itself after a host reboot? Needs the Docker

@@ -6,86 +6,63 @@ use uuid::Uuid;
 use crate::enums::{AssignmentStatus, AssignmentType};
 use crate::schema::annotation_assignments;
 
-/// Assignment for team workflow management
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Insertable)]
+/// Assignment of a financial annotation to a team member.
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = annotation_assignments)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AnnotationAssignment {
     pub id: Uuid,
-    pub statement_id: Uuid,
-    pub line_item_id: Option<Uuid>,
-    pub assignee_id: Uuid,
-    pub assigner_id: Uuid,
+    pub annotation_id: Uuid,
+    pub assigned_to: Uuid,
+    pub assigned_by: Uuid,
     pub assignment_type: AssignmentType,
-    pub due_date: Option<DateTime<Utc>>,
     pub status: AssignmentStatus,
-    pub notes: Option<String>,
+    pub due_date: Option<DateTime<Utc>>,
+    pub instructions: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
-/// New annotation assignment for insertion
+/// Values needed to assign an existing annotation.
 #[derive(Debug, Clone, Serialize, Deserialize, Insertable)]
 #[diesel(table_name = annotation_assignments)]
 pub struct NewAnnotationAssignment {
-    pub statement_id: Uuid,
-    pub line_item_id: Option<Uuid>,
-    pub assignee_id: Uuid,
-    pub assigner_id: Uuid,
+    pub annotation_id: Uuid,
+    pub assigned_to: Uuid,
+    pub assigned_by: Uuid,
     pub assignment_type: AssignmentType,
-    pub due_date: Option<DateTime<Utc>>,
     pub status: AssignmentStatus,
-    pub notes: Option<String>,
+    pub due_date: Option<DateTime<Utc>>,
+    pub instructions: Option<String>,
 }
 
 impl NewAnnotationAssignment {
-    /// Create a new annotation assignment
+    /// Create a pending assignment for an existing financial annotation.
     pub fn new(
-        statement_id: Uuid,
-        assignee_id: Uuid,
-        assigner_id: Uuid,
+        annotation_id: Uuid,
+        assigned_to: Uuid,
+        assigned_by: Uuid,
         assignment_type: AssignmentType,
     ) -> Self {
         Self {
-            statement_id,
-            line_item_id: None,
-            assignee_id,
-            assigner_id,
+            annotation_id,
+            assigned_to,
+            assigned_by,
             assignment_type,
-            due_date: None,
             status: AssignmentStatus::Pending,
-            notes: None,
+            due_date: None,
+            instructions: None,
         }
     }
-
-    /// Create a line item assignment
-    pub fn for_line_item(
-        statement_id: Uuid,
-        line_item_id: Uuid,
-        assignee_id: Uuid,
-        assigner_id: Uuid,
-        assignment_type: AssignmentType,
-    ) -> Self {
-        Self {
-            statement_id,
-            line_item_id: Some(line_item_id),
-            assignee_id,
-            assigner_id,
-            assignment_type,
-            due_date: None,
-            status: AssignmentStatus::Pending,
-            notes: None,
-        }
-    }
-
-    /// Set due date for the assignment
+    /// Set the assignment deadline.
     pub fn with_due_date(mut self, due_date: DateTime<Utc>) -> Self {
         self.due_date = Some(due_date);
         self
     }
-
-    /// Add notes to the assignment
+    /// Add instructions for the assignee.
     pub fn with_notes(mut self, notes: String) -> Self {
-        self.notes = Some(notes);
+        self.instructions = Some(notes);
         self
     }
 }
@@ -93,10 +70,9 @@ impl NewAnnotationAssignment {
 /// Filter for querying annotation assignments
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnnotationAssignmentFilter {
-    pub statement_id: Option<Uuid>,
-    pub line_item_id: Option<Uuid>,
-    pub assignee_id: Option<Uuid>,
-    pub assigner_id: Option<Uuid>,
+    pub annotation_id: Option<Uuid>,
+    pub assigned_to: Option<Uuid>,
+    pub assigned_by: Option<Uuid>,
     pub assignment_type: Option<AssignmentType>,
     pub status: Option<AssignmentStatus>,
     pub due_after: Option<DateTime<Utc>>,
@@ -108,10 +84,9 @@ pub struct AnnotationAssignmentFilter {
 impl Default for AnnotationAssignmentFilter {
     fn default() -> Self {
         Self {
-            statement_id: None,
-            line_item_id: None,
-            assignee_id: None,
-            assigner_id: None,
+            annotation_id: None,
+            assigned_to: None,
+            assigned_by: None,
             assignment_type: None,
             status: None,
             due_after: None,

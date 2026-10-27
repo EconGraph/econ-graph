@@ -88,8 +88,8 @@ jobs:
       e2e_images: ${{ steps.filter.outputs.e2e_images }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
-    - uses: dorny/paths-filter@v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
       id: filter
       # Protected-branch pushes run the ordinary suite without path filtering.
       if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
@@ -196,17 +196,17 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -228,7 +228,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
     - name: Install promtool
       run: |
@@ -243,6 +243,27 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+  postgres-backup-scripts:
+    name: PostgreSQL Backup Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+
+    # The postgres-backup CronJob's backup, sync and restore scripts, in its
+    # images, against scratch econ_graph, econ_graph_app and keycloak databases
+    # and an S3 mock.
+    - name: Check the backup and restore scripts
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-postgres-backup-scripts.sh
+
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
@@ -252,18 +273,20 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
-    # rendering against the manifests and the library against a stub kubectl.
+    # rendering against the manifests, and the library and the cut-over's rollback
+    # NetworkPolicy step against a stub kubectl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        scripts/deploy/test-cutover-rollback-policy.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.
@@ -284,6 +307,11 @@ jobs:
     - name: Check the kind installer
       run: scripts/deploy/test-install-kind.sh
 
+    # The pre-deploy database check (backup running, crawler stop, long transactions),
+    # against a stub kubectl.
+    - name: Check the pre-deploy database check
+      run: scripts/deploy/test-precheck-db-migration.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
@@ -295,12 +323,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
-      uses: actions/setup-python@v7
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
       with:
         python-version: '3.14'
 
@@ -377,17 +405,17 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -486,12 +514,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -556,17 +584,17 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -594,7 +622,7 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -681,18 +709,18 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -733,7 +761,8 @@ jobs:
           own_account_cannot_be_suspended_or_deleted \
           own_account_is_left_intact_by_suspend_and_delete \
           update_user_email_conflict_leaves_other_fields_unchanged \
-          deleting_a_chart_inviter_preserves_other_users_access; do
+          deleting_a_chart_inviter_preserves_other_users_access \
+          concurrent_admin_removals_leave_an_active_admin; do
           name="graphql::authorization_tests::$test"
           log="$RUNNER_TEMP/$test.log"
           cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
@@ -859,12 +888,8 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
-    # Allowed to fail (owner decision): the full workspace run still has known
-    # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
-    # running so those failures stay visible in the log. TODO: drop
-    # continue-on-error once the pre-existing failures are fixed.
+    # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
-      continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
@@ -874,11 +899,9 @@ jobs:
         exit $status
       working-directory: backend
 
-    # TODO: ~45 doctests across the workspace do not compile (stale examples).
-    # Fix them, then drop continue-on-error (or fold into the step above by
-    # removing --lib --bins --tests).
+    # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
-      continue-on-error: true
+      if: ${{ !cancelled() }}
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
@@ -915,15 +938,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1050,12 +1073,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1086,7 +1109,7 @@ jobs:
       run: npm run e2e:smoke
 
     - name: Upload admin frontend test coverage
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: admin-frontend-coverage-${{ github.sha }}
         path: admin-frontend/coverage/
@@ -1104,12 +1127,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1146,7 +1169,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1154,12 +1177,12 @@ jobs:
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: |
           ~/.cargo/registry
@@ -1182,7 +1205,7 @@ jobs:
         cargo clippy -- -W clippy::all
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1219,15 +1242,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1246,7 +1269,7 @@ jobs:
       working-directory: backend
 
     - name: Setup Node.js for npm audit
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1286,15 +1309,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1302,7 +1325,7 @@ jobs:
         save-if: ${{ github.job == 'backend-build-cache' }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1364,7 +1387,7 @@ jobs:
         echo "✅ License compliance check completed successfully"
 
     - name: Upload license reports
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: license-compliance-reports-${{ github.sha }}
         path: |
@@ -1395,15 +1418,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1442,12 +1465,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1472,12 +1495,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
     - name: Build optimized E2E container
       run: |
@@ -1494,7 +1517,7 @@ jobs:
         docker save econ-graph-e2e-mobile-optimized:latest | gzip > e2e-mobile-container-optimized.tar.gz
 
     - name: Upload optimized E2E containers
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: e2e-containers-optimized
         path: |
@@ -1528,7 +1551,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -1563,10 +1586,10 @@ jobs:
         } >> "$GITHUB_ENV"
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1603,7 +1626,7 @@ jobs:
       working-directory: backend
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -1676,15 +1699,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1730,7 +1753,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -1841,7 +1864,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: playwright-test-results-e2e-comprehensive
         path: |
@@ -1879,17 +1902,17 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1935,7 +1958,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -2050,7 +2073,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: playwright-test-results-mobile-e2e-core
         path: |
@@ -2076,7 +2099,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -2129,15 +2152,15 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
     - name: Build backend Docker image
-      uses: docker/build-push-action@v7
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./backend
         push: false
@@ -2147,7 +2170,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build frontend Docker image
-      uses: docker/build-push-action@v7
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./frontend
         push: false

@@ -185,7 +185,6 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
-  render_manifest k8s/manifests/keycloak/ingress.yaml | kubectl apply -f -
   # Wait for the new Keycloak pod, so the realm import below talks to the server this
   # deploy just applied, after any schema migration it ran on start. The Deployment
   # uses Recreate, so no old pod stays ready meanwhile. Under --dry-run kubectl only
@@ -214,6 +213,10 @@ fi
 # that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
+# crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
+# deploy (scripts/deploy/precheck-db-migration.sh --stop-crawler) stays stopped while the data
+# migrations run, and stays stopped if the Job fails (a migration that gave up on its table
+# locks, say): the deploy stops here.
 has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
   -o jsonpath='{.data.data-database-url}')"
 if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
@@ -261,18 +264,11 @@ kubectl apply -f k8s/manifests/frontend-service.yaml
 # (401-on-everything) admin frontend doesn't keep serving traffic.
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
-# ingress.yaml routes /admin to the admin-frontend Service, which isn't deployed
-# above; apply it with that one path filtered out rather than pointing an ingress
-# rule at a nonexistent Service.
-yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
-  k8s/manifests/ingress.yaml | render_manifest - | kubectl apply -f -
-# graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
-# (see the comment in ingress.yaml), so both manifests must be applied together.
-render_manifest k8s/manifests/graphql-ingress.yaml | kubectl apply -f -
-
-# ingress-nginx client-address settings and the public Ingresses, both ways,
-# then the tunnel connector (scripts/deploy/lib/public-host.sh).
-apply_public_edge
+# The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
+# 80/443 (k8s/manifests/gateway/; idempotent). The routes, with the public
+# host's, follow once cert-manager is installed (apply_public_edge below).
+run_script ./scripts/deploy/install-gateway.sh --context "$CLUSTER_ROLE_CONTEXT"
+# The tunnel connector (scripts/deploy/lib/public-host.sh).
 apply_cloudflared
 
 # Deploy chart API service (internal only)
@@ -345,12 +341,33 @@ kill $MONITOR_PID 2>/dev/null || true
 
 # Install cert-manager first: k8s/monitoring/letsencrypt-cloudflare-dns01.yaml
 # defines ClusterIssuer/Certificate resources whose CRDs cert-manager provides.
+# Its Gateway API support (--enable-gateway-api, needed for the gateway's https
+# listener certificate) is switched on in the manifest before it is applied, so
+# the controller starts once with it.
 echo "🔐 Installing cert-manager (provides the CRDs used by k8s/monitoring/)..."
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+cert_manager_manifest="$(mktemp)"
+curl -fsSL --retry 3 -o "$cert_manager_manifest" \
+  https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+awk '{ print } /^ *- --acme-http01-solver-image=/ { sub(/-.*/, "- --enable-gateway-api"); print }' \
+  "$cert_manager_manifest" > "${cert_manager_manifest}.patched"
+grep -q -- '- --enable-gateway-api$' "${cert_manager_manifest}.patched" || {
+  echo "❌ Could not add --enable-gateway-api to the cert-manager manifest"
+  exit 1
+}
+kubectl apply -f "${cert_manager_manifest}.patched"
+rm -f "$cert_manager_manifest" "${cert_manager_manifest}.patched"
 echo "⏳ Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
+
+# The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
+# public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none})"
+else
+  apply_public_edge
+fi
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
@@ -451,7 +468,7 @@ if [ -n "$PUBLIC_HOST" ]; then
   echo "  Public:   https://${PUBLIC_HOST} (through the Cloudflare Tunnel; www redirects here)"
   echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} [--via-cloudflare]"
 fi
-# k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
+# The gateway's routes (k8s/manifests/gateway/routes/) answer on host localhost.
 echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (ECO-242).
 echo "  Backend:  http://localhost/api"
