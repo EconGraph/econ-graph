@@ -140,11 +140,28 @@ For a new database whose initialization failure has been traced to huge-page use
 ```bash
 microk8s kubectl set env statefulset/postgresql -n econ-graph \
   --containers=postgresql POSTGRES_INITDB_ARGS='--set huge_pages=off'
+microk8s kubectl get statefulset postgresql -n econ-graph \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="postgresql")].env[?(@.name=="POSTGRES_INITDB_ARGS")].value}{"\n"}{.metadata.generation}{" generation; "}{.status.observedGeneration}{" observed; "}{.status.updateRevision}{" update revision\n"}'
+microk8s kubectl get pod postgresql-0 -n econ-graph \
+  -o jsonpath='{.metadata.uid}{" UID; "}{.metadata.labels.controller-revision-hash}{" revision\n"}{.spec.containers[?(@.name=="postgresql")].env[?(@.name=="POSTGRES_INITDB_ARGS")].value}{"\n"}'
+```
+
+Verify that the template contains `--set huge_pages=off`. Repeat the StatefulSet query until `observedGeneration` matches `generation`, then compare `updateRevision` with the pod's `controller-revision-hash` and check the pod's initialization option. Record its UID to distinguish a replacement from the old pod.
+
+The manifest uses the default `OrderedReady` pod management and `RollingUpdate` strategy. An already unready pod can [stall replacement after a template correction](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#forced-rollback), so a successful template edit does not prove the option reached the failing container. If `postgresql-0` is still failing on the old revision or without the new option, investigate any partially initialized directory before allowing another initialization attempt. Once that attempt is appropriate, delete only the named pod normally so the StatefulSet recreates it:
+
+```bash
+microk8s kubectl delete pod postgresql-0 -n econ-graph
+```
+
+This replaces the database process and interrupts availability; it preserves the StatefulSet, PVCs, PVs and database files. Do not force deletion or remove storage to bypass the stalled rollout. Repeat the two queries after recreation: verify the UID changed, the pod revision matches the observed update revision, and the initialization option is present. Then wait for the rollout and inspect the new logs:
+
+```bash
 microk8s kubectl rollout status statefulset/postgresql -n econ-graph --timeout=300s
 microk8s kubectl logs postgresql-0 -n econ-graph -c postgresql
 ```
 
-This template change rolls the PostgreSQL pod and interrupts database availability. In PostgreSQL 18, [`initdb --set`](https://www.postgresql.org/docs/18/app-initdb.html) applies the setting during initialization and writes it to the newly generated `postgresql.conf`. The [official image entrypoint](https://github.com/docker-library/postgres/blob/master/18/bookworm/docker-entrypoint.sh) skips initialization when `PGDATA/PG_VERSION` already exists, so changing `POSTGRES_INITDB_ARGS` does not reconfigure an existing database. Do not remove database files to make this option take effect. A partially initialized directory needs investigation before another initialization attempt.
+In PostgreSQL 18, [`initdb --set`](https://www.postgresql.org/docs/18/app-initdb.html) applies the setting during initialization and writes it to the newly generated `postgresql.conf`. The [official image entrypoint](https://github.com/docker-library/postgres/blob/master/18/bookworm/docker-entrypoint.sh) skips initialization when `PGDATA/PG_VERSION` already exists, so changing `POSTGRES_INITDB_ARGS` does not reconfigure an existing database. Do not remove database files to make this option take effect. A partially initialized directory needs investigation before another initialization attempt.
 
 The [huge-page helper](../../scripts/configure-postgresql-no-hugepages.sh) sets this same initialization variable and deletes the pod. It uses the ambient `kubectl` configuration; the directly targeted command above avoids that ambiguity.
 
