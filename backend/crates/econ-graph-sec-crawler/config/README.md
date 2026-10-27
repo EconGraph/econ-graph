@@ -1,40 +1,40 @@
 # Financial Analysis Configuration
 
-This directory contains configuration files that allow financial analysts to modify ratio calculations, benchmarks, and interpretations without changing code.
+These four JSON files hold concept mappings, benchmark percentiles, interpretation thresholds, and formula reference material for the optional financial-analysis library. Analysts can maintain this metadata without editing Rust. Implementing a new calculation or changing the concepts used in its arithmetic requires changes to the [financial ratio calculator](../src/financial_ratio_calculator.rs).
 
-## Configuration Files
+The loader and calculator require the off-by-default [`xbrl-parser` Cargo feature](../README.md#cargo-features). The default crawler-worker build leaves them out, and the live filing crawl does not use these files to calculate ratios.
+
+## Loading configuration
+
+[`FinancialAnalysisConfig::load_from_dir`](../src/config_loader.rs) reads and deserializes all four files from the directory supplied by its caller. `FinancialRatioCalculator::new` and `with_config` call this loader with `config`, relative to the process working directory. For example, that path finds these files when the process runs from `backend/crates/econ-graph-sec-crawler`. Use `FinancialRatioCalculator::with_config_dir` to supply a different directory together with a `RatioCalculationConfig`.
+
+Missing files, invalid JSON, and missing required fields return errors to the caller; calculator construction fails if loading fails. Loading happens at construction. To apply edited files, construct a new calculator; an existing instance keeps its loaded configuration.
+
+The examples below are complete minimal values for their respective files. The [loader's Rust types](../src/config_loader.rs) define the required fields. Empty maps are allowed, but required top-level fields must still be present.
+
+## Configuration files
 
 ### `concept_mappings.json`
-Maps standardized concept names to XBRL taxonomy concepts for different accounting standards.
 
-**Structure:**
-- `us_gaap`: US Generally Accepted Accounting Principles mappings
-- `ifrs`: International Financial Reporting Standards mappings
+[Concept mappings](concept_mappings.json) associate standardized names such as `Assets` with XBRL taxonomy concept identifiers. Both `us_gaap` and `ifrs` maps are required:
 
-**Example:**
 ```json
 {
   "us_gaap": {
     "Assets": "us-gaap:Assets",
     "NetIncome": "us-gaap:NetIncomeLoss",
     "Revenue": "us-gaap:Revenues"
-  }
+  },
+  "ifrs": {}
 }
 ```
 
-**How to modify:**
-- Add new concept mappings for different accounting standards
-- Update existing mappings if XBRL taxonomy changes
-- Add support for new taxonomies (e.g., industry-specific standards)
+`get_concept_mapping` accepts the taxonomy arguments `us-gaap` and `ifrs`; other values return `None`. Adding another top-level taxonomy does not extend this dispatch. The calculator's arithmetic selects concept identifiers in Rust and does not call its concept-mapping helper, so editing these maps alone does not change the concepts used in calculations.
 
 ### `ratio_benchmarks.json`
-Contains industry-specific benchmarks for financial ratios.
 
-**Structure:**
-- `industries`: Map of industry codes to benchmark data
-- Each industry contains percentile benchmarks (p10, p25, median, p75, p90)
+[Ratio benchmarks](ratio_benchmarks.json) store percentile values for ratios within an industry. The required `industries` map contains entries with `industry_code`, `industry_name`, and a `benchmarks` map. Each ratio entry requires `ratio_name` and all five percentile fields:
 
-**Example:**
 ```json
 {
   "industries": {
@@ -43,6 +43,7 @@ Contains industry-specific benchmarks for financial ratios.
       "industry_name": "Computer Programming, Data Processing, And Other Computer Related Services",
       "benchmarks": {
         "return_on_equity": {
+          "ratio_name": "return_on_equity",
           "median": 0.15,
           "p25": 0.08,
           "p75": 0.25,
@@ -55,20 +56,14 @@ Contains industry-specific benchmarks for financial ratios.
 }
 ```
 
-**How to modify:**
-- Add new industries using SIC or GICS codes
-- Update benchmark percentiles based on latest industry data
-- Add new ratio types for industry-specific analysis
-- Source data from industry reports, academic studies, or financial databases
+`get_industry_benchmark("7370", "return_on_equity")` looks up the exact industry and ratio map keys. The shipped keys use SIC-style industry codes. SIC (Standard Industrial Classification) and GICS (Global Industry Classification Standard) are separate classification systems; the loader does not validate codes or translate between them.
+
+The checked-in values are examples with no source or observation date recorded in the files. Treat them as illustrative, rather than sourced current industry statistics. The calculator does not use the benchmark lookup to populate results: its calculated ratios leave `benchmark_percentile` as `None`.
 
 ### `ratio_interpretations.json`
-Defines interpretation thresholds and descriptions for financial ratios.
 
-**Structure:**
-- Each ratio has five interpretation levels: excellent, good, average, below_average, poor
-- Each level has a threshold value and descriptive text
+[Ratio interpretations](ratio_interpretations.json) map exact ratio names to descriptions selected by numeric thresholds. Each ratio requires all five levels, and every level requires `threshold` and `description`:
 
-**Example:**
 ```json
 {
   "return_on_equity": {
@@ -79,25 +74,31 @@ Defines interpretation thresholds and descriptions for financial ratios.
     "good": {
       "threshold": 0.15,
       "description": "Good - Above average profitability"
+    },
+    "average": {
+      "threshold": 0.10,
+      "description": "Average - Moderate profitability"
+    },
+    "below_average": {
+      "threshold": 0.05,
+      "description": "Below average - Weak profitability"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak profitability"
     }
   }
 }
 ```
 
-**How to modify:**
-- Adjust thresholds based on market conditions or industry standards
-- Update descriptions to reflect current market expectations
-- Add new ratios with their interpretation criteria
-- Consider different thresholds for different company sizes or industries
+`get_ratio_interpretation` checks `value >= threshold` in this order: `excellent`, `good`, `average`, then `below_average`. The first match supplies the description. If none matches, it returns the `poor` description without comparing the `poor` threshold. A missing ratio key returns `None`.
+
+Use the same units as the calculator: for example, return on equity of 15% is `0.15`. The lookup applies the same comparison direction to every ratio, including ratios where lower values may be preferable. An ascending threshold sequence does not reverse the comparison. Interpretations have no company-size or industry dimension; adding those dimensions or a different comparison direction requires Rust changes.
 
 ### `ratio_formulas.json`
-Contains formulas, descriptions, and educational links for financial ratios.
 
-**Structure:**
-- Organized by category: profitability, liquidity, leverage, efficiency, valuation, warren_buffett_favorites, growth
-- Each ratio includes formula, description, and educational link
+[Ratio formulas](ratio_formulas.json) provide readable formulas, explanations, and educational links. All seven category maps shown here are required, even when empty. Each ratio entry requires `formula`, `description`, and `educational_link`:
 
-**Example:**
 ```json
 {
   "profitability": {
@@ -106,81 +107,36 @@ Contains formulas, descriptions, and educational links for financial ratios.
       "description": "Measures how efficiently a company uses shareholders' equity to generate profits",
       "educational_link": "https://www.investopedia.com/terms/r/returnonequity.asp"
     }
-  }
+  },
+  "liquidity": {},
+  "leverage": {},
+  "efficiency": {},
+  "valuation": {},
+  "warren_buffett_favorites": {},
+  "growth": {}
 }
 ```
 
-**How to modify:**
-- Add new ratios with their formulas and explanations
-- Update educational links to point to current resources
-- Add industry-specific or custom ratios
-- Include alternative calculation methods for the same ratio
+`get_ratio_formula` searches these category maps by exact ratio key, and `get_ratios_by_category` lists the keys in a named category. New entries make reference material available through these APIs. Formula strings are descriptive text, not executable expressions; the calculator implements arithmetic and assigns its result formula strings in Rust. Editing this file does not change either behavior. A new category also requires changes to the loader's types and lookup methods.
 
-## Best Practices for Financial Analysts
+## Maintaining the files
 
-### 1. Benchmark Updates
-- Update benchmarks quarterly or annually based on latest industry data
-- Consider seasonal variations in certain industries
-- Use multiple data sources to ensure accuracy
-- Document the source and date of benchmark data
+For a benchmark change, record the source, data date, peer-group definition, units, and calculation method in the change's review description or an accompanying reference document. These JSON types have no provenance fields. Cite the actual report, dataset, or database extract used; a provider name alone does not establish the origin of the numbers. For an interpretation or formula change, explain the rationale and confirm that the text matches the implemented calculation.
 
-### 2. Threshold Adjustments
-- Review interpretation thresholds annually
-- Consider market conditions (bull vs. bear markets)
-- Adjust for inflation and interest rate changes
-- Test thresholds against historical data
+Validate JSON syntax, then load the full directory through `FinancialAnalysisConfig::load_from_dir` and fail the check on any returned error. Syntax checks alone do not detect missing required fields. For example, this program loads the checked-in files when run from the repository root, with `xbrl-parser` enabled in the consuming crate:
 
-### 3. New Ratio Development
-- Start with clear business rationale for the new ratio
-- Define calculation methodology precisely
-- Set appropriate interpretation thresholds
-- Include educational resources for users
+```rust
+use econ_graph_sec_crawler::FinancialAnalysisConfig;
 
-### 4. Quality Assurance
-- Validate JSON syntax before deploying changes
-- Test new configurations with sample data
-- Document changes and their rationale
-- Maintain version control of configuration files
+fn main() -> anyhow::Result<()> {
+    let config = FinancialAnalysisConfig::load_from_dir(
+        "backend/crates/econ-graph-sec-crawler/config",
+    )?;
+    assert!(config.get_ratio_formula("return_on_equity").is_some());
+    Ok(())
+}
+```
 
-## Data Sources for Benchmarks
+Check the affected lookups with representative values, including values at and on either side of interpretation thresholds. Loading verifies the Rust schema; it does not establish the financial validity of benchmark values or threshold choices. For changes intended to affect calculations, check representative financial statements against the Rust implementation as well.
 
-### Industry Data
-- **SIC/GICS Codes**: Standard Industrial Classification codes
-- **Industry Reports**: McKinsey, Deloitte, PwC industry studies
-- **Academic Research**: Financial journals and studies
-- **Government Data**: SEC, Federal Reserve, Bureau of Economic Analysis
-
-### Financial Databases
-- **Bloomberg Terminal**: Industry ratio databases
-- **S&P Capital IQ**: Industry benchmarking tools
-- **FactSet**: Peer analysis and benchmarking
-- **Morningstar**: Industry and sector analysis
-
-### Professional Organizations
-- **CFA Institute**: Financial analysis standards
-- **AICPA**: Accounting and auditing standards
-- **Industry Associations**: Sector-specific benchmarks
-
-## Version Control
-
-All configuration changes should be:
-1. **Documented**: Include change rationale and data sources
-2. **Tested**: Validate with sample financial statements
-3. **Reviewed**: Have another analyst review changes
-4. **Versioned**: Use git to track configuration history
-
-## Emergency Updates
-
-For urgent market condition changes:
-1. Create a hotfix branch
-2. Update only the necessary thresholds
-3. Test with current data
-4. Deploy and document the emergency change
-5. Follow up with a proper review and permanent update
-
-## Contact
-
-For questions about configuration changes or to suggest new ratios:
-- **Technical Issues**: Backend development team
-- **Financial Content**: Senior financial analysts
-- **Data Sources**: Research team
+Keep changes in version control and have another analyst review the financial content. After review, make the edited directory available to the consuming application and construct a new calculator with that path. The library has no file-watching or reload mechanism.
