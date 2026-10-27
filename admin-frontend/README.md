@@ -40,9 +40,9 @@ backend [query root](../backend/crates/econ-graph-graphql/src/graphql/query.rs) 
 [mutation root](../backend/crates/econ-graph-graphql/src/graphql/mutation.rs) when
 diagnosing schema errors.
 
-The service links above the tabs are hardcoded in [`App.tsx`](src/App.tsx): the
-main frontend, Grafana, backend API, and GraphQL Playground use
-`http://localhost:8080/`, `/grafana`, `/api`, and `/playground`, respectively.
+All four service links above the tabs are hardcoded in [`App.tsx`](src/App.tsx)
+to `http://localhost:8080`: main frontend `/`, Grafana `/grafana`, backend API
+`/api`, and GraphQL Playground `/playground`.
 These links do not configure API requests or collect monitoring data. For the
 platform's metrics and dashboards, see the [monitoring guide](../docs/monitoring/README.md).
 
