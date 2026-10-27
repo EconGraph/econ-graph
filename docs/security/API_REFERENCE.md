@@ -112,8 +112,9 @@ HTTP stack.
 
 Schema introspection is available under the same depth and complexity limits.
 The `/playground` browser page is a separate feature: the backend serves it only
-when `ENABLE_GRAPHQL_PLAYGROUND=true`, and otherwise returns 404. Disabling that
-page does not disable introspection at `/graphql`.
+when `ENABLE_GRAPHQL_PLAYGROUND` is `true` (case-insensitive) or `1`, with
+surrounding whitespace allowed. Other values, or an unset variable, return 404.
+Disabling that page does not disable introspection at `/graphql`.
 
 Deployments can impose additional HTTP quotas. The committed Kubernetes Gateway
 policies apply separate rate-limit buckets to the application and data GraphQL
