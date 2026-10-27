@@ -8,55 +8,70 @@ The EconGraph backend exposes a GraphQL API. DataLoaders batch selected relation
 
 ### DataLoader Implementation
 
-The current [DataLoaders implementation](../../backend/crates/econ-graph-graphql/src/graphql/dataloaders.rs) has these fields:
-
-- `data_source_loader` — source lookups by ID
-- `data_points_by_series_loader` — data points by series ID
-- `data_point_count_loader` — data point counts by series ID
-- `series_by_source_loader` — series by source ID
-- `series_count_loader` — series counts by source ID
-- `user_loader` — user lookups by ID
-- `latest_observation_loader` — latest observations by series ID (non-cached)
+The [DataLoaders implementation](../../backend/crates/econ-graph-graphql/src/graphql/dataloaders.rs)
+provides cached loaders for sources, data points, data point counts, series by source,
+and series counts (`data_source_loader`, `data_points_by_series_loader`,
+`data_point_count_loader`, `series_by_source_loader`, and `series_count_loader`).
+It also provides four non-cached loaders: `dataset_loader`,
+`series_dataset_fields_loader`, `dataset_source_loader`, and `latest_observation_loader`.
+A loader's presence does not mean every related field uses it.
 
 ### Field Resolvers with DataLoaders
 
-[EconomicSeriesType resolvers](../../backend/crates/econ-graph-graphql/src/graphql/types.rs)
-obtain loaders from `ctx.data::<SchemaResources>()?.data_loaders` and call
-`.load(key).await`. For example, `source` uses `data_source_loader`, and
-`recentDataPoints` uses `data_points_by_series_loader` before taking the requested limit.
-The limit does not bound the loader's database fetch.
+The active [EconomicSeriesType resolvers](../../backend/crates/econ-graph-graphql/src/types.rs)
+batch `dataset`, `dimensions`, and `defaultMeasure` through the dataset and series-dataset
+loaders, and `latestObservation` through the latest-observation loader.
+[`DatasetType.source`](../../backend/crates/econ-graph-graphql/src/graphql/datasets.rs)
+uses `dataset_source_loader`. These resolvers obtain loaders through
+`crate::graphql::context::data_loaders(ctx)?` and call `.try_load(key).await`.
+The helper reads the optional loaders in `SchemaResources`; without a configured data
+database, it returns `DATA_SERVED_REMOTELY`, directing callers to `/data/graphql`.
 
-The filtered `EconomicSeriesType.dataPoints` resolver queries the database directly for
-each series. Selecting it across several series therefore performs per-series queries;
-there is no filtered-date-range loader.
+`EconomicSeriesType.source`, `recentDataPoints`, `dataPointCount`, and
+filtered `dataPoints` query the database separately for each series.
+`recentDataPoints(limit: ...)` applies a SQL limit and returns the latest revision of
+each selected observation, ordered from newest observation date to oldest.
+`DataSourceType.series` also queries directly, loading the source's active series with
+observations before paging them in memory; its `first` argument limits the response,
+not the database fetch.
 
 Cached loaders are created with the schema and stored in its `SchemaResources`, so
 cache lifetime follows schema lifetime. The backend's [`/graphql` route](../../backend/crates/econ-graph-backend/src/main.rs)
 builds a fresh schema for every HTTP request, making those caches request-scoped.
 Callers that retain a schema, such as the MCP and security servers, retain its cached
-loaders across requests. The latest-observation loader is explicitly non-cached so
-retained schemas can read observations updated by a crawl.
+loaders across requests. The dataset and latest-observation loaders are non-cached so
+retained schemas can read dataset edits and observations updated by a crawl.
 
 ## GraphQL Schema
 
 ### Queries
 
 #### Core Data Queries
+
 - `series(id: ID!)` - Get a specific economic series
 - `seriesList(filter: SeriesFilter, pagination: PaginationInput)` - List series with filtering
 - `searchSeries(query: String!, ...)` - Full-text search across series
 - `dataSource(id: ID!)` - Get a specific data source
-- `dataSources` - List all data sources
+- `dataSources` - List sources with at least one series containing observations
 - `seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String)` - Get time series data, one page at a time
-- `crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean)` - One measure of a dataset for every value of one dimension (e.g. every country), at a date or at each key's latest value
+- `crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean, asOf: NaiveDate)` - One measure of a dataset for every value of one dimension (e.g. every country), at a date or at each key's latest value
+
+`series(id: ...)` returns null for an unknown series or one without observations.
+`seriesList` and `searchSeries` omit series without observations and, by default,
+inactive series. `dataSource(id: ...)` can still return a source omitted by `dataSources`.
 
 #### Monitoring Queries
-- `crawlerStatus` - Get crawler status information
-- `queueStatistics` - Get queue processing statistics
+
+- `crawlerStatus` - Get crawler status information; requires `admin.system:read`
+- `queueStatistics` - Get queue processing statistics; requires `admin.system:read`
 
 ### Mutations
 
-- `triggerCrawl(input: TriggerCrawlInput!)` - Manually trigger data crawling
+- `triggerCrawl(input: TriggerCrawlInput!)` - Enqueue crawl jobs; requires `admin.crawlers:manage`
+
+For these protected operations, send an identity-provider access token in the
+`Authorization: Bearer <token>` header. Authorization checks the token's roles claim;
+a valid token must also grant the operation's required permission.
 
 ### Types
 
@@ -73,6 +88,7 @@ there is no separate `TransformedDataPoint` output type.
 ## Example Queries
 
 ### Basic Series Query with Related Data
+
 ```graphql
 query GetSeries($id: ID!) {
   series(id: $id) {
@@ -96,6 +112,15 @@ query GetSeries($id: ID!) {
 ```
 
 ### Search with Pagination
+
+Omit `after` for the first page. `first` defaults to 50 and is capped at 1,000.
+`totalCount` counts all matching series. For the next page, set `after` to the number
+of series already read, expressed as a decimal string: after reading 50 results, send
+`"after": "50"` with the same query and filters. Add each page's returned series count
+to that offset and stop when it reaches `totalCount`. Malformed cursors, negative
+offsets, and offsets outside the i32 range are rejected with `BAD_USER_INPUT`.
+Unlike `seriesData`, this result has no `pageInfo` or `endCursor`.
+
 ```graphql
 query SearchSeries($query: String!, $first: Int, $after: String) {
   searchSeries(query: $query, first: $first, after: $after) {
@@ -115,6 +140,7 @@ query SearchSeries($query: String!, $first: Int, $after: String) {
 ```
 
 ### Data with Transformation
+
 ```graphql
 query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
   seriesData(
@@ -132,12 +158,14 @@ query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
 ```
 
 ### Every Point of a Long Series
+
 `seriesData` returns at most 10,000 points per page (`first` defaults to and is capped at 10,000).
 `totalCount` counts every point matching the filter. Pass the previous page's `endCursor` as
 `after` until `hasNextPage` is false. A cursor is the number of points up to and including the
 one it names. A transformed page has the values it would have in the whole series, so pages can
 be concatenated. `LOG_DIFFERENCE` is `ln(value) - ln(previous value)`, empty unless both are
 positive.
+
 ```graphql
 query GetSeriesPage($seriesId: ID!, $after: String) {
   seriesData(seriesId: $seriesId, filter: { latestRevisionOnly: true }, first: 10000, after: $after) {
@@ -155,8 +183,10 @@ query GetSeriesPage($seriesId: ID!, $after: String) {
 ```
 
 ### Data as Known on a Past Date
+
 `asOf` returns each observation's newest revision published on or before that date, and omits
 observations first published later. It takes precedence over `latestRevisionOnly`.
+
 ```graphql
 query GetSeriesAsOf($seriesId: ID!) {
   seriesData(seriesId: $seriesId, filter: { asOf: "2024-03-15" }) {
@@ -170,6 +200,7 @@ query GetSeriesAsOf($seriesId: ID!) {
 ```
 
 ### Cross-section for a map
+
 ```graphql
 query GdpPerCapitaByCountry($wdi: ID!) {
   crossSection(
@@ -192,11 +223,21 @@ query GdpPerCapitaByCountry($wdi: ID!) {
 date, since the latest year is often missing for many countries. Every active matching
 series is returned, ordered by key; `value` (and with `latest`, `date`) is null where the
 series has no value. `area` is set when `across` uses the `countries` code list, and `kind` tells
-countries from aggregates such as `WLD`. `flags` stays empty until datasets store
-observation attributes, and `asOf` is not supported yet. An unknown dataset is a
+countries from aggregates such as `WLD`. `flags` is empty. An unknown dataset is a
 `NOT_FOUND` error; an invalid request is `BAD_REQUEST`.
 
-### Multiple Series with Batched Relationship Fields
+`asOf` selects each observation's newest revision published on or before that date;
+observations first published later are excluded. Combine it with `date` to read that
+observation date as it was known at `asOf`, or with `latest: true` to find each key's
+most recent non-null value among the revisions known at `asOf`. Omit `asOf` to use
+current revisions.
+
+### Multiple Series with Batched Dataset and Observation Fields
+
+In this example, `dataset` and `latestObservation` batch their lookups across the
+returned series. The enclosing `DataSourceType.series` field queries directly, as
+explained above.
+
 ```graphql
 query GetMultipleSeries($sourceId: ID!) {
   dataSource(id: $sourceId) {
@@ -205,10 +246,14 @@ query GetMultipleSeries($sourceId: ID!) {
       nodes {
         id
         title
-        dataPointCount
-        recentDataPoints(limit: 5) {
+        dataset {
+          code
+          source { name }
+        }
+        latestObservation {
           date
           value
+          revisionDate
         }
       }
     }
@@ -218,10 +263,10 @@ query GetMultipleSeries($sourceId: ID!) {
 
 ## Performance Features
 
-1. **Batched Database Queries** - Selected relationship fields use DataLoaders; filtered `dataPoints` remains a direct per-series query
+1. **Batched Database Queries** - Selected relationship fields use DataLoaders; `source`, `recentDataPoints`, `dataPointCount`, and filtered `dataPoints` query per series
 2. **Query Complexity Analysis** - Built-in protection against expensive queries
-3. **Caching** - Cache lifetime follows schema lifetime: request-scoped on the backend `/graphql` route, retained when callers reuse a schema; latest-observation loading is non-cached
-4. **Efficient Pagination** - Cursor-based pagination for large result sets
+3. **Caching** - Cache lifetime follows schema lifetime: request-scoped on the backend `/graphql` route, retained when callers reuse a schema; dataset and latest-observation loading is non-cached
+4. **Pagination** - `seriesData` and `seriesList` page in the database; `DataSourceType.series` pages in memory
 5. **Selective Field Loading** - Only requested fields are processed
 6. **Schema Reference** - The generated SDL and snapshot test keep the full API reference aligned with runtime types
 
