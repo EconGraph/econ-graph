@@ -62,7 +62,7 @@ python3 scripts/check_migration_order.py
 
 ### App and data migration validation
 
-For a **new reversible incremental app migration**, test up, down, and up again on a disposable database. First set `DATABASE_URL` to that database, apply the prerequisite migrations, and confirm the new migration will be the last app migration before reverting:
+For a **new reversible incremental app migration**, test up, down, and up again on a disposable database. First set `DATABASE_URL` to that database and apply the prerequisite migrations. After the first run below, confirm that the new app migration has the highest recorded version across the entire database before reverting it. On a shared database, this comparison includes both planes:
 
 ```bash
 diesel migration run --migration-dir migrations/app
@@ -70,7 +70,7 @@ diesel migration revert --migration-dir migrations/app
 diesel migration run --migration-dir migrations/app
 ```
 
-`revert` acts on the last applied migration in the selected directory, not the last migration across both planes. `redo` likewise reverts and reapplies within that directory. Neither baseline can be reverted.
+`--migration-dir` supplies migration files; it does not restrict which recorded version Diesel selects. Default `revert` and `redo` select the highest recorded migration version across the database, then look for its files in the selected directory. If that version belongs only to the data plane, selecting `migrations/app` fails with `UnknownMigrationVersion` rather than skipping back to an earlier app migration. Neither baseline can be reverted.
 
 Data migrations are forward-only: fix mistakes with a new migration rather than `revert` or `redo`. They preserve existing rows, using defaults, backfills, or conversions where needed. A change requiring crawled rows to be dropped or fetched again needs the maintainer's sign-off, a verified retained backup, and a recrawl plan. See [data migrations](../development/MIGRATIONS.md#data-migrations).
 
