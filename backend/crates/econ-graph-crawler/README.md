@@ -100,7 +100,9 @@ cargo test -p econ-graph-crawler --all-features -- --test-threads=1
 Adapter tests use a local mock upstream rather than provider APIs; see the
 [testkit](src/testkit/mod.rs). DB-backed tests skip when `DATABASE_URL` is unset. To run them,
 set `DATABASE_URL` to a disposable PostgreSQL test database: the test helper applies migrations,
-and tests delete queue rows. This test setting is separate from the runtime
+and tests delete queue rows. Migration tests also create and drop separate scratch databases
+on the same server, so the role in `DATABASE_URL` must be allowed to create databases
+(for example, have `CREATEDB`). This test setting is separate from the runtime
 `DATA_DATABASE_URL`. See [database testing](../../../docs/testing/DATABASE_TESTING.md) for setup.
 
 ## License
