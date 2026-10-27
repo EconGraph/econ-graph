@@ -180,6 +180,7 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
     --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
+    --from-file=preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."

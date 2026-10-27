@@ -26,9 +26,10 @@ impl AnonymousConfig {
 
     /// Injectable environment reader for configuration tests.
     pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<Option<Self>, String> {
-        let url = var("OIDC_ANONYMOUS_TOKEN_URL");
-        let secret = var("OIDC_ANONYMOUS_CLIENT_SECRET");
-        if url.is_none() && secret.is_none() && var("OIDC_ANONYMOUS_CLIENT_ID").is_none() {
+        let set = |key| var(key).filter(|value| !value.trim().is_empty());
+        let url = set("OIDC_ANONYMOUS_TOKEN_URL");
+        let secret = set("OIDC_ANONYMOUS_CLIENT_SECRET");
+        if url.is_none() && secret.is_none() && set("OIDC_ANONYMOUS_CLIENT_ID").is_none() {
             return Ok(None);
         }
         let token_url = url
@@ -167,10 +168,11 @@ impl AnonymousPermissions {
             .into_iter()
             .filter(|role| role.is_catalog())
             .collect();
-        Ok((
-            roles,
-            Duration::from_secs(remaining.min(response.expires_in).min(300)),
-        ))
+        let seconds = remaining.min(response.expires_in).min(300);
+        if seconds == 0 {
+            return Err(());
+        }
+        Ok((roles, Duration::from_secs(seconds)))
     }
 }
 
@@ -189,6 +191,9 @@ mod tests {
     #[test]
     fn absent_configuration_denies_and_partial_configuration_fails_without_secrets() {
         assert!(AnonymousConfig::from_vars(|_| None).unwrap().is_none());
+        assert!(AnonymousConfig::from_vars(|_| Some("  ".into()))
+            .unwrap()
+            .is_none());
         for (url, secret) in [
             (None, Some("secret")),
             (Some("https://idp.test/token"), None),

@@ -168,6 +168,7 @@ fn data_plane(url: String, timeout: std::time::Duration) -> Arc<DataPlaneClient>
     Arc::new(
         DataPlaneClient::new(&DataGraphqlConfig {
             forward_authorization: false,
+            allow_insecure_authorization: false,
             url,
             host: Some(DATA_GRAPHQL_HOST.to_string()),
             timeout,

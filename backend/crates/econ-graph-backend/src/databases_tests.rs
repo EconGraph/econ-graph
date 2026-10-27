@@ -382,6 +382,7 @@ async fn the_data_plane_check_agrees_with_the_database_check() {
     let client = Arc::new(
         DataPlaneClient::new(&DataGraphqlConfig {
             forward_authorization: false,
+            allow_insecure_authorization: false,
             url: format!("http://{addr}/graphql"),
             host: Some("br-check.localhost".to_string()),
             timeout: std::time::Duration::from_secs(5),

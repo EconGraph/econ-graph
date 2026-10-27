@@ -7,6 +7,23 @@ use serial_test::serial;
 use std::sync::Arc;
 use testcontainers::{ContainerAsync, GenericImage};
 
+/// The HTTP route supplies a verified caller in production. Direct tool tests provide an
+/// explicit principal with the same catalog capabilities rather than relying on public data.
+fn test_server(
+    app: econ_graph_core::AppPool,
+    data: Option<econ_graph_core::DataPool>,
+) -> EconGraphMcpServer {
+    let mut context = econ_graph_graphql::graphql::context::GraphQLContext::anonymous();
+    context.principal = Some(econ_graph_auth::Principal::new(
+        Default::default(),
+        econ_graph_auth::Role::all()
+            .iter()
+            .copied()
+            .filter(|role| role.is_catalog() || *role == econ_graph_auth::Role::ApiMcp),
+    ));
+    EconGraphMcpServer::new(app, data).with_auth_context(Arc::new(context))
+}
+
 // We need to create a simple test container setup since we can't import test_utils
 // from the tests directory. Let's create a minimal version for integration testing.
 
@@ -75,9 +92,19 @@ async fn seed_series(pool: &econ_graph_core::DatabasePool) -> String {
 async fn mcp_queries_return_real_series_and_date_filtered_observations() {
     let (_database, pool) = create_test_database_pool().await;
     let series_id = seed_series(&pool).await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::AppPool(pool.clone()),
         Some(econ_graph_core::DataPool(pool)),
+    );
+    let denied = server.clone().with_auth_context(Arc::new(
+        econ_graph_graphql::graphql::context::GraphQLContext::anonymous(),
+    ));
+    assert!(
+        denied
+            .get_series_data(json!({"series_id": series_id}))
+            .await
+            .is_err(),
+        "direct tool calls with no catalog grants must not bypass authorization"
     );
     let response = server
         .get_series_data(json!({"series_id": series_id, "start_date": "2023-02-01", "limit": 1}))
@@ -117,7 +144,7 @@ async fn mcp_queries_return_real_series_and_date_filtered_observations() {
 async fn test_mcp_server_integration_basic_functionality() {
     // Test basic MCP server functionality with real database
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -150,7 +177,7 @@ async fn test_mcp_server_integration_basic_functionality() {
 async fn test_mcp_server_error_handling_integration() {
     // Test error handling in integration context
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -184,7 +211,7 @@ async fn test_mcp_server_error_handling_integration() {
 async fn test_mcp_server_concurrent_requests_integration() {
     // Test concurrent requests in integration context
     let (_database, pool) = create_test_database_pool().await;
-    let server = Arc::new(EconGraphMcpServer::new(
+    let server = Arc::new(test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     ));
@@ -219,7 +246,7 @@ async fn test_mcp_server_concurrent_requests_integration() {
 async fn test_mcp_server_chart_api_integration() {
     // Test chart API integration
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -263,7 +290,7 @@ async fn test_mcp_server_chart_api_integration() {
 async fn test_mcp_server_database_integration() {
     // Test database integration
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -311,7 +338,7 @@ async fn test_mcp_server_end_to_end_integration() {
     // Test complete end-to-end integration
     let (_database, pool) = create_test_database_pool().await;
     let series_id = seed_series(&pool).await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -368,7 +395,7 @@ async fn test_mcp_server_create_data_visualization_tool_integration() {
     // It should be run as part of the integration test suite that starts all services
     let (_database, pool) = create_test_database_pool().await;
     let series_id = seed_series(&pool).await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -399,7 +426,7 @@ async fn test_mcp_server_create_data_visualization_tool_integration() {
 async fn test_mcp_server_call_private_chart_api_success_integration() {
     // This test requires the chart API service to be running
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );
@@ -434,7 +461,7 @@ async fn test_mcp_server_call_private_chart_api_success_integration() {
 async fn test_mcp_server_call_private_chart_api_failure_integration() {
     // This test requires the chart API service to be running
     let (_database, pool) = create_test_database_pool().await;
-    let server = EconGraphMcpServer::new(
+    let server = test_server(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
     );

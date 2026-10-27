@@ -455,5 +455,8 @@
         "catalog-public"
       ]
     }
-  ]
+  ],
+  "attributes": {
+    "econgraph.catalog-policy-initialized": "true"
+  }
 }

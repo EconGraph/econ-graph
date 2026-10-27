@@ -493,6 +493,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         scripts/keycloak/test-check-keycloak-roles.sh
         scripts/keycloak/test-render-realm.sh
+        python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
 
     - name: Check the branch-clone delete safety checks

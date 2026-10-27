@@ -188,9 +188,18 @@ Docker Compose uses a development-only client secret. Kubernetes provisions a ra
 through `scripts/deploy/create-secrets.sh`, preserving it across deployments, and supplies the
 same Secret key (`econ-graph-keycloak/anonymous-client-secret`) to the backend, Keycloak and realm
 import Job. Set `KEYCLOAK_ANONYMOUS_CLIENT_SECRET` to supply a managed credential instead.
-Existing Compose realms need the normal development realm reset; Kubernetes reapplies the realm
-on deployment. Reapplying the checked-in realm also reapplies its default role assignments, so
-persist operational policy changes in the managed realm configuration when they must survive deploys.
+Existing Compose realms need the normal development realm reset. Kubernetes reapplies structural
+configuration on deployment, but `preserve-catalog-grants.py` snapshots catalog policy first.
+Existing catalog-public grants, catalog edges on managed composites, anonymous-reader mappings,
+reader scope restrictions and enabled states survive reapply, including empty sets. Defaults seed
+only the first feature rollout; a realm attribute records initialization so deleting a policy role
+or reader cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
+from signed-in default roles, which would otherwise bypass anonymous-only restrictions.
+
+Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
+separate admin API operations, so preservation is best effort under concurrent administrator edits;
+avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
+modified. Role definitions and non-catalog structural settings remain configuration as code.
 
 ### Separate and shared data planes
 
@@ -205,6 +214,13 @@ except for the existing explicit suspended-account public-read behavior.
 Annotation creation on an app-only backend checks the series through `DATA_GRAPHQL_URL`.
 This preflight likewise uses anonymous grants by default. For a trusted data plane, set
 `DATA_GRAPHQL_FORWARD_AUTHORIZATION=true` so the preflight can read a catalog granted to the
-signed-in caller even when anonymous access is disabled. Requests follow no redirects and tokens
-are not logged. Cross-realm gateways must continue to strip credentials; a trusted route must
+signed-in caller even when anonymous access is disabled. Forwarding requires HTTPS by default.
+For a deliberately trusted private HTTP hop, also set `DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION=true`;
+that exception sends the bearer token in plaintext and must not be used for public network targets.
+Requests follow no redirects and tokens are not logged. Cross-realm gateways must continue to strip credentials; a trusted route must
 preserve them. Catalog authorization does not replace that gateway trust configuration.
+
+For a local sign-in-off server, clear `OIDC_ISSUER`, `OIDC_ANONYMOUS_TOKEN_URL` and
+`OIDC_ANONYMOUS_CLIENT_SECRET` together. Empty anonymous settings count as absent. This starts
+the server without Keycloak and denies catalog reads, while keeping health and other public
+non-data routes available.

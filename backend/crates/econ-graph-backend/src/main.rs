@@ -2201,6 +2201,7 @@ mod series_check_startup_tests {
     fn config() -> DataGraphqlConfig {
         DataGraphqlConfig {
             forward_authorization: false,
+            allow_insecure_authorization: false,
             url: "http://gateway.example/data/graphql".to_string(),
             host: Some("br-1.localhost".to_string()),
             timeout: std::time::Duration::from_secs(2),

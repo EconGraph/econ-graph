@@ -323,7 +323,9 @@ export async function executeGraphQL<T = any>(
   let response = await postGraphQL(endpoint, request, token, signal);
 
   if (token && (await isSuspendedRefusal(response))) {
-    setAccountSuspended(true);
+    // A separate data backend may have an independent account database. Its refusal
+    // must not disable mutations against the app backend.
+    if (endpoint === GRAPHQL_ENDPOINT) setAccountSuspended(true);
     if (isMutation) {
       throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
     }

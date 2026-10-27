@@ -100,6 +100,15 @@ impl DataPlaneClient {
     /// # Errors
     /// [`AppError::ConfigError`] when the HTTP client can't be built.
     pub fn new(config: &DataGraphqlConfig) -> AppResult<Self> {
+        if config.forward_authorization
+            && !config.allow_insecure_authorization
+            && reqwest::Url::parse(&config.url).map_or(true, |url| url.scheme() != "https")
+        {
+            return Err(AppError::ConfigError(
+                "Bearer forwarding requires HTTPS or an explicit private HTTP transport exception"
+                    .into(),
+            ));
+        }
         let http = reqwest::Client::builder()
             .timeout(config.timeout)
             .redirect(reqwest::redirect::Policy::none())
@@ -202,6 +211,7 @@ mod tests {
     fn client(url: String, host: Option<&str>, timeout: Duration) -> DataPlaneClient {
         DataPlaneClient::new(&DataGraphqlConfig {
             forward_authorization: false,
+            allow_insecure_authorization: false,
             url,
             host: host.map(str::to_string),
             timeout,
@@ -421,6 +431,7 @@ mod trusted_plane_tests {
                 host: None,
                 timeout: Duration::from_secs(2),
                 forward_authorization: trusted,
+                allow_insecure_authorization: true,
             })
             .unwrap()
             .for_caller(Some("Bearer test-caller-token"));

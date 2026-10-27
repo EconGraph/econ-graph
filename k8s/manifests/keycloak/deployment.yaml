@@ -21,7 +21,8 @@
 #
 # The Job in realm-import-job.yaml creates the realm on the first deploy and applies
 # it on every deploy after, so later changes to it (roles, clients, the Google client)
-# reach the cluster without touching users. Keycloak itself does not import anything:
+# reach the cluster without touching ordinary users. The import preserves operator-managed
+# catalog grants before applying the structural configuration. Keycloak itself does not import anything:
 # --import-realm would create resources (roles, composites) directly that
 # keycloak-config-cli does not then own, so removing one from the file later would
 # leave it behind in the cluster.

@@ -146,7 +146,7 @@ impl Role {
 
     /// Whether this capability can be granted to anonymous data readers.
     pub fn is_catalog(self) -> bool {
-        self.as_str().starts_with("catalog.")
+        self.as_str().starts_with("catalog.") && self.as_str().ends_with(":read")
     }
 
     /// Catalog read capability for a canonical data-source name; unknown sources deny access.

@@ -232,6 +232,10 @@ pub const DATA_GRAPHQL_HOST: &str = "DATA_GRAPHQL_HOST";
 /// Opt into forwarding verified user credentials to a trusted data plane.
 pub const DATA_GRAPHQL_FORWARD_AUTHORIZATION: &str = "DATA_GRAPHQL_FORWARD_AUTHORIZATION";
 
+/// Explicit exception for caller forwarding over a trusted private HTTP transport.
+pub const DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION: &str =
+    "DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION";
+
 /// How long, in milliseconds, a [`DATA_GRAPHQL_URL`] request may take in all.
 pub const DATA_GRAPHQL_TIMEOUT_MS: &str = "DATA_GRAPHQL_TIMEOUT_MS";
 
@@ -244,6 +248,8 @@ pub const DEFAULT_DATA_GRAPHQL_TIMEOUT: std::time::Duration = std::time::Duratio
 pub struct DataGraphqlConfig {
     /// Forward the verified caller token only when the target trusts the same issuer/audience.
     pub forward_authorization: bool,
+    /// Permit plaintext HTTP only when the operator explicitly trusts the private transport.
+    pub allow_insecure_authorization: bool,
     /// `DATA_GRAPHQL_URL`: an `http` or `https` URL.
     pub url: String,
     /// `DATA_GRAPHQL_HOST`, or `None` to send the URL's own host.
@@ -279,6 +285,12 @@ pub enum DataGraphqlConfigError {
     /// Forwarding accepts only true or false.
     #[error("DATA_GRAPHQL_FORWARD_AUTHORIZATION must be true or false")]
     InvalidForwardAuthorization,
+    /// Plaintext bearer forwarding requires a separate explicit transport exception.
+    #[error("Bearer forwarding requires HTTPS; trusted private HTTP needs DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION=true")]
+    InsecureForwardAuthorization,
+    /// The transport exception accepts only true or false.
+    #[error("DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION must be true or false")]
+    InvalidInsecureAuthorization,
 }
 
 /// `url` as it may be logged: `scheme://host[:port]/path`, without any user name, password,
@@ -312,6 +324,15 @@ pub fn data_graphql_config_from(
         Some("true") => true,
         _ => return Err(DataGraphqlConfigError::InvalidForwardAuthorization),
     };
+    let allow_insecure_authorization =
+        match non_empty(&var, DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION)
+            .as_deref()
+            .map(str::trim)
+        {
+            None | Some("false") => false,
+            Some("true") => true,
+            _ => return Err(DataGraphqlConfigError::InvalidInsecureAuthorization),
+        };
     let host = non_empty(&var, DATA_GRAPHQL_HOST).map(|h| h.trim().to_string());
     let timeout = non_empty(&var, DATA_GRAPHQL_TIMEOUT_MS);
     let Some(url) = non_empty(&var, DATA_GRAPHQL_URL).map(|u| u.trim().to_string()) else {
@@ -331,6 +352,9 @@ pub fn data_graphql_config_from(
     let parsed = reqwest::Url::parse(&url).map_err(|_| DataGraphqlConfigError::InvalidUrl)?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(DataGraphqlConfigError::InvalidUrl);
+    }
+    if forward_authorization && !allow_insecure_authorization && parsed.scheme() != "https" {
+        return Err(DataGraphqlConfigError::InsecureForwardAuthorization);
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(DataGraphqlConfigError::UrlWithCredentials);
@@ -358,6 +382,7 @@ pub fn data_graphql_config_from(
         host,
         timeout,
         forward_authorization,
+        allow_insecure_authorization,
     }))
 }
 
@@ -644,6 +669,7 @@ mod tests {
             ])),
             Ok(Some(DataGraphqlConfig {
                 forward_authorization: false,
+                allow_insecure_authorization: false,
                 url: "http://gw.example/data/graphql".to_string(),
                 host: Some("br-1.localhost".to_string()),
                 timeout: DEFAULT_DATA_GRAPHQL_TIMEOUT,
@@ -757,6 +783,28 @@ mod data_plane_trust_tests {
                 .unwrap()
                 .unwrap()
                 .forward_authorization
+        );
+        let plaintext = |key: &str| match key {
+            DATA_GRAPHQL_URL => Some("http://private.test/graphql".into()),
+            DATA_GRAPHQL_FORWARD_AUTHORIZATION => Some("true".into()),
+            _ => None,
+        };
+        assert_eq!(
+            data_graphql_config_from(plaintext),
+            Err(DataGraphqlConfigError::InsecureForwardAuthorization)
+        );
+        let private_exception = |key: &str| {
+            if key == DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION {
+                Some("true".into())
+            } else {
+                plaintext(key)
+            }
+        };
+        assert!(
+            data_graphql_config_from(private_exception)
+                .unwrap()
+                .unwrap()
+                .allow_insecure_authorization
         );
         assert_eq!(
             data_graphql_config_from(|key| if key == DATA_GRAPHQL_FORWARD_AUTHORIZATION {

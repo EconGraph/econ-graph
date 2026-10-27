@@ -242,6 +242,19 @@ describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
     expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
   });
 
+  it('keeps a separate data backend suspension from disabling app mutations', async () => {
+    const executeGraphQL = await loadWith('/data/graphql');
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'suspended', extensions: { code: 'ACCOUNT_SUSPENDED' } }] }), { status: 403 }));
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    await executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL });
+    const { isAccountSuspended } = await import('../../auth/accessToken');
+    expect(isAccountSuspended()).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((fetchSpy.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBeUndefined();
+    await executeGraphQL({ query: 'mutation UpdateAnnotation { __typename }' });
+    expect((fetchSpy.mock.calls[2][1]?.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
   it('does not retry a catalog denial with anonymous permissions', async () => {
     const executeGraphQL = await loadWith('/data/graphql');
     fetchSpy.mockImplementation(
