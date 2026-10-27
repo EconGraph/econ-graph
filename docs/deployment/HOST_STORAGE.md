@@ -485,5 +485,5 @@ the subvolumes.
   `postgres-backup-data` PVC, and Grafana's data, are still node-local. They
   are lost when the cluster is deleted, which is one reason
   `recreate-kind-cluster.sh` and `teardown.sh` take a host-side dump first.
-- Hostpath volumes have no size limit. The PV capacities (50Gi and 5Gi) are
+- Hostpath volumes have no size limit. The PV capacities (50Gi, 10Gi and 5Gi) are
   informational; the real limit is free space on the btrfs filesystem.
