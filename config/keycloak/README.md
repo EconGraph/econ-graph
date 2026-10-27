@@ -4,13 +4,30 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 
 | File | Used by | Contents |
 |---|---|---|
-| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google identity provider |
-| `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
-| `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
+| [`econ-graph-realm.json`](econ-graph-realm.json) | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google identity provider |
+| [`dev/econ-graph-users-0.json`](dev/econ-graph-users-0.json) | docker-compose only | Seeded test users. Never deployed |
+| [`qa/econ-graph-users-1.json`](qa/econ-graph-users-1.json) | [`docker-compose.qa-users.yml`](../../docker-compose.qa-users.yml) only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
-Keycloak imports the mounted files on first start (`--import-realm`). An existing realm is
-not overwritten, so after editing a file, reset the realm by dropping Keycloak's
-database volume and starting again:
+## Local stack
+
+```bash
+docker compose up -d keycloak
+scripts/keycloak/dev-token.sh alice   # prints selected access-token claims, including roles
+```
+
+- Issuer: `http://localhost:8081/realms/econ-graph` (host port from `KEYCLOAK_PORT`)
+- Admin console: <http://localhost:8081/admin>, user `admin`, password `admin`
+  (override with `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)
+
+### Reset the local realm
+
+In the local Compose stack, Keycloak imports the mounted files on first start
+(`--import-realm`). It does not overwrite an existing realm. After editing an
+imported file, reset the local realm by removing Keycloak's database volume and
+starting again. This deletes all local Keycloak accounts and other state in that
+database, including changes made through the admin console.
+
+Run from the repository root:
 
 ```bash
 docker compose rm -sf keycloak keycloak-db
@@ -18,18 +35,10 @@ docker volume rm "$(basename "$PWD")_keycloak_db_data"
 docker compose up -d keycloak
 ```
 
-In Kubernetes the realm is re-applied on every deploy instead (see below).
-
-## Local stack
-
-```bash
-docker compose up -d keycloak
-scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's access token
-```
-
-- Issuer: `http://localhost:8081/realms/econ-graph` (host port from `KEYCLOAK_PORT`)
-- Admin console: <http://localhost:8081/admin>, user `admin`, password `admin`
-  (override with `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)
+The volume name above assumes Compose uses the repository directory name as its
+project name. If you use `-p` or `COMPOSE_PROJECT_NAME`, use
+`<project-name>_keycloak_db_data` and the same project name for the Compose commands.
+In [Kubernetes](#kubernetes), the realm is re-applied on every deploy.
 
 ### Test users
 
@@ -79,7 +88,7 @@ enum variant, the client role and, if staff should have it, the composite.
   The password grant is enabled only where `KC_WEB_DIRECT_GRANTS=true`, which only
   docker-compose sets, so scripts and tests can get tokens without a browser.
 - `econ-graph-api`: bearer-only client representing the backend. It is the token
-  audience and will own the fine-grained client roles.
+  audience and owns the fine-grained client roles.
 
 ## Placeholders
 
@@ -95,8 +104,9 @@ The realm file reads these environment variables when it is imported:
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
-is first imported; change a value later by recreating the volume. In Kubernetes the
-realm-import Job renders them on every deploy with `scripts/keycloak/render-realm.sh`,
+is first imported; change a value later by [resetting the local realm](#reset-the-local-realm).
+In Kubernetes the realm-import Job renders them on every deploy with
+[`scripts/keycloak/render-realm.sh`](../../scripts/keycloak/render-realm.sh),
 so a rotated Google client secret in the Secret reaches Keycloak on the next deploy.
 
 For Google sign-in locally, create an OAuth client in Google Cloud with redirect URI
@@ -113,7 +123,7 @@ Two more realm-local users, `qa-alice` and `qa-bob` (passwords `qa-alice-passwor
 and `qa-bob-password`), live in `qa/econ-graph-users-1.json` for the release QA
 suite to run a two-account check against a local compose stack. They are off by
 default; opt in explicitly. Users are imported only on the realm's first start, so
-reset the realm first (see above) if Keycloak has run before:
+[reset the local realm](#reset-the-local-realm) first if Keycloak has run before:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
@@ -125,22 +135,28 @@ fails the build if they do. Real Google sign-in stays a manual QA step.
 
 ## Kubernetes
 
-See `k8s/manifests/keycloak/` and the Keycloak section of `k8s/README.md`. The realm
-file becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
-`econ-graph-keycloak`, written by `scripts/deploy/create-secrets.sh`.
+See the [Keycloak manifests](../../k8s/manifests/keycloak/) and the
+[deployment guide's Keycloak section](../../k8s/README.md#-keycloak). The realm file
+becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
+`econ-graph-keycloak`, written by
+[`scripts/deploy/create-secrets.sh`](../../scripts/deploy/create-secrets.sh).
 
-The realm is created (on the first deploy) and applied (on every deploy after) by the
-Job `keycloak-realm-import` (`realm-import-job.yaml`), which runs
-[keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli) against the
-running server. Keycloak itself does not import anything: the alternatives were
-rejected because `--import-realm` creates resources directly, outside
-keycloak-config-cli's tracking, so removing one from the file later would leave it
-behind in the cluster; `kc.sh import --override true` deletes the realm and every
-account in it. keycloak-config-cli instead changes only what differs from the realm
-file, so Google-brokered accounts, sessions and every user's role mappings survive a
-redeploy — as long as the roles they're mapped to stay in the file. A realm role,
-client or mapper removed from the file is removed from the cluster on the next
-deploy, taking any user's mapping to that role with it.
+The [`keycloak-realm-import` Job](../../k8s/manifests/keycloak/realm-import-job.yaml)
+creates the realm on the first deploy and applies it on every deploy after that.
+It runs [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli)
+against the running server's admin API, changing only what differs from the realm
+file.
+
+Google-brokered accounts and sessions survive a redeploy. Users' role mappings
+also survive as long as the roles they are mapped to remain in the file. A realm
+role, client or mapper removed from the file is removed from the cluster on the
+next deploy; removing a role also removes users' mappings to it.
+
+Keycloak's native imports do not provide this reconciliation behavior.
+`--import-realm` skips existing realms and creates resources outside
+keycloak-config-cli's tracking, so resources created that way would remain in the
+cluster after removal from the file. `kc.sh import --override true` deletes the
+realm and every account in it.
 
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the
