@@ -31,5 +31,5 @@ Pre-commit reminder:
 
 Notes:
 
-- Docs-only PRs still receive Markdown and relative-link checks through [Docs Checks](../../.github/workflows/docs-checks.yml). [Core CI](../../.github/workflows/ci-core.yml) uses path filters to skip documentation changes.
+- Docs-only PRs still receive Markdown and relative-link checks through [Docs Checks](../../.github/workflows/docs-checks.yml). [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when all changed paths match its exclusions.
 - If hooks fail, fix the underlying issues; do not bypass with `--no-verify`
