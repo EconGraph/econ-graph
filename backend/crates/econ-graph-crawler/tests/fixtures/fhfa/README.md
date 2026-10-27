@@ -12,11 +12,13 @@ and DC. Each series has a few periods. Purchase-only rows have both `index_nsa` 
 `index_sa`; all-transactions rows leave `index_sa` empty. These combinations match the live
 file's 203 in-scope series, counting the two index columns as separate series.
 
-The fixture uses FHFA's `hpi_type`, `hpi_flavor`, `frequency` and `level` values, with `USA`,
-`DV_*` division ids and USPS state codes as `place_id`. The `period` column holds a month or
-quarter number according to `frequency`. Out-of-scope rows (metros, expanded-data, non-metro
-and distress-free) exercise the adapter's filters. A metro name contains a comma to exercise
-CSV quoting.
+The in-scope rows use FHFA's `hpi_type`, `hpi_flavor`, `frequency` and `level` values, with
+`USA`, `DV_*` division ids and USPS state codes as `place_id`. The `period` column holds a
+month or quarter number according to `frequency`. Additional rows exercise rejection of
+metros, non-metro and distress-free types, and an unsupported `hpi_type` value,
+`expanded-data`. FHFA publishes expanded-data as an `hpi_flavor`; these synthetic rows
+exercise the type filter, not the expanded-data flavor filter. A metro name contains a comma
+to exercise CSV quoting.
 
 FHFA's [data dictionary](https://www.fhfa.gov/document/d/hpi/hpi_dictionary.xlsx) describes
 the master columns, and its
