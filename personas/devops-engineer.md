@@ -32,7 +32,7 @@ DevOps engineers follow these standards for infrastructure automation, reliabili
 
 ### Cursor-native commands
 * Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs
-* Use `/workflow-audit` to validate GitHub Actions workflows (triggers/steps/names) and enforce hygiene
+* Use `/workflow-audit` to check GitHub Actions workflow triggers, steps, and names, and identify missing permissions, timeouts, or concurrency settings
 * Use `/deploy` to run the standard deployment script when available; use `/docker-logs` for local container debugging
 * Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change)
 
