@@ -6,11 +6,11 @@ database is seeded from recorded fixtures through the crawler adapters. The seed
 uses local mock upstreams and refuses requests to external data sources, so no
 upstream API keys are needed. The suite uses real local HTTP services. It is the
 release exit check (exit criterion 5 in ECO-5). The other specs under
-`tests/e2e/` belong to the older configs, which skip this directory — except
-`world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`
-(ECO-282), which only mock GraphQL via `page.route` and so also run under the
-older `global-analysis` and default/mobile configs; everything else here needs
-this suite's seeded backend.
+`tests/e2e/` belong to the older configs. Those configs exclude this directory
+apart from two mocked-map specs: `world-map/world-map-mocked.spec.ts` and
+`world-map/world-atlas.spec.ts` (ECO-282). These mock GraphQL via `page.route`,
+so they also run under the older `global-analysis` and default/mobile configs.
+The remaining specs here need this suite’s seeded backend.
 
 A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts`
 and the phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone
@@ -156,7 +156,7 @@ In this mode ([environment and user mapping](env.ts)):
   the page offers (checking its value, or that the page says there aren't enough
   observations), and download the CSV (header and row count). The expected
   values are `SWEPT_SOURCES` in `fixtures.ts`. The world map's three WDI
-  indicators are the world-map area's spec.
+  indicators are covered by the specs in `world-map/`.
 - `series-ui/multipage-series.spec.ts` (fixture mode only, ECO-261): a synthetic
   daily FRED series of 22,000 points (`SEEDED_MULTIPAGE`), which the series page
   reads in three `seriesData` pages. It loads the page, picks a date range and
