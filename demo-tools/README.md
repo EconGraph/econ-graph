@@ -33,7 +33,7 @@ If execution reaches the upload stage, the orchestrator stages demo files, creat
 
 ### Narration and presentation generation
 
-[`demo-tools/create-professional-narration.sh`](create-professional-narration.sh) reads the business impact narration and uses macOS `say` to generate audio. It expects the narration text in the caller's directory and writes under `demo-videos/`; those paths span two different directories in this checkout.
+[`demo-tools/create-professional-narration.sh`](create-professional-narration.sh) reads the business impact narration and uses macOS `say` to generate audio. It expects the narration text in the caller's directory and writes under `demo-videos/`. In this checkout, the narration file is under `demo-tools/`, while the existing `demo-videos/` directory is at the repository root.
 
 [`demo-tools/combine-real-demo.sh`](combine-real-demo.sh) uses FFmpeg and ffprobe to combine a supplied `real-demo-recording.mov` with `demo-videos/ultra_comprehensive_complete_narration.mp3`, writing a narrated MP4 under `demo-videos/`. Its inputs are relative to the caller.
 
