@@ -105,10 +105,11 @@ the calculations. The caller controls `timeRange` and updates it through
 ```tsx
 import { TrendAnalysisChart } from '@/components/financial';
 
+// timeRange and setTimeRange come from the parent component's state.
 <TrendAnalysisChart
   ratios={ratios}
   statements={statements}
-  timeRange='3Y'
+  timeRange={timeRange}
   onTimeRangeChange={setTimeRange}
 />;
 ```
