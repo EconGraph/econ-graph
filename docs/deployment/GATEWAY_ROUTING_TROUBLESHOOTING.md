@@ -31,7 +31,8 @@ Each result names the route and what was expected. The URL selects the connectio
 issuer, regardless of either address: a public-host deployment needs the public issuer above
 even when testing localhost or the port-forward below. The example uses the default
 `MAIN_HOST=www.${PUBLIC_HOST}`; use the actual served main host when it differs. See
-[Main public address](MAIN_HOST.md). Without Keycloak, use `SKIP_KEYCLOAK=true`.
+[Main public address](MAIN_HOST.md). Without Keycloak, run
+`test-gateway-routes.sh` with `SKIP_KEYCLOAK=true`.
 
 To test the proxy without the host ports (for example while another controller still holds
 them), port-forward its Service:
