@@ -441,9 +441,6 @@ kubectl logs -f deployment/econ-graph-backend -n econ-graph
 
 # Frontend logs
 kubectl logs -f deployment/econ-graph-frontend -n econ-graph
-
-# Admin UI logs
-kubectl logs -f deployment/econ-graph-admin-frontend -n econ-graph
 ```
 
 ### Scale Deployments
