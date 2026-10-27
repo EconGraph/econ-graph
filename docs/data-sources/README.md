@@ -84,8 +84,8 @@ the full history. When a fetched response has a new `lastupdated`, its observati
 stored under that new vintage. WDI therefore retains updates actually fetched; it does
 not recover missed editions or provide an upstream archive comparable to ALFRED.
 
-Observation attributes are distinct from dimensions and vintage dates. BLS parses and
-logs footnotes such as `P` (preliminary) and `X` (unavailable), but does not persist them.
+Observation attributes are distinct from dimensions and vintage dates. BLS parses footnotes
+such as `P` (preliminary) and `X` (unavailable), but does not persist them.
 BEA's `NoteRef`, World Bank's `obs_status` and `decimal`, and FHFA's `rstderr` and `note`
 are also not stored as observation attributes. WDI declares attributes in its dataset
 contract, but that declaration does not populate them. FRED has no per-observation flags;
