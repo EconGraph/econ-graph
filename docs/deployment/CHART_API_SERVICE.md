@@ -445,4 +445,4 @@ A 400 response can identify either top-level validation failure or a generator e
 
 ## License
 
-This project uses the [MIT License](../../LICENSE).
+See the repository’s [Microsoft Reference Source License (MS-RSL)](../../LICENSE) for its terms.
