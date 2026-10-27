@@ -29,7 +29,7 @@ The deployment includes:
 - Learning Kubernetes concepts
 
 **Advantages:**
-- Built-in addons (dns, ingress, storage, metrics-server)
+- Built-in addons (dns, storage, metrics-server)
 - Native SSL/TLS support with cert-manager
 - Production-like networking
 - Lower resource overhead
@@ -85,14 +85,14 @@ cd /path/to/EconGraph/FrontEnd-1
 
 This script will:
 - ✅ Check/start MicroK8s
-- ✅ Enable required addons (dns, ingress, storage, metrics-server)
+- ✅ Enable required addons (dns, storage, metrics-server)
 - ✅ Build Docker images with versioned tags
 - ✅ Load images into MicroK8s
 - ✅ Apply updated manifests
 - ✅ Deploy monitoring stack
 - ✅ Install cert-manager for SSL
 - ✅ Configure Let's Encrypt issuer
-- ✅ Deploy SSL ingress with security features
+- ✅ Install the gateway and apply its routes
 - ✅ Wait for rollout completion
 - ✅ Display deployment status
 
@@ -101,7 +101,7 @@ This script will:
 - Backend: https://www.econgraph.com/api
 - Admin: https://www.econgraph.com/admin
 
-Grafana is not exposed on the public ingress; use port forwarding (below).
+Grafana is not routed by the gateway; use port forwarding (below).
 
 **For detailed MicroK8s setup and troubleshooting, see**: [MicroK8s Deployment Guide](MICROK8S_DEPLOYMENT.md)
 
@@ -259,39 +259,11 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:${BACKEND_NODEPORT}/heal
 
 ## Troubleshooting
 
-### ⚠️ CRITICAL: Ingress Routing Bug
+### Routing
 
-**Problem**: Root path (`/`) returns admin interface instead of frontend when accessing through ingress.
-
-**Root Cause**: This is a **fundamental design flaw** in the nginx ingress controller's configuration generation. The controller generates a server-level `set $proxy_upstream_name "-";` that overrides location-level settings, causing incorrect routing.
-
-**Impact**: 
-- ✅ All other paths work correctly (`/admin`, `/health`, `/api`, etc.)
-- ✅ Services work correctly when accessed directly (port-forward)
-- ❌ Root path (`/`) fails through ingress
-
-**Workarounds**:
-
-**Option 1: Use Separate Ingress for Frontend**
-```bash
-# Access frontend via separate ingress
-curl -H "Host: frontend.econ-graph.local" http://localhost:8080/
-```
-
-**Option 2: Use Direct Service Access**
-```bash
-# Port-forward to frontend service directly
-kubectl port-forward service/econ-graph-frontend-service 3000:3000 -n econ-graph
-# Access via http://localhost:3000
-```
-
-**Option 3: Use Admin Path for Admin Interface**
-```bash
-# Access admin via /admin path
-curl -H "Host: admin.econ-graph.local" http://localhost:8080/admin
-```
-
-**For detailed debugging information, see**: [Ingress Routing Troubleshooting Guide](INGRESS_ROUTING_TROUBLESHOOTING.md)
+Requests reach the services through the Gateway API gateway (Envoy Gateway). Check every route
+with `./scripts/deploy/test-gateway-routes.sh`; see the
+[Gateway routing troubleshooting guide](GATEWAY_ROUTING_TROUBLESHOOTING.md).
 
 ### Common Issues
 
@@ -331,7 +303,9 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 2. **Configure Kind with Extra Port Mappings**:
 ```bash
 # Create kind cluster with port mappings
-kind create cluster --name econ-graph --config - <<EOF
+kind create cluster --name econ-graph \
+  --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed \
+  --config - <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -348,14 +322,8 @@ nodes:
 EOF
 ```
 
-3. **Use Ingress (For Admin UI)**:
-```bash
-# Add to /etc/hosts (or equivalent)
-echo "127.0.0.1 admin.econ-graph.local" >> /etc/hosts
-
-# Access via ingress controller port
-curl -H "Host: admin.econ-graph.local" http://localhost:30466/admin
-```
+3. **Use the gateway**: every routed path answers on <http://localhost> (host ports 80/443);
+   the admin frontend is not routed.
 
 #### Database Connection Issues
 ```bash

@@ -15,7 +15,7 @@
 #      confirmations below, so a run you abort still leaves it.
 #   2. Set the PostgreSQL and backup PVs to Retain (protect-postgres-pv.sh).
 #   3. Delete the app plane, after you type the namespace name (--yes answers
-#      this one): the cloudflared tunnel connector, the routes (ingresses),
+#      this one): the cloudflared tunnel connector, the gateway routes,
 #      frontend, admin frontend, backend, chart API, Keycloak, and the app and
 #      Keycloak Postgres StatefulSets and
 #      Services. Their Secrets and PVCs stay, so the next deploy.sh brings the
@@ -159,8 +159,8 @@ fi
 # 3-5. Every confirmation is asked before anything is deleted.
 echo ""
 echo "This deletes the app plane, in namespace ${NAMESPACE}:"
-echo "  - the cloudflared tunnel connector, ingresses, frontend, admin frontend,"
-echo "    backend, chart API, Keycloak"
+echo "  - the cloudflared tunnel connector, the gateway routes and rate limits, frontend,"
+echo "    admin frontend, backend, chart API, Keycloak"
 echo "  - the app Postgres (app-postgres) and Keycloak Postgres (keycloak-postgres)"
 echo "    StatefulSets and Services. Their Secrets and PVCs are kept: the next"
 echo "    deploy.sh brings the same databases back."
@@ -201,14 +201,26 @@ echo "Removing the app plane..."
 # The public edge first (deploy.sh's apply_public_edge and apply_cloudflared),
 # so no tunnel keeps routing to Services that are going away.
 run kubectl delete -f k8s/manifests/cloudflared.yaml --ignore-not-found=true
-run kubectl -n "${NAMESPACE}" delete ingress -l econgraph.io/public-host=true --ignore-not-found=true
-for manifest in graphql-ingress ingress frontend-service frontend-deployment \
+# This namespace's routes and rate limits on the gateway, the public host's
+# copies included. The gateway itself (k8s/manifests/gateway/, its own
+# namespaces) serves the whole cluster and stays.
+# Each kind only when its CRD exists (a cluster without the gateway has
+# neither): `kubectl delete -f` fails on an unknown kind even with
+# --ignore-not-found.
+if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+    run kubectl delete -f k8s/manifests/gateway/routes/httproutes.yaml --ignore-not-found=true
+    run kubectl -n "${NAMESPACE}" delete httproute -l econgraph.io/public-host=true --ignore-not-found=true
+fi
+if kc get crd backendtrafficpolicies.gateway.envoyproxy.io >/dev/null 2>&1; then
+    run kubectl delete -f k8s/manifests/gateway/routes/ratelimit-policies.yaml --ignore-not-found=true
+fi
+for manifest in frontend-service frontend-deployment \
     admin-frontend-service admin-frontend-deployment backend-service \
     backend-deployment chart-api-service chart-api-deployment; do
     run kubectl delete -f "k8s/manifests/${manifest}.yaml" --ignore-not-found=true
 done
 run kubectl -n "${NAMESPACE}" delete job keycloak-realm-import --ignore-not-found=true
-for manifest in keycloak/ingress keycloak/deployment keycloak/postgres app-postgres; do
+for manifest in keycloak/deployment keycloak/postgres app-postgres; do
     run kubectl delete -f "k8s/manifests/${manifest}.yaml" --ignore-not-found=true
 done
 run kubectl delete -f k8s/manifests/app-postgres-init.yaml --ignore-not-found=true

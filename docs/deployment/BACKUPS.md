@@ -461,14 +461,22 @@ refusals are tested by `scripts/backup/test-branch-clone.sh` (in CI).
 ## The in-cluster `postgres-backup` CronJob
 
 `k8s/manifests/postgres-backup-cronjob.yaml` (with
-`postgres-backup-configmap.yaml` and `postgres-backup-pvc.yaml`) dumps
-`econ_graph` nightly at 08:00 UTC to the `postgres-backup-data` PVC and
-verifies each dump. Like everything in this runbook it deletes nothing:
-it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and
+`postgres-backup-configmap.yaml` and `postgres-backup-pvc.yaml`) dumps the
+same databases as `dump-databases.sh` (`econ_graph`, `econ_graph_app` and
+`keycloak`) nightly at 08:00 UTC to the `postgres-backup-data` PVC, except
+that it dumps `econ_graph_app` only when the backend's `app-database-url`
+names it (`APP_DATABASE=separate`; with `shared`, the app tables are in the
+`econ_graph` dump). Each
+dump is read back in full and must hold at least one table, each is taken
+whether or not the others succeed, and the Job fails when any of them fails.
+Like everything in this runbook it deletes nothing: it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and
 [#427](https://github.com/EconGraph/econ-graph/pull/427) removed that, so its dumps stay until the operator removes them by hand
-(`POSTGRES_BACKUP_RESTORE.md` says how). It is kept for now as an
-independent second copy while the host-side dumps prove themselves. It is
-not pointed at the new layout because:
+(`POSTGRES_BACKUP_RESTORE.md` says how). It is kept as an
+independent second copy: the two share no files, schedule or lock, run
+through different paths (the CronJob over the Services from inside the
+cluster, `dump-databases.sh` with `kubectl exec` through the kind node), and
+neither touches the other's dumps. The host-side dumps are the primary copy
+on threadripper. The CronJob is not pointed at the new layout because:
 
 - its PVC is kind local-path storage inside the kind node container: deleting
   or recreating the kind cluster destroys it together with the database,
@@ -477,8 +485,7 @@ not pointed at the new layout because:
 - moving it onto a host path would need a static PV and kind `extraMounts`
   (owned by the cluster wiring work, not this), and the obvious host path,
   inside `data-plane`, would put backups on the subvolume they back up;
-- it covers only `econ_graph`, not the app database or Keycloak, and has no restore drill or
-  freshness check.
+- it has no restore drill or freshness check, and no alert watches its Job.
 
 Retire it (remove the three manifests and their references in
 `scripts/deploy/`) once the host timers have run cleanly for two weeks.

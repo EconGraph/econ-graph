@@ -12,11 +12,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-K8S_DIR="${PROJECT_ROOT}/k8s"
-
 # Default values
 NAMESPACE="econ-graph"
 DOMAIN="econgraph.example.com"
@@ -228,12 +223,6 @@ else
     kubectl describe certificate ${DOMAIN}-wildcard-tls -n ${NAMESPACE}
     exit 1
 fi
-
-# Deploy updated ingress with DNS-01 support
-print_status "Deploying updated ingress configuration with Cloudflare DNS-01 support..."
-kubectl apply -f "${K8S_DIR}/manifests/ingress-cloudflare-dns01.yaml"
-
-print_success "Ingress configuration updated"
 
 # Display final status
 print_status "Setup completed successfully!"
