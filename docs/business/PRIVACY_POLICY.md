@@ -17,7 +17,7 @@ By using our Service, you consent to the data practices described in this Privac
 
 Sign-in is handled by Keycloak. When Google sign-in is enabled, Google authenticates you through Keycloak; EconGraph does not collect a local account password. EconGraph receives an identity-provider account identifier and available profile information, including your name, email address, email verification status, and profile picture.
 
-EconGraph keeps an account record for ownership and preferences. On first use, it stores the identity-provider account identifier, a name (or a default if none is supplied), and a verified email address when available and usable. Otherwise, it stores a generated placeholder address. Profile records also support an optional avatar and organization name.
+EconGraph keeps an account record to associate your annotations and comments with your account and remember your preferences. On first use, it stores the identity-provider account identifier, a name (or a default if none is supplied), and an email address when the address is verified, is not already used by another account, and meets the account field's length limit. Otherwise, it stores a generated placeholder address. Profile records also support an optional avatar and organization name.
 
 **User Preferences:**
 
