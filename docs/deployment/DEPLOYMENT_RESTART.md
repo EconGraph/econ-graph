@@ -1,192 +1,195 @@
-# 🚀 Kubernetes Deployment Restart
+# Restarting a kind deployment
 
-## ✅ **Ready to Deploy: Latest Version with Monitoring Stack**
+Use this runbook for an existing EconGraph deployment in the kind cluster
+`econ-graph`. A rollout restart replaces application pods using their configured
+images. To deploy changes from a checkout, build and load the images, run the
+deployment procedure, then restart deployments whose image tags have been reused.
 
-**Status**: Integration tests fixed, GitHub Actions release/deploy disabled, port configuration standardized  
-**Changes**: All auth tests passing (11/11), collaboration tests fixed (6/7), enhanced logging and debugging
+Run commands from the repository root in Bash on the cluster host. This procedure
+does not use `restart-k8s-rollout.sh`, which targets MicroK8s.
 
----
+## Prerequisites and cluster selection
 
-## 🎯 **Quick Restart Command**
+The cluster must already exist on the rootful Docker daemon, with the host storage
+mounts and node bindings described in [Host storage](HOST_STORAGE.md). For a missing
+cluster, follow that guide's setup and recovery instructions before continuing;
+recreating a cluster is not part of a pod restart.
 
-**When Docker/Kubernetes is available**, run this single command:
+The operator needs access to that Docker daemon and the Kubernetes API. The helpers
+default to `unix:///var/run/docker.sock`; use `ECONGRAPH_DOCKER_HOST` to select a
+different daemon deliberately. For builds, install the pinned kind v0.33.0 with
+[`install-kind.sh`](../../scripts/deploy/install-kind.sh). A full deployment also
+uses `jq`, Python 3 with PyYAML, OpenSSL and Mike Farah's `yq` v4, and needs network access for
+external images and the cert-manager manifest. Review the
+[database settings](../../k8s/README.md#databases),
+[Secrets configuration](../../k8s/README.md#secrets) and
+[public-site configuration](../../k8s/README.md#-public-site-cloudflare-tunnel)
+before deploying changes.
+
+Select the cluster's own kubectl and kubeconfig explicitly. The helper below copies
+kubectl from the kind control-plane node and obtains kind's kubeconfig, caching both
+under `${XDG_CACHE_HOME:-$HOME/.cache}/econgraph`. It leaves `~/.kube/config` alone.
+Plain `kubectl` on the host may be a MicroK8s wrapper; a child deployment script's
+shell settings do not configure the shell you use afterward.
 
 ```bash
-./scripts/deploy/restart-k8s-rollout.sh
+export KIND_CLUSTER=econ-graph
+export KIND_CLUSTER_NAME=econ-graph
+source scripts/deploy/lib/kind-env.sh
+check_docker_daemon
+use_kind_kubectl
+export KUBECTL="${ECONGRAPH_KUBE_DIR}/bin/kubectl"
+kind_kube=("$KUBECTL" "--kubeconfig=$KUBECONFIG" --context=kind-econ-graph)
+egk() { "${kind_kube[@]}" -n econ-graph "$@"; }
+
+# Verify the API server, cluster identity and access before changing workloads.
+"${kind_kube[@]}" config view --minify -o jsonpath='{.clusters[0].cluster.server}{"\n"}'
+"${kind_kube[@]}" get namespace kube-system -o jsonpath='{.metadata.uid}{"\n"}'
+"${kind_kube[@]}" get nodes -o wide
+egk get deployments
+egk auth can-i patch deployments.apps
+egk auth can-i get pods
 ```
 
-This script will:
-- ✅ Check/create kind cluster
-- ✅ Build Docker images with v3.7.1 tag
-- ✅ Load images into cluster
-- ✅ Apply updated manifests
-- ✅ Restart backend and frontend deployments
-- ✅ Wait for rollout completion
-- ✅ Display deployment status
+Confirm that the server, nodes and kube-system UID identify the intended cluster,
+and that both permission checks return `yes`. A shared context name alone does not
+identify a production cluster. Stop on an access failure or unexpected identity.
+Rerun this selection block after a cluster recreation or in a new shell. All
+`egk` commands below use this binary, kubeconfig, context and namespace.
 
-On a cluster that serves the public site, give the same `PUBLIC_HOST` as
-`deploy.sh` (`PUBLIC_HOST=econgraph.com ./scripts/deploy/restart-k8s-rollout.sh`).
-Both scripts apply the manifests through `scripts/deploy/lib/public-host.sh`, and both
-stop when the cluster serves a public host and `PUBLIC_HOST` is unset, rather than
-putting Keycloak and the backend back on localhost. `PUBLIC_HOST=` (empty) removes the
-public host. See "Public site" in `k8s/README.md`.
+## Restart existing application pods
 
----
+For a restart using the images already loaded into kind, restart only the affected
+deployments. For example, to restart the backend and frontend:
 
-## 🔄 **Manual Restart Commands**
-
-If you prefer to run each step manually:
-
-### 1. **Verify Cluster Status**
 ```bash
-# Check existing clusters
-kind get clusters
-
-# If no cluster exists, create one:
-cd terraform/k8s
-terraform init && terraform apply -auto-approve
-cd ../..
+egk rollout restart deployment/econ-graph-backend
+egk rollout status deployment/econ-graph-backend --timeout=300s
+egk rollout restart deployment/econ-graph-frontend
+egk rollout status deployment/econ-graph-frontend --timeout=300s
 ```
 
-### 2. **Build and Tag New Images**
+Wait for each rollout to succeed before proceeding. This does not build images or
+apply configuration. Backend startup applies app plane migrations embedded in its
+image; restarting pods does not run the separate data plane migration Job. See
+[Database migrations](../development/MIGRATIONS.md) when changing images or schemas.
+
+## Rebuild and deploy a checkout
+
+Build and load the checkout's images first:
+
 ```bash
-# Build images with new version
 ./scripts/deploy/build-images.sh
-
-# Tag with latest version
-docker tag econ-graph-backend:latest econ-graph-backend:latest
-docker tag econ-graph-frontend:latest econ-graph-frontend:latest
-
-# Load into kind cluster
-kind load docker-image econ-graph-backend:latest --name econ-graph
-kind load docker-image econ-graph-frontend:latest --name econ-graph
 ```
 
-### 3. **Apply Updated Manifests**
-```bash
-# Apply all manifests (includes updated image tags) through deploy.sh, which
-# switches to kind-econ-graph. Don't run `kubectl apply -f k8s/manifests/`:
-# cloudflared.yaml is committed with 0 replicas, so that stops the tunnel
-# connector on the production cluster, and the public host is dropped.
-PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh   # production cluster
-PUBLIC_HOST= ./scripts/deploy/deploy.sh                # any other cluster
-```
+The builder reads the version from `backend/Cargo.toml` and builds the backend,
+crawler worker and frontend as `v<version>` (currently `v4.0.0`). The chart API image
+uses `v1.0.0`. It also creates `latest` tags, but loads the versioned tags referenced
+by the manifests into kind. These workloads use `imagePullPolicy: Never`, so the
+images must be present on the nodes before pods start. Do not override `VERSION`
+independently of the manifests. The admin frontend is not built or deployed by this
+workflow.
 
-### 4. **Restart Rollouts**
-```bash
-# Restart deployments to pick up new version
-kubectl rollout restart deployment/econ-graph-backend -n econ-graph
-kubectl rollout restart deployment/econ-graph-frontend -n econ-graph
-
-# Wait for completion
-kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
-kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
-```
-
-### 5. **Verify Deployment**
-```bash
-# Check pod status
-kubectl get pods -n econ-graph
-
-# Check services
-kubectl get services -n econ-graph
-
-# View logs
-kubectl logs -f deployment/econ-graph-backend -n econ-graph
-kubectl logs -f deployment/econ-graph-frontend -n econ-graph
-```
-
----
-
-## 📋 **What's New in Latest Version**
-
-### ✅ **Critical Fixes Applied:**
-
-1. **Frontend Tests**: 173/173 passing (100% success rate)
-2. **Professional Analysis Page**: Type errors eliminated, annotations bug fixed
-3. **Accessibility**: WCAG compliance with proper navigation landmarks
-4. **Test Quality**: Coverage improved from 23.84% to 29.2%
-5. **CI/CD Pipeline**: Backend ✅, Code Quality ✅, Security ✅
-
-### ✅ **Technical Improvements:**
-
-- **ProfessionalChart Component**: Fixed `annotations.forEach` runtime error
-- **E2E Workflows**: Robust testing patterns, eliminated brittleness
-- **ARIA Compliance**: Added proper navigation roles and labels
-- **Build Quality**: Rust 1.89.0, all dependencies optimized
-
-### ✅ **Deployment Changes:**
-
-- **Image Tags**: Using latest stable versions
-- **Health Checks**: All probes verified working
-- **Resource Limits**: Optimized for test environment performance
-- **Configuration**: All environment variables properly set
-
----
-
-## 🌐 **Expected Application URLs After Restart**
-
-Load port configuration from `ports.env`:
-```bash
-source ports.env
-```
-
-- **Frontend**: http://localhost:${FRONTEND_NODEPORT} (React app with all 173 tests passing)
-- **Backend**: http://localhost:${BACKEND_NODEPORT} (Rust API with improved performance)  
-- **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql (Enhanced schema)
-- **Health Check**: http://localhost:${BACKEND_NODEPORT}/health (System status)
-- **Grafana**: `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`, then http://localhost:3000 (user admin, password in Secret `grafana-admin`, see k8s/README.md)
-
----
-
-## 📊 **Monitoring Commands**
-
-After restart, monitor the deployment:
+A deployment applies database, Keycloak, application, ingress and monitoring
+resources; it also creates missing Secrets and runs the data plane migration Job
+before applying the backend and crawler worker. It is broader than a pod restart.
+Before schema changes, use the [backup procedures](BACKUPS.md). Immediately before
+deploying, check for running backup or migration Jobs and transactions that could
+block migrations:
 
 ```bash
-# Real-time pod status
-watch kubectl get pods -n econ-graph
-
-# Live backend logs
-kubectl logs -f deployment/econ-graph-backend -n econ-graph
-
-# Live frontend logs  
-kubectl logs -f deployment/econ-graph-frontend -n econ-graph
-
-# Check ingress status
-kubectl get ingress -n econ-graph
-
-# Performance monitoring
-kubectl top pods -n econ-graph
+./scripts/deploy/precheck-db-migration.sh --stop-crawler
 ```
 
----
+The precheck stops the crawler worker after checking for active Jobs, then checks
+for long-running or idle transactions. It lists blocking sessions without ending
+them. If it fails, resolve the reported cause before deploying; if abandoning the
+deploy, follow its printed command to restore the worker. On a successful deploy,
+`deploy.sh` restores the worker from its manifest only after data migrations succeed.
+If the migration Job fails, deployment stops and the worker remains stopped.
 
-## 🎯 **Verification Steps**
+Choose **one** deployment command according to the intended public host:
 
-After restart, verify these key improvements:
+```bash
+# Keep the public site on its production cluster (use its actual hostname).
+PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh
+```
 
-1. **Professional Analysis Page**: Navigate to http://localhost:3000/analysis
-   - Should render without type errors
-   - All collaboration features working
-   - Charts display properly with annotations
+```bash
+# Intentionally serve localhost only, removing any existing public host.
+PUBLIC_HOST= ./scripts/deploy/deploy.sh
+```
 
-2. **Accessibility**: Test keyboard navigation
-   - All buttons accessible via Tab key
-   - ARIA labels present and correct
-   - Navigation landmarks properly defined
+Leaving `PUBLIC_HOST` unset is equivalent to empty only when the cluster serves no
+public host. If it already serves one, `deploy.sh` stops and requires an explicit
+value so it cannot silently remove the public routes. A nonempty value requires
+the [production marker](../../k8s/README.md#production-marker). The tunnel connector
+starts only on a marked cluster with a public host and tunnel token; unmarked
+clusters keep it at zero replicas. Use the existing production hostname unless
+intentionally changing the site configuration.
 
-3. **Test Coverage**: All functionality robust
-   - Search functionality works correctly
-   - Chart interactions responsive  
-   - Error handling graceful
+Use `deploy.sh` to apply these resources. Applying all of `k8s/manifests/` directly
+also applies `cloudflared.yaml`, whose committed replica count is zero, stopping a
+running tunnel connector. Direct application also bypasses public-host rendering.
+See [Public site](../../k8s/README.md#-public-site-cloudflare-tunnel) for tunnel setup
+and public access checks.
 
----
+After `deploy.sh` succeeds, restart any deployments whose images were rebuilt under
+the same tag: applying an unchanged pod template does not replace running pods.
+For a full rebuild, use the four deployments built above:
 
-## 💡 **Note**
+```bash
+for deployment in econ-graph-backend crawler-worker econ-graph-frontend chart-api-service; do
+  egk rollout restart "deployment/$deployment" || break
+  egk rollout status "deployment/$deployment" --timeout=300s || break
+done
+```
 
-**Docker Required**: This deployment requires Docker to be running. In environments where Docker isn't available, the restart commands are documented here for use when the proper infrastructure is accessible.
+Stop and investigate any failed rollout before continuing. A successful apply or an
+available old replica does not by itself establish that the new image is running.
 
-**Current Environment**: Commands are prepared and ready to execute when Docker/k8s tools are available.
+## Verify the result
 
-**Automated Script**: Use `./scripts/deploy/restart-k8s-rollout.sh` for the easiest restart experience.
+Check the workloads and their recent logs:
+
+```bash
+egk get deployments,pods,services,ingress
+egk get events --sort-by=.metadata.creationTimestamp
+egk logs deployment/econ-graph-backend --tail=100
+egk logs deployment/econ-graph-frontend --tail=100
+```
+
+The restarted deployments should have all desired replicas updated and available.
+Investigate pending pods, image-loading errors, repeated restarts or failed probes;
+use `egk describe pod <pod-name>` and the affected deployment's logs. For a rebuild,
+also check `crawler-worker` and `chart-api-service` logs. Append `-f` to a log command
+to follow it, and use Ctrl-C to stop.
+
+On the cluster host, the kind ingress exposes the frontend at `http://localhost`,
+GraphQL at `http://localhost/graphql`, and backend health at `http://localhost/health`.
+The checked-in kind port mappings do not expose the services' NodePorts directly.
+For remote access, use the configured public HTTPS hostname and the public-site
+checks linked above.
+
+```bash
+curl --fail --show-error http://localhost/health
+curl --fail --show-error http://localhost/graphql \
+  -H 'Content-Type: application/json' \
+  --data '{"query":"{ __typename }"}'
+```
+
+Expect an HTTP success response and health JSON from `/health`, and a `data` object
+with `__typename` and no `errors` from GraphQL. These checks establish HTTP routing
+and a basic API response. In the browser, open `/explore`, search for a known series,
+and open its detail page to confirm that data loads and its chart renders. If sign-in
+is configured, confirm that it returns to the application. These smoke checks do not
+replace application tests.
+
+For Grafana, forward to a separate local port to avoid confusing it with the app:
+
+```bash
+egk port-forward service/grafana-service 13000:3000
+```
+
+Open `http://localhost:13000`; credentials are described in
+[Secrets configuration](../../k8s/README.md#secrets). The forward runs until Ctrl-C.
