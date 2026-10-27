@@ -29,7 +29,7 @@ release source appears in the table. See the [scheduler's source eligibility rul
 | `DISCOVERED` | Distinct current-publication series from catalog discovery and fetched series |
 | `WITH DATA` | Current-publication series with at least one data point (`end_date` set) |
 | `COVERAGE` | `WITH DATA / DISCOVERED`; `-` when nothing is discovered, which counts as below target |
-| `OVERDUE` | Series with data whose last successful crawl is missing or at least two refresh intervals old; ten intervals for `not_found` series |
+| `OVERDUE` | Series with data whose last successful crawl is missing or at least two refresh intervals old; ten intervals for `not_found` or `absent` series |
 | `oldest success` | The earliest last successful crawl among the source's series |
 
 Refresh intervals depend on frequency: 1 day for daily series, 7 days for weekly and monthly,
@@ -37,8 +37,8 @@ Refresh intervals depend on frequency: 1 day for daily series, 7 days for weekly
 [scheduler interval definitions](../../backend/crates/econ-graph-crawler/src/scheduler.rs)). Census counts only the ids its
 adapter can fetch.
 
-Coverage excludes series confirmed absent (`crawl_status = 'not_found'`) that never had
-data. The worker deactivates catalog-only rows when their first fetch returns NotFound.
+Coverage excludes series that never had data when their fetch status is `not_found`
+or `absent`. The worker deactivates catalog-only rows when their first fetch returns NotFound.
 Historical series that later return NotFound still count because their data remains useful;
 they become overdue after ten intervals. See the [coverage calculation](../../backend/crates/econ-graph-crawler/src/coverage.rs).
 
@@ -75,7 +75,7 @@ No Alertmanager is deployed, so firing alerts are visible in Prometheus without 
 available replica. It concerns metric collection; `CrawlerSourceNotRefreshed` concerns
 source data freshness.
 
-A series is overdue as soon as it misses twice its interval (ten intervals for `not_found`). Investigate transient failures
+A series is overdue as soon as it misses twice its interval (ten intervals for `not_found` or `absent`). Investigate transient failures
 rather than deactivating stored series. Publication state is separate from fetch health:
 retired series keep their observations and remain reachable by link. Non-active publication
 states are excluded from automatic fetch scheduling and live coverage/freshness denominators;
@@ -439,9 +439,11 @@ kubectl -n econ-graph exec deploy/crawler-worker -- \
 kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler status   # FAILED/24H goes up
 ```
 
-Within about a minute, `crawler_last_failure_timestamp_seconds{source="FRED"}` moves to
-now and `CrawlerCrawlFailed` fires for FRED. It resolves by itself an hour later. Without a
-FRED key the job fails as well, because of the key error.
+Once the job reaches terminal failure, the next queue metrics poll (every 30 seconds)
+updates `crawler_last_failure_timestamp_seconds{source="FRED"}`. `CrawlerCrawlFailed` fires
+when Prometheus next scrapes and evaluates the rule. It clears an hour after the failure
+if no further FRED jobs fail. Without a FRED key the job fails as well, because of the key
+error.
 
 ### Stale source
 
@@ -478,11 +480,19 @@ psql -c "UPDATE economic_series SET last_crawled_at = NOW() - INTERVAL '90 days'
 The promtool tests verify that overdue data alerts after 30 minutes when scheduling is
 enabled or its mode metric is missing. Restore the original scheduler setting after QA;
 `kubectl set env` rolls the pod, and a GitOps sync may revert it. Enabling the scheduler
-re-crawls the backdated series on the next tick (normally within 5 minutes), so a healthy
-scheduler can repair the fixture before an alert fires.
+can enqueue a current, non-legacy series on its next tick (normally within 5 minutes),
+unless a recent failed attempt delays its retry. A successful fetch can repair the fixture
+before an alert fires.
 Restore the recorded timestamp after the experiment and confirm the overdue count
 returns to its baseline after the next gauge refresh.
 
+```sh
+kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=true
+kubectl -n econ-graph rollout status deploy/crawler-worker
+```
+
+Use the recorded scheduler value rather than `true` if scheduling was disabled before QA.
+Confirm that the overdue count returns to its baseline after the next gauge refresh.
 
 ### Low coverage
 
