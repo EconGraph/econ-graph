@@ -29,7 +29,8 @@ ROUTE_HOST=econgraph.com EXPECTED_ISSUER=https://econgraph.com/idp/realms/econ-g
 Each result names the route and what was expected. The URL selects the connection address;
 `ROUTE_HOST` independently sets the Host header. Set `EXPECTED_ISSUER` to Keycloak's configured
 issuer, regardless of either address: a public-host deployment needs the public issuer above
-even when testing localhost or the port-forward below. Without Keycloak, use `SKIP_KEYCLOAK=true`.
+even when testing localhost or the port-forward below. Without Keycloak, run
+`test-gateway-routes.sh` with `SKIP_KEYCLOAK=true`.
 
 To test the proxy without the host ports (for example while another controller still holds
 them), port-forward its Service:
