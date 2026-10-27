@@ -127,8 +127,11 @@ docker compose up -d keycloak
 Two more realm-local users, `qa-alice` and `qa-bob` (passwords `qa-alice-password`
 and `qa-bob-password`), live in `qa/econ-graph-users-1.json` for the release QA
 suite to run a two-account check against a local compose stack. They are off by
-default; opt in explicitly. Users are imported only on the realm's first start, so
-[reset the local realm](#reset-the-local-realm) first if Keycloak has run before:
+default; opt in explicitly. Users are imported only on the realm's first start.
+If Keycloak has run before, follow the container and volume removal steps in
+[Reset the local realm](#reset-the-local-realm), including its data-loss and
+project-name guidance. Use the command below instead of that procedure's final
+startup command, so the QA users are mounted when the realm is first imported:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
