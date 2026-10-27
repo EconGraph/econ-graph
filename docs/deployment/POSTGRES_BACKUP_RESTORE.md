@@ -43,22 +43,28 @@ BACKUPS.md says how the two fit together and when the CronJob may be retired.
   `restore.sh` scripts the CronJob and restore job run. They never delete
   dumps.
 - **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
-  `PersistentVolume`s for `econ_graph`'s data and the backups to
+  `PersistentVolume`s for all three databases and the backups to
   `persistentVolumeReclaimPolicy: Retain`. It runs after PostgreSQL comes
   up and again before teardown. A backup PVC using delayed binding may not
   have a PV until the first backup job; teardown protects it once bound.
-  Deleting either PVC leaves its PV `Released` for manual reattachment.
+  Deleting a PVC leaves its PV `Released`; see
+  [Reattaching a retained volume](#reattaching-a-retained-volume) for the
+  storage-specific recovery path.
 - **`scripts/deploy/teardown.sh`**: dumps the data, app and Keycloak
   databases first and refuses when `postgresql-0` is not running unless
   `--no-backup` is given. It sets the bound PVs to Retain and stops if that
   step fails. By default it deletes only the app plane (routes, frontend,
   backend, chart API, Keycloak, and the app and Keycloak Postgres
   StatefulSets), after the namespace name is typed on a terminal or `--yes`;
-  their Secrets and PVCs stay. The data plane (the `postgresql` StatefulSet,
-  its Services, the crawler, this CronJob), the Secrets and the `econ-graph`
-  namespace, which owns the PostgreSQL and backup PVCs, go only with
-  `--include-data-plane` and `econ_graph` typed on a terminal; `--yes` never
-  answers that. `--include-data-plane --delete-cluster` also deletes the kind
+  their Secrets and PVCs stay.
+
+  With `--include-data-plane`, it also deletes the data plane (the
+  `postgresql` StatefulSet, its Services, the crawler and this CronJob), the
+  Secrets and the `econ-graph` namespace, which owns the PostgreSQL and backup
+  PVCs. This requires `econ_graph` typed on a terminal; `--yes` never answers
+  that confirmation.
+
+  With `--include-data-plane --delete-cluster`, it also deletes the kind
   cluster, whose nodes hold the in-cluster backup volume and Grafana's data,
   after the cluster name is typed. A confirmation that can't be typed stops
   the script before it changes anything. `--dry-run` prints every step and
@@ -123,8 +129,9 @@ kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=tr
 ```
 
 With `APP_DATABASE=separate`, the app database has tables once the backend has
-started against it (it applies the app migrations at startup), so the table
-check fails only a run that comes before the backend's first start.
+started against it (it applies the app migrations at startup). A backup
+before that first start fails the table check because those migrations have
+not created the tables yet.
 
 ### Keycloak
 
@@ -216,21 +223,68 @@ then prints its logs. It dumps the same databases as the nightly run.
 
 ### econ_graph
 
-```sh
-# See what's available
-./scripts/deploy/restore-postgres-backup.sh --list
+This restore is **destructive**: `pg_restore --clean --if-exists` drops and
+recreates every object the dump contains, overwriting its current data in
+`econ_graph`. In shared mode this also replaces app state. The helper prompts
+unless `--yes` is passed; it does not stop any clients for you.
 
-# Restore the latest backup (prompts for confirmation)
-./scripts/deploy/restore-postgres-backup.sh
+1. List the available dumps and choose the recovery point:
 
-# Restore a specific dump, without the confirmation prompt
-./scripts/deploy/restore-postgres-backup.sh --file econ_graph-20260101-080000.dump --yes
-```
+   ```sh
+   ./scripts/deploy/restore-postgres-backup.sh --list
+   ```
 
-This is **destructive**: `pg_restore --clean --if-exists` drops and
-recreates every object the dump contains before restoring it, overwriting
-whatever is currently in `econ_graph`. That's why it prompts unless `--yes`
-is passed. `restore.sh` refuses a file that isn't an `econ_graph-*.dump`
+2. Record the current replica counts for both writers, then stop them and
+   wait until their pods are gone. Keep these counts for the restart, even
+   if you leave this shell during recovery:
+
+   ```sh
+   kubectl -n econ-graph get deployment econ-graph-backend crawler-worker \
+     -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
+   kubectl -n econ-graph scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0 || exit 1
+   while :; do
+     writer_pods="$(kubectl -n econ-graph get pods \
+       -l 'app in (econ-graph-backend,crawler-worker)' -o name)" || exit 1
+     [ -z "$writer_pods" ] && break
+     sleep 2
+   done
+   ```
+
+   `--clean` waits on locks held by clients; a live connection mid-query can
+   stall the restore indefinitely, and concurrent crawler writes can race
+   with it. Stop any other clients that write to `econ_graph` too. Do not
+   proceed if scaling or checking the pods fails.
+
+3. Restore the chosen dump. Run one of these alternatives:
+
+   ```sh
+   # Latest good backup (prompts for confirmation)
+   ./scripts/deploy/restore-postgres-backup.sh
+
+   # A specific dump, without the confirmation prompt
+   ./scripts/deploy/restore-postgres-backup.sh --file econ_graph-20260101-080000.dump --yes
+   ```
+
+   The helper waits up to 600 seconds. If that wait times out, it reports
+   failure but leaves the Job running. Keep writers stopped, inspect the
+   `postgres-restore-*` Job it named and its logs, and establish whether the
+   Job completed or failed before retrying or resuming clients. A timeout
+   alone does not mean the restore was rolled back.
+
+4. After the Job succeeds, check ownership as described below and check
+   `diesel migration list` / `__diesel_schema_migrations` against the schema
+   and the migrations required by the deployed services. `--clean` only
+   drops objects present in the dump: tables created by migrations that ran
+   after the dump remain, and can disagree with the restored migration
+   history. Resolve any mismatch before resuming writers.
+
+5. Scale `deployment/econ-graph-backend` and `deployment/crawler-worker` back
+   to their recorded replica counts only after recovery and schema checks
+   succeed. In shared mode, starting the backend applies any newer app plane
+   migrations to this database. Data plane migrations require the explicit
+   [migration procedure](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate).
+
+`restore.sh` refuses a file that isn't an `econ_graph-*.dump`
 (such as an `econ_graph_app` or Keycloak dump), and a dump that lists no
 table. It resolves `latest.dump` to the dump it points at once, before
 reading anything, so a backup that finishes during the restore and moves the
@@ -266,8 +320,8 @@ table owned by `postgres`, and the services could neither read nor write it.
    created stays.
 
 `restore.sh` checks that `RESTORE_OWNER` exists before changing anything.
-Every object in the dump must be owned by `econgraph` in the database being
-restored into, since that role drops them. If one isn't, the restore stops at
+Every existing object that the second restore step drops must be owned by
+`econgraph` so that role can drop them. If one isn't, the restore stops at
 `must be owner of ...` and rolls back. Give the object to `econgraph`
 (`ALTER TABLE ... OWNER TO econgraph`, or the matching `ALTER` for another
 kind of object), then restore again. To check the result, as `postgres` in
@@ -277,15 +331,6 @@ kind of object), then restore again. To check the result, as `postgres` in
 SELECT tableowner, count(*) FROM pg_tables
  WHERE schemaname NOT IN ('pg_catalog', 'information_schema') GROUP BY 1;
 ```
-
-Before restoring into a real deployment, scale `backend-deployment` and
-`crawler-worker` to 0 replicas first: `--clean` waits on any lock they hold
-(a live connection mid-query can stall the restore indefinitely), and the
-crawler writing new rows mid-restore can race with it. Also note that
-`--clean` only drops objects present in the dump: tables created by
-migrations that ran *after* the dump was taken are left behind, which can
-disagree with Diesel's migration history after the restore; check
-`diesel migration list` / `__diesel_schema_migrations` afterwards.
 
 ### keycloak
 
@@ -313,64 +358,91 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
    The dump holds password hashes and client secrets; keep the local copy
    private and remove it when done.
 
-2. Stop Keycloak, so nothing writes to the database during the restore:
+2. Record Keycloak's replica count, then stop it so nothing writes to the
+   database during the restore. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph scale deployment/keycloak --replicas=0
-   # Until no Keycloak pod is left (returns at once if there was none)
-   while kubectl -n econ-graph get pods -l app=keycloak -o name | grep -q .; do sleep 2; done
+   kubectl -n econ-graph get deployment keycloak \
+     -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
+   kubectl -n econ-graph scale deployment/keycloak --replicas=0 || exit 1
+   while :; do
+     writer_pods="$(kubectl -n econ-graph get pods -l app=keycloak -o name)" || exit 1
+     [ -z "$writer_pods" ] && break
+     sleep 2
+   done
    ```
+
+   Do not proceed if recording the count, scaling or checking the pods fails.
 
 3. Recreate the database and restore the dump into it:
 
    ```sh
-   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak
-   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak
+   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak || exit 1
+   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak || exit 1
    kubectl -n econ-graph exec -i keycloak-postgres-0 -- \
      pg_restore -U keycloak -d keycloak --no-owner --no-privileges \
-     --exit-on-error --single-transaction < "./${DUMP}"
+     --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
 
-4. Start Keycloak again: `./scripts/deploy/deploy.sh`, or
-   `kubectl -n econ-graph scale deployment/keycloak --replicas=1`.
+4. Confirm that database deletion, creation and restoration all exited
+   successfully. If any command fails, keep Keycloak stopped and resolve the
+   failure before continuing. Only after a successful restore, scale
+   `deployment/keycloak` back to its recorded replica count.
 
 ### econ_graph_app
 
-An app database restore replaces every user and everything they created with
-the dump's. Take a manual backup first, as for Keycloak. The backend connects
-as the role `econgraph`, which owns the app database's tables (the backend
-creates them, running the app migrations as `econgraph`). The CronJob's dumps
-carry no owner (`--no-owner`), so the restore runs with
-`--role=econgraph`, into a database `econgraph` owns, to give the tables
-back to it; restored as `postgres` alone they would belong to `postgres`, and
-the backend could not use them. For the same reason,
-`scripts/backup/restore-dump.sh` (which restores the host-side dumps, which
-do keep their owners) is not for these dumps.
+Use this procedure for `APP_DATABASE=separate`, where the backend uses
+`econ_graph_app` on `app-postgres-service`. With `APP_DATABASE=shared`, app
+state is in the `econ_graph` dump: follow [econ_graph](#econ_graph) instead,
+which replaces both app state and data plane contents. See
+[Which app database](#which-app-database) for how the layout is selected.
+
+A separate app database restore replaces every user and everything they
+created with the dump's. Take a manual backup first, as for Keycloak. The
+backend connects as `econgraph`, which owns the tables it creates through
+app plane migrations. The CronJob's dumps omit ownership (`--no-owner`),
+so restore into
+an `econgraph`-owned database with `--role=econgraph` to give the restored
+tables to that role. Restoring as `postgres` alone would leave the tables
+owned by `postgres`, and the backend could not use them. The host-side
+`scripts/backup/restore-dump.sh` helper is for dumps that retain ownership;
+do not use it for these CronJob dumps.
 
 1. Copy the dump off the backup PVC as in step 1 above, with
    `DUMP=econ_graph_app-20260101-080000.dump`.
 
-2. Stop the backend, the only client of the app database:
+2. Record the replica count for the backend, the only client of the app
+   database, then stop it. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph scale deployment/econ-graph-backend --replicas=0
-   while kubectl -n econ-graph get pods -l app=econ-graph-backend -o name | grep -q .; do sleep 2; done
+   kubectl -n econ-graph get deployment econ-graph-backend \
+     -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
+   kubectl -n econ-graph scale deployment/econ-graph-backend --replicas=0 || exit 1
+   while :; do
+     writer_pods="$(kubectl -n econ-graph get pods -l app=econ-graph-backend -o name)" || exit 1
+     [ -z "$writer_pods" ] && break
+     sleep 2
+   done
    ```
+
+   Do not proceed if recording the count, scaling or checking the pods fails.
 
 3. Recreate the database, owned by `econgraph`, and restore the dump into it
    as `econgraph`:
 
    ```sh
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app
+   kubectl -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app || exit 1
+   kubectl -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app || exit 1
    kubectl -n econ-graph exec -i app-postgres-0 -c postgres -- \
      pg_restore -U postgres -d econ_graph_app --role=econgraph --no-owner --no-privileges \
-     --exit-on-error --single-transaction < "./${DUMP}"
+     --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
 
-4. Start the backend again: `./scripts/deploy/deploy.sh`, or scale
-   `deployment/econ-graph-backend` back to its replica count. It applies any
-   app migrations newer than the dump at startup.
+4. Confirm that database deletion, creation and restoration all exited
+   successfully. If any command fails, keep the backend stopped and resolve
+   the failure before continuing. Only after a successful restore, scale
+   `deployment/econ-graph-backend` back to its recorded replica count. It
+   applies any app plane migrations newer than the dump at startup.
 
 ## Testing
 
@@ -378,52 +450,63 @@ do keep their owners) is not for these dumps.
 scripts/deploy/test-postgres-backup-scripts.sh
 ```
 
-Runs `backup.sh`, `sync.sh` and `restore.sh` from the ConfigMap in the
-CronJob's images and security settings (uid 999, read-only root), with the
-`pg-dump` container's environment read from the CronJob manifest, against
-scratch `postgres:18` containers standing in for `data-postgres-service`
-(also aliased `postgres-service`), `app-postgres-service` and
-`keycloak-postgres-service`, and an S3 mock. It checks that all three dumps
-are written, restore with every table's row count equal to the source (the
-Keycloak one through `pg_restore` on stdin, as in its step 3 above) and sync
-without the `latest` links; that the app dump, restored as in
-[econ_graph_app](#econ_graph_app) step 3, leaves `econgraph` owning its
-tables and able to write them, with the source's schema; that `restore.sh`,
-with the restore Job's environment, puts `econ_graph` back with `econgraph`
-owning everything but the extensions and able to write its tables, the
-schema (tables, indexes, constraints, views, functions, extensions) equal to
-the source's and every extension untouched, owner and comment included (a
-comment set on the target survives); that on a newly initialised server (the
-init script, with `uuid-ossp` then dropped, and `RESTORE_OWNER` unset) it
-creates and logs the two extensions that server lacks, `pgcrypto` and
-`uuid-ossp`, each with the dump's comment, and leaves everything else owned
-by `econgraph`; that a restore failing at its last drop
-(a schema owned by `postgres`) rolls every table and row back; that with
-`latest.dump` moved to another dump right after the list, the listed dump is
-the one restored; and that it refuses a dump with no table, a missing
-`RESTORE_OWNER` role, and an app or Keycloak dump; that `backup.sh` reads
-each kind of `app-database-url` as intended (case, Service suffixes, IP
-literals, options, unreadable URLs); that the app database is dumped when
-`app-database-url` names `app-postgres-service:5432/econ_graph_app` (also in
-upper case with the full Service name and options), skipped with one log
-line, the run succeeding, when it names the database dumped as `econ_graph`,
-and failed when it names any other database (another host, the same host
-with another database, an IP, a host in the options) or can't be read,
-whatever `APP_REQUIRED` says; that a missing `app-database-url` is skipped,
-or failed with `APP_REQUIRED=true`; that a failure of any dump (server down,
-wrong password, no tables, a table locked past the lock wait) keeps and
-syncs the others and fails the Job; that a missing app password in separate mode fails the run; that a missing
-Keycloak password is a failure with `KEYCLOAK_REQUIRED=true` and a skip with
-`false`; that the Job has a
-deadline and a `podFailurePolicy` that doesn't retry a failed container;
-that no run deletes a dump, and that a dump removed from the volume by hand
-stays in S3 after the next sync; and that no output contains a password. It needs Docker and
-python3 with PyYAML, and runs in CI ("PostgreSQL Backup Scripts").
+The suite runs `backup.sh`, `sync.sh` and `restore.sh` from the ConfigMap in
+the CronJob's images and security settings (uid 999, read-only root). It
+reads the `pg-dump` container's environment from the CronJob manifest and
+uses scratch `postgres:18` containers for `data-postgres-service` (also
+aliased `postgres-service`), `app-postgres-service` and
+`keycloak-postgres-service`, plus an S3 mock.
 
-It does not cover the in-cluster wiring (the PVC mounts, the Secrets, the
-CronJob schedule, the Services' selectors, network policy). Check that on a
-cluster with `backup-postgres-now.sh` followed by
-`restore-postgres-backup.sh --list`.
+The checks cover these guarantees:
+
+- **Archive round trips and app ownership.** All three dumps are written,
+  read back and restored with every table's row count equal to the source.
+  The Keycloak dump is restored through `pg_restore` on stdin, as in its
+  procedure above. The app dump, restored as in
+  [econ_graph_app](#econ_graph_app) step 3, retains the source schema and
+  leaves `econgraph` owning its tables and able to write them.
+- **Data ownership, schema and extensions.** With the restore Job's
+  environment, `restore.sh` leaves `econgraph` owning all restored objects
+  except extensions and able to write its tables. The schema matches the
+  source's tables, indexes, constraints, views, functions and extensions.
+  Existing extensions keep their owners and comments, including a comment
+  set only on the target. On a newly initialised server using the init
+  script, with `uuid-ossp` then dropped and `RESTORE_OWNER` unset, the restore
+  creates and logs the two missing extensions, `pgcrypto` and `uuid-ossp`,
+  with the dump's comments. Everything else belongs to `econgraph`.
+- **Restore rollback and input selection.** A restore that fails at its last
+  drop because a schema belongs to `postgres` rolls back every table and row.
+  Moving `latest.dump` to another dump immediately after the archive list
+  does not change which dump is restored. The script refuses a dump without
+  tables, a missing `RESTORE_OWNER` role, and an app or Keycloak dump.
+- **App target selection and credentials.** `backup.sh` interprets URL case,
+  Service suffixes, IP literals, options and unreadable URLs as specified in
+  [Which app database](#which-app-database). A separate app target is dumped,
+  including an uppercase full Service name with options. A shared target is
+  skipped with one log line and a successful run. Other targets (another
+  host, the same host with another database, an IP or a host in the options)
+  and unreadable URLs fail regardless of `APP_REQUIRED`. A missing URL is
+  skipped, or fails with `APP_REQUIRED=true`. A missing app password in
+  separate mode fails the run. A missing Keycloak password fails with
+  `KEYCLOAK_REQUIRED=true` and is skipped with `false`.
+- **Independent failures and bounded runs.** When a dump fails because its
+  server is down, its password is wrong, it has no tables, or a table stays
+  locked past the lock wait, the other dumps are kept and synced and the Job
+  fails. Without `BACKUP_STATUS_FILE`, `backup.sh` itself exits 1 on a dump
+  failure. Manifest checks verify a Job deadline and a `podFailurePolicy`
+  that does not retry a failed container.
+- **Sync, retention and output privacy.** Dumps sync without the `latest`
+  links. No run deletes a dump, and a dump removed from the volume by hand
+  remains in S3 after the next sync. No output contains a password.
+
+The suite needs Docker and python3 with PyYAML, and runs in CI as
+“PostgreSQL Backup Scripts”. It does not cover the in-cluster wiring: PVC
+mounts, Secrets, the CronJob schedule, Service selectors or network policy.
+On the intended cluster, `backup-postgres-now.sh` followed by
+`restore-postgres-backup.sh --list` checks that an ad-hoc Job can write dumps
+and the listing pod can see them. Inspect the deployed schedule and network
+configuration separately; these commands do not exercise scheduled
+execution or a restore.
 
 ## Object storage (optional)
 
@@ -449,21 +532,55 @@ AWS credentials need to reach the `backup-sync` container (e.g. via
 `AWS_SECRET_ACCESS_KEY`, or IAM roles for service accounts on EKS). They are
 not wired up by default.
 
-## Reattaching a Retain'd volume
+## Reattaching a retained volume
 
-Once a PV's reclaim policy is `Retain`, deleting its PVC leaves the PV
-behind in the `Released` phase; it isn't automatically reused. A plain
-redeploy creates a *new*, empty PVC/PV pair, quietly giving you a fresh,
-empty database instead of your old data. To bind back to the old volume:
+`Retain` keeps a PV and its storage after PVC deletion, but leaves the PV
+`Released`; it does not by itself make that PV reusable. Recovery depends on
+which storage layout owns the volume.
 
-1. `kubectl get pv` and find the `Released` one (check its capacity/claimRef
-   to confirm it's the right one).
-2. `kubectl patch pv <pv-name> -p '{"spec":{"claimRef": null}}'` to clear its
-   claim so it's `Available` again.
-3. Apply `postgres-deployment.yaml` as usual; if the new PVC doesn't bind to
-   it automatically (StatefulSet-created PVCs don't pin a specific volume),
-   create a PVC by hand requesting that exact PV via `spec.volumeName`
-   before applying the StatefulSet.
+### Static host-storage databases
+
+The current database manifests use the `econgraph-host` StorageClass and pin
+their claims to `econgraph-data-plane-pg`, `econgraph-app-prod-app-pg` and
+`econgraph-app-prod-keycloak-pg`. Their storage is in the host's database
+directories. The normal `deploy.sh` path runs `apply-host-storage.sh`, which
+re-arms a Released database PV by clearing the old claim UID and resource
+version while keeping its intended claim name and namespace. The replacement
+claim then binds to the same directory. Keep that prebinding; do not clear
+the entire `claimRef` using the dynamic-volume procedure below. See
+[How the cluster reaches host storage](HOST_STORAGE.md#how-the-cluster-reaches-them)
+for the mount checks and required Secrets.
+
+### Dynamically provisioned backup volume
+
+`postgres-backup-data` uses the default StorageClass and is not one of the
+three database PVs re-armed by deployment. A replacement claim can therefore
+provision a new empty volume rather than recover the old backups. For this
+volume, or a database on a cluster deliberately configured with dynamic
+storage, reattach the retained PV explicitly:
+
+1. Stop workloads using the affected claim and keep backup Jobs from
+   starting during recovery. Find the old Released PV with `kubectl get pv`.
+   Confirm its capacity and `claimRef` identify the intended volume; record
+   its StorageClass and access modes too.
+2. Check whether a replacement PVC already exists. If none exists, prepare
+   one with the required name and namespace (`postgres-backup-data` in
+   `econ-graph` for backups). If a replacement is Pending and unbound, replace
+   it with the explicitly bound claim only after confirming it has no bound
+   volume. If it is Bound to a different PV, preserve any data on that volume
+   and stop its users before replacing the claim; protect that PV with Retain
+   before deleting its PVC. Do not create a competing claim with another
+   name or discard a bound replacement's data.
+3. Once no live claim uses the old Released PV, clear its stale claim:
+   `kubectl patch pv <pv-name> -p '{"spec":{"claimRef": null}}'`.
+4. Create the intended PVC with `spec.volumeName` set to the old PV's name,
+   matching its StorageClass and access modes and requesting no more than its
+   capacity. Use the workload's expected claim name; for a dynamically stored
+   StatefulSet database, create that claim before applying the StatefulSet.
+   Do not first apply an unpinned PVC that can provision another volume.
+5. Verify that the PVC is Bound to the intended PV and that the expected
+   files are present before resuming workloads. Keep the explicit volume
+   selection in the claim manifest used for subsequent deployment.
 
 ## Retention
 
