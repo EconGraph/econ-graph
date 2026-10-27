@@ -5,6 +5,14 @@ propagation failure. First identify the resolver path and compare the failing
 query through that path and its upstreams. Change forwarding only when those
 results support the change.
 
+The public Gateway uses a self-signed origin certificate by default; visitor TLS
+terminates at Cloudflare. That self-signed issuer does not use DNS-01. Deployment
+retains an existing Gateway Certificate's issuer unless `GATEWAY_TLS_ISSUER`
+overrides it, so inspect the actual issuer before investigating ACME challenges.
+For other public-site TLS or routing failures, use the
+[Gateway troubleshooting guide](./GATEWAY_ROUTING_TROUBLESHOOTING.md) and
+[public-site configuration](../../k8s/README.md#-public-site-cloudflare-tunnel).
+
 ## Recognize the failing lookup
 
 These recorded failure excerpts show an SOA lookup failing through cluster DNS:
@@ -44,7 +52,7 @@ kubectl config get-contexts
 DNS_CONTEXT='REPLACE_CONTEXT'
 kubectl --context="$DNS_CONTEXT" get deployments,pods,services,configmaps -n kube-system
 kubectl --context="$DNS_CONTEXT" get deployments,pods -A
-kubectl --context="$DNS_CONTEXT" get ingress,certificates,orders.acme.cert-manager.io,challenges.acme.cert-manager.io -A
+kubectl --context="$DNS_CONTEXT" get gateways.gateway.networking.k8s.io,certificates,orders.acme.cert-manager.io,challenges.acme.cert-manager.io -A
 ```
 
 Discover the DNS workload and its mounted ConfigMaps rather than assuming they
@@ -61,7 +69,6 @@ CM_NAMESPACE='REPLACE_CERT_MANAGER_NAMESPACE'
 CM_DEPLOYMENT='REPLACE_CERT_MANAGER_CONTROLLER_DEPLOYMENT'
 CM_POD='REPLACE_CERT_MANAGER_CONTROLLER_POD'
 CM_CONTAINER='REPLACE_CERT_MANAGER_CONTROLLER_CONTAINER'
-APP_NAMESPACE='REPLACE_CERTIFICATE_NAMESPACE'
 
 kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get deployment "$DNS_DEPLOYMENT" -o yaml
 kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get configmap "$DNS_CONFIGMAP" -o yaml
@@ -69,23 +76,61 @@ kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" get deployment "$CM_DEPLOYME
   -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{.args}{"\n"}{end}'
 kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" get pod "$CM_POD" \
   -o jsonpath='{.spec.dnsPolicy}{"\n"}{.spec.dnsConfig}{"\n"}'
-kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get ingress \
-  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.tls}{"\n"}{end}'
-kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get certificates \
-  -o custom-columns='NAME:.metadata.name,SECRET:.spec.secretName,DNS_NAMES:.spec.dnsNames,ISSUER:.spec.issuerRef.name'
 ```
 
 For a DNS workload that is not a Deployment, inspect its actual workload kind.
-Select the Certificate whose
-`spec.secretName` matches the affected ingress and whose `spec.dnsNames` covers
-the affected domain; do not infer its name from a previous incident. No Secret
-contents are needed for these checks.
+For the affected TLS connection, discover the Gateway and inspect its HTTPS
+listener's `tls.certificateRefs`. The shipped public listener is `https` on
+Gateway `econ-graph-gateway` in namespace `econ-graph-gateway`, referencing Secret
+`econ-graph-tls`. The application HTTPRoutes can be in a different namespace;
+their namespace does not determine where the certificate lives.
+
+```bash
+GATEWAY_NAMESPACE='REPLACE_GATEWAY_NAMESPACE'
+GATEWAY='REPLACE_GATEWAY_NAME'
+kubectl --context="$DNS_CONTEXT" -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY" \
+  -o jsonpath='{range .spec.listeners[*]}{.name}{"\t"}{.protocol}{"\t"}{.tls.certificateRefs}{"\n"}{end}'
+
+CERT_NAMESPACE='REPLACE_REFERENCED_SECRET_NAMESPACE'
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" get certificates \
+  -o custom-columns='NAME:.metadata.name,SECRET:.spec.secretName,DNS_NAMES:.spec.dnsNames,ISSUER:.spec.issuerRef.name'
+```
+
+For a Secret reference, use its explicit namespace, or the Gateway namespace if
+omitted. In that namespace, select the Certificate whose `spec.secretName`
+matches the reference and whose `spec.dnsNames` covers the affected domain. The
+shipped Certificate is also named `econ-graph-tls`; discover the names in your
+cluster rather than inferring them from a previous incident. No Secret contents
+are needed for these checks.
 
 ```bash
 CERTIFICATE='REPLACE_CERTIFICATE_NAME'
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" describe certificate "$CERTIFICATE"
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" get certificate "$CERTIFICATE" \
+  -o jsonpath='{.spec.issuerRef}{"\n"}'
+```
+
+Read the referenced issuer's type and solver configuration. For a cert-manager
+`Issuer` (the default when `issuerRef.kind` is omitted), use the Certificate's
+namespace; for a `ClusterIssuer`, omit the namespace:
+
+```bash
+ISSUER='REPLACE_ISSUER_NAME'
+# Run the command matching the selected Certificate's issuerRef.kind.
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" get issuer "$ISSUER" \
+  -o jsonpath='{.spec.selfSigned}{"\n"}{.spec.acme.server}{"\n"}{.spec.acme.solvers}{"\n"}'
+kubectl --context="$DNS_CONTEXT" get clusterissuer "$ISSUER" \
+  -o jsonpath='{.spec.selfSigned}{"\n"}{.spec.acme.server}{"\n"}{.spec.acme.solvers}{"\n"}'
+```
+
+Continue with this runbook when the selected Certificate uses an ACME DNS-01
+solver and has an actual failing DNS-01 Challenge. An issuer can have multiple
+solvers; check the solver selected for the affected name. A self-signed
+Certificate has no ACME Order or Challenge to inspect.
+
+```bash
 CHALLENGE='REPLACE_ACTIVE_CHALLENGE_NAME'
-kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" describe certificate "$CERTIFICATE"
-kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" describe challenge "$CHALLENGE"
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" describe challenge "$CHALLENGE"
 kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" logs deployment/"$CM_DEPLOYMENT" --all-pods=true --since=15m
 ```
 
@@ -223,7 +268,7 @@ or prove that the running DNS process accepted it.
 ```bash
 kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get pods
 kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" logs deployment/"$DNS_DEPLOYMENT" --all-pods=true --since=15m
-kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get certificate "$CERTIFICATE" -w
+kubectl --context="$DNS_CONTEXT" -n "$CERT_NAMESPACE" get certificate "$CERTIFICATE" -w
 ```
 
 If the Corefile contains `log . { class error }`, successful queries are excluded
@@ -241,4 +286,5 @@ conditions; a successful lookup alone does not demonstrate renewal health.
 ## Related documentation
 
 - [Let's Encrypt Cloudflare DNS-01 Integration](./LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md)
+- [Gateway Routing Troubleshooting](./GATEWAY_ROUTING_TROUBLESHOOTING.md)
 - [Kubernetes Deployment Guide](./KUBERNETES_DEPLOYMENT.md)
