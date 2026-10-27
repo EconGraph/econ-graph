@@ -93,6 +93,8 @@ The checked-in values are examples with no source or observation date recorded i
 
 `get_ratio_interpretation` checks `value >= threshold` in this order: `excellent`, `good`, `average`, then `below_average`. The first match supplies the description. If none matches, it returns the `poor` description without comparing the `poor` threshold. A missing ratio key returns `None`.
 
+For implemented calculations such as return on equity, the calculator uses this lookup to set the result's `interpretation`, falling back to `Unable to interpret ratio` when the ratio key is missing.
+
 Use the same units as the calculator: for example, return on equity of 15% is `0.15`. The lookup applies the same comparison direction to every ratio, including ratios where lower values may be preferable. An ascending threshold sequence does not reverse the comparison. Interpretations have no company-size or industry dimension; adding those dimensions or a different comparison direction requires Rust changes.
 
 ### `ratio_formulas.json`
