@@ -91,9 +91,11 @@ The guide's [GetData examples](https://apps.bea.gov/api/_pdf/bea_web_service_api
 and [Appendix N](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=60)
 document Regional data and request parameters. The
 [Regional fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/bea/regional_sagdp2_line1.json)
-illustrates `DataSetName=Regional&TableName=SAGDP2&LineCode=1&GeoFips=STATE&Year=ALL`,
-with `GeoFips`, `GeoName`, `TimePeriod`, `DataValue`, `CL_UNIT`, `UNIT_MULT` and optional
-`NoteRef` fields. Its values are also illustrative.
+illustrates `DataSetName=Regional&TableName=SAGDP2&LineCode=1&Year=ALL` with
+`GeoFips=00000,01000,06000,36000,56000`, selecting the US, Alabama, California, New York
+and Wyoming. Rows contain `GeoFips`, `GeoName`, `TimePeriod`, `DataValue`, `CL_UNIT`,
+`UNIT_MULT` and optional `NoteRef` fields. Its values are also illustrative. For an
+all-states request, the guide documents `GeoFips=STATE`.
 
 Values are strings with thousands separators; `UNIT_MULT` is a power of ten (`6` =
 millions). `TimePeriod` is `2024`, `2024Q1` or `2024M01`.
