@@ -61,7 +61,7 @@ batches, paging).
 | Panicking adapter | covered | `worker/tests.rs::adapter_panic_is_retried_and_worker_survives` |
 | Circuit breaker on repeated 429 / auth | covered | `worker/tests.rs::circuit_breaker_pauses_throttled_source_only`, `per_series_rate_limit_in_a_batch_counts_for_the_breaker`, `breaker_counts_one_result_per_batch_call` |
 | Partial batch failure | covered | `worker/tests.rs::one_bad_series_fails_only_its_own_job`, `whole_batch_error_applies_to_every_job_with_usual_retries` |
-| A failed fetch never overwrites stored data or reports success | covered | `worker/tests.rs::a_failed_refresh_keeps_the_stored_data_and_does_not_count_as_fresh` (5xx, 401, non-JSON and incomplete bodies: points, end date and last successful crawl unchanged, status `failed`, attempt recorded with its kind, coverage unchanged) |
+| A failed fetch never overwrites stored data or reports success | covered | `worker/tests.rs::a_failed_refresh_keeps_the_stored_data_and_does_not_count_as_fresh` (5xx, 401, non-JSON and incomplete bodies: points, end date and last successful crawl unchanged, series status `failed`, attempt recorded with its kind, coverage unchanged) |
 | An empty response never deletes stored data | covered | `worker/tests.rs::an_empty_refresh_keeps_the_stored_points` |
 | Cancellation: shutdown mid-job | covered | `worker/tests.rs::shutdown_mid_request_finishes_the_job_and_claims_no_more` |
 | Legacy queue service | covered | `econ-graph-services/src/services/queue_service.rs` (17 tests, lease-guarded transitions) |
