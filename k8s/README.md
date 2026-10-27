@@ -26,6 +26,7 @@ This directory contains all the necessary files to deploy EconGraph to a local K
 ### Setup
 
 ```bash
+sudo scripts/host/setup-subvolumes.sh                    # host storage under /srv/econgraph, once per host
 ./scripts/deploy/recreate-kind-cluster.sh --if-missing   # the kind cluster, if there is none
 ./scripts/deploy/build-images.sh                         # the images
 ./scripts/deploy/deploy.sh                               # databases, Secrets, application, routes

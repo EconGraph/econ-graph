@@ -155,8 +155,8 @@ kubectl() { kc "$@"; }
 
 if [[ "$DRY_RUN" = true ]]; then
     print_status "Dry run: on context $CONTEXT, would create Secret cert-manager/cloudflare-api-token-secret,"
-    print_status "  apply the ClusterIssuer and a wildcard Certificate for $DOMAIN in $NAMESPACE, wait for it,"
-    print_status "  and apply k8s/manifests/ingress-cloudflare-dns01.yaml. Nothing was changed."
+    print_status "  apply the ClusterIssuer and a wildcard Certificate for $DOMAIN in $NAMESPACE, and wait for it."
+    print_status "  Nothing was changed."
     exit 0
 fi
 
