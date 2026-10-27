@@ -18,7 +18,7 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
 | [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
 | [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
-| [playwright-tests-deployed.yml](playwright-tests-deployed.yml) | None | Playwright against an explicitly deployed target |
+| [playwright-tests-deployed.yml](playwright-tests-deployed.yml) | None | Legacy suite: its `base_url` input sets `PLAYWRIGHT_BASE_URL`, but the default config reads `FRONTEND_URL`, so the input does not select the target. Use the [release suite’s deployed mode](../../frontend/tests/e2e/release/README.md#against-a-deployed-build-rel-qa-check-3). |
 | [ci-experimental.yml](ci-experimental.yml) | None | Optional RAM-disk experiment |
 | [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | None | Manual build-cache experiment |
 
