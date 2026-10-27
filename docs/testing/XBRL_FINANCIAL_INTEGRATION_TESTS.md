@@ -38,7 +38,7 @@ responses; chart rendering is also mocked by the
 | Financial Dashboard Integration | Company name, ticker, and industry appear. Ratio values include ROE `14.7%` and current ratio `104.0%`. Benchmark content includes “Industry Benchmark Analysis” and “Above Average.” |
 | Financial Statement Viewer Integration | Balance-sheet and income-statement labels and formatted values appear, including Total Assets, Current Assets, Total Liabilities, Stockholders' Equity, Net Sales, and Net Income. The hierarchy-named test checks labels and values, without asserting parent-child layout. |
 | Benchmark Comparison Integration | Benchmark labels, the 75th-percentile ranking, “Above Average,” and supplied P10, P25, median, P75, and P90 values appear. |
-| Trend Analysis Integration | The trend heading, mocked visualization, and direction and strength labels appear. |
+| Trend Analysis Integration | The trend heading, “Trend Visualization” heading, and direction and strength labels appear. |
 | XBRL Data Processing Integration | Company and industry content or asset labels appear. These assertions do not verify processing status transitions or taxonomy reference resolution. |
 | Error Handling Integration | The viewer heading or company name appears. These assertions do not verify parsing-error recovery or missing-taxonomy handling. |
 | Performance Integration | Rendering until “Total Assets” appears takes less than two seconds. |
@@ -162,12 +162,13 @@ intended disposable database, PostgreSQL is reachable, and the role can recreate
 its schema and apply migrations. Check for another test process using the same
 database if fixtures disappear or tables change during a run.
 
+Parser initialization failures belong to `XbrlParser::new()`; this target does
+not diagnose XML parsing or DTS resolution from an instance document.
+
 For frontend failures, first confirm that the integration configuration selected
 the file. Then check the mocked GraphQL operation names, fixture responses, and
 component props against the failing assertion. Changes to the unattached
-`mockFetch` stub do not change `executeGraphQL` responses. Parser initialization
-failures belong to `XbrlParser::new()`; this target does not diagnose XML parsing
-or DTS resolution from an instance document.
+`mockFetch` stub do not change `executeGraphQL` responses.
 
 The backend commands already include `--nocapture`. For verbose frontend output,
 run this command from `frontend/`:
