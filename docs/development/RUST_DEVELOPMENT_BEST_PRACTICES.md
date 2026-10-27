@@ -1,6 +1,6 @@
 # Rust Development Best Practices
 
-This guide covers Rust-specific best practices for the EconGraph project, based on common patterns and issues encountered during development.
+This guide covers Rust-specific best practices for the EconGraph backend. Snippets are independent examples; placeholders such as `some_function()` stand for surrounding application code. Examples using project APIs include imports or links to their definitions. Standalone teaching scaffolds are labeled separately.
 
 ## Warning Management
 
@@ -9,6 +9,7 @@ This guide covers Rust-specific best practices for the EconGraph project, based 
 **Problem:** `unused variable: 'variable_name'`
 
 **Solutions:**
+
 ```rust
 // ✅ Prefix with underscore for intentionally unused variables
 let _unused_variable = some_function();
@@ -28,6 +29,7 @@ fn process_data(_unused_param: String, active_param: i32) {
 **Problem:** `unused import: 'module_name'`
 
 **Solutions:**
+
 ```rust
 // ✅ Remove unused imports
 // use std::collections::HashMap; // Remove this line
@@ -45,15 +47,18 @@ use std::collections::HashMap;
 
 **Problem:** `unused Result that must be used`
 
+Choose the behavior the caller needs. Return recoverable failures with `?`; log and continue only when the operation can safely continue after failure. `let _ =` deliberately discards both success and failure, so reserve it for results whose loss is acceptable. `expect()` still panics: in production it requires a documented invariant, while tests may use it to stop immediately when setup fails.
+
 **Solutions:**
+
 ```rust
-// ✅ Handle the Result properly
+// ✅ Report success or failure when continuing is acceptable
 match result {
     Ok(value) => println!("Success: {:?}", value),
     Err(e) => eprintln!("Error: {}", e),
 }
 
-// ✅ Use if let for simple cases
+// ✅ Report a nonfatal failure and continue
 if let Err(e) = result {
     eprintln!("Error: {}", e);
 }
@@ -61,8 +66,8 @@ if let Err(e) = result {
 // ✅ Use let _ = for intentionally ignored results
 let _ = result_that_must_be_used();
 
-// ✅ Use expect() only when you're certain it won't fail
-let value = result.expect("This should never fail in this context");
+// ✅ An invariant: this literal is always a valid integer
+let value: u32 = "42".parse().expect("hard-coded literal must be a valid u32");
 ```
 
 ### Unnecessary Mutability Warnings
@@ -70,6 +75,7 @@ let value = result.expect("This should never fail in this context");
 **Problem:** `variable does not need to be mutable`
 
 **Solutions:**
+
 ```rust
 // ✅ Remove 'mut' if variable is never modified
 let variable = some_value(); // Remove 'mut'
@@ -83,30 +89,34 @@ counter += 1;
 
 ### Database Operations
 
+Connection acquisition and query failures are recoverable application errors. Return them to the caller rather than panicking. This example uses the project's [pool alias](../../backend/crates/econ-graph-core/src/database.rs) and [error types](../../backend/crates/econ-graph-core/src/error.rs):
+
 ```rust
-// ✅ CORRECT: Proper error handling with map_err
-pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut conn = self.pool.get().await
-        .map_err(|e| format!("Failed to get connection: {}", e))?;
-    
+use econ_graph_core::{
+    database::DatabasePool,
+    error::{AppError, AppResult},
+};
+
+async fn database_operation(pool: &DatabasePool) -> AppResult<()> {
+    let mut conn = pool.get().await
+        .map_err(|e| AppError::database_error(format!("Failed to get connection: {}", e)))?;
+
     diesel_async::RunQueryDsl::execute(
-        diesel::sql_query("TRUNCATE TABLE countries CASCADE"),
+        diesel::sql_query("SELECT 1"),
         &mut conn,
     )
     .await
-    .map_err(|e| format!("Failed to truncate countries: {}", e))?;
-    
-    Ok(())
-}
+    .map_err(|e| AppError::database_error(format!("Query failed: {}", e)))?;
 
-// ❌ WRONG: Using expect() masks real errors
-pub async fn clean_database(&self) {
-    let mut conn = self.pool.get().await.expect("Failed to get connection");
-    // ... rest of implementation
+    Ok(())
 }
 ```
 
+Using `pool.get().await.expect("Failed to get connection")` here would panic instead of returning the failure to the caller.
+
 ### Test Utilities
+
+A test should fail immediately if required setup fails; otherwise its assertions run against invalid state. The following alternatives assume the disposable-database setup and shared locking described in [Test Isolation](#test-isolation).
 
 ```rust
 // ✅ CORRECT: Handle Results in test setup
@@ -130,100 +140,46 @@ async fn test_something() {
 
 ### Test Isolation
 
-```rust
-// ✅ CORRECT: Use serial attribute for tests that modify shared state
-#[tokio::test]
-#[serial]
-async fn test_that_modifies_database() {
-    let container = TestContainer::new().await;
-    container.clean_database().await.expect("Failed to clean database");
-    
-    // Test implementation
-}
+Follow the target module's existing migration, fixture, and locking convention. Tests sharing a database must coordinate destructive cleanup and fixture writes through the same lock. `#[serial]` coordinates only participating tests using the same serialization arrangement; it does not protect against unrelated locks or separate Cargo processes.
 
-// ✅ CORRECT: Use unique identifiers for test data
-async fn setup_test_data(container: &TestContainer) -> AppResult<(Uuid, Uuid, Uuid)> {
-    let test_id = Uuid::new_v4().to_string()[..8].to_string();
-    
-    let country_a = NewCountry {
-        iso_code: format!("T{}", &test_id[..2]),
-        iso_code_2: format!("T{}", &test_id[..1]),
-        name: format!("TEST Country {}", test_id),
-        // ... other fields
-    };
-    
-    // Insert and return IDs
-}
-```
+`TestContainer::new()` starts a PostgreSQL container in core unit tests, even when `DATABASE_URL` makes the pool use an external database. When core is compiled as a dependency, including for integration tests, it connects to `DATABASE_URL` or the test fallback without starting a container. Construction does not run migrations. See [TestContainer lifecycle](../testing/DATABASE_TESTING.md#testcontainer-lifecycle) for the full setup.
+
+Before calling `clean_database()`, ensure the pool uses a disposable test database and set `DATABASE_URL` to that same database. The helper drops the pool database's entire `public` schema with `CASCADE`, then migrates using a separately selected URL. Follow the [cleaning and migration target requirements](../testing/DATABASE_TESTING.md#cleaning-and-migration-targets); never use this helper against a database containing data you need to keep.
 
 ### Test Data Management
 
-```rust
-// ✅ CORRECT: Generate unique test data
-let test_id = Uuid::new_v4().to_string()[..8].to_string();
-let unique_name = format!("test_data_{}", test_id);
+Use a full UUID for an unconstrained fixture name or identifier. Do not truncate it to fit a country code or another constrained field; choose valid values according to that fixture's schema and isolation strategy.
 
-// ✅ CORRECT: Clean up after tests
-#[tokio::test]
-async fn test_with_cleanup() {
-    let container = TestContainer::new().await;
-    
-    // Setup
-    container.clean_database().await.expect("Failed to clean database");
-    
-    // Test implementation
-    
-    // Cleanup (automatic with TestContainer)
-}
+```rust
+use uuid::Uuid;
+
+let test_id = Uuid::new_v4();
+let unique_name = format!("test_data_{}", test_id);
 ```
+
+Keep the `TestContainer` alive while its pool is in use. Dropping it releases its owned resources, including a container it started, but does not remove rows from an external database. Arrange external-database cleanup through the module's test setup rather than assuming scope exit cleans the database. Unique fixture rows can avoid destructive cleanup where the module supports that pattern.
 
 ## Async Programming Best Practices
 
-### Proper Async Error Handling
+### Async Error Handling
+
+Async functions follow the same error policy as synchronous functions. The project's `AppError::HttpClient` conversion accepts `reqwest::Error`, so `?` can propagate both request and response-decoding failures:
 
 ```rust
-// ✅ CORRECT: Proper async error handling
-async fn fetch_data() -> Result<Data, AppError> {
-    let response = reqwest::get("https://api.example.com/data")
-        .await
-        .map_err(|e| AppError::network_error(format!("Request failed: {}", e)))?;
-    
-    let data: Data = response.json()
-        .await
-        .map_err(|e| AppError::parse_error(format!("JSON parse failed: {}", e)))?;
-    
+use econ_graph_core::error::AppResult;
+
+async fn fetch_data(url: &str) -> AppResult<serde_json::Value> {
+    let response = reqwest::get(url).await?.error_for_status()?;
+    let data = response.json().await?;
     Ok(data)
 }
-
-// ❌ WRONG: Using expect() in async functions
-async fn fetch_data() -> Data {
-    let response = reqwest::get("https://api.example.com/data")
-        .await
-        .expect("Request failed");
-    
-    response.json().await.expect("JSON parse failed")
-}
 ```
+
+Using `expect()` for these fallible network operations would panic instead of allowing the caller to handle the failure.
 
 ### Database Connection Management
 
-```rust
-// ✅ CORRECT: Proper connection handling
-async fn database_operation(pool: &DatabasePool) -> AppResult<()> {
-    let mut conn = pool.get().await
-        .map_err(|e| AppError::database_error(format!("Failed to get connection: {}", e)))?;
-    
-    // Use connection
-    diesel_async::RunQueryDsl::execute(
-        diesel::sql_query("SELECT 1"),
-        &mut conn,
-    )
-    .await
-    .map_err(|e| AppError::database_error(format!("Query failed: {}", e)))?;
-    
-    Ok(())
-}
-```
+Acquire a pooled connection only for the operations that need it, as in [Database Operations](#database-operations). The connection guard returns the connection to the pool when it leaves scope; it does not need a custom `Drop` implementation. Release it before unrelated slow work so other tasks can acquire a connection.
 
 ## Performance Considerations
 
@@ -260,10 +216,10 @@ fn print_message(message: &str) {
     println!("{}", message);
 }
 
-// ✅ CORRECT: Use Cow<str> for flexible string handling
+// ✅ Borrow unchanged text; allocate only for the uppercase result
 use std::borrow::Cow;
 
-fn process_text(text: &str) -> Cow<str> {
+fn process_text(text: &str) -> Cow<'_, str> {
     if text.contains("error") {
         Cow::Owned(text.to_uppercase())
     } else {
@@ -274,40 +230,33 @@ fn process_text(text: &str) -> Cow<str> {
 
 ## Memory Management
 
-### Avoiding Memory Leaks
+### Ownership and Resource Lifetimes
+
+Owned fields are dropped automatically when their owner is dropped. RAII guards, such as a pooled connection or a mutex guard, release their resource on scope exit. Add a custom `Drop` implementation only when a type has an extra cleanup obligation that its fields do not already perform.
+
+An `Arc` keeps its value alive until the last strong owner is dropped. This standalone example shows the lifetime through a `Weak` reference without adding a destructor:
 
 ```rust
-// ✅ CORRECT: Proper resource cleanup
 use std::sync::Arc;
 
-struct ResourceManager {
-    resource: Arc<SomeResource>,
+let data = Arc::new(vec![1, 2, 3]);
+let observer = Arc::downgrade(&data);
+{
+    let shared = Arc::clone(&data);
+    drop(data);
+    assert_eq!(shared.len(), 3); // A strong owner still holds the vector.
+    assert!(observer.upgrade().is_some());
 }
-
-impl Drop for ResourceManager {
-    fn drop(&mut self) {
-        // Cleanup code here
-        println!("Cleaning up resource");
-    }
-}
-
-// ✅ CORRECT: Use RAII patterns
-struct DatabaseConnection {
-    conn: Option<Connection>,
-}
-
-impl Drop for DatabaseConnection {
-    fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            // Close connection
-        }
-    }
-}
+assert!(observer.upgrade().is_none()); // The last strong owner left scope.
 ```
+
+`Arc` does not prevent leaks caused by strong reference cycles. Use `Weak` for back-references that must not keep their target alive.
 
 ## Code Organization
 
 ### Module Structure
+
+This schematic module layout illustrates re-exports and visibility; the service and model names are placeholders.
 
 ```rust
 // ✅ CORRECT: Clear module organization
@@ -329,28 +278,19 @@ fn private_function() {}
 
 ### Error Types
 
+Use the project's existing [`AppError` and `AppResult`](../../backend/crates/econ-graph-core/src/error.rs) for application operations. Typed `From` conversions let callers propagate errors with `?`; use contextual messages when the underlying error alone does not identify the failed operation.
+
+This standalone teaching scaffold shows how `thiserror` derives a conversion. `ExampleError` is not a replacement for the project's error enum:
+
 ```rust
-// ✅ CORRECT: Comprehensive error types
 #[derive(Debug, thiserror::Error)]
-pub enum AppError {
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-    
-    #[error("Network error: {0}")]
-    NetworkError(String),
-    
-    #[error("Parse error: {0}")]
-    ParseError(String),
-    
-    #[error("Validation error: {0}")]
-    ValidationError(String),
+enum ExampleError {
+    #[error("Could not read input: {0}")]
+    Io(#[from] std::io::Error),
 }
 
-// ✅ CORRECT: Error conversion
-impl From<diesel::result::Error> for AppError {
-    fn from(err: diesel::result::Error) -> Self {
-        AppError::DatabaseError(err.to_string())
-    }
+fn read_input(path: &std::path::Path) -> Result<String, ExampleError> {
+    Ok(std::fs::read_to_string(path)?)
 }
 ```
 
@@ -382,7 +322,12 @@ mod tests {
 
 ### Integration Tests
 
+This pattern assumes the [disposable database and shared-lock prerequisites](#test-isolation). The `database_operation` helper is defined above. Use the target module's lock convention; the serial attribute shown here is only suitable when every test sharing this database participates in the same lock.
+
 ```rust
+use econ_graph_core::test_utils::TestContainer;
+use serial_test::serial;
+
 // ✅ CORRECT: Integration test with proper setup
 #[tokio::test]
 #[serial]
@@ -400,16 +345,14 @@ async fn test_database_integration() {
 
 ## Common Anti-Patterns to Avoid
 
-### 1. Using `unwrap()` in Production Code
+### 1. Panicking on Recoverable Failures
 
 ```rust
-// ❌ WRONG: Using unwrap() in production
+// ❌ WRONG: Panic on a recoverable application failure
 let value = risky_operation().unwrap();
 
-// ✅ CORRECT: Proper error handling
+// ✅ Return a recoverable failure to the caller
 let value = risky_operation()?;
-// OR
-let value = risky_operation().expect("This should never fail in this context");
 ```
 
 ### 2. Ignoring Results
@@ -418,10 +361,11 @@ let value = risky_operation().expect("This should never fail in this context");
 // ❌ WRONG: Ignoring Results
 risky_operation();
 
-// ✅ CORRECT: Handle the Result
-let _ = risky_operation(); // If intentionally ignoring
-// OR
-risky_operation().expect("Operation failed");
+// ✅ Return a failure when the operation is required
+risky_operation()?;
+
+// ✅ Discard only an explicitly optional notification failure
+let _ = send_optional_notification();
 ```
 
 ### 3. Unnecessary Cloning
@@ -447,17 +391,25 @@ process_data(&expensive_data);
 
 ## Automated Tools
 
+Run these commands from the backend Cargo workspace. From the repository root:
+
+```bash
+cd backend
+```
+
+Check diagnostics before applying automatic edits, and review the resulting diff.
+
 ### Cargo Fix
 
 ```bash
 # Apply automatic fixes
 cargo fix --lib --tests
 
-# Check what would be fixed without applying
-cargo fix --lib --tests --dry-run
+# Report compiler diagnostics without applying fixes (not a patch preview)
+cargo check --lib --tests
 
 # Fix specific package
-cargo fix --lib -p package_name --tests
+cargo fix --lib -p econ-graph-core --tests
 ```
 
 ### Clippy
@@ -502,31 +454,11 @@ fn measure_performance() {
 }
 ```
 
-### Memory Profiling
-
-```rust
-// ✅ CORRECT: Monitor memory usage
-use std::alloc::{GlobalAlloc, System, Layout};
-
-struct MemoryTracker;
-
-unsafe impl GlobalAlloc for MemoryTracker {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let ptr = System.alloc(layout);
-        // Track allocation
-        ptr
-    }
-    
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // Track deallocation
-        System.dealloc(ptr, layout);
-    }
-}
-```
-
 ## Documentation
 
 ### Function Documentation
+
+This teaching template illustrates arguments, return bounds, error conditions, and example usage for a hypothetical correlation function. Its implementation and example imports are omitted.
 
 ```rust
 /// Calculates the correlation coefficient between two data series.
@@ -555,30 +487,28 @@ pub fn calculate_correlation(series_a: &[f64], series_b: &[f64]) -> Result<f64, 
 
 ### Module Documentation
 
-```rust
-//! # Database Module
-//!
-//! This module provides database connectivity and operations for the EconGraph project.
-//!
-//! ## Features
-//!
-//! - Connection pooling
-//! - Async operations
-//! - Error handling
-//! - Migration support
-//!
-//! ## Usage
-//!
-//! ```rust
-//! use crate::database::DatabasePool;
-//!
-//! let pool = DatabasePool::new().await?;
-//! let result = pool.execute_query("SELECT 1").await?;
-//! ```
+Module documentation should describe the module's purpose and show how its public APIs fit together. This example uses the current [database APIs](../../backend/crates/econ-graph-core/src/database.rs); `database_url` is supplied by the caller, and creating a pool requires a reachable database:
 
-pub mod connection;
-pub mod migrations;
-pub mod queries;
+```rust
+//! Database connection pooling and connectivity checks.
+//!
+//! Create a pool, then verify that it can acquire a connection and run a query.
+//! Pool creation does not apply migrations.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use econ_graph_core::{
+//!     database::{create_pool, test_connection},
+//!     error::AppResult,
+//! };
+//!
+//! async fn check_database(database_url: &str) -> AppResult<()> {
+//!     let pool = create_pool(database_url).await?;
+//!     test_connection(&pool).await?;
+//!     Ok(())
+//! }
+//! ```
 ```
 
 ## Additional Resources
