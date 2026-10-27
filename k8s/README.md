@@ -1,14 +1,25 @@
 # EconGraph Kubernetes Deployment
 
-This directory contains all the necessary files to deploy EconGraph to a local Kubernetes cluster using Terraform and kind (Kubernetes in Docker).
+This directory contains the manifests for deploying EconGraph to the host-backed kind
+(Kubernetes in Docker) cluster. Terraform creates the cluster; the deployment scripts
+build images and deploy the application.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Docker
+Run the commands in this guide from the repository root unless a step says otherwise.
+Before creating the cluster, prepare the host storage described in
+[Host Storage](../docs/deployment/HOST_STORAGE.md#layout): mounted btrfs subvolumes at
+`/srv/econgraph/data-plane` and `/srv/econgraph/app-prod`, with their roots owned by the
+operator account. Terraform bind-mounts these paths into the worker node; the database
+manifests require this storage layout.
+
+- Access to the rootful Docker daemon at `unix:///var/run/docker.sock`, as the operator
+  account without sudo. See [Which Docker daemon](../docs/deployment/HOST_STORAGE.md#which-docker-daemon).
 - Terraform
 - kubectl
+- yq and jq, used by deployment and dashboard validation
 - kind v0.33.0, the version the deploy scripts run. Install it once, as the user who runs
   them (no sudo):
 
@@ -79,16 +90,15 @@ scripts/deploy/         # Deployment scripts
 └── released-pvs.sh    # List Released PVs; delete one on typed confirmation
 ```
 
-## 🛠️ Manual Setup
+## 🛠️ Setup
 
-If you prefer to run each step manually:
+After preparing the host storage and tools above, run these steps from the repository root.
 
 ### 1. Create Kubernetes Cluster
 
 ```bash
-cd terraform/k8s
-terraform init
-terraform apply
+terraform -chdir=terraform/k8s init
+terraform -chdir=terraform/k8s apply
 ```
 
 Only on the production cluster (the one that serves the public site), mark it as
@@ -183,7 +193,6 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 After deployment, the application will be available at:
 
 - **Frontend**: <http://localhost>
-- **Backend API**: <http://localhost/api>
 - **GraphQL**: <http://localhost/graphql>
 - **Health Check**: <http://localhost/health>
 
@@ -620,10 +629,19 @@ kubectl -n econ-graph get secret grafana-admin -o jsonpath='{.data.admin-passwor
 Postgres and Grafana read their passwords only when their data volume is first initialised.
 Changing `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` or `GRAFANA_ADMIN_PASSWORD` later updates the
 Secret but not the running service; also change the password there (for example
-`ALTER ROLE econgraph PASSWORD ...` in psql). A Postgres volume created before these Secrets
-existed has tables owned by `postgres` and an `econgraph` password that no longer matches: for a
-local cluster, recreate it (`./scripts/deploy/teardown.sh`, then deploy again); to keep the data,
-dump it with `pg_dump --no-owner` and restore it as `econgraph` into a fresh volume.
+`ALTER ROLE econgraph PASSWORD ...` in psql).
+
+A Postgres volume created before these Secrets existed may have tables owned by `postgres`
+or an `econgraph` password that does not match the Secret. Reconcile the existing database's
+password and object ownership, or preserve the data with `pg_dump --no-owner` and restore it
+as `econgraph` into a fresh destination. Omitting owners from the dump does not choose the
+restore owner: restoring as `postgres` alone leaves the tables owned by `postgres`. See
+[restore ownership](../docs/deployment/POSTGRES_BACKUP_RESTORE.md#ownership) for the role and
+extension handling, and [host-storage migration](../docs/deployment/HOST_STORAGE.md#moving-the-live-deployment)
+and [production recovery](../docs/deployment/HOST_STORAGE.md#recovering-production-eco-432)
+for moving or recovering host-backed databases with their saved Secrets. Teardown and
+redeployment retain the host data; they do not reset database credentials or ownership.
+
 `create-secrets.sh` stops when it finds such a volume (a `postgresql-data-postgresql-*` PVC) but no
 `econ-graph-postgres` Secret, or an `app-postgres-data-app-postgres-*` PVC but no
 `econ-graph-app-postgres` Secret; set `ALLOW_EXISTING_DB_VOLUME=1` to continue anyway. It also
@@ -652,7 +670,7 @@ later runs don't need them.
 
 ## 🗑️ Cleanup
 
-Every database lives on a host directory (`docs/deployment/HOST_STORAGE.md`). No script deletes
+Every database lives on a [host directory](../docs/deployment/HOST_STORAGE.md). No script deletes
 those directories or their PersistentVolumes, and each teardown below first dumps the data, app
 and Keycloak databases to `~/econgraph-backups/<UTC timestamp>/`. Add `--dry-run` to see every
 step without changing anything.
@@ -778,7 +796,7 @@ For production use, consider:
 
 ### Production Recommendations
 
-- Use proper secrets management (e.g., HashiCorp Vault)
+- Follow the [human-only Secret setup and rotation workflow](../docs/technical/SECRETS_MANAGEMENT.md#current-workflow)
 - Enable network policies
 - Use TLS certificates
 - Regular security scanning
