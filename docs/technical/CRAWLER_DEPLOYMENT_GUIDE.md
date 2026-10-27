@@ -179,7 +179,11 @@ Refresh requests use the validators stored in `reference_file_cache`: `If-None-M
 the `ETag` and `If-Modified-Since` from `Last-Modified`. A response whose body hashes to the
 stored copy also counts as unchanged, covering sources that honor neither header.
 
-A new database can get those labels before the first crawl from a seed migration, `backend/migrations/data/<timestamp>_seed_<source>_reference_codes/`, which loads them with the validators they were downloaded with (`ETag`, `Last-Modified` and body SHA-256), and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
+A seed migration can populate a new database with those labels before its first crawl.
+These migrations live in `backend/migrations/data/<timestamp>_seed_<source>_reference_codes/`
+and load the labels with the validators they were downloaded with (`ETag`, `Last-Modified`
+and body SHA-256). A migration loads a reference file only if that database does not already
+contain it. Record one from a machine that can reach the source:
 
 ```bash
 cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS
