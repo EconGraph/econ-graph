@@ -1,1088 +1,355 @@
 # GraphQL Security Deployment Guide
 
-## Overview
+The GraphQL API runs in `econ-graph-backend`; `econ-graph-graphql` is the
+library it links. This guide covers configuring that server, deploying it behind
+the maintained Kubernetes Gateway, and checking identity, exposure, monitoring
+and recovery. Commands below are operator procedures, not evidence that a
+particular deployment has passed them.
 
-This guide provides comprehensive instructions for deploying the GraphQL security system in various environments, including development, staging, and production.
+## Choose the deployment boundary
 
-## Prerequisites
+Use a local source build for development and the [Kubernetes deployment
+procedure](../../k8s/README.md#-quick-start) for the maintained cluster topology.
+The backend serves HTTP, normally on port 9876. Envoy Gateway supplies external
+routing, response headers and request rate limits; TLS terminates outside the
+backend. A direct HTTP connection to the backend retains its schema and identity
+checks but bypasses Gateway policies.
 
-### System Requirements
+Development may deliberately run without sign-in, with every caller anonymous,
+and may enable the GraphQL playground. Staging should exercise the same identity
+and Gateway boundaries as production using separate databases, credentials and
+host configuration. Production uses the [public-site
+procedure](../../k8s/README.md#-public-site-cloudflare-tunnel), including its
+production marker and tunnel credential safeguards. There is no environment
+profile that turns the protections below into stricter production values.
 
-- **Rust**: Version 1.70 or higher
-- **PostgreSQL**: Version 13 or higher
-- **Memory**: Minimum 512MB RAM
-- **CPU**: Minimum 1 core
-- **Storage**: Minimum 1GB available space
+## Configure a local backend
 
-### Dependencies
+Clone [EconGraph/econ-graph](https://github.com/EconGraph/econ-graph) and work from
+its `backend/` workspace. Use the repository's pinned
+[toolchain](../../rust-toolchain.toml), currently Rust 1.99.1; the workspace uses
+edition 2024. Native builds need PostgreSQL client libraries, OpenSSL development
+libraries and `pkg-config`, as shown in the maintained
+[Dockerfile](../../backend/Dockerfile). The cluster uses PostgreSQL 18. Capacity
+must be sized for the workload; the container resource settings below are not
+minimum hardware requirements.
 
-- `async-graphql` 7.0
-- `warp` web framework
-- `diesel` ORM
-- `tokio` async runtime
-- `serde` serialization
-- `chrono` date/time handling
-- `uuid` unique identifiers
-- `regex` pattern matching
+### Databases and migrations
 
-## Environment Setup
+The app plane stores users and application state, including audit records. The
+data plane stores economic data, reference data and crawl state. Set
+`APP_DATABASE_URL` to the app database and, when serving data locally,
+`DATA_DATABASE_URL` to the data database. Both URLs may name the same physical
+database, which then contains both planes' tables. The backend requires the app
+URL and does not fall back to `DATABASE_URL`.
 
-### Development Environment
+Provision the chosen databases and supply their URLs through your local secret
+handling before starting a process. Do not commit credentials or paste them into
+shared logs. With no data URL, the backend can serve the app plane; data fields
+report `DATA_SERVED_REMOTELY`. See [database configuration](../../k8s/README.md#databases)
+for the shared and separate layouts and [migrations](../development/MIGRATIONS.md)
+for migration ownership and CLI details.
 
-#### 1. Clone Repository
-
-```bash
-git clone https://github.com/your-org/econ-graph4.git
-cd econ-graph4
-```
-
-#### 2. Install Dependencies
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-
-# Install PostgreSQL
-# macOS
-brew install postgresql
-brew services start postgresql
-
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install postgresql postgresql-contrib
-
-# CentOS/RHEL
-sudo yum install postgresql-server postgresql-contrib
-sudo postgresql-setup initdb
-sudo systemctl start postgresql
-```
-
-#### 3. Database Setup
+The backend applies `backend/migrations/app` on startup. Data plane migrations
+in `backend/migrations/data` run through `crawler migrate`; service startup does
+not apply them. For a local database owned by this development environment, run
+these from `backend/` after setting the URLs:
 
 ```bash
-# Create database
-createdb econ_graph_dev
-
-# Run migrations
-cd backend
-diesel migration run
+cargo run --locked --bin crawler -- migrate
+cargo run --locked --bin econ-graph-backend
 ```
 
-#### 4. Environment Variables
+The first command needs `DATA_DATABASE_URL`; omit it for an app-only backend.
+Do not substitute a bare `diesel migration run` for both operations: the
+repository's Diesel default selects app migrations only. Diesel's CLI URL
+handling is distinct from the server's environment settings; use the migration
+guide when applying migrations manually.
 
-Create `.env` file:
+Because the server runs app migrations, its app database role needs the object
+ownership and DDL privileges required by those migrations, as well as runtime
+access. Granting only table DML and sequence usage is insufficient. The cluster's
+init scripts create an `econgraph` role in each app/data database. Use roles
+scoped to the chosen databases and do not grant PostgreSQL superuser access to
+the API. Changing to separate migration and runtime roles requires a compatible
+startup and ownership procedure; revoking creation rights alone does not supply
+one.
+
+### Runtime settings and identity
+
+The executable binds HTTP/1.1 on `0.0.0.0` at `BACKEND_PORT` (default 9876).
+Although the configuration object reads `SERVER_HOST`, the listener does not use
+it. Restrict development access with the host/network boundary or container port
+publishing; do not rely on that setting for loopback isolation. Keep container
+mappings, Services and probe ports consistent when changing the port.
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins such as
+`http://localhost:3000`. Startup rejects an empty list, wildcards, and values
+that are not HTTP(S) origins. CORS controls browser access; it does not replace
+resolver authorization or restrict non-browser clients.
+
+Configure sign-in using these settings:
+
+| Setting | Meaning |
+| --- | --- |
+| `OIDC_ISSUER` | Issuer URL matching the token's `iss`, including the realm path. Unset or empty disables sign-in and makes every caller anonymous. |
+| `OIDC_AUDIENCE` | Required token audience; defaults to `econ-graph-api`. An explicitly empty value is rejected. |
+| `OIDC_JWKS_URL` | Optional signing-key URL override, useful when the public issuer cannot be reached from the API. Without it, keys are found through issuer discovery. |
+| `OIDC_REQUIRED` | Set to `true` in deployments requiring sign-in configuration. It stops startup without an issuer; it does not require authentication for every public query. |
+
+Malformed identity settings stop startup. The verifier checks RS256 signatures,
+issuer, audience, expiry and not-before claims. It fetches signing keys lazily,
+so startup and anonymous requests can succeed while the provider is unavailable.
+Cached keys refresh after 15 minutes and may remain usable for up to 24 hours
+while the provider cannot be reached. Failure to fetch a needed key prevents
+verification; it does not grant an authenticated principal. Diagnose issuer and
+audience mismatches separately from key-fetch failures.
+
+For the cluster, the committed issuer is
+`http://localhost/idp/realms/econ-graph`; the audience is `econ-graph-api`,
+`OIDC_REQUIRED` is `true`, and JWKS is fetched from the in-cluster Keycloak
+service. `PUBLIC_HOST` changes the issuer and Keycloak hostname together to
+`https://<host>/idp/realms/econ-graph`. Follow the [Keycloak
+procedure](../../k8s/README.md#-keycloak) for realm and identity-provider setup.
+Anonymous callers may use public data operations; app and admin operations keep
+their own permission checks. Disabling sign-in does not grant admin access.
+
+### Controls applied by the server
+
+The [schema](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs)
+compiles in maximum depth 15 and complexity 1000. These values count query
+structure rather than returned rows and are not environment settings. The HTTP
+handler bounds POST `/graphql` bodies at 1 MiB. Validation and authorization also
+occur at individual inputs and resolvers; there is no global environment switch
+that enables HTML sanitization, SQL-injection prevention or XSS prevention.
+
+The playground is off unless `ENABLE_GRAPHQL_PLAYGROUND` is `true` or `1`.
+Enabling it is useful locally; disabling it removes the interactive UI but does
+not disable schema introspection. Gateway rate limits apply only to traffic
+through the routes described below.
+
+For container builds, use `backend/Dockerfile` with `backend/` as its context,
+rather than copying a second Dockerfile into the repository root. It builds the
+actual server and crawler binaries with `--locked`, embeds both migration sets,
+and copies runtime reference files. It runs as UID 1000 and checks `/health` at
+`BACKEND_PORT`. Its default build flag profile is `release`; local Cargo builds
+use the `dev` profile from `backend/.cargo/config.toml`. See [build-time
+flags](../../config/flags/README.md) before changing that profile. Supply URLs and
+OIDC settings explicitly for a standalone container; building an image does not
+install a Gateway, TLS or request limits.
+
+## Deploy the maintained cluster
+
+Start with the [cluster prerequisites and image build
+procedure](../../k8s/README.md#-quick-start), including [host
+storage](../deployment/HOST_STORAGE.md). Run the repository scripts from the
+repository root against the intended context. Do not apply a replacement
+Deployment or a top-level `kubectl apply -f k8s/` as a substitute for orchestration.
+
+1. Select the database layout and provision credentials using
+   `scripts/deploy/create-secrets.sh`. The deploy script also runs it. Follow
+   [Secrets](../../k8s/README.md#secrets) and [secret
+   handling](../technical/SECRETS_MANAGEMENT.md); do not commit Secret manifests.
+   Existing shared layouts keep their app URL until explicitly changed. Creating
+   a separate app database does not move existing app rows into it.
+2. Review `scripts/deploy/deploy.sh --dry-run`, then run
+   `scripts/deploy/deploy.sh` when ready to change the target cluster. It installs
+   the Gateway and applies the maintained resources. After PostgreSQL is ready,
+   it runs `crawler-migrate` before deploying the backend and worker. A failed
+   migration Job stops deployment. An app-only namespace without
+   `data-database-url` skips that Job.
+3. Inspect rollout readiness and logs. A running pod alone does not establish
+   database readiness, working sign-in or route policy enforcement. Use the
+   acceptance checks below before treating the deployment as ready for traffic.
+
+### Workload, credentials and probes
+
+The maintained [Deployment](../../k8s/manifests/backend-deployment.yaml) is
+`econ-graph-backend` in namespace `econ-graph`, initially with two replicas.
+Its `backend` container listens on 9876. The
+[Service](../../k8s/manifests/backend-service.yaml),
+`econ-graph-backend-service`, selects those pods on port 9876; it also exposes
+NodePort 30080. Review reachability of that direct path as part of the host's
+network policy, since it bypasses the Gateway.
+
+The Deployment maps `econ-graph-secrets` key `app-database-url` to
+`APP_DATABASE_URL`, and optional key `data-database-url` to
+`DATA_DATABASE_URL`. `BACKEND_PORT` comes from `econ-graph-config`;
+`CORS_ALLOWED_ORIGINS` comes from its `CORS_ORIGIN` key. Identity settings are
+specified on the Deployment and public-host rendering updates the issuer.
+
+The backend container requests 100m CPU and 256Mi memory, with limits of 500m
+and 512Mi. It runs as non-root UID 1000, disallows privilege escalation, drops
+all Linux capabilities, uses a read-only root filesystem and `RuntimeDefault`
+seccomp. The pod uses filesystem group 1000. The PostgreSQL wait init container
+also has an explicit security context and resource limits. Preserve these
+settings when changing images or adding writable mounts.
+
+Startup and readiness probes call `/readyz`: the app database must be reachable
+and its app migrations at least as new as this binary requires. Data database
+state appears in the readiness body but does not fail readiness, so a data
+outage does not remove sign-in from service. Liveness calls `/livez`, which
+checks the process without depending on PostgreSQL. `/health` is the general
+health endpoint used by the image, not the Deployment's readiness probe.
+
+### Gateway, TLS and exposure
+
+The [Gateway reference](../../k8s/README.md#-gateway) explains installation and
+route application. The namespace label `econgraph.io/gateway-access: "true"`
+admits its routes to the Gateway. The localhost HTTP routes send `/graphql` to
+the backend and `/data/graphql` to backend `/graphql` after removing
+`Authorization` and `Cookie`. The backend route handles `/api`, `/auth` and
+`/health`; frontend and Keycloak have separate routes. API routes set
+`X-Content-Type-Options`, `X-Frame-Options` and HSTS. Frontend routes also set CSP.
+
+Each GraphQL route limits each client address to 20 requests per second, with
+bursts of 100 and HTTP 429 above the limit. The
+[route policies](../../k8s/manifests/gateway/routes/ratelimit-policies.yaml)
+provide the rate; the [burst patch](../../k8s/manifests/gateway/ratelimit-burst.yaml)
+raises the bucket size to 100. Check both policy application and patch status:
+a rate policy alone has a burst size of 20. The two routes use separate buckets.
+Limits are local to each Envoy proxy replica; the maintained proxy runs one
+replica. Clients behind one NAT, and requests from the host via the Docker
+bridge, can share a bucket. Scaling backend replicas does not change these
+limits; scaling proxy replicas changes their aggregate behavior.
+
+The committed topology serves `http://localhost`. For the public site, visitors
+use HTTPS to Cloudflare, a tunnel reaches the in-cluster connector, and the
+connector uses HTTPS to the Gateway. The Gateway forwards HTTP to the app and
+Keycloak. The default Gateway certificate is self-signed and the tunnel's
+origin connection uses **No TLS Verify**; this is not a publicly trusted origin
+certificate. Use the [public-site TLS and tunnel
+procedure](../../k8s/README.md#-public-site-cloudflare-tunnel) to configure the
+host, certificate, connector and redirects together. The backend does not
+consume `SSL_CERT_PATH` or `SSL_KEY_PATH`.
+
+The Gateway drops client-supplied scheme/host forwarding headers, derives the
+scheme from the connection, and replaces `X-Forwarded-For` with its selected
+client address. It trusts forwarded addresses from pod peers for the tunnel
+path, so in-cluster callers can claim addresses. Backend audit attribution has
+a separate boundary: `TRUSTED_PROXIES` is empty by default, recording the TCP
+peer rather than trusting a forwarded address. Follow [trusted proxy
+configuration](ADMIN_AUDIT.md#trusted-proxies-in-kubernetes) before changing it;
+do not trust a universal pod CIDR.
+
+Keep `/metrics`, `/livez` and `/readyz` internal; the public routes do not expose
+them. Review the actual [NetworkPolicies](../../k8s/manifests/network-policy.yaml)
+and their enforcement by the cluster's networking implementation. They admit
+Gateway traffic to the application ports and namespace traffic to the proxy's
+pod ports 10080/10443. Host firewall rules must account for Docker/kind
+networking, NodePorts and operator access. A blanket host INPUT drop is not a
+replacement for these policies or a safe deployment recipe.
+
+### Operator acceptance and troubleshooting
+
+Use the correct cluster context for these observations:
 
 ```bash
-# Database
-DATABASE_URL=postgresql://username:password@localhost/econ_graph_dev
-
-# Security Configuration
-SECURITY_MAX_COMPLEXITY=2000
-SECURITY_MAX_DEPTH=15
-SECURITY_MAX_QUERY_SIZE=20000
-SECURITY_QUERY_TIMEOUT=60
-SECURITY_PROTECT_INTROSPECTION=false
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS_PER_MINUTE=120
-RATE_LIMIT_REQUESTS_PER_HOUR=2000
-RATE_LIMIT_REQUESTS_PER_DAY=20000
-RATE_LIMIT_ENABLED=false
-
-# Input Validation
-INPUT_VALIDATION_MAX_STRING_LENGTH=2000
-INPUT_VALIDATION_ENABLE_HTML_SANITIZATION=true
-INPUT_VALIDATION_ENABLE_SQL_INJECTION_PREVENTION=true
-INPUT_VALIDATION_ENABLE_XSS_PREVENTION=true
-
-# Logging
-RUST_LOG=debug
-LOG_LEVEL=debug
+kubectl -n econ-graph rollout status deployment/econ-graph-backend
+kubectl -n econ-graph get pods
+kubectl -n econ-graph logs deployment/econ-graph-backend -c backend
+kubectl -n econ-graph get job crawler-migrate
 ```
 
-#### 5. Build and Run
-
-```bash
-# Build the project
-cargo build
-
-# Run in development mode
-cargo run --bin econ-graph-graphql
-```
-
-### Staging Environment
-
-#### 1. Server Setup
-
-```bash
-# Create staging user
-sudo useradd -m -s /bin/bash econ-graph-staging
-sudo usermod -aG sudo econ-graph-staging
-
-# Switch to staging user
-sudo su - econ-graph-staging
-```
-
-#### 2. Application Directory
-
-```bash
-# Create application directory
-mkdir -p /home/econ-graph-staging/app
-cd /home/econ-graph-staging/app
-
-# Clone repository
-git clone https://github.com/your-org/econ-graph4.git .
-git checkout staging
-```
-
-#### 3. Database Setup
-
-```bash
-# Create staging database
-sudo -u postgres createdb econ_graph_staging
-
-# Set up database user
-sudo -u postgres psql -c "CREATE USER econ_graph_staging WITH PASSWORD 'secure_password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE econ_graph_staging TO econ_graph_staging;"
-```
-
-#### 4. Environment Configuration
-
-Create `/home/econ-graph-staging/app/.env`:
-
-```bash
-# Database
-DATABASE_URL=postgresql://econ_graph_staging:secure_password@localhost/econ_graph_staging
-
-# Security Configuration
-SECURITY_MAX_COMPLEXITY=1000
-SECURITY_MAX_DEPTH=10
-SECURITY_MAX_QUERY_SIZE=10000
-SECURITY_QUERY_TIMEOUT=30
-SECURITY_PROTECT_INTROSPECTION=true
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS_PER_MINUTE=60
-RATE_LIMIT_REQUESTS_PER_HOUR=1000
-RATE_LIMIT_REQUESTS_PER_DAY=10000
-RATE_LIMIT_ENABLED=true
-
-# Input Validation
-INPUT_VALIDATION_MAX_STRING_LENGTH=1000
-INPUT_VALIDATION_ENABLE_HTML_SANITIZATION=true
-INPUT_VALIDATION_ENABLE_SQL_INJECTION_PREVENTION=true
-INPUT_VALIDATION_ENABLE_XSS_PREVENTION=true
-
-# Logging
-RUST_LOG=info
-LOG_LEVEL=info
-```
-
-#### 5. Build and Deploy
-
-```bash
-# Build release version
-cargo build --release
-
-# Run migrations
-diesel migration run
-
-# Start application
-./target/release/econ-graph-graphql
-```
-
-### Production Environment
-
-#### 1. Server Setup
-
-```bash
-# Create production user
-sudo useradd -m -s /bin/bash econ-graph-prod
-sudo usermod -aG sudo econ-graph-prod
-
-# Switch to production user
-sudo su - econ-graph-prod
-```
-
-#### 2. Application Directory
-
-```bash
-# Create application directory
-mkdir -p /home/econ-graph-prod/app
-cd /home/econ-graph-prod/app
-
-# Clone repository
-git clone https://github.com/your-org/econ-graph4.git .
-git checkout main
-```
-
-#### 3. Database Setup
-
-```bash
-# Create production database
-sudo -u postgres createdb econ_graph_prod
-
-# Set up database user
-sudo -u postgres psql -c "CREATE USER econ_graph_prod WITH PASSWORD 'very_secure_password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE econ_graph_prod TO econ_graph_prod;"
-```
-
-#### 4. Environment Configuration
-
-Create `/home/econ-graph-prod/app/.env`:
-
-```bash
-# Database
-DATABASE_URL=postgresql://econ_graph_prod:very_secure_password@localhost/econ_graph_prod
-
-# Security Configuration
-SECURITY_MAX_COMPLEXITY=500
-SECURITY_MAX_DEPTH=8
-SECURITY_MAX_QUERY_SIZE=5000
-SECURITY_QUERY_TIMEOUT=15
-SECURITY_PROTECT_INTROSPECTION=true
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS_PER_MINUTE=30
-RATE_LIMIT_REQUESTS_PER_HOUR=500
-RATE_LIMIT_REQUESTS_PER_DAY=5000
-RATE_LIMIT_ENABLED=true
-
-# Input Validation
-INPUT_VALIDATION_MAX_STRING_LENGTH=500
-INPUT_VALIDATION_ENABLE_HTML_SANITIZATION=true
-INPUT_VALIDATION_ENABLE_SQL_INJECTION_PREVENTION=true
-INPUT_VALIDATION_ENABLE_XSS_PREVENTION=true
-
-# Logging
-RUST_LOG=warn
-LOG_LEVEL=warn
-```
-
-#### 5. Build and Deploy
-
-```bash
-# Build release version
-cargo build --release
-
-# Run migrations
-diesel migration run
-
-# Start application
-./target/release/econ-graph-graphql
-```
-
-## Docker Deployment
-
-### Dockerfile
-
-Create `Dockerfile`:
-
-```dockerfile
-# Build stage
-FROM rust:1.99.1-trixie as builder
-
-WORKDIR /app
-
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
-
-# Build dependencies
-RUN cargo build --release
-
-# Copy source code
-COPY . .
-
-# Build application
-RUN cargo build --release --bin econ-graph-graphql
-
-# Runtime stage
-FROM debian:trixie-slim
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3t64 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN useradd -r -s /bin/false econ-graph
-
-# Copy binary
-COPY --from=builder /app/target/release/econ-graph-graphql /usr/local/bin/
-
-# Set ownership
-RUN chown econ-graph:econ-graph /usr/local/bin/econ-graph-graphql
-
-# Switch to app user
-USER econ-graph
-
-# Expose port
-EXPOSE 8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-# Start application
-CMD ["econ-graph-graphql"]
-```
-
-### Docker Compose
-
-Create `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:18
-    environment:
-      POSTGRES_DB: econ_graph
-      POSTGRES_USER: econ_graph
-      POSTGRES_PASSWORD: secure_password
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U econ_graph"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  econ-graph-graphql:
-    build: .
-    environment:
-      DATABASE_URL: postgresql://econ_graph:secure_password@postgres:5432/econ_graph
-      SECURITY_MAX_COMPLEXITY: 1000
-      SECURITY_MAX_DEPTH: 10
-      SECURITY_MAX_QUERY_SIZE: 10000
-      SECURITY_QUERY_TIMEOUT: 30
-      SECURITY_PROTECT_INTROSPECTION: true
-      RATE_LIMIT_REQUESTS_PER_MINUTE: 60
-      RATE_LIMIT_REQUESTS_PER_HOUR: 1000
-      RATE_LIMIT_REQUESTS_PER_DAY: 10000
-      RATE_LIMIT_ENABLED: true
-      RUST_LOG: info
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
-```
-
-### Build and Run
-
-```bash
-# Build and start services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f econ-graph-graphql
-
-# Stop services
-docker-compose down
-```
-
-## Kubernetes Deployment
-
-### Namespace
-
-Create `k8s/namespace.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: econ-graph
-  labels:
-    name: econ-graph
-```
-
-### ConfigMap
-
-Create `k8s/configmap.yaml`:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: econ-graph-config
-  namespace: econ-graph
-data:
-  SECURITY_MAX_COMPLEXITY: "1000"
-  SECURITY_MAX_DEPTH: "10"
-  SECURITY_MAX_QUERY_SIZE: "10000"
-  SECURITY_QUERY_TIMEOUT: "30"
-  SECURITY_PROTECT_INTROSPECTION: "true"
-  RATE_LIMIT_REQUESTS_PER_MINUTE: "60"
-  RATE_LIMIT_REQUESTS_PER_HOUR: "1000"
-  RATE_LIMIT_REQUESTS_PER_DAY: "10000"
-  RATE_LIMIT_ENABLED: "true"
-  RUST_LOG: "info"
-```
-
-### Secret
-
-Do not commit a Secret manifest. Create the Secrets out of band with
-`scripts/deploy/create-secrets.sh`; the database URLs are stored in the
-`econ-graph-secrets` Secret under the keys `app-database-url` and `data-database-url`. See
-[k8s/README.md](../../k8s/README.md#secrets) for the Secret names and keys.
-
-### Deployment
-
-Create `k8s/deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: econ-graph-graphql
-  namespace: econ-graph
-  labels:
-    app: econ-graph-graphql
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: econ-graph-graphql
-  template:
-    metadata:
-      labels:
-        app: econ-graph-graphql
-    spec:
-      containers:
-      - name: econ-graph-graphql
-        image: econ-graph-graphql:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: app-database-url
-        envFrom:
-        - configMapRef:
-            name: econ-graph-config
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-```
-
-### Service
-
-Create `k8s/service.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: econ-graph-graphql-service
-  namespace: econ-graph
-spec:
-  selector:
-    app: econ-graph-graphql
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 8080
-  type: ClusterIP
-```
-
-### Gateway routes
-
-External traffic reaches the API through the cluster's Gateway API gateway (Envoy Gateway), not
-an Ingress. The routes, the security headers and the per-client GraphQL rate limits (20 requests
-a second, bursts of 100) are in `k8s/manifests/gateway/routes/`; the gateway itself, and its
-optional https listener with a cert-manager certificate, are installed by
-`scripts/deploy/install-gateway.sh`. See the "Gateway" section of `k8s/README.md`.
-
-### Deploy to Kubernetes
-
-```bash
-# Apply all configurations
-kubectl apply -f k8s/
-
-# Check deployment status
-kubectl get pods -n econ-graph
-
-# View logs
-kubectl logs -f deployment/econ-graph-graphql -n econ-graph
-
-# Scale deployment
-kubectl scale deployment econ-graph-graphql --replicas=5 -n econ-graph
-```
-
-## Load Balancer Configuration
-
-### Nginx Configuration
-
-Use your own domain in place of the `api.example.com` placeholder here as well.
-
-Create `nginx.conf`:
-
-```nginx
-upstream econ_graph_backend {
-    server 127.0.0.1:8080;
-    server 127.0.0.1:8081;
-    server 127.0.0.1:8082;
-}
-
-server {
-    listen 80;
-    server_name api.example.com;
-
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req zone=api burst=20 nodelay;
-
-    # Security headers
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
-
-    # GraphQL endpoint
-    location /graphql {
-        proxy_pass http://econ_graph_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Timeout settings
-        proxy_connect_timeout 30s;
-        proxy_send_timeout 30s;
-        proxy_read_timeout 30s;
-        
-        # Buffer settings
-        proxy_buffering on;
-        proxy_buffer_size 4k;
-        proxy_buffers 8 4k;
-    }
-
-    # Health check endpoint
-    location /health {
-        proxy_pass http://econ_graph_backend;
-        access_log off;
-    }
-
-    # Metrics endpoint
-    location /metrics {
-        proxy_pass http://econ_graph_backend;
-        allow 127.0.0.1;
-        deny all;
-    }
-}
-```
-
-### HAProxy Configuration
-
-Create `haproxy.cfg`:
-
-```haproxy
-global
-    daemon
-    user haproxy
-    group haproxy
-    log 127.0.0.1:514 local0
-    chroot /var/lib/haproxy
-    stats socket /run/haproxy/admin.sock mode 660 level admin
-    stats timeout 30s
-
-defaults
-    mode http
-    log global
-    option httplog
-    option dontlognull
-    option log-health-checks
-    option forwardfor
-    option httpchk GET /health
-    timeout connect 5000
-    timeout client 50000
-    timeout server 50000
-    errorfile 400 /etc/haproxy/errors/400.http
-    errorfile 403 /etc/haproxy/errors/403.http
-    errorfile 408 /etc/haproxy/errors/408.http
-    errorfile 500 /etc/haproxy/errors/500.http
-    errorfile 502 /etc/haproxy/errors/502.http
-    errorfile 503 /etc/haproxy/errors/503.http
-    errorfile 504 /etc/haproxy/errors/504.http
-
-frontend econ_graph_frontend
-    bind *:80
-    bind *:443 ssl crt /etc/ssl/certs/econ-graph.pem
-    
-    # Rate limiting
-    stick-table type ip size 100k expire 30s store http_req_rate(10s)
-    http-request track-sc0 src
-    http-request deny if { sc_http_req_rate(0) gt 10 }
-    
-    # Security headers
-    http-response set-header X-Frame-Options DENY
-    http-response set-header X-Content-Type-Options nosniff
-    http-response set-header X-XSS-Protection "1; mode=block"
-    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    
-    # Routing
-    default_backend econ_graph_backend
-
-backend econ_graph_backend
-    balance roundrobin
-    option httpchk GET /health
-    
-    server econ_graph_1 127.0.0.1:8080 check
-    server econ_graph_2 127.0.0.1:8081 check
-    server econ_graph_3 127.0.0.1:8082 check
-
-listen stats
-    bind *:8404
-    stats enable
-    stats uri /stats
-    stats refresh 30s
-    stats admin if TRUE
-```
-
-## Monitoring and Observability
-
-### Prometheus Configuration
-
-Create `prometheus.yml`:
-
-```yaml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-rule_files:
-  - "econ_graph_rules.yml"
-
-scrape_configs:
-  - job_name: 'econ-graph-graphql'
-    static_configs:
-      - targets: ['localhost:8080']
-    metrics_path: '/metrics'
-    scrape_interval: 5s
-    scrape_timeout: 5s
-
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['localhost:9187']
-    scrape_interval: 15s
-
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['localhost:9113']
-    scrape_interval: 15s
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-          - alertmanager:9093
-```
-
-### Grafana Dashboard
-
-Create `grafana-dashboard.json`:
-
-```json
-{
-  "dashboard": {
-    "id": null,
-    "title": "Econ Graph GraphQL Security",
-    "tags": ["econ-graph", "graphql", "security"],
-    "timezone": "browser",
-    "panels": [
-      {
-        "id": 1,
-        "title": "Request Rate",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "rate(econ_graph_requests_total[5m])",
-            "legendFormat": "Requests/sec"
-          }
-        ]
-      },
-      {
-        "id": 2,
-        "title": "Security Events",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "rate(econ_graph_security_events_total[5m])",
-            "legendFormat": "Security Events/sec"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Query Complexity",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, rate(econ_graph_query_complexity_bucket[5m]))",
-            "legendFormat": "95th percentile"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### Alert Rules
-
-Create `econ_graph_rules.yml`:
-
-```yaml
-groups:
-- name: econ_graph_security
-  rules:
-  - alert: HighSecurityEventRate
-    expr: rate(econ_graph_security_events_total[5m]) > 10
-    for: 2m
-    labels:
-      severity: warning
-    annotations:
-      summary: "High security event rate detected"
-      description: "Security events are occurring at {{ $value }} events/sec"
-
-  - alert: QueryComplexityExceeded
-    expr: rate(econ_graph_complexity_exceeded_total[5m]) > 5
-    for: 1m
-    labels:
-      severity: critical
-    annotations:
-      summary: "Query complexity limit exceeded"
-      description: "{{ $value }} queries exceeded complexity limit in the last 5 minutes"
-
-  - alert: RateLimitExceeded
-    expr: rate(econ_graph_rate_limit_exceeded_total[5m]) > 20
-    for: 2m
-    labels:
-      severity: warning
-    annotations:
-      summary: "Rate limit exceeded frequently"
-      description: "{{ $value }} requests exceeded rate limit in the last 5 minutes"
-
-  - alert: ServiceDown
-    expr: up{job="econ-graph-graphql"} == 0
-    for: 1m
-    labels:
-      severity: critical
-    annotations:
-      summary: "Econ Graph GraphQL service is down"
-      description: "The GraphQL service has been down for more than 1 minute"
-```
-
-## Security Hardening
-
-### System Security
-
-#### 1. Firewall Configuration
-
-```bash
-# UFW (Ubuntu)
-sudo ufw enable
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw deny 5432/tcp
-
-# iptables (CentOS/RHEL)
-sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 5432 -j DROP
-sudo iptables -A INPUT -j DROP
-```
-
-#### 2. SSL/TLS Configuration
-
-```bash
-# Generate SSL certificate
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
-
-# Configure SSL in application
-SSL_CERT_PATH=/path/to/cert.pem
-SSL_KEY_PATH=/path/to/key.pem
-```
-
-#### 3. Database Security
-
-```sql
--- Create restricted database user
-CREATE USER econ_graph_app WITH PASSWORD 'secure_password';
-GRANT CONNECT ON DATABASE econ_graph TO econ_graph_app;
-GRANT USAGE ON SCHEMA public TO econ_graph_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO econ_graph_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO econ_graph_app;
-
--- Revoke unnecessary privileges
-REVOKE CREATE ON SCHEMA public FROM econ_graph_app;
-REVOKE DROP ON SCHEMA public FROM econ_graph_app;
-```
-
-### Application Security
-
-#### 1. Environment Variables
-
-```bash
-# Use strong passwords
-DATABASE_PASSWORD=$(openssl rand -base64 32)
-
-# Enable security features
-SECURITY_PROTECT_INTROSPECTION=true
-SECURITY_MAX_COMPLEXITY=500
-SECURITY_MAX_DEPTH=8
-RATE_LIMIT_ENABLED=true
-```
-
-#### 2. Input Validation
-
-```rust
-// Enable all input validation features
-INPUT_VALIDATION_ENABLE_HTML_SANITIZATION=true
-INPUT_VALIDATION_ENABLE_SQL_INJECTION_PREVENTION=true
-INPUT_VALIDATION_ENABLE_XSS_PREVENTION=true
-INPUT_VALIDATION_MAX_STRING_LENGTH=500
-```
-
-#### 3. Logging and Monitoring
-
-```bash
-# Enable security logging
-RUST_LOG=warn
-SECURITY_LOG_LEVEL=info
-SECURITY_LOG_EVENTS=true
-
-# Configure log rotation
-logrotate /etc/logrotate.d/econ-graph
-```
-
-## Backup and Recovery
-
-### Database Backup
-
-```bash
-# Create backup script
-#!/bin/bash
-BACKUP_DIR="/backups/econ-graph"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/econ_graph_$DATE.sql"
-
-# Create backup
-pg_dump -h localhost -U econ_graph_prod econ_graph_prod > $BACKUP_FILE
-
-# Compress backup
-gzip $BACKUP_FILE
-
-# Backups are never deleted automatically; remove old ones by hand.
-
-# Schedule in crontab
-# 0 2 * * * /path/to/backup_script.sh
-```
-
-### Application Backup
-
-```bash
-# Backup application files
-tar -czf /backups/econ-graph/app_$(date +%Y%m%d_%H%M%S).tar.gz /home/econ-graph-prod/app
-
-# Backup configuration
-cp /home/econ-graph-prod/app/.env /backups/econ-graph/config_$(date +%Y%m%d_%H%M%S).env
-```
-
-### Recovery Procedures
-
-```bash
-# Database recovery
-gunzip -c /backups/econ-graph/econ_graph_20231201_020000.sql.gz | psql -h localhost -U econ_graph_prod econ_graph_prod
-
-# Application recovery
-tar -xzf /backups/econ-graph/app_20231201_020000.tar.gz -C /
-cp /backups/econ-graph/config_20231201_020000.env /home/econ-graph-prod/app/.env
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### 1. High Memory Usage
-
-```bash
-# Check memory usage
-free -h
-ps aux --sort=-%mem | head
-
-# Check for memory leaks
-valgrind --tool=memcheck ./target/release/econ-graph-graphql
-
-# Monitor memory over time
-watch -n 1 'free -h'
-```
-
-#### 2. Performance Issues
-
-```bash
-# Check CPU usage
-top -p $(pgrep econ-graph-graphql)
-
-# Profile application
-perf record -p $(pgrep econ-graph-graphql)
-perf report
-
-# Check database performance
-pg_stat_statements
-```
-
-#### 3. Security Issues
-
-```bash
-# Check security logs
-tail -f /var/log/econ-graph/security.log
-
-# Monitor failed authentication attempts
-grep "authentication failed" /var/log/postgresql/postgresql.log
-
-# Check for suspicious queries
-grep "suspicious" /var/log/econ-graph/security.log
-```
-
-### Debug Mode
-
-```bash
-# Enable debug logging
-RUST_LOG=debug cargo run
-
-# Enable trace logging
-RUST_LOG=trace cargo run
-
-# Enable specific module logging
-RUST_LOG=econ_graph_graphql::security=debug cargo run
-```
-
-### Health Checks
-
-```bash
-# Application health
-curl -f http://localhost:8080/health
-
-# Database health
-pg_isready -h localhost -p 5432
-
-# Security metrics
-curl http://localhost:8080/metrics | grep security
-```
-
-## Maintenance
-
-### Regular Tasks
-
-#### 1. Security Updates
-
-```bash
-# Update system packages
-sudo apt update && sudo apt upgrade
-
-# Update Rust
-rustup update
-
-# Update dependencies
-cargo update
-```
-
-#### 2. Log Rotation
-
-```bash
-# Configure logrotate
-sudo vim /etc/logrotate.d/econ-graph
-
-# Manual log rotation
-sudo logrotate -f /etc/logrotate.d/econ-graph
-```
-
-#### 3. Performance Monitoring
-
-```bash
-# Check system resources
-htop
-iotop
-nethogs
-
-# Check application metrics
-curl http://localhost:8080/metrics
-```
-
-### Scaling
-
-#### 1. Horizontal Scaling
-
-```bash
-# Add more instances
-kubectl scale deployment econ-graph-graphql --replicas=5 -n econ-graph
-
-# Re-apply the gateway routes
-./scripts/deploy/apply-gateway-routes.sh
-```
-
-#### 2. Vertical Scaling
-
-```bash
-# Increase resource limits
-kubectl patch deployment econ-graph-graphql -n econ-graph -p '{"spec":{"template":{"spec":{"containers":[{"name":"econ-graph-graphql","resources":{"limits":{"memory":"2Gi","cpu":"1000m"}}}]}}}}'
-```
-
-## Conclusion
-
-This deployment guide provides comprehensive instructions for deploying the GraphQL security system in various environments. The system is designed to be secure, scalable, and maintainable while providing robust security features and monitoring capabilities.
-
-Key deployment considerations:
-
-1. **Security First**: Always enable security features in production
-2. **Monitoring**: Implement comprehensive monitoring and alerting
-3. **Backup**: Regular backups of database and configuration
-4. **Scaling**: Plan for horizontal and vertical scaling
-5. **Maintenance**: Regular security updates and performance monitoring
-
-Follow these guidelines to ensure a successful deployment and operation of the GraphQL security system.
+For a deployment with a data database, inspect `crawler-migrate` logs if the Job
+fails. For unready backends, inspect pod events and the app database/migration
+state before changing probe thresholds. Liveness succeeding while readiness
+fails points to a different problem than a process that cannot start.
+
+Run `scripts/deploy/test-gateway-routes.sh` through the intended entry point;
+its `--rate-limit` option exercises rate rejection and generates traffic. Check
+Gateway/HTTPRoute acceptance and policy status, then verify sign-in with the
+configured issuer and a permission-protected operation. Also check anonymous
+public access and rejection of unauthorized app/admin access. Test forged
+forwarding headers through the actual chain when configuring trusted proxies.
+These checks serve different purposes: a successful health response proves
+neither authentication nor Gateway enforcement.
+
+## Observe and maintain the deployment
+
+Use container stdout/stderr for backend logs; the server initializes formatted
+tracing at INFO. Although the Deployment supplies `RUST_LOG`, this initializer
+does not install an environment filter, so setting it to `debug` or `trace` does
+not enable those levels. There is no configured `/var/log/econ-graph/security.log`
+writer in this deployment.
+
+Prometheus scrapes `/metrics` internally on port 9876. Use the maintained
+[monitoring guidance](../monitoring/README.md) and inspect metric recording sites,
+not only registrations, before building alerts. The active `/graphql` route
+executes its authenticated schema directly and does not call the legacy
+`graphql_handler` metrics helper. Consequently, the registered
+`graphql_queries_total` and `graphql_query_duration_seconds` do not observe
+traffic through that route. The helper supplies constant complexity 1.0 to
+`graphql_query_complexity`, so it would not measure actual query cost either.
+Do not use these series to infer query volume, latency or security rejection
+rates for the deployed route.
+
+`http_requests_total` is recorded by `/`, `/health`, `/livez` and `/readyz`
+handlers, rather than all HTTP traffic; their duration observations are 0.0.
+For those recorded requests, `sum(rate(http_requests_total[5m]))` is requests per
+second averaged over five minutes; `sum(increase(http_requests_total[5m]))`
+estimates a count over that window. Neither expression measures GraphQL load.
+Gateway 429s never reach the backend; use Gateway observations for them.
+
+Admin attempts and permission denials write app-plane `audit_logs` and
+`security_events`; consult [admin audit guidance](ADMIN_AUDIT.md) for authorized
+pagination and interpretation. These writes are best-effort and separate from
+the operation being audited. Failed writes log errors and increment
+`audit_write_failures_total{table}`, synchronized when metrics are scraped.
+Investigate any increase: an empty event page does not prove no attempts occurred.
+
+For upgrades, follow the [release procedure](../development/RELEASE_PROCESS.md)
+and take the appropriate pre-change backup. Update pinned toolchains,
+dependencies and images through reviewed changes rather than running unbounded
+updates on a serving host. Preserve credential rotation and log retention in
+the operator's maintenance process; Kubernetes logs do not create a separate
+security archive.
+
+Backend scaling uses `kubectl -n econ-graph scale deployment/econ-graph-backend
+--replicas=3`. The Service selects the new ready pods, so scaling alone needs no
+route reapplication. Account for database connections and startup app migrations
+when sizing replicas. Change resource requests/limits in the maintained manifest
+for persistent tuning; a live patch alone will be overwritten by deployment.
+
+## Back up and recover the whole service
+
+Recovery needs economic data, app state and identity state. With separate app
+storage, that means `econ_graph`, `econ_graph_app` and Keycloak's `keycloak`
+database. With `APP_DATABASE=shared`, app tables are in `econ_graph`. A backup of
+only the data database in a separate layout cannot restore users, audit history
+or sign-in.
+
+The [host backup runbook](../deployment/BACKUPS.md) covers snapshots of the data
+and app subvolumes, logical database dumps, dump verification, restore drills
+and freshness checks. The independent in-cluster nightly `postgres-backup`
+CronJob writes database dumps and a `MANIFEST` to its PVC. It selects app coverage
+from the backend's app URL: shared app tables are covered by the data dump;
+separate app state needs its own dump. Consult [backup scope and
+failures](../deployment/POSTGRES_BACKUP_RESTORE.md) for required versus skipped
+databases and partial-run handling. A successful data dump alone does not prove
+the whole run succeeded. The CronJob's kind-local PVC can be lost with the
+cluster; keep recoverable copies outside that failure boundary.
+
+Treat backups, exported Secrets, database passwords, OIDC/provider credentials,
+tunnel tokens and any off-site encryption keys as sensitive recovery material.
+The operator must retain the necessary configuration and credentials outside
+version control using the [Secrets procedure](../technical/SECRETS_MANAGEMENT.md)
+and [cluster Secret reference](../../k8s/README.md#secrets). Database dumps are not
+a substitute for that material. Do not collect it into an unprotected `.env`
+archive or publish it as review evidence.
+
+Before recovery, choose a backup covering the intended databases, check its
+manifest and verification results, identify which writes will be lost, and
+stop the relevant writers. Use the human-run [dump restore
+procedures](../deployment/POSTGRES_BACKUP_RESTORE.md#restore) or [host
+recovery runbook](../deployment/BACKUPS.md), including their destination,
+ownership, confirmation and rollback steps. Snapshot recovery also depends on
+the kind node seeing the restored mount. After recovery, check migration history,
+app readiness, economic data and Keycloak sign-in before resuming writers.
+Archive verification and a disposable restore drill provide different evidence;
+neither alone proves production authentication works.
+
+Backups and snapshots are not deleted automatically. Monitor space and freshness,
+and let the operator explicitly remove unneeded recovery points according to
+the runbooks. Do not infer encryption, off-site availability or restore readiness
+from the presence of a backup Job.
