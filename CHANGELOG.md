@@ -13,9 +13,9 @@ All notable changes to EconGraph are documented here. The format follows
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
   token. Unset, every request goes where it went before. The dev server and `vite preview`
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
-- `crawler migrate [--dry-run]` applies the pending data migrations to `DATA_DATABASE_URL` and
-  prints each version applied; `--dry-run` prints the pending versions and changes nothing. It
-  never applies or records an app migration.
+- `crawler migrate [--dry-run]` applies the pending data plane migrations to `DATA_DATABASE_URL`
+  and prints each version applied; `--dry-run` prints the pending versions and changes nothing.
+  It never applies or records an app plane migration.
 - `scripts/deploy/deploy.sh` runs `crawler migrate` as the Kubernetes Job `crawler-migrate`
   (`k8s/manifests/crawler-migrate-job.yaml`) before it applies the backend and crawler-worker,
   and stops if the Job fails. It skips the Job in a namespace whose `econ-graph-secrets` has no
@@ -40,29 +40,30 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Changed
 
-- The backend applies only the app migrations at startup, and its `/readyz` checks only the app
-  migrations. No service applies the data migrations at startup, so redeploying one never
-  changes a data database; run `crawler migrate` first on a new or older database.
-
 - The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
   `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read
   `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
   longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. `seed-fixtures` applies only the
-  data migrations. The SEC crawlers no longer fall back to a local default database.
-- The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
-  next to `database-url`, all three naming the one database. The backend and crawler-worker
-  manifests read the new keys.
+  data plane migrations. The SEC crawlers no longer fall back to a local default database.
+- The backend manifest reads `app-database-url` and `data-database-url` from the Kubernetes
+  Secret `econ-graph-secrets`; the crawler-worker manifest reads `data-database-url`. The backend
+  pod no longer gets `DATABASE_URL`.
+  The legacy `database-url` key remains an alias for `data-database-url` for older manifests.
+  The app URL may name a separate app database or the shared data database. A new Secret
+  defaults to separate databases; an existing configuration is preserved unless explicitly
+  changed. See [database settings](k8s/README.md#databases) for selection and transition details.
 - The backend reads `APP_DATABASE_URL` (required) and `DATA_DATABASE_URL` (optional) instead of
   `DATABASE_URL`, and exits at startup with the same message when only `DATABASE_URL` is set.
-  Users, annotations, comments, collaborators, audit logs and security events use the app
-  database; series, observations, sources, datasets, search and the crawl queue use the data
-  database. Both may be the same database.
-- The backend never migrates the data database; operators apply the data set with
-  `crawler migrate` (the `crawler-migrate` Job in Kubernetes, the `crawler-migrate` service in
-  docker-compose). `/readyz` fails only when the app database is unreachable or its migrations
-  are pending, each database check bounded on its own. It reports the data database as `ok`,
-  `unreachable`, `pending_migrations` or `not_configured` in its body without failing, so a data
-  outage does not take sign-in down.
+  The app plane stores users, annotations, comments, collaborators, audit logs and security
+  events in the app database; the data plane stores series, observations, sources, datasets,
+  search and the crawl queue in the data database. Both planes may share one physical database.
+- The backend applies only app plane migrations at startup. No service applies data plane
+  migrations at startup; run `crawler migrate` (the `crawler-migrate` Job in Kubernetes, the
+  `crawler-migrate` service in docker-compose) before using a new database or one with pending
+  data plane migrations. `/readyz` fails only when the app database is unreachable or its app plane
+  migrations are pending, each database check bounded on its own. It reports the data database
+  as `ok`, `unreachable`, `pending_migrations` or `not_configured` in its body without failing, so
+  a data outage does not take sign-in down.
 - When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are the same, the backend opens one pool for
   both. `APP_DB_POOL_SIZE` and `DATA_DB_POOL_SIZE` (default 10 each) size the pools; a shared
   pool gets their sum, so a backend opens at most 20 connections by default either way.
@@ -73,7 +74,6 @@ All notable changes to EconGraph are documented here. The format follows
   (outcome `unavailable`). `queueItems` is nullable in the schema for this.
 - docker-compose runs `crawler migrate` as a one-shot `crawler-migrate` service that the
   backends wait for.
-- The backend pod no longer gets `DATABASE_URL`.
 
 ### Fixed
 
