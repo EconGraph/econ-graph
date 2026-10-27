@@ -242,6 +242,26 @@ describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
     expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
   });
 
+  it('does not retry a catalog denial with anonymous permissions', async () => {
+    const executeGraphQL = await loadWith('/data/graphql');
+    fetchSpy.mockImplementation(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            errors: [
+              { message: 'Insufficient catalog permissions', extensions: { code: 'FORBIDDEN' } },
+            ],
+          }),
+        }) as Response
+    );
+    await expect(executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL })).rejects.toThrow(
+      'Insufficient catalog permissions'
+    );
+    expect(sent()).toEqual({ url: '/data/graphql', authorization: `Bearer ${TOKEN}` });
+  });
+
   it('obtains the caller token for a data operation', async () => {
     const executeGraphQL = await loadWith('/data/graphql');
     const { setAccessTokenProvider } = await import('../../auth/accessToken');

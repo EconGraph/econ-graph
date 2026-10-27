@@ -121,10 +121,6 @@ pub(crate) async fn resolve(
 ) -> async_graphql::Result<Vec<CrossSectionEntry>> {
     let dataset_id = Uuid::parse_str(&dataset_id)
         .map_err(|_| bad_request(format!("datasetId {:?} is not a UUID", dataset_id.as_str())))?;
-    let pool = super::context::data_pool(ctx)?;
-    if let Some(dataset) = econ_graph_core::models::Dataset::find_by_id(pool, dataset_id).await? {
-        super::catalogs::require_source(ctx, dataset.source_id).await?;
-    }
     let date = match (date, latest) {
         (Some(date), None | Some(false)) => CrossSectionDate::On(date),
         (None, Some(true)) => CrossSectionDate::Latest,
@@ -153,6 +149,9 @@ pub(crate) async fn resolve(
         async_graphql::Error::new("reference data unavailable")
     })?;
     let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
+    if let Some(dataset) = econ_graph_core::models::Dataset::find_by_id(pool, dataset_id).await? {
+        super::catalogs::require_source(ctx, dataset.source_id).await?;
+    }
     let mut conn = pool.get().await.map_err(|e| {
         tracing::error!("crossSection: database pool: {e}");
         async_graphql::Error::new("database unavailable")

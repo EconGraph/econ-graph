@@ -20,7 +20,7 @@ pub struct GraphQLContext {
     /// The signed-in caller and their roles; `None` for anonymous requests
     pub principal: Option<Principal>,
     /// Anonymous catalog capabilities only; never establishes a user identity.
-    pub anonymous_catalog_roles: std::collections::BTreeSet<Role>,
+    anonymous_catalog_roles: std::collections::BTreeSet<Role>,
     /// Allowed source IDs, resolved once per request.
     pub(crate) catalog_sources: Arc<tokio::sync::OnceCell<Vec<Uuid>>>,
     /// Client IP address for security logging

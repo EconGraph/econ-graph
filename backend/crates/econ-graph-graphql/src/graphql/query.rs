@@ -304,7 +304,6 @@ impl Query {
     ) -> Result<DataPointConnection> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&series_id)?;
-        catalogs::require_series(ctx, series_uuid).await?;
 
         if first.is_some_and(|first| first < 0) {
             return Err(async_graphql::Error::new("first must not be negative"));
@@ -312,6 +311,7 @@ impl Query {
         // A cursor is the number of matching points up to and including the one it names, so
         // `after: endCursor` continues where the last page stopped.
         let offset = parse_offset_cursor(after.as_deref())?;
+        catalogs::require_series(ctx, series_uuid).await?;
 
         let transformation =
             transformation.filter(|&transformation| transformation != DataTransformationType::None);

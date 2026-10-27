@@ -645,7 +645,8 @@ impl GraphqlRefusal {
 /// is refused.
 ///
 /// A token the identity provider's keys could not check (the provider is down and its keys
-/// were never fetched) is dropped and the request runs anonymously: it receives only the configured anonymous catalog grants. Cached grants can keep
+/// were never fetched) is dropped and the request runs anonymously: it receives only the
+/// configured anonymous catalog grants. Cached grants can keep
 /// public data browsable until their own token expires.
 async fn graphql_caller(
     pool: &AppPool,

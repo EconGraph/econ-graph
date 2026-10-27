@@ -26,7 +26,8 @@ console.log('  - Final DATA_GRAPHQL_ENDPOINT (data operations):', DATA_GRAPHQL_E
  * Data operations read data-plane tables and go to the data URL. Signed-in requests carry
  * the caller's token so the data backend can enforce catalog roles when it shares our trust.
  * A separate data URL stays anonymous unless VITE_DATA_GRAPHQL_AUTH=true, preserving access
- * to shared data planes that use a different deployment's Keycloak realm. The routing audit behind this list is in ECO-427. `graphql-operations.test.ts` fails if an operation in `src/` is in
+ * to shared data planes that use a different deployment's Keycloak realm. The routing audit
+ * behind this list is in ECO-427. `graphql-operations.test.ts` fails if an operation in `src/` is in
  * neither this set nor `APP_OPERATIONS`, or in both.
  */
 export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
