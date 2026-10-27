@@ -49,11 +49,14 @@ for dependencies, port conflicts, database overrides, and selecting an area or
 browser project. An override of `RELEASE_E2E_DATABASE_URL` must name a disposable
 test database: the runner migrates, seeds, and writes to it.
 
-Two map specs,
+The map specs exercise different boundaries.
 [`world-map-mocked.spec.ts`](../../frontend/tests/e2e/release/world-map/world-map-mocked.spec.ts)
-and [`world-atlas.spec.ts`](../../frontend/tests/e2e/release/world-map/world-atlas.spec.ts),
-intercept GraphQL with Playwright's `page.route`. They check map interactions and
-outline loading independently of seeded backend responses. The
+intercepts GraphQL with Playwright's `page.route` to check map interactions against
+controlled responses.
+[`world-atlas.spec.ts`](../../frontend/tests/e2e/release/world-map/world-atlas.spec.ts)
+checks that outlines load from the app's own origin, then aborts the
+`countries-50m` asset request in a separate case to verify the error and Reload
+action. It does not intercept GraphQL. The
 [`world-map-every-country.spec.ts`](../../frontend/tests/e2e/release/world-map/world-map-every-country.spec.ts)
 fixture-mode check instead compares every seeded WDI country and indicator with
 recorded World Bank responses and the seed manifest. A mocked browser test does
