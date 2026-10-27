@@ -159,8 +159,12 @@ routing and application configuration.
 The [public-site guide](../../k8s/README.md#-public-site-cloudflare-tunnel) describes
 the supported Gateway and Tunnel deployment, including its
 [production-cluster prerequisite](../../k8s/README.md#production-marker).
-After the production ClusterIssuer is ready, select it for the Gateway through
-the normal deployment from the repository root:
+This deployment uses the kind cluster's own kubectl and kubeconfig and pins context
+`kind-${KIND_CLUSTER}` (normally `kind-econ-graph`), independently of the shell's
+selected kubectl context. Ensure the credential Secret and production ClusterIssuer
+created above exist in that same cluster, and target that cluster with the
+kubectl checks below. Once its production ClusterIssuer is ready, select it for
+the Gateway through the normal deployment from the repository root:
 
 ```bash
 PUBLIC_HOST=yourdomain.com GATEWAY_TLS_ISSUER=letsencrypt-prod-cloudflare \
