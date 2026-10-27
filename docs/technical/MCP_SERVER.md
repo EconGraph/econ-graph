@@ -240,7 +240,9 @@ Access and body failures use non-200 HTTP statuses. Their JSON-RPC response has 
 | Unsupported or missing method | 200 | `-32601` |
 | Tool/resource failure, unknown tool/URI, or invalid tool arguments | 200 | `-32603` |
 
-The handler does not emit `-32602` for invalid tool arguments. Data-query errors are tool/resource failures; a backend without a local data plane reports `DATA_SERVED_REMOTELY` through that error path. Authentication failures include a `WWW-Authenticate: Bearer` challenge; invalid tokens add `error="invalid_token"`, and a missing role adds `error="insufficient_scope"`.
+The handler does not emit `-32602` for invalid tool arguments. Data-query errors are tool/resource failures; a backend without a local data plane reports `DATA_SERVED_REMOTELY` through that error path.
+
+Missing-token and disabled-sign-in responses include `WWW-Authenticate: Bearer`. Invalid-token responses use `Bearer error="invalid_token"`; missing-role responses use `Bearer error="insufficient_scope"`. Suspended-account, unavailable-sign-in, and account-loading failures do not include that header.
 
 ## Development
 
