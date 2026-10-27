@@ -1,194 +1,105 @@
-# 🎬 Epic End-to-End Integration Demo
+# Epic search-to-chart demo
 
-## 🎯 The Ultimate System Demonstration
+Finding an economic series and turning it into a chart makes EconGraph's value
+visible: a researcher can move from a question about GDP to observations and
+growth calculations in the same interface. The
+[Epic recorder](epic-e2e-demo.sh) contains a Playwright sequence for presenting
+that journey, with a 1920×1080 video configuration and screenshots along the way.
+Its browser actions illustrate a workflow; they do not assert that the displayed
+data or calculations are correct.
 
-This epic demo showcases the complete economic data analysis system from data crawling with TestContainers to interactive UI visualization with video output. It's the ultimate proof that our system works end-to-end!
+## Choose the evidence for your demonstration
 
-## 🚀 What This Demo Does
+For a reproducible search-to-chart check, follow the
+[release end-to-end suite's run guidance](../frontend/tests/e2e/release/README.md#run-it).
+In fixture mode, its [launcher](../scripts/release-e2e.sh) loads recorded upstream
+responses through the crawler adapters into PostgreSQL. The backend reads that
+same database, and the frontend connects to that backend. The
+[release journey](../frontend/tests/e2e/release/journey.spec.ts) searches for GDP,
+opens the series, checks the chart and newest observation, and compares
+transformation values with fixture expectations. This exercises real adapter,
+storage, API and UI code with recorded inputs, rather than crawling live sources.
+The suite also offers a headed run for watching the interactions; its
+[Playwright configuration](../frontend/playwright.release.config.ts) retains
+failure traces and screenshots, without enabling video recording.
 
-### 🔄 Complete Data Pipeline Demonstration
-1. **TestContainers Setup**: Spins up real PostgreSQL database
-2. **Data Crawling**: Simulates crawling economic data from FRED API
-3. **Data Storage**: Stores time series data with proper relationships
-4. **Search Integration**: Tests full-text search capabilities
-5. **GraphQL API**: Demonstrates complete API functionality
-6. **UI Integration**: Shows user searching and finding data
-7. **Interactive Charts**: Displays data with hover tooltips
-8. **Video Recording**: Captures the entire user journey
+Backend database tests provide narrower checks of persistence and queries; see
+the [database testing guide](../docs/testing/DATABASE_TESTING.md) for their setup
+and isolation requirements. These tests do not start a UI or supply the database
+for the Epic recorder.
 
-### 🎥 Video Output Features
-- **Complete User Journey**: From search to visualization
-- **Interactive Tooltips**: Shows data points on hover
-- **Real-time Search**: Demonstrates search-as-you-type
-- **Chart Interactions**: Mouse movements and data exploration
-- **Professional Quality**: 1920x1080 HD video output
+The Epic shell script invokes backend and frontend test-name filters before
+starting separate servers. Neither `epic_e2e_complete_system_demonstration` nor
+`Epic Complete User Journey` matches a current test, and the frontend command
+passes Jest-style options to the Vitest test script. It does not pass a
+test-container database or seeded dataset to its backend server. A recording
+therefore cannot establish that crawler-created rows reached the UI.
 
-## 🎊 Running the Epic Demo
+## Read the Epic launcher before using it
 
-### Prerequisites
-```bash
-# Install required dependencies
-npm install -g playwright
-playwright install chromium
+The Epic launcher does not provide a reproducible test-and-recording command.
+Its directory changes break relative log paths;
+later, it changes into `epic-demo-results` while the generated JavaScript still
+prefixes video and screenshot paths with `./epic-demo-results/`. Installing
+Playwright alone or changing the launch directory does not correct these paths.
+These launcher and artifact defects are covered by
+[ECO-592](https://linear.app/econgraph/issue/ECO-592).
 
-# Backend dependencies should already be installed
-# Frontend dependencies should already be installed
-```
+The script also installs browser packages into the frontend's development
+dependencies, starts backend and frontend processes, and launches headed
+Chromium. Its final cleanup uses process-name matches for `cargo run` and
+`npm start`, which can affect other matching processes, and has no exit trap to
+ensure cleanup after a failure. Use the release suite's setup guidance for
+repeatable validation rather than treating this script as a quick start.
 
-### 🚀 Launch the Epic Demo
-```bash
-# Run the complete epic demonstration
-./epic-e2e-demo.sh
-```
+## The GDP recording sequence
 
-This single command will:
-1. ✅ Start TestContainers with PostgreSQL
-2. ✅ Run backend E2E tests with real data crawling
-3. ✅ Start backend server
-4. ✅ Run frontend E2E tests with UI automation
-5. ✅ Start frontend development server
-6. ✅ Record video of complete user journey
-7. ✅ Generate screenshots at each step
-8. ✅ Create comprehensive demo report
-9. ✅ Clean up all resources
+The generated Playwright sequence expresses one researcher question: “How can I
+find GDP data and explore its growth?” It attempts the following steps against
+the application served at `http://localhost:3000`:
 
-### 📊 Demo Results
+1. Open the application, then follow **Explore**, falling back to `/explore`.
+2. Type `Real GDP` into the first text input and press Enter after a fixed wait.
+3. Try to click text matching `GDP`; continue if selection fails.
+4. If the first `svg`, `canvas` or `.chart` element is visible, hover at three
+   positions. The selector can match other graphics, and the sequence does not
+   check whether a chart tooltip appears.
+5. If a button containing `Year` is visible, click it. The sequence does not
+   verify that a year-over-year transformation was applied.
+6. Capture the final page state and close the browser context.
 
-After running, you'll find:
+The recorder does not perform an unemployment comparison, choose a date range,
+or verify source and revision information. The broader demonstration scope and
+its evidence requirements are recorded in
+[ECO-638](https://linear.app/econgraph/issue/ECO-638).
 
-```
-epic-demo-results/
-├── videos/
-│   └── user-journey-recording.webm    # Complete demo video
-├── screenshots/
-│   ├── 01_app_loaded.png
-│   ├── 02_series_explorer.png
-│   ├── 03_search_typed.png
-│   ├── 04_search_results.png
-│   ├── 05_result_selected.png
-│   ├── 06_chart_tooltip_1.png
-│   ├── 07_chart_tooltip_2.png
-│   ├── 08_chart_tooltip_3.png
-│   ├── 09_transformation.png
-│   └── 10_final_state.png
-├── logs/
-│   ├── backend_epic_test_[timestamp].log
-│   ├── frontend_epic_test_[timestamp].log
-│   └── video_demo_[timestamp].log
-└── EPIC_DEMO_REPORT_[timestamp].md
-```
+## Recognize the assets and their limits
 
-## 🎯 What You'll See in the Video
+The JavaScript names the following screenshots. Each capture depends on reaching
+its step successfully; these names describe capture points, not passed checks.
 
-### Phase 1: Application Launch
-- Loading screen and initial UI
-- Navigation to Series Explorer
+| Screenshot name | Capture point |
+| --- | --- |
+| `01_app_loaded.png` | Initial application page |
+| `02_series_explorer.png` | Page after Explore navigation |
+| `03_search_typed.png` | Text input after typing `Real GDP` |
+| `04_search_results.png` | Page after Enter and a fixed wait |
+| `05_result_selected.png` | Only after a successful GDP selection attempt |
+| `06_chart_tooltip_1.png`, `07_chart_tooltip_2.png`, `08_chart_tooltip_3.png` | Only when the selected graphic is visible and the hovers succeed |
+| `09_transformation.png` | Only when the `Year` button is visible and clicked |
+| `10_final_state.png` | Page at the end of the sequence |
+| `error_state.png` | Attempted capture when the sequence catches an error |
 
-### Phase 2: Epic Search Experience
-- User typing "Real GDP" with realistic delays
-- Search suggestions appearing
-- Results loading with relevance scores
+The video configuration requests 1920×1080 output but assigns no fixed filename.
+The shell names timestamped logs
+`backend_epic_test_<timestamp>.log`, `frontend_epic_test_<timestamp>.log` and
+`video_demo_<timestamp>.log`, plus `EPIC_DEMO_REPORT_<timestamp>.md`. Because of
+the path defects above, these names do not constitute an expected results tree.
 
-### Phase 3: Data Discovery
-- Clicking on search results
-- Series details loading
-- Data visualization preparation
-
-### Phase 4: Interactive Chart Magic
-- Chart rendering with real data
-- Mouse hover showing tooltips with:
-  - 📅 Date information
-  - 💰 Exact values
-  - 📈 Change indicators
-  - 🔄 Revision status
-
-### Phase 5: Advanced Features
-- Data transformation controls
-- Date range selection
-- Performance optimization demos
-
-## 🏆 Technical Highlights
-
-### Backend Capabilities Demonstrated
-- **TestContainers Integration**: Real database testing
-- **Data Crawling Pipeline**: FRED API simulation
-- **GraphQL Schema**: Complete API functionality
-- **Search Engine**: Full-text search with ranking
-- **Data Transformations**: YoY, MoM, QoQ calculations
-- **Concurrent Processing**: Multiple simultaneous requests
-- **Error Handling**: Graceful failure recovery
-
-### Frontend Capabilities Demonstrated
-- **React Application**: Modern component architecture
-- **Real-time Search**: Instant results as you type
-- **Interactive Charts**: Hover tooltips and data exploration
-- **Responsive Design**: Works on all screen sizes
-- **Accessibility**: Keyboard navigation and screen readers
-- **Performance**: Smooth animations and transitions
-
-### Integration Capabilities Demonstrated
-- **Full Stack Communication**: Frontend ↔ Backend
-- **Real Data Flow**: Database → GraphQL → UI
-- **Error Boundaries**: Graceful error handling
-- **Loading States**: Professional UX patterns
-- **State Management**: Efficient data caching
-
-## 🎉 Epic Demo Scenarios
-
-### Scenario 1: Economic Researcher
-> "I need to find GDP data and analyze year-over-year growth"
-- Searches for "Real GDP"
-- Finds relevant series
-- Applies YoY transformation
-- Explores data with interactive tooltips
-
-### Scenario 2: Financial Analyst
-> "I want to compare unemployment rates across different time periods"
-- Searches for "unemployment rate"
-- Selects series with best relevance score
-- Uses date range controls
-- Hovers over chart to see exact values
-
-### Scenario 3: Data Journalist
-> "I need to quickly verify economic data for my article"
-- Uses search suggestions for quick discovery
-- Clicks through to detailed series information
-- Screenshots chart for article inclusion
-- Verifies data sources and revision dates
-
-## 🚀 Performance Metrics
-
-The epic demo measures and reports:
-- **Search Response Time**: < 200ms for typical queries
-- **Chart Rendering**: < 500ms for 1000+ data points
-- **Tooltip Responsiveness**: < 50ms hover response
-- **Video Frame Rate**: 30 FPS smooth recording
-- **Memory Usage**: Efficient resource management
-- **Database Queries**: Optimized with minimal N+1 issues
-
-## 🎊 Why This Demo is Epic
-
-1. **🔄 Complete Integration**: Every component working together
-2. **🎥 Professional Video**: HD recording of entire user journey
-3. **📊 Real Data**: Actual economic time series processing
-4. **🖱️ Interactive Tooltips**: Hover to see exact data points
-5. **⚡ Performance**: Demonstrably fast and responsive
-6. **♿ Accessible**: Keyboard navigation and screen reader support
-7. **🎨 Beautiful UI**: Professional design and animations
-8. **🔍 Intelligent Search**: Relevance scoring and suggestions
-9. **📈 Advanced Features**: Data transformations and filtering
-10. **🚀 Production Ready**: Full error handling and edge cases
-
-## 🎬 Lights, Camera, Action!
-
-Ready to see the magic? Run the demo and prepare to be amazed:
-
-```bash
-./epic-e2e-demo.sh
-```
-
-**Get ready for the most comprehensive system demonstration you've ever seen!** 🎊
-
----
-
-*This epic demo represents the culmination of world-class software engineering, demonstrating a production-ready economic data analysis platform that rivals the best in the industry.*
+The report is a fixed success template, and caught browser errors do not become
+failed assertions. Shell pipelines also check the log writer's exit status
+instead of the test command's. Review the actual captures and test results before using them
+as evidence. The recorder collects no search, rendering or hover timings, frame
+rate, memory measurements, database query analysis, or accessibility results.
+Its video settings and fixed waits support presentation, not performance or
+production-readiness conclusions.
