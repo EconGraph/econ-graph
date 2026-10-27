@@ -1,30 +1,58 @@
 # EconGraph Crawler
 
-Data collection for EconGraph. All crawling goes through the Postgres `crawl_queue`:
+Data collection for EconGraph. Background crawling uses the Postgres `crawl_queue`:
+GraphQL's admin-only `triggerCrawl`, the `crawler` CLI, and the refresh scheduler enqueue
+jobs; `crawler-worker` claims and executes them. The worker runs source adapters through the
+shared rate-limited `HttpFetcher`, persists results, and retries or fails jobs by error kind.
+The worker lives in the `econ-graph-crawler-worker` crate and is deployed by
+[`crawler-worker.yaml`](../../../k8s/manifests/crawler-worker.yaml).
 
-1. **Enqueue** jobs, either from GraphQL (`triggerCrawl`, admin only; it only enqueues) or with the
-   `crawler` CLI below.
-2. **`crawler-worker`** (crate `econ-graph-crawler-worker`, deployed by `k8s/manifests/crawler-worker.yaml`)
-   claims jobs, runs the source adapter (`src/sources/*`) through the shared rate-limited `HttpFetcher`,
-   persists the result and retries or fails the job by error kind.
+The queue supports `fetch_series` to download one series, `refetch_series` to force a
+full-history re-fetch, and `discover_catalog` to write a source's series metadata.
+`fetch_filing` jobs are handled separately by `econ-graph-sec-crawler` for SEC filings.
+For debugging, `crawler fetch` runs an adapter and persists its result directly in the CLI
+process, bypassing the queue.
 
-3. **Refresh scheduler** (`src/scheduler.rs`, runs inside `crawler-worker`; disable with
-   `--scheduler false` / `CRAWLER_SCHEDULER=false`, tick every `--scheduler-interval-secs` /
-   `CRAWLER_SCHEDULER_INTERVAL_SECS`, default 300) only enqueues: each tick it adds `fetch_series` jobs
-   (priority 5, at most 500, oldest first) for active series that are due, and a `discover_catalog` job for
-   each registered source whose last discovery finished more than 7 days ago. A series is due if it was
-   never crawled or `last_crawled_at` is older than its frequency's interval: daily 1 day, weekly and
-   monthly 7 days, quarterly 14 days, annual/semiannual 30 days, anything else 7 days. Series with
-   `crawl_status = 'failed'` wait twice as long (from their last attempt); `'not_found'` (the source
-   confirmed the series doesn't exist) waits ten times as long. A series with no `economic_series`
-   row yet whose first fetch comes back NotFound has its `series_metadata` row deactivated instead
-   (see `persist::deactivate_metadata_conn`), so it isn't retried on a timer at all until catalog
-   discovery lists it again. Skipped: static catalogs,
-   sources whose `fetch_series` isn't implemented (WORLD_BANK, BEA), SEC, and disabled `data_sources`.
-   Duplicates of active jobs are rejected by the queue's unique index, so no leader election is needed.
+## Refresh scheduler
 
-Job kinds: `fetch_series` (download one series), `discover_catalog` (write a source's series metadata),
-`fetch_filing` (SEC, handled by `econ-graph-sec-crawler`).
+The [refresh scheduler](src/scheduler.rs) runs inside `crawler-worker` and only enqueues work.
+It is enabled by default; disable it with `--scheduler false` or `CRAWLER_SCHEDULER=false`.
+Set the time between ticks in seconds with `--scheduler-interval-secs` or
+`CRAWLER_SCHEDULER_INTERVAL_SECS`; the default is 300.
+
+Each tick enqueues at most 500 `fetch_series` jobs at priority 5. Candidates include active
+`economic_series` rows that are due and active `series_metadata` rows from discovery that
+have no `economic_series` row yet. The two groups take turns in the batch, each oldest first,
+so an initial discovery cannot starve refreshes. Series refresh requires a registered source
+with an enabled `data_sources` row and excludes static catalogs and SEC. World Bank and BEA
+both support series refresh.
+
+An existing series is due if it has never been crawled or its `last_crawled_at` is at least
+one refresh interval old. The interval depends on frequency: daily and business daily use
+1 day; weekly, biweekly, and monthly use 7 days; quarterly uses 14 days; annual and semiannual
+use 30 days; anything else uses 7 days. A series with `crawl_status = 'failed'` waits twice
+its interval from the later of its last successful crawl and last attempt. A series with
+`crawl_status = 'not_found'`, meaning the source confirmed it does not exist, waits ten times
+its interval from that same reference time.
+
+A discovered series with no `economic_series` row yet uses its last failed `fetch_series`
+queue row for the twice-interval delay. This history lasts only as long as queue retention
+(14 days by default), so purging can shorten that delay for quarterly and annual series.
+Disabling purging preserves the full delay. If a fetch returns NotFound before an
+`economic_series` row exists, the worker instead deactivates the `series_metadata` row with `persist::deactivate_metadata_conn`.
+That series is no longer a scheduling candidate until catalog discovery lists it again.
+
+Catalog discovery considers registered sources other than SEC, including static catalogs,
+unless an existing `data_sources` row is disabled. A source with no retained discovery
+history is eligible immediately. After a completed or cancelled discovery, the scheduler
+waits 7 days. After a terminal failure, once worker retries are exhausted, it waits 1 hour;
+consecutive failed discovery jobs double that delay up to 1 day. Successful discovery resets
+the failure backoff. Discovery history also comes from retained queue rows, so purging that
+history resets the backoff.
+
+Active jobs (`pending`, `processing`, or `retrying`) suppress new discovery jobs for the same
+source and new series refreshes for a series with a `fetch_series` or `refetch_series` job.
+The queue's unique index rejects concurrent duplicates, so no leader election is needed.
 
 ## `crawler` CLI
 
@@ -50,24 +78,31 @@ command that applies them: the worker applies no migrations, and the backend app
 app migrations. Export the relevant provider API keys in the
 worker's environment as well as in the CLI's environment for direct `fetch` calls.
 
+Use `crawler --help` for the full command list. For queue-backed full-history re-fetches and
+progress reporting, see the [re-fetch guide](../../../docs/technical/OBSERVATION_PRECISION_REFETCH.md).
+
 ## Development-only static catalogs
 
 Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
-the `static_catalogs` build flag (`config/flags/README.md`): on by default for the `dev` profile
-(`cargo run`, `cargo test`, anything that doesn't set `FLAGS_PROFILE=release`), off for `release`
-(the Dockerfile, every deployment). A release build that still wants them can set
-`FLAGS_PROFILE=dev` explicitly: `FLAGS_PROFILE=dev cargo build --release -p
+the `static_catalogs` build flag; see [feature flags](../../../config/flags/README.md).
+They are on in the `dev` flag profile used by local Cargo builds and tests, and off in the
+`release` flag profile used by the Dockerfile and deployments. Cargo's `--release` option
+does not select the flag profile. To include static catalogs explicitly, use `FLAGS_PROFILE=dev cargo build --release -p
 econ-graph-crawler-worker`, or `--build-arg FLAGS_PROFILE=dev` to `backend/Dockerfile`. Their
 discovery writes a fixed series list with no HTTP and they can't fetch data.
 
 ## Tests
 
 ```bash
-cargo test -p econ-graph-crawler --all-features -- --test-threads=1   # DB-backed tests use DATABASE_URL
+cargo test -p econ-graph-crawler --all-features -- --test-threads=1
 ```
 
-Adapters are tested against a local mock upstream (`testkit`, see `src/testkit`); no network needed.
+Adapter tests use a local mock upstream rather than provider APIs; see the
+[testkit](src/testkit/mod.rs). DB-backed tests skip when `DATABASE_URL` is unset. To run them,
+set `DATABASE_URL` to a disposable PostgreSQL test database: the test helper applies migrations,
+and tests delete queue rows. This test setting is separate from the runtime
+`DATA_DATABASE_URL`. See [database testing](../../../docs/testing/DATABASE_TESTING.md) for setup.
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the [repository license](../../../LICENSE) for complete terms and conditions.
