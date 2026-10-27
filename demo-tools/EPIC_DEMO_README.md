@@ -12,13 +12,13 @@ data or calculations are correct.
 
 For a reproducible search-to-chart check, follow the
 [release end-to-end suite's run guidance](../frontend/tests/e2e/release/README.md#run-it).
-In fixture mode, its [launcher](../scripts/release-e2e.sh) loads recorded upstream
-responses through the crawler adapters into PostgreSQL. The backend reads that
+In fixture mode, its [launcher](../scripts/release-e2e.sh) loads checked-in
+fixtures through the crawler adapters into PostgreSQL. The backend reads that
 same database, and the frontend connects to that backend. The
 [release journey](../frontend/tests/e2e/release/journey.spec.ts) searches for GDP,
 opens the series, checks the chart and newest observation, and compares
 transformation values with fixture expectations. This exercises real adapter,
-storage, API and UI code with recorded inputs, rather than crawling live sources.
+storage, API and UI code with fixture inputs, rather than crawling live sources.
 The suite also offers a headed run for watching the interactions; its
 [Playwright configuration](../frontend/playwright.release.config.ts) retains
 failure traces and screenshots, without enabling video recording.
