@@ -27,12 +27,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
