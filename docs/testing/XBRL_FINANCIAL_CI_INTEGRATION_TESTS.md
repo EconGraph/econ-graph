@@ -82,18 +82,27 @@ component behavior with mock responses rather than backend API compatibility.
 
 ### Test Categories
 
-The file's describe blocks provide useful entry points:
+The file's describe-block names provide navigation; their assertions cover the
+following behavior:
 
 - **Financial Dashboard Integration** checks company data, ratios and benchmark comparisons.
 - **Financial Statement Viewer Integration** checks balance sheets, income statements and hierarchical line items.
 - **Benchmark Comparison Integration** checks industry benchmarks and distribution percentiles.
 - **Trend Analysis Integration** checks ratio trends, direction and strength.
-- **XBRL Data Processing Integration** checks processing-status and taxonomy-reference displays.
-- **Error Handling Integration** checks parsing-error and missing-schema displays.
-- **Performance Integration** contains a rendering check using a larger mocked dataset.
+- **XBRL Data Processing Integration** checks company and industry text in one case,
+  and Total Assets and Current Assets labels in another. It does not assert
+  processing-status or taxonomy-reference displays.
+- **Error Handling Integration** checks the Financial Statements heading or Apple
+  Inc. text. It does not assert parsing-error or missing-schema displays.
+- **Performance Integration** times rendering until Total Assets appears and
+  asserts a duration below two seconds.
 
-These are the suite's intended assertions, not evidence that every test currently
-passes. The frontend assertion failures and missing CI selection are tracked in
+The processing, taxonomy and error scenarios configure responses on the
+disconnected `mockFetch` function described above. The performance case also puts
+its 1,000-row dataset on that unused mock, so its timing assertion does not
+establish large-dataset rendering performance. Passing these cases would not
+verify the scenario-specific behavior suggested by their names. Separately, the
+frontend assertion failures and missing CI selection are tracked in
 [ECO-442](https://linear.app/econgraph/issue/ECO-442).
 
 ### Running and Debugging
