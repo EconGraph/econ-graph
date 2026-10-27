@@ -7,7 +7,7 @@
 ## ⚡ Cursor-native commands
 
 - Use `/commit` for Conventional Commits (enforced in the prompt) and pre-commit reminders
-- Use `/pr` to open curated PRs; `/pr-ready` to ensure the PR exists and update its description; `/pr-checks` to watch checks; `/ci-latest` to inspect recent runs
+- Use `/pr` to create or update curated PRs; `/pr-ready` to push the branch and ensure an open PR; `/pr-checks` to watch checks; `/ci-latest` to inspect recent runs
 - Use `/e2e` to run end-to-end validation locally before pushing
 - Use `/review` to summarize diffs and surface risky changes/test gaps
 
