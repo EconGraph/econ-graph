@@ -17,24 +17,30 @@ kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler coverage --json
 kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler coverage --fail-under 95
 ```
 
-It prints one row for each source that the refresh scheduler refreshes and whose
-`data_sources` row is enabled. Sources the scheduler doesn't fetch yet (those in
-`FETCH_UNIMPLEMENTED` in `scheduler.rs`, today World Bank and BEA, and the static
-catalogs) are not listed and not measured: a passing `--fail-under 95` says nothing about
-them, so check that every release source appears in the table.
+It prints one row for each registered source that supports scheduled series fetches,
+provided its `data_sources` row is enabled or missing. A missing row reports zero discovered
+series and fails the threshold check. The scheduler enqueues work; workers fetch it.
+Static catalogs and SEC are excluded, as are sources in `FETCH_UNIMPLEMENTED`, which is
+empty. A passing `--fail-under 95` says nothing about excluded sources, so check that every
+release source appears in the table. See the [scheduler's source eligibility rules](../../backend/crates/econ-graph-crawler/src/scheduler.rs).
 
 | Column | Meaning |
 |---|---|
 | `DISCOVERED` | Distinct series ids from catalog discovery (`series_metadata`) and fetched series (`economic_series`), active only |
 | `WITH DATA` | Fetched series with at least one data point (`end_date` set) |
 | `COVERAGE` | `WITH DATA / DISCOVERED`; `-` when nothing is discovered, which counts as below target |
-| `OVERDUE` | Series with data whose last successful crawl is older than twice their refresh interval |
+| `OVERDUE` | Series with data whose last successful crawl is missing or at least two refresh intervals old; ten intervals for `not_found` series |
 | `oldest success` | The earliest last successful crawl among the source's series |
 
 Refresh intervals depend on frequency: 1 day for daily series, 7 days for weekly and monthly,
 14 days for quarterly, 30 days for annual, and 7 days for anything else (see
-`backend/crates/econ-graph-crawler/src/scheduler.rs`). Census counts only the ids its
+[scheduler interval definitions](../../backend/crates/econ-graph-crawler/src/scheduler.rs)). Census counts only the ids its
 adapter can fetch.
+
+Coverage excludes series confirmed absent (`crawl_status = 'not_found'`) that never had
+data. The worker deactivates catalog-only rows when their first fetch returns NotFound.
+Historical series that later return NotFound still count because their data remains useful;
+they become overdue after ten intervals. See the [coverage calculation](../../backend/crates/econ-graph-crawler/src/coverage.rs).
 
 ## Metrics and alerts
 
@@ -46,10 +52,10 @@ crawler-worker serves the same numbers on `:9102/metrics`, refreshed every 5 min
 `crawler_coverage_last_refresh_timestamp_seconds`, when they were last refreshed. The queue
 poller, which runs every 30 seconds, adds `crawler_last_failure_timestamp_seconds{source}`.
 
-The alerts are in `k8s/monitoring/prometheus-rules-crawler.yaml` (a ConfigMap that
-Prometheus mounts at `/etc/prometheus/rules`; `scripts/deploy/restart-k8s-rollout.sh`
-applies it), group `crawler.coverage`. No Alertmanager is deployed yet, so a firing alert is
-seen in Prometheus, not notified: open `/alerts` on the Prometheus service
+The alerts are in the [crawler rules ConfigMap](../../k8s/monitoring/prometheus-rules-crawler.yaml),
+group `crawler.coverage`. Prometheus mounts it at `/etc/prometheus/rules`;
+[`restart-k8s-rollout.sh`](../../scripts/deploy/restart-k8s-rollout.sh) applies it.
+No Alertmanager is deployed, so firing alerts are visible in Prometheus without notifications: open `/alerts` on the Prometheus service
 (`kubectl -n econ-graph port-forward svc/prometheus-service 9090`) or query
 `ALERTS{alertname="CrawlerCrawlFailed"}`.
 
@@ -58,16 +64,22 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 | `CrawlerCoverageLow` | A source's coverage has been under 95% for 6 hours |
 | `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes |
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
-| `CrawlerCoverageStale` | The worker runs but the coverage gauges haven't been refreshed for 15 minutes, for 30 minutes |
+| `CrawlerCoverageStale` | The worker is running, and the coverage gauges have remained more than 15 minutes out of date for 30 minutes |
 
-A series is overdue as soon as it misses twice its interval. The scheduler retries a failed
-series only after twice its interval, so a single failed refresh makes it overdue, and
-`CrawlerSourceNotRefreshed` fires, until a retry succeeds. A series that fails every time
-(for example a discontinued id) keeps it firing. Find those series and fix or deactivate
-them:
+`CrawlerCoverageStale` also detects an absent refresh gauge while the worker has an
+available replica. It concerns metric collection; `CrawlerSourceNotRefreshed` concerns
+source data freshness.
+
+Coverage uses `last_crawled_at`, the last successful crawl, which a failed attempt leaves
+unchanged. For an existing series with an ordinary failure, the scheduler waits two refresh
+intervals after the later of that success and the latest failed attempt before retrying.
+For `not_found` series it waits ten intervals. Coverage can therefore mark a series overdue
+before its retry is eligible. Repeated ordinary failures keep the source freshness alert
+firing until the series succeeds or is deactivated. Inspect failed series and deactivate
+one only after confirming it is gone for good:
 
 ```sql
-SELECT es.external_id, es.crawl_error_message
+SELECT es.id, es.external_id, es.crawl_error_message
 FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
 WHERE ds.name = 'Federal Reserve Economic Data (FRED)' AND es.crawl_status = 'failed';
 -- then, for a series that is gone for good:
@@ -75,19 +87,68 @@ UPDATE economic_series SET is_active = FALSE WHERE id = '<id>';
 ```
 
 To check the rules and run their unit tests locally, with promtool and PyYAML installed:
-`k8s/monitoring/check-prometheus-rules.sh`. CI runs it in the "Prometheus Rules" job.
+[`k8s/monitoring/check-prometheus-rules.sh`](../../k8s/monitoring/check-prometheus-rules.sh).
+CI runs it in the "Prometheus Rules" job. The [coverage rule tests](../../k8s/monitoring/tests/crawler-coverage.test.yaml)
+include stale and absent refresh gauges; these test rule evaluation with synthetic metrics,
+whereas the procedures below exercise the deployed worker and Prometheus.
 
 ## Forcing the alerts (QA)
 
-The coverage stale alert and `CrawlerMetricsMissing` also need kube-state-metrics
-(`k8s/monitoring/kube-state-metrics-*.yaml`, applied by `deploy.sh`). If the cluster ran the
-old operator-based `PrometheusRule` (`kubectl -n econ-graph get prometheusrule crawler-alerts`),
-delete it, or its alerts fire twice.
+Use a QA cluster for these experiments. Record the worker's scheduler and coverage interval
+settings before changing them, and restore those settings after each experiment. The examples
+assume the defaults: scheduler enabled and coverage refreshed every 300 seconds. A GitOps sync
+can revert temporary changes; keep the chosen settings in effect for the full pending period.
+`kubectl set env` recreates the worker pod, so wait for each rollout before continuing.
 
-The SQL below runs against the application database. The worker image has no `psql`, so run
-it from the Postgres pod (`kubectl -n econ-graph exec -it <postgres pod> -- psql -U <user>
-<database>`) or through `kubectl port-forward` with the `DATA_DATABASE_URL` from the
-crawler-worker's Secret.
+`CrawlerCoverageStale` and `CrawlerMetricsMissing` also require kube-state-metrics, installed
+from the [monitoring manifests](../../k8s/monitoring) by
+[`scripts/deploy/deploy.sh`](../../scripts/deploy/deploy.sh). If the cluster also has the
+old operator-based `PrometheusRule` (`kubectl -n econ-graph get prometheusrule crawler-alerts`),
+remove that obsolete resource to avoid duplicate alerts.
+
+All SQL on this page targets the **data plane database**, which contains the series and
+crawl tables. The worker image has no `psql`. For the examples below, run a local `psql`
+through a port-forward to `svc/data-postgres-service`, and configure its connection using
+the database, user and credentials corresponding to the worker's `DATA_DATABASE_URL`.
+Export `PGHOST=127.0.0.1`, `PGPORT` with the forwarded local port, `PGDATABASE`, and `PGUSER`,
+and supply authentication through a protected password file or password prompt. These
+settings are inherited by every subsequent `psql -c` command; a port-forward alone does not
+configure the connection. Alternatively, run the SQL in `psql` inside the data Postgres pod
+(`postgresql` Deployment), using its database and user. See [database settings](../../k8s/README.md#databases).
+
+### Stale coverage gauges
+
+Increase only the coverage metrics interval, leaving the worker and its metrics endpoint
+running. The [worker configuration](../../backend/crates/econ-graph-crawler-worker/src/main.rs)
+accepts this interval; the [gauge loop](../../backend/crates/econ-graph-crawler-worker/src/metrics.rs)
+refreshes immediately at startup and then waits for the interval:
+
+```sh
+kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_COVERAGE_METRICS_INTERVAL_SECS=7200
+kubectl -n econ-graph rollout status deploy/crawler-worker
+```
+
+Confirm in Prometheus that `kube_deployment_status_replicas_available{namespace="econ-graph",
+deployment="crawler-worker"}` is at least 1, and that
+`crawler_coverage_last_refresh_timestamp_seconds` has a recent value that stays unchanged
+across scrapes. Ensure no other worker instance is publishing fresh coverage gauges, because
+the rule uses the maximum refresh timestamp across instances. If the initial refresh fails, investigate the worker log before timing the
+test. Keep the pod running without restarts: a restart resets the experiment with another
+immediate refresh. Once the timestamp is more than 900 seconds old, `CrawlerCoverageStale`
+becomes pending. It fires after that condition has held for 30 minutes, subject to scrape
+and evaluation timing. Queue metrics should continue updating throughout.
+
+Restore the recorded interval (300 seconds for the default) and wait for the rollout:
+
+```sh
+kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_COVERAGE_METRICS_INTERVAL_SECS=300
+kubectl -n econ-graph rollout status deploy/crawler-worker
+```
+
+The startup refresh advances the timestamp, and the alert clears after Prometheus observes
+it. Confirm that the timestamp continues advancing at the restored interval. This experiment
+exercises stale gauges while the worker remains available after rollout; the local rule tests
+also cover a refresh gauge that is entirely absent.
 
 ### Crawl failure
 
@@ -106,40 +167,96 @@ FRED key the job fails as well, because of the key error.
 
 ### Stale source
 
-Stop the scheduler, then backdate one series:
+Disable the scheduler and wait for its rollout. Let already queued work finish, then select
+an active FRED series with data, without an active queue job, whose status is not `not_found`.
+Record its id and original `last_crawled_at` so the experiment can be undone. Backdate that
+series using the recorded id:
 
 ```sh
 kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=false
-psql -c "UPDATE economic_series SET last_crawled_at = NOW() - INTERVAL '90 days'
-  WHERE id = (SELECT es.id FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
-              WHERE ds.name = 'Federal Reserve Economic Data (FRED)' AND es.is_active
-                AND es.end_date IS NOT NULL LIMIT 1)"
+kubectl -n econ-graph rollout status deploy/crawler-worker
 ```
 
-`crawler coverage` shows `OVERDUE` 1 for FRED at once. `CrawlerSourceNotRefreshed` fires
-30 minutes after the next gauge refresh. `kubectl set env` rolls the pod, and a GitOps sync
-may revert it, so undo it explicitly with `CRAWLER_SCHEDULER=true`: the next tick re-crawls
-the series and the alert clears.
+```sql
+SELECT es.id, es.external_id, es.last_crawled_at
+FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
+WHERE ds.name = 'Federal Reserve Economic Data (FRED)' AND es.is_active
+  AND es.end_date IS NOT NULL AND es.crawl_status IS DISTINCT FROM 'not_found'
+  AND NOT EXISTS (SELECT 1 FROM crawl_queue q WHERE q.source = 'FRED'
+    AND q.series_id = es.external_id AND q.status IN ('pending', 'processing', 'retrying'))
+LIMIT 1;
+```
 
-If the scheduler keeps running, it re-crawls the backdated series on its next tick (within
-5 minutes). The alert then never fires, which shows that refresh works.
+```sh
+psql -c "UPDATE economic_series SET last_crawled_at = NOW() - INTERVAL '90 days'
+  WHERE id = '<recorded-id>'"
+```
+
+Do not enqueue that series during the experiment. `crawler coverage` immediately shows
+an additional overdue series for FRED if the selected series was fresh.
+`CrawlerSourceNotRefreshed` fires after the next gauge refresh reports overdue series
+continuously for 30 minutes. Restore the recorded timestamp, then restore the scheduler:
+
+```sh
+kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=true
+kubectl -n econ-graph rollout status deploy/crawler-worker
+```
+
+Confirm that the overdue count returns to its baseline after the next gauge refresh. If the
+scheduler keeps running during the experiment, it enqueues the backdated series on its next
+tick (normally within 5 minutes). A successful fetch then prevents the alert from firing,
+which demonstrates that refresh works.
 
 ### Low coverage
 
-Check `crawler coverage` first: a source already under 95% fires the alert without this
-step. Otherwise insert catalog rows that are never fetched: `N` = a tenth of FRED's `DISCOVERED`
-from `crawler coverage` (at least 1000), which takes a source at 100% below 95%:
+Check `crawler coverage` first: a source already under 95% fires the alert after six hours
+continuously below target without synthetic rows. Otherwise disable the scheduler and wait
+for its rollout before inserting rows, using the same commands as the stale-source test.
+The scheduler normally enqueues active catalog-only rows; a worker fetching a synthetic id
+can receive NotFound and deactivate the row, removing it from the coverage denominator.
+
+Reserve a fresh prefix for this experiment. The examples use `QA_UNFETCHED_ECO627_`.
+Run this preflight query and proceed only when all counts are zero; otherwise choose an
+unused prefix and replace it consistently in the queries. This rules out already queued
+jobs, which disabling the scheduler does not cancel. Keep other discovery jobs and manual
+producers from creating or enqueueing these synthetic ids during the test.
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM series_metadata
+    WHERE external_id LIKE 'QA\_UNFETCHED\_ECO627\_%') AS metadata_rows,
+  (SELECT COUNT(*) FROM economic_series
+    WHERE external_id LIKE 'QA\_UNFETCHED\_ECO627\_%') AS fetched_rows,
+  (SELECT COUNT(*) FROM crawl_queue
+    WHERE source = 'FRED' AND series_id LIKE 'QA\_UNFETCHED\_ECO627\_%') AS queue_rows;
+```
+
+Insert `N` catalog rows, where `N` is a tenth of FRED's `DISCOVERED` rounded up, with a
+minimum of 1000. Adding this many unfetched rows takes even 100% coverage below 95%:
 
 ```sh
 psql -c "INSERT INTO series_metadata (source_id, external_id, title, is_active)
-  SELECT ds.id, 'QA_UNFETCHED_' || g, 'QA', TRUE
+  SELECT ds.id, 'QA_UNFETCHED_ECO627_' || g, 'QA', TRUE
   FROM data_sources ds, generate_series(1, 1000) g
   WHERE ds.name = 'Federal Reserve Economic Data (FRED)'
   ON CONFLICT (source_id, external_id) DO NOTHING"
 ```
 
-(replace `1000` with `N`).
+Replace `1000` with `N`. `crawler coverage --fail-under 95` must now fail for FRED.
+Keep the scheduler disabled and verify that the rows remain active and unfetched, with no
+queue jobs for the reserved prefix. `CrawlerCoverageLow` fires once the refreshed gauge
+has stayed below 95% for six hours. Other completed fetches can raise coverage during that
+period; check the ratio and increase `N` if necessary, restarting the pending period if the
+ratio reaches 95%.
 
-`crawler coverage --fail-under 95` then fails for FRED, and `CrawlerCoverageLow` fires 6
-hours later. Delete the rows afterwards:
-`DELETE FROM series_metadata WHERE external_id LIKE 'QA\_UNFETCHED\_%'`.
+Delete the synthetic rows **before** restoring the scheduler so it cannot enqueue them:
+
+```sql
+DELETE FROM series_metadata sm USING data_sources ds
+WHERE sm.source_id = ds.id AND ds.name = 'Federal Reserve Economic Data (FRED)'
+  AND sm.external_id LIKE 'QA\_UNFETCHED\_ECO627\_%';
+```
+
+Restore the recorded scheduler setting and wait for its rollout. Check that FRED's coverage
+returns to its baseline after the next gauge refresh and that the alert clears if coverage
+is at least 95%.
