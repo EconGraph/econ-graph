@@ -2,126 +2,39 @@
 
 ## Overview
 
-The EconGraph MCP (Model Context Protocol) Server provides AI models with direct access to economic data search, retrieval, and visualization capabilities. This server implements the MCP protocol to enable AI assistants to interact with economic data through a standardized interface.
+The EconGraph server exposes Model Context Protocol (MCP) tools and resources that let AI assistants search for economic series, retrieve their data, and request visualizations. An assistant can find indicators for economic research, compare metrics for a financial report, help students explore economic concepts, or supply economic data to a business analytics workflow.
 
-## Features
+The interface is an authenticated HTTP JSON-RPC endpoint with four supported methods. It does not implement the MCP initialization lifecycle: `initialize` receives Method not found. A client must support the direct HTTP requests described here; this guide does not establish compatibility with desktop MCP clients that require initialization or a persistent transport.
 
-### 🔍 Data Search
-- **Tool**: `search_economic_series`
-- **Purpose**: Find economic data series by name, description, or keywords
-- **Input**: Search query and optional limit
-- **Output**: List of matching economic series with metadata
+| Operation | Tool or resource | What it provides |
+| --- | --- | --- |
+| Find indicators | `search_economic_series` | Matching series and descriptive metadata |
+| Retrieve observations | `get_series_data` | A bounded date-ordered set of values for one series |
+| Understand a series | `get_series_metadata` | Frequency, units, source, and timestamps |
+| Prepare a chart | `create_data_visualization` | Chart configuration or fallback data for caller-side rendering |
+| Browse sources and series | `resources/read` | Source information or a bounded series catalog |
 
-### 📊 Data Retrieval
-- **Tool**: `get_series_data`
-- **Purpose**: Retrieve time series data points for specific economic series
-- **Input**: Series ID, optional date range, and limit
-- **Output**: Time series data points with dates and values
+## Endpoint and access
 
-### 📋 Metadata Access
-- **Tool**: `get_series_metadata`
-- **Purpose**: Get detailed information about economic series
-- **Input**: Series ID
-- **Output**: Complete series metadata including source, frequency, units, etc.
+Send `POST http://localhost:9876/mcp` with `Content-Type: application/json` and `Authorization: Bearer <access-token>`. The account must be active, and its access token must grant the `api:mcp` role. The backend needs `OIDC_ISSUER` and `OIDC_AUDIENCE` configured to verify tokens.
 
-### 📈 Data Visualization
-- **Tool**: `create_data_visualization`
-- **Purpose**: Create charts and graphs for economic data
-- **Input**: Series IDs, chart type, title, and optional date range
-- **Output**: Visualization data structure (ready for chart generation)
+The `/mcp` route is compiled only when the `mcp` build flag is enabled. The `dev` flag profile enables it; `release` disables it. A build without the route answers 404. See [local startup](#running-the-server) and [build flags](../../config/flags/README.md).
 
-### 📚 Resource Access
-- **Resources**: Data sources catalog and series catalog
-- **Purpose**: Browse available data sources and economic series
-- **Access**: Through MCP resource endpoints
+Requests may contain at most 1 MiB of body data. Authentication is checked before the body is read. Use a separate request for each operation and inspect both the HTTP status and the JSON-RPC `error` field: HTTP 200 alone does not establish success.
 
-## CI/CD Integration
+For a direct HTTP caller with an access token already available in `ACCESS_TOKEN`:
 
-The MCP server is fully integrated into the main CI pipeline with comprehensive testing architecture. For detailed CI pipeline documentation, see [MCP_CI_PIPELINE.md](./MCP_CI_PIPELINE.md).
-
-### Test Architecture Overview
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CI Pipeline Overview                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-backend-smoke-tests (includes MCP unit tests)
-    ↓
-chart-api-integration-tests (validates chart API)
-    ↓
-┌─────────────────────────────────────┬─────────────────────────────────────┐
-│  backend-mcp-integration-tests     │  comprehensive-e2e                  │
-│  (MCP + Backend + Chart API)       │  (Frontend + Backend + Database)    │
-│  Ports: 5445, 9877, 3001          │  Ports: 5432, 8080                  │
-└─────────────────────────────────────┴─────────────────────────────────────┘
+```bash
+curl -X POST http://localhost:9876/mcp \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-### Test Categories
+### Supported methods
 
-#### **Unit Tests** (Smoke Tests)
-- **Location**: `backend-smoke-tests` job
-- **Duration**: ~2-3 minutes
-- **Coverage**: 15 test cases covering all MCP endpoints
-- **Speed**: Fast execution (no database, mocked dependencies)
-- **Dependencies**: None (runs first)
+`tools/list` returns `result.tools`, including each tool's `name`, `description`, and `input_schema`. `resources/list` returns `result.resources`, including `uri`, `name`, `description`, and `mime_type`. These field names reflect the endpoint's actual response spelling.
 
-**Test Coverage**:
-- ✅ Server creation and initialization
-- ✅ Tool functionality (search, data retrieval, visualization)
-- ✅ Error handling and edge cases
-- ✅ HTTP integration with mocked dependencies
-- ✅ GraphQL query construction and execution
-
-#### **Chart API Integration Tests**
-- **Location**: `chart-api-integration-tests` job
-- **Duration**: ~3-4 minutes
-- **Coverage**: 71.42% overall coverage (43 tests)
-- **Services**: Chart API service (port 3001)
-- **Dependencies**: Requires smoke tests to pass
-
-**Coverage Breakdown**:
-- **chartApi.js**: 100% coverage (12/12 statements)
-- **server.js**: 100% coverage (12/12 statements)
-- **security.js**: 52.94% coverage (9/17 statements)
-
-#### **MCP Integration Tests**
-- **Location**: `backend-mcp-integration-tests` job
-- **Duration**: ~8-10 minutes
-- **Coverage**: 6 integration tests with real services
-- **Services**: Backend (port 9877) + Chart API (port 3001) + Database (port 5445)
-- **Dependencies**: Requires both smoke tests and chart API tests to pass
-- **Execution**: Runs in parallel with comprehensive e2e tests
-
-**Test Categories**:
-1. **Server Integration**: MCP server with real backend
-2. **Error Handling**: Integration-level error scenarios
-3. **Concurrent Requests**: Thread safety testing
-4. **Chart API Integration**: Visualization workflow
-5. **Database Integration**: Data query workflows
-6. **End-to-End Integration**: Complete MCP request flow
-
-### Performance Metrics
-- **Total Tests**: 64 comprehensive tests
-- **Execution Time**: ~15-20 minutes (parallel execution)
-- **Success Rate**: >99% (with automatic retry for transient failures)
-- **Coverage**: 71.42% overall across all components
-
-### Port Isolation Strategy
-- **MCP Tests**: Ports 5445, 9877, 3001 (isolated from e2e tests)
-- **E2E Tests**: Ports 5432, 8080, 3000 (isolated from MCP tests)
-- **Chart API**: Port 3001 (isolated containers prevent conflicts)
-
-## API Endpoints
-
-### MCP Server Endpoint
-- **URL**: `http://localhost:9876/mcp`
-- **Method**: POST
-- **Protocol**: JSON-RPC 2.0
-- **Content-Type**: application/json
-
-### Supported Methods
-
-#### 1. List Available Tools
 ```json
 {
   "jsonrpc": "2.0",
@@ -130,39 +43,8 @@ chart-api-integration-tests (validates chart API)
 }
 ```
 
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "tools": [
-      {
-        "name": "search_economic_series",
-        "description": "Search for economic data series by name, description, or keywords",
-        "input_schema": {
-          "type": "object",
-          "properties": {
-            "query": {
-              "type": "string",
-              "description": "Search query for economic series"
-            },
-            "limit": {
-              "type": "integer",
-              "description": "Maximum number of results to return",
-              "default": 10
-            }
-          },
-          "required": ["query"]
-        }
-      }
-      // ... other tools
-    ]
-  }
-}
-```
+Use `tools/call` to run a named tool:
 
-#### 2. Call a Tool
 ```json
 {
   "jsonrpc": "2.0",
@@ -178,7 +60,8 @@ chart-api-integration-tests (validates chart API)
 }
 ```
 
-#### 3. List Available Resources
+Discover resource URIs with `resources/list`:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -187,7 +70,8 @@ chart-api-integration-tests (validates chart API)
 }
 ```
 
-#### 4. Read a Resource
+Then read a resource with `resources/read`:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -199,16 +83,39 @@ chart-api-integration-tests (validates chart API)
 }
 ```
 
-## Tool Details
+### Reading results
+
+Successful tool calls return `result.content`, an array of text blocks, and `result.is_error: false`. For search, data, and metadata tools, parse the JSON string in `result.content[0].text` to obtain the payload described below. For example, a search with no matches has this response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"data\":{\"searchSeries\":{\"series\":[],\"totalCount\":0}}}"
+      }
+    ],
+    "is_error": false
+  }
+}
+```
+
+Resource reads instead return `result.contents`, also containing text blocks whose `text` holds JSON. Visualization text includes explanatory prose and embedded JSON sections; the whole text is not a JSON document.
+
+## Tool reference
+
+The examples in this section are the `params` objects for `tools/call`. Replace illustrative UUIDs with IDs from search or the catalog. In returned series objects, `name` means the series title.
 
 ### search_economic_series
-Searches for economic data series using the GraphQL search API.
 
-**Parameters:**
-- `query` (string, required): Search query
-- `limit` (integer, optional): Maximum results (default: 10)
+Find series by name, description, or keywords, with spelling correction and synonym support. Results exclude inactive series and series without observations, and are ordered by relevance.
 
-**Example:**
+- `query` (string, required): Search text, from 1 to 500 characters.
+- `limit` (integer, optional): Maximum results, from 1 to 1,000; default 10.
+
 ```json
 {
   "name": "search_economic_series",
@@ -219,16 +126,16 @@ Searches for economic data series using the GraphQL search API.
 }
 ```
 
+The parsed payload contains `data.searchSeries.series` and `data.searchSeries.totalCount`. Each series contains `id`, `name`, `description`, `frequency`, `units`, `source` (`name`, `description`), and `lastUpdated`. `totalCount` counts all matches, so it can exceed the returned array length. This tool exposes no continuation cursor or offset; a capped result is not a complete search export.
+
 ### get_series_data
-Retrieves time series data points for a specific economic series.
 
-**Parameters:**
-- `series_id` (string, required): UUID of the economic series
-- `start_date` (string, optional): Start date in YYYY-MM-DD format
-- `end_date` (string, optional): End date in YYYY-MM-DD format
-- `limit` (integer, optional): Maximum data points (default: 100)
+Retrieve observations and basic metadata for one economic series.
 
-**Example:**
+- `series_id` (string, required): Series UUID.
+- `start_date` and `end_date` (strings, optional): Inclusive bounds in `YYYY-MM-DD` format. An omitted bound leaves that side unrestricted.
+- `limit` (integer, optional): Maximum observations; default 100, capped at 10,000. Zero returns no observations; negative values are rejected.
+
 ```json
 {
   "name": "get_series_data",
@@ -241,13 +148,18 @@ Retrieves time series data points for a specific economic series.
 }
 ```
 
+The parsed payload contains `data.series` with `id`, `name`, `description`, and `dataPoints`. Each point contains `date` and `value`; a missing value is `null`. Points run from the earliest matching date forward, ordered by date and then revision date. The limit counts observations, including stored revisions, rather than distinct dates.
+
+This tool returns all stored revisions within the selected bounds. Several points can therefore have the same date, but their revision dates are not included in the result. There is no `asOf`, latest-revision selector, transformation argument, continuation cursor, total count, or truncation flag. Do not interpret a full-length result as the complete history or assume that one point represents the latest estimate for each date. Use the [GraphQL API](../api/GRAPHQL_API.md) when analysis requires those controls.
+
+An unknown series, or a series without observations, produces a tool error. An existing series with no observations within the requested date range returns an empty `dataPoints` array.
+
 ### get_series_metadata
-Gets detailed metadata about an economic series.
 
-**Parameters:**
-- `series_id` (string, required): UUID of the economic series
+Read the descriptive metadata needed to interpret a series.
 
-**Example:**
+- `series_id` (string, required): Series UUID.
+
 ```json
 {
   "name": "get_series_metadata",
@@ -257,22 +169,25 @@ Gets detailed metadata about an economic series.
 }
 ```
 
+The parsed payload contains `data.series` with `id`, `name`, `description`, `frequency`, `units`, `source` (`name`, `description`, `url`), `lastUpdated`, and `createdAt`. The source `url` is its base URL. Unlike the data tool, metadata returns `data.series: null` for an unknown series or one without observations.
+
 ### create_data_visualization
-Creates visualization data for economic series.
 
-**Parameters:**
-- `series_ids` (array, required): Array of series UUIDs
-- `chart_type` (string, optional): "line", "bar", or "scatter" (default: "line")
-- `title` (string, optional): Chart title
-- `start_date` (string, optional): Start date in YYYY-MM-DD format
-- `end_date` (string, optional): End date in YYYY-MM-DD format
+Prepare a chart comparing one or more series. The caller renders the returned chart configuration or builds a visualization from fallback data; this tool does not return an image.
 
-**Example:**
+- `series_ids` (array, required): Series UUID strings.
+- `chart_type` (string, optional): `line`, `bar`, or `scatter`; default `line`.
+- `title` (string, optional): Default `Economic Data Visualization`.
+- `start_date` and `end_date` (strings, optional): Inclusive observation bounds in `YYYY-MM-DD` format.
+
 ```json
 {
   "name": "create_data_visualization",
   "arguments": {
-    "series_ids": ["123e4567-e89b-12d3-a456-426614174000", "987fcdeb-51a2-43d1-b789-123456789abc"],
+    "series_ids": [
+      "123e4567-e89b-12d3-a456-426614174000",
+      "987fcdeb-51a2-43d1-b789-123456789abc"
+    ],
     "chart_type": "line",
     "title": "GDP vs Unemployment Rate",
     "start_date": "2020-01-01",
@@ -281,232 +196,94 @@ Creates visualization data for economic series.
 }
 ```
 
-## Resource Details
+Each series contributes at most its earliest 1,000 matching observations, with the same date selection and revision behavior as `get_series_data`. A missing series or a data-query failure prevents visualization; chart-service fallback does not cover those errors.
+
+When the chart service returns a `chartConfig`, the tool's text contains a **Chart Configuration** JSON section and a **Metadata** JSON section. If the service request fails or its response lacks `chartConfig`, the tool instead returns text containing **Visualization Data**: `chart_type`, `title`, `series_data`, and `metadata` with `series_count`, `total_data_points`, and a fallback `note`. Each entry in `series_data` has the same fields as the data tool's `data.series`.
+
+Both outcomes set `is_error: false`. Inspect the text to distinguish a generated configuration from fallback data; a successful tool call does not prove that the chart service is available.
+
+Omitted tool dates do not restrict the fetched observations. Separately, the chart request defaults its `startDate` to `2020-01-01` and `endDate` to `2024-01-01` when those arguments are omitted. Supply explicit dates when chart request bounds must match the observation range you intend to analyze.
+
+## Resource reference
 
 ### econ-graph://data-sources
-Provides information about available economic data sources (FRED, BLS, etc.).
+
+The parsed JSON contains `data.dataSources`, with `id`, `name`, `description`, `url`, and `lastUpdated` for each source. `url` is the source's base URL; `lastUpdated` is the source record's update timestamp. Sources are listed by name, and only sources with at least one series that has observations are included.
 
 ### econ-graph://series-catalog
-Provides a catalog of all available economic series with basic metadata.
 
-## Integration with AI Clients
+The parsed JSON contains `data.series.nodes`. Each node contains `id`, `name`, `description`, `frequency`, `units`, and `source.name`. This is the first 100 series in title order, with IDs breaking title ties. Inactive series and series without observations are excluded. The resource exposes no pagination argument, total count, or continuation cursor, so it is a bounded browsing aid rather than the complete catalog.
 
-### Claude Desktop
-Add to your Claude Desktop configuration:
+## Errors
 
-```json
-{
-  "mcpServers": {
-    "econ-graph": {
-      "command": "curl",
-      "args": [
-        "-X", "POST",
-        "http://localhost:9876/mcp",
-        "-H", "Content-Type: application/json",
-        "-d", "@-"
-      ]
-    }
-  }
-}
-```
-
-### Custom Integration
-The MCP server uses standard JSON-RPC 2.0 protocol, making it compatible with any MCP client implementation.
-
-## Error Handling
-
-The server returns standard JSON-RPC error responses:
+Access and body failures use non-200 HTTP statuses. Their JSON-RPC response has `id: null`. Method and tool/resource errors use HTTP 200 and echo the request ID. For example:
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
   "error": {
-    "code": -32603,
-    "message": "Internal error: Database connection failed"
+    "code": -32601,
+    "message": "Method not found"
   }
 }
 ```
 
-Common error codes:
-- `-32601`: Method not found
-- `-32602`: Invalid params
-- `-32603`: Internal error
+| Condition | HTTP status | JSON-RPC error code |
+| --- | --- | --- |
+| Missing token, sign-in disabled, or invalid/expired token | 401 | `-32001` |
+| Missing `api:mcp` role or suspended account | 403 | `-32003` |
+| Sign-in temporarily unavailable | 503 | `-32002` |
+| Signed-in account cannot be loaded | 500 | `-32603` |
+| Body exceeds 1 MiB | 413 | `-32600` |
+| Body cannot be read, or malformed JSON | 400 | `-32700` |
+| Unsupported or missing method | 200 | `-32601` |
+| Tool/resource failure, unknown tool/URI, or invalid tool arguments | 200 | `-32603` |
+
+The handler does not emit `-32602` for invalid tool arguments. Data-query errors are tool/resource failures; a backend without a local data plane reports `DATA_SERVED_REMOTELY` through that error path. Authentication failures include a `WWW-Authenticate: Bearer` challenge; invalid tokens add `error="invalid_token"`, and a missing role adds `error="insufficient_scope"`.
 
 ## Development
 
-### Running the Server
+### Running the server
 
-`/mcp` is compiled in only when the `mcp` build flag is on, which it is in the `dev`
-flag profile and not in `release` (the default). From the repository root, with
-`APP_DATABASE_URL` and `DATA_DATABASE_URL` exported, and the data migrations applied, as in the [backend development setup](../../backend/README.md#development-workflow):
+From the repository root, follow the [backend development setup](../../backend/README.md#development-workflow) to configure `APP_DATABASE_URL` and `DATA_DATABASE_URL` and apply data plane migrations. Set `OIDC_ISSUER` and `OIDC_AUDIENCE` for sign-in before starting the backend:
 
 ```bash
 cd backend
 FLAGS_PROFILE=dev cargo run -p econ-graph-backend --bin econ-graph-backend
 ```
 
-The MCP server will be available at `http://localhost:9876/mcp`. Requests need a
-bearer access token for a signed-in account holding the `api:mcp` role, so the backend
-must be started with `OIDC_ISSUER` and `OIDC_AUDIENCE` set; without a token `/mcp`
-answers 401.
+At the default backend port, the endpoint is `http://localhost:9876/mcp`. Calling it requires an active account's access token granting `api:mcp`, including for tool and resource discovery.
 
-### Testing
-```bash
-# Run the MCP crate's tests (from backend/)
-cargo test -p econ-graph-mcp
-
-# Test with curl, using an access token from the identity provider
-curl -X POST http://localhost:9876/mcp \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
-```
+For chart configuration generation, run the [Chart API service](../deployment/CHART_API_SERVICE.md) and set `CHART_API_SERVICE_URL` before backend startup. For a local service the base is `http://localhost:3001/api/chart`; the MCP caller appends `/generate`. The default base is `http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart`. If the service cannot supply a configuration, visualization calls with valid series data return the fallback described above.
 
 ### Architecture
 
-The MCP server is built using:
-- **Rust** with `rust-mcp-sdk` for MCP protocol implementation
-- **Warp** for HTTP server
-- **Async-GraphQL** for data access
-- **Diesel** for database operations
-- **PostgreSQL** for data storage
+The backend's Warp route enforces authentication and body limits before passing requests to the MCP crate. That crate manually dispatches the four supported JSON-RPC methods and uses the GraphQL schema for economic data reads. It uses an HTTP client to request chart configurations.
 
-### Implementation Status
+`EconGraphMcpServer::new(app: AppPool, data: Option<DataPool>)` accepts typed pools for the two logical planes. The app plane holds users and application state; the data plane holds economic series and observations. Both pools may refer to the same physical database. Without a local data pool, discovery still works, but the economic-data tools and resource reads fail with `DATA_SERVED_REMOTELY`.
 
-#### ✅ **Completed Features**
-- **Core MCP Protocol**: Full JSON-RPC 2.0 implementation
-- **Tool Registration**: All 4 tools properly registered and functional
-- **Resource Access**: Data sources and series catalog endpoints
-- **Error Handling**: Comprehensive error responses with proper JSON-RPC codes
-- **GraphQL Integration**: Query construction and execution for data access
-- **Chart API Integration**: HTTP client for visualization generation
-- **Comprehensive Testing**: 64 tests across unit, integration, and e2e levels
+The implementation lives in [the MCP crate](../../backend/crates/econ-graph-mcp/src/mcp_server.rs), with the authenticated HTTP route in [mcp_routes.rs](../../backend/crates/econ-graph-backend/src/mcp_routes.rs).
 
-#### 🔧 **Technical Implementation**
-- **Server Creation**: `EconGraphMcpServer::new()` with database pool
-- **Tool Handling**: `handle_tool_call()` with parameter validation
-- **Resource Management**: `get_data_sources()` and `get_series_catalog()`
-- **HTTP Integration**: `mcp_handler()` for JSON-RPC request processing
-- **Error Recovery**: Graceful handling of malformed requests and service failures
+### Testing and CI
 
-#### 🧪 **Testing Infrastructure**
-- **Unit Tests**: 15 tests with mocked dependencies for fast execution
-- **Integration Tests**: 6 placeholder tests ready for testcontainers implementation
-- **CI Integration**: Full pipeline integration with parallel execution
-- **Coverage Analysis**: 71.42% overall coverage with detailed breakdown
-- **Port Isolation**: Proper service isolation to prevent test conflicts
+From `backend/`, run only the pure discovery tests without a database:
 
-#### 🚀 **Performance Characteristics**
-- **Startup Time**: ~2-3 seconds for server initialization
-- **Request Processing**: <100ms for typical tool calls
-- **Memory Usage**: ~50MB baseline with database connections
-- **Concurrent Handling**: Thread-safe with Arc-based sharing
-- **Error Recovery**: Automatic retry for transient failures
-
-## Use Cases
-
-### Economic Research
-AI assistants can help researchers find relevant economic data, retrieve time series, and create visualizations for analysis.
-
-### Financial Analysis
-Analysts can use AI to quickly access economic indicators, compare different metrics, and generate charts for reports.
-
-### Educational Applications
-Students and educators can explore economic data through natural language queries, making economic concepts more accessible.
-
-### Business Intelligence
-Companies can integrate economic data into their AI-powered analytics workflows for better decision-making.
-
-## Testing Implementation
-
-### Current Test Structure
-
-#### **Unit Tests** (Fast, Isolated)
-```rust
-// Example: Testing search functionality
-#[tokio::test]
-async fn test_search_economic_series_with_custom_limit() {
-    let container = TestContainer::new().await;
-    let pool = container.pool();
-    let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
-
-    let arguments = serde_json::json!({
-        "query": "GDP",
-        "limit": 5
-    });
-
-    let result = server.search_economic_series(arguments).await;
-    assert!(result.is_ok());
-}
+```bash
+cargo test -p econ-graph-mcp --lib test_get_available_tools
+cargo test -p econ-graph-mcp --lib test_get_available_resources
 ```
 
-#### **Integration Tests** (Service Dependencies)
-```rust
-// Example: Testing with real services
-#[tokio::test]
-async fn test_mcp_server_chart_api_integration() {
-    // Placeholder for real integration testing
-    // Would test: MCP → Backend → Chart API flow
-    assert!(true);
-}
+The rest of the crate's library tests include database-backed cases that use disposable PostgreSQL containers and require Docker. The [integration tests](../../backend/crates/econ-graph-mcp/tests/mcp_server_integration_tests.rs) create their own PostgreSQL containers, apply both migration sets, and store observations to check retrieval and date filtering. These tests call the server object directly; they do not establish authenticated HTTP or desktop-client interoperability. With Docker available:
+
+```bash
+cargo test -p econ-graph-mcp
 ```
 
-#### **Chart API Tests** (Node.js/Jest)
-```javascript
-// Example: Testing chart generation
-describe('Chart API', () => {
-  test('generates line chart correctly', () => {
-    const result = generateChart({
-      chartType: 'line',
-      data: [{ x: '2023-01', y: 100 }],
-      title: 'Test Chart'
-    });
-    expect(result).toBeDefined();
-    expect(result.type).toBe('line');
-  });
-});
-```
+To exercise chart-service calls, make the service reachable at `CHART_API_SERVICE_URL` as described above. Visualization assertions allow fallback, and the direct chart-call success test tolerates an unavailable service, so a passing MCP suite alone does not establish chart-service health. Backend route tests separately cover access rejection and body limits.
 
-### Test Coverage Analysis
-
-#### **MCP Server Coverage** (`backend/src/mcp_server.rs`)
-- **Server Creation**: ✅ Tested with database pool
-- **Tool Functions**: ✅ All 4 tools tested with various parameters
-- **Error Handling**: ✅ Malformed requests, missing parameters, service failures
-- **HTTP Integration**: ✅ JSON-RPC request/response handling
-- **GraphQL Queries**: ✅ Query construction and execution
-- **Chart API Calls**: ✅ Success and failure scenarios
-
-#### **Chart API Coverage** (`chart-api-service/`)
-- **Core Logic**: 100% coverage (chartApi.js)
-- **HTTP Endpoints**: 100% coverage (server.js)
-- **Security Functions**: 52.94% coverage (security.js) - improvement needed
-- **Integration Tests**: ✅ End-to-end HTTP testing
-
-### CI Pipeline Integration
-
-#### **Parallel Execution Strategy**
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CI Pipeline Flow                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-backend-smoke-tests (2-3 min)
-    ↓
-chart-api-integration-tests (3-4 min)
-    ↓
-┌─────────────────────────────────────┬─────────────────────────────────────┐
-│  backend-mcp-integration-tests     │  comprehensive-e2e                  │
-│  (8-10 min)                        │  (15-20 min)                       │
-└─────────────────────────────────────┴─────────────────────────────────────┘
-```
-
-#### **Port Isolation**
-- **MCP Tests**: 5445 (DB), 9877 (Backend), 3001 (Chart API)
-- **E2E Tests**: 5432 (DB), 8080 (Backend), 3000 (Frontend)
-- **Isolation**: Prevents conflicts between parallel test execution
+In [Core CI](../../.github/workflows/ci-core.yml), `backend-smoke-tests` follows `backend-build-cache` and selects the pure MCP tool/resource discovery tests. `chart-api-integration-tests` follows smoke tests; `backend-mcp-integration-tests` follows both and provisions PostgreSQL, the backend, and the chart service. See the [MCP CI guide](MCP_CI_PIPELINE.md) for workflow details and validation limits.
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the main project LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the [project license](../../LICENSE) for the terms and conditions.
