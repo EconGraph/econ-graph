@@ -28,7 +28,7 @@ Complete setup and rehearsal before starting the narration clock.
 
    If the backend uses a different port, set `BACKEND_URL` to that address instead. Open `http://localhost:3000`.
 
-3. Choose a populated source and series, then rehearse the entire route below. Write down the exact source, search query, series title, frequency, date range, and transformation you will use. A query such as “GDP” or “inflation” is useful only if it returns the chosen series in this database. Confirm that the chart has enough observations for the chosen transformation, that the source and frequency filters retain the result, and that **Download CSV** produces the displayed observations. If using fixtures, identify them as fixture data in the narration rather than implying a fresh upstream fetch.
+3. Confirm that the dashboard's configured indicators show values and observation dates rather than “No data yet”; the chosen explorer series may differ from those indicators. Choose a populated source and series, then rehearse the entire route below. Write down the exact source, search query, series title, frequency, date range, and transformation you will use. A query such as “GDP” or “inflation” is useful only if it returns the chosen series in this database. Confirm that the chart has enough observations for the chosen transformation, that the source and frequency filters retain the result, and that **Download CSV** produces the displayed observations. If using fixtures, identify them as fixture data in the narration rather than implying a fresh upstream fetch.
 4. Prepare the browser's Network panel so you can show a GraphQL request without exposing tokens or private information. Rehearse the narration and clicks together to fit each timed segment, including loading time.
 5. In QuickTime, choose **New Screen Recording**, or use another screen recorder. Capture only the browser area. Disable click indicators and notifications, and begin on the loaded dashboard.
 
@@ -57,7 +57,7 @@ Complete setup and rehearsal before starting the narration clock.
 
 ### [45–75 seconds] Interactive Charts
 
-**SAY:** “The series chart lets you inspect individual observations and focus on a period of interest. Transformations make changes over time easier to examine alongside the original levels.”
+**SAY:** “The series chart lets you inspect individual observations and focus on a period of interest. Transformations make changes over time easier to examine and compare with the original levels.”
 
 **DO:**
 
