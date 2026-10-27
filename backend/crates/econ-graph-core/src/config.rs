@@ -229,6 +229,9 @@ pub const DATA_GRAPHQL_URL: &str = "DATA_GRAPHQL_URL";
 /// request through the shared gateway takes the same route as the browser's.
 pub const DATA_GRAPHQL_HOST: &str = "DATA_GRAPHQL_HOST";
 
+/// Opt into forwarding verified user credentials to a trusted data plane.
+pub const DATA_GRAPHQL_FORWARD_AUTHORIZATION: &str = "DATA_GRAPHQL_FORWARD_AUTHORIZATION";
+
 /// How long, in milliseconds, a [`DATA_GRAPHQL_URL`] request may take in all.
 pub const DATA_GRAPHQL_TIMEOUT_MS: &str = "DATA_GRAPHQL_TIMEOUT_MS";
 
@@ -239,6 +242,8 @@ pub const DEFAULT_DATA_GRAPHQL_TIMEOUT: std::time::Duration = std::time::Duratio
 /// Where the backend asks the data plane over HTTP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataGraphqlConfig {
+    /// Forward the verified caller token only when the target trusts the same issuer/audience.
+    pub forward_authorization: bool,
     /// `DATA_GRAPHQL_URL`: an `http` or `https` URL.
     pub url: String,
     /// `DATA_GRAPHQL_HOST`, or `None` to send the URL's own host.
@@ -271,6 +276,9 @@ pub enum DataGraphqlConfigError {
     /// `DATA_GRAPHQL_HOST` or `DATA_GRAPHQL_TIMEOUT_MS` is set without `DATA_GRAPHQL_URL`.
     #[error("{0} is set but DATA_GRAPHQL_URL is not")]
     WithoutUrl(&'static str),
+    /// Forwarding accepts only true or false.
+    #[error("DATA_GRAPHQL_FORWARD_AUTHORIZATION must be true or false")]
+    InvalidForwardAuthorization,
 }
 
 /// `url` as it may be logged: `scheme://host[:port]/path`, without any user name, password,
@@ -298,9 +306,20 @@ pub fn data_graphql_config() -> Result<Option<DataGraphqlConfig>, DataGraphqlCon
 pub fn data_graphql_config_from(
     var: impl Fn(&str) -> Option<String>,
 ) -> Result<Option<DataGraphqlConfig>, DataGraphqlConfigError> {
+    let forwarding = non_empty(&var, DATA_GRAPHQL_FORWARD_AUTHORIZATION);
+    let forward_authorization = match forwarding.as_deref().map(str::trim) {
+        None | Some("false") => false,
+        Some("true") => true,
+        _ => return Err(DataGraphqlConfigError::InvalidForwardAuthorization),
+    };
     let host = non_empty(&var, DATA_GRAPHQL_HOST).map(|h| h.trim().to_string());
     let timeout = non_empty(&var, DATA_GRAPHQL_TIMEOUT_MS);
     let Some(url) = non_empty(&var, DATA_GRAPHQL_URL).map(|u| u.trim().to_string()) else {
+        if forward_authorization {
+            return Err(DataGraphqlConfigError::WithoutUrl(
+                DATA_GRAPHQL_FORWARD_AUTHORIZATION,
+            ));
+        }
         if host.is_some() {
             return Err(DataGraphqlConfigError::WithoutUrl(DATA_GRAPHQL_HOST));
         }
@@ -334,7 +353,12 @@ pub fn data_graphql_config_from(
             _ => return Err(DataGraphqlConfigError::InvalidTimeout(value)),
         },
     };
-    Ok(Some(DataGraphqlConfig { url, host, timeout }))
+    Ok(Some(DataGraphqlConfig {
+        url,
+        host,
+        timeout,
+        forward_authorization,
+    }))
 }
 
 fn non_empty(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
@@ -619,6 +643,7 @@ mod tests {
                 (DATA_GRAPHQL_HOST, "br-1.localhost"),
             ])),
             Ok(Some(DataGraphqlConfig {
+                forward_authorization: false,
                 url: "http://gw.example/data/graphql".to_string(),
                 host: Some("br-1.localhost".to_string()),
                 timeout: DEFAULT_DATA_GRAPHQL_TIMEOUT,
@@ -713,5 +738,43 @@ mod tests {
         ] {
             assert_eq!(redacted_url(url), redacted, "{url}");
         }
+    }
+}
+
+#[cfg(test)]
+mod data_plane_trust_tests {
+    use super::*;
+
+    #[test]
+    fn data_plane_forwarding_requires_explicit_boolean_and_a_target() {
+        let configured = |key: &str| match key {
+            DATA_GRAPHQL_URL => Some("https://data.test/graphql".into()),
+            DATA_GRAPHQL_FORWARD_AUTHORIZATION => Some("true".into()),
+            _ => None,
+        };
+        assert!(
+            data_graphql_config_from(configured)
+                .unwrap()
+                .unwrap()
+                .forward_authorization
+        );
+        assert_eq!(
+            data_graphql_config_from(|key| if key == DATA_GRAPHQL_FORWARD_AUTHORIZATION {
+                Some("maybe".into())
+            } else {
+                None
+            }),
+            Err(DataGraphqlConfigError::InvalidForwardAuthorization)
+        );
+        assert_eq!(
+            data_graphql_config_from(|key| if key == DATA_GRAPHQL_FORWARD_AUTHORIZATION {
+                Some("true".into())
+            } else {
+                None
+            }),
+            Err(DataGraphqlConfigError::WithoutUrl(
+                DATA_GRAPHQL_FORWARD_AUTHORIZATION
+            ))
+        );
     }
 }

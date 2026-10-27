@@ -167,6 +167,7 @@ const DATA_GRAPHQL_HOST: &str = "br-split.localhost";
 fn data_plane(url: String, timeout: std::time::Duration) -> Arc<DataPlaneClient> {
     Arc::new(
         DataPlaneClient::new(&DataGraphqlConfig {
+            forward_authorization: false,
             url,
             host: Some(DATA_GRAPHQL_HOST.to_string()),
             timeout,

@@ -48,6 +48,8 @@ services:
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      OIDC_ANONYMOUS_TOKEN_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token
+      OIDC_ANONYMOUS_CLIENT_SECRET: ${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}
     ports:
       - "8000:8000"
     depends_on:
@@ -123,6 +125,7 @@ services:
       # Frontend origin of the release e2e stack
       KC_WEB_E2E_BASE_URL: http://localhost:18081
       KC_WEB_DIRECT_GRANTS: "true"
+      KC_ANONYMOUS_CLIENT_SECRET: ${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}
       KC_GOOGLE_CLIENT_ID: ${KEYCLOAK_GOOGLE_CLIENT_ID:-unset}
       KC_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-unset}
     ports:
@@ -160,6 +163,8 @@ services:
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      OIDC_ANONYMOUS_TOKEN_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token
+      OIDC_ANONYMOUS_CLIENT_SECRET: ${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}
     ports:
       - "8000:8000"
     depends_on:

@@ -645,8 +645,8 @@ impl GraphqlRefusal {
 /// is refused.
 ///
 /// A token the identity provider's keys could not check (the provider is down and its keys
-/// were never fetched) is dropped and the request runs anonymously: it grants nothing, and
-/// public data stays browsable through an outage.
+/// were never fetched) is dropped and the request runs anonymously: it receives only the configured anonymous catalog grants. Cached grants can keep
+/// public data browsable until their own token expires.
 async fn graphql_caller(
     pool: &AppPool,
     verifier: Option<&OidcVerifier>,
@@ -849,8 +849,22 @@ fn build_routes(
                         Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
                     };
 
+                    let data_plane = data_plane.map(|client| {
+                        Arc::new(client.for_caller(
+                            caller.as_ref().and_then(|_| authorization_header(&headers)),
+                        ))
+                    });
+                    let anonymous_roles = if caller.is_none() {
+                        match verifier.as_deref() {
+                            Some(verifier) => verifier.anonymous_catalog_roles().await,
+                            None => Default::default(),
+                        }
+                    } else {
+                        Default::default()
+                    };
                     let auth_context = std::sync::Arc::new(
                         econ_graph_graphql::graphql::context::GraphQLContext::new(caller)
+                            .with_anonymous_catalog_roles(anonymous_roles)
                             .with_client(client),
                     );
                     let auth_schema =
@@ -1011,7 +1025,20 @@ async fn main() -> AppResult<()> {
         ),
         None => info!("🔓 Sign-in disabled (OIDC_ISSUER unset): every caller is anonymous"),
     }
-    let verifier = oidc.map(|config| Arc::new(OidcVerifier::new(config)));
+    let anonymous =
+        econ_graph_auth::anonymous::AnonymousConfig::from_env().map_err(AppError::ConfigError)?;
+    if anonymous.is_some() && oidc.is_none() {
+        return Err(AppError::ConfigError(
+            "Anonymous catalog grants require OIDC_ISSUER".into(),
+        ));
+    }
+    let verifier = oidc.map(|config| {
+        let verifier = OidcVerifier::new(config);
+        Arc::new(match anonymous {
+            Some(config) => verifier.with_anonymous(config),
+            None => verifier,
+        })
+    });
 
     info!("📊 Configuration loaded successfully:");
     info!("  - Server host: {}", config.server.host);
@@ -2172,6 +2199,7 @@ mod series_check_startup_tests {
 
     fn config() -> DataGraphqlConfig {
         DataGraphqlConfig {
+            forward_authorization: false,
             url: "http://gateway.example/data/graphql".to_string(),
             host: Some("br-1.localhost".to_string()),
             timeout: std::time::Duration::from_secs(2),

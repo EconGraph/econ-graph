@@ -770,6 +770,18 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run catalog and anonymous permission regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
+        grep -Eq '^test result: ok\. 4 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
+        cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
+      working-directory: backend
+
     - name: Run mapped trusted-proxy regression (required)
       run: |
         set -euo pipefail

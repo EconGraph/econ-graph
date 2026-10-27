@@ -5,6 +5,8 @@
 declare const __APP_VERSION__: string;
 
 interface ImportMetaEnv {
+  /** Forward user tokens to a separate data URL only when it trusts our issuer/audience. */
+  readonly VITE_DATA_GRAPHQL_AUTH?: string;
   readonly VITE_API_URL: string;
   readonly VITE_GRAPHQL_URL: string;
   /** Where data operations go, with no token (e.g. `/data/graphql`). Unset: the GraphQL URL. */

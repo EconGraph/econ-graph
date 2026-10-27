@@ -167,7 +167,9 @@ them unchanged. Numeric observation values remain numbers in series CSV files.
 
 5. **🎉 Open your browser** to `http://localhost:3000`
 
-This starts an empty local database. The backend treats callers as anonymous while
+This starts an empty local database. Catalog reads additionally need the Keycloak anonymous
+grant settings in [backend configuration](backend/README.md#configuration); Docker Compose wires
+these automatically. The backend treats callers as anonymous while
 `OIDC_ISSUER` is unset; protected operations require a configured identity provider.
 Vite's development frontend defaults to the Keycloak realm at
 `http://localhost:8081/realms/econ-graph`. Sign-in requires that realm to be reachable

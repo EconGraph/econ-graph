@@ -178,6 +178,8 @@ impl VerifyError {
 pub struct VerifiedToken {
     /// The caller's user id (`sub`), which keys their `users` row.
     pub subject: Uuid,
+    /// Absolute expiry of the verified access token (Unix seconds).
+    pub expires_at: u64,
     /// The top-level `roles` claim, as sent: names outside the catalog are kept here and
     /// skipped by [`Principal::from_claim`].
     pub roles: Vec<String>,
@@ -198,6 +200,7 @@ impl VerifiedToken {
 
 #[derive(Deserialize)]
 struct AccessClaims {
+    exp: u64,
     sub: String,
     typ: Option<String>,
     roles: Option<Vec<String>>,
@@ -237,6 +240,7 @@ pub struct OidcVerifier {
     min_refresh_interval: Duration,
     cache: RwLock<KeyCache>,
     refresh: Mutex<RefreshState>,
+    pub(crate) anonymous: Option<crate::anonymous::AnonymousPermissions>,
 }
 
 impl std::fmt::Debug for OidcVerifier {
@@ -280,6 +284,7 @@ impl OidcVerifier {
             min_refresh_interval: MIN_REFRESH_INTERVAL,
             cache: RwLock::default(),
             refresh: Mutex::new(refresh),
+            anonymous: None,
         }
     }
 
@@ -339,6 +344,7 @@ impl OidcVerifier {
 
         Ok(VerifiedToken {
             subject,
+            expires_at: claims.exp,
             roles,
             email: non_empty(claims.email),
             email_verified: claims.email_verified.unwrap_or(false),

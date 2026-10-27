@@ -17,6 +17,7 @@
 //! - Error messages must be user-friendly and actionable
 //! - All resolvers must have comprehensive documentation
 
+use crate::graphql::catalogs;
 use crate::imports::*;
 use crate::types::*;
 
@@ -54,6 +55,7 @@ impl Query {
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
+        catalogs::require_series(ctx, series_uuid).await?;
 
         match series_service::get_series_by_id(&pool, series_uuid).await? {
             // A series with no data points (e.g. a discovered series whose source adapter was
@@ -70,6 +72,7 @@ impl Query {
     async fn series_exists(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
+        catalogs::require_series(ctx, series_uuid).await?;
         Ok(series_service::series_exists(pool, series_uuid).await?)
     }
 
@@ -100,6 +103,10 @@ impl Query {
             .await
             .optional()?;
 
+        drop(conn);
+        if let Some(series) = &series {
+            catalogs::require_source(ctx, series.source_id).await?;
+        }
         Ok(series.map(EconomicSeriesType::from))
     }
 
@@ -121,8 +128,11 @@ impl Query {
         let mut search_params = convert_series_filter_to_params(filter)?;
         search_params.limit = Some(i64::from(first));
         search_params.offset = Some(i64::from(offset));
-        let total_count = series_service::count_series(pool, &search_params).await?;
-        let series = series_service::list_series(pool, search_params).await?;
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let total_count =
+            series_service::count_series_in_sources(pool, &search_params, Some(&allowed)).await?;
+        let series =
+            series_service::list_series_in_sources(pool, search_params, Some(&allowed)).await?;
 
         let end_index = i64::from(offset) + series.len() as i64;
         Ok(SeriesConnection {
@@ -141,6 +151,7 @@ impl Query {
     async fn data_source(&self, ctx: &Context<'_>, id: ID) -> Result<Option<DataSourceType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&id)?;
+        catalogs::require_source(ctx, source_uuid).await?;
 
         use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
         use diesel_async::RunQueryDsl;
@@ -197,10 +208,12 @@ impl Query {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::{data_sources, economic_series};
 
-        let mut conn = pool.get().await?;
         // Excludes sources with no series that has data (e.g. a source whose crawler adapter
         // was removed before any series it discovered ever got data points).
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let mut conn = pool.get().await?;
         let sources = data_sources::table
+            .filter(data_sources::id.eq_any(allowed))
             .filter(exists(
                 economic_series::table.filter(
                     economic_series::source_id
@@ -229,7 +242,10 @@ impl Query {
         use econ_graph_core::schema::datasets;
 
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let mut query = datasets::table.into_boxed();
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let mut query = datasets::table
+            .filter(datasets::source_id.eq_any(allowed))
+            .into_boxed();
         if let Some(source_id) = source_id {
             let source_id = Uuid::parse_str(&source_id)
                 .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
@@ -259,6 +275,9 @@ impl Query {
         let id =
             Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
+        if let Some(dataset) = &dataset {
+            catalogs::require_source(ctx, dataset.source_id).await?;
+        }
         Ok(dataset.map(crate::graphql::datasets::DatasetType))
     }
 
@@ -285,6 +304,7 @@ impl Query {
     ) -> Result<DataPointConnection> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&series_id)?;
+        catalogs::require_series(ctx, series_uuid).await?;
 
         if first.is_some_and(|first| first < 0) {
             return Err(async_graphql::Error::new("first must not be negative"));
@@ -413,7 +433,8 @@ impl Query {
             .map(|id| parse_id_argument("source", id))
             .transpose()?;
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let search_service = SearchService::new(Arc::new(pool.clone()));
+        let search_service = SearchService::new(Arc::new(pool.clone()))
+            .with_allowed_sources(catalogs::allowed_sources(ctx).await?);
 
         // Convert GraphQL input to internal search parameters
         let search_params = search::SearchParams {
@@ -450,7 +471,8 @@ impl Query {
         limit: Option<i32>,
     ) -> Result<Vec<SearchSuggestionType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let search_service = SearchService::new(Arc::new(pool.clone()));
+        let search_service = SearchService::new(Arc::new(pool.clone()))
+            .with_allowed_sources(catalogs::allowed_sources(ctx).await?);
 
         let suggestions = search_service
             .get_suggestions(&partial_query, limit.unwrap_or(10))

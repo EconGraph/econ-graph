@@ -146,3 +146,65 @@ The Job signs in as the admin from the Secret's `admin-username` / `admin-passwo
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
 realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --all-containers`.
+
+## Catalog access, including anonymous visitors
+
+Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
+`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
+canonical data-source names to these capabilities; adding a source requires its role and mapping.
+Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
+MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
+
+The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
+the `econgraph-anonymous` service account inherit it. Remove a catalog read role from
+`catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
+Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
+`catalog-public` from the anonymous service account and assign its permitted catalog roles
+individually instead. Use group/composite grants for signed-in exceptions as usual.
+
+Visitors receive no token and no service-account identity. The backend obtains a client-credentials
+token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
+anonymous data requests. It never turns those roles into account, annotation, or staff privileges.
+Signed-in callers use only their own token's roles, even if anonymous visitors have broader access.
+
+Configure the backend with:
+
+| Setting | Purpose |
+|---|---|
+| `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` | Existing token verification settings |
+| `OIDC_ANONYMOUS_TOKEN_URL` | Reachable token endpoint, possibly the internal Keycloak service URL |
+| `OIDC_ANONYMOUS_CLIENT_ID` | Defaults to `econgraph-anonymous` |
+| `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
+
+Missing anonymous configuration grants no anonymous data access, including when sign-in is off.
+Partial configuration fails startup. Cached anonymous grants last no longer than the token's
+absolute expiry, `expires_in`, or five minutes, whichever is shortest. Renewals are coalesced per
+backend process. Failed renewals deny access after expiry and retry at most once per ten seconds;
+unexpired grants remain usable through an outage. User role removals take effect when existing
+five-minute access tokens expire, plus the verifier's 30-second clock tolerance. No permission
+check calls Keycloak; anonymous token renewal is the only additional request.
+
+Docker Compose uses a development-only client secret. Kubernetes provisions a random credential
+through `scripts/deploy/create-secrets.sh`, preserving it across deployments, and supplies the
+same Secret key (`econ-graph-keycloak/anonymous-client-secret`) to the backend, Keycloak and realm
+import Job. Set `KEYCLOAK_ANONYMOUS_CLIENT_SECRET` to supply a managed credential instead.
+Existing Compose realms need the normal development realm reset; Kubernetes reapplies the realm
+on deployment. Reapplying the checked-in realm also reapplies its default role assignments, so
+persist operational policy changes in the managed realm configuration when they must survive deploys.
+
+### Separate and shared data planes
+
+For requests to the same GraphQL endpoint, the browser sends the signed-in user's token.
+A separate `VITE_DATA_GRAPHQL_URL` stays anonymous by default, preserving branch environments
+that share a data plane with a different Keycloak realm. These reads use the **data plane's
+anonymous catalog grants**, rather than that branch user's roles. Set the frontend build option
+`VITE_DATA_GRAPHQL_AUTH=true` only when that data plane trusts the same issuer and audience;
+then signed-in catalog roles apply there. A denied or invalid token is never retried anonymously
+except for the existing explicit suspended-account public-read behavior.
+
+Annotation creation on an app-only backend checks the series through `DATA_GRAPHQL_URL`.
+This preflight likewise uses anonymous grants by default. For a trusted data plane, set
+`DATA_GRAPHQL_FORWARD_AUTHORIZATION=true` so the preflight can read a catalog granted to the
+signed-in caller even when anonymous access is disabled. Requests follow no redirects and tokens
+are not logged. Cross-realm gateways must continue to strip credentials; a trusted route must
+preserve them. Catalog authorization does not replace that gateway trust configuration.

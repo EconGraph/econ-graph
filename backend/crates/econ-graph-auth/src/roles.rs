@@ -63,6 +63,42 @@ macro_rules! role_catalog {
 }
 
 role_catalog! {
+    // Catalog reads (including development-only sources).
+    /// Read the Federal Reserve Economic Data (FRED) catalog.
+    CatalogFredRead => "catalog.fred:read",
+    /// Read the Bureau of Labor Statistics (BLS) catalog.
+    CatalogBlsRead => "catalog.bls:read",
+    /// Read the U.S. Census Bureau catalog.
+    CatalogCensusRead => "catalog.census:read",
+    /// Read the World Bank Open Data catalog.
+    CatalogWorldBankRead => "catalog.world_bank:read",
+    /// Read the Bureau of Economic Analysis (BEA) catalog.
+    CatalogBeaRead => "catalog.bea:read",
+    /// Read the International Monetary Fund (IMF) catalog.
+    CatalogImfRead => "catalog.imf:read",
+    /// Read the Federal Housing Finance Agency (FHFA) catalog.
+    CatalogFhfaRead => "catalog.fhfa:read",
+    /// Read the European Central Bank (ECB) catalog.
+    CatalogEcbRead => "catalog.ecb:read",
+    /// Read the OECD (Organisation for Economic Co-operation and Development) catalog.
+    CatalogOecdRead => "catalog.oecd:read",
+    /// Read the Bank of England (BoE) catalog.
+    CatalogBoeRead => "catalog.boe:read",
+    /// Read the World Trade Organization (WTO) catalog.
+    CatalogWtoRead => "catalog.wto:read",
+    /// Read the Bank of Japan (BoJ) catalog.
+    CatalogBojRead => "catalog.boj:read",
+    /// Read the Reserve Bank of Australia (RBA) catalog.
+    CatalogRbaRead => "catalog.rba:read",
+    /// Read the Bank of Canada (BoC) catalog.
+    CatalogBocRead => "catalog.boc:read",
+    /// Read the Swiss National Bank (SNB) catalog.
+    CatalogSnbRead => "catalog.snb:read",
+    /// Read the UN Statistics Division catalog.
+    CatalogUnstatsRead => "catalog.unstats:read",
+    /// Read the International Labour Organization (ILO) catalog.
+    CatalogIloRead => "catalog.ilo:read",
+
     // Collaboration
     /// Create an annotation on a series.
     AnnotationCreate => "annotation:create",
@@ -106,6 +142,37 @@ impl Role {
     /// Every role in the catalog, in declaration order.
     pub fn all() -> &'static [Role] {
         Self::ALL
+    }
+
+    /// Whether this capability can be granted to anonymous data readers.
+    pub fn is_catalog(self) -> bool {
+        self.as_str().starts_with("catalog.")
+    }
+
+    /// Catalog read capability for a canonical data-source name; unknown sources deny access.
+    pub fn for_catalog(name: &str) -> Option<Self> {
+        match name {
+            "Federal Reserve Economic Data (FRED)" => Some(Self::CatalogFredRead),
+            "Bureau of Labor Statistics (BLS)" => Some(Self::CatalogBlsRead),
+            "U.S. Census Bureau" => Some(Self::CatalogCensusRead),
+            "World Bank Open Data" => Some(Self::CatalogWorldBankRead),
+            "Bureau of Economic Analysis (BEA)" => Some(Self::CatalogBeaRead),
+            "International Monetary Fund (IMF)" => Some(Self::CatalogImfRead),
+            "Federal Housing Finance Agency (FHFA)" => Some(Self::CatalogFhfaRead),
+            "European Central Bank (ECB)" => Some(Self::CatalogEcbRead),
+            "OECD (Organisation for Economic Co-operation and Development)" => {
+                Some(Self::CatalogOecdRead)
+            }
+            "Bank of England (BoE)" => Some(Self::CatalogBoeRead),
+            "World Trade Organization (WTO)" => Some(Self::CatalogWtoRead),
+            "Bank of Japan (BoJ)" => Some(Self::CatalogBojRead),
+            "Reserve Bank of Australia (RBA)" => Some(Self::CatalogRbaRead),
+            "Bank of Canada (BoC)" => Some(Self::CatalogBocRead),
+            "Swiss National Bank (SNB)" => Some(Self::CatalogSnbRead),
+            "UN Statistics Division" => Some(Self::CatalogUnstatsRead),
+            "International Labour Organization (ILO)" => Some(Self::CatalogIloRead),
+            _ => None,
+        }
     }
 
     /// Whether this is a staff role (its resource is under `admin.`).

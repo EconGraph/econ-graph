@@ -27,7 +27,8 @@ const backendPort = Number(process.env.RELEASE_BACKEND_PORT ?? 18080);
 const frontendPort = Number(process.env.RELEASE_FRONTEND_PORT ?? 18081);
 const backendUrl = `http://localhost:${backendPort}`;
 const frontendUrl = `http://localhost:${frontendPort}`;
-const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
+const backendBin =
+  process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
 
 // Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
 // mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
@@ -63,6 +64,8 @@ const webServer: PlaywrightTestConfig['webServer'] = [
       // The dev realm from docker-compose.release-e2e.yml's keycloak service.
       OIDC_ISSUER,
       OIDC_AUDIENCE: 'econ-graph-api',
+      OIDC_ANONYMOUS_TOKEN_URL: `${OIDC_ISSUER}/protocol/openid-connect/token`,
+      OIDC_ANONYMOUS_CLIENT_SECRET: 'anonymous-dev-only',
       RUST_LOG: process.env.RUST_LOG ?? 'warn',
     },
   },

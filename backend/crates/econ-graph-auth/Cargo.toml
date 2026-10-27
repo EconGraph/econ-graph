@@ -34,7 +34,7 @@ chrono.workspace = true
 uuid.workspace = true
 
 # HTTP client
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 
 # Test identity provider (the `testkit` feature)
 aws-lc-rs = { version = "1.15", optional = true }

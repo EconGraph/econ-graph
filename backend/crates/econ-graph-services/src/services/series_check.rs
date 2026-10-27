@@ -56,11 +56,12 @@ impl SeriesCheck {
     }
 }
 
-/// Asks the data plane's GraphQL endpoint about series, with no token: the gateway strips
-/// credentials on that route anyway, and the data plane may not trust this backend's identity
-/// provider.
+/// Asks the data plane about series. Cross-realm shared planes use anonymous grants by
+/// default; explicit trust configuration permits forwarding the verified caller token.
 #[derive(Clone)]
 pub struct DataPlaneClient {
+    forward_authorization: bool,
+    authorization: Option<String>,
     http: reqwest::Client,
     url: String,
     /// `url` without anything that could be secret, for logs and error detail.
@@ -105,12 +106,26 @@ impl DataPlaneClient {
             .build()
             .map_err(|e| AppError::ConfigError(format!("data plane HTTP client: {e}")))?;
         Ok(Self {
+            forward_authorization: config.forward_authorization,
+            authorization: None,
             http,
             url: config.url.clone(),
             log_url: redacted_url(&config.url),
             host: config.host.clone(),
             timeout: config.timeout,
         })
+    }
+
+    /// Bind a verified HTTP caller to this request's preflight. The token is retained only
+    /// when the configured target explicitly shares the issuer and audience trust.
+    pub fn for_caller(&self, authorization: Option<&str>) -> Self {
+        let mut client = self.clone();
+        client.authorization = if self.forward_authorization {
+            authorization.map(str::to_owned)
+        } else {
+            None
+        };
+        client
     }
 
     /// The URL this client asks, as it may be logged ([`redacted_url`]): no user name,
@@ -145,6 +160,9 @@ impl DataPlaneClient {
             "operationName": "SeriesExists",
             "variables": { "id": id.to_string() },
         }));
+        if let Some(authorization) = &self.authorization {
+            request = request.header(reqwest::header::AUTHORIZATION, authorization);
+        }
         if let Some(host) = &self.host {
             request = request.header(reqwest::header::HOST, host);
         }
@@ -183,6 +201,7 @@ mod tests {
 
     fn client(url: String, host: Option<&str>, timeout: Duration) -> DataPlaneClient {
         DataPlaneClient::new(&DataGraphqlConfig {
+            forward_authorization: false,
             url,
             host: host.map(str::to_string),
             timeout,
@@ -377,5 +396,42 @@ mod tests {
             .series_exists(Uuid::new_v4())
             .await
             .unwrap());
+    }
+}
+
+#[cfg(test)]
+mod trusted_plane_tests {
+    use super::*;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn caller_credentials_are_forwarded_only_with_explicit_trust_and_never_logged() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data":{"seriesExists":true}})),
+            )
+            .mount(&server)
+            .await;
+        for trusted in [false, true] {
+            let client = DataPlaneClient::new(&DataGraphqlConfig {
+                url: server.uri(),
+                host: None,
+                timeout: Duration::from_secs(2),
+                forward_authorization: trusted,
+            })
+            .unwrap()
+            .for_caller(Some("Bearer test-caller-token"));
+            assert!(!format!("{client:?}").contains("test-caller-token"));
+            assert!(client.series_exists(Uuid::new_v4()).await.unwrap());
+        }
+        let requests = server.received_requests().await.unwrap();
+        assert!(!requests[0].headers.contains_key("authorization"));
+        assert_eq!(
+            requests[1].headers.get("authorization").unwrap(),
+            "Bearer test-caller-token"
+        );
     }
 }

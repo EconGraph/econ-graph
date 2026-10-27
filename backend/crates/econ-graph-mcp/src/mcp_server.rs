@@ -26,6 +26,7 @@ pub struct EconGraphMcpServer {
         econ_graph_graphql::graphql::mutation::Mutation,
         async_graphql::EmptySubscription,
     >,
+    auth_context: Option<Arc<econ_graph_graphql::graphql::context::GraphQLContext>>,
     /// HTTP client for calling private frontend chart API
     http_client: Client,
     /// Frontend chart API base URL
@@ -46,9 +47,19 @@ impl EconGraphMcpServer {
         Self {
             app,
             schema,
+            auth_context: None,
             http_client,
             frontend_chart_api_url,
         }
+    }
+
+    /// Bind data tools to the authenticated HTTP caller's catalog grants.
+    pub fn with_auth_context(
+        mut self,
+        context: Arc<econ_graph_graphql::graphql::context::GraphQLContext>,
+    ) -> Self {
+        self.auth_context = Some(context);
+        self
     }
 
     /// Execute a GraphQL query
@@ -60,6 +71,10 @@ impl EconGraphMcpServer {
             Request::new(query)
         };
 
+        let request = match &self.auth_context {
+            Some(context) => request.data(context.clone()),
+            None => request,
+        };
         let response = self.schema.execute(request).await;
 
         if !response.errors.is_empty() {

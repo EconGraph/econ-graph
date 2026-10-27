@@ -19,6 +19,10 @@ pub struct GraphQLContext {
     pub user: Option<User>,
     /// The signed-in caller and their roles; `None` for anonymous requests
     pub principal: Option<Principal>,
+    /// Anonymous catalog capabilities only; never establishes a user identity.
+    pub anonymous_catalog_roles: std::collections::BTreeSet<Role>,
+    /// Allowed source IDs, resolved once per request.
+    pub(crate) catalog_sources: Arc<tokio::sync::OnceCell<Vec<Uuid>>>,
     /// Client IP address for security logging
     pub client_ip: Option<String>,
     /// The request's `User-Agent`, already cut to a sane length (see [`ClientInfo::new`])
@@ -46,12 +50,30 @@ impl GraphQLContext {
         Self {
             user,
             principal,
+            anonymous_catalog_roles: Default::default(),
+            catalog_sources: Default::default(),
             client_ip: None,
             user_agent: None,
             request_timestamp: chrono::Utc::now(),
             request_id: uuid::Uuid::new_v4().to_string(),
             denials: Default::default(),
         }
+    }
+
+    /// Attach only catalog capabilities to an anonymous caller.
+    pub fn with_anonymous_catalog_roles(mut self, roles: impl IntoIterator<Item = Role>) -> Self {
+        self.anonymous_catalog_roles = roles.into_iter().filter(|r| r.is_catalog()).collect();
+        self.catalog_sources = Default::default();
+        self
+    }
+
+    /// Whether the caller's effective catalog grant set contains this role.
+    pub fn can_read_catalog(&self, role: Role) -> bool {
+        role.is_catalog()
+            && self.principal.as_ref().map_or_else(
+                || self.anonymous_catalog_roles.contains(&role),
+                |p| p.has_role(role),
+            )
     }
 
     /// The same context, recording `client` as the request's sender.
@@ -274,5 +296,26 @@ mod tests {
         for &role in Role::all() {
             assert!(ctx.require_role(role).is_err(), "{role}");
         }
+    }
+}
+
+#[cfg(test)]
+mod anonymous_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn anonymous_catalog_grants_do_not_create_an_identity_or_other_capabilities() {
+        let context = GraphQLContext::anonymous().with_anonymous_catalog_roles([
+            Role::CatalogFredRead,
+            Role::AnnotationCreate,
+            Role::AdminUsersDelete,
+        ]);
+        assert!(context.can_read_catalog(Role::CatalogFredRead));
+        assert!(!context.can_read_catalog(Role::CatalogBeaRead));
+        assert!(!context.can_read_catalog(Role::AnnotationCreate));
+        assert!(!context.is_authenticated());
+        assert!(context.user.is_none() && context.principal.is_none());
+        assert!(context.require_role(Role::AnnotationCreate).is_err());
+        assert_eq!(context.anonymous_catalog_roles.len(), 1);
     }
 }
