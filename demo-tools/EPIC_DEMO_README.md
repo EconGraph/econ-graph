@@ -28,8 +28,8 @@ the [database testing guide](../docs/testing/DATABASE_TESTING.md) for their setu
 and isolation requirements. These tests do not start a UI or supply the database
 for the Epic recorder.
 
-The Epic shell script invokes backend and frontend test-name filters before
-starting separate servers. Neither `epic_e2e_complete_system_demonstration` nor
+The Epic shell script invokes backend and frontend test-name filters and starts
+separate application servers. Neither `epic_e2e_complete_system_demonstration` nor
 `Epic Complete User Journey` matches a current test, and the frontend command
 passes Jest-style options to the Vitest test script. It does not pass a
 test-container database or seeded dataset to its backend server. A recording
