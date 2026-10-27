@@ -114,6 +114,9 @@ spec:
         # PUBLIC_HOST (https://<host>/idp/realms/econ-graph); OIDC_JWKS_URL stays in-cluster.
         - name: OIDC_ISSUER
           value: "http://localhost/idp/realms/econ-graph"
+        # Credential transport stays on the private in-cluster Keycloak service.
+        - name: OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP
+          value: "true"
         - name: OIDC_ANONYMOUS_TOKEN_URL
           value: "http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token"
         - name: OIDC_ANONYMOUS_CLIENT_SECRET

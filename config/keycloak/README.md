@@ -172,7 +172,8 @@ Configure the backend with:
 | Setting | Purpose |
 |---|---|
 | `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` | Existing token verification settings |
-| `OIDC_ANONYMOUS_TOKEN_URL` | Reachable token endpoint, possibly the internal Keycloak service URL |
+| `OIDC_ANONYMOUS_TOKEN_URL` | Reachable HTTPS token endpoint, or loopback HTTP for local development |
+| `OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP` | Explicit `true` allows private-network HTTP credential transport; enabled only for the internal Compose/Kubernetes Keycloak service |
 | `OIDC_ANONYMOUS_CLIENT_ID` | Defaults to `econgraph-anonymous` |
 | `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
 

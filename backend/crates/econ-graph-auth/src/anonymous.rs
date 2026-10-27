@@ -36,7 +36,10 @@ impl AnonymousConfig {
             .filter(|s| !s.trim().is_empty())
             .ok_or("OIDC_ANONYMOUS_TOKEN_URL is required")?;
         let parsed = reqwest::Url::parse(&token_url).map_err(|_| "Invalid anonymous token URL")?;
-        if !matches!(parsed.scheme(), "http" | "https")
+        let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        let private_http = parsed.scheme() == "http"
+            && (loopback || set("OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP").as_deref() == Some("true"));
+        if !(parsed.scheme() == "https" || private_http)
             || parsed.host_str().is_none()
             || !parsed.username().is_empty()
             || parsed.password().is_some()
@@ -212,6 +215,36 @@ mod tests {
             });
             let error = result.err().expect("invalid configuration");
             assert!(!error.contains("secret@") && !error.contains("credential"));
+        }
+    }
+
+    /// Credentials require HTTPS unless a local loopback or private-network exception applies.
+    #[test]
+    fn token_url_requires_secure_transport_or_explicit_private_http() {
+        for (url, allow_http, valid) in [
+            ("https://idp.test/token", None, true),
+            ("http://idp.test/token", None, false),
+            ("http://idp.test/token", Some("false"), false),
+            ("http://idp.test/token", Some("true"), true),
+            ("http://localhost/token", None, true),
+            ("http://127.0.0.1/token", None, true),
+            ("http://[::1]/token", None, true),
+            ("http://localhost.other.test/token", None, false),
+            ("http://user:secret@idp.test/token", Some("true"), false),
+            (
+                "http://idp.test/token?secret=credential",
+                Some("true"),
+                false,
+            ),
+            ("http://idp.test/token#secret", Some("true"), false),
+        ] {
+            let result = AnonymousConfig::from_vars(|key| match key {
+                "OIDC_ANONYMOUS_TOKEN_URL" => Some(url.into()),
+                "OIDC_ANONYMOUS_CLIENT_SECRET" => Some("test-only".into()),
+                "OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP" => allow_http.map(str::to_owned),
+                _ => None,
+            });
+            assert_eq!(result.is_ok(), valid, "{url}");
         }
     }
 

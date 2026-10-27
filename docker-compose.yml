@@ -49,6 +49,8 @@ services:
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      # Explicit private-network credential transport to the Compose Keycloak service.
+      OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP: ${OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP:-true}
       OIDC_ANONYMOUS_TOKEN_URL: ${OIDC_ANONYMOUS_TOKEN_URL-http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token}
       OIDC_ANONYMOUS_CLIENT_SECRET: ${OIDC_ANONYMOUS_CLIENT_SECRET-${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}}
     ports:
@@ -165,6 +167,8 @@ services:
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      # Explicit private-network credential transport to the Compose Keycloak service.
+      OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP: ${OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP:-true}
       OIDC_ANONYMOUS_TOKEN_URL: ${OIDC_ANONYMOUS_TOKEN_URL-http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token}
       OIDC_ANONYMOUS_CLIENT_SECRET: ${OIDC_ANONYMOUS_CLIENT_SECRET-${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}}
     ports:
