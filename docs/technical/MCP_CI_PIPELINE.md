@@ -58,7 +58,7 @@ The [integration tests](../../backend/crates/econ-graph-mcp/tests/mcp_server_int
 
 The target checks database queries, invalid arguments, concurrent searches, resource access and visualization responses. For example, `mcp_queries_return_real_series_and_date_filtered_observations` inserts a series with observations, then asserts that a date-filtered query returns the expected series ID and date and that search and catalog responses contain the inserted series. These assertions establish more than a successful response wrapper.
 
-Visualization tests have narrower guarantees. Several accept a fallback visualization when the Chart API call fails. `test_mcp_server_call_private_chart_api_success_integration` logs an unavailable service without failing the test, while the failure test accepts an error for invalid input. The job also configures `CHART_API_SERVICE_URL` with the obsolete `/api/chart` route. Health checks and these fallback-tolerant assertions therefore do not establish a successful MCP-to-Chart-API round trip.
+Visualization tests have narrower guarantees. Several accept a fallback visualization when the Chart API call fails. `test_mcp_server_call_private_chart_api_success_integration` logs an unavailable service without failing the test, while the failure test accepts an error for invalid input. The job configures `CHART_API_SERVICE_URL` as the base URL `http://localhost:3001/api/chart`; the MCP client appends `/generate`, targeting the current generation endpoint. Health checks and these fallback-tolerant assertions therefore do not establish a successful MCP-to-Chart-API round trip.
 
 ## Runner, process and database isolation
 
