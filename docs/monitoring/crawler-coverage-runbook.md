@@ -114,7 +114,7 @@ Export `PGHOST=127.0.0.1`, `PGPORT` with the forwarded local port, `PGDATABASE`,
 and supply authentication through a protected password file or password prompt. These
 settings are inherited by every subsequent `psql -c` command; a port-forward alone does not
 configure the connection. Alternatively, run the SQL in `psql` inside the data Postgres pod
-(`postgresql` Deployment), using its database and user. See [database settings](../../k8s/README.md#databases).
+(`postgresql` StatefulSet), using its database and user. See [database settings](../../k8s/README.md#databases).
 
 ### Stale coverage gauges
 
@@ -161,9 +161,11 @@ kubectl -n econ-graph exec deploy/crawler-worker -- \
 kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler status   # FAILED/24H goes up
 ```
 
-Within about a minute, `crawler_last_failure_timestamp_seconds{source="FRED"}` moves to
-now and `CrawlerCrawlFailed` fires for FRED. It resolves by itself an hour later. Without a
-FRED key the job fails as well, because of the key error.
+Once the job reaches terminal failure, the next queue metrics poll (every 30 seconds)
+updates `crawler_last_failure_timestamp_seconds{source="FRED"}`. `CrawlerCrawlFailed` fires
+when Prometheus next scrapes and evaluates the rule. It clears an hour after the failure
+if no further FRED jobs fail. Without a FRED key the job fails as well, because of the key
+error.
 
 ### Stale source
 
@@ -202,9 +204,10 @@ kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=true
 kubectl -n econ-graph rollout status deploy/crawler-worker
 ```
 
-Confirm that the overdue count returns to its baseline after the next gauge refresh. If the
-scheduler keeps running during the experiment, it enqueues the backdated series on its next
-tick (normally within 5 minutes). A successful fetch then prevents the alert from firing,
+Confirm that the overdue count returns to its baseline after the next gauge refresh. For a
+series outside a `legacy` dataset with no recent failed attempt delaying its retry, a running
+scheduler can enqueue the backdated series on its next tick (normally within 5 minutes).
+If the fetch succeeds before the alert's pending period elapses, the alert does not fire,
 which demonstrates that refresh works.
 
 ### Low coverage
