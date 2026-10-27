@@ -26,8 +26,10 @@ The adapter uses these endpoints:
 The key is also sent on the two metadata requests. State names and FIPS codes come from
 [the Census state reference file](https://www2.census.gov/geo/docs/reference/state.txt).
 
-`CENSUS_API_KEY` is required: the Census API rejects keyless requests, so without it the
-adapter fails with an auth error before making any discovery or series-fetch request.
+`CENSUS_API_KEY` is required by the adapter: without it, discovery and series fetching
+fail with an auth error before making any request. The BDS data endpoint rejects keyless
+requests, although [public variable metadata](https://api.census.gov/data/timeseries/bds/variables/ESTAB.json)
+is available without a key.
 Obtain a free key through [Census API key signup](https://api.census.gov/data/key_signup.html)
 and configure it in the worker's environment.
 
