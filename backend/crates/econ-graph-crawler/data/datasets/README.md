@@ -10,8 +10,8 @@ Every series belongs to a dataset (`economic_series.dataset_id` is `NOT NULL`), 
 registered adapter must declare at least one. Startup fails if a registered adapter
 declares none, a declared code has no definition, or its file defines a code that the
 adapter does not declare. At crawl time, a series that names an undeclared dataset,
-or whose dimension keys differ from the definition, fails its job before anything is
-written.
+or whose dimension keys differ from the definition, fails its job before the series
+metadata or observations are written.
 
 ```toml
 [[dataset]]
@@ -40,11 +40,12 @@ name = "obs_status"
 label = "Observation status"
 ```
 
-Use either `codes` or `codelist` for a dimension. Inline codes supply labels without
-restricting the dimension to those codes. A `codelist` names a shared reference list,
-resolved by the API; `countries` is the only supported list. Source-specific labels
-for codes in that list, such as World Bank aggregate names, arrive through crawling
-and must not be defined in this file.
+A dimension may use `codes` or `codelist`, but not both. If neither is present, the
+file supplies no code labels or shared list for that dimension. Inline codes supply
+labels without restricting the dimension to those codes. A `codelist` names a shared
+reference list, resolved by the API; `countries` is the only supported list.
+Source-specific labels for codes in that list, such as World Bank aggregate names,
+arrive through crawling and must not be defined in this file.
 
 Generated external IDs contain the dataset code and dimension values in declared
 order. Dimension names are the keys stored in each series’ dimensions. Once series
