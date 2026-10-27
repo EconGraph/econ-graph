@@ -108,7 +108,8 @@ audience mismatches separately from key-fetch failures.
 For the cluster, the committed issuer is
 `http://localhost/idp/realms/econ-graph`; the audience is `econ-graph-api`,
 `OIDC_REQUIRED` is `true`, and JWKS is fetched from the in-cluster Keycloak
-service. `PUBLIC_HOST` changes the issuer and Keycloak hostname together to
+service. With `PUBLIC_HOST` set, the deployment sets Keycloak's `KC_HOSTNAME`
+to `https://<host>/idp` and the backend's `OIDC_ISSUER` to
 `https://<host>/idp/realms/econ-graph`. Follow the [Keycloak
 procedure](../../k8s/README.md#-keycloak) for realm and identity-provider setup.
 Anonymous callers may use public data operations; app and admin operations keep
