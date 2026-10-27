@@ -2,8 +2,8 @@
 
 This crate defines the GraphQL schema, query and mutation resolvers, and DataLoaders
 that expose EconGraph's economic data and application state. The hosting
-[backend](../econ-graph-backend/src/main.rs) authenticates bearer tokens, supplies
-request context, and records GraphQL request metrics. This crate uses the caller in
+[backend](../econ-graph-backend/src/main.rs) authenticates bearer tokens and supplies
+request context. This crate uses the caller in
 [`GraphQLContext`](src/graphql/context.rs) to enforce resolver permissions.
 
 ## Schema behavior
