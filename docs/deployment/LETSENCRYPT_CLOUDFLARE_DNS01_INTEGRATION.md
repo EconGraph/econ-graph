@@ -14,7 +14,7 @@ public-site guide for routing and trusted client-IP handling.
 
 ## Prerequisites and credentials
 
-Choose the intended kubectl context before running any command below. The target
+Choose the intended kubectl context for the standalone commands below. The target
 cluster needs cert-manager and its `cert-manager.io/v1` CRDs, plus namespace
 `econ-graph` for the standalone wildcard requests. Installing cert-manager is
 outside this procedure; use its [installation guidance](https://cert-manager.io/docs/installation/)
@@ -159,8 +159,12 @@ routing and application configuration.
 The [public-site guide](../../k8s/README.md#-public-site-cloudflare-tunnel) describes
 the supported Gateway and Tunnel deployment, including its
 [production-cluster prerequisite](../../k8s/README.md#production-marker).
-After the production ClusterIssuer is ready, select it for the Gateway through
-the normal deployment from the repository root:
+This deployment uses the kind cluster's own kubectl and kubeconfig and pins context
+`kind-${KIND_CLUSTER}` (normally `kind-econ-graph`), independently of the shell's
+selected kubectl context. Ensure the credential Secret and production ClusterIssuer
+created above exist in that same cluster, and target that cluster with the
+kubectl checks below. Once its production ClusterIssuer is ready, select it for
+the Gateway through the normal deployment from the repository root:
 
 ```bash
 PUBLIC_HOST=yourdomain.com GATEWAY_TLS_ISSUER=letsencrypt-prod-cloudflare \
