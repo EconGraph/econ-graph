@@ -8,9 +8,11 @@ live in [Linear](https://linear.app/econgraph).
 ## 📖 Documentation Structure
 
 ### 🏢 [Business Documentation](./business/)
+
 - **[Privacy Policy](./business/PRIVACY_POLICY.md)** - Data privacy and protection policies
 
 ### 🔧 [Technical Documentation](./technical/)
+
 - **[Secrets Management](./technical/SECRETS_MANAGEMENT.md)** - Current human-run secret setup and handling rules
 - **[Admin Security](./technical/ADMIN_SECURITY.md)** - Security configuration and best practices
 - **[Frontend Summary](./technical/FRONTEND_SUMMARY.md)** - React frontend architecture overview
@@ -21,6 +23,7 @@ live in [Linear](https://linear.app/econgraph).
 - **[Global Analysis Features](./technical/GLOBAL_ANALYSIS_FEATURES.md)** - Comprehensive feature documentation for global analysis
 
 #### Backend Technical Docs
+
 - **[BLS API Experimental Findings](./technical/BLS_API_EXPERIMENTAL_FINDINGS.md)** - Bureau of Labor Statistics API research
 - **[Census BDS Integration](./technical/CENSUS_BDS_INTEGRATION.md)** - Census Business Dynamics Statistics integration
 - **[Census Bureau Integration Summary](./technical/CENSUS_BUREAU_INTEGRATION_SUMMARY.md)** - Census API integration overview
@@ -31,50 +34,66 @@ live in [Linear](https://linear.app/econgraph).
 - **[Testing Strategy](./technical/TESTING_STRATEGY.md)** - Comprehensive testing approach
 - **[World Bank API Experimental Findings](./technical/WORLD_BANK_API_EXPERIMENTAL_FINDINGS.md)** - World Bank API research
 
+### 🌐 [Data Sources](./data-sources/README.md)
+
+- **[Source Reference](./data-sources/README.md)** - Source coverage, sample payloads, frequency and revision behavior
+
 ### 🚀 [Deployment Documentation](./deployment/)
+
+- **[Kubernetes Deployment](../k8s/README.md)** - Cluster setup, configuration and deployment
 - **[Deployment Restart](./deployment/DEPLOYMENT_RESTART.md)** - Deployment restart procedures
 - **[K8s Restart Commands](./deployment/K8S_RESTART_COMMANDS.md)** - Kubernetes restart commands
 - **[Chart API Service](./deployment/CHART_API_SERVICE.md)** - Chart API service deployment
 
 ### 💻 [Development Documentation](./development/)
+
 - **[Pre-commit Setup](./development/PRECOMMIT_SETUP.md)** - Pre-commit hooks configuration
 - **[CI/CD Pipeline](./development/CI_CD_PIPELINE.md)** - Continuous integration and deployment
 - **[CI Optimization Notes](./development/CI_OPTIMIZATION_NOTES.md)** - CI performance optimization
 
 ### 🔌 [API Documentation](./api/)
+
 - **[GraphQL API](./api/GRAPHQL_API.md)** - GraphQL API reference and schema
 
 ### 🧪 [Testing Documentation](./testing/)
+
 - **[Database Testing](./testing/DATABASE_TESTING.md)** - Database testing strategies and procedures
-- **[E2E Test Report](./testing/e2e-test-report.md)** - End-to-end testing results and analysis
+- **[Testing Strategy](./technical/TESTING_STRATEGY.md)** - Test categories, end-to-end testing principles and test infrastructure
 
 ### 📊 [Monitoring Documentation](./monitoring/)
-- **[Monitoring README](./monitoring/README.md)** - Monitoring setup and configuration
-- **[Grafana Dashboards](./monitoring/README.md)** - Grafana dashboard documentation
+
+- **[Grafana Monitoring](./monitoring/README.md)** - Dashboard overview, setup and configuration
 
 ### 👥 [User Guides](./user-guides/)
+
 - **[Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)** - Using the world map
 
 ## 🎯 Quick Navigation
 
 ### For Developers
+
 - Start with [Development Documentation](./development/) for setup and workflow
 - Check [Technical Documentation](./technical/) for architecture details
 - Review [Testing Documentation](./testing/) for testing procedures
 
 ### For DevOps/Deployment
+
 - See [Deployment Documentation](./deployment/) for deployment procedures
 - Check [Monitoring Documentation](./monitoring/) for observability setup
 
 ### For API Users
+
 - See [API Documentation](./api/) for GraphQL API reference
+- See [Data Sources](./data-sources/README.md) for source coverage and response formats
 
 ### For End Users
+
 - Start with [User Guides](./user-guides/) for feature usage
 - Check [Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md) for the world map
 
 ### For Security
-- Review the [Security Assessment Report](./security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md) for vulnerability analysis
+
+- Review [Secrets Management](./technical/SECRETS_MANAGEMENT.md) for credential setup and handling rules
 - Check [Admin Security](./technical/ADMIN_SECURITY.md) for admin interface security
 
 ## 🔐 Secrets Management
@@ -84,8 +103,7 @@ Kubernetes credentials are Secrets created by `scripts/deploy/create-secrets.sh`
 
 Run `scripts/deploy/set-crawler-keys.sh` yourself for hidden-input crawler key setup.
 Agents never handle secret values. See [Secrets Management](./technical/SECRETS_MANAGEMENT.md)
-for handling tiers and the accepted SOPS + age direction; Sealed Secrets and the
-old secrets submodule are retired.
+for the current setup and handling tiers.
 
 ## 📝 Contributing to Documentation
 
@@ -95,15 +113,4 @@ When adding new documentation:
 2. **Follow naming conventions** - Use UPPERCASE_WITH_UNDERSCORES.md for consistency
 3. **Update this index** - Add new docs to the appropriate section above
 4. **Cross-reference** - Link related documents where appropriate
-
-## 🔍 Finding Documentation
-
-- **By Topic**: Use the category structure above
-- **By File**: All docs are in the `docs/` directory with logical subdirectories
-- **By Purpose**: Business, Technical, Deployment, Development, API, Testing, Monitoring
-
----
-
-*This documentation structure provides organized access to all EconGraph documentation. Each category contains relevant documents for different audiences and use cases.*
-
 

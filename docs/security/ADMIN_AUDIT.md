@@ -32,14 +32,19 @@ it also accepts `after` and `filter`.
 ## Trusted proxies in Kubernetes
 
 `TRUSTED_PROXIES` is empty by default, including in the committed manifests. This
-fails closed: audit records show the backend's TCP peer, usually the ingress or
-Gateway pod. Deployment operators must supply verified proxy addresses/ranges to
+fails closed: audit records show the backend's TCP peer, the gateway's Envoy
+proxy pod. Deployment operators must supply verified proxy addresses/ranges to
 record the forwarded client IP. A universal pod CIDR is unsafe: it would trust
-headers forged by every pod in that range. The ingress-nginx to Envoy Gateway
-transition also changes which peers are legitimate proxies, so there is no static
-range here that is correct for all deployments.
+headers forged by every pod in that range. Proxy pod addresses differ per
+cluster and change when the pod is recreated, so there is no static range here
+that is correct for all deployments.
 
-1. Identify the actual ingress/Gateway pod IPs reaching the backend, and the
+The gateway replaces `X-Forwarded-For` with the one address it settled on: the
+connecting peer, or, for a request from a pod (the Cloudflare Tunnel connector
+included), the last address that pod sent in `X-Forwarded-For`. Any pod can
+claim an address that way (`k8s/README.md`, "Public site").
+
+1. Identify the actual Gateway proxy pod IPs reaching the backend, and the
    forwarding chain (for production, Cloudflare Tunnel and the Gateway).
 2. Configure the edge to sanitize or append client addresses from its verified
    immediate peer. Trust only the specific proxy IPs or a dedicated proxy subnet

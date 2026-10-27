@@ -133,63 +133,20 @@ spec:
   renewBefore: 720h  # Renew 30 days before expiration
 ```
 
-### 4. Update Ingress Configuration
+### 4. Use the Certificate on the Gateway
 
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: econ-graph-ingress-cloudflare
-  namespace: econ-graph
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod-cloudflare"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/cloudflare-real-ip: "true"
-spec:
-  ingressClassName: nginx
-  tls:
-  - hosts:
-    - "yourdomain.com"
-    - "*.yourdomain.com"
-    secretName: yourdomain.com-wildcard-tls
-  rules:
-  - host: yourdomain.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: econ-graph-frontend-service
-            port:
-              number: 3000
-```
-
-## Terraform Integration
-
-For Infrastructure as Code deployments, the Terraform configuration supports Cloudflare DNS-01 challenges:
-
-### 1. Update terraform.tfvars
-
-```hcl
-# Enable DNS-01 challenge
-enable_dns01_challenge = true
-cloudflare_api_token   = "your-cloudflare-api-token"
-```
-
-### 2. Apply Terraform Configuration
+The gateway's https listener gets its certificate from cert-manager, from the ClusterIssuer
+named in `GATEWAY_TLS_ISSUER`; with a DNS-01 issuer no HTTP-01 challenge has to reach the
+cluster:
 
 ```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
+PUBLIC_HOST=yourdomain.com GATEWAY_TLS_ISSUER=letsencrypt-prod-cloudflare \
+  ./scripts/deploy/deploy.sh
 ```
 
-The Terraform configuration will automatically:
-- Create Cloudflare API credentials secret
-- Deploy DNS-01 ClusterIssuers
-- Configure ingress with wildcard certificates
+The certificate (Secret `econ-graph-tls` in namespace `econ-graph-gateway`) covers the host
+and its `www` name. Without `GATEWAY_TLS_ISSUER` it is self-signed, which is all the Cloudflare
+Tunnel needs. See "Public site" in `k8s/README.md`.
 
 ## Configuration Options
 
@@ -314,26 +271,20 @@ Events:
 - Use production Let's Encrypt server for production environments
 - Monitor certificate expiration and renewal status
 - Implement proper TLS configuration with strong ciphers
-- Use security headers in ingress configuration
+- Security headers are set by the gateway's frontend route (`k8s/manifests/gateway/routes/httproutes.yaml`)
 
 ### Network Security
 
-- Configure Cloudflare Real IP handling in ingress
-- Use Cloudflare IP whitelist for additional security
 - Implement network policies to restrict access
 - Monitor DNS record changes for unauthorized modifications
 
 ## Cloudflare-Specific Optimizations
 
-### Real IP Handling
+### Client Addresses
 
-Configure nginx ingress to properly handle Cloudflare's IP addresses:
-
-```yaml
-annotations:
-  nginx.ingress.kubernetes.io/cloudflare-real-ip: "true"
-  nginx.ingress.kubernetes.io/whitelist-source-range: "173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22"
-```
+The gateway's GraphQL rate limits count per client address as the Envoy proxy sees it (the TCP
+peer). Behind the Cloudflare proxy (orange cloud) or a Cloudflare Tunnel, every request arrives
+from Cloudflare or from the tunnel connector, so all visitors share those addresses' limits.
 
 ### Proxy Settings
 
@@ -428,7 +379,7 @@ To migrate from HTTP-01 to DNS-01 challenges:
 1. **Create DNS-01 ClusterIssuer** alongside existing HTTP-01 issuer
 2. **Test with staging environment** using a subdomain
 3. **Gradually migrate services** to use DNS-01 certificates
-4. **Update ingress configurations** to reference new certificates
+4. **Point the gateway at the new issuer** (`GATEWAY_TLS_ISSUER`)
 5. **Monitor certificate renewal** for both challenge types
 6. **Remove HTTP-01 ClusterIssuers** once migration is complete
 

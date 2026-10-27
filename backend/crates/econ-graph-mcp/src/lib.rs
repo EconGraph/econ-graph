@@ -27,17 +27,17 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use econ_graph_mcp::McpServer;
-//! use econ_graph_mcp::McpConfig;
+//! use econ_graph_mcp::EconGraphMcpServer;
+//! use econ_graph_core::database::{create_pool, AppPool, DataPool};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize MCP server
-//!     let config = McpConfig::new();
-//!     let server = McpServer::new(config);
+//!     let pool = create_pool("postgres://localhost/econ_graph").await?;
+//!     let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool)));
 //!
-//!     // Start MCP server
-//!     server.start().await?;
+//!     // Tool results can be passed back through the MCP transport.
+//!     let result = server.get_data_sources().await?;
 //!     Ok(())
 //! }
 //! ```

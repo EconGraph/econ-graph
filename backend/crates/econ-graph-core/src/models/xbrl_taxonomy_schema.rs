@@ -20,6 +20,8 @@ use crate::schema::xbrl_taxonomy_schemas;
 ///
 /// # Example
 /// ```rust
+/// use econ_graph_core::models::XbrlTaxonomySchema;
+/// use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType, CompressionType, ProcessingStatus};
 /// use chrono::Utc;
 /// use uuid::Uuid;
 ///
@@ -44,8 +46,8 @@ use crate::schema::xbrl_taxonomy_schemas;
 ///     processing_error: None,
 ///     processing_started_at: None,
 ///     processing_completed_at: None,
-///     concepts_extracted: 0,
-///     relationships_extracted: 0,
+///     concepts_extracted: Some(0),
+///     relationships_extracted: Some(0),
 ///     created_at: Utc::now(),
 ///     updated_at: Utc::now(),
 /// };
@@ -62,7 +64,7 @@ pub struct XbrlTaxonomySchema {
     pub file_type: TaxonomyFileType,
     pub source_type: TaxonomySourceType,
     pub file_content: Option<Vec<u8>>,
-    pub file_oid: Option<i32>,
+    pub file_oid: Option<u32>,
     pub file_size_bytes: i64,
     pub file_hash: String,
     pub is_compressed: bool,
@@ -74,8 +76,8 @@ pub struct XbrlTaxonomySchema {
     pub processing_error: Option<String>,
     pub processing_started_at: Option<DateTime<Utc>>,
     pub processing_completed_at: Option<DateTime<Utc>>,
-    pub concepts_extracted: i32,
-    pub relationships_extracted: i32,
+    pub concepts_extracted: Option<i32>,
+    pub relationships_extracted: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -112,8 +114,8 @@ impl XbrlTaxonomySchema {
             processing_error: None,
             processing_started_at: None,
             processing_completed_at: None,
-            concepts_extracted: 0,
-            relationships_extracted: 0,
+            concepts_extracted: Some(0),
+            relationships_extracted: Some(0),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

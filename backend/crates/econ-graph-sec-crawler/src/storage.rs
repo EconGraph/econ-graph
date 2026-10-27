@@ -217,6 +217,7 @@ impl XbrlStorage {
 
         let statement = financial_statements
             .filter(accession_number.eq(acc_num))
+            .select(FinancialStatement::as_select())
             .first::<FinancialStatement>(&mut conn)
             .await
             .optional()
@@ -353,8 +354,8 @@ impl XbrlStorage {
             processing_error: None,
             processing_started_at: None,
             processing_completed_at: None,
-            concepts_extracted: 0,
-            relationships_extracted: 0,
+            concepts_extracted: Some(0),
+            relationships_extracted: Some(0),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

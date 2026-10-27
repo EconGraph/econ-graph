@@ -85,26 +85,6 @@ variable "bls_api_key" {
   default     = ""
 }
 
-variable "enable_dns01_challenge" {
-  description = "Enable DNS-01 challenge for wildcard certificates"
-  type        = bool
-  default     = false
-}
-
-variable "cloudflare_api_token" {
-  description = "Cloudflare API token for DNS-01 challenge"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "monitoring_basic_auth" {
-  description = "htpasswd line (user:bcrypt-hash) for basic auth on the Grafana ingress, e.g. from `htpasswd -nB admin` (prompts for the password); single-quote it in TF_VAR_monitoring_basic_auth since the hash contains `$`. Empty disables basic auth; Grafana's own login still applies."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 # Generate random passwords for internal services
 resource "random_password" "database_password" {
   length  = 32
@@ -221,23 +201,6 @@ module "monitoring" {
   depends_on = [kubernetes_namespace.econgraph]
 }
 
-# Ingress Controller (if not already installed)
-module "ingress" {
-  source = "./modules/ingress"
-
-  namespace = kubernetes_namespace.econgraph.metadata[0].name
-  domain    = var.domain
-  
-  # DNS-01 challenge configuration
-  enable_dns01_challenge = var.enable_dns01_challenge
-  cloudflare_api_token   = var.cloudflare_api_token
-
-  # Optional basic auth in front of Grafana
-  monitoring_basic_auth = var.monitoring_basic_auth
-
-  depends_on = [module.frontend, module.backend, module.monitoring]
-}
-
 # Outputs
 output "namespace" {
   description = "Kubernetes namespace"
@@ -293,36 +256,6 @@ module "admin_frontend" {
   depends_on = [
     module.postgresql,
     module.backend
-  ]
-}
-
-# Admin Ingress (Restricted Access)
-module "admin_ingress" {
-  source = "./modules/admin-ingress"
-
-  admin_domain       = var.admin_domain
-  admin_namespace    = module.admin_frontend.namespace_name
-  admin_service_name = module.admin_frontend.service_name
-  admin_service_port = module.admin_frontend.service_port
-
-  backend_service_host = "${module.backend.service_name}.${kubernetes_namespace.econgraph.metadata[0].name}.svc.cluster.local"
-  backend_service_port = module.backend.service_port
-
-  # Access control
-  allowed_admin_ips = var.allowed_admin_ips
-  admin_tls_cert    = var.admin_tls_cert
-  admin_tls_key     = var.admin_tls_key
-
-  # Security settings
-  rate_limit_rps         = var.admin_rate_limit_rps
-  rate_limit_connections = var.admin_rate_limit_connections
-  enable_monitoring      = var.enable_monitoring
-
-  # Alerting
-  alert_email = var.admin_alert_email
-
-  depends_on = [
-    module.admin_frontend
   ]
 }
 

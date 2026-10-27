@@ -185,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http,
         pool: pool.0,
         keys: ApiKeys::from_env(),
+        bypass_validators: false,
     };
 
     let config = WorkerConfig {

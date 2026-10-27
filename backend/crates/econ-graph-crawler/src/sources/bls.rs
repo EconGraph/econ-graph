@@ -119,7 +119,6 @@
 //! dimensionless [`OTHER_DATASET`] until its survey gets a layout.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::str::FromStr;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -141,6 +140,7 @@ use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
 use crate::reference_file::{self, labels_only, CodeList, ReferenceFile};
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// The real BLS Public Data API v2 root.
 pub const DEFAULT_BASE_URL: &str = "https://api.bls.gov/publicAPI/v2";
@@ -424,7 +424,7 @@ fn parse_value(raw: &str) -> Result<Option<BigDecimal>, CrawlError> {
         return Ok(None);
     }
     let cleaned = v.replace(',', "");
-    BigDecimal::from_str(&cleaned)
+    parse_observation_value(&cleaned)
         .map(Some)
         .map_err(|e| CrawlError::Parse(format!("BLS: invalid value {raw:?}: {e}")))
 }
@@ -1533,6 +1533,8 @@ impl SourceAdapter for BlsAdapter {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
     use serde_json::json;

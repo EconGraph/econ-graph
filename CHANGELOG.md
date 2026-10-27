@@ -13,6 +13,14 @@ All notable changes to EconGraph are documented here. The format follows
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
   token. Unset, every request goes where it went before. The dev server and `vite preview`
   proxy `/data/graphql` to `DATA_BACKEND_URL` (default `BACKEND_URL`).
+- The kind cluster serves `/data/graphql`: the backend's `/graphql` with `Authorization` and
+  `Cookie` removed, rate-limited like `/graphql`.
+- For the public host (`PUBLIC_HOST`, served through the Cloudflare Tunnel), the gateway gets an
+  https listener with a cert-manager certificate, `-public` copies of the routes on it, and
+  redirects of plain http and `www` to `https://<host>`.
+- `scripts/deploy/test-gateway-routes.sh` checks every route on the gateway, and
+  `scripts/deploy/cutover-to-gateway.sh` moves a running cluster from ingress-nginx to the
+  gateway (with `--dry-run` and `--rollback`).
 - `crawler migrate [--dry-run]` applies the pending data migrations to `DATA_DATABASE_URL` and
   prints each version applied; `--dry-run` prints the pending versions and changes nothing. It
   never applies or records an app migration.
@@ -40,10 +48,27 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Changed
 
+- The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.9.2, Gateway
+  API v1.6.3 standard channel) instead of ingress-nginx, which no longer gets security fixes.
+  `deploy.sh` installs it with `scripts/deploy/install-gateway.sh` (pinned, checksummed release
+  manifests; no Helm). The routes and paths are unchanged, except that `/playground` is no
+  longer routed to the backend.
+- The `/graphql` rate limit (20 requests a second per client address, bursts of 100) now
+  answers 429 instead of 503 when exceeded, and counts IPv6 clients too.
+- The client address is the TCP peer, or, for requests from a pod (the tunnel connector), the
+  visitor in `X-Forwarded-For`, so the rate limits apply per visitor behind the tunnel. Every
+  route sets `X-Forwarded-For` to that address, and a client's `X-Forwarded-Proto/-Host/-Port`,
+  `Forwarded` and `X-Real-IP` are dropped.
+- The tunnel's origin is the gateway:
+  `https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443` (No TLS
+  Verify, as before).
+- The frontend's security headers (CSP, HSTS, frame options) are sent on every frontend
+  response through the gateway, on plain HTTP too, and the API responses get
+  `X-Content-Type-Options`, `X-Frame-Options` and HSTS. The CSP no longer allows connections to
+  `https://api.econ-graph.com`.
 - The backend applies only the app migrations at startup, and its `/readyz` checks only the app
   migrations. No service applies the data migrations at startup, so redeploying one never
   changes a data database; run `crawler migrate` first on a new or older database.
-
 - The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
   `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read
   `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
@@ -75,8 +100,21 @@ All notable changes to EconGraph are documented here. The format follows
   backends wait for.
 - The backend pod no longer gets `DATABASE_URL`.
 
+- New kind clusters (`recreate-kind-cluster.sh`, `terraform/k8s`) run Kubernetes 1.36
+  (`kindest/node:v1.36.4`, pinned by digest in `kind-config.yaml`), which needs kind v0.33.0 or
+  newer. cert-manager is v1.21.3.
+
+### Removed
+
+- ingress-nginx, its Ingress manifests (`ingress.yaml`, `graphql-ingress.yaml`,
+  `keycloak/ingress.yaml`, `ssl-ingress.yaml`, `frontend-ingress.yaml`,
+  `ingress-cloudflare-dns01.yaml`), the unused `security-configmap.yaml`, the Terraform
+  `ingress` and `admin-ingress` modules and the kind ingress-nginx installers.
+
 ### Fixed
 
+- Observation values are stored exactly, as unconstrained `NUMERIC`: data migration
+  `20261025000100`, which `crawler migrate` applies (ECO-501).
 - `searchSeries`'s `totalCount` is the number of series that match the query and filters, the
   same on every page, instead of the length of the page returned (ECO-508).
 - A `source` on `searchSeries`, or a `filter.sourceId` on `seriesList`, that isn't a UUID

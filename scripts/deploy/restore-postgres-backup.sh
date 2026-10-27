@@ -130,6 +130,11 @@ spec:
               key: postgres-password
         - name: PGDATABASE
           value: "econ_graph"
+        # The role the backend and crawler connect as (econ-graph-secrets
+        # data-database-url, created by postgres-init.yaml). It owns the tables,
+        # and restore.sh recreates every object as it so that it still does.
+        - name: RESTORE_OWNER
+          value: "econgraph"
         - name: BACKUP_DIR
           value: "/backups"
         - name: BACKUP_FILE
