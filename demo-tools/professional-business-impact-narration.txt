@@ -2,33 +2,33 @@ Professional EconGraph Business Impact Demonstration - Narration Script
 =======================================================================
 
 [0:00 - 0:08]
-Welcome to EconGraph, the revolutionary open-source economic analysis platform that delivers Bloomberg Terminal-level capabilities at a fraction of the cost. While Bloomberg costs twenty-four thousand dollars annually, and Thomson Reuters twenty-two thousand, EconGraph provides institutional-grade analysis completely free.
+Welcome to EconGraph. Bring published economic indicators, country comparisons, and historical charts into one research workflow.
 
 [0:08 - 0:16]
-Here's our professional dashboard, featuring real-time economic indicators with collaboration tools that rival premium financial terminals. Notice the clean Material-UI interface and responsive design that outperforms traditional systems.
+The dashboard shows the latest published values of key indicators, with quick access to series and data sources.
 
 [0:16 - 0:25]
-Let's explore our breakthrough Global Economic Network Analysis. Click the menu to access Global Analysis. This interactive world map visualizes economic correlations between countries - a feature typically found only in premium terminals costing thousands per month.
+Open Global Analysis and choose a World Bank development indicator. The world map gives you an international overview at a glance.
 
 [0:25 - 0:35]
-The network visualization shows economic interconnections with D3.js-powered graphics. Node sizes represent economic centrality, colors indicate health, and connections show correlation strength. This level of analysis previously required expensive Bloomberg or CapIQ subscriptions.
+Each country's color represents its latest available value. Use the legend to compare values, then hover over a country to inspect its reading.
 
 [0:35 - 0:45]
-Switch to our Multi-Country Dashboard for comparative analysis across major economies. This Bloomberg Terminal-style interface provides GDP, inflation, and trade relationship analysis with synchronized charts and real-time correlation calculations.
+Observation dates can differ between countries. Open Values as a table to check each country's value and date before drawing comparisons.
 
 [0:45 - 0:55]
-Our Global Events Explorer tracks major economic crises including the 2008 financial crisis, COVID-19 pandemic, and Brexit impacts. This comprehensive event analysis typically costs institutions twelve thousand dollars annually through S&P Capital IQ.
+Click a country with data to open its series. The historical chart helps you see how that indicator has changed over time.
 
 [0:55 - 1:05]
-The business impact is transformative. Financial institutions can save hundreds of thousands annually by replacing expensive terminal subscriptions. Research teams gain access to institutional-grade tools without budget constraints.
+For research teams, this connects an international overview to the underlying country history, making it easier to choose where to investigate further.
 
 [1:05 - 1:15]
-EconGraph's open-source architecture enables customization impossible with proprietary systems. Built with Rust backend for performance and React frontend for modern user experience, delivering enterprise capabilities with startup agility.
+Policy analysts can put a country's latest reading in historical context, while keeping the dates behind international comparisons visible in their analysis.
 
 [1:15 - 1:25]
-For economic research, policy analysis, and institutional decision-making, EconGraph provides the comprehensive tools previously exclusive to premium financial terminals. Experience Bloomberg Terminal-level analysis, completely free and open-source.
+For institutional research, use this workflow to explore an economic question before preparing a briefing. Start with the overview, then examine the evidence.
 
 [1:25 - 1:30]
-Transform your economic analysis workflow with EconGraph - the future of accessible, professional economic data visualization.
+Explore EconGraph and bring economic context to your next research question.
 
 Total Duration: ~90 seconds
