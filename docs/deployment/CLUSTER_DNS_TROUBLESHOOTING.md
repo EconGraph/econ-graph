@@ -1,268 +1,244 @@
 # Cluster DNS Troubleshooting Guide
 
-## Overview
+Use this runbook when a cert-manager DNS-01 challenge reports a DNS lookup or
+propagation failure. First identify the resolver path and compare the failing
+query through that path and its upstreams. Change forwarding only when those
+results support the change.
 
-This document describes the DNS resolution issues encountered during Let's Encrypt Cloudflare DNS-01 integration and the solutions implemented.
+## Recognize the failing lookup
 
-## Problem Description
+These recorded failure excerpts show an SOA lookup failing through cluster DNS:
 
-During Let's Encrypt certificate generation with Cloudflare DNS-01 challenges, cert-manager was unable to verify DNS records due to cluster DNS resolution issues.
-
-### Symptoms Observed
-
-```bash
-# CoreDNS logs showed SERVFAIL errors
+```text
 [INFO] 10.1.26.103:47908 - 44624 "SOA IN _acme-challenge.econgraph.com. udp 58 false 4096" SERVFAIL qr,rd,ra 47 0.017550642s
 
-# cert-manager logs showed propagation check failures
 E1003 07:07:01.123197       1 sync.go:208] "propagation check failed" err="Could not determine the zone for \"_acme-challenge.econgraph.com.\": When querying the SOA record for the domain '_acme-challenge.econgraph.com.' using nameservers [10.152.183.10:53], rcode was expected to be 'NOERROR' or 'NXDOMAIN', but got 'SERVFAIL'"
 ```
 
-### Root Cause
+The address is an observation from that failure, not a resolver to copy into
+another cluster. The excerpts establish failed zone discovery; they do not
+identify the upstream that failed or establish a historical root cause.
 
-The cluster's CoreDNS configuration was using unreliable upstream DNS servers that couldn't properly resolve Cloudflare DNS records, particularly for SOA (Start of Authority) queries required for DNS-01 challenge validation.
+By default, cert-manager uses recursive resolvers from its `/etc/resolv.conf` to
+find authoritative nameservers, then queries the authoritative servers directly
+for its DNS-01 self-check. SOA queries help find the zone; TXT queries check the
+challenge record. The controller flags `--dns01-recursive-nameservers` and
+`--dns01-recursive-nameservers-only` can change that path. Inspect them before
+assuming that a cluster DNS change will affect the self-check. See
+[cert-manager's nameserver settings](https://cert-manager.io/docs/configuration/acme/dns01/#setting-nameservers-for-dns01-self-check).
 
-## Solution Implemented
+A recursive resolver resolves queries on behalf of its clients. An authoritative
+server serves the zone's records. Cloudflare hosting the zone does not require
+CoreDNS to forward to Cloudflare's public recursive resolver.
 
-### 1. Updated CoreDNS Configuration
+## Select the cluster and discover resources
 
-**Before:**
-```yaml
-Corefile: |
-  .:53 {
-      errors
-      health {
-        lameduck 5s
-      }
-      ready
-      log . {
-        class error
-      }
-      kubernetes cluster.local in-addr.arpa ip6.arpa {
-        pods insecure
-        fallthrough in-addr.arpa ip6.arpa
-      }
-      prometheus :9153
-      forward . /etc/resolv.conf
-      cache 30
-      loop
-      reload
-      loadbalance
-  }
-```
-
-**After:**
-```yaml
-Corefile: |
-  .:53 {
-      errors
-      health {
-        lameduck 5s
-      }
-      ready
-      log . {
-        class error
-      }
-      kubernetes cluster.local in-addr.arpa ip6.arpa {
-        pods insecure
-        fallthrough in-addr.arpa ip6.arpa
-      }
-      prometheus :9153
-      forward . 8.8.8.8 1.1.1.1 {
-        except econgraph.com
-      }
-      forward econgraph.com 1.1.1.1 8.8.8.8
-      cache 30
-      loop
-      reload
-      loadbalance
-  }
-```
-
-### 2. Key Changes
-
-- **Explicit upstream DNS servers**: Using `8.8.8.8` (Google DNS) and `1.1.1.1` (Cloudflare DNS) instead of relying on `/etc/resolv.conf`
-- **Domain-specific forwarding**: Special handling for `econgraph.com` to ensure proper Cloudflare DNS resolution
-- **Exception handling**: Using `except econgraph.com` to prevent conflicts with domain-specific forwarding
-
-### 3. Implementation Commands
+Use the kubectl and kubeconfig intended for the target cluster; the repository's
+[deployment entry point](../../k8s/README.md) describes kind. Run the following
+inspection examples from an operator shell. Replace every `REPLACE_*` value from
+the selected cluster before using later examples. Keep the explicit context in
+all commands.
 
 ```bash
-# Update CoreDNS configuration
-kubectl patch configmap/coredns -n kube-system --type merge -p='{"data":{"Corefile":".:53 {\n    errors\n    health {\n      lameduck 5s\n    }\n    ready\n    log . {\n      class error\n    }\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n      pods insecure\n      fallthrough in-addr.arpa ip6.arpa\n    }\n    prometheus :9153\n    forward . 8.8.8.8 1.1.1.1 {\n      except econgraph.com\n    }\n    forward econgraph.com 1.1.1.1 8.8.8.8\n    cache 30\n    loop\n    reload\n    loadbalance\n}"}}'
-
-# Restart CoreDNS to apply changes
-kubectl rollout restart deployment/coredns -n kube-system
-
-# Wait for rollout to complete
-kubectl rollout status deployment/coredns -n kube-system
-
-# Restart cert-manager to clear cached DNS queries
-kubectl rollout restart deployment/cert-manager -n cert-manager
+kubectl config get-contexts
+DNS_CONTEXT='REPLACE_CONTEXT'
+kubectl --context="$DNS_CONTEXT" get deployments,pods,services,configmaps -n kube-system
+kubectl --context="$DNS_CONTEXT" get deployments,pods -A
+kubectl --context="$DNS_CONTEXT" get ingress,certificates,orders.acme.cert-manager.io,challenges.acme.cert-manager.io -A
 ```
 
-## Verification
-
-### 1. DNS Resolution Test
+Discover the DNS workload and its mounted ConfigMaps rather than assuming they
+are called `coredns`. Follow the service endpoints to the DNS pods, and inspect
+the workload's volume mounts, Corefile, imported files, and configuration owner
+(for example, an add-on manager or Helm release). If NodeLocal DNSCache or another
+resolver sits in front of CoreDNS, include it in the path.
 
 ```bash
-# Test external DNS resolution
-dig NS econgraph.com
-# Should show Cloudflare nameservers:
-# econgraph.com.    86381  IN  NS  leia.ns.cloudflare.com.
-# econgraph.com.    86381  IN  NS  seth.ns.cloudflare.com.
+DNS_NAMESPACE='REPLACE_DNS_NAMESPACE'
+DNS_DEPLOYMENT='REPLACE_DNS_DEPLOYMENT'
+DNS_CONFIGMAP='REPLACE_DNS_CONFIGMAP'
+CM_NAMESPACE='REPLACE_CERT_MANAGER_NAMESPACE'
+CM_DEPLOYMENT='REPLACE_CERT_MANAGER_CONTROLLER_DEPLOYMENT'
+CM_POD='REPLACE_CERT_MANAGER_CONTROLLER_POD'
+CM_CONTAINER='REPLACE_CERT_MANAGER_CONTROLLER_CONTAINER'
+APP_NAMESPACE='REPLACE_CERTIFICATE_NAMESPACE'
 
-# Test ACME challenge records
-dig TXT _acme-challenge.econgraph.com
-# Should show Let's Encrypt challenge tokens
+kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get deployment "$DNS_DEPLOYMENT" -o yaml
+kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get configmap "$DNS_CONFIGMAP" -o yaml
+kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" get deployment "$CM_DEPLOYMENT" \
+  -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{.args}{"\n"}{end}'
+kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" get pod "$CM_POD" \
+  -o jsonpath='{.spec.dnsPolicy}{"\n"}{.spec.dnsConfig}{"\n"}'
+kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get ingress \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.tls}{"\n"}{end}'
+kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get certificates \
+  -o custom-columns='NAME:.metadata.name,SECRET:.spec.secretName,DNS_NAMES:.spec.dnsNames,ISSUER:.spec.issuerRef.name'
 ```
 
-### 2. Certificate Generation Test
+For a DNS workload that is not a Deployment, inspect its actual workload kind.
+Select the Certificate whose
+`spec.secretName` matches the affected ingress and whose `spec.dnsNames` covers
+the affected domain; do not infer its name from a previous incident. No Secret
+contents are needed for these checks.
 
 ```bash
-# Monitor certificate status
-kubectl get certificate econgraph.com-wildcard-tls -n econ-graph -w
-
-# Check challenge status
-kubectl get challenges -A
-
-# Verify domain validation
-kubectl describe challenge <challenge-name> -n econ-graph
-# Should show: Domain "econgraph.com" verified with "DNS-01" validation
+CERTIFICATE='REPLACE_CERTIFICATE_NAME'
+CHALLENGE='REPLACE_ACTIVE_CHALLENGE_NAME'
+kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" describe certificate "$CERTIFICATE"
+kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" describe challenge "$CHALLENGE"
+kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" logs deployment/"$CM_DEPLOYMENT" --all-pods=true --since=15m
 ```
 
-### 3. CoreDNS Logs Verification
+Use the Challenge's DNS name, reason, presentation state, and owner references to
+follow the relevant Order and CertificateRequest. If presentation failed with a
+provider API error, investigate the selected Issuer's Cloudflare zone access and
+token permissions through the
+[DNS-01 integration guide](./LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md).
+Changing CoreDNS will not repair an API authorization failure.
+
+## Compare the same queries along the resolver path
+
+Read the controller container's resolver configuration if its image supports
+`cat`; otherwise use an approved diagnostic method that can inspect that
+container's resolver file. A different pod's `/etc/resolv.conf` is not evidence
+of the controller's settings.
 
 ```bash
-# Check CoreDNS logs for successful resolution
-kubectl logs -n kube-system deployment/coredns --tail=20
-# Should show successful DNS queries without SERVFAIL errors
+kubectl --context="$DNS_CONTEXT" -n "$CM_NAMESPACE" exec "$CM_POD" -c "$CM_CONTAINER" -- cat /etc/resolv.conf
 ```
 
-## Results
+Run the queries below inside an existing approved diagnostic container with
+`dig`, using network access comparable to the controller. Confirm its DNS policy
+and resolver file. Different pod or node network policies can make results differ
+from the controller's; direct upstream comparisons also need to account for the
+DNS server's egress path. This runbook does not require creating a test workload.
+An unqualified `dig` on a host tests that host's resolver, not cluster DNS.
 
-### Before Fix
-- ❌ DNS-01 challenges failing with `SERVFAIL` errors
-- ❌ Certificate generation stuck in "Issuing" state
-- ❌ CoreDNS unable to resolve Cloudflare DNS records
-
-### After Fix
-- ✅ DNS-01 challenges succeeding with domain validation
-- ✅ Certificate generation progressing normally
-- ✅ CoreDNS resolving Cloudflare DNS records correctly
-- ✅ Let's Encrypt able to verify domain ownership
-
-## Monitoring and Maintenance
-
-### 1. Regular DNS Health Checks
+Set the variables in that diagnostic shell. `SELF_CHECK_RECURSOR` is the actual
+recursive resolver used by cert-manager, from its flags or resolver file.
+`CURRENT_UPSTREAM` comes from the active forwarding configuration and, when it
+uses `/etc/resolv.conf`, the DNS server container's resolver file.
+`CANDIDATE_UPSTREAM` is a resolver permitted by the cluster's network and DNS
+policy. Use fully qualified names with a trailing dot. For a wildcard certificate,
+the challenge name normally omits `*.`; account for any configured challenge
+zone delegation or CNAME following.
 
 ```bash
-# Check CoreDNS pod health
-kubectl get pods -n kube-system | grep coredns
+CHALLENGE_FQDN='REPLACE_CHALLENGE_FQDN_WITH_TRAILING_DOT'
+ZONE_FQDN='REPLACE_ZONE_FQDN_WITH_TRAILING_DOT'
+SELF_CHECK_RECURSOR='REPLACE_RESOLVER_IP'
+CURRENT_UPSTREAM='REPLACE_CURRENT_UPSTREAM_IP'
+CANDIDATE_UPSTREAM='REPLACE_APPROVED_CANDIDATE_IP'
 
-# Monitor CoreDNS logs for errors
-kubectl logs -n kube-system deployment/coredns --tail=50 | grep -i error
-
-# Test DNS resolution from within cluster
-kubectl run dns-test --image=busybox --rm -it --restart=Never -- nslookup econgraph.com
+for resolver in "$SELF_CHECK_RECURSOR" "$CURRENT_UPSTREAM" "$CANDIDATE_UPSTREAM"; do
+  dig @"$resolver" "$CHALLENGE_FQDN" SOA +time=3 +tries=1
+  dig @"$resolver" "$ZONE_FQDN" SOA +time=3 +tries=1
+  dig @"$resolver" "$CHALLENGE_FQDN" TXT +time=3 +tries=1
+  dig @"$resolver" "$ZONE_FQDN" NS +time=3 +tries=1
+done
 ```
 
-### 2. Certificate Monitoring
+Repeat for every configured upstream, and use `+tcp` to compare TCP when UDP
+fails or times out. Retain the response status, answer, authority section, and
+server address; `+short` hides useful failure evidence. If necessary, repeat the
+comparisons from the DNS server's network path before attributing a difference
+to forwarding.
+
+Use the discovered NS records to identify the authoritative servers, resolve
+their addresses, then query each server directly from the diagnostic container:
 
 ```bash
-# Monitor certificate status
-kubectl get certificates -A
-
-# Check certificate expiration
-kubectl get certificate econgraph.com-wildcard-tls -n econ-graph -o yaml | grep -A 5 -B 5 "notAfter"
-
-# Monitor cert-manager logs
-kubectl logs -n cert-manager deployment/cert-manager --tail=20
+AUTHORITATIVE_IP='REPLACE_DISCOVERED_AUTHORITATIVE_SERVER_IP'
+dig @"$AUTHORITATIVE_IP" "$ZONE_FQDN" SOA +norecurse +time=3 +tries=1
+dig @"$AUTHORITATIVE_IP" "$CHALLENGE_FQDN" TXT +norecurse +time=3 +tries=1
 ```
 
-### 3. DNS Configuration Backup
+Repeat authoritative and public recursive checks from an external network when
+comparing internal and public visibility. Label those results with their origin;
+they establish external visibility, not the controller's connectivity. See
+[cert-manager's DNS-01 troubleshooting](https://cert-manager.io/docs/troubleshooting/acme/#dns01-troubleshooting).
+
+| Observation | Interpretation and next check |
+| --- | --- |
+| SOA lookup returns `NOERROR` with no answer, or `NXDOMAIN`, at the challenge name | These can be valid results while discovering the enclosing zone. Check the authority section and parent-zone SOA; neither response establishes TXT propagation. |
+| SOA lookup returns `SERVFAIL`, `REFUSED`, or times out | Zone discovery cannot proceed through that path. Compare the same name and record type through each upstream before selecting a repair. |
+| Cluster path fails while current upstreams answer from a comparable network path | Inspect DNS service endpoints, local caches, CoreDNS forwarding rules, and network policy. This alone does not justify replacing the upstreams. |
+| Current upstream fails but an approved candidate answers the same SOA queries from the DNS server's path | An upstream change may help; confirm other required zones and network policy before changing forwarding. |
+| Authoritative servers lack the expected TXT during an active, presented challenge | Investigate presentation, zone selection, delegation, or authoritative propagation. TXT absence outside an active challenge is expected after cleanup. |
+| Authoritative servers have the expected TXT but recursive resolvers do not | Compare cache TTLs and split DNS views. Allow for propagation and negative caching; changing resolvers does not establish public visibility. |
+| SOA and active-challenge TXT checks pass but issuance remains blocked | Follow Challenge, Order, CertificateRequest, and Certificate conditions and events. DNS success alone does not establish certificate issuance. |
+
+## Repair forwarding only when the comparison supports it
+
+Before changing DNS, preserve the complete current ConfigMap, any imported
+configuration, the workload definition, and the configuration owner's source.
+For example, the following saves the selected ConfigMap locally:
 
 ```bash
-# Backup current CoreDNS configuration
-kubectl get configmap coredns -n kube-system -o yaml > coredns-backup.yaml
-
-# Restore configuration if needed
-kubectl apply -f coredns-backup.yaml
-kubectl rollout restart deployment/coredns -n kube-system
+kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get configmap "$DNS_CONFIGMAP" -o yaml > coredns-before.yaml
 ```
 
-## Troubleshooting Common Issues
+Prepare the change through that owner's supported configuration mechanism so an
+add-on reconciliation does not overwrite it. Limit the edit to the failing
+forwarding path. Preserve cluster service resolution, reverse zones, private
+zones, imports, plugin settings, and unrelated upstream options. Record the exact
+previous forwarding settings so the same mechanism can restore them.
 
-### 1. CoreDNS Pod Restart Issues
+For example, if `forward . /etc/resolv.conf` sends external queries to an upstream
+that fails the comparisons, replacing that directive's upstream list with tested,
+approved recursive resolver addresses is a possible repair. Test private zones
+before changing a catch-all rule: public resolvers cannot resolve private DNS.
+This is a conditional configuration change, not a replacement Corefile.
+
+A suffix-specific rule is appropriate only when that suffix needs a distinct
+resolution path, such as a private zone. In CoreDNS, `forward` matches a domain
+suffix and `except` excludes matching names from that rule. Reversing the order
+of the same two recursive upstreams in another rule does not create a route to
+the zone's authoritative provider: the default selection policy is random.
+See the [CoreDNS forward reference](https://coredns.io/plugins/forward/).
+
+Apply an authorized change through the configuration owner, then verify that all
+DNS replicas accepted it. If the mounted Corefile uses `reload`, allow for volume
+propagation and the reload interval, and inspect each replica's logs for the new
+configuration and any reload errors. A running pod may still serve the previous
+configuration after a rejected reload. Use the deployment's supported rollout
+procedure if reload is unavailable; do not restart cert-manager merely to test
+DNS. The [CoreDNS reload reference](https://coredns.io/plugins/reload/) explains
+reload behavior and failure evidence.
+
+If the change is rejected or breaks required lookups, restore the preserved
+settings through the same configuration owner. For an unmanaged ConfigMap,
+restore its saved data while retaining current Kubernetes metadata; do not
+blindly apply an old whole-object export over concurrent changes. Confirm that
+every replica accepted the restored configuration and repeat the baseline queries.
+
+## Verify recovery at each layer
+
+Inspect each DNS replica's startup or reload output and readiness, then rerun the
+same SOA and active-challenge TXT queries through the controller's actual resolver
+path. Also test a known cluster Service and any private zones affected by the
+edit. Viewing a ConfigMap only shows stored text; it does not parse the Corefile
+or prove that the running DNS process accepted it.
 
 ```bash
-# Check CoreDNS pod status
-kubectl describe pod -n kube-system -l k8s-app=kube-dns
-
-# Check for configuration syntax errors
-kubectl logs -n kube-system deployment/coredns | grep -i error
-
-# Validate Corefile syntax
-kubectl get configmap coredns -n kube-system -o yaml | grep -A 20 "Corefile:"
+kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" get pods
+kubectl --context="$DNS_CONTEXT" -n "$DNS_NAMESPACE" logs deployment/"$DNS_DEPLOYMENT" --all-pods=true --since=15m
+kubectl --context="$DNS_CONTEXT" -n "$APP_NAMESPACE" get certificate "$CERTIFICATE" -w
 ```
 
-### 2. DNS Resolution Still Failing
+If the Corefile contains `log . { class error }`, successful queries are excluded
+from query logs. `SERVFAIL` query entries can have an `[INFO]` prefix, so filtering
+only for the word `error` can hide them. Use explicit DNS responses as evidence of
+successful resolution; use logs to diagnose failures and configuration acceptance.
+See the [CoreDNS log reference](https://coredns.io/plugins/log/).
 
-```bash
-# Test upstream DNS servers directly
-nslookup econgraph.com 8.8.8.8
-nslookup econgraph.com 1.1.1.1
+Finally, confirm that the relevant Challenge and Order advance and the Certificate
+reports `Ready=True`, with the expected DNS names, issuer, and validity period.
+Challenges can disappear after completion, so use their owning resources and
+events to follow issuance. Continue monitoring Certificate readiness and renewal
+conditions; a successful lookup alone does not demonstrate renewal health.
 
-# Check if domain is properly managed by Cloudflare
-dig NS econgraph.com
-
-# Verify Cloudflare API token permissions
-# Check Cloudflare dashboard for API token permissions
-```
-
-### 3. Certificate Generation Issues
-
-```bash
-# Check challenge status
-kubectl get challenges -A -o wide
-
-# Describe challenge for detailed status
-kubectl describe challenge <challenge-name> -n econ-graph
-
-# Check cert-manager logs for specific errors
-kubectl logs -n cert-manager deployment/cert-manager | grep -i "error\|failed"
-```
-
-## Best Practices
-
-### 1. DNS Configuration
-
-- **Use reliable upstream DNS servers**: Google DNS (8.8.8.8) and Cloudflare DNS (1.1.1.1)
-- **Implement domain-specific forwarding**: For domains managed by specific DNS providers
-- **Monitor DNS resolution**: Regular health checks and log monitoring
-- **Backup configurations**: Keep backups of working DNS configurations
-
-### 2. Certificate Management
-
-- **Use staging environment**: Test certificate generation with Let's Encrypt staging server first
-- **Monitor certificate lifecycle**: Track expiration and renewal status
-- **Implement proper error handling**: Handle DNS resolution failures gracefully
-- **Document troubleshooting steps**: Keep detailed records of issues and solutions
-
-### 3. Cluster DNS Maintenance
-
-- **Regular updates**: Keep CoreDNS and cert-manager updated
-- **Health monitoring**: Implement monitoring for DNS resolution failures
-- **Automated recovery**: Consider automated DNS health checks and recovery
-- **Documentation**: Maintain detailed documentation of DNS configuration changes
-
-## Related Documentation
+## Related documentation
 
 - [Let's Encrypt Cloudflare DNS-01 Integration](./LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md)
 - [Kubernetes Deployment Guide](./KUBERNETES_DEPLOYMENT.md)
-
-## Conclusion
-
-The DNS resolution issues were successfully resolved by updating the CoreDNS configuration to use reliable upstream DNS servers and implementing domain-specific forwarding for Cloudflare-managed domains. This fix enabled successful Let's Encrypt certificate generation with Cloudflare DNS-01 challenges.
-
-The solution provides a robust foundation for automated SSL certificate management in the Kubernetes cluster while maintaining proper DNS resolution for all cluster services.
