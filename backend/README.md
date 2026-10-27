@@ -117,7 +117,8 @@ Main backend application providing server infrastructure, metrics collection, an
 
 ### **Local database and server**
 
-Run these commands from the repository root. Docker must be running.
+Run these commands from the repository root. Docker must be running. This setup uses one
+database for both the [app and data planes](#environment-configuration).
 
 ```bash
 docker run -d --name econ-graph-db \
@@ -173,13 +174,13 @@ at startup; only `crawler migrate` applies data plane migrations.
 
 | Variable | Meaning |
 |----------|---------|
-| `APP_DATABASE_URL` | Required. The app database: users and everything they create. The backend applies the app migration set to it at startup. |
-| `DATA_DATABASE_URL` | Optional. The data database: sources, series, observations, crawl state. Never migrated by the backend. Without it, every data field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` (message `Data is served by the data plane at /data/graphql`), `systemHealth`'s `queueItems` is null, annotations check their series through `DATA_GRAPHQL_URL`, and `/readyz` reports the data database as `not_configured`. |
-| `DATA_GRAPHQL_URL` | Read only without `DATA_DATABASE_URL`, and then required when sign-in is on. The data plane's GraphQL endpoint, an http(s) URL without a user name, password, query string or fragment (startup refuses one; logs show only its scheme, host, port and path), where `createAnnotation` asks (fields `seriesCatalog(id)` and `seriesExists(id)`, anonymous by default) whether a new annotation's series exists and which catalog it is in; a series with no observations counts, as with `DATA_DATABASE_URL`. `annotationsForSeries`, `commentsForAnnotation`, `addComment` and `updateAnnotation` ask `seriesCatalog(id)` too. The backend then applies its own caller's catalog grants to the catalog name: a series the caller can't read answers as a missing one. The data plane must serve both fields, or every check fails closed. With neither this nor `DATA_DATABASE_URL`, no series can be checked against catalog grants: the backend refuses to start when sign-in is on (`OIDC_ISSUER` set), and otherwise starts with a warning and refuses annotations on series. If the data plane can't be reached, times out or doesn't answer cleanly, the annotation is not created (or shown) and the request fails with `extensions.code = DATA_PLANE_UNAVAILABLE` (message `Couldn't check the series right now; try again`). In Kubernetes: `http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql`, the gateway's in-cluster address, so the request takes the same `/data/graphql` route as the browser's. |
+| `APP_DATABASE_URL` | Required. App database; the backend applies app migrations at startup. |
+| `DATA_DATABASE_URL` | Optional. Direct data database; never migrated by the backend. See data-field and readiness behavior below. |
+| `DATA_GRAPHQL_URL` | Remote data-plane endpoint for annotation checks when no direct data database is configured. Required with sign-in in that mode; see validation and catalog checks below. |
 | `DATA_GRAPHQL_FORWARD_AUTHORIZATION` | Defaults to `false`. Set to `true` only when the data plane trusts the same issuer and audience; annotation preflights then forward the verified caller token instead of relying on anonymous catalog grants. |
 | `DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION` | Defaults to `false`. Allows caller tokens over deliberately trusted private HTTP when forwarding is enabled; otherwise forwarding requires HTTPS. Never enable this for public network targets. |
-| `DATA_GRAPHQL_HOST` | Optional. The `Host` header sent with `DATA_GRAPHQL_URL` requests: the backend's own route hostname, `<slug>.localhost` in a branch namespace and `localhost` in production. Unset, the URL's host is sent. |
-| `DATA_GRAPHQL_TIMEOUT_MS` | Optional, default 2000. How long one `DATA_GRAPHQL_URL` request may take, connecting included. |
+| `DATA_GRAPHQL_HOST` | Optional Host header override for remote annotation checks; defaults to the endpoint host. See Kubernetes routing below. |
+| `DATA_GRAPHQL_TIMEOUT_MS` | Optional, default 2000. Positive whole number of milliseconds per remote request, connection included. |
 | `APP_DB_POOL_SIZE` | Optional, default 10. Connections in the app database pool. |
 | `DATA_DB_POOL_SIZE` | Optional, default 10. Connections in the data database pool. |
 
@@ -192,7 +193,8 @@ is `Data is served by the data plane at /data/graphql`; `systemHealth` reports `
 as null. Setting `DATA_GRAPHQL_URL` enables annotation validation only; it does not proxy
 those data fields.
 
-Annotation operations check the series' catalog and enforce the caller's catalog grants.
+`createAnnotation`, `annotationsForSeries`, `commentsForAnnotation`, `addComment` and
+`updateAnnotation` check the series' catalog and enforce the caller's catalog grants.
 With a direct data database, `createAnnotation` also checks that the series exists; a series
 without observations still counts. Without a data database, the backend asks
 `seriesCatalog(id)` and, for creation, `seriesExists(id)` at `DATA_GRAPHQL_URL`.
