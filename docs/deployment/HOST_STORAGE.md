@@ -270,7 +270,7 @@ from the backup taken just before:
 Run each step with `--dry-run` first. Every step can be re-run.
 
 1. Cluster (deletes an unreachable cluster of the same name only with
-   `--delete-unreachable`, after a typed `yes`; installs ingress-nginx):
+   `--delete-unreachable`, after a typed `yes`; installs the gateway):
 
    ```bash
    scripts/deploy/recreate-kind-cluster.sh --if-missing --delete-unreachable

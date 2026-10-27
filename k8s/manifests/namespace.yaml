@@ -1,3 +1,6 @@
+# econgraph.io/gateway-access lets this namespace's HTTPRoutes attach to the
+# Gateway's http listener, and econgraph.io/env: production to its https
+# listener (k8s/manifests/gateway/).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -5,3 +8,5 @@ metadata:
   labels:
     name: econ-graph
     app: econ-graph
+    econgraph.io/env: production
+    econgraph.io/gateway-access: "true"
