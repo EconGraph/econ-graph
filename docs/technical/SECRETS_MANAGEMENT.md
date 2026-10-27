@@ -41,8 +41,9 @@ realm import.
 token and leaves the crawler alone. It refuses before prompting unless the cluster
 is marked production. After a token is entered, it starts or restarts an existing
 `cloudflared` deployment for the cluster's public host, rechecking the production
-marker and token Secret. Without a public host, it leaves the connector at zero
-replicas; without a deployment, startup is left to `deploy.sh`. See the
+marker and token Secret. Without a public host, it skips connector startup and
+leaves the deployment unchanged; without a deployment, startup is left to
+`deploy.sh`. See the
 [public-site guide](../../k8s/README.md#-public-site-cloudflare-tunnel).
 
 `set-crawler-keys.sh --dry-run` reads key presence and shows the intended actions,
