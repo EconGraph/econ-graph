@@ -1,74 +1,101 @@
 # EconGraph SEC Crawler
 
-SEC EDGAR XBRL crawler for the EconGraph system, providing comprehensive functionality for crawling SEC EDGAR filings and downloading XBRL financial data. This crate includes advanced features like rate limiting, retry logic, and financial ratio calculation for reliable financial data acquisition.
+This crate retrieves SEC EDGAR company submissions and stores the XBRL instance documents
+for matching filings in PostgreSQL. It updates the company record and skips filings already
+stored for that company. The crawl reads the submissions document's recent filings; it does
+not follow the separate submission-history files.
 
-## Features
+## Crawling through the worker
 
-- **SEC EDGAR Crawling**: Comprehensive crawling of SEC EDGAR filings and XBRL data
-- **XBRL Parsing** (requires `xbrl-parser`): Advanced XBRL document parsing and financial data extraction
-- **Rate Limiting**: Intelligent rate limiting to respect SEC policies
-- **Retry Logic**: Robust retry mechanisms with exponential backoff
-- **Financial Analysis** (requires `xbrl-parser`): Automated financial ratio calculation and analysis
-- **Data Validation**: Comprehensive data validation and quality checks
+`SecFilingHandler` processes `(SEC, fetch_filing)` jobs in `crawler-worker`. Each job identifies
+a company by CIK and, by default, selects 10-K and 10-Q filings. Requests use the worker's shared
+`HttpFetcher`, which applies SEC rate limits, concurrency limits, retries, and metrics.
 
-## Cargo features
+From `backend/`, enqueue a company with:
 
-- `xbrl-parser` (off by default): the XBRL parser, DTS (taxonomy) download, financial ratio
-  calculator, their `config/*.json` loading, and the `parse` and `validate` CLI subcommands.
-  This code is unfinished, so the default build (and the crawler-worker) leaves it out and the
-  live crawl only stores filings. It enables `econ-graph-core/financial-ratios`.
+```bash
+cargo run -p econ-graph-sec-crawler --bin sec-crawler -- enqueue --cik 0000320193
+```
+
+The CLI requires `DATA_DATABASE_URL` pointing to a data database with migrations applied.
+Enqueuing writes a job; a running worker performs the crawl. See the
+[Crawler Deployment Guide](../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
+for database setup, worker configuration, and queue operation, and
+[Crawler Politeness](../../../docs/technical/CRAWLER_POLITENESS.md) for HTTP policies.
+
+## Optional XBRL processing
+
+The default build, including the deployed `crawler-worker`, stores filing documents without
+parsing financial facts or calculating ratios. The `xbrl-parser` Cargo feature is off by
+default. It exposes the XBRL parser, DTS (Discoverable Taxonomy Set) download, financial ratio
+calculator, their `config/*.json` loading, and the `sec-crawler parse` and `validate`
+subcommands. It also enables `econ-graph-core/financial-ratios`.
+
+With this feature enabled, the crawl attempts to download referenced taxonomy components
+after storing each instance document; taxonomy download failures are logged without failing
+the filing. Enabling the feature does not make the crawl parse facts or calculate ratios.
+The separate `parse_and_store_xbrl` method parses a stored document and logs the result, but
+does not persist parsed statements or facts. The `validate` command checks parsing and the
+presence of facts; fact-level validation rules are not implemented.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure SEC crawling functionality, XBRL parsing accuracy, and financial analysis work correctly.
+Default-feature tests cover utilities, submissions decoding, filing URLs and filters, and
+handler behavior against a local `MockSource` HTTP server. Mock handler tests exercise HTTP
+error mapping and rate limiting. Database-backed handler tests also check filing storage,
+repeated crawls, and queue behavior against mocked EDGAR responses. They return early when
+`DATABASE_URL` is unset, so a passing default run can omit those checks.
 
-### Test Types
+Feature-enabled tests add parser fixtures, ratio-calculator and JSON configuration checks,
+and taxonomy storage tests. The `xbrl_financial_integration_tests` target inserts test records
+to exercise database storage and DTS references; its parser integration check only verifies
+initialization. These suites do not establish a live SEC crawl or end-to-end financial
+analysis accuracy.
 
-#### **Unit Tests**
-- **Purpose**: Test individual SEC crawling components in isolation
-- **Examples**: XBRL parsing, rate limiting, retry logic, financial ratio calculations
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
+### Database prerequisites
 
-#### **Integration Tests**
-- **Purpose**: Test SEC crawling with real EDGAR filings and XBRL documents
-- **Examples**: End-to-end crawling workflows, XBRL document processing, financial data extraction
-- **Benefits**: Catch integration issues, test real-world scenarios, validate data accuracy
+Use a disposable PostgreSQL database for database-backed tests. Handler tests apply migrations
+and delete SEC queue rows and the test company's records. Feature-enabled tests use
+`econ_graph_core::test_utils::TestContainer` as a dependency: in this mode it connects to
+`DATABASE_URL`, falling back to `postgres://localhost/econ_graph_test`; it does not start a
+Docker container. Its cleanup drops and recreates the entire `public` schema and then applies
+migrations. Set `DATABASE_URL` explicitly and run these suites without other tests or services
+using that database. See [Database Testing](../../../docs/testing/DATABASE_TESTING.md)
+for the shared helper and database setup.
 
-#### **XBRL Parsing Tests**
-- **Purpose**: Validate XBRL document parsing and financial data extraction
-- **Examples**: Document parsing, taxonomy handling, financial statement extraction, ratio calculations
-- **Benefits**: Ensure parsing accuracy, validate financial data, test complex XBRL structures
+### Running tests
 
-#### **Financial Analysis Tests**
-- **Purpose**: Validate financial ratio calculations and analysis accuracy
-- **Examples**: Ratio calculations, benchmark comparisons, financial statement analysis
-- **Benefits**: Ensure calculation accuracy, validate financial analysis, test edge cases
-
-### Running Tests
+Run these commands from `backend/`. The first command deliberately omits database-backed
+handler coverage:
 
 ```bash
-# Run the default tests (live crawl path only)
-cargo test
-
-# Also run the XBRL parser and financial ratio tests
-cargo test --all-features
-
-# Run specific test modules (the XBRL parser is behind the xbrl-parser feature)
-cargo test --features xbrl-parser xbrl_parser
-cargo test --features xbrl-parser financial_ratio_calculator
-cargo test --features xbrl-parser --test xbrl_financial_integration_tests
-
-# Run with SEC EDGAR testing
-SEC_EDGAR_TESTING=true cargo test
+env -u DATABASE_URL cargo test -p econ-graph-sec-crawler
 ```
 
-### Test Infrastructure
+After setting `DATABASE_URL` to the disposable database described above, run the default
+suite with database coverage, or enable all crate features:
 
-- **SEC EDGAR Mocking**: Controlled testing of SEC EDGAR interactions
-- **XBRL Document Testing**: Comprehensive XBRL document parsing and validation
-- **Financial Analysis Testing**: Automated financial ratio calculation validation
-- **Rate Limiting Testing**: SEC politeness compliance and rate limiting validation
+```bash
+cargo test -p econ-graph-sec-crawler -- --test-threads=1
+cargo test -p econ-graph-sec-crawler --all-features -- --test-threads=1
+```
+
+For focused feature-enabled checks, use the module filters or the integration target:
+
+```bash
+cargo test -p econ-graph-sec-crawler --features xbrl-parser xbrl_parser -- --test-threads=1
+cargo test -p econ-graph-sec-crawler --features xbrl-parser financial_ratio_calculator -- --test-threads=1
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests -- --test-threads=1
+```
+
+The storage-statistics test is ignored in ordinary runs. It requires `DATABASE_URL` and uses
+a temporary table on one connection. Run it explicitly with:
+
+```bash
+cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_empty_mixed_and_large_totals -- --ignored --exact
+```
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL).
+See the [license](../../LICENSE) for complete terms and conditions.
