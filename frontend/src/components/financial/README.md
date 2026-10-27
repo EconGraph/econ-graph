@@ -1,9 +1,14 @@
 # Financial UI Components
 
-This directory contains a comprehensive set of React components for financial
-statement visualization and analysis. These components provide a complete
-financial data analysis experience with modern UI/UX patterns, responsive
-design, and educational features.
+This directory contains React components for exploring financial statements,
+ratios, trends, and educational explanations. The component catalog below helps
+developers choose views and supply their data and callbacks.
+
+The components are used by the financial showcase, which is excluded from both
+committed development and release build profiles by the `financial_components`
+flag. Some views query financial data; others render supplied data or demonstrate
+controls with sample values and simulated actions. See [Data Integration](#-data-integration)
+for caller requirements and [Demo Page](#-demo-page) for preview instructions.
 
 ## 📁 Component Overview
 
@@ -11,10 +16,10 @@ design, and educational features.
 
 #### 1. **FinancialDashboard**
 
-**File:** `FinancialDashboard.tsx`
+**File:** [FinancialDashboard.tsx](FinancialDashboard.tsx)
 
-The main dashboard component that provides a comprehensive overview of a
-company's financial data.
+The main dashboard queries a company's overview, statements, and ratios by
+`companyId`.
 
 **Features:**
 
@@ -22,8 +27,10 @@ company's financial data.
 - Recent filings display
 - Financial ratio summaries
 - Tabbed navigation (Overview, Statements, Ratios, Trends, Comparison, Analysis)
-- Real-time data updates
-- Export and sharing capabilities
+- Loading and error displays for the dashboard query
+
+Trends, Comparison, and Analysis tabs show descriptive placeholders. The Refresh,
+Download, and Share buttons have no action handlers.
 
 **Usage:**
 
@@ -40,7 +47,7 @@ import { FinancialDashboard } from '@/components/financial';
 
 #### 2. **FinancialStatementViewer**
 
-**File:** `FinancialStatementViewer.tsx`
+**File:** [FinancialStatementViewer.tsx](FinancialStatementViewer.tsx)
 
 Detailed viewer for individual financial statements with interactive features.
 
@@ -48,9 +55,13 @@ Detailed viewer for individual financial statements with interactive features.
 
 - Tabbed interface (Statement, Ratios, Analysis, Education)
 - Line item details with trend indicators
-- Annotation system with real-time collaboration
+- Query-backed annotation display
 - Educational content integration
-- Progress tracking and error handling
+- Loading and error displays
+
+Annotation creation and subscriptions use no-op stand-ins, and the edit/delete
+callbacks are empty. Enabling `showCollaborativeFeatures` does not connect a live
+collaboration service.
 
 **Usage:**
 
@@ -68,18 +79,22 @@ import { FinancialStatementViewer } from '@/components/financial';
 
 #### 3. **TrendAnalysisChart**
 
-**File:** `TrendAnalysisChart.tsx`
+**File:** [TrendAnalysisChart.tsx](TrendAnalysisChart.tsx)
 
-Interactive charts for analyzing financial trends over time.
+Trend selection and calculations for caller-supplied financial ratios.
 
 **Features:**
 
 - Time range selection (1Y, 3Y, 5Y, 10Y)
-- Multiple chart types (line, bar)
+- Line/bar chart type selection
 - Ratio selection and filtering
 - Trend calculations with strength indicators
-- Forward-looking projections
-- Export capabilities
+- Four-quarter projections that repeat the difference between the last two values
+
+The chart area is a placeholder; selecting a chart type changes local state.
+The Export Chart button has no handler. `statements` is accepted but not used in
+the calculations. The caller controls `timeRange` and updates it through
+`onTimeRangeChange`.
 
 **Usage:**
 
@@ -96,17 +111,21 @@ import { TrendAnalysisChart } from '@/components/financial';
 
 #### 4. **PeerComparisonChart**
 
-**File:** `PeerComparisonChart.tsx`
+**File:** [PeerComparisonChart.tsx](PeerComparisonChart.tsx)
 
 Compare financial metrics with industry peers and competitors.
 
 **Features:**
 
-- Multiple view modes (table, chart, radar)
-- Industry filtering and sorting
-- Performance scoring and rankings
-- Percentile comparisons
-- Interactive visualizations
+- Peer-company query combined with the supplied current company and ratios
+- Table view with ratio values and percentile indicators
+- Industry filtering and sorting by name, performance score, or market cap
+- Table/chart/radar view selection
+
+Chart and radar views render placeholders. The performance summary contains fixed
+sample values, including its overall ranking, industry, and market cap; it is not
+a calculated summary of the supplied company. The Export Comparison button has
+an empty handler.
 
 **Usage:**
 
@@ -122,17 +141,20 @@ import { PeerComparisonChart } from '@/components/financial';
 
 #### 5. **FinancialAlerts**
 
-**File:** `FinancialAlerts.tsx`
+**File:** [FinancialAlerts.tsx](FinancialAlerts.tsx)
 
-Real-time alerts and notifications system for financial metrics.
+A query-backed alert list with local filtering and alert actions.
 
 **Features:**
 
-- Multiple alert types (ratio thresholds, trend changes, filing deadlines)
+- Display of alert types, including ratio thresholds, trend changes, and filing deadlines
 - Severity levels (low, medium, high, critical)
 - Filtering and sorting capabilities
-- Real-time updates with WebSocket integration
-- Alert management (mark as read, toggle active)
+- Mark-as-read and active/inactive controls
+
+Alert actions update local component state without saving changes to the server.
+There is no WebSocket or subscription connection. `ratios` and `statements` are
+accepted but do not generate alerts; the list comes from the company alert query.
 
 **Usage:**
 
@@ -150,18 +172,20 @@ import { FinancialAlerts } from '@/components/financial';
 
 #### 6. **FinancialExport**
 
-**File:** `FinancialExport.tsx`
+**File:** [FinancialExport.tsx](FinancialExport.tsx)
 
-Comprehensive data export system supporting multiple formats.
+Export option selection and a simulated export-job interface.
 
 **Features:**
 
-- Multiple export formats (PDF, Excel, CSV, JSON, PNG)
+- Format choices (PDF, Excel, CSV, JSON, PNG)
 - Content customization (charts, raw data, annotations, benchmarks)
 - Data selection (statements, ratios)
 - Chart type selection
-- Export job tracking with progress indicators
-- Download management
+- Simulated export-job tracking with progress indicators
+
+Progress is driven by timers. Completed jobs receive a constructed download URL,
+but no file is generated and the download handler does nothing.
 
 **Usage:**
 
@@ -178,18 +202,21 @@ import { FinancialExport } from '@/components/financial';
 
 #### 7. **FinancialMobile**
 
-**File:** `FinancialMobile.tsx`
+**File:** [FinancialMobile.tsx](FinancialMobile.tsx)
 
 Mobile-responsive wrapper that adapts components for different screen sizes.
 
 **Features:**
 
-- Device type detection (mobile, tablet, desktop)
-- Orientation handling
+- Layout selection by viewport width (mobile, tablet, desktop)
 - Mobile-optimized navigation
 - Touch-friendly interfaces
 - Responsive layouts
-- Progressive disclosure
+- Statement selection and tab navigation
+
+The wrapper passes company and statement identifiers to nested query-backed
+components; supplying arrays does not replace those requests. Some visible status
+and change indicators use fixed sample values.
 
 **Usage:**
 
@@ -210,37 +237,41 @@ import { FinancialMobile } from '@/components/financial';
 
 #### 8. **RatioAnalysisPanel**
 
-**File:** `RatioAnalysisPanel.tsx`
+**File:** [RatioAnalysisPanel.tsx](RatioAnalysisPanel.tsx)
 
-Detailed analysis panel for financial ratios with educational content.
+Queries ratios by `statementId` and groups them for analysis with educational
+content.
 
 #### 9. **BenchmarkComparison**
 
-**File:** `BenchmarkComparison.tsx`
+**File:** [BenchmarkComparison.tsx](BenchmarkComparison.tsx)
 
-Industry benchmarking and comparison tools.
+Displays the supplied company value alongside optional industry benchmark data,
+including percentiles and the industry median.
 
 #### 10. **AnnotationPanel**
 
-**File:** `AnnotationPanel.tsx`
+**File:** [AnnotationPanel.tsx](AnnotationPanel.tsx)
 
-Collaborative annotation system for financial statements.
+Displays supplied annotations and invokes caller-provided edit/delete callbacks.
+The caller owns persistence; the add callback is accepted but not used by the panel.
 
 #### 11. **EducationalPanel**
 
-**File:** `EducationalPanel.tsx`
+**File:** [EducationalPanel.tsx](EducationalPanel.tsx)
 
-Educational content integration for different user types.
+Displays a supplied ratio name, formula, description, and optional learning link.
 
 #### 12. **CollaborativePresence**
 
-**File:** `CollaborativePresence.tsx`
+**File:** [CollaborativePresence.tsx](CollaborativePresence.tsx)
 
-Real-time collaboration features and user presence indicators.
+Displays caller-supplied team members and the current user. Presence discovery
+and synchronization belong to the caller.
 
 #### 13. **RatioExplanationModal**
 
-**File:** `RatioExplanationModal.tsx`
+**File:** [RatioExplanationModal.tsx](RatioExplanationModal.tsx)
 
 Modal component for explaining financial ratios and concepts.
 
@@ -248,18 +279,23 @@ Modal component for explaining financial ratios and concepts.
 
 ### User Types
 
-Components support different user experience levels:
-
-- **Beginner**: Simplified interfaces with educational content
-- **Intermediate**: Balanced features with guided explanations
-- **Advanced**: Full feature set with technical details
-- **Expert**: Maximum functionality with minimal UI guidance
+The `userType` prop accepts `beginner`, `intermediate`, `advanced`, or `expert`.
+Its effect depends on the component; these values do not define permission or
+feature tiers. For example, `RatioAnalysisPanel` shows an additional explanation
+for beginners when `showEducationalContent` is true. `FinancialDashboard`,
+`PeerComparisonChart`, `FinancialAlerts`, and `FinancialExport` accept `userType`
+without changing their behavior.
 
 ### Responsive Design
 
-- **Mobile** (< 768px): Touch-optimized, bottom navigation, drawer menus
-- **Tablet** (768px - 1024px): Hybrid interface with collapsible panels
-- **Desktop** (> 1024px): Full dashboard with sidebars and detailed views
+`FinancialMobile` selects its layout from the viewport width on mount and resize:
+
+- **Mobile** (< 768px): Bottom navigation and drawer menus
+- **Tablet** (768px ≤ width < 1024px): Tabbed views and a two-column metrics grid
+- **Desktop** (≥ 1024px): Embedded financial dashboard
+
+The wrapper does not track orientation separately. Other components use their own
+responsive styles; these boundaries describe `FinancialMobile`.
 
 ### Color System
 
@@ -271,40 +307,47 @@ Components support different user experience levels:
 
 ## 🔧 Technical Features
 
-### State Management
+### State and Rendering
 
-- React hooks for local state
-- Context providers for shared state
-- GraphQL integration with Apollo Client
-- Real-time subscriptions for live updates
-
-### Performance Optimizations
-
-- Lazy loading for large datasets
-- Virtual scrolling for long lists
-- Memoization for expensive calculations
-- Progressive image loading
+React hooks manage local selections, filters, and simulated jobs. Query-backed
+components use TanStack Query and the project's `executeGraphQL` utility.
+`TrendAnalysisChart`, `PeerComparisonChart`, and `FinancialAlerts` memoize derived
+data, and several display components use `React.memo`.
 
 ### Accessibility
 
-- ARIA labels and roles
-- Keyboard navigation support
-- Screen reader compatibility
-- High contrast mode support
-- Focus management
+Controls include component-specific labels and state attributes. For example,
+`PeerComparisonChart` labels its view switches and exposes their pressed state,
+and `BenchmarkComparison` labels its benchmark region and values. Check keyboard
+and screen-reader behavior in the host application when composing these views.
 
-### Internationalization
+### Formatting
 
-- Multi-language support ready
-- Currency and number formatting
-- Date and time localization
-- RTL language support
+Formatting is defined in individual components. For example,
+`FinancialStatementViewer` uses `en-US` number formatting and USD currency, while
+`RatioAnalysisPanel` formats currencies with `en-US`. There is no shared locale or
+RTL configuration exposed by this directory.
 
 ## 📊 Data Integration
 
 ### GraphQL Queries
 
-All components use standardized GraphQL queries:
+`FinancialDashboard`, `FinancialStatementViewer`, `PeerComparisonChart`, and
+`FinancialAlerts` fetch data using TanStack Query and
+[`executeGraphQL`](../../utils/graphql.ts). Their identifiers must refer to data
+available from the configured endpoint. The identifiers in this page's examples
+illustrate prop shapes; they do not establish that those records exist.
+
+`TrendAnalysisChart` and `FinancialExport` consume supplied props without making
+queries. `AnnotationPanel`, `BenchmarkComparison`, `EducationalPanel`,
+`CollaborativePresence`, and `RatioExplanationModal` also accept their display
+data through props. `RatioAnalysisPanel` queries ratios by statement identifier.
+`FinancialMobile` mixes supplied data with nested query-backed views.
+
+The [barrel exports](index.ts) include the following query documents from
+[`graphql/financial.ts`](../../graphql/financial.ts), along with annotation
+mutation and subscription documents. Exporting a document does not connect a
+component's inactive actions:
 
 ```typescript
 // Get financial statements
@@ -325,7 +368,8 @@ GET_FINANCIAL_ANNOTATIONS;
 
 ### Type Safety
 
-Full TypeScript support with comprehensive type definitions:
+The [financial types](../../types/financial.ts) describe company, statement, ratio,
+and annotation data. These abbreviated examples show their structure:
 
 ```typescript
 interface FinancialStatement {
@@ -363,12 +407,25 @@ import {
 
 ### Basic Setup
 
-1. Ensure GraphQL client is configured
-2. Set up authentication context
-3. Configure theme provider
-4. Initialize Apollo Client with proper endpoints
+The existing application provides `QueryClientProvider` in
+[`src/index.tsx`](../../index.tsx), and authentication and theme contexts in
+[`App.tsx`](../../App.tsx). Render query-backed components beneath the query
+provider. A separate host must also supply the project's styles and suitable MUI
+theme; see [`index.css`](../../index.css) and
+[`ThemeContext.tsx`](../../contexts/ThemeContext.tsx).
+
+The request utility defaults to `/graphql`, overridden at build time by
+`VITE_GRAPHQL_URL`. Financial data queries use `VITE_DATA_GRAPHQL_URL` when set;
+otherwise they use the same URL. Annotation operations use the app endpoint and
+the host application's access-token integration. See the
+[request utility](../../utils/graphql.ts) and
+[authentication context](../../contexts/AuthContext.tsx) when integrating a
+separate host. The endpoint must support the financial operations being rendered;
+providing a query client alone does not supply financial records.
 
 ### Example Implementation
+
+This page component runs beneath the existing application's providers:
 
 ```tsx
 import React from 'react';
@@ -392,7 +449,7 @@ export default App;
 
 ### Component Testing
 
-Each component includes comprehensive tests:
+Run the component tests in [`__tests__/`](__tests__/) from `frontend/`:
 
 ```bash
 # Run component tests (Vitest filters by file path)
@@ -404,7 +461,8 @@ npm run test:coverage -- financial
 
 ### E2E Testing
 
-End-to-end tests for user workflows:
+The frontend also exposes the application-wide Playwright command. Run it from
+`frontend/` with the environment required by the selected tests:
 
 ```bash
 # Run E2E tests
@@ -413,13 +471,18 @@ npm run test:e2e
 
 ## 📱 Demo Page
 
-Visit `/financial-components-demo` to see all components in action with:
+The `/financial-components-demo` route is registered only when the
+`financial_components` build flag is enabled. Both committed build profiles set
+it to false, so starting the default development server does not expose the
+route. Follow the [build-flag guide](../../../docs/build-flags.md) to configure a
+build that includes it.
 
-- Interactive component showcase
-- Device type switching (mobile, tablet, desktop)
-- User type selection
-- Live component preview
-- Usage examples and code snippets
+The [showcase page](../../pages/FinancialComponentsDemo.tsx) defines sample company,
+statement, and ratio objects for its prop-driven views. Query-backed components
+still request data by identifier; those sample objects do not intercept requests.
+The page offers component selection, device preview widths, user-type selection,
+and usage snippets. Its controls retain the simulations and placeholders
+described in the catalog.
 
 ## 📚 Resources
 
@@ -430,5 +493,4 @@ Visit `/financial-components-demo` to see all components in action with:
 
 ---
 
-_This component library is part of the EconGraph project - a comprehensive
-financial data analysis platform._
+_These components are part of the EconGraph project._
