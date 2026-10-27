@@ -78,6 +78,19 @@ do not bypass private-annotation visibility.
 | `deleteUser` | `admin.users:delete`; cannot delete the caller's own account. |
 | `suspendUser`, `activateUser` | `admin.users:suspend`; callers cannot suspend themselves. |
 
+Updating, deleting, suspending, or activating another user's account also requires
+every `admin.*` permission:
+
+- `admin.users:read`, `admin.users:create`, `admin.users:update`,
+  `admin.users:delete`, and `admin.users:suspend`;
+- `admin.sessions:read` and `admin.sessions:revoke`;
+- `admin.crawlers:manage` and `admin.system:read`;
+- `admin.security:read` and `admin.audit:read`.
+
+A caller with only `admin.users:update` can update their own record; changing its
+`isActive` field still requires `admin.users:suspend`. Callers cannot delete or
+suspend their own account, including by setting `isActive: false` through `updateUser`.
+
 Available source data and product features vary by deployment. Use discovery queries
 to find the data present at the selected endpoint; availability does not imply an
 account entitlement, and a missing source does not by itself indicate a permission denial.
@@ -154,8 +167,9 @@ Search text must be 1–500 characters. Omit `after` for the first search page.
 `totalCount` counts all matching series. For the next page, set `after` to the number
 of series already read as a decimal string: after reading 50 results, send
 `"after": "50"` with the same query and filters. Add each page's returned series count
-to that offset and stop when it reaches `totalCount`. Malformed cursors, negative
-offsets, and offsets outside the i32 range return `BAD_USER_INPUT`. Unlike
+to that offset and stop when it reaches `totalCount`. An `after` offset must be an
+integer from 0 through 2,147,483,647. Malformed cursors and offsets outside that
+range return `BAD_USER_INPUT`. Unlike
 `seriesList` and `seriesData`, search results have no `pageInfo` or `endCursor`.
 
 ```graphql
