@@ -14,6 +14,12 @@ non-secret configuration, but must never read, enter, copy, or decrypt secret
 values. Do not paste them into an agent session or ask an agent to run the secret
 setup commands. Kubernetes base64 encoding is not encryption.
 
+Confirm the intended cluster before running either script. `create-secrets.sh`
+uses the selected kubectl context and namespace (`econ-graph` by default). For a
+direct run, cached kind copies are the default when available and no kubectl,
+kubeconfig, or pinned context is specified. The interactive wrapper selects the
+kind cluster's kubectl and context.
+
 For crawler API keys, from the repository root:
 
 ```bash
@@ -25,12 +31,19 @@ them to `create-secrets.sh` through its environment. Enter keeps the existing
 value. Values are never printed or passed as command arguments. Only the selected
 mode's credentials are inherited by `create-secrets.sh`.
 
-By default the crawler worker is scaled to one replica and restarted afterwards.
-Use `--no-start-crawler` to enter keys without starting it. `--google` also prompts
-for the Google identity-provider client and restarts Keycloak and reruns its realm
-import after new credentials are entered. `--tunnel` is a separate run that prompts
-only for the Cloudflare Tunnel connector token. It refuses before prompting unless
-the cluster is marked production; see the [public-site guide](../../k8s/README.md#-public-site-cloudflare-tunnel).
+In crawler mode, an existing crawler worker deployment is scaled to one replica
+and restarted afterwards. Use `--no-start-crawler` to enter keys without starting
+it. `--google` also prompts for the Google identity-provider client. If credentials
+are entered and Keycloak is deployed, the script restarts Keycloak and reruns its
+realm import.
+
+`--tunnel` is a separate run that prompts only for the Cloudflare Tunnel connector
+token and leaves the crawler alone. It refuses before prompting unless the cluster
+is marked production. After a token is entered, it starts or restarts an existing
+`cloudflared` deployment for the cluster's public host, rechecking the production
+marker and token Secret. Without a public host, it leaves the connector at zero
+replicas; without a deployment, startup is left to `deploy.sh`. See the
+[public-site guide](../../k8s/README.md#-public-site-cloudflare-tunnel).
 
 `set-crawler-keys.sh --dry-run` reads key presence and shows the intended actions,
 without prompting or writing secrets. It still queries the cluster. It is a
@@ -38,16 +51,12 @@ human-run check, not an offline mode. `create-secrets.sh --dry-run` also perform
 real cluster checks and resolves existing values without printing them or writing
 Secrets.
 
-`create-secrets.sh` uses the selected kubectl context and namespace (`econ-graph`
-by default). The interactive wrapper selects the kind cluster's kubectl and
-context. Confirm the intended cluster before running either script.
-
-The script generates missing database, Keycloak, and Grafana passwords, preserving
+`create-secrets.sh` generates missing database, Keycloak, and Grafana passwords, preserving
 existing values on later runs. Optional unset or empty inputs keep the existing
 value, or leave a missing key absent. Obvious placeholders are refused. Values
 reach kubectl through a private temporary directory and server-side apply; they
 do not enter command arguments or the last-applied-configuration annotation.
-The script stops if the cluster cannot be queried or if it finds a database volume
+`create-secrets.sh` stops if the cluster cannot be queried or if it finds a database volume
 without its matching password Secret. Do not bypass that guard to repair a lost
 password: follow the [database recovery guidance](../../k8s/README.md#secrets).
 
@@ -68,24 +77,6 @@ volume; coordinate rotation in the service too.
 
 Agents never handle values from any tier. Secret dumps, database dumps containing
 identity-provider credentials, Terraform state, and recovery keys require the
-same protection as the credentials they contain. The agent kubeconfig restriction
-is tracked in [ECO-444](https://linear.app/econgraph/issue/ECO-444); this document
-does not imply that RBAC isolation has already been implemented.
-
-## Encrypted configuration
-
-SOPS with age is the accepted replacement for the abandoned Sealed Secrets design,
-not the deployed workflow. Implementation and status live in
-[ECO-437](https://linear.app/econgraph/issue/ECO-437), including its accepted secrets
-amendment. Ciphertext will live in a separate private secrets repository, accessed
-by Flux through a second GitRepository with a read-only deploy key, without a
-public-repository submodule.
-
-The amendment specifies two recipients: a cluster key held in `flux-system/sops-age`
-and an operator recovery key protected by a passphrase and backed up in the
-password manager and on paper. Agents receive neither private key. Machine-only
-passwords remain generated in-cluster, avoiding a second source of truth. The
-private repository will check SOPS metadata and scan for leaked plaintext before
-commit. Recovery is to be drilled in a fresh kind cluster each quarter. These are
-requirements for that future workflow; installing or running SOPS is not part of
-today's secret setup.
+same protection as the credentials they contain. This is a handling rule: the
+scripts use the selected kubeconfig's Kubernetes permissions and do not enforce a
+separate agent access boundary.
