@@ -6,13 +6,19 @@ database is seeded from recorded fixtures through the crawler adapters. The seed
 uses local mock upstreams and refuses requests to external data sources, so no
 upstream API keys are needed. The suite uses real local HTTP services. It is the
 release exit check (exit criterion 5 in ECO-5). The other specs under
-`tests/e2e/` belong to the older configs. Those configs exclude this directory
-apart from two map specs: `world-map/world-map-mocked.spec.ts` and
-`world-map/world-atlas.spec.ts` (ECO-282). The first mocks GraphQL via `page.route`;
-the second checks outline loading and intercepts a failed outline request. Both
-also run under the older `global-analysis` and default/mobile configs.
-The remaining specs use this suite’s seeded backend by default; deployed mode
-is described below.
+`tests/e2e/` belong to the older configs. The default and mobile configs exclude
+this directory apart from two map specs: `world-map/world-map-mocked.spec.ts`
+and `world-map/world-atlas.spec.ts` (ECO-282). The first mocks GraphQL via
+`page.route`; the second checks outline loading and intercepts a failed outline
+request.
+
+The standalone [Global Analysis config](../../../ci/configs/playwright-global-analysis.config.ts)
+and its [mobile counterpart](../../../ci/configs/playwright-mobile-global-analysis.config.ts)
+also collect `world-map/world-map-every-country.spec.ts`, which requires the
+release fixture data unless deployed mode is selected and the spec skips
+itself. Within `world-map/`, those standalone configs exclude only
+`world-map.spec.ts`. The remaining release specs use this suite’s seeded
+backend by default; deployed mode is described below.
 
 A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts`
 and the phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone
@@ -110,7 +116,9 @@ In this mode ([environment and user mapping](env.ts)):
   six-source sweep checks each source’s newest point against its own cadence
   (`liveMaxAgeDays` in `SWEPT_SOURCES`). The sweep requires enough live history
   to compute every offered transformation. The deployed database must contain
-  those series with current catalog metadata, including the Census BDS titles: the sweep searches by and asserts the expected title.
+  those series with current catalog metadata, including the Census BDS titles.
+  The sweep searches by the expected title and checks the title on the series
+  page.
   If metadata or observations are missing or stale, use the
   [crawler discovery and fetch guidance](../../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
   to populate them before running the sweep.
