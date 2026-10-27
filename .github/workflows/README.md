@@ -10,10 +10,11 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs; merge groups | Markdown lint and offline relative-link checks |
 | [actionlint.yml](actionlint.yml) | Push to main/develop that changes workflows, local actions or their validation; all PRs; merge groups | Immutable action references and actionlint, with shellcheck on `run:` scripts |
 | [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; merge groups; Monday 06:17 UTC | Flag validation and generated-file consistency |
+| [release.yml](release.yml) | Push of `v*.*.*` tags | Manual dispatch or `vX.Y.Z-rc.N` tag pushes build and publish missing commit-tagged images; final version tags promote existing image digests without rebuilding and draft a GitHub release. See the [release process](../../docs/development/RELEASE_PROCESS.md). |
 | [release-e2e.yml](release-e2e.yml) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
 | [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
-| [update-cost-analysis.yml](update-cost-analysis.yml) | Manual dispatch; matching PRs | Recalculate cost documentation; manual runs on main attempt to publish changes |
+| [update-cost-analysis.yml](update-cost-analysis.yml) | Manual dispatch; matching PRs | Validate calculations and generated-output repeatability; manual runs on main attempt to publish changes |
 | [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
 | [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
 | [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
@@ -37,7 +38,9 @@ The manual crawler workflow accepts only source and series inputs. A maintainer 
 
 ## Validation
 
-Run Markdown lint and relative-link checks as defined in [docs-checks.yml](docs-checks.yml). Lint workflow files with actionlint and shellcheck at the versions pinned in [actionlint.yml](actionlint.yml); per-file ignores live in [actionlint.yaml](../actionlint.yaml). The repository's [workflow validation script](../../ci/scripts/validate-ci-workflows.sh) checks YAML and basic job structure; it does not prove job-selection semantics. Its trigger check uses PyYAML's default loader, which can interpret the key on as boolean true, so trigger warnings require verification against the YAML.
+Run Markdown lint and relative-link checks as defined in [docs-checks.yml](docs-checks.yml). Lint workflow files with actionlint and shellcheck at the versions pinned in [actionlint.yml](actionlint.yml); per-file ignores live in [actionlint.yaml](../actionlint.yaml).
+
+The repository's [workflow validation script](../../ci/scripts/validate-ci-workflows.sh) checks YAML and basic job structure; it does not prove job-selection semantics. Its trigger check uses PyYAML's default loader, which can interpret the key `on` as boolean `true`, so trigger warnings require verification against the YAML.
 
 With `PyYAML==6.0.3` installed, run `python3 ci/scripts/check_action_pins.py` and `python3 -m unittest discover -s ci/scripts -p 'test_action_pins.py'` to check action references and exercise the enforcement rules locally.
 
