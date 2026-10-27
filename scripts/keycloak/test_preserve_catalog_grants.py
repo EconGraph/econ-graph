@@ -41,7 +41,8 @@ class CatalogPolicyTests(unittest.TestCase):
         self.state[self.prefix] = None
         merged = self.merge()
         self.assertEqual(self.role(merged,"catalog-public")["composites"],self.role(self.realm,"catalog-public")["composites"])
-        self.assertEqual(merged["attributes"][preserve.INITIALIZED],"true")
+        self.assertNotIn(preserve.INITIALIZED,merged["attributes"])
+        self.assertEqual(json.loads(merged["attributes"][preserve.PENDING]),{"policy":True,"reader":True})
 
     def test_existing_empty_sets_and_removed_memberships_are_authoritative(self):
         merged = self.merge()
@@ -102,6 +103,59 @@ class CatalogPolicyTests(unittest.TestCase):
         self.assertEqual(self.role(merged,"catalog-public")["composites"],self.role(self.realm,"catalog-public")["composites"])
         self.assertEqual(merged["users"][0]["realmRoles"],["catalog-public"])
         self.assertIn("catalog-public",self.role(merged,"user")["composites"]["realm"])
+
+    def test_realm_attributes_survive_without_premature_completion(self):
+        self.state[self.prefix]["attributes"]={"frontendUrl":"https://custom.test","cli-state":"existing-state"}
+        merged=self.merge()
+        self.assertEqual(merged["attributes"]["frontendUrl"],"https://custom.test")
+        self.assertEqual(merged["attributes"]["cli-state"],"existing-state")
+        self.assertNotIn(preserve.INITIALIZED,merged["attributes"])
+
+    def test_interrupted_old_realm_bootstrap_retries_only_originally_missing_resources(self):
+        self.state[self.prefix]["attributes"]={}
+        self.state[self.prefix+"/roles/catalog-public"]=None
+        self.state[self.prefix+"/clients?clientId=econgraph-anonymous"]=[]
+        first=self.merge()
+        # Config-cli writes the pending descriptor before creating clients and roles. Fail
+        # after it creates the policy role and client but before setting their default grants.
+        self.state[self.prefix]["attributes"]=first["attributes"]
+        self.state[self.prefix+"/roles/catalog-public"]={"name":"catalog-public","composite":False}
+        self.state[self.prefix+"/clients?clientId=econgraph-anonymous"]=[{"id":"anon","clientId":"econgraph-anonymous","enabled":False,"serviceAccountsEnabled":False}]
+        retried=self.merge()
+        self.assertEqual(self.role(retried,"catalog-public")["composites"],self.role(self.realm,"catalog-public")["composites"])
+        self.assertIn("catalog-public",self.role(retried,"user")["composites"]["realm"])
+        self.assertEqual(retried["users"][0]["realmRoles"],["catalog-public"])
+        self.assertTrue(next(c for c in retried["clients"] if c["clientId"]=="econgraph-anonymous")["enabled"])
+        self.assertNotIn(preserve.INITIALIZED,retried["attributes"])
+
+    def test_disabled_service_accounts_preserve_live_scope_restrictions(self):
+        self.state[self.prefix+"/clients?clientId=econgraph-anonymous"][0]["serviceAccountsEnabled"]=False
+        self.state[self.prefix+"/clients/anon/scope-mappings/clients/api"]=[{"name":"catalog.fred:read"}]
+        merged=self.merge()
+        self.assertEqual(merged["clientScopeMappings"]["econ-graph-api"][0]["roles"],["catalog.fred:read"])
+        self.assertEqual(merged["users"],[])
+
+    def test_completion_commits_marker_after_import_and_keeps_fresh_attributes(self):
+        self.state[self.prefix]["attributes"]={"frontendUrl":"https://custom.test","cli-state":"new-state",preserve.PENDING:json.dumps({"policy":True,"reader":True})}
+        writes=[]
+        preserve.complete_bootstrap(self.realm,self.state.get,lambda path,body:writes.append((path,body)))
+        self.assertEqual(len(writes),1)
+        attributes=writes[0][1]["attributes"]
+        self.assertEqual(attributes["frontendUrl"],"https://custom.test")
+        self.assertEqual(attributes["cli-state"],"new-state")
+        self.assertEqual(attributes[preserve.INITIALIZED],"true")
+        self.assertNotIn(preserve.PENDING,attributes)
+        self.state[self.prefix]["attributes"]=attributes
+        preserve.complete_bootstrap(self.realm,self.state.get,lambda path,body:writes.append((path,body)))
+        self.assertEqual(len(writes),1,"completion is idempotent")
+
+    def test_incomplete_import_cannot_be_marked_complete(self):
+        self.state[self.prefix]["attributes"]={}
+        self.state[self.prefix+"/roles/catalog-public"]=None
+        writes=[]
+        with self.assertRaises(RuntimeError):
+            preserve.complete_bootstrap(self.realm,self.state.get,lambda path,body:writes.append(body))
+        self.assertEqual(writes,[])
 
     def test_missing_relations_or_failed_api_never_fall_back_to_defaults(self):
         self.state[self.prefix + "/roles/catalog-public/composites"] = None

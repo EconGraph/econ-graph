@@ -308,6 +308,26 @@ impl OidcVerifier {
 
     /// Check `token` and return the claims the API uses.
     pub async fn verify(&self, token: &str) -> Result<VerifiedToken, VerifyError> {
+        self.verify_token(token, true).await
+    }
+
+    /// Keycloak omits the mapped roles claim when an anonymous reader has no grants.
+    /// Authenticate the token identically, treating only that absent claim as an empty set.
+    /// This path supplies catalog grants, never an authenticated request identity.
+    pub(crate) async fn verify_catalog_token(
+        &self,
+        token: &str,
+    ) -> Result<VerifiedToken, VerifyError> {
+        self.verify_token(token, false).await
+    }
+
+    /// Both callers run identical cryptographic and identity checks. Only the signed-in
+    /// contract requires a roles claim; its absence cannot grant anonymous permissions.
+    async fn verify_token(
+        &self,
+        token: &str,
+        require_roles_claim: bool,
+    ) -> Result<VerifiedToken, VerifyError> {
         let header = jsonwebtoken::decode_header(token)
             .map_err(|e| VerifyError::invalid(format!("malformed token: {e}")))?;
         if header.alg != Algorithm::RS256 {
@@ -336,9 +356,13 @@ impl OidcVerifier {
         }
         let subject = Uuid::parse_str(&claims.sub)
             .map_err(|_| VerifyError::invalid("subject is not a UUID"))?;
-        let roles = claims
-            .roles
-            .ok_or_else(|| VerifyError::invalid("token has no roles claim"))?;
+        let roles = match claims.roles {
+            Some(roles) => roles,
+            None if require_roles_claim => {
+                return Err(VerifyError::invalid("token has no roles claim"))
+            }
+            None => Vec::new(),
+        };
         let non_empty =
             |s: Option<String>| s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 

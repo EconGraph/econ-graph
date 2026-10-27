@@ -154,7 +154,7 @@ impl AnonymousPermissions {
             .await
             .map_err(|_| ())?;
         let token = verifier
-            .verify(&response.access_token)
+            .verify_catalog_token(&response.access_token)
             .await
             .map_err(|_| ())?;
         let remaining = token
@@ -341,6 +341,53 @@ mod tests {
             .await
             .retry_after = None;
         assert!(verifier.anonymous_catalog_roles().await.is_empty());
+        task.abort();
+    }
+
+    /// Deny-all is a valid cached policy, while signature failures remain failed renewals.
+    #[tokio::test]
+    async fn omitted_roles_cache_empty_grants_but_invalid_signatures_never_cache() {
+        let issuer = TestIssuer::start().await;
+        let mut claims = issuer.claims(Uuid::new_v4(), &[]);
+        claims.as_object_mut().unwrap().remove("roles");
+        let token = issuer.sign(&claims);
+        assert!(
+            issuer.verifier().verify(&token).await.is_err(),
+            "the ordinary signed-in verification contract remains strict"
+        );
+        let (verifier, response, calls, task) =
+            provider(json!({"access_token":token,"expires_in":300}), &issuer).await;
+        let (first, second) = tokio::join!(
+            verifier.anonymous_catalog_roles(),
+            verifier.anonymous_catalog_roles()
+        );
+        assert!(first.is_empty() && second.is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "empty grants are cached and coalesced"
+        );
+        let provider = verifier.anonymous.as_ref().unwrap();
+        assert!(provider
+            .cache
+            .lock()
+            .await
+            .valid_until
+            .is_some_and(|expiry| expiry > Instant::now()));
+        let bad_key = crate::testkit::SigningKey::generate("test-key-1");
+        *response.write().unwrap() = json!({"access_token":bad_key.sign(&claims),"expires_in":300});
+        provider.cache.lock().await.valid_until = Some(Instant::now());
+        assert!(verifier.anonymous_catalog_roles().await.is_empty());
+        assert!(
+            provider.cache.lock().await.valid_until.is_none(),
+            "missing roles cannot bypass signature verification"
+        );
+        assert!(verifier.anonymous_catalog_roles().await.is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "invalid signatures are rate-limited, never cached as grants"
+        );
         task.abort();
     }
 

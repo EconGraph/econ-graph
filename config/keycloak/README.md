@@ -177,7 +177,9 @@ Configure the backend with:
 | `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
 
 Missing anonymous configuration grants no anonymous data access, including when sign-in is off.
-Partial configuration fails startup. Cached anonymous grants last no longer than the token's
+Partial configuration fails startup. Keycloak omits the roles claim for a reader with no grants;
+that is cached as an empty permission set. Signed-in token verification remains strict.
+Cached anonymous grants last no longer than the token's
 absolute expiry, `expires_in`, or five minutes, whichever is shortest. Renewals are coalesced per
 backend process. Failed renewals deny access after expiry and retry at most once per ten seconds;
 unexpired grants remain usable through an outage. User role removals take effect when existing
@@ -192,8 +194,10 @@ Existing Compose realms need the normal development realm reset. Kubernetes reap
 configuration on deployment, but `preserve-catalog-grants.py` snapshots catalog policy first.
 Existing catalog-public grants, catalog edges on managed composites, anonymous-reader mappings,
 reader scope restrictions and enabled states survive reapply, including empty sets. Defaults seed
-only the first feature rollout; a realm attribute records initialization so deleting a policy role
-or reader cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
+only the first feature rollout. The render step records which policy resources originally needed
+bootstrap, so an interrupted first import can retry without freezing partial empty mappings. A
+finalizer marks initialization only after config-cli succeeds; deleting a policy role or reader
+cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
 from signed-in default roles, which would otherwise bypass anonymous-only restrictions.
 
 Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are

@@ -12,7 +12,7 @@
 #
 # The admin API does not resolve the ${VAR:default} placeholders that Keycloak's own
 # import does, so an init container renders them first with
-# scripts/keycloak/render-realm.sh (both files come from the ConfigMap keycloak-realm,
+# scripts/keycloak/render-realm.sh (the realm and both helper scripts come from ConfigMap keycloak-realm,
 # written by scripts/deploy/deploy.sh). deploy.sh deletes the previous Job, applies
 # this one after the Keycloak Deployment and waits for it to complete.
 #
@@ -110,7 +110,6 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
-      containers:
       - name: keycloak-config-cli
         image: adorsys/keycloak-config-cli:6.5.1-26.5.5
         env:
@@ -152,6 +151,46 @@ spec:
           runAsNonRoot: true
           # The image runs as `nobody`; a numeric id lets the kubelet verify runAsNonRoot.
           runAsUser: 65534
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: finalize-catalog-policy
+        image: python:3.12.12-slim
+        command: ["python", "/config/preserve-catalog-grants.py", "--complete", "/rendered/econ-graph-realm.json"]
+        env:
+        - name: KEYCLOAK_URL
+          value: "http://keycloak-service:8080/idp"
+        - name: KEYCLOAK_USER
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-username
+        - name: KEYCLOAK_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-password
+        volumeMounts:
+        - name: realm
+          mountPath: /config
+          readOnly: true
+        - name: rendered
+          mountPath: /rendered
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
           allowPrivilegeEscalation: false
           capabilities:
             drop:
