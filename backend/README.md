@@ -29,19 +29,18 @@ The foundational crate providing core data models, database schema, and shared u
 **Key Features:**
 - Economic and financial data models with type safety
 - Database connection pooling and async operations
-- Authentication models and JWT token handling
+- User and application-state models
 - Comprehensive error handling and logging
 - Test utilities with database containers
 
 ### **econ-graph-auth**
-Authentication and authorization system with enterprise-grade security features, OAuth integration, and comprehensive user management.
+Authentication and authorization for API callers. The crate verifies identity-provider access tokens and enforces fine-grained application roles. [Keycloak](../config/keycloak/README.md) handles sign-in, provider integration, token issuance, and refresh.
 
 **Key Features:**
-- OAuth integration (Google, GitHub, etc.)
-- JWT authentication with configurable expiration
-- Role-based access control and permissions
-- Security middleware and session management
-- User lifecycle management
+- Bearer-token authentication for API requests
+- OIDC issuer, audience, expiry, and not-before validation
+- JWT signature verification against the provider’s cached JWKS
+- Fine-grained role checks for protected operations
 
 ### **econ-graph-metrics**
 Comprehensive metrics collection and monitoring capabilities using Prometheus, providing insights into system performance and health.
@@ -96,13 +95,12 @@ Specialized SEC EDGAR XBRL crawler for financial data acquisition with advanced 
 - Comprehensive data validation and quality assurance
 
 ### **econ-graph-mcp**
-Model Context Protocol server implementation enabling AI model integration for economic data access through standardized protocols.
+Model Context Protocol server enabling AI assistants to access economic data through a standardized interface.
 
 **Key Features:**
 - Full MCP server implementation with economic data endpoints
-- AI model integration and data access control
-- Secure authentication for AI model access
-- Intelligent data filtering and access control
+- Authentication and access control for AI model requests
+- Economic data search and filtering
 - Protocol compliance and message handling
 
 ### **econ-graph-backend**
@@ -135,16 +133,16 @@ cd backend
 # One local database is both the app and the data database.
 export APP_DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
 export DATA_DATABASE_URL=$APP_DATABASE_URL
-# The data migrations: only `crawler migrate` applies them, never a server at startup
+# Data plane migrations: only `crawler migrate` applies them, never a server at startup
 cargo run -p econ-graph-crawler --bin crawler -- migrate
 ```
 
 On a database built by the single v4.0.0 baseline, start the backend instead
-of using the diesel CLI for the app set: the backend records the app baseline there, while the
+of using the diesel CLI for the app plane migrations: the backend records the app baseline there, while the
 CLI stops at its guard.
 
 Start the server with `cargo run -p econ-graph-backend --bin econ-graph-backend`. It applies the
-app migrations at startup ([database migrations](../docs/development/MIGRATIONS.md)). It listens on port
+app plane migrations at startup ([database migrations](../docs/development/MIGRATIONS.md)). It listens on port
 **9876** unless `BACKEND_PORT` overrides it. Verify startup with
 `curl --fail "http://localhost:${BACKEND_PORT:-9876}/health"`. The database is initially empty;
 see the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
@@ -167,20 +165,59 @@ The backend reads exported variables and optionally loads a `.env` file.
 There is no checked-in `.env.example`; the exported database URLs above are sufficient
 for the local anonymous server.
 
+The app plane owns users and application state; the data plane owns crawled and reference
+data, including sources, series, observations, and crawl state. `APP_DATABASE_URL` and
+`DATA_DATABASE_URL` may point to the same physical database, as in the local setup above.
+That database then holds tables for both planes. The backend applies app plane migrations
+at startup; only `crawler migrate` applies data plane migrations.
+
 | Variable | Meaning |
 |----------|---------|
-| `APP_DATABASE_URL` | Required. The app database: users and everything they create. The backend applies the app migration set to it at startup. |
-| `DATA_DATABASE_URL` | Optional. The data database: sources, series, observations, crawl state. Never migrated by the backend. Without it, every data field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` (message `Data is served by the data plane at /data/graphql`), `systemHealth`'s `queueItems` is null, `createAnnotation` checks its series through `DATA_GRAPHQL_URL` (or, without that, not at all), and `/readyz` reports the data database as `not_configured`. |
-| `DATA_GRAPHQL_URL` | Optional, read only without `DATA_DATABASE_URL`. The data plane's GraphQL endpoint, an http(s) URL without a user name, password, query string or fragment (startup refuses one; logs show only its scheme, host, port and path), where `createAnnotation` asks (field `seriesExists(id)`, no token) whether a new annotation's series exists; a series with no observations counts, as with `DATA_DATABASE_URL`. The data plane must serve `seriesExists`, or every check fails closed. With neither this nor `DATA_DATABASE_URL`, the check is skipped and the backend logs that once at startup. If the data plane can't be reached, times out or doesn't answer cleanly, the annotation is not created and the mutation fails with `extensions.code = DATA_PLANE_UNAVAILABLE` (message `Couldn't check the series right now; try again`). In Kubernetes: `http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql`, the gateway's in-cluster address, so the request takes the same `/data/graphql` route as the browser's. |
-| `DATA_GRAPHQL_HOST` | Optional. The `Host` header sent with `DATA_GRAPHQL_URL` requests: the backend's own route hostname, `<slug>.localhost` in a branch namespace and `localhost` in production. Unset, the URL's host is sent. |
-| `DATA_GRAPHQL_TIMEOUT_MS` | Optional, default 2000. How long one `DATA_GRAPHQL_URL` request may take, connecting included. |
+| `APP_DATABASE_URL` | Required. Database for the app plane. |
+| `DATA_DATABASE_URL` | Optional. Database for the data plane, accessed directly when configured. |
+| `DATA_GRAPHQL_URL` | Optional. Data plane GraphQL endpoint for annotation series checks when `DATA_DATABASE_URL` is unset. |
+| `DATA_GRAPHQL_HOST` | Optional. Override for the `Host` header on remote series checks; defaults to the URL’s host. Requires `DATA_GRAPHQL_URL`. |
+| `DATA_GRAPHQL_TIMEOUT_MS` | Optional, default 2000. Positive whole number of milliseconds allowed for one remote request, including connection time. Requires `DATA_GRAPHQL_URL`. |
 | `APP_DB_POOL_SIZE` | Optional, default 10. Connections in the app database pool. |
-| `DATA_DB_POOL_SIZE` | Optional, default 10. Connections in the data database pool. When the two URLs are the same, the backend opens one pool of `APP_DB_POOL_SIZE + DATA_DB_POOL_SIZE` connections for both. |
+| `DATA_DB_POOL_SIZE` | Optional, default 10. Connections in the data database pool. |
 
-Both may name the same database. `DATABASE_URL` is not read: with it set and `APP_DATABASE_URL`
+When `APP_DATABASE_URL` and `DATA_DATABASE_URL` are identical, the backend opens one pool of
+`APP_DB_POOL_SIZE + DATA_DB_POOL_SIZE` connections for both planes.
+
+With `DATA_DATABASE_URL` configured, data fields query that database. Without it, every data
+field fails with a GraphQL error whose `extensions.code` is `DATA_SERVED_REMOTELY` and message
+is `Data is served by the data plane at /data/graphql`; `systemHealth` reports `queueItems`
+as null. Setting `DATA_GRAPHQL_URL` enables annotation validation only; it does not proxy
+those data fields.
+
+Before creating an annotation, `createAnnotation` checks that its series exists in the data
+database when `DATA_DATABASE_URL` is configured. Otherwise, it sends a `seriesExists(id)`
+query to `DATA_GRAPHQL_URL` without a token. Both checks count a series with no observations
+as existing. If neither setting is configured, the backend skips this check and logs that
+choice once at startup.
+
+The remote check requires a successful HTTP response with a boolean `data.seriesExists`
+and no GraphQL errors. If the endpoint cannot be reached, times out, or returns an unusable
+response, the annotation is not created. The mutation fails with
+`extensions.code = DATA_PLANE_UNAVAILABLE` and message
+`Couldn't check the series right now; try again`. The data plane must serve `seriesExists`;
+otherwise every remote check fails closed.
+
+`DATA_GRAPHQL_URL` must be an http(s) URL with a host and without a user name, password,
+query string, or fragment. Startup rejects invalid remote settings even when a configured
+data database takes precedence. Logs show only the URL’s scheme, host, port, and path.
+
+In Kubernetes, use
+`http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql`, the
+gateway’s in-cluster address, so the check takes the same `/data/graphql` route as the
+browser’s request. Set `DATA_GRAPHQL_HOST` to the backend’s route hostname: `<slug>.localhost`
+in a branch namespace or `localhost` in production. Without this override, the request uses
+the URL’s host.
+
+`DATABASE_URL` is not read: with it set and `APP_DATABASE_URL`
 unset, the backend exits at startup with
 `DATABASE_URL is no longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. Tests still read
-`DATABASE_URL`, as one database holding both sets.
+`DATABASE_URL`, as one database holding tables for both planes.
 
 `/readyz` answers 503 only when the app database is unreachable or its migrations are pending.
 Its body reports the data database as `ok`, `unreachable`, `pending_migrations` or
@@ -201,7 +238,7 @@ export OIDC_JWKS_URL=http://localhost:8081/realms/econ-graph/protocol/openid-con
 These URLs are example identity-provider settings, not a Keycloak installation.
 The backend verifies provider access tokens and does not issue its own.
 With `OIDC_ISSUER` unset, callers are anonymous and protected operations remain
-unavailable.
+unavailable. If `OIDC_REQUIRED=true`, the backend instead refuses to start without an issuer.
 
 ### **Build and test**
 
@@ -224,7 +261,8 @@ docker exec econ-graph-db createdb -U postgres econ_graph_test
 
 ## Testing Strategy
 
-The backend employs a comprehensive testing strategy across all crates:
+The workspace tests cover components and complete workflows. For database setup, cleanup,
+and helper selection, see the [database testing guide](../docs/testing/DATABASE_TESTING.md).
 
 ### **Test Types**
 - **Unit Tests**: Fast, isolated component testing
@@ -282,10 +320,9 @@ access tokens. This server does not expose `/auth/login` or `/api/v1/series`.
 ## Security Features
 
 ### **Authentication & Authorization**
-- OAuth 2.0 integration with major providers
-- JWT-based stateless authentication
-- Role-based access control (RBAC)
-- Session management and token refresh
+- Identity-provider JWT access-token verification
+- Fine-grained role-based access control for protected operations
+- Sign-in, provider integration, and token issuance and refresh through [Keycloak](../config/keycloak/README.md)
 
 ### **API Security**
 - GraphQL query complexity analysis
@@ -328,8 +365,8 @@ kubectl get pods -n econ-graph -l app=econ-graph-backend
 
 ### **Database Migrations**
 
-From `backend/`, with the database URLs exported as above. Server startup applies pending app
-migrations to `APP_DATABASE_URL`; there is no `--migrate` server mode. The data migrations are
+From `backend/`, with the database URLs exported as above. Server startup applies pending app plane
+migrations to `APP_DATABASE_URL`; there is no `--migrate` server mode. Data plane migrations are
 applied only by `crawler migrate`, to `DATA_DATABASE_URL`
 ([database migrations](../docs/development/MIGRATIONS.md)).
 
@@ -361,8 +398,8 @@ diesel migration revert --database-url "$APP_DATABASE_URL" --migration-dir migra
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the [license](../LICENSE) for complete terms and conditions.
 
 ## Support
 
-For technical support, feature requests, or bug reports, please refer to the project documentation or contact the development team.
+For technical support, feature requests, or bug reports, see the [project documentation](../docs/README.md) or [repository issues](https://github.com/EconGraph/econ-graph/issues).
