@@ -140,8 +140,9 @@ HTTP success is insufficient when its body can contain GraphQL errors or missing
 data. Cover rejected input and unavailable dependencies at the layer that owns the
 response. A selected dependency check should fail clearly when its prerequisite
 is missing; returning success early would hide the missing verification. Rust
-`#[ignore]` requires explicit selection with `--ignored`, regardless of whether
-the test runs locally or in CI.
+`#[ignore]` excludes a test by default, both locally and in CI. Use `--ignored`
+to select only ignored tests or `--include-ignored` to run them alongside the
+ordinary tests.
 
 The existing [crawler soak target](../../backend/crates/econ-graph-crawler/tests/soak.rs)
 checks queue completion, duplicate claims, retry spacing, and request-rate limits
