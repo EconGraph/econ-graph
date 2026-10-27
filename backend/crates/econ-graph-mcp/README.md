@@ -41,7 +41,8 @@ Run these commands from `backend/` with the repository's Rust toolchain and Post
 client libraries available. For the library suite, set `DATABASE_URL` to a reachable,
 disposable PostgreSQL database; the default is `postgres://localhost/econ_graph_test`.
 The core test helper is compiled as a dependency here, so it connects to that database
-without starting a container or applying migrations.
+without starting a container or applying migrations. Leave `CHART_API_SERVICE_URL` unset
+for this suite because its server-creation test checks the default service hostname.
 
 For a newly created empty test database, install the Diesel CLI with PostgreSQL support
 and apply both planes' migrations before running the library tests:
@@ -68,10 +69,11 @@ requires a running Docker daemon and access to the PostgreSQL image:
 cargo test -p econ-graph-mcp --test mcp_server_integration_tests
 ```
 
-No AI provider is required by either suite. To exercise chart-service responses, run the
-chart API service and set `CHART_API_SERVICE_URL` to its base endpoint, including
-`/api/chart`; the server appends `/generate`. The integration suite still permits service
-failure, so inspect the chart response separately when verifying that service.
+No AI provider is required by either suite. To exercise chart-service responses in
+`mcp_server_integration_tests`, run the chart API service and set `CHART_API_SERVICE_URL`
+for that target to its base endpoint, including `/api/chart`; the server appends
+`/generate`. The integration suite still permits service failure, so inspect the chart
+response separately when verifying that service.
 
 ## License
 
