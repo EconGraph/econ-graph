@@ -95,18 +95,28 @@ resources; it also creates missing Secrets and runs the data plane migration Job
 before applying the backend and crawler worker. It is broader than a pod restart.
 Before schema changes, use the [backup procedures](BACKUPS.md). Immediately before
 deploying, check for running backup or migration Jobs and transactions that could
-block migrations:
+block migrations. Record the current worker replica count before the precheck so
+you can restore it if you abandon the deployment:
 
 ```bash
+egk get deployment/crawler-worker -o jsonpath='{.spec.replicas}{"\n"}'
 ./scripts/deploy/precheck-db-migration.sh --stop-crawler
 ```
 
 The precheck stops the crawler worker after checking for active Jobs, then checks
 for long-running or idle transactions. It lists blocking sessions without ending
-them. If it fails, resolve the reported cause before deploying; if abandoning the
-deploy, follow its printed command to restore the worker. On a successful deploy,
-`deploy.sh` restores the worker from its manifest only after data migrations succeed.
-If the migration Job fails, deployment stops and the worker remains stopped.
+them. If it fails after scaling the worker down, it prints a command to restore the
+previous replica count. Resolve the reported cause before deploying. A successful
+precheck leaves the worker stopped and does not print that recovery command. If
+you then abandon the deployment before running `deploy.sh`, restore the count you
+recorded with `egk scale deployment/crawler-worker --replicas=<previous-count>`.
+
+On a successful deploy, `deploy.sh` restores the worker from its manifest only after
+data migrations succeed. If the migration Job fails, deployment stops and the worker
+remains stopped. Investigate the failure and establish that the worker's image is
+compatible with the resulting database schema before restoring it. If a deployment
+fails before reaching migrations and you abandon it, restore the recorded count
+only after checking that the failure left the worker safe to run.
 
 Choose **one** deployment command according to the intended public host:
 
