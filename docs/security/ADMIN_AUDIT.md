@@ -48,7 +48,8 @@ that is correct for all deployments.
 The Gateway uses the connecting peer's address unless that peer belongs to the
 configured pod CIDRs. For a peer in those CIDRs (including the Cloudflare Tunnel
 connector), it selects the rightmost `X-Forwarded-For` address outside those
-CIDRs. It replaces the header with that single selected address. Any pod can
+CIDRs, when present. If all entries are within those CIDRs, it uses the leftmost
+entry. It replaces the header with that single selected address. Any pod can
 claim an address that way; see the
 [public-site configuration](../../k8s/README.md#-public-site-cloudflare-tunnel).
 
