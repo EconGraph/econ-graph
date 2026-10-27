@@ -57,7 +57,11 @@ Detailed viewer for individual financial statements with interactive features.
 - Line item details with trend indicators
 - Query-backed annotation display
 - Educational content integration
-- Loading and error displays
+- Suspense loading fallback
+
+Statement and annotation query failures propagate to the nearest host error
+boundary. Wrap the viewer in an error boundary to provide a contained failure
+display.
 
 Annotation creation and subscriptions use no-op stand-ins, and the edit/delete
 callbacks are empty. Enabling `showCollaborativeFeatures` does not connect a live
