@@ -24,16 +24,23 @@ Open `http://localhost:6006`. Useful starting points are:
 | `Financial/FinancialStatementViewer` | `Default`, `BeginnerUser`, `AdvancedUser`, `ExpertUser` |
 
 These variants change component args such as `userType` and educational features.
-They do not select loading or error responses. Inspect or edit the `args` in the
+They do not select loading or error responses. Use the **Controls** panel to change
+args interactively, or inspect and edit the `args` in the
 [dashboard stories](../src/components/financial/FinancialDashboard.stories.tsx) or
 [statement viewer stories](../src/components/financial/FinancialStatementViewer.stories.tsx)
-to reproduce a particular prop combination. For responsive inspection, open the
-story canvas in its own browser tab and resize it or use browser device emulation.
+to save a particular prop combination.
 
-[`.storybook/main.ts`](../.storybook/main.ts) registers only the onboarding and
-links addons. The controls and viewport parameters in `preview.tsx` do not enable
-those addons, so this workflow does not depend on a Controls panel or Viewport
-toolbar.
+Storybook 10 includes [Controls and Viewport as built-in Essentials](https://storybook.js.org/docs/essentials);
+they need no addon entries, and [`.storybook/main.ts`](../.storybook/main.ts) does
+not disable them. Use the **Viewport** toolbar to inspect the built-in device
+sizes. You can also open the story canvas in its own browser tab and resize it or
+use browser device emulation.
+
+The custom Mobile, Tablet, and Desktop definitions in `preview.tsx` use the legacy
+`viewport.viewports` property. Storybook 10 reads custom definitions from
+[`viewport.options`](https://storybook.js.org/docs/essentials/viewport#configuration),
+so those definitions do not configure the toolbar's choices. Use the built-in
+viewports for this setup.
 
 To check static bundling separately from the development server, run this from
 `frontend/`:
