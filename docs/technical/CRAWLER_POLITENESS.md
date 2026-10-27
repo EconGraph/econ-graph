@@ -1,21 +1,31 @@
 # Crawler Politeness
 
-Every outbound crawler request goes through one `HttpFetcher`
-(`backend/crates/econ-graph-crawler/src/http.rs`). It applies, per source:
+Every outbound crawler request goes through the shared
+[`HttpFetcher`](../../backend/crates/econ-graph-crawler/src/http.rs). It tracks rate and
+concurrency limits per source and applies the following policies:
 
-- **Rate limit**: a token bucket (`governor`) at `requests_per_second` with `burst`; callers wait
-  for a permit rather than dropping requests.
+- **Rate limit**: a token-bucket-style GCRA limiter at `requests_per_second` with
+  `burst`; callers wait for a permit rather than dropping requests.
 - **Concurrency limit**: at most `max_concurrency` in-flight requests.
-- **Timeout**: 30 s per request (`CRAWLER_HTTP_TIMEOUT_SECS` on the worker).
-- **User-Agent**: `EconGraph/<version> (+https://econgraph.com; support@econgraph.com)`. download.bls.gov refuses a User-Agent that links to github.com. The SEC crawler sends `EconGraph support@econgraph.com` by default.
-- **In-process retries**: up to 2 extra attempts for rate-limit and transient errors, jittered
-  exponential backoff, honouring `Retry-After`. After that the queue reschedules the job
-  (see [CRAWLER_DEPLOYMENT_GUIDE.md](./CRAWLER_DEPLOYMENT_GUIDE.md#retries)).
+- **Timeout**: ordinary requests default to 30 s (`CRAWLER_HTTP_TIMEOUT_SECS` on the worker).
+  Reference-file downloads use the greater of 120 s and the configured timeout.
+- **User-Agent**: the worker sends
+  `EconGraph/<version> (+https://econgraph.com; support@econgraph.com)`, including for SEC jobs.
+  download.bls.gov refuses a User-Agent that links to github.com. The standalone SEC crawler
+  defaults to `EconGraph support@econgraph.com`.
+- **In-process retries**: the fetcher makes up to two extra attempts for rate-limit and
+  transient errors. It uses exponential backoff with jitter and honors `Retry-After`.
+  When `Retry-After` exceeds 5 s, the fetcher returns the error immediately so the queue can
+  defer the job.
+  Reference-file downloads make no extra attempts, avoiding repeated long downloads within
+  one discovery job. Errors returned to the worker follow the queue retry rules below.
 - **Secrets**: `api_key`, `registrationkey` and `UserID` query parameters are redacted in logs and errors.
 
 ## Per-source policy
 
-Defaults from `SourcePolicy::default_for` (`src/policy.rs`); an adapter may override its own.
+Defaults come from
+[`SourcePolicy::default_for`](../../backend/crates/econ-graph-crawler/src/policy.rs);
+an adapter may override its source's policy.
 
 | Source | Rate | Burst | Concurrency | API key |
 |---|---|---|---|---|
@@ -26,7 +36,10 @@ Defaults from `SourcePolicy::default_for` (`src/policy.rs`); an adapter may over
 | SEC | 8/s (SEC allows 10/s) | 8 | 4 | none |
 | all others | 1/s | 1 | 2 | none |
 
-Queue retries: `max_retries` 3, backoff 30 s doubling up to 30 min.
+Queue jobs default to `max_retries` 3: a job fails when its counted failures reach three.
+Transient failures count toward that limit; rate-limit deferrals do not. Queue backoff starts
+at 30 s and doubles up to 30 min. A supplied `Retry-After` sets the rate-limit deferral instead.
+See [Retries](./CRAWLER_DEPLOYMENT_GUIDE.md#retries) for the queue's error classification.
 
 ## Request patterns
 
@@ -42,8 +55,10 @@ Queue retries: `max_retries` 3, backoff 30 s doubling up to 30 min.
 
 - Change a default in `SourcePolicy::default_for`, or override `SourceAdapter::policy` in the
   source's adapter. Rebuild and redeploy the worker.
-- Throughput across sources: `CRAWLER_CONCURRENCY`. Per-source limits still cap each source.
+- `CRAWLER_CONCURRENCY` controls concurrent jobs across sources. Per-source limits still cap
+  each source.
 - A source that keeps returning 429 / auth errors is paused for `CRAWLER_PAUSE_SECS` after
   `CRAWLER_PAUSE_AFTER` consecutive failures.
-- Split sources across workers with `CRAWLER_SOURCES` only if they are separate deployments;
-  rate limits are per process.
+- To split sources across workers, use separate deployments with nonoverlapping
+  `CRAWLER_SOURCES` filters. Rate limits are per process: replicas serving the same source each
+  enforce the full limit independently, multiplying the possible traffic to that source.
