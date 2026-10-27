@@ -182,7 +182,8 @@ persists those results through the shared
 upserts `series_metadata` by source and external ID; fetching upserts `economic_series`
 and `data_points`. Indicator names and descriptions come from refreshed dataset codes,
 with response-carried names as a fallback. The source guide explains the reference
-refresh, unchanged-version probes, and storage of `lastupdated` as the observation vintage.
+refresh and storage of `lastupdated` as the observation vintage. The adapter module's
+“Re-crawls” section explains how unchanged-version probes can skip full downloads.
 
 The adapter uses the World Bank defaults in
 [`SourcePolicy`](../../backend/crates/econ-graph-crawler/src/policy.rs): a sustained
