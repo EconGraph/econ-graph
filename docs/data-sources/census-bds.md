@@ -39,7 +39,7 @@ for one variable and geography. The adapter keeps `YEAR` as January 1 and the va
 and assigns "Count" as the units for every series. It does not request county,
 metro or CBSA series, or breakdowns by industry, firm age or firm size.
 
-## Sample (recorded)
+## Samples and fixtures
 
 [`bds_estab_us.json`](../../backend/crates/econ-graph-crawler/tests/fixtures/census/bds_estab_us.json)
 is a fixture with a JSON array of string rows, header first and geography last.
