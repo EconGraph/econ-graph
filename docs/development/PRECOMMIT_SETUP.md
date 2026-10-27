@@ -70,7 +70,7 @@ pre-commit run --hook-stage pre-push --all-files
 Hooks are selected by filename patterns and exclusions in [.pre-commit-config.yaml](../../.pre-commit-config.yaml). A hook can be skipped when no selected file matches. Selecting staged files or using `--all-files` determines which hooks are triggered; local commands can still operate on a whole workspace or project.
 
 - **Rust:** `rust-fmt` runs `cargo fmt --all` and rewrites backend files. `rust-clippy` checks all backend targets and features with the configured lint exceptions. Both are triggered by matching backend Rust files.
-- **Frontend:** Prettier checks formatting; ESLint checks JavaScript and TypeScript; `frontend-jsdoc` checks JSDoc with a warning budget; `typescript-check` runs `tsc --noEmit`. These hooks target `frontend`; admin frontend formatting, lint, and type-check hooks are commented out. The ESLint and JSDoc commands scan their configured source globs, and TypeScript checks the project.
+- **Frontend:** The Prettier hook does not forward selected paths to its checker; use the direct check below. ESLint checks JavaScript and TypeScript; `frontend-jsdoc` checks JSDoc with a warning budget; `typescript-check` runs `tsc --noEmit`. These hooks target `frontend`; admin frontend formatting, lint, and type-check hooks are commented out. The ESLint and JSDoc commands scan their configured source globs, and TypeScript checks the project.
 - **Security:** `rust-audit` checks backend dependencies when the Cargo manifest or lockfile matches. `npm-audit` runs the shared audit helper for both frontends, using each package's allowlist, when package files, the helper, or allowlists match.
 - **General files:** Hooks check YAML, JSON, TOML, merge conflicts, and added files over 5,000 KB. Trailing-whitespace, end-of-file, and mixed-line-ending hooks can rewrite files; line endings are fixed to LF. Markdown and text files are excluded from the whitespace and end-of-file fixers, and other exclusions are recorded in the configuration.
 - **Documentation:** `markdownlint` checks Markdown using [.markdownlint.json](../../.markdownlint.json), also used by the Docs Checks workflow.
@@ -94,7 +94,13 @@ If you used another installer, put that installation's executable directory on `
 
 ### Formatting failures
 
-These commands start from the repository root and use subshells so the first directory change does not affect the next command:
+The `frontend-prettier` hook wraps `npx prettier --check` in `bash -c` without forwarding the selected paths. Check frontend formatting directly from the repository root:
+
+```bash
+(cd frontend && npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,css,md}")
+```
+
+To apply formatting fixes, use the commands below. These commands start from the repository root and use subshells so the first directory change does not affect the next command:
 
 ```bash
 (cd backend && cargo fmt --all)
