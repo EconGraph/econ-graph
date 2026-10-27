@@ -1,64 +1,79 @@
 # EconGraph MCP
 
-Model Context Protocol server implementation for the EconGraph system, providing AI model integration for economic data access. This crate enables AI assistants to interact with economic data through a standardized protocol, bridging the gap between AI models and economic data systems.
+This crate lets AI assistants search economic series, retrieve observations and metadata,
+and request visualizations through the Model Context Protocol (MCP). It provides the
+backend's MCP request handler and economic-data tools, using GraphQL for data reads.
 
-## Features
+## Interface
 
-- **MCP Server**: Full Model Context Protocol server implementation
-- **AI Integration**: Seamless integration with AI models and assistants
-- **Economic Data Access**: Secure access to economic data through AI interfaces
-- **Protocol Compliance**: Full compliance with MCP specification
-- **Authentication**: Secure authentication for AI model access
-- **Data Filtering**: Intelligent data filtering and access control
+The JSON-RPC handler supports `tools/list`, `tools/call`, `resources/list`, and
+`resources/read`. Its tools search series, retrieve series data with optional date and
+result limits, retrieve series metadata, and request chart configurations. Resources expose
+the data-source list and series catalog. Visualization requests use the chart API service;
+if it is unavailable or returns no chart configuration, the tool returns the series data
+for manual visualization.
+
+The backend exposes `POST /mcp` when the `mcp` build flag is enabled. Its
+[route](../econ-graph-backend/src/mcp_routes.rs) requires a valid bearer token for an active
+account with the `api:mcp` role before calling this crate's handler. Authentication belongs
+to that backend route; callers embedding the handler must supply their own access checks.
+See the [MCP server guide](../../../docs/technical/MCP_SERVER.md) for tool arguments and
+backend configuration.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure MCP protocol compliance, AI integration, and data access functionality work correctly.
+Library tests exercise tool and resource definitions, argument validation, JSON-RPC
+handling, errors, concurrent requests, and visualization fallback data. Most use a real
+PostgreSQL connection, including tests that invoke the handler directly. They do not
+exercise the backend route's authentication or conduct conversations with AI models.
 
-### Test Types
+The `mcp_server_integration_tests` target starts PostgreSQL containers, applies data plane
+and app plane migrations to each database, and seeds series and observations for data
+retrieval and visualization checks. It calls server methods directly to check stored data,
+date filtering, errors, and concurrent requests. Visualization checks allow the data
+fallback when the chart service is unavailable. Even the chart API success-named test
+accepts a failed service call, so a passing suite does not establish successful live chart
+rendering.
 
-#### **Unit Tests**
-- **Purpose**: Test individual MCP components in isolation
-- **Examples**: Protocol message handling, data access logic, authentication, filtering
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
+### Running tests
 
-#### **Integration Tests**
-- **Purpose**: Test MCP server with real AI model interactions
-- **Examples**: End-to-end AI model communication, data access workflows, protocol compliance
-- **Benefits**: Catch integration issues, test real-world scenarios, validate AI interactions
+Run these commands from `backend/` with the repository's Rust toolchain and PostgreSQL
+client libraries available. For the library suite, set `DATABASE_URL` to a reachable,
+disposable PostgreSQL database; the default is `postgres://localhost/econ_graph_test`.
+The core test helper is compiled as a dependency here, so it connects to that database
+without starting a container or applying migrations.
 
-#### **Protocol Tests**
-- **Purpose**: Validate MCP protocol compliance and message handling
-- **Examples**: Protocol message parsing, response generation, error handling, compliance validation
-- **Benefits**: Ensure protocol compliance, validate message handling, test error scenarios
-
-#### **AI Integration Tests**
-- **Purpose**: Test AI model integration and data access functionality
-- **Examples**: AI model communication, data filtering, access control, authentication
-- **Benefits**: Ensure AI integration works, validate data access, test security measures
-
-### Running Tests
+For a newly created empty test database, install the Diesel CLI with PostgreSQL support
+and apply both planes' migrations before running the library tests:
 
 ```bash
-# Run all tests
-cargo test
+diesel migration run --migration-dir migrations/data
+diesel migration run --migration-dir migrations/app
+cargo test -p econ-graph-mcp --lib
 
-# Run specific test modules
-cargo test mcp_server
-cargo test protocol
-cargo test integration
-
-# Run with AI model testing
-AI_MODEL_TESTING=true cargo test
+# Focus on JSON-RPC handler tests using the same database setup.
+cargo test -p econ-graph-mcp --lib test_mcp_handler
 ```
 
-### Test Infrastructure
+The library tests do not seed economic series. Tests using the fixed series ID
+`550e8400-e29b-41d4-a716-446655440000` expect it to be absent, so use a fresh database
+rather than a copy of populated application data. See
+[database testing](../../../docs/testing/DATABASE_TESTING.md) for helper behavior and
+[database migrations](../../../docs/development/MIGRATIONS.md) for migration details.
 
-- **AI Model Mocking**: Controlled testing of AI model interactions
-- **Protocol Testing**: Comprehensive MCP protocol compliance validation
-- **Data Access Testing**: Secure data access and filtering validation
-- **Authentication Testing**: AI model authentication and authorization testing
+The integration target manages its own PostgreSQL 18 containers and database setup. It
+requires a running Docker daemon and access to the PostgreSQL image:
+
+```bash
+cargo test -p econ-graph-mcp --test mcp_server_integration_tests
+```
+
+No AI provider is required by either suite. To exercise chart-service responses, run the
+chart API service and set `CHART_API_SERVICE_URL` to its base endpoint, including
+`/api/chart`; the server appends `/generate`. The integration suite still permits service
+failure, so inspect the chart response separately when verifying that service.
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the
+[LICENSE](../../../LICENSE) file for complete terms and conditions.
