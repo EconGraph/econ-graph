@@ -7,7 +7,7 @@ plans and permissions design record in Linear:
 https://linear.app/econgraph/document/auth-plans-and-permissions-roadmap-design-record-from-pr-176-eae73ef9ee81). This fails when a role is in one and not
 the other, when the realm defines a client role twice, when a composite role
 refers to an econ-graph-api role that the realm does not define, when the
-`admin` or `super_admin` composite lacks a catalog role, or when the `user`
+`admin` or `super_admin` composite lacks a non-catalog capability, or when the `user`
 composite or the realm's default role grants a staff (`admin.*`) role.
 
 Usage:
@@ -27,7 +27,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REALM = REPO_ROOT / "config" / "keycloak" / "econ-graph-realm.json"
 API_CLIENT = "econ-graph-api"
-# Staff composites that must grant every role in the catalog.
+# Staff composites must grant every operational capability. Catalog reads remain revocable.
 FULL_COMPOSITES = ("admin", "super_admin")
 # The composite every account holds; it and the realm's default role grant no staff role.
 USER_COMPOSITE = "user"
@@ -82,7 +82,7 @@ def check(realm, catalog):
         if composite not in realm_roles:
             problems.append(f"realm role {composite!r} is missing")
             continue
-        for name in sorted(catalog - api_roles_granted(realm_roles, composite)):
+        for name in sorted({name for name in catalog if not (name.startswith("catalog.") and name.endswith(":read"))} - api_roles_granted(realm_roles, composite)):
             problems.append(f"composite {composite!r} does not grant {name!r}")
     if USER_COMPOSITE not in realm_roles:
         problems.append(f"realm role {USER_COMPOSITE!r} is missing")

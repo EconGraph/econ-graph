@@ -41,6 +41,7 @@
 #   econ-graph-keycloak            admin-username            KEYCLOAK_ADMIN_USERNAME (default admin)
 #                                  admin-password            KEYCLOAK_ADMIN_PASSWORD (generated)
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
+#                                  anonymous-client-secret   KEYCLOAK_ANONYMOUS_CLIENT_SECRET (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
@@ -646,6 +647,7 @@ else
 fi
 add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
+add_required KEYCLOAK_ANONYMOUS_CLIENT_SECRET anonymous-client-secret
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
 apply_secret

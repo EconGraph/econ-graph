@@ -352,6 +352,11 @@ jobs:
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
 
+    # deploy.sh stops before applying anything when Secret econ-graph-keycloak lacks
+    # anonymous-client-secret, against a stub kubectl.
+    - name: Check the Keycloak Secret guard
+      run: scripts/deploy/test-keycloak-secret-guard.sh
+
     - name: Check restricted agent access and credential guards
       run: scripts/deploy/test-agent-access.sh
 
@@ -570,6 +575,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         scripts/keycloak/test-check-keycloak-roles.sh
         scripts/keycloak/test-render-realm.sh
+        python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
 
     - name: Check the branch-clone delete safety checks
@@ -847,6 +853,26 @@ jobs:
           grep -Fq "test $name ... ok" "$log"
           grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
         done
+      working-directory: backend
+
+    - name: Run catalog and anonymous permission regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
+        grep -Eq '^test result: ok\. 15 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
+        cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 6 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
+        cargo test -p econ-graph-services --lib services::series_check::tests::readable_series_exists_applies_the_plane_answer_and_the_callers_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-plane-grants.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-plane-grants.log"
+        cargo test -p econ-graph-services --lib services::series_check::tests::skip_accepts_every_series_but_none_against_catalog_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-skip.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-skip.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend series_check_startup_tests::neither_with_sign_in_refuses_to_start -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-startup.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-startup.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend databases_tests::the_data_plane_check_agrees_with_the_database_check -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-preflight.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-preflight.log"
       working-directory: backend
 
     - name: Run mapped trusted-proxy regression (required)

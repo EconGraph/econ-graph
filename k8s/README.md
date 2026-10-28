@@ -164,6 +164,15 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
   back, and is the only way to downgrade Keycloak (never `kubectl rollout undo` or
   `set image`); see the [v4.0.0 QA plan](../docs/release/v4.0.0-qa.md). The Deployment
   uses `Recreate`, and `deploy.sh` waits for the new Keycloak before applying the realm.
+- The backend, Keycloak and the realm import read the anonymous catalog reader's credential
+  from `econ-graph-keycloak/anonymous-client-secret`. A Secret written before that key
+  existed stops `deploy.sh` before it applies anything, with
+  `Run scripts/deploy/create-secrets.sh`. Run it (every existing value is kept and the key is
+  generated), then deploy again:
+  `./scripts/deploy/create-secrets.sh && ./scripts/deploy/deploy.sh`.
+- The realm import also stops while the `catalog-public` role holds anything but
+  `econ-graph-api` `catalog.*:read` roles; remove the composites its log names, in the admin
+  console, and deploy again. See [catalog access](../config/keycloak/README.md#catalog-access-including-anonymous-visitors).
 
 ## 🌐 Accessing the Application
 
@@ -516,9 +525,10 @@ The data migrations go to the data database and the app migrations to the databa
 No service applies the data migrations at startup. `deploy.sh` runs the Job `crawler-migrate`
 (`manifests/crawler-migrate-job.yaml`: `/app/crawler migrate` from the crawler-worker image,
 reading `data-database-url`) after PostgreSQL is ready and before it applies the backend and
-the crawler-worker. A failed Job stops the deploy and prints its logs. The Job runs only in a
-namespace that owns a data database, i.e. whose `econ-graph-secrets` has the key
-`data-database-url`; without that key `deploy.sh` skips it. The backend applies the app
+the crawler-worker. A failed Job stops the deploy and prints its logs. Without the key
+`data-database-url` in `econ-graph-secrets`, `deploy.sh` stops before applying the backend:
+with sign-in on and no data database, the backend refuses to start (it could not apply catalog
+grants to annotations). `scripts/deploy/create-secrets.sh` writes the key. The backend applies the app
 migrations itself at startup. `deploy.sh --dry-run` prints every command of the deploy,
 including the Job, and changes nothing.
 
@@ -545,7 +555,7 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | the data database (`postgresql`), its init script |
 | `econ-graph-app-postgres` | `postgres-password` (`APP_POSTGRES_PASSWORD`, generated), `app-password` (`APP_POSTGRES_APP_PASSWORD`, generated) | the app database (`app-postgres`), its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
-| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |
+| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, `anonymous-client-secret`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords and the anonymous client secret are generated on the first run, the username defaults to `admin` | Keycloak, the realm import and the backend (`anonymous-client-secret`) |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
