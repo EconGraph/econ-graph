@@ -106,11 +106,12 @@
 # --dry-run runs every check against the cluster and prints, per Secret, the
 # keys it would write and how each value was resolved; it writes nothing.
 #
-# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
-# and its KUBECONFIG, on that kubectl's current context (or --context). Run by hand with none
-# of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
-# kubeconfig when copies are kept in ~/.cache/econgraph, and says so
-# (cluster_role_default_kubectl in lib/cluster-role.sh).
+# Other environment: NAMESPACE (default econ-graph), KUBECTL and its
+# KUBECONFIG, on that kubectl's current context (or --context). Run by hand
+# without KUBECTL, it uses the kind cluster's own kubectl kept in
+# ~/.cache/econgraph, with KUBECONFIG if that is set and the kind cluster's
+# kubeconfig kept there if not, and says so; without those copies it stops
+# (cluster_role_default_kubectl in lib/cluster-role.sh). Never plain kubectl.
 
 set -euo pipefail
 # Never trace: the values handled below are credentials.
@@ -183,7 +184,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 # --context=NAME replaces an inherited CLUSTER_ROLE_CONTEXT before the kubectl
 # is chosen, so it is the same kubectl as a run without the inherited one.
 if [[ -n "$CONTEXT_ARG" ]]; then unset CLUSTER_ROLE_CONTEXT; fi
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 
 # --context=NAME pins that context, replacing an inherited one (as
