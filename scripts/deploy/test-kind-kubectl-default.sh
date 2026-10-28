@@ -226,6 +226,17 @@ expect_rootful "deploy.sh"
 grep -qF " config use-context kind-econ-graph" "$LOGS/kind-kubectl.log" ||
     fail "deploy.sh did not switch the kind kubectl to kind-econ-graph"
 
+# The operator's shell exports DOCKER_HOST for the rootless daemon: kind and
+# docker still run on the rootful one.
+run env PUBLIC_HOST= DOCKER_HOST=unix:///run/user/1000/docker.sock "$TREE/scripts/deploy/deploy.sh"
+expect "deploy.sh with a rootless DOCKER_HOST" nonzero "fake kind kubectl: refusing to apply" \
+    "--context kind-econ-graph apply -f k8s/manifests/namespace.yaml"
+expect_rootful "deploy.sh with a rootless DOCKER_HOST"
+run env DOCKER_HOST=unix:///run/user/1000/docker.sock "$DEPLOY/backup-keycloak-db.sh" --dry-run
+expect "backup-keycloak-db.sh --dry-run with a rootless DOCKER_HOST" 0 "dry run on context kind-econ-graph" \
+    "--context kind-econ-graph get namespace kube-system"
+expect_rootful "backup-keycloak-db.sh --dry-run with a rootless DOCKER_HOST"
+
 # --- cutover-to-gateway.sh -----------------------------------------------------------
 run env FAKE_FAIL="get namespace econ-graph" "$DEPLOY/cutover-to-gateway.sh" --dry-run
 expect "cutover-to-gateway.sh --dry-run" nonzero "namespace econ-graph not found" \
