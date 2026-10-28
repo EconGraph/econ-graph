@@ -1,75 +1,97 @@
 # FHFA House Price Index
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/fhfa.rs`. Fixtures:
-`tests/fixtures/fhfa/`. No key.
+The [FHFA adapter](../../backend/crates/econ-graph-crawler/src/sources/fhfa.rs) reads the
+public HPI master CSV without an API key. Its [test fixtures](../../backend/crates/econ-graph-crawler/tests/fixtures/fhfa/README.md)
+contain synthetic values; they are separate from the downloaded source rows shown below.
 
-## What we fetch today
+## Discovery and fetching
 
-- **Discovery and fetch**: both download the HPI master CSV,
-  `GET https://www.fhfa.gov/hpi/download/monthly/hpi_master.csv` — one file holding every
-  HPI series and period. Columns are found by header name. Discovery and every fetch batch
-  download the same file; a process-local in-flight reservation keyed by the URL stops two
-  workers downloading it at once (the second gets a retryable `Busy` instead of making a
-  redundant request).
-- **Scope**: rows with `hpi_type` `traditional`, `hpi_flavor` `purchase-only` or
-  `all-transactions`, `frequency` `monthly` or `quarterly`, and `level`
-  `USA or Census Division` or `State` — the United States, the nine census divisions, and
-  the states and DC. Every other row (metros, expanded-data, non-metro, distress-free, ...)
-  is skipped without being parsed.
-- **Series and ids**: each series is in dataset `fhfa_hpi`
-  (`data/datasets/fhfa.toml`), with dimensions `hpi_type`, `hpi_flavor`, `frequency`,
-  `level`, `place_id` and `seasonal_adjustment` (`nsa` for the `index_nsa` column, `sa` for
-  `index_sa`) — the two value columns become separate series. Ids are canonical dataset
-  ids, e.g. `fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa`. A
-  series exists only when its column has at least one value (`index_sa` is empty for many
-  series). The made-up `{CODE}HPI` ids (e.g. `USHPI`, `CAHPI`) are gone.
-- **Kept**: `yr` + `period` (as the month's or quarter's first day), `index_nsa`,
-  `index_sa`.
-- **Dropped**: nothing published per observation beyond the two index columns; there are no
-  derived year-over-year or quarter-over-quarter fields in the master file.
+Discovery and series fetching use the same [HPI master CSV](https://www.fhfa.gov/hpi/download/monthly/hpi_master.csv),
+which combines monthly and quarterly indexes. One read serves a whole fetch batch, and the
+batch limit covers every series the adapter ingests. Columns are found by header name.
+Reference-data refresh reads the file separately to label `place_id` codes from
+`place_name`, using its own ETag cache.
 
-**The master CSV's layout has never been verified against a live download.** The column
-names and order, the `hpi_type`/`hpi_flavor`/`frequency`/`level` values, and the division
-and state `place_id`s are carried over from FHFA's public documentation, not a recording;
-see `tests/fixtures/fhfa/README.md` for the pre-release checks QA runs (URL, header,
-`place_id` values, which series have `index_sa`, and the base periods the adapter states as
-units).
+Discovery and fetching use conditional requests with stored `ETag` or `Last-Modified`
+values when available, with a SHA-256 body hash as a fallback. Without usable HTTP
+validators, an unchanged check can still download the body, but the matching hash avoids
+parsing it again. Discovery tracks the file under its own validator key; an unchanged
+result leaves the catalog intact. A fetch batch uses stored validators only when every
+member was fetched from the same file with the current parser version. An unchanged
+result marks the series crawled and preserves its points. A new series, differing stored
+validators, or an obsolete parser version requires a full read.
 
-## Sample
+A process-local in-flight reservation keyed by the master URL prevents discovery and
+fetch batches in the same process from downloading it concurrently. A second worker
+receives retryable `Busy` instead of making a request. The reservation does not coordinate
+separate worker processes or cover the reference-data request.
 
-Assumed file layout (`hpi_master.csv`, **not a recording**; values illustrative):
+## Scope and series
+
+The adapter selects rows with `hpi_type` equal to `traditional`, `hpi_flavor` equal to
+`purchase-only` or `all-transactions`, `frequency` equal to `monthly` or `quarterly`, and
+`level` equal to `USA or Census Division` or `State`. These cover the United States, the
+nine census divisions, and the states and DC. Other rows, including metros, expanded-data,
+non-metro and distress-free indexes, are skipped before their dates and values are parsed.
+
+Selected rows supply five dimensions: `hpi_type`, `hpi_flavor`, `frequency`, `level` and
+`place_id`. Each populated index column becomes a separate series through the sixth
+dimension, `seasonal_adjustment`: `nsa` for `index_nsa` and `sa` for `index_sa`. A series
+exists only when its column has at least one value. The adapter lowercases `level` and
+replaces spaces with hyphens for the canonical dataset ID, for example
+`fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa`.
+
+Monthly coverage is purchase-only for the United States and census divisions. Quarterly
+coverage includes both flavors at all supported geographic levels. Within this scope,
+`index_sa` is populated only for purchase-only indexes, including state indexes; the
+column remains present but empty for all-transactions rows.
+
+## Source layout and sample
+
+The downloaded master CSV has 12 columns. Checking its rows confirmed the selected
+categories, the `USA` and nine `DV_*` division codes, the 51 state and DC postal codes, and
+the seasonal-adjustment coverage described above. FHFA's [datasets page](https://www.fhfa.gov/data/hpi/datasets)
+links the master file, its [dictionary](https://www.fhfa.gov/document/d/hpi/hpi_dictionary.xlsx)
+and the [download specifications](https://www.fhfa.gov/document/d/hpi/hpi_specifications.xlsx).
+
+These two rows are reproduced from the downloaded master CSV, with all columns retained:
 
 ```csv
-hpi_type,hpi_flavor,frequency,level,place_name,place_id,yr,period,index_nsa,index_sa
-traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,10,203.17,203.78
-traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,10,206.34,206.96
+hpi_type,hpi_flavor,frequency,level,place_name,place_id,yr,period,index_nsa,index_sa,rstderr,note
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,10,429.51,427.19,,
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,10,357.88,355.61,,
 ```
 
-`index_sa` is only present for purchase-only series (every level, including states); it is
-empty, not omitted, for all-transactions series.
+The master file contains no derived year-over-year or quarter-over-quarter measures.
+Its `rstderr` and `note` columns carry standard errors and notes on some rows outside the
+adapter's scope, including notes about insufficient records and suppressed indexes.
+Both columns were empty in every in-scope row of the checked download. The adapter does
+not retain either column as observation attributes.
 
-## Frequency and revisions
+## Dates, units and revisions
 
-Monthly (purchase-only, national and census divisions) and quarterly (all levels). The
-index is a repeat-sales estimate, so every release re-estimates the whole history as new
-sale pairs arrive (from public docs): each release is effectively a new vintage of every
-observation. The file has no vintage column; a fetch ignores `since` and returns every
-observation, so each refresh overwrites the stored values with the latest estimate
-(`revision_date = date`, `is_original_release = true`, as for the other sources without
-vintage history).
+The adapter combines `yr` and `period` into the first day of the observation's month or
+quarter. Purchase-only indexes use January 1991 = 100 for monthly series and 1991Q1 = 100
+for quarterly series; all-transactions indexes use 1980Q1 = 100. The FHFA monthly and
+quarterly workbooks linked from the datasets page confirm these base periods.
 
-## Flags and footnotes
-
-None per observation in the published file. Series with too few transactions are omitted
-rather than flagged.
+FHFA's repeat-sales estimates can change throughout the history as new sale pairs arrive.
+The master file has no vintage column. When a file needs to be parsed, the adapter ignores
+`since` and returns each requested series' complete history. It stores points with
+`revision_date = date` and `is_original_release = true`, so changed estimates overwrite
+stored values under the same revision key. Earlier release vintages are not retained.
+An unchanged-file result preserves the existing values, as described above.
 
 ## Dataset mapping
 
-One dataset for the HPI master file, already in effect (`data/datasets/fhfa.toml`):
+All series belong to [`fhfa_hpi`](../../backend/crates/econ-graph-crawler/data/datasets/fhfa.toml).
+The dataset stores one decimal value per observation, with the two source index columns
+separated by `seasonal_adjustment`.
 
-| Role | Columns |
+| Role | Mapping |
 |---|---|
 | Dimensions | `hpi_type`, `hpi_flavor`, `frequency`, `level`, `place_id`, `seasonal_adjustment` |
-| Measures | `value` (decimal) |
-| Attributes | none |
-| Shape | long; the file's two value columns (`index_nsa`, `index_sa`) become separate series via the `seasonal_adjustment` dimension rather than a wide row; `revision_date = date` (no vintage column; each refresh overwrites) |
+| Measure | `value` (decimal), from `index_nsa` or `index_sa` |
+| Observation date | `yr` and `period`, mapped to the month's or quarter's first day |
+| Attributes | None |
+| Shape | Long; one value per series and observation date |

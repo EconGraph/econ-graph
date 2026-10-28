@@ -1,178 +1,169 @@
-# Storybook Testing Workflow
+# Storybook testing workflow
 
-This document outlines the Storybook testing setup and workflow for the frontend application.
+Use Storybook to inspect frontend components with fixture data and compare their
+exported variants. Browser inspection, automated rendering checks, and screenshot
+regression tests establish different things; this setup provides no screenshot
+baselines or image comparisons.
 
-## Overview
+## View and build stories
 
-Storybook testing enables us to test UI components in isolation using the same test infrastructure and mocks as our regular tests. This provides visual testing capabilities and component-level testing that complements our existing test suite.
+From the repository root, use the Node version in [`.nvmrc`](../../.nvmrc) and install
+the locked frontend dependencies:
 
-## Architecture
-
-### Core Components
-
-1. **Storybook Configuration** (`.storybook/`)
-   - `main.tsx` - Main Storybook configuration with Vite integration
-   - `preview.tsx` - Global decorators and parameters
-   - `test-runner.config.ts` - Test runner configuration
-
-2. **Story Files** (`src/**/*.stories.tsx`)
-   - Component stories with different scenarios
-   - Integration with existing MSW mocks
-   - Error boundary and provider setup
-
-3. **Test Infrastructure**
-   - MSW (Mock Service Worker) integration
-   - React Query provider setup
-   - Material-UI theme and localization providers
-
-## Key Features
-
-### MSW Integration
-- **Core Philosophy**: MSW is central to our testing approach
-- **Mock Scenarios**: Success, error, loading states
-- **GraphQL Responses**: Reuses existing test data
-- **Browser Compatibility**: Handles Node.js imports in browser environment
-
-### Provider Setup
-- **QueryClient**: Isolated per story for test isolation
-- **ErrorBoundary**: Catches and displays component errors
-- **ThemeProvider**: Material-UI theming
-- **LocalizationProvider**: Date picker localization
-
-### Story Organization
-- **Component Stories**: One story file per component
-- **Scenario Coverage**: Different user types and states
-- **Viewport Testing**: Mobile, tablet, desktop
-- **Error States**: Loading and error scenarios
-
-## Usage
-
-### Viewing Stories
-
-1. **Start Storybook Development Server**
-   ```bash
-   cd frontend
-   npm run storybook
-   ```
-
-2. **Open Browser**
-   Navigate to `http://localhost:6006` to see the Storybook interface
-
-3. **Browse Components**
-   - **Financial/FinancialDashboard** - Main dashboard with multiple scenarios
-   - **Financial/FinancialStatementViewer** - Statement viewer component
-
-4. **Interactive Testing**
-   - Use **Controls** panel to modify props (companyId, userType, etc.)
-   - Use **Viewport** addon to test different screen sizes
-   - Switch between stories to see different scenarios
-
-5. **Story Scenarios Available**
-   - **Default** - Basic functionality
-   - **BeginnerUser** - Simplified interface for new users
-   - **AdvancedUser** - Full feature set
-   - **ExpertUser** - Professional tools
-   - **MobileView/TabletView** - Responsive design testing
-   - **LoadingState** - Loading behavior
-   - **ErrorState** - Error handling
-
-### Development
 ```bash
-# Start Storybook development server
+cd frontend
+npm ci
 npm run storybook
+```
 
-# Build Storybook for production
+Open `http://localhost:6006`. Useful starting points are:
+
+| Sidebar component | Exported stories |
+| --- | --- |
+| `Financial/FinancialDashboard` | `Default`, `BeginnerUser`, `AdvancedUser` |
+| `Financial/FinancialStatementViewer` | `Default`, `BeginnerUser`, `AdvancedUser`, `ExpertUser` |
+
+These variants change component args such as `userType` and educational features.
+They do not select loading or error responses. Use the **Controls** panel to change
+args interactively, or inspect and edit the `args` in the
+[dashboard stories](../src/components/financial/FinancialDashboard.stories.tsx) or
+[statement viewer stories](../src/components/financial/FinancialStatementViewer.stories.tsx)
+to save a particular prop combination.
+
+Storybook 10 includes [Controls and Viewport as built-in Essentials](https://storybook.js.org/docs/essentials);
+they need no addon entries, and [`.storybook/main.ts`](../.storybook/main.ts) does
+not disable them. Use the **Viewport** toolbar to inspect the built-in device
+sizes. You can also open the story canvas in its own browser tab and resize it or
+use browser device emulation.
+
+The custom Mobile, Tablet, and Desktop definitions in `preview.tsx` use the legacy
+`viewport.viewports` property. Storybook 10 reads custom definitions from
+[`viewport.options`](https://storybook.js.org/docs/essentials/viewport#configuration),
+so those definitions do not configure the toolbar's choices. Use the built-in
+viewports for this setup.
+
+To check static bundling separately from the development server, run this from
+`frontend/`:
+
+```bash
 npm run build-storybook
 ```
 
-### Testing
+## Understand the shared preview
+
+[`.storybook/preview.tsx`](../.storybook/preview.tsx) wraps stories with Material UI
+styled-engine and theme providers, date localization using `AdapterDateFns`,
+`CssBaseline`, and React Query's `QueryClientProvider`. Add a story decorator only
+for context the component needs beyond those global providers. There is no global
+error boundary; supply one in a story if its behavior is part of the example.
+
+One module-level `QueryClient` is shared across stories and renders. It disables
+query retries and refetching on window focus, treats data as fresh for five
+minutes, and retains inactive queries for ten minutes. Switching stories does not
+clear cached data. When changing mock responses, invalidate or clear the affected
+queries, or reload the preview, so an earlier cached result does not hide the
+change.
+
+## Choose fixture responses
+
+The preview calls [`setupSimpleMSW`](../src/test-utils/mocks/simpleServer.ts).
+Despite its name, this helper replaces `global.fetch`; it does not start an MSW
+service worker or reuse the regular tests' MSW server. Requests whose URL contains
+`graphql` are handled using the JSON request body's `operationName` (or a name
+extracted from its query), variables, and the current mock scenario. Other
+requests pass through to the original fetch. The preview's `msw.handlers`
+parameter does not select responses: no MSW addon or loader consumes it.
+
+The helper maps GraphQL operation names to fixture keys. For example,
+`GetFinancialStatement` maps to `get_financial_statement`. The
+[response loader](../src/test-utils/mocks/graphql-response-loader.ts) statically
+imports JSON from
+[`graphql-responses/`](../src/test-utils/mocks/graphql-responses/) and selects the
+entry in `RESPONSE_MAP` for that key and scenario, such as
+[`get_financial_statement/error.json`](../src/test-utils/mocks/graphql-responses/get_financial_statement/error.json).
+Adding a JSON file alone does not register it: add its import and map entry too.
+A new GraphQL operation also needs an entry in `simpleServer.ts`'s `operationMap`.
+
+The default scenario is `MockScenarios.SUCCESS`. To create a response variant,
+call `setMockScenario(MockScenarios.ERROR)` before the component requests data,
+and reset it to `MockScenarios.SUCCESS` when leaving that variant. The scenario is
+module state; the preview does not reset it between stories. Check `RESPONSE_MAP`
+or `getAvailableScenarios()` before choosing a scenario, because operations
+support different subsets. A `loading` fixture returns immediately with fixture
+data; it does not delay the request or keep a fetch pending.
+
+A request's `statementId` overrides the global scenario when it is
+`error-statement-id`, `empty-statement-id`, `loading-statement-id`, or
+`not-found-statement-id`. These select `error`, `empty`, `loading`, and `not_found`
+respectively, but still require that operation/scenario pair in `RESPONSE_MAP`.
+An unknown GraphQL operation returns `data: null` and an `Unknown operation`
+error. A missing fixture key or scenario returns `data: null` with a GraphQL error
+whose code is `MOCK_NOT_FOUND`; it does not fall back to the success fixture.
+
+## Run browser checks
+
+The installed `@storybook/test-runner` package exposes the `test-storybook`
+executable. With Storybook running in another terminal and Playwright's Chromium
+installed, invoke it directly from `frontend/`:
+
 ```bash
-# Run Storybook tests (requires Storybook to be running)
-npm run test-storybook
-
-# Run with UI mode
-npm run test-storybook:ui
-
-# Run in headed mode (visible browser)
-npm run test-storybook:headed
+./node_modules/.bin/test-storybook --config-dir=.storybook --url http://127.0.0.1:6006 --disable-telemetry
 ```
 
-### CI Integration
-Storybook tests run in CI parallel to frontend integration tests:
-- **Trigger**: After `frontend-tests` job completes
-- **Parallel**: Runs alongside `frontend-integration-tests`
-- **Dependencies**: `frontend-tests` must pass first
-- **Artifacts**: Test results uploaded for debugging
+Use `--help` to inspect supported options, `--browsers firefox chromium` to select
+browsers with installed binaries, or `--listTests` to list test files. Even
+`--listTests` first requires a running Storybook. The `test-storybook` npm scripts
+currently name `@storybook/test-runner` as an executable; use the direct command
+above instead. The runner has no Playwright Test `--ui` or `--headed` mode.
 
-## Configuration Details
+The runner uses Jest with Playwright. Its hook configuration is
+`.storybook/test-runner.ts` (or `.js`), and Jest overrides use
+`test-runner-jest.config.*`. The checked-in
+[`.storybook/test-runner.config.ts`](../.storybook/test-runner.config.ts) is not
+loaded by this runner; its Playwright-shaped browser projects, retries, and
+reporters do not apply. See the [runner configuration reference](https://github.com/storybookjs/test-runner#ejecting-configuration)
+for the supported contract.
 
-### Vite Integration
-The Storybook configuration includes Vite customization to handle:
-- Node.js module externalization (`fs`, `path`)
-- Global definitions for browser compatibility
-- Alias resolution for clean imports
-
-### MSW Setup
-- **Browser Compatibility**: Node.js imports handled via Vite externalization
-- **Mock Scenarios**: Reuses existing test infrastructure
-- **GraphQL Responses**: Loads from existing test data files
-- **Error Handling**: Graceful fallbacks for missing files
-
-### Test Runner
-- **Playwright Integration**: Uses Playwright for browser automation
-- **Story Coverage**: Tests all stories automatically
-- **Visual Testing**: Screenshot comparison capabilities
-- **CI Integration**: Runs in GitHub Actions workflow
-
-## Best Practices
-
-### Story Creation
-1. **Reuse Existing Mocks**: Use established MSW scenarios
-2. **Component Isolation**: Each story should be self-contained
-3. **Error Boundaries**: Wrap components in ErrorBoundary
-4. **Provider Setup**: Include all necessary providers
-5. **Scenario Coverage**: Test different states and user types
-
-### MSW Integration
-1. **Don't Simplify**: MSW is core to testing philosophy
-2. **Use Existing Scenarios**: Leverage established mock data
-3. **Handle Node.js Imports**: Configure Vite for browser compatibility
-4. **Maintain Consistency**: Keep same patterns as regular tests
-
-### Testing Strategy
-1. **Visual Testing**: Use Storybook for component-level testing
-2. **Integration Testing**: Combine with existing test suite
-3. **CI Integration**: Run in parallel with other tests
-4. **Error Handling**: Test error states and boundaries
+The runner checks that selected stories render and executes their `play`
+functions, if present. The active stories have no `play` assertions, and this
+repository has no Storybook screenshot comparison hook or baseline setup. A
+rendering pass therefore does not establish interaction or visual regression
+coverage. CLI help and configuration loading can be checked without a browser;
+a successful story run requires the running preview and browser binaries.
 
 ## Troubleshooting
 
-### Common Issues
+- **A variant shows old data:** check the shared React Query cache and the current
+  global scenario before changing fixtures. Reloading the preview resets both.
+- **A mock returns `MOCK_NOT_FOUND`:** read the logged operation/scenario pair,
+  then check the operation mapping, static import, and `RESPONSE_MAP` entry. A
+  statement-ID override can select a scenario that the operation does not support.
+- **A browser import mentions `fs` or `path`:** trace the import back to the story
+  or mock and use browser-compatible code. The fixture loader uses static JSON
+  imports; externalizing a Node module does not provide its filesystem API in a
+  browser. Check aliases and the `global: 'globalThis'` definition in `main.ts`
+  when diagnosing resolution or global-variable errors.
+- **JSX fails to parse:** use `.tsx` for TypeScript containing JSX, as the global
+  preview does.
+- **The runner executable is missing:** run `npm ci` in `frontend/`; the dependency
+  is already declared and locked. Use the direct binary above rather than adding
+  another dependency.
+- **The runner cannot reach Storybook:** confirm the development server is
+  listening on port 6006 and that `--url` matches it. Building static files alone
+  does not serve them.
 
-1. **Node.js Import Errors**
-   - **Cause**: `fs` and `path` modules in browser environment
-   - **Solution**: Vite externalization configuration in `main.tsx`
+## CI coverage
 
-2. **JSX Parsing Errors**
-   - **Cause**: TypeScript files with JSX content
-   - **Solution**: Use `.tsx` extension for files with JSX
+The workflows do not build or test Storybook. Core CI's frontend jobs run
+TypeScript checks, Vitest coverage, and release-bundle checks; its dependent
+frontend integration job runs `test:coverage` again. These checks do not replace
+local story inspection or a Storybook runner invocation.
 
-3. **MSW Integration Issues**
-   - **Cause**: Browser compatibility with Node.js modules
-   - **Solution**: Proper Vite configuration for externalization
-
-4. **Test Runner Not Found**
-   - **Cause**: Missing `@storybook/test-runner` package
-   - **Solution**: Install with `npm install --save-dev @storybook/test-runner`
-
-### Debug Steps
-1. Check file extensions (`.tsx` for JSX files)
-2. Verify MSW setup and mock scenarios
-3. Ensure all providers are properly configured
-4. Test with `npm run build-storybook` first
-5. Check CI logs for specific error messages
-
-## Related Documentation
+Files under `frontend/`, including this guide, match Core CI's frontend path
+filter and the separate Release E2E workflow's pull-request filter. A
+documentation-only edit here can therefore incur frontend checks and the release
+Chromium suite, which builds the application and backend against a fixture-seeded
+Postgres database. Those application checks do not validate Storybook.
 
 - [Frontend Summary](../../docs/technical/FRONTEND_SUMMARY.md)
 - [CI/CD Pipeline](../../docs/development/CI_CD_PIPELINE.md)

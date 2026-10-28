@@ -11,6 +11,7 @@ on:
       - '.github/actions/**'
       - 'ci/scripts/check_action_pins.py'
       - 'ci/scripts/test_action_pins.py'
+      - 'ci/scripts/test_crawler_secrets.py'
   pull_request:
     paths:
       - '.github/workflows/**'
@@ -18,6 +19,7 @@ on:
       - '.github/actions/**'
       - 'ci/scripts/check_action_pins.py'
       - 'ci/scripts/test_action_pins.py'
+      - 'ci/scripts/test_crawler_secrets.py'
   workflow_dispatch:
 
 permissions:
@@ -70,6 +72,7 @@ jobs:
         "$python" -m pip install 'PyYAML==6.0.3'
         "$python" -m unittest discover -s ci/scripts -p 'test_action_pins.py'
         "$python" ci/scripts/check_action_pins.py
+        "$python" -m unittest discover -s ci/scripts -p 'test_crawler_secrets.py'
 
     - name: Run actionlint
       run: |

@@ -31,6 +31,8 @@ Core CI builds and smoke-tests Docker images; it does not publish or deploy them
 
 External actions and reusable workflows are pinned to full commit SHAs, with version comments for readability. Resolve updates from the action's upstream repository and update the SHA and comment together. Docker actions require an image digest; local actions use the calling commit. The Actionlint workflow enforces these rules in workflows and composite actions.
 
+The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
+
 ## Validation
 
 Run Markdown lint and relative-link checks as defined in [docs-checks.yml](docs-checks.yml). Lint workflow files with actionlint and shellcheck at the versions pinned in [actionlint.yml](actionlint.yml); per-file ignores live in [actionlint.yaml](../actionlint.yaml). The repository's [workflow validation script](../../ci/scripts/validate-ci-workflows.sh) checks YAML and basic job structure; it does not prove job-selection semantics. Its trigger check uses PyYAML's default loader, which can interpret the key on as boolean true, so trigger warnings require verification against the YAML.
