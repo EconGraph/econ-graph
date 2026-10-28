@@ -4,9 +4,9 @@
 # the app migrations, and a run with nothing pending changes nothing.
 #
 # scripts/deploy/deploy.sh deletes the previous Job, applies this one before the backend
-# and crawler-worker, and stops the deploy unless it completes. It runs only in a
-# namespace that owns a data database, i.e. whose Secret econ-graph-secrets has the key
-# data-database-url; elsewhere deploy.sh skips it.
+# and crawler-worker, and stops the deploy unless it completes. It needs the Secret
+# econ-graph-secrets's key data-database-url; without it deploy.sh stops, since the backend
+# would refuse to start.
 #
 # Image: the crawler-worker image (built from backend/Dockerfile with
 # `--target crawler-worker`), which ships /app/crawler; keep the tag in step with

@@ -45,6 +45,7 @@ services:
       KC_WEB_BASE_URL: http://localhost:3000
       KC_WEB_E2E_BASE_URL: http://localhost:${RELEASE_FRONTEND_PORT:-18081}
       KC_WEB_DIRECT_GRANTS: "true"
+      KC_ANONYMOUS_CLIENT_SECRET: anonymous-dev-only
     ports:
       - "127.0.0.1:8081:8080"
     volumes:

@@ -1,0 +1,4 @@
+annotation:create
+api:mcp
+admin.users:read
+catalog.fred:read

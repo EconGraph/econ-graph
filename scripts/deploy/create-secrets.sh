@@ -41,6 +41,7 @@
 #   econ-graph-keycloak            admin-username            KEYCLOAK_ADMIN_USERNAME (default admin)
 #                                  admin-password            KEYCLOAK_ADMIN_PASSWORD (generated)
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
+#                                  anonymous-client-secret   KEYCLOAK_ANONYMOUS_CLIENT_SECRET (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
@@ -141,6 +142,11 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
 
 if [[ "$CLOUDFLARE_DNS_ONLY" == true && "$PROMPT_TUNNEL_TOKEN" == true ]]; then
     echo "create-secrets: error: DNS-only mode cannot prompt for a tunnel token" >&2
@@ -641,6 +647,7 @@ else
 fi
 add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
+add_required KEYCLOAK_ANONYMOUS_CLIENT_SECRET anonymous-client-secret
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
 apply_secret

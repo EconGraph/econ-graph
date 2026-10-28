@@ -767,6 +767,111 @@ grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore
 run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
+# require_recreate_confirmation: before the downtime, a cluster that
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
+# but none, one that can't be read, or one noted as production) needs the prefix: a
+# matching --confirm-production, or typed at a terminal, then passed on to
+# recreate-kind-cluster.sh. rrc runs it with stdin /dev/null (no terminal); rrc_tty under a
+# pseudo-terminal (run_migrate_tty).
+# shellcheck disable=SC2016 # expanded by run_migrate's bash
+rrc_setup='source scripts/deploy/lib/cluster-role.sh
+  kube_system_uid() { [ -z "${STUB_UID_FAILS:-}" ] || return 1; echo uid-kind-cluster; }
+  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  recreate_flags=()
+  CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"'
+# shellcheck disable=SC2016
+rrc="$rrc_setup"'
+  require_recreate_confirmation </dev/null && echo "went on, flags: ${recreate_flags[*]}"'
+# shellcheck disable=SC2016
+rrc_tty="$rrc_setup"'
+  require_recreate_confirmation && echo "went on, flags: ${recreate_flags[*]}"'
+# run_migrate_tty INPUT SCRIPT [VAR=value ...]: run_migrate under a pseudo-terminal, with
+# INPUT typed ahead; killed after a minute if it waits for more.
+run_migrate_tty() {
+  local input="$1" script="$2"
+  shift 2
+  : >"$log"; rm -f "$stub_dir/mig/state.env"
+  env "$@" timeout 60 python3 -c '
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[2], sys.argv[2:])
+os.write(fd, sys.argv[1].encode())
+out = b""
+while True:
+    try:
+        data = os.read(fd, 4096)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(status))
+' "$input" bash -c '
+    log() { echo "==> $*"; }
+    die() { echo "error: $*" >&2; exit 1; }
+    kind_cluster_is_production() { CLUSTER_ROLE_REASON="stub reason"; return "$STUB_RC"; }
+    KIND_CLUSTER=econ-graph PROJECT_ROOT="$MIG_ROOT" STATE_FILE="$MIG_ROOT/state.env" DRY_RUN="${DRY_RUN:-false}"
+    eval "$MIGRATE_SRC"
+    eval "$1"' _ "$script" >"$out" 2>&1
+}
+for marker in "production uid-kind-cluster" "Production uid-other" "None uid-kind-cluster" "staging uid-kind-cluster"; do
+  if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker"; then
+    fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
+  fi
+  grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_WAS=true; then
+  fail "require_recreate_confirmation: went on without a terminal for a cluster noted as production"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind STUB_UID_FAILS=1; then
+  fail "require_recreate_confirmation: went on when the kube-system UID can't be read"
+fi
+for marker in "" "none uid-kind-cluster"; do
+  run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker" ||
+    fail "require_recreate_confirmation: refused a cluster without a production marker ('$marker'): $(cat "$out")"
+  grep -q 'went on, flags: $' "$out" || fail "require_recreate_confirmation: passed a prefix on for '$marker': $(cat "$out")"
+done
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind ||
+  fail "require_recreate_confirmation: refused a matching --confirm-production: $(cat "$out")"
+if run_migrate "$rrc" STUB_RC=1 STUB_CONFIRM=uid-othe; then
+  fail "require_recreate_confirmation: took a --confirm-production that doesn't match"
+fi
+grep -q 'does not match' "$out" || fail "require_recreate_confirmation: the mismatch was not reported: $(cat "$out")"
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" DRY_RUN=true ||
+  fail "require_recreate_confirmation: refused a dry run"
+# At a terminal: the prefix is asked and checked here, then passed on; --yes plays no part.
+run_migrate_tty $'uid-kind\n' "$rrc_tty" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" ||
+  fail "require_recreate_confirmation: refused the right prefix typed at a terminal: $(cat "$out")"
+grep -q 'Type the first 8 characters of the kube-system UID above' "$out" ||
+  fail "require_recreate_confirmation: no prompt at a terminal: $(cat "$out")"
+grep -q 'went on, flags: --confirm-production uid-kind' "$out" ||
+  fail "require_recreate_confirmation: the typed prefix is not passed on to recreate-kind-cluster.sh: $(cat "$out")"
+if run_migrate_tty $'yes\n' "$rrc_tty" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on with a wrong answer typed at a terminal"
+fi
+grep -q 'confirmation did not match' "$out" ||
+  fail "require_recreate_confirmation: the wrong answer was not reported: $(cat "$out")"
+run_migrate_tty '' "$rrc_tty" STUB_RC=1 STUB_MARKER="none uid-kind-cluster" ||
+  fail "require_recreate_confirmation: asked at a terminal for a cluster without a production marker: $(cat "$out")"
+grep -q 'Type the first 8' "$out" && fail "require_recreate_confirmation: prompted for a cluster without a production marker"
+# ...and both forward() and rollback() call it before their downtime confirmation and before
+# stopping the writers.
+for fn in forward rollback; do
+  body="$(sed -n "/^${fn}() {\$/,/^}\$/p" scripts/deploy/migrate-to-host-storage.sh)"
+  check_at="$(grep -n '^ *require_recreate_confirmation$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  confirm_at="$(grep -n '^ *confirm "This stops econ-graph' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  stop_at="$(grep -n '^ *stop_writers$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  if [ -z "$check_at" ] || [ -z "$confirm_at" ] || [ -z "$stop_at" ] ||
+    [ "$check_at" -gt "$confirm_at" ] || [ "$check_at" -gt "$stop_at" ]; then
+    fail "migrate-to-host-storage.sh ${fn}(): require_recreate_confirmation (line ${check_at:-none}) is not before the downtime confirmation (${confirm_at:-none}) and stop_writers (${stop_at:-none})"
+  fi
+done
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached

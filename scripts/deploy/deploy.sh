@@ -172,6 +172,11 @@ fi
 echo "✅ All linter checks passed - proceeding with deployment"
 echo ""
 
+# Secrets from an earlier version may lack keys this one needs: stop before applying anything.
+# shellcheck source=scripts/deploy/lib/keycloak-secret.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/keycloak-secret.sh"
+require_anonymous_client_secret || exit 1
+
 public_host_init
 
 # Apply all manifests
@@ -219,6 +224,7 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
     --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
+    --from-file=preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
@@ -247,9 +253,9 @@ fi
 
 # Data migrations: the crawler-migrate Job applies backend/migrations/data and must
 # complete before the backend and crawler-worker are applied; no service applies them at
-# startup. It runs only in a namespace that owns a data database: one whose Secret
-# econ-graph-secrets has the key data-database-url (create-secrets.sh writes it). Without
-# that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
+# startup. It needs the data database: the Secret econ-graph-secrets's key
+# data-database-url (create-secrets.sh writes it). Without that key the deploy stops, since
+# the backend would refuse to start. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
 # crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
@@ -286,7 +292,11 @@ if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
     esac
   fi
 else
-  echo "⚠️  Secret econ-graph-secrets has no data-database-url: no data database here, skipping crawler-migrate."
+  # The backend these manifests deploy has sign-in on and no DATA_GRAPHQL_URL, so without a
+  # data database it refuses to start (it could not apply catalog grants to annotations).
+  echo "❌ Secret econ-graph-secrets has no data-database-url, so the backend would refuse to start."
+  echo "   Run scripts/deploy/create-secrets.sh (it writes the key), then deploy again."
+  exit 1
 fi
 
 # Deploy application

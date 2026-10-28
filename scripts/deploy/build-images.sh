@@ -65,6 +65,7 @@ cd ../frontend
 docker build \
   --build-arg VITE_API_URL="http://localhost" \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_DATA_GRAPHQL_AUTH="${VITE_DATA_GRAPHQL_AUTH:-false}" \
   --build-arg VITE_DATA_GRAPHQL_URL="${VITE_DATA_GRAPHQL_URL:-}" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
   --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER}" \

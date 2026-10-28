@@ -93,11 +93,22 @@ async fn make_series(pool: &DatabasePool) -> String {
 }
 
 /// Runs `query` against the real schema, as `user` (or anonymous when `None`); never staff.
+/// Anonymous callers hold every catalog read, as with the default `catalog-public` grants, so
+/// these tests see annotation visibility alone.
 async fn run_as(pool: &DatabasePool, user: Option<User>, query: &str) -> async_graphql::Response {
+    let context = match user {
+        Some(user) => GraphQLContext::for_test_user(Some(user), false),
+        None => GraphQLContext::anonymous().with_anonymous_catalog_roles(
+            econ_graph_auth::Role::all()
+                .iter()
+                .copied()
+                .filter(|role| role.is_catalog()),
+        ),
+    };
     let schema = create_schema_with_data(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
-        Arc::new(GraphQLContext::for_test_user(user, false)),
+        Arc::new(context),
     );
     schema.execute(query).await
 }
