@@ -804,8 +804,15 @@ need no kubectl.
 ```bash
 scripts/deploy/deploy-branch.sh build-frontend feature/my-change \
   --context kind-econ-graph --frontend-image econ-graph-frontend:my-change
-# Build the backend from this checkout; load these branch images into kind
-# (or push them to a registry reachable by its nodes) before deployment.
+# build-frontend builds on the kind cluster's Docker daemon (ECONGRAPH_DOCKER_HOST,
+# default unix:///var/run/docker.sock), not the caller's DOCKER_HOST. Build the
+# backend from this checkout on the same daemon, then load both into kind.
+# load-kind-images.sh compares image IDs, so a stale image under the same tag
+# is replaced.
+DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}" \
+  docker build -t econ-graph-backend:my-change backend
+scripts/deploy/load-kind-images.sh \
+  econ-graph-backend:my-change econ-graph-frontend:my-change
 scripts/deploy/deploy-branch.sh up feature/my-change --context kind-econ-graph \
   --backend-image econ-graph-backend:my-change \
   --frontend-image econ-graph-frontend:my-change --dry-run

@@ -118,10 +118,14 @@ def main():
                '--build-arg', 'VITE_OIDC_CLIENT_ID=econ-graph-web',
                '--build-arg', 'VITE_GRAPHQL_URL=/graphql', '--build-arg', 'VITE_DATA_GRAPHQL_URL=/data/graphql',
                '--build-arg', 'FLAGS_PROFILE=release', str(renderer.ROOT/'frontend')]
+        # Build on the daemon the kind cluster runs on, as lib/kind-env.sh does: the
+        # operator's DOCKER_HOST is a rootless daemon, and `kind load` from the rootful one
+        # would otherwise load a stale image under the same tag.
+        docker_host = os.environ.get('ECONGRAPH_DOCKER_HOST') or 'unix:///var/run/docker.sock'
         if args.dry_run:
-            print(' '.join(cmd))
+            print('DOCKER_HOST=' + docker_host + ' ' + ' '.join(cmd))
         else:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=dict(os.environ, DOCKER_HOST=docker_host))
         return
     if args.dry_run:
         print(f'{args.action}: namespace={namespace} host={origin} context={args.context}')

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline safety and routing regression tests for disposable branch environments."""
 import importlib.util
+import io
 import hashlib
 import json
 import os
@@ -168,6 +169,18 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(env['OIDC_ANONYMOUS_CLIENT_SECRET']['valueFrom']['secretKeyRef'],
                              {'name': 'econ-graph-keycloak', 'key': 'anonymous-client-secret'})
 
+    def test_social_login_credentials_are_never_referenced(self):
+        def social(docs):
+            found = []
+            for d in docs:
+                if d['kind'] in ['Deployment', 'Job'] and d['metadata']['name'] in ['keycloak', 'keycloak-realm-import']:
+                    pod = d['spec']['template']['spec']
+                    for c in pod.get('initContainers', []) + pod['containers']:
+                        found += [e['name'] for e in c.get('env', []) if e['name'].startswith(('KC_GOOGLE', 'KC_FACEBOOK'))]
+            return found
+        self.assertTrue(social(r.source_objects()), 'production Keycloak no longer reads Google credentials; update this test')
+        self.assertEqual(social(self.docs), [])
+
     def test_local_data_uses_own_backend_and_tagged_data_image(self):
         docs = r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')
         route = by_name(docs, 'HTTPRoute', 'econ-graph-data-graphql')
@@ -290,6 +303,137 @@ class GuardTests(unittest.TestCase):
                     for script in set(re.findall(r'/config/([\w.-]+)', text)):
                         self.assertIn(script, set(realm), (d['metadata']['name'], c['name']))
 
+    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None):
+        """Run deploy-branch.py against a fake cluster; return (error, calls, sent documents)."""
+        calls, sent = [], []
+        def fake(command, **kwargs):
+            calls.append(command)
+            if kwargs.get('input'):
+                sent.extend(d for d in yaml.safe_load_all(kwargs['input']) if d)
+            code, out = 0, ''
+            if 'nc' in command:
+                client, target = command[command.index('exec') + 1], command[-2]
+                code = 0 if ((client == 'branch-network-allow' and target == '10.244.1.3')
+                             or (client == 'branch-network-backend' and target == '10.96.0.13')) else 1
+            elif 'get' in command and 'json' in command:
+                kind, name = command[command.index('get') + 1:command.index('get') + 3]
+                found = {'namespace': namespace, 'referencegrant': grant,
+                         'pod': {'status': {'podIP': '10.244.1.3'}},
+                         'service': {'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
+                             'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}.get(name)}}}.get(kind)
+                out = json.dumps(found) if found else ''
+            elif 'get' in command and 'secret' in command:
+                name = command[command.index('secret') + 1]
+                out = 'secret/' + name if name in present else ''
+            return subprocess.CompletedProcess(command, code, stdout=out)
+        error = None
+        with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', 'scratch']), \
+                patch.object(subprocess, 'run', side_effect=fake), patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
+            if typed is None:
+                try:
+                    deploy.main()
+                except ValueError as e:
+                    error = e
+            else:
+                # A real terminal on stdin, with the operator typing `typed`.
+                master, slave = os.openpty()
+                try:
+                    os.write(master, (typed + '\n').encode())
+                    with open(slave, 'r', closefd=False) as tty, patch.object(sys, 'stdin', tty), \
+                            patch('sys.stdout', new_callable=io.StringIO):
+                        try:
+                            deploy.main()
+                        except ValueError as e:
+                            error = e
+                finally:
+                    os.close(master)
+                    os.close(slave)
+        return error, calls, sent
+
+    def owned(self, branch='one', mode='primary', **meta):
+        slug, _ = r.identity(branch)
+        return dict({'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
+                     'annotations': {'econgraph.io/branch-name': branch}}, **meta)
+
+    UP = ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+
+    @staticmethod
+    def mutations(calls):
+        return [c for c in calls if any(verb in c for verb in ['apply', 'create', 'delete'])]
+
+    def test_up_into_owned_namespace_proceeds(self):
+        error, calls, sent = self.cluster(self.UP, namespace={'metadata': self.owned()})
+        self.assertIsNone(error)
+        self.assertTrue(any(d['kind'] == 'ReferenceGrant' for d in sent))
+
+    def test_up_refuses_a_terminating_namespace_before_mutations(self):
+        error, calls, _ = self.cluster(self.UP, namespace={'metadata': self.owned(deletionTimestamp='2026-10-28T00:00:00Z')})
+        self.assertRegex(str(error), 'terminating')
+        self.assertEqual(self.mutations(calls), [])
+
+    def test_up_refuses_a_data_mode_change_before_mutations(self):
+        error, calls, _ = self.cluster(self.UP, namespace={'metadata': self.owned(mode='local')})
+        self.assertRegex(str(error), 'data mode cannot change')
+        self.assertEqual(self.mutations(calls), [])
+
+    def test_down_on_a_terminal_deletes_only_after_the_exact_typed_namespace(self):
+        _, namespace = r.identity('one')
+        existing = {'metadata': self.owned()}
+        error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace + 'x')
+        self.assertRegex(str(error), 'typed namespace confirmation')
+        self.assertEqual(self.mutations(calls), [])
+        error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace)
+        self.assertIsNone(error)
+        self.assertIn(['stub-kubectl', '--context', 'scratch', 'delete', 'namespace', namespace], calls)
+
+    def test_down_refuses_a_reference_grant_it_does_not_own(self):
+        _, namespace = r.identity('one')
+        foreign = {'metadata': {'labels': {'econgraph.io/branch': 'other'}}}
+        error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()}, grant=foreign, typed=namespace)
+        self.assertRegex(str(error), 'ReferenceGrant ownership differs')
+        self.assertFalse([c for c in calls if 'delete' in c and ('referencegrant' in c or 'namespace' in c)])
+
+    def test_up_refuses_a_reference_grant_it_does_not_own(self):
+        foreign = {'metadata': {'labels': {'econgraph.io/branch': 'other'}}}
+        error, _, sent = self.cluster(self.UP, grant=foreign)
+        self.assertRegex(str(error), 'different ownership')
+        self.assertFalse([d for d in sent if d['kind'] == 'ReferenceGrant'])
+
+    def test_branch_secrets_are_all_or_none(self):
+        names = ['econ-graph-app-postgres', 'econ-graph-keycloak', 'econ-graph-secrets']
+        for present in [names[:1], names[1:]]:
+            error, _, sent = self.cluster(self.UP, namespace={'metadata': self.owned()}, present=present)
+            self.assertRegex(str(error), 'incomplete branch credentials')
+            self.assertFalse([d for d in sent if d['kind'] == 'Secret'])
+        error, _, sent = self.cluster(self.UP, namespace={'metadata': self.owned()}, present=names)
+        self.assertIsNone(error)
+        self.assertFalse([d for d in sent if d['kind'] == 'Secret'])
+
+    def test_branch_realm_has_no_identity_providers(self):
+        source = json.loads((ROOT/'config/keycloak/econ-graph-realm.json').read_text())
+        self.assertTrue(source['identityProviders'], 'the realm no longer has identity providers; update this test')
+        _, _, sent = self.cluster(self.UP)
+        realm = next(d for d in sent if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'keycloak-realm')
+        self.assertEqual(json.loads(realm['data']['econ-graph-realm.json'])['identityProviders'], [])
+
+    def test_build_frontend_uses_the_kind_docker_daemon_not_the_callers(self):
+        for override, expected in [(None, 'unix:///var/run/docker.sock'), ('', 'unix:///var/run/docker.sock'),
+                                   ('unix:///run/other.sock', 'unix:///run/other.sock')]:
+            env = {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock'}
+            if override is not None:
+                env['ECONGRAPH_DOCKER_HOST'] = override
+            runs = []
+            with patch.dict(os.environ, env), patch.object(sys, 'argv', ['deploy-branch.py', 'build-frontend', 'one', '--context', 'x']), \
+                    patch.object(subprocess, 'run', side_effect=lambda cmd, **kw: runs.append((cmd, kw))):
+                deploy.main()
+            (cmd, kwargs), = runs
+            self.assertEqual(cmd[:2], ['docker', 'build'])
+            self.assertEqual(kwargs['env']['DOCKER_HOST'], expected)
+            with patch.dict(os.environ, env), patch.object(sys, 'argv', ['deploy-branch.py', 'build-frontend', 'one', '--context', 'x', '--dry-run']), \
+                    patch('sys.stdout', new_callable=io.StringIO) as out:
+                deploy.main()
+            self.assertTrue(out.getvalue().startswith('DOCKER_HOST=' + expected + ' docker build '))
+
     def test_local_data_rejects_untagged_crawler(self):
         with self.assertRaises(SystemExit):
             self.invoke(['up', 'one', '--context', 'scratch', '--dry-run', '--local-data', '--data-image', 'worker:latest',
@@ -327,6 +471,45 @@ class GuardTests(unittest.TestCase):
 
 
 class SeedRestoreTests(unittest.TestCase):
+    def bundle(self, temp):
+        path = Path(temp)
+        (path/'VERIFIED').touch()
+        (path/'econ_graph.dump').write_bytes(b'synthetic data-only fixture')
+        checksum = hashlib.sha256(b'synthetic data-only fixture').hexdigest()
+        (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
+        return type('Args', (), {'seed_dir': path, 'context': 'scratch',
+                                 'kubectl': staticmethod(lambda: ['stub-kubectl', '--context', 'scratch'])})(), checksum
+
+    def seed(self, marker=None, tables='0'):
+        with tempfile.TemporaryDirectory() as temp:
+            args, checksum = self.bundle(temp)
+            runs, execs = [], []
+            def run(command, **kwargs):
+                runs.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='1; 1259 1 TABLE public economic_series postgres\n')
+            def k(*cmd, **kwargs):
+                execs.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0, stdout=tables + '\n')
+            applied = []
+            with patch.object(subprocess, 'run', side_effect=run):
+                deploy.seed_local(args, 'branch', k, lambda *a: marker and {'data': {'sha256': marker(checksum)}}, applied.extend)
+            return runs, execs, applied
+
+    def test_seed_marker_from_another_dump_refuses_before_touching_the_database(self):
+        with self.assertRaisesRegex(ValueError, 'different dump'):
+            self.seed(marker=lambda checksum: '0' * 64)
+        runs, execs, applied = self.seed(marker=lambda checksum: checksum)
+        self.assertEqual((execs, applied), ([], []))
+        self.assertFalse([c for c in runs if 'exec' in c])
+
+    def test_nonempty_unmarked_database_is_never_restored_over(self):
+        runs = []
+        with self.assertRaisesRegex(ValueError, 'nonempty'):
+            self.seed(tables='3')
+        runs, execs, applied = self.seed(tables='0')
+        self.assertTrue([c for c in runs if 'pg_restore' in c and 'exec' in c])
+        self.assertEqual(applied[0]['metadata']['name'], 'branch-data-seed')
+
     def test_restore_streams_through_the_chosen_kubectl(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
@@ -414,7 +597,7 @@ class KubectlChoiceTests(unittest.TestCase):
 
 
 class NetworkProbeTests(unittest.TestCase):
-    def check(self, insecure=False, primary_open=False, proxy_open=False, canary_open=True):
+    def check(self, insecure=False, primary_open=False, proxy_open=False, canary_open=True, local_data=False, backend_proxy=True):
         network = module('network', 'branch-network-check.py')
         calls = []
         def k(*cmd, **kwargs):
@@ -425,7 +608,7 @@ class NetworkProbeTests(unittest.TestCase):
                 allowed = ((client == 'branch-network-allow' and target == '10.244.1.3' and canary_open)
                            or (client == 'branch-network-deny' and insecure)
                            or (target in ['10.96.0.11', '10.96.0.12'] and primary_open)
-                           or (target == '10.96.0.13' and (client == 'branch-network-backend' or proxy_open)))
+                           or (target == '10.96.0.13' and ((client == 'branch-network-backend' and backend_proxy) or proxy_open)))
                 code = 0 if allowed else 1
             return subprocess.CompletedProcess(cmd, code, stdout='')
         def lookup(kind, name, namespace):
@@ -435,7 +618,7 @@ class NetworkProbeTests(unittest.TestCase):
                   'econ-graph-gateway-proxy': '10.96.0.13'}[name]
             return {'spec': {'clusterIP': ip}}
         try:
-            network.verify('econ-graph-br-test', False, k, lookup, lambda docs: None)
+            network.verify('econ-graph-br-test', local_data, k, lookup, lambda docs: None)
         finally:
             self.assertEqual(calls[-1][0:4], ('-n', 'econ-graph-br-test', 'delete', 'pods'))
             self.assertIn('--wait=false', calls[-1])
@@ -450,6 +633,13 @@ class NetworkProbeTests(unittest.TestCase):
     def test_missing_positive_control_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'positive canary'):
             self.check(canary_open=False)
+
+    def test_backend_gateway_access_must_match_the_data_mode(self):
+        self.check(local_data=True, backend_proxy=False)
+        with self.assertRaisesRegex(ValueError, 'does not match the selected branch data mode'):
+            self.check(local_data=True, backend_proxy=True)
+        with self.assertRaisesRegex(ValueError, 'does not match the selected branch data mode'):
+            self.check(local_data=False, backend_proxy=False)
 
     def test_primary_or_nonbackend_proxy_access_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'directly reach'):
