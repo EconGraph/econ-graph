@@ -32,7 +32,7 @@ data:
         # Six failures in a row is a minute of Keycloak not answering the backend (or refusing
         # its anonymous client). Grants survive that only until they expire.
         - alert: AnonymousGrantRenewalFailing
-          expr: max(anonymous_grant_renewal_consecutive_failures) >= 6
+          expr: anonymous_grant_renewal_consecutive_failures >= 6
           for: 1m
           labels:
             severity: warning
@@ -43,7 +43,7 @@ data:
         # Also fires when every catalog was deliberately withdrawn from anonymous visitors; then
         # it is expected and can be silenced.
         - alert: AnonymousCatalogGrantsEmpty
-          expr: min(anonymous_catalog_grants) == 0
+          expr: anonymous_catalog_grants == 0
           for: 10m
           labels:
             severity: warning
@@ -52,7 +52,7 @@ data:
             description: A backend has held no anonymous catalog grants for 10 minutes, so anonymous visitors see empty catalogs. Expected only when every catalog was withdrawn from anonymous visitors in Keycloak; otherwise see AnonymousGrantRenewalFailing and the backend log.
 
         - alert: AnonymousGrantRefreshStopped
-          expr: min(anonymous_grant_refresh_task_running) == 0
+          expr: anonymous_grant_refresh_task_running == 0
           for: 1m
           labels:
             severity: critical

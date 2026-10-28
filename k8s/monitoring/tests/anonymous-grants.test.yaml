@@ -47,6 +47,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+              app: econ-graph-backend
             exp_annotations:
               summary: The backend can't renew anonymous catalog grants from Keycloak
               description: A backend has failed to renew the anonymous catalog grants six or more times in a row. Once the current grants expire (and any ANONYMOUS_GRANTS_STALE_MAX_SECS window passes), anonymous visitors see no catalogs. Check the backend log for "Anonymous catalog grant renewal failed" or "Keycloak refused the anonymous catalog client", and Keycloak itself.
@@ -58,11 +59,13 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+              app: econ-graph-backend
             exp_annotations:
               summary: Anonymous visitors have had no catalog access for 10 minutes
               description: A backend has held no anonymous catalog grants for 10 minutes, so anonymous visitors see empty catalogs. Expected only when every catalog was withdrawn from anonymous visitors in Keycloak; otherwise see AnonymousGrantRenewalFailing and the backend log.
 
-  # Two replicas; one's refresh task ends at 3m. The stopped alert fires for it.
+  # Two replicas; one's refresh task ends at 3m. The stopped alert fires for that pod alone,
+  # naming it.
   - interval: 1m
     input_series:
       - series: 'anonymous_grant_refresh_task_running{app="econ-graph-backend", kubernetes_pod_name="a"}'
@@ -78,6 +81,8 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              app: econ-graph-backend
+              kubernetes_pod_name: b
             exp_annotations:
               summary: A backend stopped renewing anonymous catalog grants
               description: The background task that renews anonymous catalog grants has ended in a backend, so its anonymous grants lapse within five minutes and are never renewed. Restart the backend (`kubectl -n econ-graph rollout restart deployment/econ-graph-backend`) and look for "refresh task" in its log.
