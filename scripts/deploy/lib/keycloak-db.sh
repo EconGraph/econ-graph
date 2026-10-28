@@ -34,8 +34,8 @@ KDB_COUNT_SQL="select table_name, (xpath('/row/c/text()', query_to_xml(format('s
 kdb_use_context() {
     local names
     unset CLUSTER_ROLE_CONTEXT
-    cluster_role_default_kubectl
-    export KUBECTL="${KUBECTL:-kubectl}"
+    cluster_role_default_kubectl || return 1
+    export KUBECTL
     # Captured first: grep -q exiting early could SIGPIPE kubectl and fail the pipeline.
     names="$(command "${KUBECTL:-kubectl}" config get-contexts -o name)" || return 1
     if ! grep -qxF -- "$1" <<<"$names"; then

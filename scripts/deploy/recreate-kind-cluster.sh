@@ -44,7 +44,7 @@ mv -f "${kube_cache}/bin/kubectl.new" "${kube_cache}/bin/kubectl"
 (umask 077 && kind get kubeconfig --name econ-graph >"${kube_cache}/kubeconfig-econ-graph")
 echo "🔑 kubectl ${kube_cache}/bin/kubectl, KUBECONFIG=${kube_cache}/kubeconfig-econ-graph"
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 
 # Wait for cluster to be ready
 echo "⏳ Waiting for cluster to be ready..."

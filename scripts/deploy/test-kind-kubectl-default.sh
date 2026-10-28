@@ -269,6 +269,50 @@ expect "setup-port-forwarding.sh" nonzero "Cannot connect to Kubernetes cluster"
 run env FAKE_FAIL=cluster-info "$DEPLOY/setup-letsencrypt-cloudflare.sh" -d example.org -t stub-token --staging
 expect "setup-letsencrypt-cloudflare.sh" nonzero "Cannot connect to Kubernetes cluster" "cluster-info"
 
+# An explicit KUBECTL is used as it is (here the same fake).
+run env KUBECTL="$CACHE/bin/kubectl" KUBECONFIG="$CACHE/kubeconfig-econ-graph" FAKE_FAIL=cluster-info \
+    "$DEPLOY/setup-port-forwarding.sh"
+expect "setup-port-forwarding.sh with KUBECTL" nonzero "Cannot connect to Kubernetes cluster" "cluster-info"
+
+# --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
+# No kind kubectl copies (a HOME whose cache holds only the kind binary): each script
+# stops before any kubectl.
+mkdir -p "$WORK/kind-only-home/.cache/econgraph/bin"
+cp "$CACHE/bin/kind" "$WORK/kind-only-home/.cache/econgraph/bin/kind"
+nocache() { # NAME ARGS...: the script, run without the kind kubectl copies, stopped before any kubectl
+    local name="$1"
+    shift
+    run env HOME="$WORK/kind-only-home" "$@"
+    if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || [ -s "$LOGS/kind-kubectl.log" ] ||
+        ! grep -qF "or set KUBECTL (and KUBECONFIG)" <<<"$out"; then
+        fail "$name without the kind kubectl: exit $rc, plain $(cat "$LOGS/plain.log")"
+    else
+        echo "ok   $name without the kind kubectl stops"
+    fi
+}
+nocache "deploy.sh" env PUBLIC_HOST= "$TREE/scripts/deploy/deploy.sh"
+nocache "backup-keycloak-db.sh --dry-run" "$DEPLOY/backup-keycloak-db.sh" --dry-run
+nocache "setup-port-forwarding.sh" "$DEPLOY/setup-port-forwarding.sh"
+nocache "setup-letsencrypt-cloudflare.sh" "$DEPLOY/setup-letsencrypt-cloudflare.sh" -d example.org -t stub-token --staging
+nocache "backup-postgres-now.sh" "$DEPLOY/backup-postgres-now.sh"
+# KUBECONFIG alone: the kind kubectl binary with it (plain kubectl may ignore it).
+other="$WORK/other-kubeconfig"
+echo "# another kubeconfig" >"$other"
+run env KUBECONFIG="$other" "$DEPLOY/backup-keycloak-db.sh" --dry-run
+if [ "$rc" -ne 0 ] || [ -s "$LOGS/plain.log" ] ||
+    grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$other " "$LOGS/kind-kubectl.log" ||
+    ! grep -qF "Using the kind cluster's kubectl $CACHE/bin/kubectl with KUBECONFIG=$other" <<<"$out"; then
+    fail "backup-keycloak-db.sh with only KUBECONFIG: exit $rc, $(cat "$LOGS/kind-kubectl.log" "$LOGS/plain.log")"
+else
+    echo "ok   backup-keycloak-db.sh with only KUBECONFIG uses the kind kubectl with it"
+fi
+run env HOME="$WORK/empty-home" KUBECONFIG="$other" "$DEPLOY/backup-keycloak-db.sh" --dry-run
+if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || ! grep -qF "Set KUBECTL too" <<<"$out"; then
+    fail "backup-keycloak-db.sh with only KUBECONFIG and no kind kubectl: exit $rc"
+else
+    echo "ok   backup-keycloak-db.sh with only KUBECONFIG and no kind kubectl stops"
+fi
+
 if [ "$failed" -ne 0 ]; then
     exit 1
 fi

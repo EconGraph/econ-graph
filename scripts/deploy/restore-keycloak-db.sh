@@ -40,9 +40,11 @@
 # docs/release/v4.0.0-qa.md).
 #
 # Running it again restores the same dump again. No dump is ever deleted.
-# Other environment: KUBECTL, with its KUBECONFIG. With neither set, the kind
-# cluster's own kubectl and kubeconfig kept in ~/.cache/econgraph
-# (cluster_role_default_kubectl in lib/cluster-role.sh), else plain kubectl.
+# Other environment: KUBECTL, with its KUBECONFIG. Without KUBECTL, the kind
+# cluster's own kubectl kept in ~/.cache/econgraph, with KUBECONFIG if that is
+# set and the kind cluster's kubeconfig kept there if not
+# (cluster_role_default_kubectl in lib/cluster-role.sh); without those copies it
+# stops. Never plain kubectl.
 
 set -euo pipefail
 

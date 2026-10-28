@@ -89,7 +89,7 @@ fi
 # cluster could remove another cluster's public routes and stop its tunnel
 # connector.
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 export KUBECTL="${KUBECTL:-kubectl}"
 if ! cluster_role_use_context kind-econ-graph; then
     echo "❌ ${KUBECTL:-kubectl} has no context kind-econ-graph"

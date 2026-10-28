@@ -26,11 +26,12 @@
 # token) is left as it is. It deletes no data, volumes or clusters: --unmark
 # removes the marker and, only if you confirm, the token.
 #
-# Other environment: KUBECTL (default kubectl) and its KUBECONFIG; it works on
-# that kubectl's current context. With neither set, it uses the kind cluster's
-# own kubectl and kubeconfig when copies are kept in ~/.cache/econgraph
-# (bin/kubectl, kubeconfig-econ-graph), and says so: plain kubectl may be
-# another cluster's (the microk8s snap wrapper ignores ~/.kube/config).
+# Other environment: KUBECTL and its KUBECONFIG; it works on that kubectl's
+# current context. Without KUBECTL, it uses the kind cluster's own kubectl kept
+# in ~/.cache/econgraph (bin/kubectl), with KUBECONFIG if that is set and
+# kubeconfig-econ-graph kept there if not, and says so; without those copies it
+# stops. Never plain kubectl: it may be another cluster's (the microk8s snap
+# wrapper ignores KUBECONFIG and ~/.kube/config).
 
 set -euo pipefail
 
@@ -68,7 +69,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 # Every call below goes through kc, on this one context: the current one, never
 # a CLUSTER_ROLE_CONTEXT inherited from the environment.
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 cluster_role_pin_context || die "$KUBECTL has no current context"

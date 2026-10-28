@@ -546,12 +546,14 @@ grep -qE "kubectl +$stub_dir/plain/kubectl" "$out" || fail "mark with KUBECTL: t
 grep -qE "context +kind-test" "$out" || fail "mark with KUBECTL: the context in use is not shown"
 used_only plain "" "mark with KUBECTL"
 
-# An exported KUBECONFIG wins too, and says that detection was skipped.
+# An exported KUBECONFIG is used with the kind kubectl binary (never plain kubectl, which
+# may ignore it), and that is said.
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run ||
   fail "mark with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark with KUBECONFIG: skipping detection was not said: $(cat "$out")"
+grep -qF "Using the kind cluster's kubectl $kind_cache/bin/kubectl with KUBECONFIG=$stub_dir/other-kubeconfig" "$out" ||
+  fail "mark with KUBECONFIG: the choice was not said: $(cat "$out")"
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
-used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
+used_only cache "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
 
 # A context pinned by deploy.sh (which switches to it first, so it is the current one):
 # create-secrets.sh stays on deploy.sh's kubectl and context.
@@ -562,18 +564,34 @@ grep -q -- '--context kind-test -n econ-graph create secret generic econ-graph-p
   fail "create-secrets with a pinned context: did not write on it"
 used_only plain "" "create-secrets with a pinned context"
 
-# Only one of the two files: plain kubectl, with a warning naming what is missing.
+# Without KUBECTL and a complete kind cache nothing runs: plain kubectl may be another
+# cluster's. Each case fails before any kubectl call, naming what is missing.
+# refused_bare LABEL STATUS MESSAGE: the last run_bare exited STATUS (non-zero), said
+# MESSAGE, and ran no kubectl.
+refused_bare() {
+  if [ "$2" -eq 0 ]; then
+    fail "$1: succeeded"
+  elif grep -q '^\[' "$log"; then
+    fail "$1: ran a kubectl: $(grep '^\[' "$log" | sort -u)"
+  elif ! grep -qF -- "$3" "$out"; then
+    fail "$1: no '$3' in: $(cat "$out")"
+  fi
+}
 mv "$kind_cache/kubeconfig-econ-graph" "$kind_cache/kubeconfig-econ-graph.away"
-run_bare STUB_MARKER=none "$mark" --dry-run || fail "mark (kubectl only) failed: $(cat "$out")"
-grep -qF "warning: found $kind_cache/bin/kubectl but not $kind_cache/kubeconfig-econ-graph: using plain kubectl" "$out" ||
-  fail "mark (kubectl only): no warning: $(cat "$out")"
-used_only plain "" "mark (kubectl only)"
+rc=0; run_bare STUB_MARKER=none "$mark" --dry-run || rc=$?
+refused_bare "mark (kubectl only)" "$rc" "no $kind_cache/kubeconfig-econ-graph"
 mv "$kind_cache/kubeconfig-econ-graph.away" "$kind_cache/kubeconfig-econ-graph"
 mv "$kind_cache/bin/kubectl" "$kind_cache/bin/kubectl.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubeconfig only) failed: $(cat "$out")"
-grep -qF "warning: found $kind_cache/kubeconfig-econ-graph but not $kind_cache/bin/kubectl: using plain kubectl" "$out" ||
-  fail "create-secrets (kubeconfig only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubeconfig only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubeconfig only)" "$rc" "no $kind_cache/bin/kubectl"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || rc=$?
+refused_bare "mark with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+mv "$kind_cache/kubeconfig-econ-graph" "$kind_cache/kubeconfig-econ-graph.away"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/protect-postgres-pv.sh --dry-run || rc=$?
+refused_bare "protect-postgres-pv (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+mv "$kind_cache/kubeconfig-econ-graph.away" "$kind_cache/kubeconfig-econ-graph"
 mv "$kind_cache/bin/kubectl.away" "$kind_cache/bin/kubectl"
 [ ! -s "$path_log" ] || fail "detection tests: called the failing kubectl on PATH: $(cat "$path_log")"
 

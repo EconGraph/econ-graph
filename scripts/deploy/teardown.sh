@@ -148,7 +148,7 @@ fi
 # kubectl becomes a function that calls kc; KUBECTL and CLUSTER_ROLE_CONTEXT are
 # exported, so protect-postgres-pv.sh uses the same kubectl and context.
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 export KUBECTL="${KUBECTL:-kubectl}"
 command -v "${KUBECTL}" >/dev/null 2>&1 || die "${KUBECTL} not found; nothing was changed"
 export CLUSTER_ROLE_CONTEXT="${EXPECTED_CONTEXT}"

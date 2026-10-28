@@ -88,7 +88,7 @@ run() {
 
 cluster_role_kind_docker_host
 # A context pinned by deploy.sh is kept; run by hand, pin the current one.
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 cluster_role_pin_context || die "${KUBECTL:-kubectl} has no current context"
 echo "  kubectl: ${KUBECTL:-kubectl}, context ${CLUSTER_ROLE_CONTEXT}"
 

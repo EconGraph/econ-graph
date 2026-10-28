@@ -263,14 +263,13 @@ A cluster is production while it carries the marker written by:
 Which cluster it reaches:
 
 - `mark-production-cluster.sh` and `create-secrets.sh` work on the current context of
-  `${KUBECTL:-kubectl}` and its `KUBECONFIG`. Run by hand with neither variable set, they
-  use the kind cluster's own kubectl and kubeconfig when copies are kept at
-  `~/.cache/econgraph/bin/kubectl` and `~/.cache/econgraph/kubeconfig-econ-graph`, and
-  say so. Plain `kubectl` may be another cluster's: the microk8s snap wrapper ignores
-  `~/.kube/config`. An exported `KUBECONFIG` (some runbooks export one) turns that off:
-  they then use plain `kubectl` with it and say so, so unset it to get the kind cluster's.
-  If only one of the two files is there, they warn which one is missing and use plain
-  `kubectl`.
+  `KUBECTL` and its `KUBECONFIG`. Run by hand without `KUBECTL`, they use the kind
+  cluster's own kubectl kept at `~/.cache/econgraph/bin/kubectl`, with an exported
+  `KUBECONFIG` if there is one (some runbooks export one; unset it to get the kind
+  cluster's) and `~/.cache/econgraph/kubeconfig-econ-graph` if not, and say which. They
+  never fall back to plain `kubectl`, which may be another cluster's (the microk8s snap
+  wrapper ignores `KUBECONFIG` and `~/.kube/config`): when a copy is missing they stop and
+  say which; `scripts/deploy/recreate-kind-cluster.sh` refreshes both, or set `KUBECTL`.
 - `deploy.sh` switches the current context of `${KUBECTL:-kubectl}`'s kubeconfig to
   `kind-econ-graph` and pins it (`create-secrets.sh`, run from it, stays on it). So
   `KUBECONFIG` has to be the production cluster's for that reason too: the context is

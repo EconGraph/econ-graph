@@ -171,9 +171,10 @@ change the current context. Every kubectl call goes through `kc`
 (`scripts/deploy/lib/cluster-role.sh`) with `--context`. With none of
 `KUBECTL`, `KUBECONFIG` and `CLUSTER_ROLE_CONTEXT` set, they use the kind
 cluster's own kubectl and kubeconfig kept in `~/.cache/econgraph`
-(`bin/kubectl`, `kubeconfig-econ-graph`), and say so. On the production
-host, plain `kubectl` is the MicroK8s snap wrapper, which reaches a different
-cluster. A `CLUSTER_ROLE_CONTEXT` inherited from the environment is replaced,
+(`bin/kubectl`, `kubeconfig-econ-graph`), and say so; with only
+`KUBECONFIG` set, the kind kubectl with it. Without those copies they stop
+rather than use plain `kubectl`: on the production host that is the MicroK8s
+snap wrapper, which reaches a different cluster. A `CLUSTER_ROLE_CONTEXT` inherited from the environment is replaced,
 not followed.
 
 Before doing anything else, both print the cluster they reached:

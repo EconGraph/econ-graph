@@ -123,7 +123,7 @@ log() {
 # context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 
 # A CLUSTER_ROLE_CONTEXT from the environment is followed only while it is the

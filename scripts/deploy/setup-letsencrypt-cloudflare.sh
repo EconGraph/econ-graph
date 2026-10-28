@@ -134,7 +134,7 @@ print_status "Checking prerequisites..."
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 export KUBECTL="${KUBECTL:-kubectl}"
 kubectl() { command "$KUBECTL" "$@"; }
 
