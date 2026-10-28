@@ -94,6 +94,13 @@ jobs:
         SERIES: ${{ github.event.inputs.series }}
       run: |
         set -euo pipefail
+        # Match the CLI's trimming before reusing the identifier in SQL queries.
+        SERIES="${SERIES#"${SERIES%%[![:space:]]*}"}"
+        SERIES="${SERIES%"${SERIES##*[![:space:]]}"}"
+        if [[ -z "$SERIES" || "$SERIES" == *,* ]]; then
+          echo "::error::The integration test requires exactly one nonempty series id"
+          exit 1
+        fi
         if [ "${SOURCE^^}" = "FRED" ] && [ -z "$FRED_API_KEY" ]; then
           echo "::error::FRED needs an API key: set the FRED_API_KEY secret"
           exit 1
