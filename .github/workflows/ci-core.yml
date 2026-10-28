@@ -393,6 +393,11 @@ jobs:
         shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
         scripts/deploy/test-recreate-kind-cluster.sh
 
+    # teardown, recreate and migrate refuse before dumping, stopping or
+    # deleting anything when the encrypted backup can't be made (all stubs).
+    - name: Check that destructive scripts refuse without an encrypted backup
+      run: scripts/deploy/test-backup-refusals.sh
+
     # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
     # reach only the kind cluster's kubectl with --context, never plain kubectl.
     - name: Check which cluster the operator scripts reach
@@ -743,6 +748,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y age
         scripts/backup/test-encryption.sh
+
+    - name: Check the restore drill's encrypted-bundle guard and tmpfs data directory
+      run: scripts/backup/test-restore-drill.sh
 
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh

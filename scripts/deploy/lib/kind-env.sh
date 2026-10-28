@@ -441,8 +441,15 @@ backup_encryption_lib="$(dirname "${BASH_SOURCE[0]}")/../../backup/encryption.sh
 # shellcheck source=scripts/backup/encryption.sh
 source "$backup_encryption_lib"
 
+# backup_databases OUTPUT: the encrypted recovery bundle every destructive
+# script takes first. Writers into one root are serialized by a lock on
+# BACKUP_ROOT/.lock (OUTPUT's parent/.lock for an output elsewhere), taken
+# before the destination is checked and released once the bundle is published
+# (a failed attempt keeps it until the caller exits). BACKUP_LOCK_NONBLOCK=true
+# fails instead of waiting (the nightly timer); otherwise a second writer
+# waits for the first.
 backup_databases() {
-    local output="$1" scratch cleanup
+    local output="$1" lock_root lock_fd scratch cleanup
     umask 077
     backup_encryption_preflight
     if [[ "${DRY_RUN}" == true ]]; then
@@ -450,8 +457,20 @@ backup_databases() {
         echo "+ encrypt the verified dumps, counts and Secrets into $output/backup.tar.age"
         return
     fi
+    if [[ "$output" == "${BACKUP_ROOT%/}/"* ]]; then
+        lock_root="$BACKUP_ROOT"
+    else
+        lock_root="$(dirname -- "$output")"
+    fi
+    mkdir -p -- "$lock_root" || die "could not create $lock_root"
+    exec {lock_fd}>"$lock_root/.lock" || die "could not open $lock_root/.lock"
+    if [[ "${BACKUP_LOCK_NONBLOCK:-false}" == true ]]; then
+        flock -n "$lock_fd" || die "another host dump is running (lock $lock_root/.lock)"
+    else
+        flock "$lock_fd" || die "could not lock $lock_root/.lock"
+    fi
     [[ ! -e "$output" && ! -e "${output}.partial" ]] || die "$output already exists"
-    scratch="$(backup_plaintext_dir)"
+    scratch="$(backup_plaintext_dir)" || die "could not create private tmpfs staging"
     # This is only disposable RAM staging, never a backup directory.
     printf -v cleanup 'rm -rf -- %q' "$scratch"
     add_exit_cleanup "$cleanup"
@@ -464,7 +483,35 @@ backup_databases() {
     backup_seal_dir "$scratch/payload" "$output" || return
     BACKUP_ACTIVE_OUTPUT="$output"
     BACKUP_ACTIVE_DIR="$scratch/payload"
+    exec {lock_fd}>&-
     log "Encrypted backup complete: $output (no identity used)"
+}
+
+# Check, before any downtime, that the private tmpfs staging has room for the
+# dumps backup_databases will write there: at least the on-disk size of every
+# running database (a custom-format dump is compressed and leaves out indexes,
+# so it is smaller) plus 64 MiB for counts and Secrets. Read-only; call after
+# backup_encryption_preflight, which picks BACKUP_PLAINTEXT_ROOT.
+backup_check_tmpfs_space() {
+    local spec pod container user db size need=$((64 * 1024 * 1024)) free
+    for spec in "postgresql-0 postgresql postgres econ_graph" \
+        "app-postgres-0 postgres postgres econ_graph_app" \
+        "keycloak-postgres-0 postgres keycloak keycloak"; do
+        read -r pod container user db <<<"$spec"
+        pod_running "$pod" || continue
+        size="$(k exec "$pod" -c "$container" -- psql -X -qAt -v ON_ERROR_STOP=1 -U "$user" -d "$db" \
+            -c 'select pg_database_size(current_database())')" ||
+            die "could not measure database $db for the tmpfs staging check; nothing was stopped"
+        [[ "$size" =~ ^[0-9]+$ ]] || die "invalid size '$size' for database $db; nothing was stopped"
+        need=$((need + size))
+    done
+    free="$(df -B1 --output=avail -- "${BACKUP_PLAINTEXT_ROOT}" | tail -n 1 | tr -d '[:space:]')" ||
+        die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
+    [[ "$free" =~ ^[0-9]+$ ]] || die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
+    if ((free < need)); then
+        die "${BACKUP_PLAINTEXT_ROOT} has $((free / 1048576)) MiB free, but the backup may need $((need / 1048576)) MiB of private tmpfs staging; nothing was stopped. Enlarge it (sudo mount -o remount,size=... ${BACKUP_PLAINTEXT_ROOT}) or point BACKUP_PLAINTEXT_ROOT at a larger tmpfs"
+    fi
+    echo "  tmpfs staging: $((free / 1048576)) MiB free in ${BACKUP_PLAINTEXT_ROOT}, at most $((need / 1048576)) MiB needed"
 }
 
 # pg_dump the data, app and Keycloak databases, verify the archives, record
