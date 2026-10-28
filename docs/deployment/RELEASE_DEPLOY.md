@@ -88,7 +88,8 @@ with a warning that the step's cleanup may be cut short. The run then prints the
 guidance as a failure of that step, reports `result=interrupted step=NAME
 signal=INT|TERM|HUP` and exits 130, 143 or 129; signals during that explanation are
 ignored. A step that completed as the signal came counts as done, and the run stops
-before the next one.
+before the next one. Steps ignore the SIGINT and SIGHUP a terminal sends its whole process
+group, so only the run's own signals stop them.
 
 ## The run's record
 
