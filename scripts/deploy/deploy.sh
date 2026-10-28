@@ -94,36 +94,6 @@ if ! kind_cluster_exists; then
 fi
 ensure_kind_kubectl
 
-# The pod status printed every 10 seconds while the deploy waits. It is also
-# stopped on exit, so a wait that fails never leaves it running: it would keep
-# printing, and hold the output of whoever runs deploy.sh (release-deploy.sh)
-# open, after deploy.sh has failed.
-MONITOR_PID=""
-start_pod_monitor() {
-  stop_pod_monitor
-  (
-    sleeper=""
-    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
-    while true; do
-      sleep 10 >/dev/null 2>&1 &
-      sleeper=$!
-      wait "$sleeper"
-      echo "📊 Pod status update:"
-      kubectl get pods -n econ-graph
-      echo ""
-    done
-  ) &
-  MONITOR_PID=$!
-}
-stop_pod_monitor() {
-  if [ -n "$MONITOR_PID" ]; then
-    kill "$MONITOR_PID" 2>/dev/null || true
-    wait "$MONITOR_PID" 2>/dev/null || true
-    MONITOR_PID=""
-  fi
-}
-add_exit_cleanup stop_pod_monitor
-
 # One kubectl, one cluster for the whole deploy: the kind kubectl that
 # ensure_kind_kubectl put first on PATH (exported as KUBECTL, so a KUBECTL from
 # the environment cannot point elsewhere), switched to kind-econ-graph and
@@ -155,6 +125,36 @@ fi
 if [ "$DRY_RUN" != true ]; then
     kubectl() { kc "$@"; }
 fi
+
+# The pod status printed every 10 seconds while the deploy waits. It is also
+# stopped on exit, so a wait that fails never leaves it running: it would keep
+# printing, and hold the output of whoever runs deploy.sh (release-deploy.sh)
+# open, after deploy.sh has failed.
+MONITOR_PID=""
+start_pod_monitor() {
+  stop_pod_monitor
+  (
+    sleeper=""
+    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
+    while true; do
+      sleep 10 >/dev/null 2>&1 &
+      sleeper=$!
+      wait "$sleeper"
+      echo "📊 Pod status update:"
+      kubectl get pods -n econ-graph
+      echo ""
+    done
+  ) &
+  MONITOR_PID=$!
+}
+stop_pod_monitor() {
+  if [ -n "$MONITOR_PID" ]; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+    MONITOR_PID=""
+  fi
+}
+add_exit_cleanup stop_pod_monitor
 
 # Monitoring stack linter: static checks only (--lint-only contacts no cluster).
 # Run after the kind cluster's kubectl and context are set, so nothing before
