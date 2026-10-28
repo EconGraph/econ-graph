@@ -22,6 +22,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,7 +49,25 @@ def _signal_group(pgid: int, sig: int) -> None:
         pass
 
 
+# When the runner asked this scenario to stop, and how long it allows for cleanup after that.
+STOP_GRACE = float(os.environ.get('QA_TIMEOUT_GRACE_SECONDS') or 60)
+stopped_at: float | None = None
+
+
+def cleanup_deadline(normal: float) -> float:
+    """A time.monotonic() deadline for a wait during cleanup: `normal` seconds from now, or,
+    once the runner has asked the scenario to stop, half its grace period from then, leaving
+    the rest for the cleanup itself."""
+    if stopped_at is not None:
+        return min(time.monotonic() + normal, stopped_at + STOP_GRACE / 2)
+    return time.monotonic() + normal
+
+
 def _on_sigterm(signum, frame):
+    global stopped_at
+    if stopped_at is not None:
+        return
+    stopped_at = time.monotonic()
     for pgid in list(_children):
         _signal_group(pgid, signal.SIGTERM)
     raise SystemExit(f'stopped by signal {signum}')

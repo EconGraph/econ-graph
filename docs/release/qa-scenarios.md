@@ -29,7 +29,9 @@ Each scenario runs in its own process group. One that overruns its `qa-timeout` 
 group gets SIGTERM, so a Python scenario stops the commands it started and runs its cleanup
 (the annotation round trip deletes what it created, and `catalog-roles` restores the
 anonymous reader's roles). After `QA_TIMEOUT_GRACE_SECONDS` (default 60), whatever remains is
-killed.
+killed. Stopping the runner with SIGTERM or Ctrl-C does the same to the running scenario, and
+the runner then starts no further scenario and exits 1. A scenario's own waits during cleanup
+use at most half the grace period.
 
 ## Profiles
 

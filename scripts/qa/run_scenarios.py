@@ -35,6 +35,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -277,12 +278,22 @@ _current_group: int | None = None
 _stopping = False
 
 
+_grace = float(DEFAULT_GRACE)
+
+
 def _on_sigterm(signum, frame):
-    """Stop: pass SIGTERM to the running scenario so it cleans up, and run nothing more."""
+    """Stop (SIGTERM or SIGINT): pass SIGTERM to the running scenario so it cleans up, kill its
+    group if it is still there after the grace period, and run nothing more."""
     global _stopping
+    if _stopping:
+        return
     _stopping = True
-    if _current_group is not None:
-        _signal_group(_current_group, signal.SIGTERM)
+    group = _current_group
+    if group is not None:
+        _signal_group(group, signal.SIGTERM)
+        timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
+        timer.daemon = True
+        timer.start()
 
 
 def _signal_group(pgid: int, sig: int) -> None:
@@ -353,13 +364,14 @@ def run_scenario(
         QA_REPO_ROOT=str(REPO_ROOT),
         QA_EVIDENCE_FILE=str(evidence_file),
         QA_WORK_DIR=str(work),
+        # How long the scenario has to clean up after SIGTERM.
+        QA_TIMEOUT_GRACE_SECONDS=str(_grace),
         PYTHONPATH=os.pathsep.join(
             p for p in (str(Path(__file__).resolve().parent / 'lib'), env.get('PYTHONPATH', '')) if p
         ),
     )
     started = time.monotonic()
-    code, raw, timed_out = run_bounded([str(scenario.path)], child_env, scenario.timeout,
-                                       float(env.get('QA_TIMEOUT_GRACE_SECONDS', DEFAULT_GRACE)))
+    code, raw, timed_out = run_bounded([str(scenario.path)], child_env, scenario.timeout, _grace)
     output = raw.decode('utf-8', errors='replace')
     duration = round(time.monotonic() - started, 2)
 
@@ -430,6 +442,27 @@ def summary_lines(report: dict) -> list[str]:
     return lines
 
 
+def run_all(selected, args, env, redact, work_parent) -> list[dict]:
+    """Run the admitted scenarios one at a time; each one's result."""
+    results = []
+    with tempfile.TemporaryDirectory(prefix='qa-scenarios-', dir=work_parent) as work_root:
+        for scenario in selected:
+            if _stopping:
+                results.append(not_run(scenario, 'not run: the runner was stopped'))
+                continue
+            why = admit(scenario, args.profile, env)
+            if why:
+                results.append(not_run(scenario, why))
+                continue
+            print(f'==> {scenario.name}', flush=True)
+            result = run_scenario(scenario, args.target, args.profile, env, redact, Path(work_root))
+            if scenario.declaration_problem:
+                result['declaration_problem'] = scenario.declaration_problem
+            results.append(result)
+            print(f'    {result["status"]} ({result["duration_seconds"]}s)', flush=True)
+    return results
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog='run-scenarios.sh',
@@ -450,6 +483,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> int:
+    global _grace, _stopping
     args = parse_args(sys.argv[1:] if argv is None else argv)
     env = dict(os.environ if env is None else env)
     scenario_dir = Path(env.get('QA_SCENARIO_DIR') or DEFAULT_SCENARIO_DIR)
@@ -487,24 +521,15 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
 
     redact = Redactor(env)
     started_at = dt.datetime.now(dt.timezone.utc)
-    results = []
     work_parent = env.get('QA_WORK_ROOT') or None
-    with tempfile.TemporaryDirectory(prefix='qa-scenarios-', dir=work_parent) as work_root:
-        signal.signal(signal.SIGTERM, _on_sigterm)
-        for scenario in selected:
-            if _stopping:
-                results.append(not_run(scenario, 'not run: the runner was stopped'))
-                continue
-            why = admit(scenario, args.profile, env)
-            if why:
-                results.append(not_run(scenario, why))
-                continue
-            print(f'==> {scenario.name}', flush=True)
-            result = run_scenario(scenario, args.target, args.profile, env, redact, Path(work_root))
-            if scenario.declaration_problem:
-                result['declaration_problem'] = scenario.declaration_problem
-            results.append(result)
-            print(f'    {result["status"]} ({result["duration_seconds"]}s)', flush=True)
+    _stopping = False
+    _grace = float(env.get('QA_TIMEOUT_GRACE_SECONDS') or DEFAULT_GRACE)
+    previous = {sig: signal.signal(sig, _on_sigterm) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        results = run_all(selected, args, env, redact, work_parent)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
     counts = {k: sum(r['status'] == k for r in results) for k in ('pass', 'fail', 'skip')}
     report = {

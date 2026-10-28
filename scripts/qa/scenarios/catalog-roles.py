@@ -35,6 +35,7 @@ import urllib.parse
 
 from qa import (Http, check, data_or_raise, error_codes, fail, finish, graphql, issuer, secret,
                 skip, GraphQLError)
+from qa import cleanup_deadline
 from qa import run as run_bounded
 
 REALM = 'econ-graph'
@@ -236,7 +237,7 @@ except (RuntimeError, OSError, KeyError) as error:
 finally:
     try:
         # Keycloak may still be restarting after a redeploy that failed or overran.
-        reachable_admin(admin, time.monotonic() + WAIT)
+        reachable_admin(admin, cleanup_deadline(WAIT))
         restore()
         restored = True
     except (RuntimeError, OSError) as error:

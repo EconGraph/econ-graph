@@ -16,10 +16,13 @@ import io
 import json
 import os
 import re
+import signal
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -296,6 +299,41 @@ finally:
         self.assertEqual(code, 1)
         self.assertEqual(cleaned.read_text(), 'yes')
         self.assertLess(report['scenarios'][0]['duration_seconds'], 10)
+
+    def test_stopping_the_runner_lets_the_running_scenario_clean_up(self):
+        started, cleaned = self.dir / 'started', self.dir / 'cleaned'
+        path = self.scenarios / 'a-tidy'
+        path.write_text(f'''#!/usr/bin/env python3
+# qa-scenario: a-tidy
+# qa-mutates: no
+# qa-profiles: ci
+# qa-description: tidy
+import qa
+open({str(started)!r}, 'w').write('yes')
+try:
+    qa.run(['sleep', '300'], timeout=600)
+finally:
+    open({str(cleaned)!r}, 'w').write(str(qa.cleanup_deadline(1000) - qa.stopped_at))
+''')
+        path.chmod(0o755)
+        self.scenario('b-later', mutates='no', profiles='ci')
+        report = self.dir / 'report.json'
+        env = dict(self.env, QA_TIMEOUT_GRACE_SECONDS='8')
+        runner_proc = subprocess.Popen(
+            [sys.executable, str(QA_DIR / 'run_scenarios.py'), '--target', 'http://localhost:1',
+             '--profile', 'ci', '--json', str(report)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 20
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        runner_proc.send_signal(signal.SIGTERM)
+        runner_proc.communicate(timeout=30)
+        self.assertEqual(runner_proc.returncode, 1)
+        # Cleanup ran, with half the grace period for its waits.
+        self.assertAlmostEqual(float(cleaned.read_text()), 4.0, delta=0.5)
+        self.assertEqual(self.ran(), [])
+        results = {r['name']: r for r in json.loads(report.read_text())['scenarios']}
+        self.assertIn('runner was stopped', results['b-later']['reason'])
 
     def test_secrets_never_reach_the_output(self):
         password_file = self.dir / 'pw'

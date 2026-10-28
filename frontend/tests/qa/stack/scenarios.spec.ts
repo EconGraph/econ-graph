@@ -14,8 +14,11 @@ import { expect, test } from '@playwright/test';
 
 const repo = resolve(import.meta.dirname, '../../../..');
 
-// Left of the test's timeout once the runner is stopped: enough to attach what it wrote.
-const ATTACH_MARGIN_MS = 60_000;
+// How long the runner gives a stopped scenario to clean up before killing it
+// (QA_TIMEOUT_GRACE_SECONDS), and what is left of the test's timeout after that to attach the
+// output.
+const GRACE_SECONDS = 45;
+const STOP_MARGIN_MS = (GRACE_SECONDS + 30) * 1000;
 
 test('QA scenario suite, ci profile, against the release e2e stack', async ({}, testInfo) => {
   const target = process.env.QA_STACK_TARGET ?? '';
@@ -27,35 +30,32 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
     if (value !== undefined && !/^(PW_|PLAYWRIGHT_|TEST_)/.test(name)) env[name] = value;
   }
   env.QA_OIDC_ISSUER ??= process.env.QA_STACK_OIDC_ISSUER ?? '';
+  env.QA_TIMEOUT_GRACE_SECONDS = String(GRACE_SECONDS);
 
-  // Its own process group (detached), so a runner that outlives the deadline is stopped with
-  // every scenario it started, and the output is still attached.
+  // The runner owns its scenarios: on SIGTERM it passes the signal to the running scenario,
+  // which cleans up (deletes its annotation, restores catalog roles), kills it after the grace
+  // period, and exits. So stopping the runner is enough, here and if this worker exits early.
   const runner = spawn(
     resolve(repo, 'scripts/qa/run-scenarios.sh'),
     ['--target', target, '--profile', 'ci', '--json', report],
-    { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true }
+    { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let output = '';
   runner.stdout.on('data', chunk => (output += chunk));
   runner.stderr.on('data', chunk => (output += chunk));
-  const stopGroup = (signal: NodeJS.Signals) => {
-    try {
-      if (runner.pid) process.kill(-runner.pid, signal);
-    } catch {
-      // Already gone.
-    }
+  const stopRunner = () => {
+    if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGTERM');
   };
+  process.once('exit', stopRunner);
 
   let timedOut = false;
   const status = await new Promise<number | null>((done, failed) => {
     const deadline = setTimeout(
       () => {
         timedOut = true;
-        // SIGTERM first: the runner's scenarios clean up what they created.
-        stopGroup('SIGTERM');
-        setTimeout(() => stopGroup('SIGKILL'), ATTACH_MARGIN_MS / 2).unref();
+        stopRunner();
       },
-      Math.max(testInfo.timeout - ATTACH_MARGIN_MS, 1_000)
+      Math.max(testInfo.timeout - STOP_MARGIN_MS, 1_000)
     );
     runner.on('error', error => {
       clearTimeout(deadline);
@@ -66,6 +66,7 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
       done(code);
     });
   });
+  process.off('exit', stopRunner);
 
   console.log(output);
   await testInfo.attach('qa-scenarios-output.txt', { body: output, contentType: 'text/plain' });
