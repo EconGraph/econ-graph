@@ -277,6 +277,11 @@ expect_unsealed() {
     grep -q "$2" "$scratch/$1.log" || { cat "$scratch/$1.log" >&2; die "$1: expected '$2'"; }
     if compgen -G "${BACKUP_PLAINTEXT_ROOT}/econgraph-verify-key.*" >/dev/null; then die "$1: left the throwaway key behind"; fi
 }
+# Sealing without a recipient fails at once (it neither hangs nor publishes).
+if (unset BACKUP_AGE_RECIPIENT; export -f backup_seal_dir die; timeout 30 bash -c 'backup_seal_dir "$1" "$2"' _ "$payload" "$scratch/no-recipient") 2>/dev/null; then
+    die 'sealed without a recipient'
+fi
+[[ ! -e "$scratch/no-recipient" && ! -e "$scratch/no-recipient.partial" ]] || die 'wrote a bundle without a recipient'
 # Ciphertext that age wrote "successfully" but that does not decrypt.
 fake_age corrupt '"$real" "$@"; out="${*: -1}"; [[ "${*: -2:1}" == -o ]]; printf "\\xff" | dd of="$out" bs=1 seek=300 conv=notrunc status=none'
 expect_unsealed corrupt 'does not decrypt'
@@ -299,7 +304,7 @@ for f in "\$@"; do
     [[ -e "$scratch/synced" ]] && state=published
     printf '%s %s\n' "\$state" "\$f" >> "$scratch/sync.log"
 done
-[[ -z "\${FAIL_SYNC:-}" ]] || exit 1
+[[ -z "\${FAIL_SYNC:-}" || " \$* " != *" \$FAIL_SYNC "* ]] || exit 1
 exec /usr/bin/env -u FAIL_SYNC PATH="${PATH}" sync "\$@"
 EOF
 chmod +x "$scratch/sync-bin/sync"
@@ -309,10 +314,19 @@ grep -qx "verified $scratch/synced.partial/SHA256SUMS" "$scratch/sync.log" || di
 grep -qx "verified $scratch/synced.partial/VERIFIED" "$scratch/sync.log" || die 'VERIFIED not flushed before publication'
 grep -qx "verified $scratch/synced.partial" "$scratch/sync.log" || die 'bundle directory not flushed before publication'
 grep -qx "published $scratch" "$scratch/sync.log" || die 'publishing rename not flushed'
-if (PATH="$scratch/sync-bin:$PATH"; export FAIL_SYNC=1; backup_seal_dir "$payload" "$scratch/sync-failed") 2>/dev/null; then
-    die 'ignored a failed flush'
+# FAIL_SYNC names the one path whose flush fails.
+for failing in backup.tar.age VERIFIED; do
+    if (PATH="$scratch/sync-bin:$PATH"; export FAIL_SYNC="$scratch/sync-failed-$failing.partial/$failing"
+        backup_seal_dir "$payload" "$scratch/sync-failed-$failing") 2>/dev/null; then
+        die "ignored a failed flush of $failing"
+    fi
+    [[ ! -e "$scratch/sync-failed-$failing" && ! -e "$scratch/sync-failed-$failing.partial/VERIFIED" ]] ||
+        die "published after a failed flush of $failing"
+done
+# A failed flush of the rename is reported, although the bundle is in place.
+if (PATH="$scratch/sync-bin:$PATH"; export FAIL_SYNC="$scratch"; backup_seal_dir "$payload" "$scratch/sync-failed-rename") 2>/dev/null; then
+    die 'ignored a failed flush of the rename'
 fi
-[[ ! -e "$scratch/sync-failed" && ! -e "$scratch/sync-failed.partial/VERIFIED" ]] || die 'published after a failed flush'
 # backup_databases must stop at a failed seal even when its caller has errexit
 # off, and must not hand the staging to in-process consumers.
 fake_age seal-fails 'exit 42'
@@ -383,8 +397,17 @@ kill "$holder"
 wait "$holder" 2>/dev/null || true
 wait "$waiter" || die 'a blocking writer failed after the lock was released'
 [[ -f "$scratch/locked-root/blocking/VERIFIED" ]] || die 'a blocking writer did not publish after the lock was released'
-# The lock is released once the bundle is published.
-flock -n "$scratch/locked-root/.lock" true || die 'lock still held'
+# The lock is released once the bundle is published, while the caller (a
+# migration that goes on to recreate the cluster) is still running.
+(
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
+    BACKUP_ROOT="$scratch/locked-root"
+    backup_databases "$scratch/locked-root/released" >/dev/null
+    flock -n "$scratch/locked-root/.lock" true
+) || die 'the lock is still held after the bundle was published'
 
 # --- consumers of an unopened bundle ----------------------------------------------------
 if (backup_source_dir "$scratch/bundle") >/dev/null 2>"$scratch/source-dir.log"; then
