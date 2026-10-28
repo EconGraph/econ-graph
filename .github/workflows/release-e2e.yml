@@ -6,15 +6,13 @@ name: Release E2E
 
 on:
   # No branch filter: pull requests into another feature branch (stacked PRs)
-  # run this suite too.
+  # run this suite too. No path filter on the trigger: Release E2E Result is a
+  # required check and must report on every PR; the changes job decides
+  # whether the suite runs.
   pull_request:
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - 'config/keycloak/**'
-      - 'docker-compose.release-e2e.yml'
-      - 'scripts/release-e2e.sh'
-      - '.github/workflows/release-e2e.yml'
+  # The merge queue (docs/development/MERGE_QUEUE.md): the suite always runs
+  # on the queued PRs merged onto their base branch.
+  merge_group:
   workflow_dispatch:
 
 # One run per pull request: a new push cancels the run for the previous head.
@@ -33,9 +31,41 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
+  # Whether a pull request touches what the suite runs on. Merge groups and
+  # manual runs always run it.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release == 'true' }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: dorny/paths-filter@v3
+      id: filter
+      if: github.event_name == 'pull_request'
+      with:
+        filters: |
+          release:
+            - 'frontend/**'
+            - 'backend/**'
+            - 'config/keycloak/**'
+            - 'docker-compose.release-e2e.yml'
+            - 'scripts/release-e2e.sh'
+            - '.github/workflows/release-e2e.yml'
+            - 'ci/scripts/check-required-jobs.sh'
+
   release-e2e:
     name: Release E2E (Chromium)
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     timeout-minutes: 45
 
     services:
@@ -101,3 +131,27 @@ jobs:
           frontend/playwright-report-release/
           frontend/test-results-release/
         retention-days: 14
+
+  # The one check branch protection requires of this workflow
+  # (docs/development/MERGE_QUEUE.md): passes when the suite passed, or when a
+  # pull request didn't touch what it runs on; in a merge group the suite must
+  # have run and passed.
+  result:
+    name: Release E2E Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ always() }}
+    needs: [changes, release-e2e]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        sparse-checkout: ci/scripts
+
+    - name: Check the job results
+      env:
+        NEEDS: ${{ toJSON(needs) }}
+        EVENT: ${{ github.event_name }}
+        MUST_RUN: changes release-e2e
+      run: ci/scripts/check-required-jobs.sh
