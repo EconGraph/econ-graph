@@ -36,7 +36,7 @@ CACHE="$HOME_DIR/.cache/econgraph"
 LOGS="$WORK/logs"
 ROOTFUL="unix:///var/run/docker.sock"
 UID_KIND="11111111-2222-3333-4444-555555555555"
-mkdir -p "$WORK/bin" "$WORK/tmp" "$WORK/host" "$LOGS" "$CACHE/bin"
+mkdir -p "$WORK/bin" "$WORK/tmp" "$WORK/host" "$LOGS" "$CACHE/bin" || exit 1
 
 # Plain kubectl and kind: any call is a failure of the test.
 for tool in kubectl kind; do
@@ -108,13 +108,14 @@ case "$*" in
     *) echo "stub docker: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
-chmod +x "$WORK/bin/"* "$CACHE/bin/kubectl" "$CACHE/bin/kind"
+chmod +x "$WORK/bin/"* "$CACHE/bin/kubectl" "$CACHE/bin/kind" ||
+    { echo "FAIL could not make the test stubs executable" >&2; exit 1; }
 
 # deploy.sh runs from a copy of scripts/deploy only, so that it skips the
 # Grafana and monitoring linters (absent) and stops at its first apply.
 TREE="$WORK/tree"
-mkdir -p "$TREE/scripts"
-cp -r "$PROJECT_ROOT/scripts/deploy" "$TREE/scripts/deploy"
+mkdir -p "$TREE/scripts" || exit 1
+cp -r "$PROJECT_ROOT/scripts/deploy" "$TREE/scripts/deploy" || exit 1
 
 # run SCRIPT ARGS...: the script with none of KUBECTL, KUBECONFIG, DOCKER_HOST
 # (and the settings that would choose another cluster) set, the scratch HOME,
@@ -290,8 +291,8 @@ expect "setup-port-forwarding.sh, past the cluster check" nonzero \
 # --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
 # No kind kubectl copies (a HOME whose cache holds only the kind binary): each script
 # stops before any kubectl.
-mkdir -p "$WORK/kind-only-home/.cache/econgraph/bin"
-cp "$CACHE/bin/kind" "$WORK/kind-only-home/.cache/econgraph/bin/kind"
+mkdir -p "$WORK/kind-only-home/.cache/econgraph/bin" || exit 1
+cp "$CACHE/bin/kind" "$WORK/kind-only-home/.cache/econgraph/bin/kind" || exit 1
 nocache() { # NAME ARGS...: the script, run without the kind kubectl copies, stopped before any kubectl
     local name="$1"
     shift
