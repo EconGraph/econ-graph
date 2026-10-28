@@ -110,6 +110,9 @@ on_exit() {
     exit "$status"
 }
 trap on_exit EXIT
+# One plaintext-staging writer at a time (with the host dumps), before
+# Keycloak is stopped.
+backup_staging_lock
 staging="$(backup_plaintext_dir)"
 work="$staging/payload"
 mkdir "$work"
