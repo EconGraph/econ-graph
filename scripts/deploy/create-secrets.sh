@@ -134,7 +134,8 @@ for arg in "$@"; do
             exit 0
             ;;
         *)
-            echo "create-secrets: error: unknown argument: $arg" >&2
+            # Never echo it: a rejected argument may be a pasted credential.
+            echo "create-secrets: error: unknown argument (see --help)" >&2
             exit 2
             ;;
     esac
@@ -174,6 +175,9 @@ log() {
 # context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+# --context=NAME replaces an inherited CLUSTER_ROLE_CONTEXT before the kubectl
+# is chosen, so it is the same kubectl as a run without the inherited one.
+if [[ -n "$CONTEXT_ARG" ]]; then unset CLUSTER_ROLE_CONTEXT; fi
 cluster_role_default_kubectl
 KUBECTL="${KUBECTL:-kubectl}"
 

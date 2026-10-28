@@ -110,6 +110,38 @@ class DnsTokenTest(unittest.TestCase):
         self.assert_private(result)
         self.assertFalse(any('create' in args or 'apply' in args for args in self.calls()))
 
+    def test_explicit_context_replaces_inherited_one(self):
+        # With KUBECTL and KUBECONFIG unset, --context=NAME uses the cached kind
+        # kubectl even when a CLUSTER_ROLE_CONTEXT is inherited; plain kubectl
+        # on PATH would fail.
+        directory = Path(self.tmp.name)
+        cache = directory / 'cache'
+        (cache / 'econgraph' / 'bin').mkdir(parents=True)
+        (directory / 'kubectl').rename(cache / 'econgraph' / 'bin' / 'kubectl')
+        (cache / 'econgraph' / 'kubeconfig-econ-graph').write_text('apiVersion: v1\n')
+        plain = directory / 'plain'
+        plain.mkdir()
+        (plain / 'kubectl').write_text('#!/bin/sh\nexit 1\n')
+        (plain / 'kubectl').chmod(0o700)
+        env = dict(self.env, CLUSTER_ROLE_CONTEXT='stale-context', XDG_CACHE_HOME=str(cache),
+                   PATH=f"{plain}:{os.environ['PATH']}",
+                   STUB_CURRENT_CONTEXT='other-context', CLOUDFLARE_API_TOKEN=TOKEN)
+        env.pop('KUBECTL')
+        env.pop('KUBECONFIG', None)
+        result = subprocess.run(['bash', '-x', str(SECRETS), '--cloudflare-dns-only',
+                                 '--context=test-context'],
+                                env=env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_private(result)
+        self.assertEqual(len([args for args in self.calls() if 'create' in args]), 1)
+
+    def test_unknown_argument_is_not_echoed(self):
+        result = self.run_script(SECRETS, '--cloudflare-dns-only', '--token=' + TOKEN)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn(TOKEN, result.stdout + result.stderr)
+        self.assertFalse(self.log.exists())
+
     def test_hidden_prompt_does_not_echo_token(self):
         master, slave = pty.openpty()
         try:
