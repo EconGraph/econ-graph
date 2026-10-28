@@ -94,9 +94,13 @@ jobs:
         SERIES: ${{ github.event.inputs.series }}
       run: |
         set -euo pipefail
-        # Match the CLI's trimming before reusing the identifier in SQL queries.
-        SERIES="${SERIES#"${SERIES%%[![:space:]]*}"}"
-        SERIES="${SERIES%"${SERIES##*[![:space:]]}"}"
+        # Rust str::trim uses Unicode White_Space, including nonbreaking spaces.
+        SERIES=$(python3 - <<'PY'
+        import os
+        whitespace = "\t\n\v\f\r \u0085\u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200b))) + "\u2028\u2029\u202f\u205f\u3000"
+        print(os.environ["SERIES"].strip(whitespace), end="")
+        PY
+        )
         if [[ -z "$SERIES" || "$SERIES" == *,* ]]; then
           echo "::error::The integration test requires exactly one nonempty series id"
           exit 1

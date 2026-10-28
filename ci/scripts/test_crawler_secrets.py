@@ -22,7 +22,9 @@ class CrawlerSecretsTest(unittest.TestCase):
         # Stop after enqueue, before the worker starts or a database is needed.
         prefix = crawl["run"].split("# One worker", 1)[0]
         for series, expected in ((" \tGDP\n", "GDP"), ("GDP", "GDP"),
-                                 ("GDP,CPI", None), (" \t\n", None), ("", None)):
+                                 ("\u00a0GDP\u00a0", "GDP"), ("\u2003GDP\u202f", "GDP"),
+                                 ("\x1cGDP\x1f", "\x1cGDP\x1f"),
+                                 ("GDP,CPI", None), (" \t\n", None), ("\u00a0", None), ("", None)):
             with self.subTest(series=series), tempfile.TemporaryDirectory() as directory:
                 crawler = Path(directory) / "target/release/crawler"
                 crawler.parent.mkdir(parents=True)
