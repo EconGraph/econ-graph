@@ -690,6 +690,15 @@ clear_log
 run "$rollback" --to "pre-$TAG" || fail "second rollback failed: $(cat "$tmp/out")"
 grep -q 'ctr -n k8s.io images tag' "$STUB_LOG" && fail "second rollback retagged"
 
+# Only the first load record says what ran before: a later block that names
+# another image does not change what rollback restores.
+reset
+load_ok
+printf '\nloaded_at=2026-10-26T00:00:00Z\nstatus=complete\ntag=%s\nbefore=backend local=econ-graph-backend:%s running=sha256:%s keep=sha256:%s\n' \
+  "$TAG" "$STUB_LOCAL_TAG" "$(rep 4)" "$(rep 4)" >>"$records/images.txt"
+run "$rollback" --to "pre-$TAG" --dry-run || fail "rollback followed a later record instead of the first: $(cat "$tmp/out")"
+grep -qF "$(pre backend) = $old_backend" "$tmp/out" || fail "rollback did not check the copy against the first record"
+
 # Rollback refusals: nothing changes.
 rollback_refuses() { # $1: what, $2: setup function, $3: expected text, rest: env
   local what="$1" setup="$2" want="$3"
