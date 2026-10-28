@@ -309,6 +309,12 @@ jobs:
     - name: Check which cluster the operator scripts reach
       run: scripts/deploy/test-operator-kubectl.sh
 
+    # With none of KUBECTL, KUBECONFIG and DOCKER_HOST set, the deploy, Keycloak
+    # backup, gateway and port-forwarding scripts reach the kind cluster's own
+    # kubectl, and kind on the rootful Docker daemon, never plain kubectl or kind.
+    - name: Check that the deploy scripts default to the kind cluster's kubectl
+      run: scripts/deploy/test-kind-kubectl-default.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
