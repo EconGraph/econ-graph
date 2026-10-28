@@ -50,6 +50,8 @@ age-keygen -o "$tmp/identity" 2>/dev/null
 BACKUP_AGE_RECIPIENT="$(age-keygen -y "$tmp/identity")"
 export BACKUP_AGE_RECIPIENT
 export BACKUP_PLAINTEXT_ROOT="$ram"
+# Nothing here should wait on the staging lock: a wait fails fast.
+export BACKUP_LOCK_TIMEOUT=5
 # On-disk plaintext staging for the refusal cases: it must really not be tmpfs.
 disk_staging="$tmp/disk-staging"
 mkdir "$disk_staging"
@@ -303,8 +305,9 @@ STUB_RESTORE_MISMATCH=1 run "$restore" "$dir" --yes
 grep -q -- '-- dropdb -U keycloak --if-exists keycloak_restore_' "$STUB_LOG" ||
   fail "restore with mismatched row counts left its restore database"
 
-# A good restore.
-run "$restore" "$dir" --yes
+# A good restore. Its safety backup must reuse the restore's staging lock rather
+# wait for it: a short timeout makes a wait fail fast.
+run env BACKUP_LOCK_TIMEOUT=5 "$restore" "$dir" --yes
 [ "$status" = 0 ] || fail "restore --yes exits $status: $(cat "$tmp/out")"
 # The stub always reports 1 replica, so the backup inside the restore scales again: uniq.
 order="$(grep -oE 'scale deployment|-- pg_dump|-- createdb -U keycloak -O keycloak keycloak_restore_[^ ]*|-d keycloak_restore_[^ ]* --no-owner --exit-on-error --single-transaction$|RENAME TO keycloak_pre_restore_' "$STUB_LOG" |
