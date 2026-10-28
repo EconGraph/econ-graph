@@ -26,9 +26,8 @@ import {
 const backendPort = Number(process.env.RELEASE_BACKEND_PORT ?? 18080);
 const frontendPort = Number(process.env.RELEASE_FRONTEND_PORT ?? 18081);
 const backendUrl = `http://localhost:${backendPort}`;
-const frontendUrl = `http://localhost:${frontendPort}`;
-const backendBin =
-  process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
+export const frontendUrl = `http://localhost:${frontendPort}`;
+const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
 
 // Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
 // mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
@@ -46,7 +45,8 @@ if (!DEPLOYED && !databaseUrl) {
 }
 if (DEPLOYED && !SKIP_AUTH) checkDeployedAuthEnv();
 
-const webServer: PlaywrightTestConfig['webServer'] = [
+// Exported for playwright.qa-stack.config.ts, which runs the QA scenario suite against this stack.
+export const webServer: PlaywrightTestConfig['webServer'] = [
   {
     // Built by scripts/release-e2e.sh. It applies the app migrations on start; the seed has
     // already applied the data migrations and loaded the fixtures.

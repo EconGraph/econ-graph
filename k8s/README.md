@@ -64,6 +64,9 @@ terraform/k8s/          # Terraform configuration
 
 scripts/deploy/         # Deployment scripts
 ├── build-images.sh    # Build Docker images
+├── load-release-images.sh     # Put a release candidate's GHCR images on the nodes
+├── verify-release-images.sh   # Restart and check the pods run them
+├── rollback-release-images.sh # Go back to what ran before the load
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── install-gateway.sh # Install the gateway (run by deploy.sh)
 ├── apply-gateway-routes.sh # Apply the routes, with the https host name (run by deploy.sh)
@@ -107,6 +110,22 @@ once instead.
 ```bash
 ./scripts/deploy/deploy.sh
 ```
+
+### Release images instead of local builds
+
+To run the images that `.github/workflows/release.yml` built for a release candidate tag,
+and not images built here, load them onto the nodes under the manifests' names before
+`deploy.sh`, then restart and check:
+
+```bash
+./scripts/deploy/load-release-images.sh --tag vX.Y.Z-rc.N
+./scripts/deploy/deploy.sh
+./scripts/deploy/verify-release-images.sh --tag vX.Y.Z-rc.N
+```
+
+`./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
+before the load. The load covers every workload that runs the three images, including the
+`crawler-migrate` Job. See [Release images on the kind cluster](../docs/deployment/RELEASE_IMAGES.md).
 
 ## 🔐 Keycloak
 
@@ -304,13 +323,14 @@ It works on the kind cluster through its own kubectl (`scripts/deploy/lib/kind-e
 reads from the terminal only, refuses piped input, refuses a cluster that is not marked
 production before it asks, and then starts cloudflared through `apply_cloudflared`, for
 the public host the cluster serves. `scripts/deploy/create-secrets.sh --prompt-tunnel-token`
-writes the token only, with `${KUBECTL:-kubectl}` on its current context. Run by hand
-with neither `KUBECTL` nor `KUBECONFIG` set, it uses the kind cluster's own kubectl and
-kubeconfig when copies are kept at `~/.cache/econgraph/bin/kubectl` and
-`~/.cache/econgraph/kubeconfig-econ-graph`, and says so; plain `kubectl` may be another
-cluster's (the microk8s snap wrapper ignores `~/.kube/config`). An exported `KUBECONFIG`
-(some runbooks export one) turns that off, which it says, and with only one of the two
-files it warns which is missing and uses plain `kubectl`. Don't put the token on a command line
+writes the token only, with `KUBECTL` on its current context. Run by hand without
+`KUBECTL`, it uses the kind cluster's own kubectl kept at `~/.cache/econgraph/bin/kubectl`,
+with an exported `KUBECONFIG` if there is one (some runbooks export one) and
+`~/.cache/econgraph/kubeconfig-econ-graph` if not, and says which. It never falls back to
+plain `kubectl`, which may be another cluster's (the microk8s snap wrapper ignores
+`KUBECONFIG` and `~/.kube/config`): when a copy is missing it stops and says which, and how
+to get it (any `scripts/deploy/lib/kind-env.sh` script keeps them) or to set `KUBECTL`.
+Don't put the token on a command line
 (`CLOUDFLARE_TUNNEL_TOKEN=...`), where shell history keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0
 replicas and says so. If a cluster that is not marked already holds the Secret,
 `create-secrets.sh` keeps it and warns; delete it there with
@@ -539,6 +559,14 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
 
+Cloudflare DNS-01 uses a separate Secret in `cert-manager`:
+`cloudflare-api-token-secret/api-token`. The certificate setup script accepts
+hidden terminal input or `CLOUDFLARE_API_TOKEN` from a secure environment source
+and writes it through `create-secrets.sh --cloudflare-dns-only`; normal deploys
+do not create this credential. Use a token scoped to one zone, with DNS edit
+and zone read permissions and no account-wide grants. See the
+[DNS-01 setup guide](../docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md).
+
 Read a value back with, for example:
 
 ```bash
@@ -718,3 +746,5 @@ For production use, consider:
 Admin audit client-IP attribution depends on the verified proxy chain. See
 [Admin audit and trusted proxies](../docs/security/ADMIN_AUDIT.md) before setting
 `TRUSTED_PROXIES`; the manifests default to the backend TCP peer.
+
+Coding agents that need Kubernetes access should use the [read-only agent session](../docs/deployment/AGENT_ACCESS.md). Its namespaced identity can read workloads, pod logs and ConfigMaps but not Secrets, and cannot change anything; deployments and restarts stay with the operator scripts.

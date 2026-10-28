@@ -22,11 +22,12 @@ done
 
 # Every call goes through kc (scripts/deploy/lib/cluster-role.sh): the KUBECTL
 # and CLUSTER_ROLE_CONTEXT that deploy.sh and teardown.sh export, or, run by
-# hand with neither, the kind cluster's own kubectl and kubeconfig when cached.
+# hand with neither, the kind cluster's own kubectl and kubeconfig kept in
+# ~/.cache/econgraph (cluster_role_default_kubectl); without them it stops.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 
 NAMESPACE="econ-graph"
 protect_pvc() {

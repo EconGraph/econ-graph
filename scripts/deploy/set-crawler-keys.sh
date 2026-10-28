@@ -64,6 +64,11 @@ for arg in "$@"; do
     esac
 done
 
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
+
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
