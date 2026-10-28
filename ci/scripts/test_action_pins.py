@@ -63,7 +63,9 @@ class ActionPinsTest(unittest.TestCase):
 
     def test_checkout_policy_covers_versions_case_and_composites(self):
         """Check every checkout, including nested composite-action steps."""
-        for reference in ("actions/checkout@" + "a" * 40, "Actions/Checkout@" + "b" * 40):
+        for path in ("actions/checkout", "Actions/Checkout", "actions/checkout/.",
+                     "actions/checkout/", "actions/checkout/./", "actions/checkout/sub/.."):
+            reference = path + "@" + "a" * 40
             with self.subTest(reference=reference):
                 document = yaml.safe_load(f'''runs:
   using: composite

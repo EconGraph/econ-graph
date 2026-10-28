@@ -24,7 +24,9 @@ def check_document(document, location):
                         errors.append(f"{here}: Docker actions need a sha256 digest: {value}")
                 elif not re.fullmatch(r"[^@\s]+/[^@\s]+@[0-9a-f]{40}", value):
                     errors.append(f"{here}: external actions need a full commit SHA: {value}")
-                if isinstance(value, str) and value.split("@", 1)[0].lower() == "actions/checkout":
+                # Include repository-root path aliases such as actions/checkout/.
+                if (isinstance(value, str)
+                        and value.split("@", 1)[0].lower().split("/")[:2] == ["actions", "checkout"]):
                     inputs = document.get("with")
                     if not isinstance(inputs, dict) or inputs.get("persist-credentials") is not False:
                         errors.append(f"{location}.with.persist-credentials: checkout must explicitly set false")
