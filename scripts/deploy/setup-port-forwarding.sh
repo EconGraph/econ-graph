@@ -9,11 +9,13 @@ echo "🔗 Setting up port forwarding for EconGraph services..."
 echo ""
 
 # The kind cluster's own kubectl and kubeconfig, on the rootful Docker daemon
-# (on this host `kubectl` is the microk8s snap wrapper).
+# (on this host `kubectl` is the microk8s snap wrapper). Stops when the kind
+# cluster can't be reached, rather than fall back to plain kubectl.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
-ensure_kind_kubectl_quietly || true
+check_docker_daemon
+ensure_kind_kubectl
 
 # Check if kubectl is available and cluster is accessible
 if ! kubectl cluster-info >/dev/null 2>&1; then

@@ -113,6 +113,16 @@ die() {
     exit 1
 }
 
+# kubectl is KUBECTL, with the KUBECONFIG it finds. Run by hand with none of
+# KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT set, it is the kind cluster's own
+# kubectl and kubeconfig kept in ${XDG_CACHE_HOME:-~/.cache}/econgraph
+# (cluster_role_default_kubectl in lib/cluster-role.sh): plain `kubectl` may be
+# another cluster's, such as the MicroK8s snap wrapper. kc below replaces the
+# library's.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+cluster_role_default_kubectl
+
 kc() {
     if [ -n "$KUBE_CONTEXT" ]; then
         command "${KUBECTL:-kubectl}" --context "$KUBE_CONTEXT" "$@"
