@@ -1,11 +1,11 @@
 # DevOps Engineer Standards
 
-This document outlines the standards and best practices for DevOps Engineers, ensuring alignment with our overarching AI developer principles and industry expectations for infrastructure automation, reliability, and operations.
+DevOps engineers follow these standards for infrastructure automation, reliability, and operations alongside the [AI Developer Standards](ai-developer-standards.md).
 
 ## Core AI Developer Principles (Applied to DevOps)
 
 ### Branching & Git Workflow
-* **Always create new branches off main** for infrastructure changes: `git fetch && git checkout -b devops/descriptive-task-name origin/main`
+* **Create a new branch for each infrastructure change**. For ordinary development, branch from `origin/main`: `git fetch && git checkout -b devops/descriptive-task-name origin/main`. For fixes found during release QA, branch from the target `release/vX.Y` branch and follow the [release fix flow](../docs/development/RELEASE_PROCESS.md#fix-flow): open the fix PR into the release branch, then forward-port it to `main` after it merges.
 * **Use `git mv` for file operations**: When moving Kubernetes manifests, Terraform files, or scripts, use `git mv` to preserve history
 * **Avoid interactive git commands**: Never use interactive merge or rebase that can hang during automated operations
 * **Conventional commits for infrastructure**: Use prefixes like `infra:`, `deploy:`, `monitor:`, `security:` for clear categorization
@@ -32,7 +32,7 @@ This document outlines the standards and best practices for DevOps Engineers, en
 
 ### Cursor-native commands
 * Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs
-* Use `/workflow-audit` to validate GitHub Actions workflows (triggers/steps/names) and enforce hygiene
+* Use `/workflow-audit` to check GitHub Actions workflow triggers, steps, and names, and identify missing permissions, timeouts, or concurrency settings
 * Use `/deploy` to run the standard deployment script when available; use `/docker-logs` for local container debugging
 * Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change)
 
@@ -118,7 +118,7 @@ This document outlines the standards and best practices for DevOps Engineers, en
 * **Stakeholder communication**: Keep relevant stakeholders informed with appropriate technical detail levels
 
 ### Documentation Standards
-* **Infrastructure documentation**: All infrastructure components must have up-to-date documentation
+* **Infrastructure documentation**: All infrastructure components must have up-to-date, accurate documentation
 * **Runbook maintenance**: Keep operational runbooks current and tested
 * **Architecture diagrams**: Maintain current architecture documentation
 * **Change documentation**: Document all infrastructure changes with rationale and impact
@@ -177,13 +177,10 @@ This document outlines the standards and best practices for DevOps Engineers, en
 * ❌ **Blame culture**: Focus on systems and processes, not individuals
 * ❌ **Siloed knowledge**: Avoid having critical operational knowledge in single individuals
 * ❌ **Reactive operations**: Don't wait for problems to occur before addressing them
-* ❌ **Outdated documentation**: Keep all operational documentation current and accurate
 
 ### Communication Anti-Patterns
-* ❌ **Vague incident updates**: Provide specific technical details in incident communications
 * ❌ **Ignoring stakeholder concerns**: Address stakeholder questions and concerns promptly
 * ❌ **Poor change communication**: Ensure all affected parties are informed of infrastructure changes
-* ❌ **Missing post-mortems**: Every incident requires a thorough post-mortem analysis
 
 ## Integration with Development Teams
 
@@ -198,5 +195,3 @@ This document outlines the standards and best practices for DevOps Engineers, en
 * **Performance feedback**: Share performance insights with development teams
 * **Security feedback**: Communicate security requirements and findings
 * **Cost feedback**: Share infrastructure cost insights to guide development decisions
-
-By following these DevOps standards, engineers will contribute to a robust, efficient, secure, and reliable infrastructure that supports the organization's development and operational goals while maintaining alignment with our core AI developer principles.

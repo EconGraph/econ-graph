@@ -1,3 +1,9 @@
+# The gateway's Envoy proxy pods (k8s/manifests/gateway/) are selected by
+# namespace envoy-gateway-system plus the labels Envoy Gateway puts on the
+# proxy of Gateway econ-graph-gateway/econ-graph-gateway. They are admitted
+# only to the pods and ports the routes send traffic to: the frontend (3000),
+# the backend (9876) and Keycloak (8080). Policies match the proxy's pod ports
+# (listener http 10080, https 10443), not its Service port 80.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -9,14 +15,6 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow ingress from nginx-ingress controller
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress
-    - podSelector:
-        matchLabels:
-          app.kubernetes.io/name: ingress-nginx
   # Allow ingress from same namespace
   - from:
     - namespaceSelector:
@@ -40,6 +38,23 @@ spec:
     ports:
     - protocol: TCP
       port: 80
+  # Allow egress to the gateway's Envoy proxy, for in-cluster callers of
+  # econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local (the
+  # backend's server-side calls, an in-cluster tunnel connector)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 10080
+    - protocol: TCP
+      port: 10443
   # Allow inter-pod communication within namespace
   - to:
     - namespaceSelector:
@@ -70,11 +85,19 @@ spec:
     - podSelector:
         matchLabels:
           app: chart-api-service
-  # Allow ingress from nginx-ingress
+  # Allow ingress from the gateway's Envoy proxy
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: ingress
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 9876
   egress:
   # Allow egress to PostgreSQL (both pod and service)
   - to:
@@ -92,6 +115,22 @@ spec:
     ports:
     - protocol: TCP
       port: 5432
+  # Allow egress to the gateway's Envoy proxy, for in-cluster calls through
+  # econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 10080
+    - protocol: TCP
+      port: 10443
   # Allow egress to Keycloak, for the signing keys that verify access tokens
   - to:
     - podSelector:
@@ -121,11 +160,19 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow ingress from nginx-ingress
+  # Allow ingress from the gateway's Envoy proxy
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: ingress
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 3000
   egress:
   # Allow egress to backend
   - to:
@@ -155,3 +202,29 @@ spec:
     ports:
     - protocol: TCP
       port: 443
+---
+# Keycloak's public paths (HTTPRoute econ-graph-idp) from the gateway's proxy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: econ-graph-keycloak-policy
+  namespace: econ-graph
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - protocol: TCP
+      port: 8080

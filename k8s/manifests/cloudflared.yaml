@@ -2,22 +2,24 @@
 # (PUBLIC_HOST in scripts/deploy/deploy.sh, https://econgraph.com) from this cluster.
 #
 # Traffic: browser -> Cloudflare edge (TLS) -> this tunnel (outbound-only from
-# the cluster, no inbound port is opened on the host) -> ingress-nginx -> the app.
+# the cluster, no inbound port is opened on the host) -> the gateway -> the app.
 # The tunnel is remotely managed: its public hostnames and their origin service
 # are set in the Cloudflare dashboard (Zero Trust > Networks > Tunnels), not here.
 # Each public hostname (econgraph.com, www.econgraph.com) points at
-#   https://ingress-nginx-controller.ingress-nginx.svc.cluster.local:443
+#   https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443
 # with No TLS Verify on and no HTTP Host header override: cloudflared passes the
-# visitor's Host through, which is what the ingress rules match on.
-# The origin is https so that the scheme ingress-nginx sees, and passes on as
-# X-Forwarded-Proto, is the connection's own: no client header can claim https,
-# and the public host's Ingresses redirect plain http to https
-# (scripts/deploy/render-public-host.py). The certificate is ingress-nginx's
-# default one, hence No TLS Verify; this hop never leaves the cluster, and the
-# tunnel itself to Cloudflare is authenticated TLS. See "Public site" in
-# k8s/README.md.
-# When ingress-nginx is replaced by the Gateway API (ECO-433), that
-# origin service changes to the Gateway's Service; update the dashboard then.
+# visitor's Host through, which is what the public routes match on.
+# The origin is the gateway's https listener so that the scheme the gateway
+# passes on as X-Forwarded-Proto is the connection's own: no client header can
+# claim https, and plain http for the public host is redirected to https
+# (scripts/deploy/render-public-host.py). The certificate is self-signed
+# (k8s/manifests/gateway/selfsigned-issuer.yaml), hence No TLS Verify; this hop
+# never leaves the cluster, and the tunnel itself to Cloudflare is
+# authenticated TLS. The visitor's address reaches the gateway in
+# X-Forwarded-For, which it trusts from pod addresses only
+# (k8s/manifests/gateway/client-traffic-policy.yaml). The NetworkPolicy
+# econ-graph-network-policy lets this pod reach the gateway's proxy (its pod
+# port 10443). See "Public site" in k8s/README.md.
 #
 # The tunnel token comes only from the Secret cloudflare-tunnel (key token),
 # written by scripts/deploy/create-secrets.sh --prompt-tunnel-token (hidden

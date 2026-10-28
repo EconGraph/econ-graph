@@ -14,19 +14,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Use the same kubectl and pinned context for credential and issuer writes.
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "${SCRIPT_DIR}/lib/cluster-role.sh"
-cluster_role_default_kubectl
-KUBECTL="${KUBECTL:-kubectl}"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Default values
 NAMESPACE="econ-graph"
 DOMAIN="econgraph.example.com"
 CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 USE_STAGING=false
+CONTEXT="kind-econ-graph"
+DRY_RUN=false
 
 # Function to print colored output
 print_status() {
@@ -58,7 +55,15 @@ OPTIONS:
     Command-line token arguments are refused.
     -n, --namespace NAMESPACE  Kubernetes namespace (default: econ-graph)
     --staging                  Use Let's Encrypt staging server (for testing)
+    --context CONTEXT          kubectl context (default: kind-econ-graph); the
+                               current context is not changed
+    --dry-run                  Show the cluster and what would be applied; change nothing
     -h, --help                 Show this help message
+
+Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) on that
+one context, with the kind cluster's own kubectl and kubeconfig from
+~/.cache/econgraph when KUBECTL and KUBECONFIG are unset: plain kubectl may be
+another cluster's. The cluster's identity is shown before anything is applied.
 
 EXAMPLES:
     # Production setup
@@ -108,6 +113,15 @@ while [[ $# -gt 0 ]]; do
             USE_STAGING=true
             shift
             ;;
+        --context)
+            [ $# -ge 2 ] && [ -n "$2" ] || { print_error "--context needs a non-empty value"; exit 2; }
+            CONTEXT="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -140,20 +154,22 @@ print_status "Environment: $([ "$USE_STAGING" = true ] && echo "staging" || echo
 # Check prerequisites
 print_status "Checking prerequisites..."
 
-# Check if kubectl is available
-if ! command -v "$KUBECTL" &> /dev/null; then
-    print_error "kubectl is not installed or not in PATH"
+# One kubectl and one context for every call below (kc, lib/cluster-role.sh),
+# never plain kubectl.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "${PROJECT_ROOT}/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_operator_context "$CONTEXT"; then
+    print_error "Nothing was changed."
     exit 1
 fi
+kubectl() { kc "$@"; }
 
-# Refuse a stale inherited context instead of writing into an unexpected cluster.
-if [[ -n "${CLUSTER_ROLE_CONTEXT:-}" ]]; then
-    [[ "$(command "$KUBECTL" config current-context)" == "$CLUSTER_ROLE_CONTEXT" ]] || {
-        print_error "CLUSTER_ROLE_CONTEXT differs from the current context; unset it or switch first."
-        exit 1
-    }
+if [[ "$DRY_RUN" = true ]]; then
+    print_status "Dry run: on context $CONTEXT, would create Secret cert-manager/cloudflare-api-token-secret,"
+    print_status "  apply the ClusterIssuer and a wildcard Certificate for $DOMAIN in $NAMESPACE, and wait for it."
+    print_status "  Nothing was changed."
+    exit 0
 fi
-cluster_role_pin_context
 
 # Check if cluster is accessible
 if ! kc cluster-info &> /dev/null; then
@@ -172,7 +188,8 @@ print_success "Prerequisites check passed"
 # Create Cloudflare API credentials secret
 print_status "Creating Cloudflare API credentials secret..."
 export CLOUDFLARE_API_TOKEN KUBECTL
-"${SCRIPT_DIR}/create-secrets.sh" --cloudflare-dns-only
+# The same kubectl, kubeconfig and context, without changing the current one.
+"${SCRIPT_DIR}/create-secrets.sh" --cloudflare-dns-only --context="$CONTEXT"
 unset CLOUDFLARE_API_TOKEN
 
 print_success "Cloudflare API credentials secret created"

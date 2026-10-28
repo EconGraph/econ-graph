@@ -13,8 +13,8 @@ positioning or evidence of development productivity.
   cost calculations. Fixed staffing assumptions and historical usage coexist with
   current source counts; the model does not measure actual replacement cost.
 
-The updater also writes a standalone archival report. It does not update the
-README, investor pitch, product summary, or demo documentation.
+The updater also writes a [standalone archival report](../docs/archive/generated/development-costs/analysis.md).
+It does not update the README, investor pitch, product summary, or demo documentation.
 
 ## Maintenance
 
@@ -25,12 +25,14 @@ From the repository root:
 python3 -m unittest discover -s scripts/tests -p 'test_cost_analysis.py' -v
 ```
 
-The shell entry point delegates to `scripts/cost_analysis.py`, which reads tracked
+The [shell entry point](../scripts/update-cost-analysis.sh) delegates to
+[`scripts/cost_analysis.py`](../scripts/cost_analysis.py), which reads tracked
 file statistics and validates CSV input before writing outputs. Repeated runs with
 unchanged inputs preserve the generated contents and timestamp.
 
-The scheduled workflow validates generation and proposes output changes through a
-pull request. The legacy webhook entry point invokes the same updater; it does not
-produce a separate summary.
+The [scheduled workflow](../.github/workflows/update-cost-analysis.yml) validates
+generation and proposes output changes through a pull request. The
+[legacy webhook entry point](../scripts/webhook-cost-update.py) invokes the same
+updater; it does not produce a separate summary.
 
 

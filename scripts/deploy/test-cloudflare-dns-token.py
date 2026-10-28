@@ -20,7 +20,11 @@ args = sys.argv[1:]
 with open(os.environ['STUB_LOG'], 'a') as log:
     log.write(json.dumps(args) + '\n')
 if 'current-context' in args:
-    print('test-context')
+    print(os.environ.get('STUB_CURRENT_CONTEXT', 'test-context'))
+elif 'view' in args and '--minify' in args:
+    print('https://127.0.0.1:6443')
+elif 'namespace' in args and 'kube-system' in args:
+    print('11111111-2222-3333-4444-555555555555')
 elif 'create' in args and 'secret' in args:
     assert 'cloudflare-api-token-secret' in args
     assert 'cert-manager' in args
@@ -51,10 +55,12 @@ class DnsTokenTest(unittest.TestCase):
         for key in ('CLOUDFLARE_API_TOKEN', 'CLUSTER_ROLE_CONTEXT'):
             self.env.pop(key, None)
 
-    def run_script(self, script, *args, token=None):
+    def run_script(self, script, *args, token=None, current_context=None):
         env = dict(self.env)
         if token is not None:
             env['CLOUDFLARE_API_TOKEN'] = token
+        if current_context is not None:
+            env['STUB_CURRENT_CONTEXT'] = current_context
         return subprocess.run(['bash', '-x', str(script), *args],
                               env=env, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=15)
@@ -74,9 +80,14 @@ class DnsTokenTest(unittest.TestCase):
             self.assertEqual(args[args.index('--context') + 1], 'test-context')
 
     def test_environment_token_reaches_only_dns_secret_without_argv_or_trace(self):
-        result = self.run_script(SETUP, '--domain', 'econgraph.example.com', token=TOKEN)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        # --context names a context other than the current one: the credential
+        # and certificate writes all go to it, and the current one is not changed.
+        result = self.run_script(SETUP, '--domain', 'econgraph.example.com',
+                                 '--context', 'test-context', token=TOKEN,
+                                 current_context='other-context')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_private(result)
+        self.assertFalse(any('use-context' in args for args in self.calls()))
         created = [args for args in self.calls() if 'create' in args]
         self.assertEqual(len(created), 1)
         self.assertTrue(all('ingress' not in ' '.join(args) for args in self.calls()))

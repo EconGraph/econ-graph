@@ -108,7 +108,7 @@ spec:
               key: CORS_ORIGIN
         # Sign-in through Keycloak (k8s/manifests/keycloak). OIDC_ISSUER is the public URL the
         # tokens name in `iss`; the API fetches signing keys from the in-cluster service, since
-        # the public URL goes through the ingress. OIDC_REQUIRED stops startup without an issuer.
+        # the public URL goes through the gateway. OIDC_REQUIRED stops startup without an issuer.
         # OIDC_ISSUER must equal Keycloak's KC_HOSTNAME plus /realms/econ-graph: change them
         # together, or every token fails the issuer check. deploy.sh does that for both from
         # PUBLIC_HOST (https://<host>/idp/realms/econ-graph); OIDC_JWKS_URL stays in-cluster.

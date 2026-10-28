@@ -2,13 +2,14 @@
 # The scripts given to run_lib are expanded in its subshell, not here.
 # The yq stub is called by the sourced library.
 # shellcheck disable=SC2016,SC2329
-# Tests for scripts/deploy/lib/public-host.sh against a stub kubectl, no cluster:
-#   - PUBLIC_HOST unset on a cluster that serves a public host (public Ingresses, or the
-#     retired econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
-#   - a public host sets only the real-ip settings in the ingress-nginx ConfigMap and
-#     removes use-forwarded-headers; no public host removes all of them again and
-#     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way,
-#     before any Ingress is applied (in public_host_init);
+# Tests for scripts/deploy/lib/public-host.sh against a stub kubectl and a stub
+# apply-gateway-routes.sh, no cluster:
+#   - PUBLIC_HOST unset on a cluster that serves a public host (public HTTPRoutes, or on a
+#     cluster still on ingress-nginx the public Ingresses or the retired
+#     econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
+#   - apply_public_edge hands the public host, or `none` without one, to
+#     apply-gateway-routes.sh on the pinned context; nothing touches ingress-nginx; the
+#     retired econ-graph-ssl-ingress goes either way (in public_host_init);
 #   - cloudflared gets 0 replicas without its Secret or without a public host;
 #   - only a cluster marked production (scripts/deploy/lib/cluster-role.sh) runs
 #     cloudflared or takes a PUBLIC_HOST: unmarked or a marker copied from another cluster
@@ -56,6 +57,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        another cluster), other-role, none, or fails (the lookup fails)
 #   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
 #   STUB_NO_CONTEXT=1    there is no current context
+#   STUB_ROUTE_HOST      the host the public HTTPRoutes serve; STUB_NO_GATEWAY_API=1 the
+#                        cluster has no HTTPRoute CRD
 #   STUB_PUBLIC_HOST     the host the public Ingresses serve; STUB_SSL_HOSTS the retired one's
 #   STUB_SECRET=1        cloudflare-tunnel exists (with a fake token); STUB_SECRET_FAILS=1
 #                        looking it up fails
@@ -83,6 +86,8 @@ case "$*" in
   *"get namespace econ-graph"*)
     [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
+  *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
+  *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
   *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
   *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] || exit 1 ;;
@@ -110,10 +115,21 @@ printf '#!/usr/bin/env bash\necho "kubectl on PATH: $*" >>%q\nexit 1\n' "$path_l
 chmod +x "$stub_dir/path/kubectl"
 export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 
-# run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out.
+# run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out. It runs in
+# a copy of the files the library uses, where apply-gateway-routes.sh is a stub that
+# appends its PUBLIC_HOST and arguments to $log.
+lib_root="$stub_dir/lib-root"
+mkdir -p "$lib_root/scripts/deploy/lib" "$lib_root/k8s/manifests"
+cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh "$lib_root/scripts/deploy/lib/"
+cp scripts/deploy/render-public-host.py "$lib_root/scripts/deploy/"
+cp k8s/manifests/cloudflared.yaml "$lib_root/k8s/manifests/"
+printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
+  >"$lib_root/scripts/deploy/apply-gateway-routes.sh"
+chmod +x "$lib_root/scripts/deploy/apply-gateway-routes.sh"
 run_lib() {
   : >"$log"; rm -f "$log.ctx"
   (
+    cd "$lib_root"
     # Only the '.spec.replicas = N' form apply_cloudflared uses.
     yq() {
       python3 -c 'import re, sys, yaml
@@ -132,6 +148,15 @@ print(yaml.safe_dump(d))' "$1" "$2"
 if (unset PUBLIC_HOST; STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a public cluster did not stop"
 fi
+# Unset on a cluster whose public HTTPRoutes serve econgraph.com: stop.
+if (unset PUBLIC_HOST; STUB_ROUTE_HOST=econgraph.com run_lib public_host_init); then
+  fail "PUBLIC_HOST unset on a cluster with public HTTPRoutes did not stop"
+fi
+# Without the HTTPRoute CRD (still on ingress-nginx): the public Ingresses count.
+if (unset PUBLIC_HOST; STUB_NO_GATEWAY_API=1 STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init); then
+  fail "PUBLIC_HOST unset on a cluster without the gateway, serving econgraph.com, did not stop"
+fi
+grep -q 'get httproute' "$log" && fail "HTTPRoutes looked up without their CRD"
 # Unset on a legacy cluster whose retired econ-graph-ssl-ingress serves the public host: stop.
 if (unset PUBLIC_HOST; STUB_SSL_HOSTS=$'www.econgraph.com\necongraph.com' run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a cluster with econ-graph-ssl-ingress did not stop"
@@ -161,22 +186,21 @@ if PUBLIC_HOST='' STUB_DELETE_FAILS=1 run_lib public_host_init; then
   fail "public_host_init went on after failing to delete econ-graph-ssl-ingress"
 fi
 
-# With a public host: real-ip settings only, use-forwarded-headers removed.
+# With a public host: apply-gateway-routes.sh gets it, on the pinned context.
 PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge' ||
   fail "public host: deploy failed: $(cat "$out")"
-grep -q 'patch configmap ingress-nginx-controller' "$log" || fail "public host: ConfigMap not patched"
-grep -q '"enable-real-ip":"true","forwarded-for-header":"CF-Connecting-IP","proxy-real-ip-cidr":"10.244.0.0/24,10.244.1.0/24","use-forwarded-headers":null' "$log" ||
-  fail "public host: wrong ingress-nginx settings: $(grep patch "$log")"
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=econgraph.com --context kind-test' "$log" ||
+  fail "public host: apply-gateway-routes.sh not given it: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public host: econ-graph-ssl-ingress not deleted"
-grep -q 'delete ingress -l' "$log" && fail "public host: public Ingresses deleted"
 
-# Without one: every setting removed, public Ingresses deleted.
+# Without one: `none`, so a public host served before is removed.
 PUBLIC_HOST='' run_lib 'public_host_init; apply_public_edge' ||
   fail "no public host: deploy failed: $(cat "$out")"
-grep -q '"enable-real-ip":null,"forwarded-for-header":null,"proxy-real-ip-cidr":null,"use-forwarded-headers":null' "$log" ||
-  fail "no public host: settings not removed: $(grep patch "$log")"
-grep -q 'delete ingress -l econgraph.io/public-host=true' "$log" || fail "no public host: public Ingresses kept"
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=none --context kind-test' "$log" ||
+  fail "no public host: apply-gateway-routes.sh not told none: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "no public host: econ-graph-ssl-ingress not deleted"
+# Nothing patches ingress-nginx any more.
+grep -q 'ingress-nginx' "$log" && fail "the library still touches ingress-nginx"
 
 # cloudflared on a marked cluster: 0 replicas without the Secret or without a public
 # host, 1 with both.

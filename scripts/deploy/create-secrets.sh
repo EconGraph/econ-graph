@@ -8,6 +8,8 @@
 #   CLOUDFLARE_API_TOKEN from a secure environment source, with --cloudflare-dns-only,
 #   writes only cert-manager/cloudflare-api-token-secret (key api-token).
 #   setup-letsencrypt-cloudflare.sh provides hidden terminal input for this mode.
+#   --context=NAME acts on context NAME of the kubectl without making it the
+#   current context, replacing any CLUSTER_ROLE_CONTEXT from the environment.
 #
 # Every input is an environment variable, except that --prompt-tunnel-token
 # reads CLOUDFLARE_TUNNEL_TOKEN with hidden input from the terminal (it refuses
@@ -105,7 +107,7 @@
 # keys it would write and how each value was resolved; it writes nothing.
 #
 # Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
-# and its KUBECONFIG, on that kubectl's current context. Run by hand with none
+# and its KUBECONFIG, on that kubectl's current context (or --context). Run by hand with none
 # of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
 # kubeconfig when copies are kept in ~/.cache/econgraph, and says so
 # (cluster_role_default_kubectl in lib/cluster-role.sh).
@@ -120,13 +122,15 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 CLOUDFLARE_DNS_ONLY=false
 PROMPT_TUNNEL_TOKEN=false
 DRY_RUN=false
+CONTEXT_ARG=""
 for arg in "$@"; do
     case "$arg" in
+        --context=?*) CONTEXT_ARG="${arg#--context=}" ;;
         --cloudflare-dns-only) CLOUDFLARE_DNS_ONLY=true ;;
         --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
         --dry-run | -n) DRY_RUN=true ;;
         -h | --help)
-            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -173,11 +177,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 cluster_role_default_kubectl
 KUBECTL="${KUBECTL:-kubectl}"
 
-# A CLUSTER_ROLE_CONTEXT from the environment is followed only while it is the
-# current context of $KUBECTL, as when deploy.sh, restart-k8s-rollout.sh or
-# set-crawler-keys.sh run this right after switching to it. A stray one would
-# send the check and the writes to a context the selected kubectl is not on.
-if [[ -n "${CLUSTER_ROLE_CONTEXT:-}" ]]; then
+# --context=NAME pins that context, replacing an inherited one (as
+# setup-letsencrypt-cloudflare.sh --context does, without switching contexts).
+# Otherwise a CLUSTER_ROLE_CONTEXT from the environment is followed only while
+# it is the current context of $KUBECTL, as when deploy.sh,
+# restart-k8s-rollout.sh or set-crawler-keys.sh run this right after switching
+# to it. A stray one would send the check and the writes to a context the
+# selected kubectl is not on.
+if [[ -n "$CONTEXT_ARG" ]]; then
+    command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
+    cluster_role_pin_named_context "$CONTEXT_ARG" ||
+        die "$KUBECTL has no context $CONTEXT_ARG; nothing was written."
+elif [[ -n "${CLUSTER_ROLE_CONTEXT:-}" ]]; then
     current_context="$(command "$KUBECTL" config current-context 2>/dev/null || true)"
     [[ "$current_context" == "$CLUSTER_ROLE_CONTEXT" ]] ||
         die "CLUSTER_ROLE_CONTEXT=$CLUSTER_ROLE_CONTEXT in the environment is not the current" \
@@ -524,9 +535,9 @@ if [[ -z "${GRAFANA_ADMIN_PASSWORD-}" ]] &&
 fi
 
 # --- monitoring-auth guard ---------------------------------------------------
-# Deploys before these Secrets applied monitoring-auth from
-# ingress-cloudflare-dns01.yaml with a committed htpasswd entry. Such a Secret
-# still has the client-side-apply annotation; this script never leaves one.
+# Deploys before these Secrets applied monitoring-auth from a committed
+# manifest with an htpasswd entry. Such a Secret still has the
+# client-side-apply annotation; this script never leaves one.
 if [[ -z "${MONITORING_BASIC_AUTH-}" ]] && secret_from_manifest monitoring-auth; then
     if [[ "${ALLOW_MANIFEST_MONITORING_AUTH-}" == 1 ]]; then
         log "warning: keeping monitoring-auth created from a manifest" \
@@ -648,7 +659,7 @@ begin_secret grafana-admin
 add_required GRAFANA_ADMIN_PASSWORD admin-password
 apply_secret
 
-# --- monitoring-auth (basic auth for the monitoring ingress) ----------------
+# --- monitoring-auth (basic auth for a monitoring host; no manifest reads it) --
 if [[ -n "${MONITORING_BASIC_AUTH-}" ]]; then
     begin_secret monitoring-auth
     put auth "$MONITORING_BASIC_AUTH" "from MONITORING_BASIC_AUTH"
@@ -663,9 +674,7 @@ elif secret_exists monitoring-auth; then
     fi
     log "monitoring-auth: MONITORING_BASIC_AUTH not set, kept as is"
 else
-    log "warning: monitoring-auth not created (MONITORING_BASIC_AUTH not set)." \
-        "If k8s/manifests/ingress-cloudflare-dns01.yaml is applied, the monitoring" \
-        "host returns 503 until this Secret exists."
+    log "monitoring-auth not created (MONITORING_BASIC_AUTH not set)."
 fi
 
 if [[ "$DRY_RUN" == true ]]; then

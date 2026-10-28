@@ -89,7 +89,10 @@
 //! updated the database), so each database update is stored as a new vintage of the whole series;
 //! `is_original_release` is `true`, as for the other sources without vintage history. `since` is
 //! ignored: the full history comes in the same single request, and returning all of it keeps
-//! revisions to old years. The row's `obs_status` and `decimal` are dropped: `data_points` has no
+//! revisions to old years. Values are read from the response text digit for digit
+//! ([`crate::value::parse_observation_value`]), never through an `f64`: aggregates such as
+//! world GDP at PPP have 16 or more significant digits. The row's `obs_status` and `decimal`
+//! are dropped: `data_points` has no
 //! attribute columns (the dataset still declares them, for the schema). WDI leaves
 //! `obs_status` empty for nearly every row.
 //!
@@ -129,7 +132,6 @@
 //! request.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -138,6 +140,7 @@ use chrono::NaiveDate;
 use econ_graph_core::models::Code;
 use econ_graph_core::reference::{areas, Area, AreaKind};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::Value;
 
 use crate::adapter::{
@@ -152,6 +155,7 @@ use crate::policy::SourcePolicy;
 use crate::reference::{self, WdiIndicator};
 use crate::reference_file::{self, CodeList, ParseCodes};
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// The real World Bank API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.worldbank.org/v2";
@@ -171,7 +175,7 @@ pub const MAX_PAGES: u64 = 10;
 /// How this adapter reads indicator data, prefixed to every stored `lastupdated` version (see
 /// [Re-crawls](self#re-crawls)). Bump it whenever a change to parsing, the indicator list's units
 /// or the area table should rewrite already-stored series before the World Bank's next update.
-pub const PARSE_VERSION: &str = "wb-1";
+pub const PARSE_VERSION: &str = "wb-2";
 
 /// Most series fetched per request: every area of one indicator (the country table has about 260
 /// rows), with room to spare.
@@ -231,7 +235,8 @@ impl WorldBankAdapter {
         let mut page = 1u64;
         loop {
             let page_s = page.to_string();
-            let body: Value = ctx
+            // Kept as text: the values are read from it digit for digit (see `parse_rows`).
+            let raw: Box<RawValue> = ctx
                 .http
                 .get_json(
                     SourceId::WorldBank,
@@ -243,12 +248,14 @@ impl WorldBankAdapter {
                     ],
                 )
                 .await?;
+            let body: Value = serde_json::from_str(raw.get())
+                .map_err(|e| CrawlError::Parse(format!("World Bank {path}: {e}")))?;
             let (meta, items) = parse_list(&path, body)?;
             if page == 1 {
                 last_updated = meta.last_updated;
             }
             let got = items.len();
-            rows.extend(parse_rows(&path, items)?);
+            rows.extend(parse_rows(&path, &raw_items(&path, raw.get())?)?);
             let pages = meta.pages.unwrap_or(1);
             if got == 0 || page >= pages {
                 break;
@@ -771,7 +778,8 @@ impl SourceAdapter for WorldBankAdapter {
             .iter()
             .flat_map(|(_, ids)| ids.values().map(|id| (*id).to_string()))
             .collect();
-        let stored = if requested.is_empty() {
+        // With `bypass_validators`, nothing stored counts: every indicator is read in full.
+        let stored = if requested.is_empty() || ctx.bypass_validators {
             HashMap::new()
         } else {
             persist::stored_fetch_state(&ctx.pool, SourceId::WorldBank, &requested)
@@ -1101,14 +1109,16 @@ struct Row {
 
 /// Wire format of a data row (only the fields we use).
 #[derive(Debug, Deserialize)]
-struct WbRow {
+struct WbRow<'a> {
     #[serde(default)]
     indicator: IdValue,
     country: IdValue,
     #[serde(default, rename = "countryiso3code")]
     iso3: Option<String>,
     date: String,
-    value: Option<serde_json::Number>,
+    /// The value exactly as the response writes it (`null` is `None`).
+    #[serde(borrow, default)]
+    value: Option<&'a RawValue>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1119,18 +1129,52 @@ struct IdValue {
     value: Option<String>,
 }
 
+/// The row items of a `[meta, rows]` response body, as unparsed JSON. Call after
+/// [`parse_list`] has accepted the same body; `rows` of `null` is no items.
+fn raw_items<'a>(what: &str, body: &'a str) -> Result<Vec<&'a RawValue>, CrawlError> {
+    let bad = |e: serde_json::Error| CrawlError::Parse(format!("World Bank {what}: {e}"));
+    let parts: Vec<&RawValue> = serde_json::from_str(body).map_err(bad)?;
+    let Some(rows) = parts.get(1) else {
+        return Err(CrawlError::Parse(format!(
+            "World Bank {what}: expected [metadata, rows]"
+        )));
+    };
+    Ok(serde_json::from_str::<Option<Vec<&RawValue>>>(rows.get())
+        .map_err(bad)?
+        .unwrap_or_default())
+}
+
+/// A row's `value` as written: a JSON number's own text, or the text of a numeric string.
+fn row_value(raw: &RawValue) -> Result<Option<BigDecimal>, String> {
+    let text = raw.get().trim();
+    let text = if text.starts_with('"') {
+        let s: String = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if s.trim().is_empty() {
+            return Ok(None);
+        }
+        s
+    } else {
+        text.to_string()
+    };
+    parse_observation_value(&text).map(Some)
+}
+
 /// The rows with a value. A row whose date or value cannot be parsed is a `Parse` error.
-fn parse_rows(what: &str, items: Vec<Value>) -> Result<Vec<Row>, CrawlError> {
-    let raw: Vec<WbRow> = serde_json::from_value(Value::Array(items))
-        .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad data rows: {e}")))?;
-    let mut rows = Vec::with_capacity(raw.len());
-    for r in raw {
-        let Some(value) = r.value else { continue };
+fn parse_rows(what: &str, items: &[&RawValue]) -> Result<Vec<Row>, CrawlError> {
+    let mut rows = Vec::with_capacity(items.len());
+    for item in items {
+        let r: WbRow = serde_json::from_str(item.get())
+            .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad data row: {e}")))?;
+        let Some(raw) = r.value else { continue };
         let (date, frequency) = parse_period(&r.date).ok_or_else(|| {
             CrawlError::Parse(format!("World Bank {what}: bad date {:?}", r.date))
         })?;
-        let value = BigDecimal::from_str(&value.to_string())
-            .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad value {value}: {e}")))?;
+        let Some(value) = row_value(raw).map_err(|e| {
+            CrawlError::Parse(format!("World Bank {what}: bad value {}: {e}", raw.get()))
+        })?
+        else {
+            continue;
+        };
         rows.push(Row {
             iso3: r.iso3.unwrap_or_default().trim().to_string(),
             wb_id: r.country.id.unwrap_or_default().trim().to_string(),

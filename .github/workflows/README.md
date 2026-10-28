@@ -8,7 +8,7 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | --- | --- | --- |
 | [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/**; PRs into any branch, subject to paths-ignore | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
 | [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs | Markdown lint and offline relative-link checks |
-| [actionlint.yml](actionlint.yml) | Push to main/develop and PRs that change workflow files or [actionlint.yaml](../actionlint.yaml) | actionlint, with shellcheck on `run:` scripts |
+| [actionlint.yml](actionlint.yml) | Push to main/develop and PRs that change workflows, local actions or their validation | Immutable action references and actionlint, with shellcheck on `run:` scripts |
 | [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; Monday 06:17 UTC | Flag validation and generated-file consistency |
 | [release-e2e.yml](release-e2e.yml) | PRs touching its listed application, Keycloak, release-stack or workflow paths | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
@@ -29,8 +29,14 @@ A green workflow does not imply every suite ran or every step passed. Inspect jo
 
 Core CI builds and smoke-tests Docker images; it does not publish or deploy them. Release E2E is independent of the optional Core CI E2E jobs.
 
+External actions and reusable workflows are pinned to full commit SHAs, with version comments for readability. Resolve updates from the action's upstream repository and update the SHA and comment together. Docker actions require an image digest; local actions use the calling commit. The Actionlint workflow enforces these rules in workflows and composite actions.
+
+The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
+
 ## Validation
 
 Run Markdown lint and relative-link checks as defined in [docs-checks.yml](docs-checks.yml). Lint workflow files with actionlint and shellcheck at the versions pinned in [actionlint.yml](actionlint.yml); per-file ignores live in [actionlint.yaml](../actionlint.yaml). The repository's [workflow validation script](../../ci/scripts/validate-ci-workflows.sh) checks YAML and basic job structure; it does not prove job-selection semantics. Its trigger check uses PyYAML's default loader, which can interpret the key on as boolean true, so trigger warnings require verification against the YAML.
+
+With `PyYAML==6.0.3` installed, run `python3 ci/scripts/check_action_pins.py` and `python3 -m unittest discover -s ci/scripts -p 'test_action_pins.py'` to check action references and exercise the enforcement rules locally.
 
 When changing workflow conditions, check actual jobs on both a PR and a push to main. A passing PR alone does not validate main-specific conditions.

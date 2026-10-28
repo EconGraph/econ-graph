@@ -6,116 +6,92 @@ use uuid::Uuid;
 use crate::enums::{AnnotationStatus, AnnotationType};
 use crate::schema::financial_annotations;
 
-/// Financial annotation for collaborative analysis
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Insertable)]
+/// Financial annotation stored in the app database.
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = financial_annotations)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct FinancialAnnotation {
     pub id: Uuid,
     pub statement_id: Uuid,
     pub line_item_id: Option<Uuid>,
-    pub author_id: Uuid,
-    pub content: String,
     pub annotation_type: AnnotationType,
-    pub tags: Vec<String>,
-    pub highlights: serde_json::Value,
-    pub mentions: Vec<Uuid>,
-    pub parent_annotation_id: Option<Uuid>,
+    pub title: String,
+    pub content: String,
     pub status: AnnotationStatus,
-    pub is_private: bool,
+    pub created_by: Uuid,
+    pub assigned_to: Option<Uuid>,
+    pub priority: Option<i32>,
+    pub tags: Option<Vec<Option<String>>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
 }
 
-/// New financial annotation for insertion
+/// Values needed to create a financial annotation.
 #[derive(Debug, Clone, Serialize, Deserialize, Insertable)]
 #[diesel(table_name = financial_annotations)]
 pub struct NewFinancialAnnotation {
     pub statement_id: Uuid,
     pub line_item_id: Option<Uuid>,
-    pub author_id: Uuid,
-    pub content: String,
     pub annotation_type: AnnotationType,
-    pub tags: Vec<String>,
-    pub highlights: serde_json::Value,
-    pub mentions: Vec<Uuid>,
-    pub parent_annotation_id: Option<Uuid>,
+    pub title: String,
+    pub content: String,
     pub status: AnnotationStatus,
-    pub is_private: bool,
+    pub created_by: Uuid,
+    pub assigned_to: Option<Uuid>,
+    pub priority: Option<i32>,
+    pub tags: Option<Vec<Option<String>>>,
 }
 
 impl NewFinancialAnnotation {
-    /// Create a new financial annotation
+    /// Create an active annotation, deriving a default title from its content.
     pub fn new(
         statement_id: Uuid,
-        author_id: Uuid,
+        created_by: Uuid,
         content: String,
         annotation_type: AnnotationType,
     ) -> Self {
+        let title = content
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(255)
+            .collect();
         Self {
             statement_id,
-            line_item_id: None,
-            author_id,
+            created_by,
             content,
             annotation_type,
-            tags: Vec::new(),
-            highlights: serde_json::Value::Null,
-            mentions: Vec::new(),
-            parent_annotation_id: None,
+            title,
+            line_item_id: None,
             status: AnnotationStatus::Active,
-            is_private: false,
+            assigned_to: None,
+            priority: None,
+            tags: None,
         }
     }
-
-    /// Create a line item annotation
+    /// Attach the annotation to a specific line item in its statement.
     pub fn for_line_item(
         statement_id: Uuid,
         line_item_id: Uuid,
-        author_id: Uuid,
+        created_by: Uuid,
         content: String,
         annotation_type: AnnotationType,
     ) -> Self {
         Self {
-            statement_id,
             line_item_id: Some(line_item_id),
-            author_id,
-            content,
-            annotation_type,
-            tags: Vec::new(),
-            highlights: serde_json::Value::Null,
-            mentions: Vec::new(),
-            parent_annotation_id: None,
-            status: AnnotationStatus::Active,
-            is_private: false,
+            ..Self::new(statement_id, created_by, content, annotation_type)
         }
     }
-
-    /// Add tags to the annotation
+    /// Set searchable tags without introducing NULL array elements.
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
+        self.tags = Some(tags.into_iter().map(Some).collect());
         self
     }
-
-    /// Add highlights to the annotation
-    pub fn with_highlights(mut self, highlights: serde_json::Value) -> Self {
-        self.highlights = highlights;
-        self
-    }
-
-    /// Add mentions to the annotation
-    pub fn with_mentions(mut self, mentions: Vec<Uuid>) -> Self {
-        self.mentions = mentions;
-        self
-    }
-
-    /// Set as a reply to another annotation
-    pub fn as_reply(mut self, parent_annotation_id: Uuid) -> Self {
-        self.parent_annotation_id = Some(parent_annotation_id);
-        self
-    }
-
-    /// Set as private annotation
-    pub fn as_private(mut self) -> Self {
-        self.is_private = true;
+    /// Set a title distinct from the annotation content.
+    pub fn with_title(mut self, title: String) -> Self {
+        self.title = title;
         self
     }
 }
@@ -134,11 +110,10 @@ pub struct HighlightRange {
 pub struct AnnotationFilter {
     pub statement_id: Option<Uuid>,
     pub line_item_id: Option<Uuid>,
-    pub author_id: Option<Uuid>,
+    pub created_by: Option<Uuid>,
     pub annotation_type: Option<AnnotationType>,
     pub status: Option<AnnotationStatus>,
     pub tags: Option<Vec<String>>,
-    pub is_private: Option<bool>,
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
 }
@@ -148,11 +123,10 @@ impl Default for AnnotationFilter {
         Self {
             statement_id: None,
             line_item_id: None,
-            author_id: None,
+            created_by: None,
             annotation_type: None,
             status: Some(AnnotationStatus::Active),
             tags: None,
-            is_private: Some(false), // Default to public annotations
             created_after: None,
             created_before: None,
         }

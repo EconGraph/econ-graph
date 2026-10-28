@@ -1,13 +1,15 @@
 # GraphQL Response Mocks
 
-This directory contains organized GraphQL response mocks for comprehensive
-testing. Each API call has multiple response scenarios to test different states
-and edge cases.
+These JSON fixtures provide reusable response bodies for frontend tests and mock
+handlers. Keeping the data in separate files makes scenarios easy to inspect and
+update.
 
 ## Directory Structure
 
-Each GraphQL operation has its own directory named using snake_case (matching
-GraphQL conventions):
+Fixture directories use a local snake_case naming convention. Handlers map
+GraphQL operation names such as `GetFinancialRatios` to fixture keys such as
+`get_financial_ratios`. The collection includes financial, series, search,
+annotation, and collaboration fixtures. Financial examples include:
 
 - `get_financial_dashboard/` - Company financial dashboard data
 - `get_financial_statement/` - Individual financial statement data
@@ -15,56 +17,74 @@ GraphQL conventions):
 - `get_ratio_benchmarks/` - Industry benchmark data
 - `get_ratio_explanation/` - Ratio explanation and educational content
 
+A file on disk is available through
+[`loadGraphQLResponse`](../graphql-response-loader.ts) only when it has a static
+import and an entry in that loader's `RESPONSE_MAP`. Supported scenarios vary by
+operation; `getAvailableScenarios(operation)` returns the registered scenario
+keys. An unregistered operation or scenario returns an error body with code
+`MOCK_NOT_FOUND`.
+
 ## Response Types
 
-Each operation directory contains multiple response files:
+Scenario filenames describe the response bodies. Inspect the fixture before
+using it; operations do not all provide the same scenarios. Examples include:
 
-### Success Responses
+- `success.json` - Populated response data
+- `partial.json` or `partial_data.json` - Some missing or incomplete data
+- `empty.json` - A successful response with empty data
+- `not_found.json` - An error body for a missing resource
+- `error.json` - An error body for a server or processing failure
 
-- `success.json` - Complete, valid response with all data
-- `partial_data.json` - Response with some missing or incomplete data
-- `loading.json` - Response indicating data is still being processed
-
-### Error Responses
-
-- `not_found.json` - Resource not found (404 equivalent)
-- `error.json` - Server error or processing failure
-- `empty.json` - Valid response with empty data (when applicable)
+The `loading.json` bodies also differ by operation: the dashboard contains a
+company with empty collections, the statement contains a null statement and a
+top-level `loading` flag, and ratios contain an error with code `LOADING`. Loading
+one of these bodies does not keep a request pending. To test the UI while a
+request is in flight, configure the handler's response timing separately.
 
 ## Usage in Tests
 
-These JSON files are loaded by MSW handlers to provide realistic API responses
-for different test scenarios:
+The loader is synchronous and accepts extensionless scenario keys. From a module
+in this directory, for example:
 
 ```typescript
-// Example: Test loading state
-const response = await loadMockResponse(
+import {
+  getAvailableScenarios,
+  loadGraphQLResponse,
+} from '../graphql-response-loader';
+
+const ratioScenarios = getAvailableScenarios('get_financial_ratios');
+// ['success', 'error', 'empty', 'loading']
+
+const dashboardLoadingResponse = loadGraphQLResponse(
   'get_financial_dashboard',
-  'loading.json'
+  'loading'
 );
-
-// Example: Test error handling
-const response = await loadMockResponse('get_financial_ratios', 'error.json');
-
-// Example: Test success case
-const response = await loadMockResponse(
+const ratiosErrorResponse = loadGraphQLResponse('get_financial_ratios', 'error');
+const statementSuccessResponse = loadGraphQLResponse(
   'get_financial_statement',
-  'success.json'
+  'success'
 );
 ```
 
-## Benefits
+These calls load response objects. To serve a fixture to a component test,
+configure the relevant handler to select its registered scenario and return the
+object with `HttpResponse.json(response)`. The
+[ratio handlers](../graphql/ratio-mocks.ts) show selection based on query
+variables; adjust the import path to the loader for the location of your test or
+handler.
 
-1. **Comprehensive Testing** - Test all possible API response states
-2. **Realistic Data** - Use actual GraphQL response structures
-3. **Easy Maintenance** - Update mock data without changing test code
-4. **Developer Friendly** - Easy to inspect and verify mock responses
-5. **Schema Validation** - Responses match actual GraphQL schema
+The [fixture validation tests](../../__tests__/graphql-schema-validation.test.ts)
+check selected field paths, data types, array shapes, and error structures. The
+loader itself performs no schema validation, and these tests do not establish
+that every fixture conforms to the backend schema.
 
 ## Adding New Responses
 
-1. Create new JSON file in appropriate operation directory
-2. Follow existing naming convention (success, error, not_found, etc.)
-3. Ensure response structure matches GraphQL schema
-4. Update MSW handlers to use new response file
-5. Add tests for new response scenario
+1. Create a JSON file in the appropriate operation directory, using a scenario
+   name such as `success`, `error`, or `not_found`.
+2. Match the response shape consumed by the query and component under test.
+3. Add a static import and an operation/scenario entry in
+   [`RESPONSE_MAP`](../graphql-response-loader.ts). The scenario key omits `.json`.
+4. Configure the relevant handler or test to select that scenario. Follow the
+   [ratio handler examples](../graphql/ratio-mocks.ts) when using MSW.
+5. Add a test for the new scenario, checking the intended response and UI behavior.

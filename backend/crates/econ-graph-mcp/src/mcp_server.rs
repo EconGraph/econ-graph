@@ -62,6 +62,17 @@ impl EconGraphMcpServer {
 
         let response = self.schema.execute(request).await;
 
+        if !response.errors.is_empty() {
+            anyhow::bail!(
+                "GraphQL request failed: {}",
+                response
+                    .errors
+                    .iter()
+                    .map(|e| e.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
         // Convert GraphQL response to JSON
         let result = serde_json::to_value(response)?;
         Ok(result)
@@ -215,17 +226,9 @@ impl EconGraphMcpServer {
 
         let graphql_query = r#"
             query SearchSeries($query: String!, $limit: Int!) {
-                searchSeries(query: $query, limit: $limit) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                        description
-                    }
-                    lastUpdated
+                searchSeries(query: $query, first: $limit) {
+                    series { id name: title description frequency units source { name description } lastUpdated }
+                    totalCount
                 }
             }
         "#;
@@ -262,61 +265,12 @@ impl EconGraphMcpServer {
             .and_then(|v| v.as_i64())
             .unwrap_or(100) as i32;
 
-        let mut graphql_query = r#"
-            query GetSeriesData($seriesId: Uuid!, $limit: Int!) {
-                series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    dataPoints(limit: $limit) {
-                        date
-                        value
-                        note
-                    }
-                }
-            }
-        "#
-        .to_string();
-
-        let mut variables = json!({
-            "seriesId": series_id,
-            "limit": limit
-        });
-
-        // Add date filtering if provided
-        if let Some(start) = start_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: $limit)",
-                "dataPoints(limit: $limit, startDate: $startDate)",
-            );
-            variables["startDate"] = json!(start);
-        }
-
-        if let Some(end) = end_date {
-            // Handle both cases: with and without start date
-            if start_date.is_some() {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: $limit, startDate: $startDate)",
-                    "dataPoints(limit: $limit, startDate: $startDate, endDate: $endDate)",
-                );
-            } else {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: $limit)",
-                    "dataPoints(limit: $limit, endDate: $endDate)",
-                );
-            }
-            variables["endDate"] = json!(end);
-        }
-
-        let result = self
-            .execute_graphql_query(&graphql_query, Some(variables))
+        let series = self
+            .get_series_payload(series_id, start_date, end_date, limit)
             .await?;
-
+        let result = json!({"data": {"series": series}});
         Ok(json!({
-            "content": [{
-                "type": "text",
-                "text": serde_json::to_string_pretty(&result)?
-            }],
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&result)?}],
             "is_error": false
         }))
     }
@@ -329,21 +283,11 @@ impl EconGraphMcpServer {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: series_id"))?;
 
         let graphql_query = r#"
-            query GetSeriesMetadata($seriesId: Uuid!) {
+            query GetSeriesMetadata($seriesId: ID!) {
                 series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                        description
-                        url
-                    }
-                    tags
-                    lastUpdated
-                    createdAt
+                    id name: title description frequency units
+                    source { name description url: baseUrl }
+                    lastUpdated createdAt
                 }
             }
         "#;
@@ -509,8 +453,8 @@ impl EconGraphMcpServer {
                     id
                     name
                     description
-                    url
-                    lastUpdated
+                    url: baseUrl
+                    lastUpdated: updatedAt
                 }
             }
         "#;
@@ -529,15 +473,8 @@ impl EconGraphMcpServer {
     pub async fn get_series_catalog(&self) -> Result<Value> {
         let graphql_query = r#"
             query GetSeriesCatalog {
-                series(limit: 100) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                    }
+                series: seriesList(pagination: {first: 100}) {
+                    nodes { id name: title description frequency units source { name } }
                 }
             }
         "#;
@@ -552,61 +489,42 @@ impl EconGraphMcpServer {
         }))
     }
 
-    /// Get series data for visualization
+    /// Get metadata and bounded observations for one existing series.
+    async fn get_series_payload(
+        &self,
+        series_id: &str,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        limit: i32,
+    ) -> Result<Value> {
+        let query = r#"
+            query GetSeriesPayload($seriesId: ID!, $limit: Int!, $filter: DataFilter) {
+                series(id: $seriesId) { id name: title description }
+                seriesData(seriesId: $seriesId, first: $limit, filter: $filter) {
+                    nodes { date value }
+                }
+            }
+        "#;
+        let variables = json!({"seriesId": series_id, "limit": limit,
+            "filter": {"startDate": start_date, "endDate": end_date}});
+        let response = self.execute_graphql_query(query, Some(variables)).await?;
+        let mut series = response["data"]["series"].clone();
+        if !series.is_object() {
+            anyhow::bail!("Series not found: {series_id}");
+        }
+        series["dataPoints"] = response["data"]["seriesData"]["nodes"].clone();
+        Ok(series)
+    }
+
+    /// Fetch chart input using the same date filtering as the data tool.
     async fn get_series_data_for_visualization(
         &self,
         series_id: &str,
         start_date: Option<&str>,
         end_date: Option<&str>,
     ) -> Result<Value> {
-        let mut graphql_query = r#"
-            query GetSeriesDataForViz($seriesId: Uuid!) {
-                series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    dataPoints(limit: 1000) {
-                        date
-                        value
-                    }
-                }
-            }
-        "#
-        .to_string();
-
-        let mut variables = json!({
-            "seriesId": series_id
-        });
-
-        // Add date filtering if provided
-        if let Some(start) = start_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: 1000)",
-                "dataPoints(limit: 1000, startDate: $startDate)",
-            );
-            variables["startDate"] = json!(start);
-        }
-
-        if let Some(end) = end_date {
-            // Handle both cases: with and without start date
-            if start_date.is_some() {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: 1000, startDate: $startDate)",
-                    "dataPoints(limit: 1000, startDate: $startDate, endDate: $endDate)",
-                );
-            } else {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: 1000)",
-                    "dataPoints(limit: 1000, endDate: $endDate)",
-                );
-            }
-            variables["endDate"] = json!(end);
-        }
-
-        let result = self
-            .execute_graphql_query(&graphql_query, Some(variables))
-            .await?;
-        Ok(result)
+        self.get_series_payload(series_id, start_date, end_date, 1000)
+            .await
     }
 }
 
@@ -835,13 +753,13 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_get_economic_series_tool() {
+    async fn test_get_series_data_rejects_invalid_series_id() {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
         let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test the get series tool with a mock series ID
+        // Invalid IDs must propagate the GraphQL validation error.
         let get_args = json!({
             "series_id": "test-series-id",
             "start_date": "2020-01-01",
@@ -849,11 +767,9 @@ mod tests {
         });
 
         let result = server.get_series_data(get_args).await;
-        assert!(result.is_ok(), "Get series tool failed: {:?}", result.err());
-
-        let response = result.unwrap();
-        assert!(response.get("content").is_some());
-        // Note: This might return an error if the series doesn't exist, which is expected
+        let error = result.expect_err("An invalid UUID must fail").to_string();
+        assert!(error.contains("GraphQL request failed"), "{error}");
+        assert!(error.contains("invalid character"), "{error}");
     }
 
     // test_create_data_visualization_tool moved to integration tests
@@ -1431,34 +1347,12 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_create_data_visualization_missing_series_id() {
+    async fn test_create_data_visualization_requires_series_ids_array() {
         let container = TestContainer::new().await;
         let pool = container.pool();
         let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test create_data_visualization with missing series_id
-        let arguments = json!({
-            "chart_type": "line",
-            "title": "Test Chart"
-        });
-
-        let result = server.create_data_visualization(arguments).await;
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: series_id"));
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_create_data_visualization_missing_chart_type() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
-
-        // Test create_data_visualization with missing chart_type
+        // A singular series_id cannot replace the required series_ids array.
         let arguments = json!({
             "series_id": "550e8400-e29b-41d4-a716-446655440000",
             "title": "Test Chart"
@@ -1468,9 +1362,7 @@ mod tests {
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: chart_type"));
+        assert_eq!(error.to_string(), "Missing required parameter: series_ids");
     }
 
     #[tokio::test]
