@@ -8,6 +8,17 @@ set -e
 echo "🔗 Setting up port forwarding for EconGraph services..."
 echo ""
 
+# kubectl is KUBECTL, with its KUBECONFIG. With neither set, the kind cluster's
+# own kubectl and kubeconfig kept in ~/.cache/econgraph
+# (cluster_role_default_kubectl in lib/cluster-role.sh): on the production host
+# plain `kubectl` is the MicroK8s snap wrapper.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl
+export KUBECTL="${KUBECTL:-kubectl}"
+kubectl() { command "$KUBECTL" "$@"; }
+
 # Check if kubectl is available and cluster is accessible
 if ! kubectl cluster-info >/dev/null 2>&1; then
     echo "❌ Cannot connect to Kubernetes cluster. Please ensure kubectl is configured."

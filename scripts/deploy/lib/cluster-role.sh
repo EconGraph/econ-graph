@@ -64,6 +64,39 @@ cluster_role_default_kubectl() {
     fi
 }
 
+# The Docker daemon the kind cluster runs on: the rootful system daemon
+# (docs/deployment/HOST_STORAGE.md), as for the release-image scripts
+# (lib/release-images.sh). The operator's shell may export DOCKER_HOST=<rootless
+# socket> for everyday use, so that variable is deliberately not the override;
+# ECONGRAPH_DOCKER_HOST is. Exports DOCKER_HOST, so kind, docker and every script
+# run from here use the same daemon, and says which one it chose.
+cluster_role_kind_docker_host() {
+    local chosen="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
+    if [ -n "${DOCKER_HOST:-}" ] && [ "$DOCKER_HOST" != "$chosen" ]; then
+        echo "Docker daemon of the kind cluster: ${chosen}, not DOCKER_HOST=${DOCKER_HOST}" \
+            "(set ECONGRAPH_DOCKER_HOST to choose another)" >&2
+    else
+        echo "Docker daemon of the kind cluster: ${chosen} (set ECONGRAPH_DOCKER_HOST to choose another)" >&2
+    fi
+    export DOCKER_HOST="$chosen"
+    unset DOCKER_CONTEXT
+}
+
+# Run kind as the repo keeps it, like ri_kind in lib/release-images.sh: ${KIND},
+# else the copy kept next to the kind cluster's kubectl
+# (${XDG_CACHE_HOME:-~/.cache}/econgraph/bin/kind), else kind on PATH. Call
+# cluster_role_kind_docker_host first.
+cluster_role_kind() {
+    local cached="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph/bin/kind"
+    if [ -n "${KIND:-}" ]; then
+        command "$KIND" "$@"
+    elif [ -x "$cached" ]; then
+        command "$cached" "$@"
+    else
+        command kind "$@"
+    fi
+}
+
 # Pin CLUSTER_ROLE_CONTEXT to the current context, unless it is set already
 # (exported, so scripts started from here, like create-secrets.sh from
 # deploy.sh, stay on it). Fails when there is no current context.

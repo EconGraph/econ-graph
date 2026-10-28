@@ -31,7 +31,9 @@
 #      keeps what it wrote as <UTC time>.failed.
 #
 # Each run adds a new directory; nothing is ever deleted. Other environment:
-# KUBECTL (default kubectl).
+# KUBECTL, with its KUBECONFIG. With neither set, the kind cluster's own kubectl
+# and kubeconfig kept in ~/.cache/econgraph (cluster_role_default_kubectl in
+# lib/cluster-role.sh), else plain kubectl.
 
 set -euo pipefail
 

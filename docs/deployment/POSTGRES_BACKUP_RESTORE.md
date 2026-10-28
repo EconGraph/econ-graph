@@ -51,8 +51,9 @@ k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin
   outside the cluster ([HOST_STORAGE.md](HOST_STORAGE.md)), so they survive
   it. Every kubectl call goes to the kind cluster's kubectl with
   `--context kind-econ-graph`. Before any change it checks that this context
-  is the kind cluster `econ-graph` on the caller's `DOCKER_HOST` (the same
-  kube-system UID inside its control-plane container), shows the cluster and
+  is the kind cluster `econ-graph` on the rootful Docker daemon, whatever
+  `DOCKER_HOST` the shell has (`ECONGRAPH_DOCKER_HOST` chooses another): the
+  same kube-system UID inside its control-plane container. It shows the cluster and
   asks once to go ahead (`--yes` answers that; on a cluster marked production,
   or whose marker can't be read, only the first 8 characters of its
   kube-system UID do, typed or given as `--confirm-production`, which is

@@ -39,8 +39,11 @@
 # nor KUBECONFIG is set, the kind cluster's own kubectl and kubeconfig kept in
 # ~/.cache/econgraph, as for mark-production-cluster.sh. Plain `kubectl` may
 # reach another cluster (on the production host it is the MicroK8s snap
-# wrapper). `kind` and `docker` use the caller's DOCKER_HOST, and one host may
-# run two Docker daemons with a kind cluster econ-graph each, so before
+# wrapper). `kind` and `docker` use the rootful Docker daemon the kind cluster
+# runs on, whatever DOCKER_HOST the shell has (ECONGRAPH_DOCKER_HOST chooses
+# another; cluster_role_kind_docker_host in lib/cluster-role.sh), and kind is
+# the one cluster_role_kind runs. One host may run two Docker daemons with a
+# kind cluster econ-graph each (the rootless one too), so before
 # anything changes the script checks that the context's kube-system UID is the
 # one the control-plane container on that daemon reports, and stops if not. It
 # never deletes a PV or anything on the host.
@@ -125,9 +128,16 @@ case "${KIND_EXPERIMENTAL_PROVIDER:-docker}" in
     *) die "KIND_EXPERIMENTAL_PROVIDER=${KIND_EXPERIMENTAL_PROVIDER} is not supported; nothing was changed" ;;
 esac
 
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+
+# kind and docker on the kind cluster's Docker daemon (see the header).
+cluster_role_kind_docker_host
+kind() { cluster_role_kind "$@"; }
+
 # Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found."
+if ! kind get clusters | grep -qx "econ-graph"; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}."
     exit 1
 fi
 
@@ -137,8 +147,6 @@ fi
 # switching the kubeconfig's current context: kc passes --context on every call.
 # kubectl becomes a function that calls kc; KUBECTL and CLUSTER_ROLE_CONTEXT are
 # exported, so protect-postgres-pv.sh uses the same kubectl and context.
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
 unset CLUSTER_ROLE_CONTEXT
 cluster_role_default_kubectl
 export KUBECTL="${KUBECTL:-kubectl}"
@@ -159,7 +167,7 @@ kind_uid="$(docker exec "${CONTROL_PLANE}" kubectl --kubeconfig /etc/kubernetes/
         "nothing was changed"
 [ "${kind_uid}" = "${uid}" ] ||
     die "context ${EXPECTED_CONTEXT} (kube-system UID ${uid}) is not the kind cluster ${CLUSTER} on" \
-        "DOCKER_HOST=${DOCKER_HOST:-unset} (kube-system UID ${kind_uid:-none}); set DOCKER_HOST, KUBECTL" \
+        "DOCKER_HOST=${DOCKER_HOST:-unset} (kube-system UID ${kind_uid:-none}); set ECONGRAPH_DOCKER_HOST, KUBECTL" \
         "and KUBECONFIG to the same cluster; nothing was changed"
 nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}')" || nodes="(unknown)"
 server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}')" || server="(unknown)"

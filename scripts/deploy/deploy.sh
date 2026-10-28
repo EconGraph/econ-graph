@@ -64,21 +64,33 @@ else
     FRONTEND_NODEPORT=30000
 fi
 
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+
+# The kind cluster runs on the rootful Docker daemon, whatever DOCKER_HOST the
+# shell has (cluster_role_kind_docker_host); kind, and the scripts run below,
+# use that one.
+cluster_role_kind_docker_host
 # Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found. Please run terraform first."
+if ! cluster_role_kind get clusters | grep -qx "econ-graph"; then
+    echo "❌ Kind cluster 'econ-graph' not found on ${DOCKER_HOST}. Please run terraform first."
     echo "   cd terraform/k8s && terraform init && terraform apply"
     exit 1
 fi
 
-# One kubectl, one cluster for the whole deploy: switch ${KUBECTL:-kubectl} to
-# kind-econ-graph and pin it (replacing any CLUSTER_ROLE_CONTEXT from the
-# environment), then send every kubectl call below through kc, the same binary
-# and context the production check uses (scripts/deploy/lib/cluster-role.sh).
-# Otherwise PUBLIC_HOST= meant for this cluster could remove another cluster's
-# public routes and stop its tunnel connector.
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+# One kubectl, one cluster for the whole deploy: KUBECTL, or with none of
+# KUBECTL and KUBECONFIG set the kind cluster's own kubectl and kubeconfig kept
+# in ~/.cache/econgraph (cluster_role_default_kubectl; on the production host
+# plain `kubectl` is the MicroK8s snap wrapper), exported so the scripts run
+# below use it too. Switch it to kind-econ-graph and pin that (replacing any
+# CLUSTER_ROLE_CONTEXT from the environment), then send every kubectl call
+# below through kc, the same binary and context the production check uses
+# (scripts/deploy/lib/cluster-role.sh). Otherwise PUBLIC_HOST= meant for this
+# cluster could remove another cluster's public routes and stop its tunnel
+# connector.
+unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl
+export KUBECTL="${KUBECTL:-kubectl}"
 if ! cluster_role_use_context kind-econ-graph; then
     echo "❌ ${KUBECTL:-kubectl} has no context kind-econ-graph"
     exit 1

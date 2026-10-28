@@ -37,7 +37,8 @@ KIND_KUBECONFIG="$CACHE/kubeconfig-econ-graph"
 echo "apiVersion: v1" >"$KIND_KUBECONFIG"
 # Nothing from the caller's environment chooses the cluster; a case that wants
 # one of these sets it on its own command line.
-unset KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT DOCKER_HOST DOCKER_CONTEXT KIND_EXPERIMENTAL_PROVIDER
+unset KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT DOCKER_HOST DOCKER_CONTEXT KIND_EXPERIMENTAL_PROVIDER \
+    ECONGRAPH_DOCKER_HOST
 
 # Plain kubectl (on the production host, the MicroK8s wrapper): must never run.
 cat >"$WORK/bin/kubectl" <<EOF
@@ -109,7 +110,7 @@ TEARDOWN_ENV=(
 # its output; returns its exit status. Variables set on the call
 # (`FAKE_X=y teardown ...`) reach it.
 teardown() {
-    env "${TEARDOWN_ENV[@]}" "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
+    env -u KIND "${TEARDOWN_ENV[@]}" "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
 }
 
 # teardown_tty INPUT ARGS...: the same under a pseudo-terminal, with INPUT typed
@@ -117,7 +118,7 @@ teardown() {
 teardown_tty() {
     local input="$1"
     shift
-    timeout 60 env "${TEARDOWN_ENV[@]}" python3 -c '
+    timeout 60 env -u KIND "${TEARDOWN_ENV[@]}" python3 -c '
 import os, pty, sys
 pid, fd = pty.fork()
 if pid == 0:
@@ -194,7 +195,7 @@ expect_teardown() {
 
 # 1. --dry-run: shows the cluster, deletes and patches nothing.
 reset
-out="$(DOCKER_HOST=unix:///stub/docker.sock teardown --dry-run)"; rc=$?
+out="$(ECONGRAPH_DOCKER_HOST=unix:///stub/docker.sock teardown --dry-run)"; rc=$?
 if [ "$rc" -eq 0 ] && grep -q "Dry run complete: nothing was changed" <<<"$out" &&
     grep -qE "DOCKER_HOST +unix:///stub/docker.sock" <<<"$out" &&
     grep -qE "context +kind-econ-graph" <<<"$out" &&

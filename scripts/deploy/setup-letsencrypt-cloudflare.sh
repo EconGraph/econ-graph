@@ -127,9 +127,20 @@ print_status "Environment: $([ "$USE_STAGING" = true ] && echo "staging" || echo
 # Check prerequisites
 print_status "Checking prerequisites..."
 
+# kubectl is KUBECTL, with its KUBECONFIG, on its current context. With neither
+# set, the kind cluster's own kubectl and kubeconfig kept in ~/.cache/econgraph
+# (cluster_role_default_kubectl in lib/cluster-role.sh): plain `kubectl` may be
+# another cluster's, such as the MicroK8s snap wrapper.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl
+export KUBECTL="${KUBECTL:-kubectl}"
+kubectl() { command "$KUBECTL" "$@"; }
+
 # Check if kubectl is available
-if ! command -v kubectl &> /dev/null; then
-    print_error "kubectl is not installed or not in PATH"
+if ! command -v "$KUBECTL" &> /dev/null; then
+    print_error "$KUBECTL is not installed or not in PATH"
     exit 1
 fi
 

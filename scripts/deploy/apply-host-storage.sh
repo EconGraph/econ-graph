@@ -32,8 +32,9 @@
 # kubectl is ${KUBECTL:-kubectl} through kc (scripts/deploy/lib/cluster-role.sh):
 # on the context deploy.sh pinned, or, run by hand, the kind cluster's own
 # kubectl and kubeconfig from ~/.cache/econgraph when KUBECTL and KUBECONFIG
-# are unset. docker reaches the daemon the kind cluster runs on through the
-# caller's DOCKER_HOST, as `kind` in deploy.sh does.
+# are unset. docker reaches the rootful daemon the kind cluster runs on,
+# whatever DOCKER_HOST the shell has (cluster_role_kind_docker_host), as `kind`
+# in deploy.sh does.
 #
 # Environment: ECONGRAPH_HOST_ROOT (default /srv/econgraph) is where the host
 # side is checked; the PVs always point at /srv/econgraph, so change it only
@@ -85,6 +86,7 @@ run() {
 
 [ "$DRY_RUN" = true ] && log "DRY RUN: the checks run for real; nothing is changed"
 
+cluster_role_kind_docker_host
 # A context pinned by deploy.sh is kept; run by hand, pin the current one.
 cluster_role_default_kubectl
 cluster_role_pin_context || die "${KUBECTL:-kubectl} has no current context"
