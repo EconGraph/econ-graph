@@ -31,6 +31,8 @@ Core CI builds and smoke-tests Docker images; it does not publish or deploy them
 
 External actions and reusable workflows are pinned to full commit SHAs, with version comments for readability. Resolve updates from the action's upstream repository and update the SHA and comment together. Docker actions require an image digest; local actions use the calling commit. The Actionlint workflow enforces these rules in workflows and composite actions.
 
+Every `actions/checkout` must set `persist-credentials: false`. Steps that need authenticated Git or GitHub API access must receive credentials explicitly for that step. The same validation script enforces this for workflows and composite actions.
+
 The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
 
 ## Validation
