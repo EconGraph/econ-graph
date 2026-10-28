@@ -816,16 +816,23 @@ grep -qF "$with_config" "$out" || fail "mark with KUBECONFIG: the choice was not
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
 grep -qE "context +kind-test" "$out" || fail "mark with KUBECONFIG: the context in use is not shown"
 used_only cache "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
-# An explicit KUBECTL wins silently; a context pinned by deploy.sh keeps deploy.sh's kubectl.
+# An explicit KUBECTL wins silently, also with a context pinned by deploy.sh (which
+# exports both).
 run_bare KUBECTL="$stub_dir/plain/kubectl" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECTL failed: $(cat "$out")"
 grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with KUBECTL: detection spoke"
 used_only plain "" "create-secrets with KUBECTL"
-run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
-  fail "create-secrets with a pinned context failed: $(cat "$out")"
-grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
+run_bare KUBECTL="$stub_dir/plain/kubectl" CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with KUBECTL and a pinned context failed: $(cat "$out")"
 grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" || fail "create-secrets with a pinned context: did not write on it"
-used_only plain "" "create-secrets with a pinned context"
+used_only plain "" "create-secrets with KUBECTL and a pinned context"
+# A pinned context alone doesn't choose the kubectl: the kind kubectl, on that context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with only a pinned context failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "create-secrets with only a pinned context: did not say it uses the kind kubectl"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets with only a pinned context: did not write on it"
+used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets with only a pinned context"
 # Without KUBECTL and a complete kind cache nothing runs: plain kubectl may be another
 # cluster's. Each case fails before any kubectl call, naming what is missing.
 # refused_bare LABEL STATUS MESSAGE: the last run_bare exited STATUS (non-zero), said
@@ -853,6 +860,8 @@ refused_bare "mark with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
 mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
 rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
 refused_bare "create-secrets (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with only a pinned context (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
 rc=0; run_bare STUB_MARKER=none scripts/deploy/protect-postgres-pv.sh --dry-run || rc=$?
 refused_bare "protect-postgres-pv (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
 rc=0; run_bare STUB_MARKER=none scripts/deploy/install-gateway.sh --dry-run || rc=$?

@@ -294,6 +294,24 @@ for script in install-gateway.sh apply-gateway-routes.sh cutover-to-gateway.sh b
         echo "ok   $script without the kind kubectl stops"
     fi
 done
+# A CLUSTER_ROLE_CONTEXT left in the environment, without KUBECTL, doesn't choose the
+# kubectl: the kind one is still used (here, past it, the gateway scripts reach the
+# fake), and without the kind copies they still stop.
+for script in install-gateway.sh apply-gateway-routes.sh; do
+    run env CLUSTER_ROLE_CONTEXT=x PUBLIC_HOST=none "$DEPLOY/$script" --dry-run
+    if [ -s "$LOGS/plain.log" ] || [ ! -s "$LOGS/kind-kubectl.log" ] ||
+        grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph " "$LOGS/kind-kubectl.log"; then
+        fail "$script with only CLUSTER_ROLE_CONTEXT: not the kind kubectl: $(cat "$LOGS/plain.log" "$LOGS/kind-kubectl.log")"
+    else
+        echo "ok   $script with only CLUSTER_ROLE_CONTEXT uses the kind kubectl"
+    fi
+    run env HOME="$WORK/empty-home" CLUSTER_ROLE_CONTEXT=x "$DEPLOY/$script" --dry-run
+    if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || ! grep -qF "or set KUBECTL (and KUBECONFIG)" <<<"$out"; then
+        fail "$script with only CLUSTER_ROLE_CONTEXT and no kind kubectl: exit $rc, plain $(cat "$LOGS/plain.log")"
+    else
+        echo "ok   $script with only CLUSTER_ROLE_CONTEXT and no kind kubectl stops"
+    fi
+done
 # KUBECONFIG alone: the kind kubectl binary with it (plain kubectl may ignore it).
 other="$WORK/other-kubeconfig"
 echo "# another kubeconfig" >"$other"
