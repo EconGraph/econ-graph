@@ -88,10 +88,10 @@ echo "DOCKER_HOST=\${DOCKER_HOST:-} docker \$*" >>"$CALLS"
 uid="\${FAKE_UID:-uid-kind-cluster}"
 case "\$*" in
     "info --format "*) echo "29.0.0 /var/lib/docker [name=seccomp]"; exit 0 ;;
-    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf get namespace kube-system -o jsonpath={.metadata.uid}")
+    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s get namespace kube-system -o jsonpath={.metadata.uid}")
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         printf '%s' "\$uid"; exit 0 ;;
-    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get configmap econgraph-cluster-role --ignore-not-found -o jsonpath={.data.role}{\" \"}{.data.kube-system-uid}")
+    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role --ignore-not-found -o jsonpath={.data.role}{\" \"}{.data.kube-system-uid}")
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKER_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKER+x}" ] || printf '%s' "\$FAKE_MARKER"
@@ -297,6 +297,10 @@ expect_refusal "an unreachable cluster without --delete-unreachable" "re-run wit
 reset
 out="$(FAKE_UNREACHABLE=1 FAKE_EXEC_FAILS=1 recreate --yes --delete-unreachable)"; rc=$?
 expect_refusal "an unreachable cluster whose UID can't be read" "could not read the kube-system UID"
+for hint in "docker start econ-graph-control-plane" "kubeadm certs renew all" \
+    "DOCKER_HOST=$ROOTFUL $WORK/data/econgraph/bin/kind-v0.33.0 delete cluster --name econ-graph --kubeconfig $KIND_KUBECONFIG"; do
+    grep -qF -- "$hint" <<<"$out" || fail "the unidentifiable-cluster refusal does not point to: $hint"
+done
 reset
 out="$(FAKE_UNREACHABLE=1 FAKE_MARKER_FAILS=1 recreate --yes --delete-unreachable)"; rc=$?
 expect_refusal "an unreachable cluster whose marker can't be read, with --yes" "needs --confirm-production"
@@ -365,7 +369,7 @@ fi
 # 10. The marker test the script uses (lib/cluster-role.sh).
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
-for marker in "production uid-a" "production" "Production uid-a" "staging uid-a" " uid-a"; do
+for marker in "production uid-a" "production" "Production uid-a" "staging uid-a" " uid-a" "None uid-a" "NONE"; do
     cluster_role_marker_guards_delete "$marker" || fail "cluster_role_marker_guards_delete '$marker' is false"
 done
 for marker in "" " " "none" "none uid-a"; do

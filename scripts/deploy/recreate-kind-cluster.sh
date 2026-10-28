@@ -28,7 +28,10 @@
 # All of these run before anything is backed up, deleted or created.
 # A cluster whose API server doesn't answer (e.g. its certificates expired)
 # can't be backed up; it is only deleted with --delete-unreachable, and only
-# after the same identification and confirmation.
+# after the same identification and confirmation. One whose kube-system UID
+# can't be read is not deleted: start it or renew its certificates first
+# (docs/deployment/HOST_STORAGE.md, "A cluster whose API server doesn't
+# answer").
 # If the kind config bind-mounts host directories, they must be mounted
 # first (scripts/host/setup-subvolumes.sh), or nothing is deleted.
 #
@@ -53,7 +56,7 @@
 # Afterwards: on production only, mark-production-cluster.sh first (before the
 # restore, so the tunnel token is restored too); then load-kind-images.sh,
 # restore-kind-databases.sh, deploy.sh
-# (docs/deployment/HOST_STORAGE.md, "Recovering production").
+# (docs/deployment/HOST_STORAGE.md, "Restoring production from a backup").
 
 set -euo pipefail
 
@@ -151,7 +154,7 @@ delete_cluster() {
 # (the rootful daemon kind-env.sh chose, which kind deletes from), so what is
 # read is the very cluster that would be deleted.
 in_node() {
-    docker exec "${KIND_CONTROL_PLANE}" kubectl --kubeconfig /etc/kubernetes/admin.conf "$@"
+    docker exec "${KIND_CONTROL_PLANE}" kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s "$@"
 }
 
 # confirm_delete PROMPT: show the cluster, then get the confirmation its
@@ -162,9 +165,17 @@ confirm_delete() {
     nodes="$(kind get nodes --name "${KIND_CLUSTER}" 2>/dev/null | tr '\n' ' ')" || nodes="(unknown)"
     uid="$(in_node get namespace "${CLUSTER_ROLE_NAMESPACE}" -o 'jsonpath={.metadata.uid}')" || uid=""
     if [ -z "${uid}" ]; then
-        die "could not read the kube-system UID inside ${KIND_CONTROL_PLANE} on ${DOCKER_HOST}" \
+        echo "error: could not read the kube-system UID inside ${KIND_CONTROL_PLANE} on ${DOCKER_HOST}" \
             "(its API server may not answer), so the cluster can't be identified and may be production;" \
-            "nothing was deleted. Inspect it: docker exec ${KIND_CONTROL_PLANE} journalctl -u kubelet"
+            "nothing was deleted. Bring it back, then re-run this script (docs/deployment/HOST_STORAGE.md," \
+            "\"A cluster whose API server doesn't answer\"):" >&2
+        echo "  - stopped: DOCKER_HOST=${DOCKER_HOST} docker start ${KIND_CONTROL_PLANE} ${KIND_STORAGE_NODE}" >&2
+        echo "  - expired certificates: DOCKER_HOST=${DOCKER_HOST} docker exec ${KIND_CONTROL_PLANE} kubeadm certs renew all," >&2
+        echo "    then DOCKER_HOST=${DOCKER_HOST} docker restart ${KIND_CONTROL_PLANE}" >&2
+        echo "  - last resort, skipping the backup and this check, everything in its nodes lost:" >&2
+        echo "    DOCKER_HOST=${DOCKER_HOST} ${KIND_PINNED_BIN} delete cluster --name ${KIND_CLUSTER} --kubeconfig ${KIND_KUBECONFIG}" >&2
+        echo "  Inspect it: DOCKER_HOST=${DOCKER_HOST} docker exec ${KIND_CONTROL_PLANE} journalctl -u kubelet" >&2
+        exit 1
     fi
     # Broader than cluster_is_marked_production (lib/cluster-role.sh), which
     # decides whether a cluster may hold the tunnel token: before a delete, any
