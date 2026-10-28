@@ -79,6 +79,9 @@ case "$*" in
     "config view --minify"*) printf 'https://127.0.0.1:6443' ;;
     "get namespace kube-system"*) printf '11111111-2222-3333-4444-555555555555' ;;
     "get pod keycloak-postgres-0"*) printf true ;;
+    # With FAKE_APPLY, deploy.sh finds a data database and its migrations done.
+    "get secret econ-graph-secrets"*) [ -z "${FAKE_APPLY:-}" ] || printf 'eA==' ;;
+    "get job crawler-migrate"*) [ -z "${FAKE_APPLY:-}" ] || printf 'Complete' ;;
     # deploy.sh checks the anonymous reader's key before its first apply (base64, fake).
     "get secret econ-graph-keycloak --ignore-not-found -o name") echo secret/econ-graph-keycloak ;;
     "get secret econ-graph-keycloak -o "*anonymous-client-secret*) printf 'ZmFrZQ==' ;;
