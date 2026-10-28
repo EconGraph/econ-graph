@@ -19,6 +19,42 @@ renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
 
+def default_kubectl(environ=os.environ):
+    """The kubectl to run, as cluster_role_default_kubectl in lib/cluster-role.sh chooses it.
+
+    Never plain kubectl from PATH: on the production host that is the MicroK8s wrapper,
+    which ignores KUBECONFIG. KUBECTL wins; else, with KUBECONFIG set, the kind cluster's
+    kubectl kept in ~/.cache/econgraph runs with it; else that kubectl and its kubeconfig
+    together. Anything else fails closed. A chosen KUBECONFIG is exported in environ.
+    """
+    directory = Path(environ.get('XDG_CACHE_HOME') or Path(environ.get('HOME', '~')).expanduser()/'.cache')/'econgraph'
+    binary, config = directory/'bin/kubectl', directory/'kubeconfig-econ-graph'
+    fix = ('reach the kind cluster once with a script that keeps its kubectl there (any kind-env.sh script '
+           'run for real keeps them, e.g. scripts/deploy/precheck-db-migration.sh, which only reads the cluster '
+           'without --stop-crawler; a --dry-run keeps nothing; scripts/deploy/recreate-kind-cluster.sh '
+           '--if-missing creates the cluster), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly')
+    executable = os.access(binary, os.X_OK)
+    if environ.get('KUBECTL'):
+        return environ['KUBECTL']
+    if environ.get('KUBECONFIG'):
+        if not executable:
+            raise ValueError(f"KUBECONFIG is set ({environ['KUBECONFIG']}) but KUBECTL is not, and there is no kind "
+                             f'kubectl at {binary}; plain kubectl may ignore KUBECONFIG (the MicroK8s wrapper does). '
+                             f'Set KUBECTL too, or {fix}')
+        print(f"Using the kind cluster's kubectl {binary} with KUBECONFIG={environ['KUBECONFIG']} "
+              '(from the environment; set KUBECTL to choose another kubectl)', file=sys.stderr)
+        return str(binary)
+    has_config = config.exists() and config.stat().st_size > 0
+    if executable and has_config:
+        environ['KUBECONFIG'] = str(config)
+        print(f"Using the kind cluster's kubectl {binary} and KUBECONFIG={config} "
+              '(set KUBECTL and KUBECONFIG to choose another cluster)', file=sys.stderr)
+        return str(binary)
+    missing = config if executable else binary if has_config else f'{binary} and {config}'
+    raise ValueError(f"no KUBECTL is set and the kind cluster's kubectl is not kept here (no {missing}); "
+                     f'plain kubectl may be another cluster\'s. {fix[0].upper()}{fix[1:]}')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=['up', 'down', 'list', 'build-frontend'])
@@ -39,9 +75,15 @@ def main():
         p.error('--local-data requires --data-image and --seed-dir')
     if args.local_data and not re.search(r':v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?(?:@sha256:[0-9a-f]{64})?$', args.data_image):
         p.error('--data-image must use a release tag, e.g. econ-graph-crawler-worker:v4.1.0')
-    base = [os.environ.get('KUBECTL', 'kubectl'), '--context', args.context]
+    base = []
+    def kubectl():
+        # Chosen on first use: a dry run and build-frontend contact no cluster.
+        if not base:
+            base.extend([default_kubectl(), '--context', args.context])
+        return base
+    args.kubectl = kubectl
     def k(*cmd, data=None, capture=False, check=True):
-        return subprocess.run(base + list(cmd), input=data, text=True, check=check,
+        return subprocess.run(kubectl() + list(cmd), input=data, text=True, check=check,
                               stdout=subprocess.PIPE if capture else None)
     def apply(docs):
         k('apply', '-f', '-', data=yaml.safe_dump_all(docs, sort_keys=False))
@@ -218,9 +260,8 @@ def seed_local(args, namespace, k, lookup, apply):
         raise ValueError('unmarked local data database is nonempty; refusing overwrite')
     # Stream only into the explicitly owned branch pod. No primary connection
     # string or credentials are ever requested or copied.
-    base = [os.environ.get('KUBECTL', 'kubectl'), '--context', args.context]
     with dump.open('rb') as src:
-        subprocess.run(base + ['-n', namespace, 'exec', '-i', 'postgresql-0', '--', 'pg_restore',
+        subprocess.run(args.kubectl() + ['-n', namespace, 'exec', '-i', 'postgresql-0', '--', 'pg_restore',
                        '-U', 'postgres', '-d', 'econ_graph', '--no-owner', '--role=econgraph',
                        '--exit-on-error', '--single-transaction'], stdin=src, check=True)
     apply([{'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': {'name': 'branch-data-seed', 'namespace': namespace},

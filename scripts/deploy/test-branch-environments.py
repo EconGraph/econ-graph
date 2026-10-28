@@ -187,7 +187,8 @@ class GuardTests(unittest.TestCase):
             calls.append((command, kwargs))
             out = response(command) if response else ''
             return subprocess.CompletedProcess(command, 0, stdout=out)
-        with patch.object(sys, 'argv', ['deploy-branch.py']+argv), patch.object(subprocess, 'run', side_effect=fake):
+        with patch.object(sys, 'argv', ['deploy-branch.py']+argv), patch.object(subprocess, 'run', side_effect=fake), \
+                patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             deploy.main()
         return calls
 
@@ -195,6 +196,26 @@ class GuardTests(unittest.TestCase):
         common = ['--context', 'scratch', '--dry-run']
         for argv in [['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x'], ['down', 'one'], ['list'], ['build-frontend', 'one']]:
             self.assertEqual(self.invoke(argv+common), [])
+            # No kubectl is chosen either, so a dry run needs none.
+            with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HOME': home}, clear=True), \
+                    patch.object(sys, 'argv', ['deploy-branch.py']+argv+common), \
+                    patch.object(subprocess, 'run', side_effect=AssertionError('contacted')):
+                deploy.main()
+
+    def test_commands_run_the_chosen_kubectl_with_the_explicit_context(self):
+        calls = self.invoke(['down', 'one', '--context', 'scratch'])
+        self.assertEqual(calls[0][0][:3], ['stub-kubectl', '--context', 'scratch'])
+
+    def test_no_kubectl_choice_stops_before_any_command(self):
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, 'kubectl').write_text('#!/bin/sh\nexit 0\n')
+            Path(home, 'kubectl').chmod(0o755)
+            for action in [['list'], ['down', 'one'], ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']]:
+                with patch.dict(os.environ, {'HOME': home, 'PATH': home}, clear=True), \
+                        patch.object(sys, 'argv', ['deploy-branch.py']+action+['--context', 'kind-econ-graph']), \
+                        patch.object(subprocess, 'run', side_effect=AssertionError('contacted')), \
+                        self.assertRaisesRegex(ValueError, 'no KUBECTL is set'):
+                    deploy.main()
 
     def test_up_rejects_unowned_existing_namespace_before_mutations(self):
         with self.assertRaisesRegex(ValueError, 'ownership'):
@@ -249,7 +270,8 @@ class GuardTests(unittest.TestCase):
                         'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}[name]}})
             return subprocess.CompletedProcess(command, code, stdout=out)
         argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x']
-        with patch.object(sys, 'argv', argv), patch.object(subprocess, 'run', side_effect=fake):
+        with patch.object(sys, 'argv', argv), patch.object(subprocess, 'run', side_effect=fake), \
+                patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             deploy.main()
         secrets_ = {d['metadata']['name']: d['stringData'] for d in sent if d['kind'] == 'Secret'}
         self.assertIn('anonymous-client-secret', secrets_['econ-graph-keycloak'])
@@ -302,6 +324,93 @@ class GuardTests(unittest.TestCase):
             with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0,
                     stdout='1; 1259 1 TABLE public economic_series postgres\n2; 0 1 TABLE DATA public economic_series postgres\n')):
                 deploy.seed_local(args, 'branch', None, lambda *args: {'data': {'sha256': checksum}}, None)
+
+
+class SeedRestoreTests(unittest.TestCase):
+    def test_restore_streams_through_the_chosen_kubectl(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            (path/'VERIFIED').touch()
+            (path/'econ_graph.dump').write_bytes(b'synthetic data-only fixture')
+            checksum = hashlib.sha256(b'synthetic data-only fixture').hexdigest()
+            (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
+            args = type('Args', (), {'seed_dir': path, 'context': 'scratch',
+                                     'kubectl': staticmethod(lambda: ['stub-kubectl', '--context', 'scratch'])})()
+            runs = []
+            def run(command, **kwargs):
+                runs.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='1; 1259 1 TABLE public economic_series postgres\n')
+            k = lambda *cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout='0\n')
+            with patch.object(subprocess, 'run', side_effect=run):
+                deploy.seed_local(args, 'branch', k, lambda *a: None, lambda docs: None)
+            restore = next(c for c in runs if 'pg_restore' in c and 'exec' in c)
+            self.assertEqual(restore[:3], ['stub-kubectl', '--context', 'scratch'])
+
+
+class KubectlChoiceTests(unittest.TestCase):
+    """deploy-branch.py chooses kubectl as cluster_role_default_kubectl in lib/cluster-role.sh does."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.cache = self.home/'.cache/econgraph'
+        self.binary, self.config = self.cache/'bin/kubectl', self.cache/'kubeconfig-econ-graph'
+
+    def keep(self, binary=True, config=True):
+        self.binary.parent.mkdir(parents=True, exist_ok=True)
+        if binary:
+            self.binary.write_text('#!/bin/sh\n')
+            self.binary.chmod(0o755)
+        if config is not None:
+            self.config.write_text('apiVersion: v1\n' if config else '')
+
+    def choose(self, **env):
+        environ = dict(HOME=str(self.home), PATH='/usr/bin:/bin', **env)
+        with patch('sys.stderr'):
+            return deploy.default_kubectl(environ), environ
+
+    def test_kubectl_set_wins_and_keeps_kubeconfig_untouched(self):
+        self.keep()
+        self.assertEqual(self.choose(KUBECTL='/opt/k'), ('/opt/k', dict(HOME=str(self.home), PATH='/usr/bin:/bin', KUBECTL='/opt/k')))
+        self.assertEqual(self.choose(KUBECTL='/opt/k', KUBECONFIG='/x')[1]['KUBECONFIG'], '/x')
+
+    def test_kubeconfig_without_kubectl_uses_the_kind_kubectl_with_it(self):
+        self.keep(config=None)
+        chosen, environ = self.choose(KUBECONFIG='/elsewhere')
+        self.assertEqual((chosen, environ['KUBECONFIG']), (str(self.binary), '/elsewhere'))
+
+    def test_kubeconfig_without_kubectl_or_kind_kubectl_fails_closed(self):
+        self.keep(binary=False)
+        with self.assertRaisesRegex(ValueError, 'KUBECONFIG is set .* but KUBECTL is not'):
+            self.choose(KUBECONFIG='/elsewhere')
+
+    def test_neither_uses_the_kind_kubectl_and_its_kubeconfig(self):
+        self.keep()
+        chosen, environ = self.choose()
+        self.assertEqual((chosen, environ['KUBECONFIG']), (str(self.binary), str(self.config)))
+
+    def test_xdg_cache_home_moves_the_kind_cache(self):
+        self.cache = self.home/'xdg/econgraph'
+        self.binary, self.config = self.cache/'bin/kubectl', self.cache/'kubeconfig-econ-graph'
+        self.keep()
+        self.assertEqual(self.choose(XDG_CACHE_HOME=str(self.home/'xdg'))[0], str(self.binary))
+
+    def test_neither_without_both_kept_files_fails_closed_naming_what_is_missing(self):
+        for binary, config, missing in [(False, None, 'kubectl and '), (True, False, 'kubeconfig-econ-graph)'),
+                                        (True, None, 'kubeconfig-econ-graph)'), (False, True, 'bin/kubectl)')]:
+            with self.subTest(binary=binary, config=config):
+                for path in [self.binary, self.config]:
+                    path.unlink(missing_ok=True)
+                self.keep(binary, config)
+                with self.assertRaisesRegex(ValueError, 'no KUBECTL is set') as caught:
+                    self.choose()
+                self.assertIn(missing, str(caught.exception))
+
+    def test_non_executable_kind_kubectl_is_not_used(self):
+        self.keep()
+        self.binary.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, 'no KUBECTL is set'):
+            self.choose()
 
 
 class NetworkProbeTests(unittest.TestCase):

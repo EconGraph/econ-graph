@@ -793,6 +793,13 @@ The operator needs Python 3.11+, PyYAML, kubectl and a kubeconfig authorized for
 branch namespaces, reading the primary Service metadata and creating exactly the
 branch's ReferenceGrant in `econ-graph`. Use an explicit context on every command;
 the script never switches the current context or reads production Secrets.
+It never runs a plain `kubectl` from `PATH`, and chooses one as the other deploy
+scripts do (`cluster_role_default_kubectl` in `scripts/deploy/lib/cluster-role.sh`).
+`KUBECTL` is used when set. Otherwise the kind cluster's kubectl kept in
+`~/.cache/econgraph/bin` is used, with `KUBECONFIG` when it is set and with
+`~/.cache/econgraph/kubeconfig-econ-graph` when it is not. Without them the
+script stops before contacting any cluster. A `--dry-run` and `build-frontend`
+need no kubectl.
 
 ```bash
 scripts/deploy/deploy-branch.sh build-frontend feature/my-change \
