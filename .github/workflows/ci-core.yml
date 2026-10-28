@@ -391,6 +391,13 @@ jobs:
           scripts/deploy/lib/release-images.sh
         scripts/deploy/test-release-images.sh
 
+    # release-deploy.sh, the one-command release deploy, with its steps as stubs:
+    # order, stop at the first failure, the PUBLIC_HOST guard and the dry run.
+    - name: Check the release deploy entry point
+      run: |
+        shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
+        scripts/deploy/test-release-deploy.sh
+
     # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
     # identity printed first, and the resume hint keeping the run's options, against stubs.
     - name: Check the full-history re-fetch script

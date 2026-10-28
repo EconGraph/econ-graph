@@ -47,8 +47,8 @@ STUB
 done
 
 # The kind cluster's kubectl. It knows context kind-econ-graph only, refuses to
-# apply anything (so deploy.sh stops at its first apply), and fails any call
-# that contains FAKE_FAIL. Every call is recorded with its path and KUBECONFIG.
+# apply anything (so deploy.sh stops at its first apply) unless FAKE_APPLY is
+# set, and fails any call that contains FAKE_FAIL. Every call is recorded with its path and KUBECONFIG.
 cat >"$WORK/source/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "$0 KUBECONFIG=${KUBECONFIG:-} $*" >>"$TEST_LOGS/kind-kubectl.log"
@@ -66,7 +66,11 @@ if [ -n "${FAKE_FAIL:-}" ] && [[ "$*" == *"$FAKE_FAIL"* ]]; then
     exit 1
 fi
 case " $* " in
-    *" apply "*) echo "fake kind kubectl: refusing to apply" >&2; exit 1 ;;
+    *" apply "*)
+        # FAKE_APPLY: accept every apply (reading what is piped in), so deploy.sh
+        # gets past its applies.
+        if [ -n "${FAKE_APPLY:-}" ]; then cat >/dev/null; exit 0; fi
+        echo "fake kind kubectl: refusing to apply" >&2; exit 1 ;;
 esac
 case "$*" in
     "config get-contexts -o name" | "config current-context") echo kind-econ-graph ;;
@@ -75,6 +79,9 @@ case "$*" in
     "config view --minify"*) printf 'https://127.0.0.1:6443' ;;
     "get namespace kube-system"*) printf '11111111-2222-3333-4444-555555555555' ;;
     "get pod keycloak-postgres-0"*) printf true ;;
+    # With FAKE_APPLY, deploy.sh finds a data database and its migrations done.
+    "get secret econ-graph-secrets"*) [ -z "${FAKE_APPLY:-}" ] || printf 'eA==' ;;
+    "get job crawler-migrate"*) [ -z "${FAKE_APPLY:-}" ] || printf 'Complete' ;;
     # deploy.sh checks the anonymous reader's key before its first apply (base64, fake).
     "get secret econ-graph-keycloak --ignore-not-found -o name") echo secret/econ-graph-keycloak ;;
     "get secret econ-graph-keycloak -o "*anonymous-client-secret*) printf 'ZmFrZQ==' ;;
@@ -229,6 +236,51 @@ expect "deploy.sh" nonzero "fake kind kubectl: refusing to apply" \
 expect_rootful "deploy.sh"
 grep -qF " config use-context kind-econ-graph" "$LOGS/kind-kubectl.log" ||
     fail "deploy.sh did not switch the kind kubectl to kind-econ-graph"
+# A PUBLIC_HOST the caller set (release-deploy.sh's) wins over one in a local ports.env.
+printf 'BACKEND_NODEPORT=30080\nPUBLIC_HOST=other.example\n' >"$TREE/ports.env"
+run env PUBLIC_HOST= "$TREE/scripts/deploy/deploy.sh"
+rm -f "$TREE/ports.env"
+if grep -qF "No PUBLIC_HOST: serving http://localhost only" <<<"$out" && ! grep -qF "other.example" <<<"$out"; then
+    echo "ok   deploy.sh keeps the caller's PUBLIC_HOST over ports.env's"
+else
+    fail "deploy.sh let ports.env replace the caller's PUBLIC_HOST"
+fi
+
+# A deploy that fails while it waits for the Deployments stops its pod status
+# monitor on the way out, so its output closes when it exits: a caller that
+# reads it to the end (release-deploy.sh) is not kept waiting. Run in a copy
+# whose helper scripts are stubs (they would touch the host's storage and
+# Secrets), up to the first wait for a Deployment, which fails; the output is
+# read with a time limit, so a monitor left running fails the check instead of
+# hanging it.
+DTREE="$WORK/deploy-tree"
+mkdir -p "$DTREE/scripts" "$DTREE/k8s" || exit 1
+cp -r "$PROJECT_ROOT/scripts/deploy" "$DTREE/scripts/deploy" || exit 1
+cp -r "$PROJECT_ROOT/k8s/manifests" "$DTREE/k8s/manifests" || exit 1
+for helper in apply-host-storage.sh create-secrets.sh protect-postgres-pv.sh install-gateway.sh; do
+    printf '#!/bin/sh\necho "stub %s $*"\n' "$helper" >"$DTREE/scripts/deploy/$helper"
+done
+: >"$LOGS/plain.log"; : >"$LOGS/kind-kubectl.log"
+start=$SECONDS
+out="$({ timeout 60 env -u KUBECTL -u KUBECONFIG -u DOCKER_HOST -u DOCKER_CONTEXT -u ECONGRAPH_DOCKER_HOST \
+    -u ECONGRAPH_KUBE_DIR -u CLUSTER_ROLE_CONTEXT -u KIND_CLUSTER -u NAMESPACE \
+    -u ECONGRAPH_SCRATCH_STORAGE -u XDG_CACHE_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME \
+    -u KIND_FALLBACK_WARNED -u DRY_RUN \
+    HOME="$HOME_DIR" TMPDIR="$WORK/tmp" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
+    TEST_LOGS="$LOGS" TEST_SOURCE="$WORK/source" PUBLIC_HOST= FAKE_APPLY=1 \
+    FAKE_FAIL="wait --for=condition=available" "$DTREE/scripts/deploy/deploy.sh" </dev/null 2>&1
+    echo "deploy.sh exit $?"; } | timeout 30 cat)"
+elapsed=$((SECONDS - start))
+if ! grep -qF "fake kind kubectl: failing as asked: wait --for=condition=available" <<<"$out"; then
+    fail "deploy.sh with a failing wait: did not reach the wait for the Deployments"
+elif ! grep -qE "^deploy.sh exit [1-9]" <<<"$out"; then
+    fail "deploy.sh with a failing wait: did not fail"
+elif [ "$elapsed" -ge 20 ]; then
+    fail "deploy.sh with a failing wait: its output stayed open ${elapsed}s after it failed (the pod monitor kept running)"
+else
+    echo "ok   deploy.sh stops its pod monitor when a wait fails (output closed after ${elapsed}s)"
+fi
+pkill -f "$DTREE/scripts/deploy/deploy.sh" 2>/dev/null || true
 
 # The operator's shell exports DOCKER_HOST for the rootless daemon: kind and
 # docker still run on the rootful one.

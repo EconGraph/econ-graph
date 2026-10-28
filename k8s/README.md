@@ -64,6 +64,7 @@ terraform/k8s/          # Terraform configuration
 
 scripts/deploy/         # Deployment scripts
 ├── build-images.sh    # Build Docker images
+├── release-deploy.sh          # Load, back up, check, deploy and verify a release in order
 ├── load-release-images.sh     # Put a release candidate's GHCR images on the nodes
 ├── verify-release-images.sh   # Restart and check the pods run them
 ├── rollback-release-images.sh # Go back to what ran before the load
@@ -126,6 +127,9 @@ and not images built here, load them onto the nodes under the manifests' names b
 `./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
 before the load. The load covers every workload that runs the three images, including the
 `crawler-migrate` Job. See [Release images on the kind cluster](../docs/deployment/RELEASE_IMAGES.md).
+`./scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N` runs the database backup, the load,
+the Keycloak backup, the pre-deploy check, `deploy.sh` (with `PUBLIC_HOST` from the host's
+deploy config) and the verify in order, from a clean checkout of the tag; see [Deploying a release](../docs/deployment/RELEASE_DEPLOY.md).
 
 ## 🔐 Keycloak
 
