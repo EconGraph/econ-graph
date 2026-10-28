@@ -318,13 +318,14 @@ It works on the kind cluster through its own kubectl (`scripts/deploy/lib/kind-e
 reads from the terminal only, refuses piped input, refuses a cluster that is not marked
 production before it asks, and then starts cloudflared through `apply_cloudflared`, for
 the public host the cluster serves. `scripts/deploy/create-secrets.sh --prompt-tunnel-token`
-writes the token only, with `${KUBECTL:-kubectl}` on its current context. Run by hand
-with neither `KUBECTL` nor `KUBECONFIG` set, it uses the kind cluster's own kubectl and
-kubeconfig when copies are kept at `~/.cache/econgraph/bin/kubectl` and
-`~/.cache/econgraph/kubeconfig-econ-graph`, and says so; plain `kubectl` may be another
-cluster's (the microk8s snap wrapper ignores `~/.kube/config`). An exported `KUBECONFIG`
-(some runbooks export one) turns that off, which it says, and with only one of the two
-files it warns which is missing and uses plain `kubectl`. Don't put the token on a command line
+writes the token only, with `KUBECTL` on its current context. Run by hand without
+`KUBECTL`, it uses the kind cluster's own kubectl kept at `~/.cache/econgraph/bin/kubectl`,
+with an exported `KUBECONFIG` if there is one (some runbooks export one) and
+`~/.cache/econgraph/kubeconfig-econ-graph` if not, and says which. It never falls back to
+plain `kubectl`, which may be another cluster's (the microk8s snap wrapper ignores
+`KUBECONFIG` and `~/.kube/config`): when a copy is missing it stops and says which, and how
+to get it (any `scripts/deploy/lib/kind-env.sh` script keeps them) or to set `KUBECTL`.
+Don't put the token on a command line
 (`CLOUDFLARE_TUNNEL_TOKEN=...`), where shell history keeps it. Without the Secret, `deploy.sh` applies `cloudflared` with 0
 replicas and says so. If a cluster that is not marked already holds the Secret,
 `create-secrets.sh` keeps it and warns; delete it there with

@@ -9,11 +9,20 @@ echo "🔗 Setting up port forwarding for EconGraph services..."
 echo ""
 
 # The kind cluster's own kubectl and kubeconfig, on the rootful Docker daemon
-# (on this host `kubectl` is the microk8s snap wrapper).
+# (on this host `kubectl` is the microk8s snap wrapper). Stops when the kind
+# cluster can't be reached, rather than fall back to plain kubectl. KUBECTL,
+# when set, is used instead, with the KUBECONFIG it finds, as in the Keycloak
+# backup scripts.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
-ensure_kind_kubectl_quietly || true
+if [ -n "${KUBECTL:-}" ]; then
+    echo "  kubectl: ${KUBECTL} (KUBECTL), KUBECONFIG=${KUBECONFIG:-(unset)}"
+    kubectl() { command "$KUBECTL" "$@"; }
+else
+    check_docker_daemon
+    ensure_kind_kubectl
+fi
 
 # Check if kubectl is available and cluster is accessible
 if ! kubectl cluster-info >/dev/null 2>&1; then
@@ -21,9 +30,14 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
     exit 1
 fi
 
-# Set kubectl context
-echo "🔧 Setting kubectl context..."
-kubectl config use-context kind-econ-graph
+# The kind kubectl's own kubeconfig: switch it to the kind cluster's context. An
+# explicit KUBECTL keeps its kubeconfig's current context, as it chose it.
+if [ -n "${KUBECTL:-}" ]; then
+    echo "🔧 Using the current context of ${KUBECTL}: $(kubectl config current-context 2>/dev/null || echo '(none)')"
+else
+    echo "🔧 Setting kubectl context..."
+    kubectl config use-context kind-econ-graph
+fi
 
 # Check if services exist
 echo "🔍 Checking if services are available..."

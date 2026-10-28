@@ -87,7 +87,8 @@ The [Release E2E workflow](../../../../.github/workflows/release-e2e.yml) runs
 the suite in Chromium on PRs into any branch when they touch `frontend/`,
 `backend/`, `config/keycloak/`, the release Compose file, the runner, its
 orchestration test or the workflow itself. It also supports GitHub’s **Run
-workflow** button (`workflow_dispatch`).
+workflow** button (`workflow_dispatch`). A second leg of the same workflow runs the
+[QA scenario suite](../../../../docs/release/qa-scenarios.md) against this stack.
 
 ## Against a deployed build (REL-QA check 3)
 
