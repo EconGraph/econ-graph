@@ -1,22 +1,32 @@
 # EconGraph GraphQL
 
-The GraphQL API layer for the EconGraph system, providing enterprise-grade GraphQL schema, resolvers, and security features. This crate serves as the API gateway that exposes economic data through a type-safe, performant GraphQL interface with comprehensive security measures and monitoring capabilities.
+This crate defines the GraphQL schema, query and mutation resolvers, and DataLoaders
+that expose EconGraph's economic data and application state. The hosting
+[backend](../econ-graph-backend/src/main.rs) authenticates bearer tokens and supplies
+request context. This crate uses the caller in
+[`GraphQLContext`](src/graphql/context.rs) to enforce resolver permissions.
 
-## Features
+## Schema behavior
 
-- **GraphQL Schema**: Complete type-safe GraphQL schema for economic data queries and mutations
-- **Security System**: Enterprise-grade security with query complexity analysis, rate limiting, and introspection protection
-- **Performance Optimization**: DataLoader-based N+1 query prevention and efficient data loading
-- **Authentication**: JWT-based authentication and authorization with role-based access control
-- **Monitoring**: Comprehensive metrics and monitoring for API performance and security
+The [schema builder](src/graphql/schema.rs) limits query depth to 15 and complexity
+to 1000, counting one per selected field. Standard introspection queries are
+permitted. [DataLoaders](src/graphql/dataloaders.rs) batch related database reads.
+
+[Authorization checks](src/graphql/context.rs) enforce fine-grained roles.
+[Audit handling](src/graphql/audit.rs) records admin mutation attempts and
+signed-in callers' permission denials. Audit writes are best effort: failures are
+logged and counted without failing the request. The
+[error sanitizer](src/graphql/errors.rs) keeps internal database details out of
+GraphQL error responses.
 
 ## Schema snapshot
 
-`schema.graphql` in this crate is the SDL the server serves, printed by
-`econ_graph_graphql::graphql::sdl()`. The `schema_snapshot` test (run in CI by the
-`backend-smoke-tests` job, "Backend Smoke Tests (Fast)") fails when the two differ, and the frontend's
-`src/__tests__/graphql-operations.test.ts` validates every frontend GraphQL operation
-against this file.
+[`schema.graphql`](schema.graphql) is the SDL the server serves, printed by
+`econ_graph_graphql::graphql::sdl()`. The
+[`schema_snapshot` test](tests/schema_snapshot.rs), run in CI by the
+`backend-smoke-tests` job, "Backend Smoke Tests (Fast)", fails when the two differ.
+The frontend's [operation validation test](../../../frontend/src/__tests__/graphql-operations.test.ts)
+validates frontend GraphQL operations against this file, except those on its skip list.
 
 A PR that changes the schema regenerates the file and commits it. From `backend/`:
 
@@ -24,58 +34,60 @@ A PR that changes the schema regenerates the file and commits it. From `backend/
 UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
 ```
 
-If a frontend operation stops validating, fix the operation. Operations that are known
-to fail are listed in `frontend/src/__tests__/graphqlOperationSkipList.ts`; remove an
-entry in the PR that fixes or deletes its operation.
+If a frontend operation stops validating, fix the operation. Operations that are
+known to fail are listed in the [frontend skip list](../../../frontend/src/__tests__/graphqlOperationSkipList.ts);
+remove an entry in the PR that fixes or deletes its operation.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure GraphQL API functionality, security measures, and performance optimizations work correctly.
+The tests cover different parts of the API:
 
-### Test Types
+- The [SDL snapshot test](tests/schema_snapshot.rs) compares the runtime schema
+  with the committed file without needing a database.
+- [Query-limit tests](src/graphql/schema.rs) check depth and complexity boundaries
+  and permitted introspection. They use deliberately unreachable pools; the
+  at-the-limit complexity case can wait for a connection timeout.
+- [Context tests](src/graphql/context.rs) and [authorization tests](src/graphql/authorization_tests.rs)
+  check caller permissions. Authorization coverage includes database-backed user
+  administration regressions; [audit tests](src/graphql/audit.rs) check recorded outcomes.
+- Database-backed tests cover [annotation visibility](src/graphql/annotation_visibility_tests.rs),
+  [annotation idempotency](src/graphql/annotation_idempotency_tests.rs),
+  [error sanitization](src/graphql/error_sanitizing_db_tests.rs), and
+  [separate app and data databases](src/graphql/split_databases_tests.rs).
+- [Loader behavior tests](src/graphql/n_plus_one_tests.rs) check missing-ID results
+  and successful query execution. They do not assert SQL query counts, timing, or
+  resource thresholds.
 
-#### **Unit Tests**
-- **Purpose**: Test individual resolvers, types, and security components in isolation
-- **Examples**: Query resolution, mutation handling, type conversions, security rule validation
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
-
-#### **Integration Tests**
-- **Purpose**: Test GraphQL schema with real database interactions and security enforcement
-- **Examples**: End-to-end query execution, authentication flows, rate limiting, data loading
-- **Benefits**: Catch integration issues, test real-world scenarios, validate security measures
-
-#### **Security Tests**
-- **Purpose**: Validate security measures and attack prevention
-- **Examples**: Query complexity limits, rate limiting, introspection protection, input validation
-- **Benefits**: Ensure security measures work, prevent vulnerabilities, validate attack resistance
-
-#### **Performance Tests**
-- **Purpose**: Ensure GraphQL API performance meets requirements
-- **Examples**: N+1 query prevention, DataLoader efficiency, query optimization
-- **Benefits**: Prevent performance regressions, validate scalability, ensure efficient data loading
-
-### Running Tests
+Run these commands from `backend/`. To check the schema without PostgreSQL:
 
 ```bash
-# Run all tests
-cargo test
-
-# Run specific test modules
-cargo test graphql::query
-cargo test security
-cargo test integration
-
-# Run with security validation
-RUST_LOG=debug cargo test
+cargo test -p econ-graph-graphql --test schema_snapshot
 ```
 
-### Test Infrastructure
+Before running database-backed tests, set `DATABASE_URL` to a reachable disposable
+PostgreSQL database; see [database testing](../../../docs/testing/DATABASE_TESTING.md)
+for setup and cleanup behavior. The core `get_test_db()` helper, compiled as a
+dependency here, connects to that URL or falls back to
+`postgres://localhost/econ_graph_test`; it does not start a container or apply
+migrations. Test modules arrange their own migrations and fixtures, and some drop
+or delete existing data. Split-database tests also need permission to create and
+drop scratch databases on that server.
 
-- **GraphQL Schema Testing**: Comprehensive schema validation and introspection testing
-- **Security Testing**: Automated security measure validation and attack simulation
-- **Database Integration**: Real database interactions with test data setup and cleanup
-- **Performance Monitoring**: Query execution time and resource usage validation
+Some modules, including annotation visibility, error sanitization, and
+split-database tests, skip when `DATABASE_URL` is absent. Others require it or use
+the helper's fallback, so an unset variable does not make the full suite database-free.
+
+```bash
+# Run this crate's full suite after preparing the disposable database.
+cargo test -p econ-graph-graphql
+
+# Select existing library test modules.
+cargo test -p econ-graph-graphql --lib graphql::authorization_tests
+cargo test -p econ-graph-graphql --lib graphql::annotation_visibility_tests
+cargo test -p econ-graph-graphql --lib graphql::split_databases_tests
+```
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL).
+See the [backend license](../../LICENSE) for complete terms and conditions.

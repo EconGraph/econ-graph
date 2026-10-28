@@ -2,205 +2,130 @@
 
 ## Overview
 
-The EconGraph frontend is a modern React application built with TypeScript and Material-UI that provides an intuitive interface for exploring economic time series data. It significantly improves upon FRED's user experience with modern design patterns and responsive interactions.
+The EconGraph frontend is a modern React application built with TypeScript and Material UI that provides an intuitive interface for exploring economic time series data. It significantly improves upon FRED's user experience with modern design patterns and responsive interactions.
 
-## ✅ Completed Features
+## Frontend Features
 
-### 🎨 Modern UI Components
-- **Material-UI Design System**: Consistent, professional styling with custom theme
-- **Responsive Layout**: Works seamlessly across desktop, tablet, and mobile
-- **Dark/Light Theme Support**: Professional blue color scheme with accessibility features
-- **Component Architecture**: Modular, reusable components with clear separation of concerns
+### Interactive Charts and Revision Information
 
-### 📊 Interactive Charts with Tooltips
-- **Chart.js Integration**: High-performance, interactive charts with smooth animations
-- **Mouse-over Tooltips**: Detailed information on hover showing:
-  - Exact date and value
-  - Original vs. revised data indicators
-  - Revision dates for data provenance
-- **Date Range Selection**: DatePicker components for custom time periods
-- **Zoom and Pan**: Native chart interactions for detailed exploration
+The series detail page plots the latest stored revision for each observation date. Hover tooltips show the observation date and formatted value with units, plus a revision date when it differs from the observation date. The recent-observations table labels each value **Original** or **Revised**, making revision provenance visible alongside the data.
 
-### 🔄 Data Transformation Options
-- **Year-over-Year (YoY)**: Calculate percentage changes from previous year
-- **Quarter-over-Quarter (QoQ)**: Calculate quarterly growth rates  
-- **Month-over-Month (MoM)**: Calculate monthly changes
-- **Real-time Switching**: Transform data instantly without page reload
-- **Visual Indicators**: Clear labeling of transformation type and units
+- **Date range controls:** Date pickers narrow the visible time period without leaving the chart.
+- **Transformations:** Year-over-year, quarter-over-quarter, and month-over-month percentage changes are offered where appropriate for the series frequency. The selector also offers change since the first available value and log difference.
+- **Consistent labels:** The chart title, axis, tooltips, and recent-observations table reflect the transformation and its units.
 
-### 📈 Original vs. Revised Data Support
-- **Dual Data Streams**: Plot both original releases and later corrections
-- **Toggle Controls**: Checkboxes to show/hide different data versions
-- **Visual Differentiation**: Different line styles for original vs. revised data
-- **Metadata Display**: Clear indicators of data revision status
+Selecting a transformation requests new values from the backend without reloading the page. While that request loads, the previous result stays visible with its own transformation label, so a new selection does not mislabel the values on screen.
 
-### 🔍 Advanced Search and Filtering
-- **Global Search**: Header search bar with auto-complete
-- **Multi-faceted Filtering**: Filter by source, frequency, category
-- **Real-time Results**: Instant search results as you type
-- **Search Highlighting**: Visual emphasis on matching terms
+### Search and Filtering
 
-### 🗂️ Modern Navigation
-- **Responsive Sidebar**: Collapsible navigation with clear categorization
-- **Breadcrumbs**: Clear navigation path for deep pages
-- **Smart Routing**: React Router with URL state preservation
-- **Mobile-First**: Touch-friendly navigation on mobile devices
+Submitting the header search opens the series explorer at `/explore?q=…`. In the explorer, searches run after a 250 ms pause in typing once the trimmed query contains at least two characters. Source and frequency filters narrow the results; selecting a source also allows browsing its series without entering a search term. The query and filter choices are stored in the URL so the view can be bookmarked or shared.
 
-## 📁 Project Structure
+### Navigation and Mobile Layout
 
-```
+React Router connects the dashboard, series explorer, series detail pages, data sources, and global analysis. Below 600px, navigation uses a modal drawer that starts closed and opens from the header menu button. At wider widths, the sidebar starts open beside the page. Charts resize to their container, and chart controls wrap on narrow screens.
+
+Light and dark themes let readers choose the display they prefer, with the choice saved in the browser. Together, the search, chart controls, and responsive navigation support exploration from a single interface, while revision labels and source metadata keep the origin of the numbers in view.
+
+## Project Structure
+
+This selected map shows the entry point and the main series-exploration components:
+
+```text
 frontend/
-├── public/
-│   ├── index.html          # HTML template with meta tags
-│   └── manifest.json       # PWA configuration
+├── index.html                 # Vite HTML entry point
 ├── src/
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── Header.tsx      # App header with search
-│   │   │   └── Sidebar.tsx     # Navigation sidebar
+│   │   │   └── Sidebar.tsx     # Responsive navigation
 │   │   └── charts/
-│   │       └── InteractiveChart.tsx  # Main chart component
+│   │       └── SeriesChart.tsx # Series plot and chart controls
+│   ├── contexts/
+│   │   └── ThemeContext.tsx    # Light/dark themes and preference
 │   ├── pages/
 │   │   ├── Dashboard.tsx       # Overview dashboard
 │   │   ├── SeriesExplorer.tsx  # Browse and search series
 │   │   ├── SeriesDetail.tsx    # Detailed series view
 │   │   ├── DataSources.tsx     # Data source information
-│   │   └── About.tsx          # About page
+│   │   └── About.tsx           # About page
 │   ├── hooks/
-│   │   └── useSeriesData.ts   # Custom hooks for data fetching
+│   │   └── useSeriesData.ts    # Series, search, and source hooks
 │   ├── utils/
-│   │   └── graphql.ts         # GraphQL client utilities
-│   ├── App.tsx               # Main app component
-│   ├── index.tsx            # App entry point
-│   └── index.css           # Global styles
-├── package.json            # Dependencies and scripts
-└── tsconfig.json          # TypeScript configuration
+│   │   └── graphql.ts         # GraphQL operations and transport
+│   ├── App.tsx                # Routes and shared page layout
+│   ├── index.tsx              # React root and query client
+│   └── index.css              # Global styles
+├── package.json               # Dependencies and scripts
+├── tsconfig.json              # TypeScript configuration
+└── vite.config.ts             # Development proxy and build configuration
 ```
 
-## 🛠️ Technology Stack
+## Technology Stack
 
-### Core Framework
-- **React 18**: Latest React with concurrent features
-- **TypeScript**: Full type safety and developer experience
-- **React Router 7**: Modern routing with hooks API
+The [package manifest](../../frontend/package.json) records dependency versions and development commands.
 
-### UI Framework  
-- **Material UI 6**: Complete design system with theming
-- **Emotion**: CSS-in-JS styling with performance optimizations
-- **Material Icons**: Comprehensive icon library
+### Core Framework and UI
 
-### Charts & Visualization
-- **Chart.js 4**: High-performance canvas-based charts
-- **React-ChartJS-2**: React wrapper with TypeScript support
-- **Date-fns**: Date manipulation and formatting
-- **ChartJS Adapter**: Time-scale support for temporal data
+- **React 19 and TypeScript:** Components with typed props, hooks, and strict type checking.
+- **React Router 7:** Client-side routes and URL search parameters.
+- **Material UI 9:** Themed components, layouts, and icons.
+- **Emotion:** CSS-in-JS styling used by the UI components.
 
-### State Management & Data Fetching
-- **React Query**: Intelligent caching and background updates
-- **GraphQL**: Efficient data fetching with exact field selection
-- **Custom Hooks**: Reusable data fetching patterns
+### Charts and Visualization
 
-### Developer Experience
-- **React Query Devtools**: Development debugging tools
-- **TypeScript Strict Mode**: Maximum type safety
-- **ESLint**: Code quality and consistency
+- **Chart.js 4:** Canvas-based time-series charts.
+- **react-chartjs-2:** React integration for Chart.js.
+- **date-fns and chartjs-adapter-date-fns:** Date formatting and time-axis support.
+- **Material UI date pickers:** Custom date-range controls.
 
-## 🎯 Key Improvements Over FRED
+### State Management and Data Fetching
 
-### 1. **Modern User Experience**
-- **Responsive Design**: Works on all devices vs. FRED's desktop-only interface
-- **Intuitive Navigation**: Clear information architecture vs. complex menu structures
-- **Fast Loading**: Optimized performance with caching vs. slow page loads
+- **React Query:** Caching, request state, and background refetches.
+- **GraphQL:** Data fetching with explicit field selection.
+- **Custom hooks:** Reusable series, search, and source queries.
 
-### 2. **Enhanced Visualization**
-- **Interactive Tooltips**: Rich hover information vs. basic static charts
-- **Real-time Transformations**: Instant YoY/QoQ/MoM calculations vs. separate pages
-- **Comparative Analysis**: Side-by-side original vs. revised data vs. separate views
+### Developer Tools
 
-### 3. **Better Search Experience**
-- **Unified Search**: Single search box vs. multiple search forms
-- **Live Results**: Real-time filtering vs. submit-and-wait pattern
-- **Smart Suggestions**: Contextual search results vs. generic listings
+- **Vite:** Development server and production bundling.
+- **React Query Devtools:** Query inspection in development.
+- **TypeScript strict mode and ESLint:** Type checking and code consistency.
 
-### 4. **Data Transparency**
-- **Revision Tracking**: Clear visualization of data changes vs. hidden revisions
-- **Source Attribution**: Prominent data source information vs. buried metadata
-- **Update Status**: Real-time freshness indicators vs. unclear data age
+## GraphQL Integration and Caching
 
-## 🔌 GraphQL Integration
+Pages use the hooks in [useSeriesData.ts](../../frontend/src/hooks/useSeriesData.ts) to coordinate fetching. The hooks call operations defined in [graphql.ts](../../frontend/src/utils/graphql.ts), and React Query tracks their cached results, loading state, and errors. Pages use that state to show loading placeholders and error messages with retry controls.
 
-### Efficient Data Fetching
-- **Field Selection**: Request only needed data fields
-- **Batched Queries**: Combine multiple requests efficiently  
-- **Automatic Caching**: React Query handles caching and updates
-- **Error Handling**: Graceful error states with retry logic
+For example, `useSeriesData` caches observations by series ID, transformation, start date, and end date. A change to any of those inputs selects a different cache entry. The hook treats observations as fresh for five minutes and retains the previous result while another transformation loads. The series detail page labels the transformation carried by the displayed result rather than assuming the newest selection has already loaded.
 
-### Key Queries
-- `GET_SERIES_LIST`: Paginated series browsing with filters
-- `GET_SERIES_DETAIL`: Complete series metadata and statistics
-- `GET_SERIES_DATA`: Time series data with transformation options
-- `SEARCH_SERIES`: Full-text search with relevance scoring
-- `GET_DATA_SOURCES`: Data provider information and status
+The observation fetcher follows GraphQL cursor pages until it has read the full result, requesting up to 10,000 points per page. These are successive requests, with a failed or stalled page treated as an error so a partial series is not displayed as complete. Transformations are computed by the backend; the chart then filters the returned points to the visible date range.
 
-## 🎨 Design System
+The transport routes economic-data queries to `VITE_DATA_GRAPHQL_URL`, falling back to `VITE_GRAPHQL_URL` and then `/graphql`. App operations, such as annotation writes, use `VITE_GRAPHQL_URL` with the user's access token. This lets a deployment share a data plane while keeping user and application state in its app plane.
 
-### Theme Configuration
-- **Primary Color**: Professional blue (#1976d2) for financial applications
-- **Secondary Color**: Accent red (#dc004e) for important data points
-- **Typography**: Roboto font family with consistent sizing scale
-- **Spacing**: 8px base unit for consistent layouts
+### Main Series Queries
 
-### Accessibility Features
-- **Keyboard Navigation**: Full keyboard support for all interactions
-- **Screen Reader**: Proper ARIA labels and semantic HTML
-- **High Contrast**: Support for high contrast mode
-- **Reduced Motion**: Respects user motion preferences
+| Query constant | Role |
+| --- | --- |
+| `GET_SERIES_LIST` | Browse series with filters and pagination. |
+| `GET_SERIES_DETAIL` | Retrieve series metadata, including source, frequency, units, and date coverage. |
+| `GET_SERIES_DATA` | Retrieve observations with a backend transformation and revision filter. |
+| `SEARCH_SERIES` | Search series with source and frequency filters. |
+| `GET_DATA_SOURCES` | Retrieve provider descriptions, series counts, and API requirements. |
 
-### Responsive Breakpoints
-- **Mobile**: < 600px (sm)
-- **Tablet**: 600px - 960px (md)  
-- **Desktop**: 960px - 1280px (lg)
-- **Large Desktop**: > 1280px (xl)
+## Design System
 
-## 🚀 Performance Optimizations
+[ThemeContext.tsx](../../frontend/src/contexts/ThemeContext.tsx) defines the light and dark themes. The light theme uses blue `#1976d2` as its primary color and red `#dc004e` as its secondary color. The dark theme uses lighter blue `#90caf9` and pink `#f48fb1`. Both use a Roboto-first font stack and an 8px spacing unit.
 
-### Code Splitting
-- **Route-based**: Each page loads only when accessed
-- **Component-based**: Heavy components load on demand
-- **Library Splitting**: Vendor code separated for better caching
+The themes keep Material UI's default breakpoints: `sm` at 600px, `md` at 900px, `lg` at 1200px, and `xl` at 1536px. Individual components use these breakpoints to adapt controls and layout; the sidebar switches between its mobile drawer and desktop panel at `sm`.
 
-### Data Optimization
-- **GraphQL**: Request only needed fields to minimize payload
-- **React Query**: Intelligent caching prevents redundant requests
-- **Background Updates**: Fresh data without blocking UI
+Navigation has a labeled landmark and marks the active route with `aria-current`. The header search has an accessible label, and the recent-observations table provides a text view of the latest values alongside the canvas chart. Global CSS includes contrast and reduced-motion rules for page styling. The [mobile sidebar regression test](../../frontend/src/__tests__/app-sidebar-mobile.test.tsx) checks that the closed mobile drawer leaves the page accessible to assistive technology.
 
-### Rendering Performance
-- **React.memo**: Prevent unnecessary re-renders
-- **useMemo/useCallback**: Optimize expensive computations
-- **Virtual Scrolling**: Handle large datasets efficiently
+## Performance
 
-## 📱 Mobile Experience
+React Query reuses fresh cached responses, and the chart memoizes filtered points, datasets, and options. The [Vite configuration](../../frontend/vite.config.ts) groups libraries such as React, Material UI, and Chart.js into separate chunks for browser caching.
 
-### Touch-First Design
-- **Large Touch Targets**: Minimum 44px tap targets
-- **Swipe Gestures**: Natural mobile interactions
-- **Responsive Charts**: Touch-enabled zoom and pan
+Core pages are imported eagerly in [App.tsx](../../frontend/src/App.tsx). Conditional routes use lazy imports controlled by [build flags](../../frontend/docs/build-flags.md); lazy loading is scoped to those routes.
 
-### Progressive Web App Features
-- **Installable**: Can be installed as native app
-- **Offline Support**: Basic functionality works offline
-- **Push Notifications**: Updates about favorite series (future)
+## Testing
 
-## 🧪 Testing Strategy
+Vitest and React Testing Library cover component behavior and query hooks. Mock Service Worker supplies API responses for tests, and Playwright covers browser workflows, including mobile configurations. Storybook supports component previews and interaction testing; see the [Storybook testing guide](../../frontend/docs/storybook-testing.md).
 
-### Component Testing
-- **React Testing Library**: User-focused testing approach
-- **Vitest**: Comprehensive test runner with coverage
-- **MSW**: Mock Service Worker for API testing
-
-### Integration Testing
-- **Playwright**: End-to-end user workflows
-- **Visual Regression**: Automated screenshot comparison
-- **Performance Testing**: Core Web Vitals monitoring
-
-The React frontend successfully delivers a modern, intuitive interface that significantly improves upon FRED's user experience while maintaining the comprehensive data access that makes FRED valuable for economic analysis.
+For setup and development commands, see the [quick start](../../README.md#-quick-start).

@@ -527,41 +527,13 @@ spec:
   type: ClusterIP
 ```
 
-### Ingress
+### Gateway routes
 
-The host `api.example.com` below is a placeholder. Replace it with a domain you
-control and configure its DNS and TLS certificate before deploying.
-
-Create `k8s/ingress.yaml`:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: econ-graph-graphql-ingress
-  namespace: econ-graph
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/rate-limit: "100"
-    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-spec:
-  tls:
-  - hosts:
-    - api.example.com
-    secretName: econ-graph-tls
-  rules:
-  - host: api.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: econ-graph-graphql-service
-            port:
-              number: 80
-```
+External traffic reaches the API through the cluster's Gateway API gateway (Envoy Gateway), not
+an Ingress. The routes, the security headers and the per-client GraphQL rate limits (20 requests
+a second, bursts of 100) are in `k8s/manifests/gateway/routes/`; the gateway itself, and its
+optional https listener with a cert-manager certificate, are installed by
+`scripts/deploy/install-gateway.sh`. See the "Gateway" section of `k8s/README.md`.
 
 ### Deploy to Kubernetes
 
@@ -1090,8 +1062,8 @@ curl http://localhost:8080/metrics
 # Add more instances
 kubectl scale deployment econ-graph-graphql --replicas=5 -n econ-graph
 
-# Update load balancer
-kubectl apply -f k8s/ingress.yaml
+# Re-apply the gateway routes
+./scripts/deploy/apply-gateway-routes.sh
 ```
 
 #### 2. Vertical Scaling

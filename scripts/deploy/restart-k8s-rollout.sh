@@ -38,22 +38,6 @@ else
     echo "⚠️  Grafana dashboard linter not found, skipping..."
 fi
 
-# Run monitoring stack linter (if available)
-if [ -f "scripts/test-monitoring.sh" ]; then
-    echo "🔧 Running monitoring stack linter..."
-    # Only run the linter part, not the full integration test
-    if ./scripts/test-monitoring.sh --lint-only 2>/dev/null || echo "⚠️  Monitoring linter not available, continuing..."; then
-        echo "✅ Monitoring stack linter passed"
-    else
-        echo "⚠️  Monitoring stack linter not available, continuing..."
-    fi
-    echo ""
-else
-    echo "⚠️  Monitoring stack linter not found, skipping..."
-fi
-
-echo "✅ All linter checks passed - proceeding with deployment"
-echo ""
 
 # Load port configuration
 if [ -f "ports.env" ]; then
@@ -79,7 +63,6 @@ if ! microk8s status | grep -q "microk8s is running"; then
     fi
     echo "Enabling required addons..."
     microk8s enable dns
-    microk8s enable ingress
     microk8s enable storage
 fi
 
@@ -109,6 +92,21 @@ if ! cluster_role_use_context microk8s; then
     exit 1
 fi
 kubectl() { kc "$@"; }
+
+# Monitoring stack linter: static checks only (--lint-only contacts no cluster),
+# run once the context is set. A failure stops the rollout; a checkout without
+# the script skips it.
+if [ -f scripts/test-monitoring.sh ]; then
+    echo "🔧 Running monitoring stack linter..."
+    if ! ./scripts/test-monitoring.sh --lint-only; then
+        echo "❌ Monitoring stack linter failed - aborting"
+        exit 1
+    fi
+else
+    echo "⚠️  scripts/test-monitoring.sh not found, skipping the monitoring stack linter"
+fi
+echo "✅ All linter checks passed - proceeding with deployment"
+echo ""
 
 # Rebuild Docker images with new version tag
 echo "🏗️  Building Docker images for ${VERSION}..."
@@ -142,7 +140,7 @@ fi
 echo "🔒 Installing cert-manager for SSL certificates..."
 if ! kubectl get namespace cert-manager >/dev/null 2>&1; then
     echo "Installing cert-manager..."
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
     
     echo "Waiting for cert-manager namespace to be created..."
     kubectl wait --for=condition=ready namespace cert-manager --timeout=30s || true
@@ -232,10 +230,6 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 public_host_init
-# ingress.yaml first: on clusters deployed before graphql-ingress.yaml existed it
-# still routes /graphql, and the admission webhook rejects a second Ingress for
-# the same host and path (the loop below goes alphabetically).
-render_manifest k8s/manifests/ingress.yaml | kubectl apply -f -
 for f in k8s/manifests/*.yaml; do
     case "$(basename "$f")" in
         # Applied by apply_cloudflared below, which runs it only on a cluster marked
@@ -244,12 +238,14 @@ for f in k8s/manifests/*.yaml; do
     esac
     render_manifest "$f" | kubectl apply -f -
 done
+# The gateway (k8s/manifests/gateway/, idempotent), then this namespace's
+# routes, with the public host's (scripts/deploy/lib/public-host.sh).
+./scripts/deploy/install-gateway.sh --context "$CLUSTER_ROLE_CONTEXT"
 apply_public_edge
 apply_cloudflared
 
 # Apply security configurations
 echo "🔒 Applying security configurations..."
-kubectl apply -f k8s/manifests/security-configmap.yaml
 kubectl apply -f k8s/manifests/network-policy.yaml
 kubectl apply -f k8s/manifests/pod-security-policy.yaml
 
@@ -457,7 +453,7 @@ sleep 5
 if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -q "200\|302"; then
     echo "  ✅ Main Entry Point: http://localhost - Accessible"
 else
-    echo "  ❌ Main Entry Point: http://localhost - Not accessible (ingress controller may be missing)"
+    echo "  ❌ Main Entry Point: http://localhost - Not accessible (the gateway may be missing: scripts/deploy/install-gateway.sh)"
 fi
 
 # Test HTTPS Termination (www.econgraph.com)
@@ -479,11 +475,11 @@ fi
 # Test SSL Certificate Status
 echo ""
 echo "🔐 Checking SSL certificate status..."
-if kubectl get secret econ-graph-tls -n econ-graph >/dev/null 2>&1; then
+if kubectl get secret econ-graph-tls -n econ-graph-gateway >/dev/null 2>&1; then
     echo "  ✅ SSL Certificate: econ-graph-tls secret exists"
     
     # Check certificate expiry
-    CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
+    CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph-gateway -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
     if [[ "$CERT_INFO" != "Unable to parse certificate" ]]; then
         echo "  📋 Certificate Info: $CERT_INFO"
     fi

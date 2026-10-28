@@ -13,9 +13,10 @@ ignore = [
     #
     # Exposure: the backend's HTTP server is built with hyper's `http1_only(true)`
     # (econ-graph-backend/src/main.rs), so it refuses HTTP/2 connections on every
-    # route, including the NodePort (30080) that bypasses the ingress. The h2
+    # route, including the NodePort (30080) that bypasses the gateway. The h2
     # server code path is therefore unreachable; h2 is only linked, never served.
-    # The nginx ingress also proxies HTTP/1.1 upstream (`backend-protocol: "HTTP"`).
+    # The gateway's Envoy proxy also speaks HTTP/1.1 to the backend (its
+    # Service port declares no appProtocol).
     #
     # Remove this once async-graphql 8.0 is released and warp is upgraded to 0.4.
     "RUSTSEC-2026-0258",

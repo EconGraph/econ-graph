@@ -1,9 +1,10 @@
 # keycloak: OIDC identity provider for EconGraph (realm `econ-graph`).
 #
-# Public URL: http://localhost/idp on the kind ingress (ingress.yaml), so the issuer
-# is http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
+# Public URL: http://localhost/idp through the gateway (HTTPRoute econ-graph-idp,
+# k8s/manifests/gateway/routes/httproutes.yaml), so the issuer is
+# http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
 # KC_HOSTNAME and KC_WEB_BASE_URL below to https://<PUBLIC_HOST>, the backend's
-# OIDC_ISSUER and the ingress hosts with them (scripts/deploy/render-public-host.py),
+# OIDC_ISSUER and the routes' host names with them (scripts/deploy/render-public-host.py),
 # so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Keycloak
 # builds its URLs from the full KC_HOSTNAME, not from request headers, and the public
 # host is only served over https (plain http is redirected; scripts/deploy/render-public-host.py).
@@ -26,7 +27,7 @@
 # keycloak-config-cli does not then own, so removing one from the file later would
 # leave it behind in the cluster.
 #
-# The admin console is not exposed on the ingress. Reach it with
+# The admin console is not routed by the gateway. Reach it with
 #   kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080
 # and open http://localhost:18080/idp/admin (KC_HOSTNAME_ADMIN below).
 apiVersion: v1
@@ -108,12 +109,12 @@ spec:
           value: "http://localhost:18080/idp"
         - name: KC_HTTP_RELATIVE_PATH
           value: "/idp"
-        # Plain HTTP behind the ingress; TLS, when configured, terminates at the ingress controller.
+        # Plain HTTP behind the gateway; TLS, when configured, terminates at the gateway.
         - name: KC_HTTP_ENABLED
           value: "true"
-        # Only for the client address in Keycloak's events and brute-force detection:
-        # ingress-nginx overwrites X-Forwarded-For/-Proto/-Host with the connection's own
-        # values (it runs without use-forwarded-headers; see "Public site" in k8s/README.md).
+        # Only for the client address in Keycloak's events and brute-force detection: the
+        # gateway sets X-Forwarded-For to the client address it settled on and drops a
+        # client's X-Forwarded-Proto/-Host (k8s/manifests/gateway/client-traffic-policy.yaml).
         - name: KC_PROXY_HEADERS
           value: "xforwarded"
         - name: KC_HEALTH_ENABLED

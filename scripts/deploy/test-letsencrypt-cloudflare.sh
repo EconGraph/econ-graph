@@ -16,6 +16,9 @@ NC='\033[0m' # No Color
 NAMESPACE="econ-graph"
 DOMAIN=""
 USE_STAGING=true
+CONTEXT="kind-econ-graph"
+DRY_RUN=false
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Function to print colored output
 print_status() {
@@ -45,7 +48,15 @@ OPTIONS:
     -d, --domain DOMAIN        Domain name to test (required)
     -n, --namespace NAMESPACE  Kubernetes namespace (default: econ-graph)
     --production               Use production Let's Encrypt server
+    --context CONTEXT          kubectl context (default: kind-econ-graph); the
+                               current context is not changed
+    --dry-run                  Show the cluster and what the test would do; change nothing
     -h, --help                 Show this help message
+
+Every kubectl call goes through kc (scripts/deploy/lib/cluster-role.sh) on that
+one context, with the kind cluster's own kubectl and kubeconfig from
+~/.cache/econgraph when KUBECTL and KUBECONFIG are unset: plain kubectl may be
+another cluster's. The cluster's identity is shown before anything is applied.
 
 EXAMPLES:
     # Test with staging environment
@@ -70,6 +81,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --production)
             USE_STAGING=false
+            shift
+            ;;
+        --context)
+            [ $# -ge 2 ] && [ -n "$2" ] || { print_error "--context needs a non-empty value"; exit 2; }
+            CONTEXT="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
             shift
             ;;
         -h|--help)
@@ -106,10 +126,21 @@ print_status "Using ACME server: $ACME_SERVER"
 # Check prerequisites
 print_status "Checking prerequisites..."
 
-# Check if kubectl is available
-if ! command -v kubectl &> /dev/null; then
-    print_error "kubectl is not installed or not in PATH"
+# One kubectl and one context for every call below (kc, lib/cluster-role.sh),
+# never plain kubectl.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "${PROJECT_ROOT}/scripts/deploy/lib/cluster-role.sh"
+if ! cluster_role_operator_context "$CONTEXT"; then
+    print_error "Nothing was changed."
     exit 1
+fi
+kubectl() { kc "$@"; }
+
+if [[ "$DRY_RUN" = true ]]; then
+    print_status "Dry run: on context $CONTEXT, would check cert-manager, the API token Secret and"
+    print_status "  ClusterIssuer $CLUSTER_ISSUER_NAME, create a test Certificate for $DOMAIN in $NAMESPACE,"
+    print_status "  wait for it, report it and delete it. Nothing was changed."
+    exit 0
 fi
 
 # Check if cluster is accessible

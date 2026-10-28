@@ -8,14 +8,14 @@ set -e
 echo "🧪 Comprehensive Cluster Testing"
 echo "================================"
 
-# Check if ingress port-forward is running
+# Check if the gateway port-forward is running
 if ! curl -s http://localhost:8080/health > /dev/null 2>&1; then
-    echo "❌ Ingress port-forward not running. Start it with:"
-    echo "   kubectl port-forward service/ingress-nginx-controller 8080:80 -n ingress-nginx"
+    echo "❌ Gateway port-forward not running. Start it with:"
+    echo "   kubectl port-forward service/econ-graph-gateway-proxy 8080:80 -n envoy-gateway-system"
     exit 1
 fi
 
-echo "✅ Ingress port-forward is running"
+echo "✅ Gateway port-forward is running"
 echo ""
 
 # Test function
@@ -64,7 +64,7 @@ test_endpoint() {
 tests_passed=0
 tests_total=0
 
-echo "🌐 Testing Ingress Routing"
+echo "🌐 Testing Gateway Routing"
 echo "-------------------------"
 
 # Test Frontend (root path)
@@ -112,9 +112,9 @@ if test_endpoint "/api" "Internal server error" "Backend API" "500"; then
     tests_passed=$((tests_passed + 1))
 fi
 
-# Grafana is ClusterIP-only (not on the ingress); test it via port-forward instead.
+# Grafana is ClusterIP-only (not routed by the gateway); test it via port-forward instead.
 tests_total=$((tests_total + 1))
-echo "🔍 Testing Grafana (via port-forward, not the public ingress)"
+echo "🔍 Testing Grafana (via port-forward, not the gateway)"
 kubectl port-forward service/grafana-service 3000:3000 -n econ-graph > /dev/null 2>&1 &
 grafana_pf_pid=$!
 sleep 2
