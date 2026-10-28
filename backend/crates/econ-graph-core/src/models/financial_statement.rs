@@ -28,6 +28,7 @@ use crate::schema::financial_statements;
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_core::models::FinancialStatement;
+/// use econ_graph_core::enums::{ProcessingStatus, CompressionType};
 /// use uuid::Uuid;
 /// use chrono::{NaiveDate, Utc};
 ///
@@ -47,10 +48,10 @@ use crate::schema::financial_statements;
 ///     xbrl_file_oid: None, // Unused: the SEC crawler stores files as bytea
 ///     xbrl_file_content: None, // Set once the XBRL file is downloaded
 ///     xbrl_file_size_bytes: Some(2048576), // 2MB
-///     xbrl_file_compressed: Some(true),
-///     xbrl_file_compression_type: Some("zstd".to_string()),
+///     xbrl_file_compressed: true,
+///     xbrl_file_compression_type: CompressionType::Zstd,
 ///     xbrl_file_hash: Some("sha256:abc123...".to_string()),
-///     xbrl_processing_status: "completed".to_string(),
+///     xbrl_processing_status: ProcessingStatus::Completed,
 ///     xbrl_processing_error: None,
 ///     xbrl_processing_started_at: Some(Utc::now()),
 ///     xbrl_processing_completed_at: Some(Utc::now()),
@@ -197,6 +198,7 @@ pub struct FinancialStatement {
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_core::models::NewFinancialStatement;
+/// use econ_graph_core::enums::{ProcessingStatus, CompressionType};
 /// use uuid::Uuid;
 /// use chrono::NaiveDate;
 ///
@@ -204,17 +206,21 @@ pub struct FinancialStatement {
 /// let new_statement = NewFinancialStatement {
 ///     company_id: Uuid::new_v4(),
 ///     filing_type: "10-K".to_string(),
-///     form_type: Some("10-K".to_string()),
+///     form_type: "10-K".to_string(),
 ///     accession_number: "0000320193-23-000006".to_string(),
 ///     filing_date: NaiveDate::from_ymd_opt(2023, 11, 3).unwrap(),
 ///     period_end_date: NaiveDate::from_ymd_opt(2023, 9, 30).unwrap(),
 ///     fiscal_year: 2023,
 ///     fiscal_quarter: None,
-///     document_type: Some("10-K".to_string()),
-///     document_url: Some("https://www.sec.gov/Archives/edgar/data/320193/000032019323000006/aapl-20230930.htm".to_string()),
-///     xbrl_file_path: None, // Will be set after download
+///     document_type: "10-K".to_string(),
+///     document_url: "https://www.sec.gov/Archives/edgar/data/320193/000032019323000006/aapl-20230930.htm".to_string(),
+///     xbrl_file_oid: None,
+///     xbrl_file_content: None,
+///     xbrl_file_hash: None,
+///     xbrl_file_compressed: false,
+///     xbrl_file_compression_type: CompressionType::None,
 ///     xbrl_file_size_bytes: None,
-///     xbrl_processing_status: "pending".to_string(),
+///     xbrl_processing_status: ProcessingStatus::Pending,
 ///     xbrl_processing_error: None,
 ///     xbrl_processing_started_at: None,
 ///     xbrl_processing_completed_at: None,
@@ -325,11 +331,13 @@ pub struct NewFinancialStatement {
 /// ```rust,no_run
 /// use econ_graph_core::models::{FinancialStatement, Company, FinancialStatementWithCompany};
 ///
+/// fn with_company(statement: FinancialStatement, company: Company) {
 /// // Financial statement with company information
 /// let statement_with_company = FinancialStatementWithCompany {
-///     statement: FinancialStatement { /* ... */ },
-///     company: Company { /* ... */ },
+///     statement,
+///     company,
 /// };
+/// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinancialStatementWithCompany {
@@ -443,6 +451,7 @@ pub struct FinancialStatementQueryParams {
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_core::models::FinancialStatementSummary;
+/// use uuid::Uuid;
 /// use chrono::NaiveDate;
 ///
 /// // Summary of Apple's financial statements

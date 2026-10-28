@@ -265,7 +265,7 @@ try_use_kind_kubectl() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
         if [ -x "${dir}/bin/kubectl" ] && [ -s "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
             KUBECONFIG="${dir}/kubeconfig-${KIND_CLUSTER}" "${dir}/bin/kubectl" \
-                version --request-timeout=15s >/dev/null 2>&1; then
+                --context "kind-${KIND_CLUSTER}" version --request-timeout=15s >/dev/null 2>&1; then
             point_kubectl_at "${dir}"
             return 0
         fi
@@ -278,7 +278,7 @@ try_use_kind_kubectl() {
     mv -f "${dir}/bin/kubectl.new" "${dir}/bin/kubectl" || return 1
     (umask 077 && kind get kubeconfig --name "${KIND_CLUSTER}" >"${dir}/kubeconfig-${KIND_CLUSTER}") || return 1
     point_kubectl_at "${dir}"
-    kubectl version --request-timeout=15s >/dev/null 2>&1
+    kubectl --context "kind-${KIND_CLUSTER}" version --request-timeout=15s >/dev/null 2>&1
 }
 
 # point_kubectl_at DIR: use DIR/bin/kubectl and DIR/kubeconfig-<cluster>.
@@ -724,22 +724,17 @@ bootstrap_databases() {
 
 # --- cluster add-ons -------------------------------------------------------------
 
-# ingress-nginx for kind. It binds hostPorts 80/443 on whatever node it runs
-# on, and only the control plane (labelled ingress-ready=true) has those ports
-# mapped to the host. The v1.13 kind manifest no longer selects that node, so
-# the controller can land on the worker and every request to localhost is
-# reset; pin it with a nodeSelector. Pinned version, so a recreate installs
-# what was tested. Idempotent (kubectl apply, merge patch).
-INGRESS_NGINX_MANIFEST="${INGRESS_NGINX_MANIFEST:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.3/deploy/static/provider/kind/deploy.yaml}"
-
-install_ingress_nginx() {
-    log "Installing ingress-nginx (${INGRESS_NGINX_MANIFEST##*/ingress-nginx/})"
-    run kubectl apply -f "${INGRESS_NGINX_MANIFEST}"
-    run kubectl -n ingress-nginx patch deployment ingress-nginx-controller --type=merge \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":{"ingress-ready":"true"}}}}}'
-    if [ "${DRY_RUN}" != "true" ]; then
-        kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
+# The gateway (Envoy Gateway, k8s/manifests/gateway/): its proxy takes host
+# ports 80/443 on the control-plane node (labelled ingress-ready=true), the
+# only node they are mapped to. Pinned versions, so a recreate installs what
+# was tested. Idempotent (scripts/deploy/install-gateway.sh).
+install_gateway() {
+    log "Installing the gateway (scripts/deploy/install-gateway.sh)"
+    if [ "${DRY_RUN}" = "true" ]; then
+        echo "+ scripts/deploy/install-gateway.sh"
+        return 0
     fi
+    "${PROJECT_ROOT}/scripts/deploy/install-gateway.sh"
 }
 
 # Will the cluster come back by itself after a host reboot? Needs the Docker

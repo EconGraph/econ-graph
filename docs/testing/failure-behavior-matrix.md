@@ -1,16 +1,15 @@
 # Failure-behavior coverage matrix
 
-ECO-264's release gate: every backend integration point reachable in the release build, the failure cases
-that apply to it, and the test that shows each is handled (or why a case doesn't apply). The
-sampled browser checks are at the end. Test names are `file::test`; backend paths are under
-`backend/crates/`, frontend paths under `frontend/`.
+This matrix maps backend failure cases to the tests that exercise their handling, or explains
+why a case does not apply. Sampled browser checks are listed separately at the end. Test names
+are `file::test`; backend paths are under `backend/crates/`, frontend paths under `frontend/`.
 
 DB-backed Rust tests need `DATABASE_URL` and skip without it (CI sets it). Upstream HTTP is faked
 with wiremock (`econ-graph-crawler/src/testkit`), Keycloak with `econ-graph-auth`'s `TestIssuer`;
 nothing calls a live API.
 
-Status: **covered** (a test exercises it), **n/a** (with the reason), **gap** (known, ticketed or
-`test.fixme`), **covered by its own PR** (a separate PR implements and tests it).
+Coverage labels: **covered** (a test exercises the case), **n/a** (with the reason),
+**gap** (missing behavior or test coverage, explained in the row).
 
 ## 1. Source HTTP client (`econ-graph-crawler/src/http.rs`)
 
@@ -62,7 +61,7 @@ batches, paging).
 | Panicking adapter | covered | `worker/tests.rs::adapter_panic_is_retried_and_worker_survives` |
 | Circuit breaker on repeated 429 / auth | covered | `worker/tests.rs::circuit_breaker_pauses_throttled_source_only`, `per_series_rate_limit_in_a_batch_counts_for_the_breaker`, `breaker_counts_one_result_per_batch_call` |
 | Partial batch failure | covered | `worker/tests.rs::one_bad_series_fails_only_its_own_job`, `whole_batch_error_applies_to_every_job_with_usual_retries` |
-| A failed fetch never overwrites stored data or reports success | covered | `worker/tests.rs::a_failed_refresh_keeps_the_stored_data_and_does_not_count_as_fresh` (5xx, 401, non-JSON and incomplete bodies: points, end date and last successful crawl unchanged, status `failed`, attempt recorded with its kind, coverage unchanged) |
+| A failed fetch never overwrites stored data or reports success | covered | `worker/tests.rs::a_failed_refresh_keeps_the_stored_data_and_does_not_count_as_fresh` (5xx, 401, non-JSON and incomplete bodies: points, end date and last successful crawl unchanged, series status `failed`, attempt recorded with its kind, coverage unchanged) |
 | An empty response never deletes stored data | covered | `worker/tests.rs::an_empty_refresh_keeps_the_stored_points` |
 | Cancellation: shutdown mid-job | covered | `worker/tests.rs::shutdown_mid_request_finishes_the_job_and_claims_no_more` |
 | Legacy queue service | covered | `econ-graph-services/src/services/queue_service.rs` (17 tests, lease-guarded transitions) |
@@ -116,7 +115,7 @@ batches, paging).
 | Metrics endpoint and gauges | covered | `econ-graph-crawler-worker/src/metrics.rs` (`healthz_follows_alive_flag_and_unknown_path_is_404`, `queue_gauges_from_seeded_rows`, `coverage_gauges_set_and_removed`) |
 | Coverage alerts (low, not refreshed, crawl failed, stale) | covered | `k8s/monitoring/tests/crawler-coverage.test.yaml` (promtool) |
 | Failure alerts (worker down, metrics missing, no completions, source failing, error rate) | covered | `k8s/monitoring/tests/crawler-failures.test.yaml` (promtool) |
-| Alert routing | n/a | no Alertmanager is deployed (`prometheus-rules-crawler.yaml`, KNOWN GAP) |
+| Alert routing | gap | No Alertmanager is deployed, so firing alerts are visible in Prometheus but are not routed and do not send notifications; see the [crawler alert rules](../../k8s/monitoring/prometheus-rules-crawler.yaml). |
 
 ## 8. Sampled browser checks (release e2e, `tests/e2e/release/failures/`)
 
@@ -134,5 +133,5 @@ Component tests hold the detailed permutations (`src/pages/__tests__/SeriesDetai
 | Annotation save/delete failure, accurate state, retry without duplicates | covered | `annotation-failures.spec.ts`: a failed save keeps the form open; a failed delete keeps the row |
 | Sign-in, callback and session failure: signed out with a recovery path | covered | `sign-in-failures.spec.ts` (unreachable sign-in service, failed callback, session ended at Keycloak) |
 | Map loading failure, Retry recovers (sampled once) | covered | `map-failures.spec.ts`; the outline's own failure is `world-map/world-atlas.spec.ts` |
-| Failed source listing (browse, no query) has a Retry | **gap** | `series-failures.spec.ts`, `test.fixme`: the explore page's error has no Retry and the Search button needs a query, so only a reload recovers |
+| Failed source listing (browse, no query), Retry recovers | covered | `series-failures.spec.ts`: `a failed source listing offers Retry, which recovers` checks that Retry restores the series listing and clears the error |
 | Saving an annotation again after a lost response | covered | `annotation-failures.spec.ts`: the backend stored the first request and the page reported a failure; the second Save reuses the create's idempotency key and stores nothing new |

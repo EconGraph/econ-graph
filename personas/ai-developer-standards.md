@@ -1,505 +1,164 @@
-This document is a comprehensive list of AI developer expectations, based on mistakes I have noticed, that all AI agents should have in their context while working on this project.  It is inspired by Cursor's memory feature, but at some point it is good for it to be static, so it can be shared across projects.
+# AI developer standards
 
+Use these standards alongside the role personas when contributing to EconGraph. Preserve existing features and test intent, investigate failures with evidence, and carry each task through review and verification.
 
-* When starting a new task, you should always create a new branch off of main for work related to that task.  You should do it by running:
-```
-git fetch
-git branch -b your_agent_name/descriptive_branch_name_for_your_task origin/main
-```
-This avoids multiple agents checking out main from different git worktrees at the same time.
-* **ALWAYS use `git mv` when moving files**: When you need to move or rename files, use `git mv old_path new_path` instead of `mv old_path new_path`. This ensures git properly tracks the file move as a rename operation rather than a delete + add, which preserves file history and makes the git log cleaner. Using `mv` followed by `git add` can cause git to lose track of file history.
-* Please make sure to not use interactive merge, or other interactive git commands.  You just hang and your human developer has to rescue you by typing `:wq`.  If you're working overnight, that's hours of work lost.
-* Always write lots of tests, and make sure that every feature you write is covered.  This means you can iterate against them and fix them until it works.
-* Never just delete tests out of frustration, unless you are knowingly changing them to be improved in a way that fullycan you captures the original intent of the tests.
-* If you are struggling with a more comprehensive test, write smaller more targeted tests to test your hypotheses before making changes, and please do small proof of concepts rather than trying to iterate on the whole program.  Write a utility that you suspect captures the essence of the bug, test that, and see if your proposed feature fixes it.
-* Your commit messages should follow Conventional Commits; prefer using `/commit` which embeds a link to the spec and reminds you of formatting and pre-commit/test steps.
-* For PRs, use `/pr` to open a curated PR and `/pr-ready` to ensure the description captures Summary, Motivation, Changes, Test plan, Risks/Rollback; use `/pr-checks` to watch checks and `/ci-latest` for recent runs.
-* You've been given access to the `gh` commandline tool.  I shouldn't have to constantly remind you of that.
-* Your human overseer prefers the socratic method when talking about potential solutions.  If I question you, I want to hear your reasoning, or for you to convince me what you're doing is not a bug with citations to documentations of the library you're using - I don't want you to just change it.
-* Do not delete existing features of the codebase just because you're frustrated at integrating them with yours.  You have to make them work together.
-* If you are tagging or giving version numbers, they can only move forwards, not backwards.  And you should realistically use [Semantic Versioning](https://semver.org/) where possible.  But all version numbers begin with a 0 major number until your human overseer has decided to call something 1.0.0, since before 1.0.0 rapid development is occuring and there is no sense in constantly incrementing major version numbers into the 100s when you are rapidly experimenting.
-* You should go on long loops of making more tests, iterating on them, fixing the code, if stuck making smaller code changes and more focused tests to test core hypotheses, and continuing to iterate until your task is accomplished.  If you are truly stuck in a loop and you are unable to discover new ideas, then stop as you are flailing.  But preferably, you really try harder rather than stopping for user input.  Ideally you should be able to work independently and productively for hours at a time.
-* If you notice your chosen port isn't working (e.g. for a dockerized postgres) please choose a random port, don't just keep incrementing it by one.  And by no means try to kill whatever is already on the port you want.  Just pick a different port, and don't hardcode it, allow it to easy be changed by environment variable so you can easily change port numbers on the fly.
-* If you modify a database schema, don't forget to run the schema integration test to avoid hard to debug Diesel ORM issues
-* Any documentation-only commits should be tagged with "[no ci]" somewhere in the title
+## Task branches and focused changes
 
-## Modular Codebase Organization
+Work in the assigned worktree and branch. For a new ordinary task without a supplied base, start from fetched `origin/main`. In a clean worktree, create and switch to a task branch with:
 
-* **Modular Codebase Organization**: Follow the established modular directory structure. Place scripts and tools in their appropriate domain directories (e.g., `ci/scripts/` for CI/CD tools, `scripts/` for general project scripts, `backend/` for Rust code, `frontend/` for React code). This improves maintainability and makes the codebase more navigable.
-* **Domain-Specific Tooling**: When creating validation scripts, testing tools, or automation scripts, place them in the appropriate domain directory rather than a generic `scripts/` folder. This makes the codebase more modular and easier to understand.
-* **Consistent Directory Structure**: Maintain consistency with the existing modular structure. If you're unsure where to place a new script or tool, follow the pattern of similar existing tools in the codebase.
-
-## Database Testing Best Practices
-
-* When working with database tests, always ensure that `clean_database()` methods return `Result<(), Error>` and handle errors properly. Never use `.expect()` in test utilities as this can mask real issues.
-* Database constraint violations in tests often indicate poor test isolation. Always ensure tests clean up after themselves and use unique identifiers to avoid conflicts.
-* When you see "duplicate key value violates unique constraint" errors in CI, this usually means either:
-  * The database cleaning isn't working properly
-  * Tests are running in parallel and interfering with each other
-  * Test data setup is using non-unique identifiers
-* Always handle `Result` types properly in test utilities. Use `map_err()` to convert errors and `?` to propagate them, not `.expect()`.
-
-## Rust Compiler Warning Management
-
-* Fix unused variable warnings systematically by prefixing with underscore (`_variable_name`) when the variable is intentionally unused.
-* Handle "unused `Result` that must be used" warnings by either:
-  * Properly handling the Result with `match` or `if let`
-  * Using `let _ = result;` when you intentionally want to ignore the result
-  * Using `result.expect("meaningful error message")` only when you're certain it won't fail
-* Run `cargo fix --lib -p package_name --tests` to automatically apply many warning fixes.
-* Never ignore compiler warnings in CI - they often indicate real issues that should be addressed.
-
-## Test Categorization Guidelines
-
-**CRITICAL: Proper test categorization is essential for CI performance and reliability.**
-
-### Unit Tests (Fast Tests - No External Dependencies)
-* **Location**: Inside crate `tests.rs` modules or `#[cfg(test)]` modules
-* **Characteristics**:
-  * No database connections
-  * No external API calls
-  * No network requests
-  * No file system operations (except temporary test files)
-  * No environment variables for external services
-  * Pure function testing
-  * Configuration validation
-  * Data structure validation
-  * Business logic testing
-* **Examples**:
-  * Testing data source configuration structs
-  * Testing data parsing functions
-  * Testing validation logic
-  * Testing mathematical calculations
-  * Testing string manipulation
-
-### Integration Tests (Slow Tests - External Dependencies)
-* **Location**: `tests/` directory at project root (for Rust) or dedicated integration test directories
-* **Characteristics**:
-  * Database connections and operations
-  * External API calls
-  * Network requests
-  * File system operations
-  * Environment variable dependencies
-  * Full system integration testing
-  * End-to-end workflows
-* **Examples**:
-  * Testing database CRUD operations
-  * Testing API client functionality
-  * Testing full service workflows
-  * Testing external service integrations
-  * Testing file upload/download
-  * Testing authentication flows
-
-### Test Naming and Organization
-* **Unit tests**: Use simple `#[test]` attribute
-* **Integration tests**: Use `#[tokio::test]` for async operations and `#[serial]` for database tests
-* **File naming**: Integration tests should be clearly named (e.g., `*_integration_tests.rs`)
-* **Test descriptions**: Clearly indicate if a test requires external dependencies in comments
-
-### CI Impact
-* **Smoke tests** (fast unit tests) run on every commit and must pass quickly
-* **Integration tests** run less frequently and can take longer
-* **Never mix** database-dependent tests in unit test suites
-* **Always move** tests that require external dependencies to integration test directories
-
-### Common Mistakes to Avoid
-* ❌ Putting database tests in unit test modules
-* ❌ Making API calls in unit tests
-* ❌ Using `TestContainer` in unit tests
-* ❌ Testing external service integrations in unit tests
-* ❌ Using environment variables for external services in unit tests
-* ✅ Move any test requiring external dependencies to integration tests
-* ✅ Keep unit tests fast and isolated
-* ✅ Use proper test categorization from the start
-
-## Port Configuration and Environment Variables
-
-**CRITICAL: Centralize all port numbers and service URLs as environment variables for maintainability and consistency.**
-
-### Centralized Configuration
-* **Single Source of Truth**: All port numbers, URLs, and service endpoints must be defined in centralized configuration files
-* **Environment Variables**: Use environment variables for all service configurations instead of hardcoding values
-* **Configuration Files**: Maintain configuration in dedicated files like `ci-env.config` or `.env` files
-* **Inheritance Pattern**: All services, databases, and test frameworks should inherit configuration from the centralized source
-
-### Port Management Best Practices
-* **Avoid Port Conflicts**: Use different ports for different test suites to prevent conflicts
-* **Dynamic Port Assignment**: When possible, use dynamic port assignment or environment variable overrides
-* **Port Naming Convention**: Use descriptive names like `BACKEND_PORT`, `FRONTEND_PORT`, `DATABASE_PORT`
-* **Test-Specific Ports**: Use separate ports for different test suites (e.g., `BACKEND_SMOKE_DB_PORT=5433`, `BACKEND_INTEGRATION_DB_PORT=5447`)
-
-### Configuration Structure
-* **Core Services**: Define base ports for main services (backend, frontend, database)
-* **Derived URLs**: Build service URLs from base configuration (e.g., `BACKEND_URL=http://localhost:${BACKEND_PORT}`)
-* **Health Check Endpoints**: Define health check URLs consistently (e.g., `BACKEND_HEALTH_URL=${BACKEND_URL}/health`)
-* **API Endpoints**: Centralize API endpoint definitions (e.g., `GRAPHQL_ENDPOINT=${BACKEND_URL}/graphql`)
-
-### Implementation Requirements
-* **CI/CD Integration**: All CI workflows must use environment variables for port configuration
-* **Docker Configuration**: Docker containers must use environment variables for port mapping
-* **Test Configuration**: All test frameworks (Playwright, Jest, etc.) must inherit port configuration
-* **Service Discovery**: Use environment variables for service-to-service communication URLs
-
-### Common Mistakes to Avoid
-* ❌ Hardcoding port numbers in multiple places
-* ❌ Using different ports for the same service across different environments
-* ❌ Not updating all references when changing port numbers
-* ❌ Creating port conflicts between different test suites
-* ❌ Using inconsistent URL patterns across services
-* ✅ Define all ports in one centralized configuration file
-* ✅ Use environment variables throughout the codebase
-* ✅ Use descriptive, consistent naming conventions
-* ✅ Test port configuration changes across all environments
-
-### Configuration File Example
 ```bash
-# Core Service Ports
-BACKEND_PORT=8080
-FRONTEND_PORT=3000
-DATABASE_PORT=5432
-
-# Derived URLs
-BACKEND_URL=http://localhost:${BACKEND_PORT}
-FRONTEND_URL=http://localhost:${FRONTEND_PORT}
-DATABASE_URL=postgresql://postgres:password@localhost:${DATABASE_PORT}/econ_graph_test
-
-# Health Check Endpoints
-BACKEND_HEALTH_URL=${BACKEND_URL}/health
-FRONTEND_HEALTH_URL=${FRONTEND_URL}
-
-# Test-Specific Ports (to avoid conflicts)
-BACKEND_SMOKE_DB_PORT=5433
-BACKEND_INTEGRATION_DB_PORT=5447
+git fetch origin
+git switch -c docs/eco-NNN-task-description origin/main
 ```
 
-## CI Failure Debugging
+If the task needs a separate worktree, use this alternative from the repository:
 
-* When CI fails, always check the detailed logs using `gh run view RUN_ID --log-failed` to see the actual error messages.
-* Common CI failure patterns:
-  * Database constraint violations: Usually test isolation issues
-  * Container timeouts: Often Docker resource issues or network problems
-  * Compilation errors: Usually missing dependencies or syntax issues
-  * Test failures: Check if tests are properly isolated and cleaned up
-  * Smoke test failures: Often caused by unit tests trying to access external dependencies
-* Always fix the root cause, not just the symptoms. For example, if you see database constraint violations, fix the test isolation rather than just changing the test data.
-* If smoke tests fail due to external dependencies, move the problematic tests to integration tests.
+```bash
+git fetch origin
+git worktree add -b docs/eco-NNN-task-description ../econ-graph-task origin/main
+```
 
-## Pull Request Management and Single Concern Principle
+Replace the example branch name with the task's issue ID and concern. Use an explicitly assigned base when provided; release fixes follow the [release fix flow](../docs/development/RELEASE_PROCESS.md#fix-flow). Separate branches and worktrees let independent tasks proceed without changing another task's checkout. Do not switch or reset a worktree containing someone else's changes.
 
-* **Create Small, Focused PRs**: When working on larger projects or fixing multiple issues, always break down your work into small, focused PRs that address a single concern. This makes code review easier, reduces risk, and allows for independent testing and merging.
-* **Independent Fixes Require Separate Branches**: If you identify multiple independent issues while working on a task, create separate branches for each fix:
-  * Each branch should be created from `main` (not from your working branch)
-  * Each branch should contain only the changes related to one specific issue
-  * This allows each fix to be reviewed, tested, and merged independently
-* **Logical Separation Examples**:
-  * **Bug fixes** should be separate from **feature additions**
-  * **Code quality improvements** (warnings, formatting) should be separate from **functional changes**
-  * **Test reorganization** should be separate from **test fixes**
-  * **Configuration changes** should be separate from **code changes**
-* **PR Creation Process**:
-  * Create each PR with a clear, descriptive title that summarizes the single concern
-  * Write detailed descriptions explaining the problem, solution, and impact
-  * Include specific file changes and reasoning
-  * Suggest merge order if PRs have dependencies
-* **Benefits of Single Concern PRs**:
-  * **Easier code review** - Reviewers can focus on one specific change
-  * **Reduced risk** - Smaller changes are less likely to introduce new bugs
-  * **Better testing** - Each change can be tested independently
-  * **Cleaner git history** - Each commit/PR has a clear, single purpose
-  * **Faster CI** - Smaller changes run faster and are less likely to fail
-* **When to Combine Changes**: Only combine changes in a single PR when they are:
-  * Tightly coupled and cannot be separated
-  * Part of the same logical feature
-  * Required to work together to achieve a single goal
-* **Example of Good Separation**:
-  * ❌ **Bad**: "Fix CI failures and improve test organization" (two concerns)
-  * ✅ **Good**: "Fix database cleanup table name bug" + "Move MCP tests to integration tests" (two separate PRs)
+Use `git mv old_path new_path` when moving a tracked file. It moves the file and stages both path changes together. Git detects renames from content when presenting diffs and history; `git mv` does not store a special rename record. Use noninteractive Git commands so a task cannot stall waiting for an editor or prompt.
 
-## Debugging Methodology and Avoiding False Confidence
+Keep each PR focused on one concern. Independent bug fixes, features, formatting cleanups, and test reorganizations belong on separate branches from the appropriate base, rather than being collected into the current task. Keep changes together when they implement one feature or must work together to solve one problem; a fix may require code, configuration, and tests in the same PR. Explain dependencies when PRs must land in a particular order.
 
-**CRITICAL: Never claim to have "fixed all issues" without comprehensive verification.**
+Follow the established directory structure and the placement of similar tools: CI tooling belongs in `ci/scripts/`, general project scripts in `scripts/`, Rust code in `backend/`, and React code in `frontend/`. Prefer the relevant domain directory when adding validation or automation.
 
-### Systematic Debugging Approach
-* **One Issue at a Time**: Focus on fixing ONE specific failure completely before moving to the next
-* **Verify Each Fix**: After each fix, wait for CI results and confirm the specific issue is resolved
-* **Don't Assume**: Never assume that fixing one issue automatically fixes related issues
-* **Test Locally First**: When possible, reproduce and fix issues locally before pushing to CI
-* **Read Error Messages Carefully**: Don't just scan error messages - read them completely and understand the root cause
+## Commits, pull requests, and releases
 
-### False Confidence Anti-Patterns
-* ❌ **"I've fixed all the issues"** - This is almost never true in complex systems
-* ❌ **"This should resolve everything"** - Complex systems have interdependencies you may not see
-* ❌ **"The tests should pass now"** - Always verify with actual test results
-* ❌ **Making multiple changes simultaneously** - Makes it impossible to know which change fixed what
-* ❌ **Assuming correlation equals causation** - Just because you made a change doesn't mean it fixed the problem
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for commits and PR titles. Use `doc:` for documentation-only commits and PR titles. Do not include CI-skip markers, personal names, AI attribution, coauthor trailers for agents, or session links. Run the applicable pre-commit checks and correct failures rather than bypassing them.
 
-### Proper Debugging Workflow
-1. **Identify the specific failure** - Get the exact error message and understand what's failing
-2. **Reproduce locally** - Try to reproduce the issue in your local environment
-3. **Make ONE targeted fix** - Address only the specific root cause you identified
-4. **Test the fix** - Verify the fix works locally if possible
-5. **Push and wait for CI** - Let CI run and confirm the specific issue is resolved
-6. **Only then move to the next issue** - Don't start fixing other things until you've confirmed this fix worked
+Write PR descriptions for a reviewer who has not read the conversation. Lead with the problem and resulting behavior, explain why the change matters, and include relevant trade-offs and a short validation note. Use connected paragraphs sized to the change; file-by-file inventories and mandatory section templates obscure small changes. Keep review bookkeeping and running status in comments. Reread the whole final description before publishing or editing it.
 
-### Communication Standards
-* **Be Honest About Uncertainty**: Say "I believe this fixes X" not "This fixes everything"
-* **Acknowledge What You Don't Know**: "I'm not sure if this will fix Y, but it should fix X"
-* **Provide Evidence**: Reference specific error messages and explain how your fix addresses them
-* **Set Expectations**: "This should fix the Docker build issue, but there may be other failures"
+The Cursor slash commands are optional helpers defined in this repository:
 
-### Process Output and Buffering Issues
-**CRITICAL: Use PTY (pseudo-terminal) for long-running processes to avoid output buffering.**
+- [`/commit`](../.cursor/commands/commit.md) creates a Conventional Commit and reports status.
+- [`/pr`](../.cursor/commands/pr.md) creates or updates a PR with a supplied or generated body.
+- [`/pr-ready`](../.cursor/commands/pr-ready.md) pushes the current branch and ensures an open PR; it does not curate the description.
+- [`/pr-checks`](../.cursor/commands/pr-checks.md) watches checks, and [`/ci-latest`](../.cursor/commands/ci-latest.md) lists recent runs.
 
-* **The Problem**: Long-running processes (like Docker builds, npm installs, etc.) often buffer their output when run in pipes or background processes
-* **The Solution**: Use `script` or `unbuffer` to create a PTY for unbuffered output
-* **Examples**:
-  * ❌ **Bad**: `docker build . &` (output may be buffered)
-  * ✅ **Good**: `script -q /dev/null docker build . &` (unbuffered output)
-  * ❌ **Bad**: `npm install | head -20` (may show no output)
-  * ✅ **Good**: `script -q /dev/null npm install | head -20` (shows real-time output)
-* **When to Use PTY**:
-  * Any long-running process where you need to see progress
-  * Docker builds, npm installs, cargo builds
-  * Any process that might buffer output in pipes
-  * Background processes where you want to monitor progress
-* **Alternative Tools**:
-  * `unbuffer` (from expect package) - `unbuffer docker build .`
-  * `stdbuf` - `stdbuf -oL -eL docker build .`
-  * `script` - `script -q /dev/null docker build .`
+Apply the standards above when supplying helper arguments or reviewing generated text. Outside Cursor, use available noninteractive Git and GitHub tools. For example, with an authorized push and the GitHub CLI available, use `gh pr create --title 'doc: clarify developer standards' --body-file /tmp/pr-body.md`, `gh pr checks --watch`, and `gh run list --branch BRANCH`. If a needed tool or permission is unavailable, use another authorized interface or report the specific blocker.
 
-### When You're Wrong (And You Will Be)
-* **Acknowledge Mistakes Immediately**: Don't double down on incorrect assumptions
-* **Learn from Each Failure**: Each failed fix teaches you something about the system
-* **Ask for Help Sooner**: If you're stuck in a loop, ask for guidance rather than continuing to guess
-* **Document What Didn't Work**: Keep track of approaches that failed so you don't repeat them
+Implementation work is complete only after a PR exists, CI is green for its latest commit, and all CodeRabbit and other automated review findings have been addressed. Fix findings you agree with; for disagreements, post the technical reasoning and resolve the thread when appropriate. Mark the PR ready when it is ready for review. Do not declare completion while checks or automated reviews remain pending, and do not merge without authorization.
 
-### Red Flags That You're Going Down the Wrong Path
-* You're making multiple changes without testing each one
-* You're claiming to fix "everything" without specific evidence
-* You're not waiting for CI results before making more changes
-* You're getting frustrated and making larger, riskier changes
-* You're ignoring specific error messages in favor of general assumptions
+Version numbers move forward. Follow [Semantic Versioning](https://semver.org/) and the existing release series: the [backend workspace](../backend/Cargo.toml) declares version `4.0.0`. Change versions or tags only as part of the authorized [release process](../docs/development/RELEASE_PROCESS.md).
 
-### Success Metrics
-* ✅ **Specific Issues Resolved**: You can point to exact error messages that are now gone
-* ✅ **Incremental Progress**: Each change moves you closer to a working system
-* ✅ **Verifiable Fixes**: You can explain exactly how each fix addresses a specific problem
-* ✅ **Honest Communication**: You accurately represent what you know and what you don't know
+## Features, tests, and database isolation
 
-## E2E Test Debugging Best Practices
+Cover new behavior and regressions with tests that can distinguish correct behavior from the failure being fixed. Do not delete difficult tests or existing features to make a task easier. When replacing a test, preserve its original intent unless approved requirements change that intent. Reversible prose edits do not need implementation tests that merely repeat the wording.
 
-**CRITICAL: E2E test failures often have complex root causes that require systematic debugging.**
+Choose test scope by dependencies separately from Cargo's target layout. Fast smoke selections should require no database, network, external API, or service credentials; temporary files are acceptable. Parsing, calculations, configuration validation, and data-structure logic are useful fast-test candidates. Tests of database CRUD, API integrations, authentication, and full workflows need their documented service setup or disposable resources.
 
-### E2E Test Failure Analysis
-* **Start with Service Health**: Always verify that both frontend and backend services are actually running and healthy before analyzing test failures
-* **Use Health Checks with Retry Logic**: Implement proper health checks with retry logic (30 attempts, 2-second intervals) to ensure services are ready before running tests
-* **Log Tailing for Real-time Debugging**: Use continuous log tailing for both frontend and backend services during E2E test execution to capture real-time debugging information
-* **Exit Code Propagation**: Ensure all script chains properly propagate exit codes using `exec "$@"` so CI jobs turn red when tests actually fail
+The Rust workspace is under `backend/`. Library tests live in crate modules such as `src/.../tests.rs`; Cargo integration targets live in the owning crate's `tests/` directory, not a workspace-wide root directory. Use `#[test]` for synchronous tests and `#[tokio::test]` when async execution is needed. Async execution alone does not make a test an integration test. Name tests clearly and document their prerequisites.
 
-### Common E2E Test Failure Patterns
-* **Service Startup Issues**: Frontend or backend services failing to start properly (most common)
-* **Port Configuration Mismatches**: Services running on different ports than expected by tests
-* **Database Connection Failures**: Backend unable to connect to database due to authentication or network issues
-* **Static File Serving Problems**: Frontend server unable to serve JavaScript bundles or CSS files
-* **Network Connectivity Issues**: Services unable to communicate due to Docker networking problems
-* **Exit Code Masking**: Test failures not properly propagating to CI job status
+Existing database-backed tests also run as library tests. For example, [dataset tests](../backend/crates/econ-graph-core/src/models/dataset/tests.rs) use migrations once per test binary and unique fixture rows. [Core CI](../.github/workflows/ci-core.yml) selects these with `--lib` and also runs a workspace suite. Consult the [CI/CD guide](../docs/development/CI_CD_PIPELINE.md) and workflow for actual selections, feature flags, and triggers. Do not move database tests wholesale to change their Cargo category. If a dependency-bound test enters a fast smoke selection, correct that selection or the test's dependency boundary while retaining its coverage elsewhere.
 
-### E2E Test Debugging Methodology
-1. **Verify Service Health**: Check that both frontend and backend services are running and responding to health checks
-2. **Test Static File Serving**: Verify frontend can serve its JavaScript bundles and CSS files
-3. **Test API Connectivity**: Verify backend API endpoints are reachable from frontend
-4. **Check Network Configuration**: Ensure Docker networking allows service-to-service communication
-5. **Implement Comprehensive Logging**: Add real-time log tailing for both services during test execution
-6. **Verify Exit Code Propagation**: Ensure test failures properly turn CI jobs red
+For database changes, follow [database testing guidance](../docs/testing/DATABASE_TESTING.md) and the target module's setup and locking conventions. Use disposable databases, coordinate cleanup with other database users, and give independent fixtures unique identifiers. A `#[serial]` attribute or `--test-threads=1` does not coordinate separate Cargo processes. When modifying a database schema, run the existing schema validation integration target, with its documented PostgreSQL, Docker, and Diesel CLI prerequisites:
 
-### E2E Test Infrastructure Requirements
-* **Health Check Scripts**: Implement robust health checks with retry logic for all services
-* **Log Tailing Scripts**: Create scripts that continuously tail service logs during test execution
-* **Exit Code Propagation**: Use `exec "$@"` in all wrapper scripts to ensure proper exit code handling
-* **Service Startup Verification**: Verify services are actually ready before proceeding with tests
-* **Network Connectivity Testing**: Test service-to-service communication before running E2E tests
+```bash
+cd backend
+cargo test -p econ-graph-core --test schema_validation_test -- --nocapture
+```
 
-## Root Cause Analysis and Systematic Debugging
+Database cleanup helpers should return errors to the caller. Use `?` and, where needed, `map_err()` in fallible utilities; at the test boundary, check the result and fail with useful context if cleanup fails. Continuing after failed cleanup conceals the original failure and can contaminate later tests.
 
-**CRITICAL: Stop jumping between different approaches. Dig deeper to find the actual root cause.**
+A duplicate-key constraint violation is evidence to investigate isolation: check whether cleanup failed, parallel tests shared a database, or fixtures reused an identifier. Inspect the pool, migration target, and lock before changing test data. Unique identifiers help independent fixtures, but cannot repair destructive cleanup racing with another test.
 
-### The "Try Different Approaches" Anti-Pattern
-* ❌ **NEVER** try multiple different solutions simultaneously without understanding why the first one failed
-* ❌ **NEVER** abandon a debugging approach just because it didn't work immediately
-* ❌ **NEVER** make configuration changes without first understanding the current system behavior
-* ❌ **NEVER** assume the problem is in the wrong place without evidence
+## Rust warnings
 
-### Proper Root Cause Analysis Process
-1. **Observe the Exact Behavior**: What exactly is happening? Get the precise error messages, logs, and system state
-2. **Understand the Expected Behavior**: What should be happening? What is the correct flow?
-3. **Trace the Request/Data Flow**: Follow the request from start to finish, understanding each component
-4. **Identify the First Point of Deviation**: Where does the actual behavior diverge from expected?
-5. **Investigate That Specific Component**: Focus on the exact point of failure, not the symptoms
-6. **Test Your Hypothesis**: Make ONE targeted change to test your understanding
-7. **Verify the Fix**: Confirm the change addresses the root cause, not just symptoms
+Address compiler warnings rather than suppressing them by default. Prefix a variable with `_` when it is intentionally unused. Handle a returned `Result` with propagation, `match`, or `if let`; use `expect` at a test boundary where failure should stop the test with context. Use `let _ = result;` only when discarding the outcome is intentional and safe, never to continue after failed setup or cleanup.
 
-### Debugging Discipline Requirements
-* **Read Error Messages Completely**: Don't just scan for keywords - understand the full context
-* **Check Logs at Each Layer**: Application logs, nginx logs, ingress logs, pod logs
-* **Verify Configuration is Applied**: Don't assume config changes took effect - verify them
-* **Test Each Component Individually**: Isolate the problem by testing components separately
-* **Document Your Understanding**: Write down what you think is happening before making changes
+`cargo fix --lib -p PACKAGE --tests` can apply compiler suggestions. Review its changes and run the affected checks; automatic suggestions do not establish correctness.
 
-### Common Debugging Mistakes to Avoid
-* ❌ **"Let me try a different approach"** - This is usually giving up on understanding the problem
-* ❌ **Making multiple config changes** - You won't know which one fixed it (if any)
-* ❌ **Assuming the problem is elsewhere** - Without evidence, focus on where the error occurs
-* ❌ **Changing multiple files simultaneously** - Makes it impossible to isolate the issue
-* ❌ **Not reading logs completely** - Error messages contain crucial context
+## Ports and service configuration
 
-### When You're Stuck
-* **Stop and Document**: Write down exactly what you know and what you don't know
-* **Ask Specific Questions**: "Why is nginx looking for /admin/static/ instead of /static/?"
-* **Test Your Assumptions**: Don't assume nginx rewrite rules work as expected - test them
-* **Check Documentation**: Verify your understanding of how the technology actually works
-* **Get More Information**: Add more logging, check more logs, get more details
+Make service ports configurable and keep each stack's listeners, client URLs, health checks, and container mappings in agreement. Separate environments and concurrently running suites may use different ports. If a port is occupied, use dynamic allocation where supported or choose an available random port through the consumer's environment override. Do not kill an unrelated process or repeatedly increment a hardcoded port.
 
-### Success Criteria for Root Cause Analysis
-* ✅ **You can explain exactly why the problem occurs** - Not just "it doesn't work"
-* ✅ **You can point to the specific line of code or configuration** causing the issue
-* ✅ **You understand the data flow** from request to response
-* ✅ **Your fix addresses the root cause** - Not just the symptoms
-* ✅ **You can predict what will happen** when you make the change
+The repository has several configuration consumers. [CI environment configuration](../config/ci-env.config) defines service defaults, derived endpoints, and distinct backend test database ports. Loading that file is explicit; its existence does not make other tools inherit its values. The E2E core job in [Core CI](../.github/workflows/ci-core.yml) sources [`ci-ports.env`](../ci-ports.env) and exports selected values through `GITHUB_ENV`. The [release Playwright configuration](../frontend/playwright.release.config.ts) instead reads `RELEASE_BACKEND_PORT` and `RELEASE_FRONTEND_PORT`, defaulting to `18080` and `18081`, and derives service URLs from them.
 
-## Test-Component Disagreement Resolution Process
+Before changing a port, inspect how the affected launcher and test configuration load values. Change the relevant consumer's override and all dependent endpoints together. Do not assume an environment loader expands shell expressions or that changing a port automatically updates a separately assigned URL.
 
-**CRITICAL: When tests and components disagree, stop and analyze from a product perspective before making changes.**
+For a Bash-sourced configuration, this illustrative pattern applies an override before deriving and exporting URLs:
 
-### The Problem
-When tests fail because they expect different behavior than what the component implements, it's tempting to either:
-* Change the component to make tests pass
-* Change the tests to match the component
-* Assume one side is "wrong" without analysis
+```bash
+BACKEND_PORT=${BACKEND_PORT:-18080}
+BACKEND_URL="http://localhost:${BACKEND_PORT}"
+BACKEND_HEALTH_URL="${BACKEND_URL}/health"
+GRAPHQL_ENDPOINT="${BACKEND_URL}/graphql"
+export BACKEND_PORT BACKEND_URL BACKEND_HEALTH_URL GRAPHQL_ENDPOINT
+```
 
-### The Solution: Product-First Analysis
+This is a Bash example, not a universal `.env` syntax contract. Verify the affected service, health check, and test client use the selected values.
 
-#### 1. Stop and Analyze
-* **Don't immediately change code** - Pause and investigate both sides
-* **Don't assume either is wrong** - Both might be correct for different reasons
-* **Gather evidence** - Look at the actual behavior vs expected behavior
+## Debugging and verification
 
-#### 2. Gather Evidence
-* **Product specifications** - What should the component actually do?
-* **Design documents** - What was the intended user experience?
-* **User stories** - What problem is this solving for users?
-* **Acceptance criteria** - What defines "done" for this feature?
-* **Business requirements** - What value does this provide?
+When the maintainer questions an approach, explain the reasoning and consult the relevant library documentation before changing it reflexively. When a failure occurs, investigate one concrete hypothesis at a time:
 
-#### 3. Justify from Product Perspective
-* **User needs** - Does this serve the intended users?
-* **Business value** - Does this align with business goals?
-* **UX principles** - Does this follow good design patterns?
-* **Industry standards** - How do similar products handle this?
-* **Technical constraints** - Are there valid technical reasons?
+1. Capture the exact failing command, test name, error, and relevant environment. For CI, read the failed logs with `gh run view RUN_ID --log-failed` when the CLI is available. Read the full error context.
+2. Establish expected behavior from the requirements and code. Trace the request or data flow to the first point where observed behavior diverges, checking the relevant application, proxy, or container logs and whether configuration actually took effect.
+3. Reproduce the failure locally where feasible. If the full scenario is hard to reason about, create a smaller reproduction or disposable proof of concept to test a specific assumption. Predict what evidence would confirm or reject the hypothesis.
+4. Make a focused change supported by that evidence. One hypothesis can require several files; avoid unrelated changes that obscure which behavior mattered.
+5. Rerun the original failing scenario and affected tests. A small reproduction supports diagnosis but does not establish that the original scenario now works. Check related callers when shared functionality changes.
+6. Push within the authorized workflow and confirm CI on the latest PR commit. Address automated findings and repeat the affected verification after changes. Report what passed and any specific limits; do not infer success from a plausible patch or partial results.
 
-#### 4. If Uncertainty Remains
-* **Ask for clarification** - Don't guess what the product should do
-* **Request product review** - Get input from product stakeholders
-* **Get stakeholder input** - Understand the business context
-* **Document assumptions** - Make your reasoning explicit
+If local reproduction is infeasible, identify the missing prerequisite and use authorized CI or another suitable disposable environment to run the failing scenario. Keep the verification gap explicit until that run completes. Persist while experiments produce new evidence. If investigation stops producing evidence, summarize what is known, failed hypotheses, and the specific information needed before asking for help.
 
-#### 5. Make Informed Decisions
-* **Based on evidence** - Not convenience or assumptions
-* **Aligned with product goals** - Supports the overall product vision
-* **Documented rationale** - Clear reasoning for future reference
-* **Communicated clearly** - Explain the decision to the team
+Common CI symptoms suggest starting points, not diagnoses: container timeouts can involve resources or networking; compilation errors can involve dependencies or syntax; smoke failures can expose external dependencies; constraint violations can expose shared state. Confirm the cause rather than applying a stock fix. Record useful decisions and investigation evidence in the issue or PR, with progress and unbuilt plans in Linear rather than checked-in documentation.
 
-### Example: RatioAnalysisPanel Component
+### Long-running command output
 
-#### The Disagreement
-* **Tests expected**: All ratios visible in a flat table structure
-* **Component implemented**: Summary cards + tabbed interface with progressive disclosure
+Keep output visible and retain the complete log. Prefer the execution tool's native PTY support when a program buffers progress in a pipe. A PTY may change the program's output behavior; it does not guarantee that all output becomes unbuffered. Monitor the process through completion and inspect its final exit status.
 
-#### Product Analysis
-* **User personas**: Executives (quick overview), Analysts (detailed analysis), Beginners (learning)
-* **Information architecture**: Progressive disclosure reduces cognitive load
-* **UX patterns**: Dashboard → details → actions (industry standard)
-* **Mobile experience**: Tabs work better than long tables on small screens
-* **Business value**: Serves multiple user types, reduces abandonment, supports learning
+On Linux with util-linux `script`, `-c` selects the child command and `-e` returns its exit status. For example, this harmless command prints progress and returns status 7:
 
-#### Decision
-* **Component was correct** - Follows sound UX principles and serves business goals
-* **Tests were wrong** - Didn't account for intended user experience and progressive disclosure
-* **Action**: Update tests to match the component's intended behavior
+```bash
+script -q -e -c 'printf "progress\n"; exit 7' /dev/null
+```
 
-### Process Requirements
+Check the installed tool's help on other platforms. Do not pipe a running test, installation, or build into `head`: that truncates evidence and can stop the producer. When logging through `tee`, preserve failures as described below.
 
-#### When Tests and Components Disagree:
-1. **Stop and analyze** - Don't immediately change either side
-2. **Gather evidence** - Product specs, design docs, user stories, business requirements
-3. **Justify from product perspective** - User needs, business value, UX principles
-4. **Ask for clarification** - If uncertainty remains, don't guess
-5. **Make informed decisions** - Based on evidence, not convenience
+### E2E readiness and failure signals
 
-#### Documentation Requirements:
-* **Document the disagreement** - What each side expects
-* **Document the analysis** - Product perspective and evidence
-* **Document the decision** - Why one approach is correct
-* **Document the rationale** - For future reference and team understanding
+Before interpreting an E2E assertion failure, check frontend and backend readiness in the authorized test environment. Use bounded health-check retries, for example up to 30 attempts at two-second intervals, with failure logs on timeout. Keep service logs available during the test. Confirm static JavaScript and CSS are served, API endpoints are reachable from the test's network, ports agree, and container networking supports the required connections. Database connection errors also require checking the test's connection setup without exposing credentials.
 
-### Common Mistakes to Avoid
-* ❌ **Assuming tests are always right** - Tests can be wrong or outdated
-* ❌ **Assuming components are always right** - Components can be buggy or poorly designed
-* ❌ **Changing code without analysis** - Leads to inconsistent behavior
-* ❌ **Ignoring product context** - Technical correctness isn't enough
-* ❌ **Making decisions based on convenience** - Easy fixes aren't always right fixes
-* ✅ **Always analyze from product perspective** - What serves users and business goals?
-* ✅ **Gather evidence before deciding** - Don't rely on assumptions
-* ✅ **Document your reasoning** - For future reference and team alignment
-* ✅ **Ask for clarification when uncertain** - Better to ask than guess wrong
+Preserve test failures through every wrapper. When a wrapper's final action is to invoke its arguments and no subsequent cleanup is needed, use:
 
-### Success Criteria
-* ✅ **You can explain the product rationale** - Why this behavior serves users
-* ✅ **You have evidence to support your decision** - Not just opinions
-* ✅ **You've considered multiple perspectives** - User, business, technical
-* ✅ **Your decision aligns with product goals** - Supports overall vision
-* ✅ **You've documented your reasoning** - Clear for future reference
+```bash
+exec "$@"
+```
 
-## Testing Verification and False Confidence Prevention
+When cleanup must follow, capture the command status even if the script uses `set -e`, perform cleanup, and return a failure if either operation failed. This Bash example takes a cleanup command (or an exported Bash function) as its first argument and the child command as the remaining arguments:
 
-**CRITICAL: Always verify your fixes work before claiming success. Never assume changes will work without testing.**
+```bash
+cleanup_command=$1
+shift
+status=0
+"$@" || status=$?
+cleanup_status=0
+"$cleanup_command" || cleanup_status=$?
+if [ "$status" -eq 0 ]; then
+  status=$cleanup_status
+fi
+exit "$status"
+```
 
-### The "I Fixed It" Anti-Pattern
-* ❌ **NEVER** claim to have fixed something without actually running the tests that were failing
-* ❌ **NEVER** assume that fixing one error automatically fixes related errors
-* ❌ **NEVER** push changes without verifying they solve the original problem
-* ❌ **NEVER** test only simple cases when the real issue is in complex scenarios
+For a Bash pipeline that writes a complete log, `pipefail` prevents a successful `tee` from hiding the child's failure. This harmless example returns a failure:
 
-### Proper Testing Verification Process
-1. **Identify the Specific Failing Test**: Get the exact test name and error message
-2. **Run the Failing Test Locally**: Reproduce the issue in your environment
-3. **Make Your Fix**: Address only the specific root cause
-4. **Test the Exact Same Scenario**: Run the same test that was failing
-5. **Verify the Fix Works**: Confirm the test now passes
-6. **Only Then Push**: Don't push until you've verified the fix works locally
+```bash
+set -o pipefail
+bash -c 'printf "test output\n"; exit 7' | tee /tmp/example-test.log
+```
 
-### Common Verification Mistakes
-* ❌ **Testing only simple cases** - The real issue might be in complex component tests
-* ❌ **Assuming related tests will pass** - Each test scenario is different
-* ❌ **Not running the exact failing test** - Generic tests don't catch specific issues
-* ❌ **Pushing without local verification** - CI is not your testing environment
+A background process starting or a log containing no visible errors does not establish test completion. Confirm that the test process exits and its status reaches CI.
 
-### Verification Requirements
-* **Run the Exact Failing Test**: Use the same test command that was failing in CI
-* **Test the Specific Component**: Don't just test simple utility functions
-* **Verify All Related Tests**: If you fix a context issue, test all components using that context
-* **Wait for CI Results**: Even after local verification, wait for CI to confirm
+## Resolving test and component disagreements
 
-### Red Flags That You're Not Testing Properly
-* You're only testing simple, isolated functions
-* You're not running the exact test that was failing
-* You're assuming your fix will work for all related scenarios
-* You're pushing changes without local verification
-* You're claiming success based on partial test results
+When tests expect different behavior from a component, investigate both before changing either. Neither passing an existing test nor matching the current component establishes the intended product behavior.
 
-### Success Metrics for Testing Verification
-* ✅ **You can run the exact failing test locally and it passes**
-* ✅ **You've tested all components that use the fixed functionality**
-* ✅ **You've verified the fix works in the same environment where it was failing**
-* ✅ **You can explain exactly why your fix addresses the specific error**
-* ✅ **You're confident the fix will work in CI because you've tested it locally**
+Compare the test assertions and actual behavior with approved specifications, design decisions, user stories, and acceptance criteria. Consider the user problem, business requirements, and technical constraints those sources identify. General UX principles or another product's conventions can suggest questions; they do not establish this product's requirements. If the sources leave the behavior unclear, ask for product clarification rather than choosing the easier implementation.
+
+Record the disagreement, supporting evidence, and decision in the issue or PR so reviewers can assess why behavior or coverage changed. Preserve useful coverage when updating tests, and change the component when evidence shows it violates the approved behavior.
+
+For example, suppose a ratio-analysis test expects every ratio in one flat table, while the component presents summary cards and category tabs. If approved acceptance criteria require summary cards and category tabs, update the tests to exercise those views and verify all required ratios remain accessible. If the criteria require every ratio to be visible at once, investigate changing the component. Without those criteria, the interface alone cannot establish which side is correct or prove better mobile usability or reduced abandonment.

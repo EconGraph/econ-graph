@@ -4,7 +4,7 @@
 # terraform/k8s/kind-config.yaml (ports 80/443/3000/8080, and the worker that
 # bind-mounts the host Postgres subvolumes), on the rootful Docker daemon
 # (scripts/deploy/lib/kind-env.sh; override with ECONGRAPH_DOCKER_HOST), then
-# install ingress-nginx.
+# install the gateway.
 #
 # DESTRUCTIVE: everything stored inside the cluster's node containers is lost
 # (Grafana data, the in-cluster postgres-backup-data PVC, Secrets, and on a
@@ -24,7 +24,7 @@
 # A dry run may create a temporary directory under $TMPDIR (a copy of the
 # cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
 #       [--if-missing]          keep a cluster that exists and answers (only
-#                               make sure ingress-nginx is installed); create
+#                               make sure the gateway is installed); create
 #                               one if there is none. Safe to re-run.
 #       [--delete-unreachable]  allow deleting an existing cluster whose API
 #                               server doesn't answer (nothing can be backed
@@ -124,7 +124,7 @@ if kind_cluster_exists; then
             check_host_storage_in_node ||
                 die "the existing cluster does not bind-mount the host subvolumes; recreate it without --if-missing (it is backed up first)"
             log "Keeping the existing cluster (--if-missing)"
-            install_ingress_nginx
+            install_gateway
             check_restart_on_boot
             exit 0
         fi
@@ -157,7 +157,7 @@ log "Creating kind cluster ${KIND_CLUSTER} from ${CONFIG}"
 run kind create cluster --name "${KIND_CLUSTER}" --config "$CONFIG" --kubeconfig "${KIND_KUBECONFIG}"
 if [ "${DRY_RUN}" = "true" ]; then
     echo "+ kubectl wait --for=condition=Ready nodes --all --timeout=300s"
-    install_ingress_nginx
+    install_gateway
     log "Dry run complete; nothing was changed"
     exit 0
 fi
@@ -165,7 +165,7 @@ fi
 use_kind_kubectl
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 check_host_storage_in_node || die "node ${KIND_STORAGE_NODE} does not see ${NODE_DATA_PLANE} and ${NODE_APP_PROD}"
-install_ingress_nginx
+install_gateway
 check_restart_on_boot
 
 log "Kind cluster recreated"

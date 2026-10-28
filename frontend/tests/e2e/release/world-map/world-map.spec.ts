@@ -51,7 +51,7 @@ test.describe('World map release spec', () => {
     // Release auth calls go straight to the backend (VITE_API_URL, playwright.release.config.ts),
     // a different origin from the frontend, and a deployed run signs in against an external OIDC
     // issuer; index.html also loads Google Fonts on every page, the CSP's own
-    // style-src/font-src exception (k8s/manifests/security-configmap.yaml). None of those are
+    // style-src/font-src exception (k8s/manifests/gateway/routes/httproutes.yaml). None of those are
     // what this check is for. Everything else external is flagged regardless of path, so an
     // outline request under an unrecognized path is still caught, not just the jsdelivr.net CDN
     // and the `world-atlas`/`countries-NNm` paths it used to serve them from.

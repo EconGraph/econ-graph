@@ -258,9 +258,12 @@ pub struct NewCompany {
 /// use uuid::Uuid;
 /// use chrono::Utc;
 ///
-/// // Company with financial summary
+/// use bigdecimal::BigDecimal;
+///
+/// // Summarize an existing company record.
+/// fn summarize(company: Company) {
 /// let company_with_financials = CompanyWithFinancials {
-///     company: Company { /* ... */ },
+///     company,
 ///     latest_filing_date: Some(Utc::now().date_naive()),
 ///     latest_fiscal_year: Some(2023),
 ///     latest_fiscal_quarter: Some(4),
@@ -269,6 +272,7 @@ pub struct NewCompany {
 ///     market_cap: Some(BigDecimal::from(3000000000000i64)), // $3T
 ///     employee_count: Some(164000),
 /// };
+/// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanyWithFinancials {
@@ -320,6 +324,7 @@ pub struct CompanyWithFinancials {
 ///     sector: Some("Technology".to_string()),
 ///     state_of_incorporation: Some("CA".to_string()),
 ///     entity_type: Some("Corporation".to_string()),
+///     entity_size: None,
 ///     is_active: Some(true),
 ///     limit: Some(50),
 ///     offset: Some(0),
@@ -434,6 +439,8 @@ pub struct CompanyComparisonParams {
 /// use uuid::Uuid;
 /// use bigdecimal::BigDecimal;
 ///
+/// use chrono::Utc;
+///
 /// // Comparison result with multiple companies and metrics
 /// let comparison_result = CompanyComparisonResult {
 ///     comparison_id: Uuid::new_v4(),
@@ -450,6 +457,8 @@ pub struct CompanyComparisonParams {
 ///             units: "USD".to_string(),
 ///             peer_average: Some(BigDecimal::from(296360000000i64)),
 ///             industry_benchmark: Some(BigDecimal::from(250000000000i64)),
+///             rankings: Some(vec![1, 3, 2]),
+///             percentiles: Some(vec![100, 0, 50]),
 ///         },
 ///     ],
 ///     fiscal_year: 2023,

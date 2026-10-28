@@ -2,8 +2,8 @@
 
 The cost scripts retain a historical development-cost model for inspection. Its
 calculated comparisons are estimates derived from fixed assumptions and current
-file counts, rather than measured replacement costs, invoices, productivity gains,
-or evidence of product quality.
+line counts from selected tracked files, rather than measured replacement costs,
+invoices, productivity gains, or evidence of product quality.
 
 ## Inputs and Implementation
 

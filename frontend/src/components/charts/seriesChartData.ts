@@ -14,6 +14,8 @@ export interface SeriesChartPoint {
   /** Observation date, `YYYY-MM-DD`. */
   date: string;
   value: number | null;
+  /** The value as the API's exact decimal string, when known (see `SeriesDataPoint`). */
+  exactValue?: string;
   /** Revision date of the value, `YYYY-MM-DD`, when known. */
   revisionDate?: string;
 }
