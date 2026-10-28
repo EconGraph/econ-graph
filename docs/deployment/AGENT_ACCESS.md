@@ -2,14 +2,18 @@
 
 Agent tools use a short-lived ServiceAccount kubeconfig through
 `scripts/deploy/run-agent-session.sh`. The identity can manage workloads in one
-namespace and read pod logs, but its Role grants no access to Secrets, RBAC,
-ServiceAccount tokens, pod exec, nodes, namespaces or cluster-scoped resources.
+namespace, delete (restart) pods and read pod logs, but its Role grants no access
+to Secrets, RBAC, ServiceAccount tokens, bare pod creation or changes, pod exec,
+attach or port-forward, service proxying, nodes, namespaces or cluster-scoped
+resources.
 Use this launcher as the default entry point for every agent session that needs
 Kubernetes access. Existing sessions keep their credentials until restarted.
 
 This reduces accidental direct access to Secrets; it is **not a confidentiality
 boundary**. An identity that can deploy arbitrary workloads can mount Secrets or
-run a pod under another ServiceAccount. Logs and ConfigMaps can also contain
+run a pod under another ServiceAccount. It can also expose a database through a
+NodePort Service, loosen NetworkPolicies, and delete PersistentVolumeClaims and
+StatefulSets, so it does not protect data either. Logs and ConfigMaps can also contain
 sensitive data. A process running as the operator's Unix user can read that user's
 admin kubeconfig and plaintext backups. Access to the rootful Docker socket can
 recover kind's admin credentials or mount host files. Environment flags and script
@@ -23,34 +27,37 @@ access only to trusted tools, preferably in a disposable branch namespace.
 
 ## Bootstrap and launch
 
-Run the bootstrap yourself in an operator terminal. Supply an absolute path to a
-real kubectl binary; on this host the snap wrapper named kubectl selects MicroK8s
-instead of respecting the intended kubeconfig. The cached kind kubectl is suitable.
-The selected context is `kind-econ-graph`; the namespace must already exist.
+Run the bootstrap yourself in an operator terminal. It chooses the kubectl and
+operator kubeconfig as the other operator scripts do (`cluster_role_default_kubectl`
+in `lib/cluster-role.sh`): `--kubectl` and `--operator-kubeconfig`, else `KUBECTL`
+and `KUBECONFIG`, else the kind cluster's kubectl and kubeconfig kept in
+`~/.cache/econgraph`. It never uses plain `kubectl` from `PATH`, and refuses a
+MicroK8s kubectl: on this host the snap wrapper named kubectl reaches MicroK8s
+and ignores the kubeconfig. It works on context `kind-econ-graph` (`kind-<cluster>`
+with `--cluster`) of that kubeconfig, prints that cluster's identity before
+writing, and leaves the kubeconfig's current context unchanged. The namespace
+must already exist.
 
 ```bash
-scripts/deploy/create-agent-kubeconfig.sh \
-  --operator-kubeconfig "$HOME/.cache/econgraph/kubeconfig-econ-graph" \
-  --kubectl "$HOME/.cache/econgraph/bin/kubectl" --dry-run
-
-scripts/deploy/create-agent-kubeconfig.sh \
-  --operator-kubeconfig "$HOME/.cache/econgraph/kubeconfig-econ-graph" \
-  --kubectl "$HOME/.cache/econgraph/bin/kubectl"
-
+scripts/deploy/create-agent-kubeconfig.sh --dry-run
+scripts/deploy/create-agent-kubeconfig.sh
 scripts/deploy/run-agent-session.sh -- bash
 ```
 
 Replace `bash` with the coding agent's command. Bootstrap is idempotent and writes
 only namespaced RBAC and a private local kubeconfig. Before publishing the config,
-it uses the issued token to check pod access and reject direct Secret, token,
-exec, impersonation and RBAC escalation grants across existing namespaces. An
-operator must be able to list namespaces for that check. A failed check leaves no
-new kubeconfig; inspect existing bindings before retrying. It requests a token lifetime
-of one hour; the API server determines the actual expiration. Re-run bootstrap to
-renew it. `--namespace`, `--cluster`, and `--output-dir` allow an existing scratch
-namespace/cluster; pass the matching `--cluster` and `--config-dir` to the launcher.
-Protect the output directory (0700) and kubeconfig (0600), which holds a bearer
-token. Never attach or paste the kubeconfig in an issue, terminal output or chat.
+it uses the issued token to check pod and pod-log access and reject direct Secret,
+ServiceAccount token, bare pod creation, pod exec/attach/port-forward, ephemeral
+container, service and node proxy, impersonation, RBAC write and RBAC escalation
+grants across existing namespaces. An operator must be able to list namespaces for
+that check. A failed check leaves no new kubeconfig; inspect existing bindings
+before retrying. It requests a token lifetime of one hour and refuses a token the
+API server issued for longer. Re-run bootstrap to renew it. `--namespace`,
+`--cluster`, and `--output-dir` allow an existing scratch namespace/cluster; pass
+the matching `--cluster` and `--config-dir` to the launcher. The output directory
+is made 0700 and the kubeconfig 0600, and an output directory inside a git work
+tree is refused. Never attach or paste the kubeconfig in an issue, terminal output
+or chat.
 
 The launcher replaces inherited kubectl/config selections and marks the session.
 The shared kind helper preserves that identity and fails when it cannot use the
@@ -84,8 +91,11 @@ kubectl auth can-i get secrets -n kube-system
 Expect `yes` only for pods. Broader existing RoleBindings can grant additional
 permissions, so verify the effective identity after installation and whenever
 bindings or namespaces change. Repeat the negative checks in every namespace,
-including `auth can-i impersonate users`, `auth can-i create serviceaccounts/token`,
-`auth can-i create pods/exec`, `auth can-i bind roles` and `auth can-i escalate roles`.
+including `auth can-i impersonate users`, `auth can-i create pods`,
+`auth can-i create serviceaccounts --subresource=token`,
+`auth can-i create pods --subresource=exec` (and `attach`, `portforward`),
+`auth can-i bind roles` and `auth can-i escalate roles`. Name subresources with
+`--subresource`: `auth can-i create pods/exec` asks about a pod named `exec`.
 Resource-name-specific grants and future binding changes still require an operator
 RBAC audit; these probes do not prove a confidentiality boundary. Remove the
 `econgraph-agent` RoleBinding and ServiceAccount in the selected namespace to

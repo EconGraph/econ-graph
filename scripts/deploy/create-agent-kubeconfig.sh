@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Bootstrap the restricted agent identity. Run yourself using an operator config.
-# Usage: create-agent-kubeconfig.sh --operator-kubeconfig FILE --kubectl BIN
+# Usage: create-agent-kubeconfig.sh [--operator-kubeconfig FILE] [--kubectl BIN]
 #        [--namespace NAME] [--cluster NAME] [--output-dir DIR] [--dry-run]
 # Writes a private kubeconfig with a short-lived token; never prints credentials.
+# Without --kubectl/--operator-kubeconfig: KUBECTL/KUBECONFIG, else the kind
+# cluster's kubectl and kubeconfig in ~/.cache/econgraph; never plain kubectl.
 set -euo pipefail
 set +x
 umask 077
@@ -25,20 +27,48 @@ while [ "$#" -gt 0 ]; do
             esac
             shift 2 ;;
         --dry-run) dry_run=true; shift ;;
-        -h|--help) sed -n '2,6p' "$0" | sed 's/^# //'; exit 0 ;;
+        -h|--help) sed -n '2,8p' "$0" | sed 's/^# //'; exit 0 ;;
         *) echo "error: unknown argument $1" >&2; exit 2 ;;
     esac
 done
 [[ "$namespace" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ && ${#namespace} -le 63 ]] || exit 2
 [[ "$cluster" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ && ${#cluster} -le 63 ]] || exit 2
-[ -n "$operator_config" ] && [ -n "$kubectl_bin" ] || {
-    echo 'error: --operator-kubeconfig and --kubectl are required; no credentials are selected implicitly' >&2
+# The kubectl and operator config are chosen as for the other operator scripts
+# (cluster_role_default_kubectl): the flags, else KUBECTL/KUBECONFIG, else the
+# kind cluster's cached kubectl and kubeconfig. Plain kubectl from PATH is
+# refused: on the production host it is the MicroK8s snap wrapper, which
+# ignores the kubeconfig and reaches another cluster.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$ROOT/scripts/deploy/lib/cluster-role.sh"
+[ -z "$kubectl_bin" ] || KUBECTL="$kubectl_bin"
+[ -z "$operator_config" ] || KUBECONFIG="$operator_config"
+unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl || exit 1
+kubectl_bin="${KUBECTL:-}" operator_config="${KUBECONFIG:-}"
+[[ "$kubectl_bin" = /* && -x "$kubectl_bin" ]] || {
+    echo 'error: no kind kubectl found; pass --kubectl with an absolute executable path' >&2
     exit 2
 }
-[[ "$kubectl_bin" = /* && -x "$kubectl_bin" ]] || { echo 'error: --kubectl must be an absolute executable path' >&2; exit 2; }
-KUBECONFIG="$operator_config" require_operator_session
+case "$(readlink -f "$kubectl_bin")" in
+    */snap/* | *microk8s*)
+        echo "error: $kubectl_bin is the MicroK8s kubectl; use the kind cluster's kubectl" >&2
+        exit 2 ;;
+esac
+[ -n "$operator_config" ] || {
+    echo 'error: no operator kubeconfig selected; pass --operator-kubeconfig' >&2
+    exit 2
+}
+export KUBECTL="$kubectl_bin" KUBECONFIG="$operator_config"
+require_operator_session
 output_dir="${output_dir:-${XDG_CACHE_HOME:-$HOME/.cache}/econgraph/agent-${cluster}}"
 [[ "$output_dir" = /* ]] || { echo 'error: --output-dir must be absolute' >&2; exit 2; }
+# The kubeconfig holds a bearer token: never write it where git could commit it.
+probe="$output_dir"
+while [ ! -e "$probe" ] && [ "$probe" != / ]; do probe="$(dirname "$probe")"; done
+if git -C "$probe" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo 'error: --output-dir is inside a git work tree; choose a private directory outside it' >&2
+    exit 2
+fi
 operator() { "$kubectl_bin" --kubeconfig "$operator_config" --context "kind-${cluster}" "$@"; }
 manifest() {
     cat <<YAML
@@ -56,8 +86,12 @@ metadata:
   namespace: ${namespace}
 rules:
 - apiGroups: [""]
-  resources: ["pods", "services", "configmaps", "persistentvolumeclaims", "events"]
+  resources: ["services", "configmaps", "persistentvolumeclaims", "events"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Pods only through their controllers: no bare pod create, update or patch.
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "delete"]
 - apiGroups: [""]
   resources: ["pods/log"]
   verbs: ["get"]
@@ -88,9 +122,16 @@ YAML
 }
 if [ "$dry_run" = true ]; then
     manifest
-    echo "# Would apply RBAC and issue a 1-hour token into ${output_dir}; no cluster contacted."
+    echo "# Would apply RBAC on context kind-${cluster} with ${kubectl_bin} and issue a 1-hour token"
+    echo "# into ${output_dir}; no cluster contacted."
     exit 0
 fi
+# Pin kind-<cluster> in the operator config (its current context stays as it
+# is) and show which cluster that is before writing to it.
+cluster_role_operator_context "kind-${cluster}" || {
+    echo 'Nothing was applied.' >&2
+    exit 1
+}
 # The directory must be owned by the invoking operator, never a symlink.
 [ ! -L "$output_dir" ] || { echo 'error: output directory is a symlink' >&2; exit 1; }
 mkdir -p "$output_dir"
@@ -113,6 +154,18 @@ if len(clusters) != 1:
 token = (work / "token").read_text().strip()
 if not token:
     raise SystemExit("error: token request returned no token")
+# Refuse a token that outlives the request (an API server may extend or cap
+# lifetimes): the claims are read locally and never printed.
+import base64
+import time
+try:
+    payload = token.split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    expires = int(claims["exp"])
+except (IndexError, KeyError, TypeError, ValueError):
+    raise SystemExit("error: the issued token has no readable expiry; nothing was written")
+if expires - time.time() > 3600 + 300:
+    raise SystemExit("error: the API server issued a token valid for more than 1 hour; nothing was written")
 config = {
     "apiVersion": "v1", "kind": "Config",
     "clusters": [{"name": cluster, "cluster": clusters[0]["cluster"]}],
@@ -138,21 +191,43 @@ expect_permission() {
         exit 1
     fi
 }
+# Subresources go in --subresource: `can-i create pods/exec` would ask about a
+# pod *named* exec, not the exec subresource.
 expect_permission yes get pods -n "$namespace"
-while IFS= read -r checked_namespace; do
-    [ -n "$checked_namespace" ] || continue
+expect_permission yes get pods --subresource=log -n "$namespace"
+while IFS= read -r ns; do
+    [ -n "$ns" ] || continue
     for verb in get list watch; do
-        expect_permission no "$verb" secrets -n "$checked_namespace"
+        expect_permission no "$verb" secrets -n "$ns"
     done
-    expect_permission no create serviceaccounts/token -n "$checked_namespace"
-    expect_permission no create pods/exec -n "$checked_namespace"
-    expect_permission no impersonate serviceaccounts -n "$checked_namespace"
-    expect_permission no bind roles -n "$checked_namespace"
-    expect_permission no escalate roles -n "$checked_namespace"
+    expect_permission no create pods -n "$ns"
+    for sub in exec attach portforward; do
+        expect_permission no create pods --subresource="$sub" -n "$ns"
+        expect_permission no get pods --subresource="$sub" -n "$ns"
+    done
+    expect_permission no patch pods --subresource=ephemeralcontainers -n "$ns"
+    expect_permission no get services --subresource=proxy -n "$ns"
+    expect_permission no create serviceaccounts --subresource=token -n "$ns"
+    expect_permission no impersonate serviceaccounts -n "$ns"
+    for kind in roles rolebindings; do
+        for verb in create update patch delete; do
+            expect_permission no "$verb" "$kind.rbac.authorization.k8s.io" -n "$ns"
+        done
+    done
+    expect_permission no bind roles.rbac.authorization.k8s.io -n "$ns"
+    expect_permission no escalate roles.rbac.authorization.k8s.io -n "$ns"
 done <"$work/namespaces"
 expect_permission no impersonate users
-expect_permission no bind clusterroles
-expect_permission no escalate clusterroles
+expect_permission no impersonate groups
+for kind in clusterroles clusterrolebindings; do
+    for verb in create update patch delete; do
+        expect_permission no "$verb" "$kind.rbac.authorization.k8s.io"
+    done
+done
+expect_permission no bind clusterroles.rbac.authorization.k8s.io
+expect_permission no escalate clusterroles.rbac.authorization.k8s.io
+expect_permission no get nodes --subresource=proxy
+expect_permission no create certificatesigningrequests.certificates.k8s.io
 [ ! -L "$output_dir/bin" ] || { echo 'error: output bin directory is a symlink' >&2; exit 1; }
 mkdir -p "$output_dir/bin"
 ln -sfn "$kubectl_bin" "$output_dir/bin/kubectl"
