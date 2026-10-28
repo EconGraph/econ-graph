@@ -17,6 +17,7 @@ use econ_graph_core::database::{
 use econ_graph_core::error::{DATA_PLANE_UNAVAILABLE, DATA_PLANE_UNAVAILABLE_MESSAGE};
 use econ_graph_core::models::User;
 use econ_graph_core::test_utils::ScratchDatabase;
+use econ_graph_services::services::collaboration_service::CollaborationService;
 use econ_graph_services::services::series_check::DataPlaneClient;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -414,10 +415,15 @@ async fn without_a_data_database_data_fields_are_served_remotely() {
         1
     );
 
-    // App operations: an annotation (its series can't be checked here), its listing, users,
-    // and systemHealth with no queue count.
-    let created = ok(run(app, None, &user, false, &create_annotation(&series_id)).await);
-    assert_eq!(created["createAnnotation"]["seriesId"], series_id.as_str());
+    // App operations. With neither a data database nor a data plane no series' catalog can be
+    // checked, so an annotation on a series is refused and none are listed; users and
+    // systemHealth (with no queue count) still answer.
+    let refused = run(app, None, &user, false, &create_annotation(&series_id)).await;
+    assert_eq!(refused.errors.len(), 1, "{:?}", refused.errors);
+    assert_eq!(
+        refused.errors[0].message,
+        format!("Series not found: {series_id}")
+    );
     let listed = ok(run(
         app,
         None,
@@ -426,10 +432,7 @@ async fn without_a_data_database_data_fields_are_served_remotely() {
         &format!(r#"{{ annotationsForSeries(seriesId: "{series_id}") {{ title }} }}"#),
     )
     .await);
-    assert_eq!(
-        listed["annotationsForSeries"],
-        json!([{ "title": "Split" }])
-    );
+    assert_eq!(listed["annotationsForSeries"], json!([]));
     let health = ok(run(
         app,
         None,
@@ -544,8 +547,22 @@ async fn an_unavailable_data_plane_refuses_the_annotation() {
     let app = &db.app;
     let user = make_user(app, "author").await;
     let series_id = uuid::Uuid::new_v4().to_string();
-    // An annotation made earlier (by a backend that doesn't check series).
-    ok(run(app, None, &user, false, &create_annotation(&series_id)).await);
+    // An annotation stored earlier, straight through the service (which checks no catalog).
+    CollaborationService::new(app.0.clone())
+        .create_annotation(
+            user.id,
+            uuid::Uuid::parse_str(&series_id).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            None,
+            "Split".to_string(),
+            "Note".to_string(),
+            "note".to_string(),
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("store an annotation");
 
     let slow = wiremock::MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::method("POST"))

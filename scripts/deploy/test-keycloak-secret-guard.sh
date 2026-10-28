@@ -4,7 +4,8 @@
 # Tests for scripts/deploy/lib/keycloak-secret.sh against a stub kubectl, no cluster:
 #   - a Secret econ-graph-keycloak without anonymous-client-secret stops the deploy and
 #     names scripts/deploy/create-secrets.sh; a failed read stops it too;
-#   - a Secret with the key, or no Secret at all (create-secrets.sh writes it in full), passes;
+#   - a Secret with the key, or no Secret at all (create-secrets.sh writes it in full), passes,
+#     but a lookup that fails (the cluster can't be asked) stops the deploy;
 #   - --dry-run contacts nothing;
 #   - the guard only reads, and deploy.sh runs it before it applies anything.
 #
@@ -19,12 +20,15 @@ fail() {
   failures=$((failures + 1))
 }
 
-# The stub cluster. STUB_SECRET: missing, without-key, with-key or read-fails.
+# The stub cluster. STUB_SECRET: missing, without-key, with-key, lookup-fails (the cluster
+# can't be asked at all) or read-fails (the Secret is found but its key can't be read).
 STUB_LOG=""
 kubectl() {
   STUB_LOG+="kubectl $*"$'\n'
   case "$STUB_SECRET:$*" in
-    missing:*) return 1 ;;
+    lookup-fails:*) return 1 ;;
+    missing:*--ignore-not-found*) return 0 ;;
+    *--ignore-not-found*) echo secret/econ-graph-keycloak ;;
     read-fails:*jsonpath*) return 1 ;;
     with-key:*jsonpath*) printf 'c2VjcmV0' ;;
     *) return 0 ;;
@@ -47,6 +51,7 @@ check() {
 
 check "Secret without the key stops the deploy" without-key false 1 "scripts/deploy/create-secrets.sh"
 check "a failed read stops the deploy" read-fails false 1 "nothing was applied"
+check "a failed lookup stops the deploy, not passes as missing" lookup-fails false 1 "is the cluster reachable"
 check "Secret with the key passes" with-key false 0
 check "no Secret passes" missing false 0
 check "dry run passes" without-key true 0 "[dry-run]"
@@ -55,7 +60,7 @@ check "dry run passes" without-key true 0 "[dry-run]"
 STUB_SECRET=without-key DRY_RUN=true STUB_LOG=""
 require_anonymous_client_secret >/dev/null
 [ -z "$STUB_LOG" ] || fail "dry run contacted the cluster: $STUB_LOG"
-for secret in missing without-key with-key read-fails; do
+for secret in missing without-key with-key read-fails lookup-fails; do
   STUB_SECRET="$secret" DRY_RUN=false STUB_LOG=""
   require_anonymous_client_secret >/dev/null 2>&1 || true
   if grep -vE '^kubectl -n econ-graph get secret econ-graph-keycloak' <<<"$STUB_LOG" | grep -q .; then

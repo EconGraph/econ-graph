@@ -4,6 +4,7 @@
 use crate::{OidcVerifier, Role, VerifyError};
 use serde::Deserialize;
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -88,6 +89,36 @@ pub(crate) struct AnonymousPermissions {
     /// Readers hold this lock only to copy the grant set; renewal never holds it across a
     /// request to Keycloak.
     state: RwLock<Grants>,
+    stats: RenewalStats,
+}
+
+/// Renewal counters for metrics, updated by every attempt.
+#[derive(Default)]
+struct RenewalStats {
+    successes: AtomicU64,
+    outages: AtomicU64,
+    refusals: AtomicU64,
+    consecutive_failures: AtomicU64,
+    task_running: AtomicBool,
+}
+
+/// A snapshot of anonymous grant renewal, for metrics and alerts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnonymousRenewalStats {
+    /// Renewals that fetched a grant set.
+    pub successes: u64,
+    /// Renewals that failed because Keycloak could not be asked or answered unusably.
+    pub outages: u64,
+    /// Renewals Keycloak refused, or whose token failed verification.
+    pub refusals: u64,
+    /// Failed renewals since the last success.
+    pub consecutive_failures: u64,
+    /// Catalog roles anonymous callers hold right now.
+    pub current_grants: u64,
+    /// Whether expired grants are being served (only while renewal fails, within the window).
+    pub serving_stale: bool,
+    /// Whether the background refresh task is running.
+    pub task_running: bool,
 }
 
 /// The current grant set. Every successful renewal replaces it wholesale.
@@ -144,6 +175,7 @@ impl OidcVerifier {
                 .build()
                 .expect("HTTP client with default TLS settings"),
             state: RwLock::new(Grants::default()),
+            stats: RenewalStats::default(),
         });
         self
     }
@@ -160,13 +192,42 @@ impl OidcVerifier {
         }
     }
 
+    /// Renewal counters and the current grant count; `None` without anonymous grants.
+    pub fn anonymous_renewal_stats(&self) -> Option<AnonymousRenewalStats> {
+        let provider = self.anonymous.as_ref()?;
+        let now = Instant::now();
+        let current_grants = provider.current(now).len() as u64;
+        let serving_stale = {
+            let state = provider.state.read().unwrap_or_else(|e| e.into_inner());
+            state.valid_until.is_some_and(|expiry| expiry <= now) && current_grants > 0
+        };
+        let stats = &provider.stats;
+        Some(AnonymousRenewalStats {
+            successes: stats.successes.load(Ordering::Relaxed),
+            outages: stats.outages.load(Ordering::Relaxed),
+            refusals: stats.refusals.load(Ordering::Relaxed),
+            consecutive_failures: stats.consecutive_failures.load(Ordering::Relaxed),
+            current_grants,
+            serving_stale,
+            task_running: stats.task_running.load(Ordering::Relaxed),
+        })
+    }
+
     /// Start the one background task that renews anonymous grants: at once, then when three
     /// quarters of each grant set's lifetime has passed, and every 10 seconds while renewal
     /// fails. Requests never wait for it. `None` when anonymous grants are not configured.
+    ///
+    /// The task never ends on its own. If it does end (a panic, or an abort), it logs an error
+    /// and `task_running` in [`OidcVerifier::anonymous_renewal_stats`] turns false; anonymous
+    /// grants then lapse at their expiry.
     pub fn spawn_anonymous_refresh(self: &Arc<Self>) -> Option<tokio::task::JoinHandle<()>> {
-        self.anonymous.as_ref()?;
+        let provider = self.anonymous.as_ref()?;
+        provider.stats.task_running.store(true, Ordering::Relaxed);
         let verifier = Arc::clone(self);
+        // Moved into the task, so it is dropped however the task ends, even before it first runs.
+        let running = TaskRunning(Arc::clone(self));
         Some(tokio::spawn(async move {
+            let _running = running;
             loop {
                 let wait = match verifier.renew_anonymous_grants().await {
                     Renewal::Renewed(valid_for) => (valid_for * 3 / 4).max(Duration::from_secs(1)),
@@ -187,6 +248,21 @@ impl OidcVerifier {
         let started = Instant::now();
         let result = provider.fetch(self).await;
         let mut state = provider.state.write().unwrap_or_else(|e| e.into_inner());
+        let stats = &provider.stats;
+        match &result {
+            Ok(_) => {
+                stats.successes.fetch_add(1, Ordering::Relaxed);
+                stats.consecutive_failures.store(0, Ordering::Relaxed);
+            }
+            Err(error) => {
+                match error {
+                    RenewalError::Outage => &stats.outages,
+                    RenewalError::Refused => &stats.refusals,
+                }
+                .fetch_add(1, Ordering::Relaxed);
+                stats.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+            }
+        }
         match result {
             Ok((roles, valid_for)) => {
                 // Measured from BEFORE the HTTP requests, never extending the token lifetime.
@@ -224,6 +300,21 @@ impl OidcVerifier {
                 Renewal::Failed
             }
         }
+    }
+}
+
+/// Marks the refresh task stopped, loudly, whenever it ends.
+struct TaskRunning(Arc<OidcVerifier>);
+
+impl Drop for TaskRunning {
+    fn drop(&mut self) {
+        if let Some(provider) = &self.0.anonymous {
+            provider.stats.task_running.store(false, Ordering::Relaxed);
+        }
+        tracing::error!(
+            "The anonymous catalog grant refresh task stopped; anonymous grants will lapse at \
+             their expiry. Restart the backend."
+        );
     }
 }
 
@@ -739,5 +830,94 @@ mod tests {
         assert!(Arc::new(issuer.verifier())
             .spawn_anonymous_refresh()
             .is_none());
+    }
+
+    /// However long the token lives, a grant set lasts at most five minutes, so a revocation
+    /// is fetched within that bound.
+    #[tokio::test]
+    async fn grant_lifetime_is_capped_at_five_minutes() {
+        let issuer = TestIssuer::start().await;
+        let mut claims = issuer.claims(Uuid::new_v4(), &["catalog.fred:read"]);
+        claims["exp"] = json!(crate::testkit::now() + 3600);
+        let (verifier, _, _, task) = provider(
+            json!({"access_token":issuer.sign(&claims),"expires_in":3600}),
+            &issuer,
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(
+            verifier.renew_anonymous_grants().await,
+            Renewal::Renewed(MAX_LIFETIME)
+        );
+        assert_eq!(MAX_LIFETIME, Duration::from_secs(300));
+        let provider = verifier.anonymous.as_ref().unwrap();
+        assert!(
+            provider.state.read().unwrap().valid_until.unwrap()
+                <= Instant::now() + Duration::from_secs(300)
+        );
+        task.abort();
+    }
+
+    /// The counters metrics read: outcomes, failures since the last success, the grants held
+    /// now, and whether stale grants are being served.
+    #[tokio::test]
+    async fn renewal_stats_count_outcomes_and_the_current_grants() {
+        let issuer = TestIssuer::start().await;
+        let token = issuer.mint_token(Uuid::new_v4(), &["catalog.fred:read", "catalog.bea:read"]);
+        let (mut verifier, response, _, task) = provider(
+            json!({"access_token":token,"expires_in":300}),
+            &issuer,
+            Duration::from_secs(600),
+        )
+        .await;
+        let stats = |v: &OidcVerifier| v.anonymous_renewal_stats().unwrap();
+        assert_eq!(stats(&verifier).current_grants, 0);
+        verifier.renew_anonymous_grants().await;
+        let after_success = stats(&verifier);
+        assert_eq!(
+            (after_success.successes, after_success.current_grants),
+            (1, 2)
+        );
+        *response.write().unwrap() = json!({"status":401});
+        verifier.renew_anonymous_grants().await;
+        let after_refusal = stats(&verifier);
+        assert_eq!(
+            (after_refusal.refusals, after_refusal.consecutive_failures),
+            (1, 1)
+        );
+        assert_eq!(after_refusal.current_grants, 0);
+        *response.write().unwrap() = json!({"access_token":token,"expires_in":300});
+        verifier.renew_anonymous_grants().await;
+        expire(&verifier, Duration::from_millis(1));
+        take_keycloak_down(&mut verifier);
+        verifier.renew_anonymous_grants().await;
+        verifier.renew_anonymous_grants().await;
+        let stale = stats(&verifier);
+        assert_eq!((stale.successes, stale.outages), (2, 2));
+        assert_eq!(stale.consecutive_failures, 2);
+        assert!(stale.serving_stale);
+        assert_eq!(stale.current_grants, 2);
+        assert!(!stale.task_running);
+        assert!(issuer.verifier().anonymous_renewal_stats().is_none());
+        task.abort();
+    }
+
+    /// The refresh task reports itself running, and not running once it has ended.
+    #[tokio::test]
+    async fn a_stopped_refresh_task_is_reported() {
+        let issuer = TestIssuer::start().await;
+        let token = issuer.mint_token(Uuid::new_v4(), &["catalog.fred:read"]);
+        let (verifier, _, _, task) = provider(
+            json!({"access_token":token,"expires_in":300}),
+            &issuer,
+            Duration::ZERO,
+        )
+        .await;
+        let refresh = verifier.spawn_anonymous_refresh().unwrap();
+        assert!(verifier.anonymous_renewal_stats().unwrap().task_running);
+        refresh.abort();
+        assert!(refresh.await.unwrap_err().is_cancelled());
+        assert!(!verifier.anonymous_renewal_stats().unwrap().task_running);
+        task.abort();
     }
 }

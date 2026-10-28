@@ -67,7 +67,7 @@ impl SeriesCheck {
     /// A series in an unreadable catalog answers `false`, exactly like a missing one, so the
     /// answer reveals nothing about catalogs the caller can't read. Through the data plane, the
     /// plane's own grants for this request apply first (`seriesCatalog` is null when they deny).
-    /// `true` for [`SeriesCheck::Skip`], which has no series to check.
+    /// `false` for [`SeriesCheck::Skip`]: with no series to check, no catalog grant can be applied.
     ///
     /// # Errors
     /// As for [`SeriesCheck::series_exists`].
@@ -81,7 +81,7 @@ impl SeriesCheck {
                 crate::services::series_service::series_catalog(pool, id).await?
             }
             SeriesCheck::DataPlane(client) => client.series_catalog(id).await?,
-            SeriesCheck::Skip => return Ok(true),
+            SeriesCheck::Skip => return Ok(false),
         };
         Ok(catalog.is_some_and(|catalog| can_read(&catalog)))
     }
@@ -473,13 +473,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skip_accepts_every_series() {
+    async fn skip_accepts_every_series_but_none_against_catalog_grants() {
         assert!(SeriesCheck::Skip
             .series_exists(Uuid::new_v4())
             .await
             .unwrap());
-        assert!(SeriesCheck::Skip
-            .readable_series_exists(Uuid::new_v4(), |_| false)
+        // No catalog can be checked, so even a caller holding every catalog is refused.
+        assert!(!SeriesCheck::Skip
+            .readable_series_exists(Uuid::new_v4(), |_| true)
             .await
             .unwrap());
     }

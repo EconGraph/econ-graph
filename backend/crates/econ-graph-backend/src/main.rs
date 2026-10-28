@@ -178,10 +178,13 @@ impl Databases {
 
 /// Where `createAnnotation` checks that a new annotation's series exists, logged in one line at
 /// startup: in the data database when the backend has one; otherwise through the data plane at
-/// `DATA_GRAPHQL_URL` (the returned client); otherwise not at all.
+/// `DATA_GRAPHQL_URL` (the returned client). With neither, no series can be checked against
+/// catalog grants, so annotations on series are refused: startup fails when sign-in is on (where
+/// annotations exist), and otherwise logs a warning.
 fn data_plane_for_series_check(
     has_data_database: bool,
     config: Option<DataGraphqlConfig>,
+    sign_in_enabled: bool,
 ) -> AppResult<Option<Arc<DataPlaneClient>>> {
     match (has_data_database, config) {
         (true, config) => {
@@ -205,10 +208,16 @@ fn data_plane_for_series_check(
             );
             Ok(Some(Arc::new(client)))
         }
+        (false, None) if sign_in_enabled => Err(AppError::ConfigError(
+            "Sign-in is on but neither DATA_DATABASE_URL nor DATA_GRAPHQL_URL is set: annotations \
+             could not be checked against catalog grants. Set DATA_DATABASE_URL, or \
+             DATA_GRAPHQL_URL to the data plane's GraphQL endpoint"
+                .into(),
+        )),
         (false, None) => {
             tracing::warn!(
-                "Neither DATA_DATABASE_URL nor DATA_GRAPHQL_URL is set: createAnnotation does not \
-                 check that the series exists"
+                "Neither DATA_DATABASE_URL nor DATA_GRAPHQL_URL is set: annotations on series are \
+                 refused, since no series can be checked against catalog grants"
             );
             Ok(None)
         }
@@ -1041,11 +1050,21 @@ async fn main() -> AppResult<()> {
         })
     });
     // Anonymous catalog grants are renewed in the background; requests only read them.
-    if verifier
+    // The task never ends on its own; if it does, say so loudly (it also logs, and
+    // anonymous_grant_refresh_task_running drops to 0 for the alert).
+    if let Some(refresh) = verifier
         .as_ref()
-        .is_some_and(|verifier| verifier.spawn_anonymous_refresh().is_some())
+        .and_then(|verifier| verifier.spawn_anonymous_refresh())
     {
         info!("🔑 Anonymous catalog grants: renewing in the background");
+        metrics::watch_anonymous_grants(Arc::clone(verifier.as_ref().expect("spawned above")));
+        tokio::spawn(async move {
+            let ended = refresh.await;
+            tracing::error!(
+                "Anonymous catalog grant refresh task ended ({ended:?}); anonymous visitors lose \
+                 catalog access when the current grants expire. Restart the backend."
+            );
+        });
     }
 
     info!("📊 Configuration loaded successfully:");
@@ -1082,11 +1101,12 @@ async fn main() -> AppResult<()> {
             e
         })?;
     let data_plane =
-        data_plane_for_series_check(databases.data.is_some(), data_graphql).map_err(|e| {
-            e.log_with_context("Application startup data plane client");
-            eprintln!("❌ {}", e);
-            e
-        })?;
+        data_plane_for_series_check(databases.data.is_some(), data_graphql, verifier.is_some())
+            .map_err(|e| {
+                e.log_with_context("Application startup data plane client");
+                eprintln!("❌ {}", e);
+                e
+            })?;
 
     // Create GraphQL schema
     let schema = econ_graph_graphql::graphql::schema::create_schema_with_data_plane(
@@ -2176,6 +2196,7 @@ mod route_tests {
 mod series_check_startup_tests {
     use super::data_plane_for_series_check;
     use econ_graph_core::config::DataGraphqlConfig;
+    use econ_graph_core::error::AppError;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -2215,25 +2236,42 @@ mod series_check_startup_tests {
         }
     }
 
-    /// With neither a data database nor `DATA_GRAPHQL_URL`, the check is skipped and startup
-    /// says so in one line.
+    /// With neither a data database nor `DATA_GRAPHQL_URL` and sign-in off, startup goes on
+    /// and says in one line that annotations on series are refused.
     #[test]
-    fn neither_skips_the_check_with_one_log_line() {
-        let (data_plane, lines) = logged(|| data_plane_for_series_check(false, None));
+    fn neither_without_sign_in_warns_in_one_line() {
+        let (data_plane, lines) = logged(|| data_plane_for_series_check(false, None, false));
         assert!(data_plane.unwrap().is_none());
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("WARN"), "{lines:?}");
         assert!(
-            lines[0].contains("createAnnotation does not check that the series exists"),
+            lines[0].contains("annotations on series are refused"),
             "{lines:?}"
         );
+    }
+
+    /// With sign-in on, an app-only backend without `DATA_GRAPHQL_URL` could not apply catalog
+    /// grants to annotations, so startup refuses.
+    #[test]
+    fn neither_with_sign_in_refuses_to_start() {
+        let error = data_plane_for_series_check(false, None, true).unwrap_err();
+        assert!(matches!(error, AppError::ConfigError(_)), "{error:?}");
+        assert!(error.to_string().contains("DATA_GRAPHQL_URL"), "{error}");
+        for (data, url) in [
+            (true, None),
+            (false, Some(config())),
+            (true, Some(config())),
+        ] {
+            assert!(data_plane_for_series_check(data, url, true).is_ok());
+        }
     }
 
     /// Without a data database, `DATA_GRAPHQL_URL` gives the data plane client, logged with
     /// its URL and `Host`.
     #[test]
     fn a_data_plane_url_is_used_without_a_data_database() {
-        let (data_plane, lines) = logged(|| data_plane_for_series_check(false, Some(config())));
+        let (data_plane, lines) =
+            logged(|| data_plane_for_series_check(false, Some(config()), true));
         let data_plane = data_plane.unwrap().expect("a data plane client");
         assert_eq!(data_plane.log_url(), "http://gateway.example/data/graphql");
         assert_eq!(data_plane.host(), Some("br-1.localhost"));
@@ -2249,7 +2287,7 @@ mod series_check_startup_tests {
     #[test]
     fn a_data_database_is_preferred() {
         for config in [None, Some(config())] {
-            let (data_plane, lines) = logged(|| data_plane_for_series_check(true, config));
+            let (data_plane, lines) = logged(|| data_plane_for_series_check(true, config, true));
             assert!(data_plane.unwrap().is_none());
             assert_eq!(lines.len(), 1, "{lines:?}");
             assert!(lines[0].contains("in the data database"), "{lines:?}");

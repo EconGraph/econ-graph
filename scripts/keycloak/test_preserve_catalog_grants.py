@@ -24,6 +24,10 @@ class CatalogPolicyTests(unittest.TestCase):
             self.prefix + "/users/reader/role-mappings": {"realmMappings": []},
             self.prefix + "/users/reader/groups": [],
             self.prefix + "/clients/anon/scope-mappings/clients/api": [],
+            self.prefix + "/clients/api/roles?briefRepresentation=false": [
+                {"name": role["name"], "composite": False}
+                for role in self.realm["roles"]["client"]["econ-graph-api"]
+            ],
         }
         for role in self.realm["roles"]["realm"]:
             path = self.prefix + "/roles/" + role["name"]
@@ -87,6 +91,30 @@ class CatalogPolicyTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as raised:
                 self.merge()
             self.assertIn(shown, str(raised.exception))
+
+    def test_a_composite_catalog_read_role_fails_the_deploy(self):
+        # admin.users:delete nested under catalog.fred:read would reach every account through
+        # catalog-public, however deep the nesting: a catalog read must not be a composite.
+        roles = self.state[self.prefix + "/clients/api/roles?briefRepresentation=false"]
+        fred = next(role for role in roles if role["name"] == "catalog.fred:read")
+        fred["composite"] = True
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("catalog.fred:read", str(raised.exception))
+        self.assertNotIn("catalog.bea:read", str(raised.exception))
+        fred["composite"] = False
+        # Other roles may be composites, as the realm file's own staff roles are.
+        next(role for role in roles if not role["name"].startswith("catalog."))["composite"] = True
+        self.merge()
+
+    def test_a_composite_catalog_read_in_the_realm_file_fails_even_for_a_new_realm(self):
+        self.state[self.prefix] = None
+        fred = next(role for role in self.realm["roles"]["client"]["econ-graph-api"]
+                    if role["name"] == "catalog.fred:read")
+        fred.update(composite=True, composites={"client": {"econ-graph-api": ["admin.users:delete"]}})
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("catalog.fred:read", str(raised.exception))
 
     def test_realm_file_public_policy_is_checked_too(self):
         self.state[self.prefix] = None  # a new realm seeds the declared defaults

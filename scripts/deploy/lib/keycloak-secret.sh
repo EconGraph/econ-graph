@@ -14,12 +14,18 @@ require_anonymous_client_secret() {
     echo "[dry-run] check that Secret econ-graph-keycloak has the key anonymous-client-secret"
     return 0
   fi
-  if ! kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
+  # A missing Secret answers empty; only a failed lookup (cluster unreachable, no access)
+  # fails, and stops the deploy rather than passing as "missing".
+  if ! value="$(kubectl -n econ-graph get secret econ-graph-keycloak --ignore-not-found -o name)"; then
+    echo "❌ Couldn't look up Secret econ-graph-keycloak (is the cluster reachable?); nothing was applied." >&2
+    return 1
+  fi
+  if [ -z "$value" ]; then
     return 0
   fi
   if ! value="$(kubectl -n econ-graph get secret econ-graph-keycloak \
       -o 'jsonpath={.data.anonymous-client-secret}')"; then
-    echo "❌ Couldn't read Secret econ-graph-keycloak; nothing was applied." >&2
+    echo "❌ Couldn't read Secret econ-graph-keycloak (is the cluster reachable?); nothing was applied." >&2
     return 1
   fi
   if [ -z "$value" ]; then

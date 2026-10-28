@@ -50,8 +50,9 @@ pub async fn require_source(ctx: &Context<'_>, source: Uuid) -> Result<()> {
     }
 }
 
-/// Check a series' parent catalog before returning metadata, existence or observations.
-pub async fn require_series(ctx: &Context<'_>, series: Uuid) -> Result<()> {
+/// `false` only for a series that exists in a catalog the caller can't read, which callers then
+/// answer exactly as for an unknown series.
+pub async fn series_readable_or_missing(ctx: &Context<'_>, series: Uuid) -> Result<bool> {
     let pool = data_pool(ctx)?;
     let mut conn = pool.get().await?;
     let source = economic_series::table
@@ -61,10 +62,10 @@ pub async fn require_series(ctx: &Context<'_>, series: Uuid) -> Result<()> {
         .await
         .optional()?;
     drop(conn);
-    match source {
-        Some(source) => require_source(ctx, source).await,
-        None => Ok(()),
-    }
+    Ok(match source {
+        Some(source) => allowed_sources(ctx).await?.contains(&source),
+        None => true,
+    })
 }
 
 /// Whether the caller may read the catalog with this data source name.
@@ -80,8 +81,8 @@ fn can_read_catalog_named(auth: Option<&GraphQLContext>, name: &str) -> bool {
 /// Whether the series exists and the caller may read its catalog, checked in the data database
 /// or, on a backend without one, through the data plane (whose own grants for this request also
 /// apply). A series the caller can't read answers `false`, exactly like a missing one, so
-/// annotation paths reveal nothing about other catalogs. `true` only on a backend with neither
-/// a data database nor a data plane, where nothing can be checked.
+/// annotation paths reveal nothing about other catalogs. `false` on a backend with neither a data
+/// database nor a data plane, where no catalog can be checked (startup refuses that with sign-in on).
 ///
 /// # Errors
 /// `DATA_PLANE_UNAVAILABLE` when the data plane can't answer, or a database error.

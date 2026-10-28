@@ -97,12 +97,37 @@ def check_public_declaration(role):
                            % (PUBLIC_ROLE, API_CLIENT))
 
 
+def composite_catalog_reads(roles):
+    """Names of catalog.*:read roles that are composites. Signed-in accounts and the anonymous
+    reader inherit catalog reads through catalog-public, so a catalog read holding any other
+    role, at any depth, would hand that role to every account. A non-composite role nests
+    nothing, which rules out every depth at once."""
+    return sorted(role["name"] for role in roles if catalog_read(role["name"]) and (
+        role.get("composite") or role.get("composites")))
+
+
+def check_catalog_reads_are_plain(realm, get, prefix, api_id):
+    """Refuse when a catalog read role, in the realm file or live in Keycloak, is a composite."""
+    declared = composite_catalog_reads(realm.get("roles", {}).get("client", {}).get(API_CLIENT, []))
+    if declared:
+        raise RuntimeError("The realm file's catalog read roles may not be composites: "
+                           + ", ".join(declared))
+    if api_id is None:
+        return
+    live = composite_catalog_reads(required(
+        get(prefix + "/clients/" + api_id + "/roles?briefRepresentation=false")))
+    if live:
+        raise RuntimeError("Catalog read roles may not be composites; remove their associated "
+                           "roles in Keycloak before deploying: " + ", ".join(live))
+
+
 def merge_catalog_policy(realm, get):
     """Merge current operator policy into a rendered import, seeding defaults only once."""
     for role in realm.get("roles", {}).get("realm", []):
         if role["name"] == PUBLIC_ROLE:
             check_public_declaration(role)
     prefix = "/admin/realms/" + urllib.parse.quote(realm["realm"], safe="")
+    check_catalog_reads_are_plain(realm, get, prefix, None)
     observed = get(prefix)
     observed_attrs = (observed or {}).get("attributes") or {}
     attributes = dict(observed_attrs)
@@ -136,6 +161,7 @@ def merge_catalog_policy(realm, get):
     seed_defaults = seed["policy"]
     api_clients = required(get(prefix + "/clients?clientId=" + API_CLIENT))
     api_id = api_clients[0]["id"] if api_clients else None
+    check_catalog_reads_are_plain(realm, get, prefix, api_id)
 
     # Keep catalog-specific edges on managed composites. Their non-catalog behavior
     # remains configuration as code. catalog-public itself belongs entirely to operators.

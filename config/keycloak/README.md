@@ -165,7 +165,9 @@ MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
 The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
 the `econgraph-anonymous` service account inherit it, so it may hold only `econ-graph-api`
 `catalog.*:read` roles: a deploy stops, before importing anything, while it holds any other
-composite (the error names each one to remove). Remove a catalog read role from
+composite (the error names each one to remove). For the same reason no `catalog.*:read` role
+may itself be a composite, at any depth: a role nested under one would reach every account. A
+deploy stops while one is, live or in the realm file. Remove a catalog read role from
 `catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
 Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
@@ -196,9 +198,20 @@ requests read the current grant set from memory and never wait for Keycloak. The
 startup (until it succeeds, anonymous visitors have no catalog access), then again when three
 quarters of each grant set's lifetime has passed, and every ten seconds while renewal fails. A
 grant set lasts no longer than its token's absolute expiry, `expires_in`, or five minutes,
-whichever is shortest. A successful renewal replaces the grant set at once, so a revocation in
-Keycloak reaches anonymous visitors at the next renewal, within about four minutes. Keycloak refusing the client (disabled, or a wrong secret) or issuing a token
-that fails verification drops the grants at once.
+whichever is shortest.
+
+A change in Keycloak reaches anonymous visitors at the backend's next renewal, not at once: with
+five-minute grants, up to about 225 seconds later (three quarters of 300 seconds). The renewal
+replaces the grant set entirely, so a revocation, or a narrower grant, applies from that moment.
+Disabling the anonymous client, or rotating its secret, also takes effect at the next renewal:
+Keycloak's refusal then drops the grants instead of keeping them, whatever the stale setting
+below. To make a revocation take effect immediately, make it in Keycloak, then restart the
+backend. A new process serves no anonymous catalog data until its first fetch succeeds, so once
+the rollout finishes, every backend serves the revoked grant set:
+
+```bash
+kubectl -n econ-graph rollout restart deployment/econ-graph-backend
+```
 
 During a Keycloak outage (no answer, a timeout, or a server error), unexpired grants stay in use.
 What happens after they expire depends on `ANONYMOUS_GRANTS_STALE_MAX_SECS`:
@@ -210,8 +223,13 @@ What happens after they expire depends on `ANONYMOUS_GRANTS_STALE_MAX_SECS`:
   during the outage takes effect as soon as Keycloak answers again.
 
 A stale window delays only revocations that can't be fetched; it never extends grants past a
-successful renewal. Disabling the anonymous client counts as a refusal, not an outage, so it
-revokes anonymous access at once whatever the setting.
+successful renewal. A refusal from Keycloak is not an outage, so it never opens the window.
+
+The backend reports renewal on `/metrics` (`anonymous_grant_renewals_total{outcome}`,
+`anonymous_grant_renewal_consecutive_failures`, `anonymous_catalog_grants`,
+`anonymous_grants_serving_stale`, `anonymous_grant_refresh_task_running`), and
+`k8s/monitoring/prometheus-rules-auth.yaml` alerts after six failed renewals in a row, after ten
+minutes with no anonymous grants, and when the renewal task stops.
 
 User role removals take effect when existing five-minute access tokens expire, plus the
 verifier's 30-second clock tolerance. No permission check calls Keycloak.

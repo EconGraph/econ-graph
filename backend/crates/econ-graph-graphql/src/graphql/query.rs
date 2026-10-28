@@ -300,10 +300,17 @@ impl Query {
         let id =
             Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
-        if let Some(dataset) = &dataset {
-            catalogs::require_source(ctx, dataset.source_id).await?;
+        // A dataset in a catalog the caller can't read is null, exactly like an unknown id.
+        let Some(dataset) = dataset else {
+            return Ok(None);
+        };
+        if !catalogs::allowed_sources(ctx)
+            .await?
+            .contains(&dataset.source_id)
+        {
+            return Ok(None);
         }
-        Ok(dataset.map(crate::graphql::datasets::DatasetType))
+        Ok(Some(crate::graphql::datasets::DatasetType(dataset)))
     }
 
     /// Get data points for a specific series with filtering and transformation, one page at a
@@ -336,7 +343,20 @@ impl Query {
         // A cursor is the number of matching points up to and including the one it names, so
         // `after: endCursor` continues where the last page stopped.
         let offset = parse_offset_cursor(after.as_deref())?;
-        catalogs::require_series(ctx, series_uuid).await?;
+        // A series in a catalog the caller can't read answers exactly like an unknown id: an
+        // empty page at this offset.
+        if !catalogs::series_readable_or_missing(ctx, series_uuid).await? {
+            return Ok(DataPointConnection {
+                nodes: Vec::new(),
+                total_count: 0,
+                page_info: PageInfo {
+                    has_next_page: false,
+                    has_previous_page: offset > 0,
+                    start_cursor: None,
+                    end_cursor: Some(offset.to_string()),
+                },
+            });
+        }
 
         let transformation =
             transformation.filter(|&transformation| transformation != DataTransformationType::None);

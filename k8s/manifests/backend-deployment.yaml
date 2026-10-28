@@ -83,6 +83,9 @@ spec:
               key: app-database-url
         # Optional: a namespace without a data database has no data-database-url, and the
         # backend then serves data fields as DATA_SERVED_REMOTELY (deploy.sh skips crawler-migrate).
+        # Such a namespace must also set DATA_GRAPHQL_URL (the shared data plane), or the
+        # backend refuses to start: with sign-in on it could not apply catalog grants to
+        # annotations (backend/README.md).
         - name: DATA_DATABASE_URL
           valueFrom:
             secretKeyRef:

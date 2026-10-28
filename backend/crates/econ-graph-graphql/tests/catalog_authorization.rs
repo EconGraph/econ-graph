@@ -46,6 +46,19 @@ async fn seed(pool: &DatabasePool, source: DataSource, suffix: &str) -> (Uuid, U
     )
     .await
     .unwrap();
+    // Six observations, so a denied seriesData page would differ from a missing series' one.
+    {
+        use diesel_async::RunQueryDsl;
+        diesel::sql_query(
+            "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
+             SELECT $1, make_date(2023, m, 1), m, make_date(2023, m, 15), TRUE \
+             FROM generate_series(1, 6) AS m",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(series.id)
+        .execute(&mut pool.get().await.unwrap())
+        .await
+        .unwrap();
+    }
     (series.id, dataset)
 }
 
@@ -104,8 +117,10 @@ async fn catalog_grants_cover_discovery_pagination_and_direct_reads_without_iden
 
     let allowed = execute(&pool, anonymous(&fred_only), &format!(r#"{{ series(id:"{fred_series}") {{ id recentDataPoints {{ id }} }} seriesExists(id:"{fred_series}") seriesData(seriesId:"{fred_series}") {{ totalCount }} }}"#)).await;
     assert!(allowed.errors.is_empty(), "{:?}", allowed.errors);
-    // Point lookups by id answer a denied series exactly as a missing one: no existence oracle.
+    // Lookups by id answer a series or dataset the caller can't read exactly as a missing one,
+    // data and errors alike: no existence oracle.
     let missing = Uuid::new_v4();
+    let page = "{ totalCount nodes { id } pageInfo { hasNextPage hasPreviousPage startCursor endCursor } }";
     for (denied, absent) in [
         (
             format!(r#"{{ series(id:"{bea_series}") {{ id }} }}"#),
@@ -133,24 +148,44 @@ async fn catalog_grants_cover_discovery_pagination_and_direct_reads_without_iden
                 bea.name
             ),
         ),
+        (
+            format!(r#"{{ seriesData(seriesId:"{bea_series}") {page} }}"#),
+            format!(r#"{{ seriesData(seriesId:"{missing}") {page} }}"#),
+        ),
+        (
+            format!(r#"{{ seriesData(seriesId:"{bea_series}", first:2, after:"3") {page} }}"#),
+            format!(r#"{{ seriesData(seriesId:"{missing}", first:2, after:"3") {page} }}"#),
+        ),
+        (
+            format!(r#"{{ dataset(id:"{bea_dataset}") {{ id }} }}"#),
+            format!(r#"{{ dataset(id:"{missing}") {{ id }} }}"#),
+        ),
+        (
+            format!(
+                r#"{{ crossSection(datasetId:"{bea_dataset}",across:"area",latest:true) {{ key }} }}"#
+            ),
+            format!(
+                r#"{{ crossSection(datasetId:"{missing}",across:"area",latest:true) {{ key }} }}"#
+            ),
+        ),
+        (
+            format!(
+                r#"{{ crossSection(datasetId:"{bea_dataset}",across:"no-such-dimension",latest:true) {{ key }} }}"#
+            ),
+            format!(
+                r#"{{ crossSection(datasetId:"{missing}",across:"no-such-dimension",latest:true) {{ key }} }}"#
+            ),
+        ),
     ] {
-        let denied_result = execute(&pool, anonymous(&fred_only), &denied).await;
-        let absent_result = execute(&pool, anonymous(&fred_only), &absent).await;
-        assert!(
-            denied_result.errors.is_empty(),
-            "{denied}: {:?}",
-            denied_result.errors
+        let denied_answer = answer(
+            &execute(&pool, anonymous(&fred_only), &denied).await,
+            &[bea_series, bea_dataset, unknown_series],
         );
-        assert!(
-            absent_result.errors.is_empty(),
-            "{absent}: {:?}",
-            absent_result.errors
+        let absent_answer = answer(
+            &execute(&pool, anonymous(&fred_only), &absent).await,
+            &[missing],
         );
-        assert_eq!(
-            denied_result.data.into_json().unwrap(),
-            absent_result.data.into_json().unwrap(),
-            "{denied}"
-        );
+        assert_eq!(denied_answer, absent_answer, "{denied}");
     }
     let readable = execute(
         &pool,
@@ -169,23 +204,19 @@ async fn catalog_grants_cover_discovery_pagination_and_direct_reads_without_iden
         fred_series.to_string()
     );
 
-    for query in [
-        format!(r#"{{ seriesData(seriesId:"{bea_series}") {{ totalCount }} }}"#),
-        format!(r#"{{ dataSource(id:"{}") {{ name }} }}"#, bea.id),
-        format!(r#"{{ dataset(id:"{bea_dataset}") {{ id }} }}"#),
-        format!(
-            r#"{{ crossSection(datasetId:"{bea_dataset}",across:"area",latest:true) {{ key }} }}"#
-        ),
-    ] {
-        let result = execute(&pool, anonymous(&fred_only), &query).await;
-        assert!(!result.errors.is_empty(), "access leaked: {query}");
-        assert_eq!(
-            result.errors[0].extensions.as_ref().unwrap().get("code"),
-            Some(&async_graphql::Value::from("FORBIDDEN")),
-            "{query}: {:?}",
-            result.errors
-        );
-    }
+    // A data source is refused by id whether or not it exists.
+    let result = execute(
+        &pool,
+        anonymous(&fred_only),
+        &format!(r#"{{ dataSource(id:"{}") {{ name }} }}"#, bea.id),
+    )
+    .await;
+    assert_eq!(
+        result.errors[0].extensions.as_ref().unwrap().get("code"),
+        Some(&async_graphql::Value::from("FORBIDDEN")),
+        "{:?}",
+        result.errors
+    );
     let mixed = execute(&pool, anonymous(&fred_only), &format!(r#"{{ open:series(id:"{fred_series}") {{ id }} blocked:series(id:"{bea_series}") {{ id }} }}"#)).await;
     assert!(mixed.errors.is_empty(), "{:?}", mixed.errors);
     let mixed = mixed.data.into_json().unwrap();
@@ -290,6 +321,23 @@ fn create_annotation(series: impl std::fmt::Display) -> String {
             annotationValue: "42.5", title: "Catalog note", content: "Note",
             annotationType: "note", isPublic: true }}) {{ id annotationValue }} }}"#
     )
+}
+
+/// The response's data and errors (message and code) with every UUID in `ids` replaced, for
+/// comparing a denial with the answer for something that doesn't exist.
+fn answer(response: &Response, ids: &[Uuid]) -> serde_json::Value {
+    let mut text = serde_json::json!({
+        "data": response.data.clone().into_json().unwrap(),
+        "errors": response.errors.iter().map(|error| serde_json::json!({
+            "message": error.message,
+            "code": error.extensions.as_ref().and_then(|e| e.get("code")).map(|c| c.to_string()),
+        })).collect::<Vec<_>>(),
+    })
+    .to_string();
+    for id in ids {
+        text = text.replace(&id.to_string(), "<id>");
+    }
+    serde_json::from_str(&text).unwrap()
 }
 
 /// The response's only error with every UUID in `ids` replaced, for comparing a denial with the
@@ -467,6 +515,104 @@ async fn annotation_reads_and_writes_follow_the_series_catalog() {
             .unwrap()
             .len(),
         1
+    );
+}
+
+/// A backend with neither a data database nor a data plane can't check any series' catalog, so
+/// it refuses annotations on series outright, even to callers holding every catalog: no create,
+/// no listing, no comments, no writes. (With sign-in on, such a backend does not start.)
+#[tokio::test]
+async fn backends_without_data_or_a_data_plane_refuse_annotations_on_series() {
+    let f = fixture("catalog_no_data").await;
+    let author = user(&f.pool, "skip").await;
+    let every_catalog: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|role| role.is_catalog())
+        .collect();
+    // An annotation stored earlier (by a backend that could check), with a comment.
+    let stored = execute(
+        &f.pool,
+        annotator(&author, &every_catalog),
+        &create_annotation(f.bea_series),
+    )
+    .await;
+    assert!(stored.errors.is_empty(), "{:?}", stored.errors);
+    let annotation: Uuid = stored.data.into_json().unwrap()["createAnnotation"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let app_only = |context: GraphQLContext, query: String| {
+        let schema = create_schema_with_data(AppPool(f.pool.clone()), None, Arc::new(context));
+        async move { schema.execute(Request::new(query)).await }
+    };
+    let missing_series = Uuid::new_v4();
+    let missing_annotation = Uuid::new_v4();
+
+    // Create: the same error as for a series that doesn't exist, whatever the grants.
+    for context in [annotator(&author, &every_catalog), annotator(&author, &[])] {
+        let refused = app_only(context, create_annotation(f.bea_series)).await;
+        assert_eq!(
+            only_error(&refused, &[f.bea_series]),
+            only_error(
+                &app_only(annotator(&author, &[]), create_annotation(missing_series)).await,
+                &[missing_series]
+            )
+        );
+    }
+
+    // Reads: nothing for anonymous callers or the author, even holding every catalog.
+    for context in [
+        anonymous(&every_catalog),
+        anonymous(&[]),
+        annotator(&author, &every_catalog),
+    ] {
+        let listed = app_only(
+            context,
+            format!(
+                r#"{{ annotationsForSeries(seriesId: "{}") {{ annotationValue }} }}"#,
+                f.bea_series
+            ),
+        )
+        .await;
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+        assert_eq!(
+            listed.data.into_json().unwrap()["annotationsForSeries"],
+            serde_json::json!([])
+        );
+    }
+    let comments =
+        |id: Uuid| format!(r#"{{ commentsForAnnotation(annotationId: "{id}") {{ id }} }}"#);
+    assert_eq!(
+        only_error(
+            &app_only(anonymous(&every_catalog), comments(annotation)).await,
+            &[annotation]
+        ),
+        only_error(
+            &app_only(anonymous(&every_catalog), comments(missing_annotation)).await,
+            &[missing_annotation]
+        )
+    );
+    let add_comment = |id: Uuid| {
+        format!(
+            r#"mutation {{ addComment(input: {{ annotationId: "{id}", content: "x" }}) {{ id }} }}"#
+        )
+    };
+    assert_eq!(
+        only_error(
+            &app_only(annotator(&author, &every_catalog), add_comment(annotation)).await,
+            &[annotation]
+        ),
+        only_error(
+            &app_only(
+                annotator(&author, &every_catalog),
+                add_comment(missing_annotation)
+            )
+            .await,
+            &[missing_annotation]
+        )
     );
 }
 
