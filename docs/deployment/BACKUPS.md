@@ -341,7 +341,8 @@ This encrypts **host logical backup bundles**. Live database files, btrfs
 snapshots, and the independent in-cluster backup CronJob/PVC remain separate copies
 with their existing protection. The Keycloak-upgrade writer also encrypts its
 special restore-tested payload with the same public recipient and the same
-throwaway-key decrypt check. `restore-keycloak-db.sh` checks that its safety
+throwaway-key decrypt check and shares the plaintext-staging lock with the host
+writers. `restore-keycloak-db.sh` checks that its safety
 backup can be encrypted before it contacts the cluster or stops Keycloak. In particular, these changes do not claim those copies are
 public-key encrypted; the in-cluster backup work must be integrated separately.
 

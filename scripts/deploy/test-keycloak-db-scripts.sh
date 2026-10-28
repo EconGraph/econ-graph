@@ -12,7 +12,8 @@
 #     throwaway key; a count mismatch fails without VERIFIED or plaintext and still drops
 #     the scratch database; ciphertext that does not decrypt is never published; a failure
 #     right after the tmpfs staging is made leaves none behind;
-#   - a restore without a public recipient or with disk staging stops before any kubectl
+#   - a backup waits for (then refuses) another plaintext-staging writer before stopping
+#     Keycloak; a restore without a public recipient or with disk staging stops before any kubectl
 #     call; an encrypted bundle restores in full at a (pseudo) terminal;
 #   - an unknown context or a pod that isn't ready stops before anything is changed;
 #   - a restore needs a VERIFIED dump from the same cluster (or --allow-other-cluster),
@@ -49,6 +50,13 @@ age-keygen -o "$tmp/identity" 2>/dev/null
 BACKUP_AGE_RECIPIENT="$(age-keygen -y "$tmp/identity")"
 export BACKUP_AGE_RECIPIENT
 export BACKUP_PLAINTEXT_ROOT="$ram"
+# On-disk plaintext staging for the refusal cases: it must really not be tmpfs.
+disk_staging="$tmp/disk-staging"
+mkdir "$disk_staging"
+if [ "$(stat -f -c %T "$disk_staging")" = tmpfs ]; then
+  echo "run with TMPDIR on a disk filesystem, not tmpfs" >&2
+  exit 1
+fi
 # These are synthetic test identities and dumps, never operator credentials.
 open_test_bundle() {
     local out
@@ -317,9 +325,25 @@ run env -u BACKUP_AGE_RECIPIENT "$restore" "$dir" --yes
 [ "$status" != 0 ] || fail "restore without a public recipient succeeded"
 grep -q 'set BACKUP_AGE_RECIPIENT' "$tmp/out" || fail "restore without a recipient did not say why: $(cat "$tmp/out")"
 [ ! -s "$STUB_LOG" ] || fail "restore without a recipient contacted the cluster: $(cat "$STUB_LOG")"
-run env BACKUP_PLAINTEXT_ROOT="$tmp" "$restore" "$dir" --yes
+run env BACKUP_PLAINTEXT_ROOT="$disk_staging" "$restore" "$dir" --yes
 [ "$status" != 0 ] || fail "restore with disk staging succeeded"
+grep -q 'must be tmpfs' "$tmp/out" || fail "restore with disk staging did not say why: $(cat "$tmp/out")"
 [ ! -s "$STUB_LOG" ] || fail "restore with disk staging contacted the cluster: $(cat "$STUB_LOG")"
+
+# Another writer is staging plaintext in the same tmpfs: the backup says whom it
+# waits for and, after BACKUP_LOCK_TIMEOUT, refuses before stopping Keycloak.
+staging_lock="$ram/.econgraph-backup-$(id -u).lock"
+printf 'pid=1 command=dump-databases.sh\n' >"$staging_lock"
+flock -o "$staging_lock" sleep 30 &
+holder=$!
+until ! flock -n "$staging_lock" true; do sleep 0.1; done
+run env BACKUP_LOCK_TIMEOUT=1 "$backup"
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+[ "$status" != 0 ] || fail "backup went ahead while another writer held the staging lock"
+grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$tmp/out" ||
+  fail "backup did not say whom it waits for: $(cat "$tmp/out")"
+if grep -q 'scale deployment/keycloak' "$STUB_LOG"; then fail "backup stopped Keycloak before it had the staging lock"; fi
 
 # The staging trap is in place before the staging exists: a failure right after
 # it is created (here: making its payload directory) leaves no plaintext behind.
