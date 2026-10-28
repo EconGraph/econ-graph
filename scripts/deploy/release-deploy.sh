@@ -91,7 +91,10 @@ while [ $# -gt 0 ]; do
             [ $# -ge 2 ] || { echo "${SCRIPT}: error: --report needs a file" >&2; exit 2; }
             REPORT="$2"; shift 2 ;;
         --cluster)
-            [ $# -ge 2 ] && [ -n "$2" ] || { echo "${SCRIPT}: error: --cluster needs a value" >&2; exit 2; }
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "${SCRIPT}: error: --cluster needs a value" >&2
+                exit 2
+            fi
             CLUSTER="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         --yes | -y) ASSUME_YES=true; shift ;;
