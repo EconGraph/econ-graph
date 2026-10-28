@@ -52,6 +52,17 @@ kc create job "${JOB_NAME}" --from=cronjob/postgres-backup -n "${NAMESPACE}"
 
 echo "⏳ Waiting for it to complete..."
 kc wait --for=condition=complete "job/${JOB_NAME}" -n "${NAMESPACE}" --timeout=300s || {
+    # A large database can take longer than the wait. A Job that is still
+    # running was not stopped, and may still finish: say so, so nobody starts
+    # a second backup beside it.
+    active="$(kc get "job/${JOB_NAME}" -n "${NAMESPACE}" -o 'jsonpath={.status.active}' 2>/dev/null || true)"
+    if [ -n "${active}" ] && [ "${active}" != 0 ]; then
+        echo "⏳ job/${JOB_NAME} is still running after 5 minutes; it was not stopped and may still finish."
+        echo "   Wait for it, and don't start another backup until it has:"
+        echo "   kubectl --context ${CONTEXT} -n ${NAMESPACE} wait --for=condition=complete job/${JOB_NAME} --timeout=3600s"
+        echo "backup-postgres-now: still running: job/${JOB_NAME}"
+        exit 1
+    fi
     echo "❌ Backup job did not complete successfully; logs:"
     kc logs "job/${JOB_NAME}" -n "${NAMESPACE}" --all-containers=true --prefix=true
     exit 1

@@ -358,6 +358,13 @@ jobs:
         shellcheck -x scripts/release/tag.sh scripts/release/test-tag.sh
         scripts/release/test-tag.sh
 
+    # release-deploy.sh, the one-command release deploy, with its steps as stubs:
+    # order, stop at the first failure, the PUBLIC_HOST guard and the dry run.
+    - name: Check the release deploy entry point
+      run: |
+        shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
+        scripts/deploy/test-release-deploy.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
