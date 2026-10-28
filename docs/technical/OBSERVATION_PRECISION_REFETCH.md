@@ -149,7 +149,9 @@ as an unknown job kind; running the command again after the rollout re-enqueues 
 
 Run from a checkout on the host of the kind cluster. The script runs the crawler CLI in the
 `crawler-worker` pod (`/app/crawler`) through the kind cluster's own kubectl on context
-`kind-econ-graph`, and the CLI uses the worker's own data database URL (`DATA_DATABASE_URL`):
+`kind-econ-graph`, and the CLI uses the worker's own data database URL (`DATA_DATABASE_URL`).
+Before the crawler runs, the script prints the cluster's context, `kube-system` UID and
+production marker:
 
 ```bash
 # What would be enqueued, per source (writes nothing).
@@ -167,7 +169,7 @@ scripts/deploy/refetch-full-history.sh --all --completed-since 2026-10-26T00:00:
 ```
 
 After enqueuing, the script prints the matching progress and resume commands with the start
-time filled in. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
+time filled in; the resume command keeps `--include-inactive` and `--priority N`. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
 `crawler --help`); `--json` gives machine-readable output.
 
 - **Which series.** The series the refresh scheduler refreshes: active `economic_series` rows
