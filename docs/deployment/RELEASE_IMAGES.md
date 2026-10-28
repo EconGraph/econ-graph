@@ -19,6 +19,8 @@ scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N --dry-run   # the
 ```
 
 Each script's header lists every option and step. All three are safe to run again.
+[Deploying a release](RELEASE_DEPLOY.md) runs the load, the backups, the precheck, the
+deploy and the verify in one command.
 
 ## Which workloads, and which names
 
