@@ -183,6 +183,10 @@ if [ -f "$DEPLOY_ENV" ]; then
         if [[ "$PUBLIC_HOST" =~ ^\"(.*)\"$ || "$PUBLIC_HOST" =~ ^\'(.*)\'$ ]]; then
             PUBLIC_HOST="${BASH_REMATCH[1]}"
         fi
+        # Blanks inside (or inside the quotes): the renderer would strip them,
+        # but deploy.sh's gateway step would not. Refuse, rather than guess.
+        [[ "$PUBLIC_HOST" != *[[:space:]]* ]] ||
+            die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', with blanks in it; write the host name alone"
         [ -z "$PUBLIC_HOST" ] || configured=true
     fi
 fi

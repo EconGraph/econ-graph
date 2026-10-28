@@ -59,9 +59,9 @@ The file is read, not sourced: surrounding blanks and one pair of quotes are dro
 nothing else. On the production host it holds `econgraph.com`; a test cluster's host has
 no file, or `PUBLIC_HOST=` (empty), and serves localhost only. Before any step it refuses:
 
-- a `PUBLIC_HOST` line with a carriage return (a file saved with CRLF endings), or a value
-  that is not a public DNS name (an inline comment, a typo), by the check `deploy.sh`
-  makes too (`render-public-host.py`);
+- a `PUBLIC_HOST` line with a carriage return (a file saved with CRLF endings), a value
+  with blanks in it (an inline comment, spaces inside the quotes), or one that is not a
+  public DNS name, by the check `deploy.sh` makes too (`render-public-host.py`);
 
 - a cluster marked production (`scripts/deploy/mark-production-cluster.sh`) with no
   `PUBLIC_HOST` configured: deploying it without one would stop the tunnel connector and

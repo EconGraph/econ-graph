@@ -291,10 +291,13 @@ run "$RELEASE_DEPLOY" --tag "$TAG" --yes
 refused "a CRLF deploy config" "carriage return"
 echo "PUBLIC_HOST=econgraph.com # the public site" >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" --yes
-refused "a PUBLIC_HOST with a trailing comment" "is not a public DNS name"
+refused "a PUBLIC_HOST with a trailing comment" "with blanks in it"
 echo "PUBLIC_HOST=localhost" >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" --yes
 refused "a PUBLIC_HOST that is not a public DNS name" "is not a public DNS name"
+echo 'PUBLIC_HOST=" econgraph.com "' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "a quoted PUBLIC_HOST with blanks inside" "with blanks in it"
 echo "PUBLIC_HOST=\"econgraph.com\"" >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" --yes
 if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST=econgraph.com " "$LOGS/steps.log"; then
