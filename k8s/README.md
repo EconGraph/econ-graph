@@ -127,9 +127,9 @@ and not images built here, load them onto the nodes under the manifests' names b
 `./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
 before the load. The load covers every workload that runs the three images, including the
 `crawler-migrate` Job. See [Release images on the kind cluster](../docs/deployment/RELEASE_IMAGES.md).
-`./scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N` runs the load, the backups, the
-pre-deploy check, `deploy.sh` (with `PUBLIC_HOST` from the host's deploy config) and the
-verify in order; see [Deploying a release](../docs/deployment/RELEASE_DEPLOY.md).
+`./scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N` runs the database backup, the load,
+the Keycloak backup, the pre-deploy check, `deploy.sh` (with `PUBLIC_HOST` from the host's
+deploy config) and the verify in order, from a clean checkout of the tag; see [Deploying a release](../docs/deployment/RELEASE_DEPLOY.md).
 
 ## 🔐 Keycloak
 
