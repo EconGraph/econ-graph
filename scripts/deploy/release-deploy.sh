@@ -103,9 +103,19 @@ die() {
     report "result=refused"
     exit 1
 }
+# Append a line to the report. A write that fails is said, never fatal: it must
+# not cut the run, or its failure guidance, short.
 report() {
-    [ -z "$REPORT" ] || printf '%s\n' "$*" >>"$REPORT"
+    [ -n "$REPORT" ] || return 0
+    printf '%s\n' "$*" 2>/dev/null >>"$REPORT" ||
+        echo "${SCRIPT}: warning: could not append '$*' to ${REPORT}" >&2
 }
+# Checked before anything else, so an unwritable report stops the run before
+# it changes anything.
+if [ -n "$REPORT" ] && ! { : >>"$REPORT"; } 2>/dev/null; then
+    echo "${SCRIPT}: error: cannot write the report ${REPORT}" >&2
+    exit 2
+fi
 
 # --- the tag ------------------------------------------------------------------------
 RC_TAG="$TAG"
@@ -159,6 +169,10 @@ case "$marker" in
             die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host" ;;
     *) die "${CLUSTER_ROLE_REASON}" ;;
 esac
+# Keycloak's replicas now: the keycloak step scales it to 0 and leaves it there
+# until deploy.sh applies it again, so a failure in between says how to start it.
+KEYCLOAK_REPLICAS="$(kc -n "$NAMESPACE" get deployment keycloak --ignore-not-found \
+    -o 'jsonpath={.spec.replicas}')" || die "could not read deployment/keycloak on ${CONTEXT}"
 unset CLUSTER_ROLE_CONTEXT
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
@@ -219,6 +233,14 @@ explain_failure() {
             echo "Run the verify step again once rollouts settle, or go back with:" ;;
     esac
     echo "  scripts/deploy/rollback-release-images.sh --to pre-${RC_TAG} --dry-run   # then without --dry-run"
+    case "$failed" in
+        keycloak | precheck | deploy)
+            if [ -n "$KEYCLOAK_REPLICAS" ] && [ "$KEYCLOAK_REPLICAS" != 0 ]; then
+                echo "Keycloak (sign-in) may be stopped: the keycloak step scales it to 0, and only"
+                echo "deploy.sh applies it again. It ran ${KEYCLOAK_REPLICAS} replica(s) before; start it with:"
+                echo "  ${kubectl_hint} scale deployment/keycloak --replicas=${KEYCLOAK_REPLICAS}"
+            fi ;;
+    esac
     case "$failed" in
         deploy | verify)
             echo "and, if the migrations ran, restore the databases from the backups this run took:"

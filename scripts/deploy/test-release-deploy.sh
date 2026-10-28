@@ -72,6 +72,7 @@ case "$*" in
             production) printf 'production %s' "$uid" ;;
             fails) exit 1 ;;
         esac ;;
+    "get deployment keycloak "*) printf '%s' "${STUB_KEYCLOAK_REPLICAS-1}" ;;
     *) echo "stub kind kubectl: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -190,22 +191,30 @@ grep -qxF "result=ok" "$WORK/report" && [ "$(grep -c '^step=.* status=ok$' "$WOR
 grep -qF "is deployed on kind-econ-graph and verified" <<<"$out" || fail "full run: no final message"
 
 # --- stop at the first failure ----------------------------------------------------------------
+# The step names release-deploy.sh prints and reports, by script.
+declare -A NAME=([load-release-images]=load [backup-postgres-now]=backup [backup-keycloak-db]=keycloak
+    [precheck-db-migration]=precheck [deploy]=deploy [verify-release-images]=verify)
+# state_of NAME: the state the last run's failure summary lists for step NAME.
+state_of() {
+    sed -n '/step .* failed; nothing after it ran/,$p' <<<"$out" |
+        awk -v s="$1" '$1 == s { $1 = ""; sub(/^ +/, ""); print; exit }'
+}
 prev=""
 for step in $ALL; do
     run env STUB_FAIL="$step" "$RELEASE_DEPLOY" --tag "$TAG" --yes --report "$WORK/report"
     want="${prev:+$prev }$step"
+    name="${NAME[$step]}"
     if [ "$rc" -eq 0 ]; then
         fail "failing $step: exit 0"
     elif [ "$(steps)" != "$want" ]; then
         fail "failing $step: steps ran as '$(steps)', expected '$want'"
     elif ! grep -qF "rollback-release-images.sh --to pre-$TAG" <<<"$out"; then
         fail "failing $step: no rollback command"
-    elif ! grep -qE "^  ${step%%-*}" <<<"$(sed -n '/step .* failed; nothing after it ran/,$p' <<<"$out")"; then
-        fail "failing $step: no state listing"
-    elif ! grep -qxF "result=failed step=$(case $step in
-        load-release-images) echo load ;; backup-postgres-now) echo backup ;;
-        backup-keycloak-db) echo keycloak ;; precheck-db-migration) echo precheck ;;
-        deploy) echo deploy ;; verify-release-images) echo verify ;; esac)" "$WORK/report"; then
+    elif [ "$(state_of "$name")" != FAILED ]; then
+        fail "failing $step: the summary lists $name as '$(state_of "$name")', not FAILED"
+    elif [ -n "$prev" ] && [ "$(state_of "${NAME[${prev##* }]}")" != "done" ]; then
+        fail "failing $step: the step before it is not listed done"
+    elif ! grep -qxF "result=failed step=$name" "$WORK/report"; then
         fail "failing $step: report is $(cat "$WORK/report" 2>/dev/null)"
     else
         echo "ok   failing $step stops there and prints the rollback"
@@ -217,7 +226,34 @@ grep -qF "scale deployment/crawler-worker --replicas=1" <<<"$out" ||
     fail "failing precheck: no command to start the crawler worker again"
 run env STUB_FAIL=deploy "$RELEASE_DEPLOY" --tag "$TAG" --yes
 grep -qF "restore-keycloak-db.sh" <<<"$out" || fail "failing deploy: no database restore pointer"
+# Keycloak: stopped by the keycloak step, applied again by deploy.sh.
+for step in backup-keycloak-db precheck-db-migration deploy; do
+    run env STUB_FAIL="$step" STUB_KEYCLOAK_REPLICAS=2 "$RELEASE_DEPLOY" --tag "$TAG" --yes
+    grep -qF "scale deployment/keycloak --replicas=2" <<<"$out" ||
+        fail "failing $step: no command to start Keycloak again at its 2 replicas"
+done
+for step in backup-postgres-now verify-release-images; do
+    run env STUB_FAIL="$step" "$RELEASE_DEPLOY" --tag "$TAG" --yes
+    if grep -qF "scale deployment/keycloak" <<<"$out"; then
+        fail "failing $step: says to start Keycloak, which that step leaves running"
+    fi
+done
+run env STUB_FAIL=backup-keycloak-db STUB_KEYCLOAK_REPLICAS= "$RELEASE_DEPLOY" --tag "$TAG" --yes
+if grep -qF "scale deployment/keycloak" <<<"$out"; then
+    fail "failing keycloak without a Keycloak Deployment: says to start it"
+fi
+echo "ok   the Keycloak restart command after the steps that leave it stopped"
 no_plain "failures"
+
+# --- the report -------------------------------------------------------------------------------
+mkdir -p "$WORK/readonly" && chmod 0555 "$WORK/readonly"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes --report "$WORK/readonly/report"
+if [ "$rc" -eq 0 ] || [ -s "$LOGS/steps.log" ] || ! grep -qF "cannot write the report" <<<"$out"; then
+    fail "an unwritable report: exit $rc, steps '$(steps)'"
+else
+    echo "ok   an unwritable report stops the run before any step"
+fi
+chmod 0755 "$WORK/readonly"
 
 # --- the PUBLIC_HOST guard --------------------------------------------------------------------
 refused() { # NAME MESSAGE: the last run refused before any step

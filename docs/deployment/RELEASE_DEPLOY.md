@@ -75,6 +75,9 @@ scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N --dry-run   # the
 ```
 
 After a failed precheck it also prints the command that starts the crawler worker again.
+The keycloak step scales Keycloak to 0 and only `deploy.sh` applies it again, so after a
+failed keycloak, precheck or deploy step it prints the command that starts Keycloak at the
+replicas it ran before the run.
 After a failed deploy or verify, if the data migrations ran, it points to the database
 restores from the backups the run took (`restore-postgres-backup.sh` and
 `restore-keycloak-db.sh`).
@@ -82,7 +85,9 @@ restores from the backups the run took (`restore-postgres-backup.sh` and
 ## Automation
 
 `--report FILE` appends one line per step (`step=NAME status=ok|failed|dry-run`) and a
-final `result=ok|failed step=NAME|dry-run|refused` line to `FILE`. The upgrade rehearsal
+final `result=ok|failed step=NAME|dry-run|refused` line to `FILE`. A report that can't be
+written stops the run before any step; a later write that fails is warned about and never
+cuts the run or its failure output short. The upgrade rehearsal
 runs `release-deploy.sh --tag ... --yes --report FILE` and reports the failed step from it.
 
 ## Tests
