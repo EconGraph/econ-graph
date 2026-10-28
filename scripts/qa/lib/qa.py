@@ -4,6 +4,10 @@ A scenario records each check with `check()`, then calls `finish()`, which exits
 check passed and 1 otherwise; `skip()` exits 77 with a reason. The runner
 (scripts/qa/run_scenarios.py) sets QA_TARGET, QA_PROFILE, QA_EVIDENCE_FILE and QA_WORK_DIR, and
 redacts secrets from what a scenario writes; scenarios still never print a password or token.
+
+When the runner stops a scenario that overran its qa-timeout, it sends SIGTERM to the
+scenario's process group. Importing this module turns that into SystemExit, after stopping every
+command started with `run()`, so a scenario's `finally` blocks still clean up.
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ import http.cookiejar
 import json
 import os
 import secrets
+import signal
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -30,6 +36,48 @@ REALM = 'econ-graph'
 WEB_CLIENT_ID = 'econ-graph-web'
 
 _failures = 0
+
+# Process groups of the commands run() has running.
+_children: set[int] = set()
+
+
+def _signal_group(pgid: int, sig: int) -> None:
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _on_sigterm(signum, frame):
+    for pgid in list(_children):
+        _signal_group(pgid, signal.SIGTERM)
+    raise SystemExit(f'stopped by signal {signum}')
+
+
+signal.signal(signal.SIGTERM, _on_sigterm)
+
+
+def run(command: list[str], timeout: float, env: dict | None = None,
+        capture: bool = True) -> subprocess.CompletedProcess:
+    """Run a command in its own process group, killing the whole group if it overruns.
+
+    Raises subprocess.TimeoutExpired after `timeout` seconds, once the group is gone. Output
+    is captured as text unless `capture` is false, when it goes to this scenario's output.
+    """
+    pipe = subprocess.PIPE if capture else None
+    proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=pipe, stderr=pipe,
+                            text=True, start_new_session=True)
+    _children.add(proc.pid)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _signal_group(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise
+    finally:
+        _children.discard(proc.pid)
+        _signal_group(proc.pid, signal.SIGKILL)
+    return subprocess.CompletedProcess(command, proc.returncode, out, err)
 
 
 def _record(entry: dict) -> None:

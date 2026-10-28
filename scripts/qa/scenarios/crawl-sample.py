@@ -16,6 +16,9 @@ Inputs:
   QA_CRAWL_SOURCES          comma-separated sources (default FRED,BLS,CENSUS,BEA,FHFA,WDI).
   QA_CRAWL_INTERVAL_SECONDS pause between sources (default 30), on top of the crawler's own
                             per-provider rate limits.
+  QA_CRAWL_HOOK_TIMEOUT_SECONDS
+                            how long one source's hook may run (default 450); an overrunning
+                            hook and everything it started are stopped, and that source fails.
 
 One check per source: the command exited 0, reported ok for that source, exactly one series,
 and at least one observation. Sources run one after another, never in parallel. Skipped
@@ -27,22 +30,29 @@ import os
 import subprocess
 import time
 
-from qa import check, finish, skip
+from qa import check, fail, finish, skip
+from qa import run as run_bounded
 
 COMMAND = os.environ.get('QA_CRAWL_SAMPLE_COMMAND', '')
 SOURCES = [s.strip() for s in os.environ.get('QA_CRAWL_SOURCES', 'FRED,BLS,CENSUS,BEA,FHFA,WDI').split(',')
            if s.strip()]
 INTERVAL = float(os.environ.get('QA_CRAWL_INTERVAL_SECONDS', '30'))
+HOOK_TIMEOUT = float(os.environ.get('QA_CRAWL_HOOK_TIMEOUT_SECONDS', '450'))
 
 if not COMMAND:
     skip('no crawl hook: set QA_CRAWL_SAMPLE_COMMAND (the lab crawls one series per source)')
+if not SOURCES:
+    fail('configuration', 'QA_CRAWL_SOURCES names no source')
 
 for i, source in enumerate(SOURCES):
     if i:
         time.sleep(INTERVAL)
     started = time.monotonic()
-    run = subprocess.run(['bash', '-c', COMMAND], env=dict(os.environ, QA_CRAWL_SOURCE=source),
-                         stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    try:
+        run = run_bounded(['bash', '-c', COMMAND], HOOK_TIMEOUT, env=dict(os.environ, QA_CRAWL_SOURCE=source))
+    except subprocess.TimeoutExpired:
+        check(f'crawl {source}', False, f'the hook overran {HOOK_TIMEOUT:.0f}s and was stopped')
+        continue
     elapsed = time.monotonic() - started
     lines = [line for line in run.stdout.splitlines() if line.strip()]
     try:

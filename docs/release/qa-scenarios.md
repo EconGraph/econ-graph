@@ -25,6 +25,12 @@ scripts/qa/run-scenarios.sh --list
 The runner exits 0 when no scenario failed, 1 when one did, and 2 for a usage error or a
 refusal. A skipped scenario does not fail the run; the summary and the report give its reason.
 
+Each scenario runs in its own process group. One that overruns its `qa-timeout` fails. Its
+group gets SIGTERM, so a Python scenario stops the commands it started and runs its cleanup
+(the annotation round trip deletes what it created, and `catalog-roles` restores the
+anonymous reader's roles). After `QA_TIMEOUT_GRACE_SECONDS` (default 60), whatever remains is
+killed.
+
 ## Profiles
 
 Each scenario declares in its header whether it changes state (`qa-mutates: yes` or `no`) and
@@ -65,14 +71,14 @@ deployed realm.
 
 | Scenario | Changes state | Profiles | What it checks |
 |---|---|---|---|
-| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, the issuer, the sign-in page, CORS, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check |
+| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, the issuer, the sign-in page, CORS, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check. It reaches the host through DNS, as a visitor does; `QA_PUBLIC_SITE_ROUTE=gateway` sends it to the gateway on the runner's host instead (`LOCAL_INGRESS_IP` and the ports `check-public-site.sh` reads) |
 | `anonymous-api` | no | all | Without a token, through `/graphql`: a search, the series, its observations and the world map's cross-section. The same search and observations through `/data/graphql` must match |
 | `anonymous-browser` | no | all | Signed out, in Chromium: the home page without script errors, a search, a series page and its chart, the CSV download against the page's newest point, and the world map's colored countries and value table |
 | `annotation-round-trip` | yes | all, production only as a `qa-*` account | Signs in, creates a private annotation, retries the create with the same idempotency key and gets the same annotation, checks that it is stored once and invisible to an anonymous reader, then deletes it. Anything it created is deleted even when a check fails |
 | `mcp-reads` | no | all | As the QA account: `/mcp` refuses an anonymous caller, lists its tools, and reads a series through `search_economic_series`, `get_series_metadata` and `get_series_data`. Skipped where nothing answers MCP: release builds compile `/mcp` out and the gateway routes no `/mcp` path |
 | `catalog-roles` | yes | lab, ci | Removes one catalog role (`QA_CATALOG_ROLE`, default `catalog.fred:read`) from the anonymous reader as the [Keycloak README](../../config/keycloak/README.md) describes, waits until an anonymous read of that catalog's series is refused, runs `QA_REDEPLOY_COMMAND` and checks that the restriction survived, then restores the original mappings and waits until the series is readable again. Skipped on a realm without catalog roles. Without `QA_REDEPLOY_COMMAND`, the redeploy check reports that persistence was not checked |
 | `backup-restore` | yes | lab | Backs up the lab database (`QA_BACKUP_SOURCE_DATABASE_URL`), restores it into a new database whose name contains `scratch` (`QA_SCRATCH_DATABASE_URL`), and compares every table's owner and row count. `QA_BACKUP_COMMAND` and `QA_RESTORE_COMMAND` replace the default `pg_dump` and `pg_restore` with the lab's own, and `QA_EXPECTED_OWNER` names the role every table must belong to |
-| `conversion-checks` | no | lab | Judges the report of a data conversion ([ECO-426](https://linear.app/econgraph/issue/ECO-426)), read from `QA_CONVERSION_REPORT` or printed by `QA_CONVERSION_CHECK_COMMAND`: every table's row count and checksum unchanged, and every annotation still on its original series |
+| `conversion-checks` | no | lab | Judges the report of a data conversion ([ECO-426](https://linear.app/econgraph/issue/ECO-426)), read from `QA_CONVERSION_REPORT` or printed by `QA_CONVERSION_CHECK_COMMAND`: every table's row count and checksum unchanged, and every annotation still on its original series. The report must list its annotations, as `[]` when there are none |
 | `crawl-sample` | yes | lab | Runs `QA_CRAWL_SAMPLE_COMMAND` once per source in `QA_CRAWL_SOURCES`, one source at a time, `QA_CRAWL_INTERVAL_SECONDS` apart; each run must report one series fetched with observations |
 
 `QA_SEARCH_QUERY` (default `GDP`) is the search the read scenarios use. Each scenario's header

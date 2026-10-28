@@ -93,8 +93,13 @@ except (GraphQLError, OSError, KeyError, TypeError) as error:
     check('round trip', False, str(error))
 finally:
     # Whatever a failure left behind.
-    for leftover in created_ids:
-        status, body = graphql('/graphql', DELETE, {'id': leftover}, token=token)
-        check('clean up', status == 200 and not body.get('errors'), f'deleted leftover {leftover}')
+    for leftover in sorted(created_ids):
+        try:
+            status, body = graphql('/graphql', DELETE, {'id': leftover}, token=token)
+            removed = data_or_raise(status, body, 'deleteAnnotation')['deleteAnnotation'] is True
+        except (GraphQLError, OSError, KeyError, TypeError) as error:
+            check('clean up', False, f'leftover {leftover} not deleted: {error}')
+            continue
+        check('clean up', removed, f'leftover {leftover} ' + ('deleted' if removed else 'NOT deleted'))
 
 finish()

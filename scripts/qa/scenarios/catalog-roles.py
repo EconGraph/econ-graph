@@ -22,6 +22,7 @@ Inputs:
   QA_REDEPLOY_COMMAND          run with bash after the restriction is verified, e.g. the lab's
                                deploy.sh; the restriction must survive it. Without it the
                                redeploy and persistence checks are skipped, and the summary says so.
+  QA_REDEPLOY_TIMEOUT_SECONDS  how long the redeploy may run (default 600).
 
 Skipped when the realm has no catalog roles (before ECO-657). Whatever the outcome, the
 anonymous reader's original role mappings are put back.
@@ -34,6 +35,7 @@ import urllib.parse
 
 from qa import (Http, check, data_or_raise, error_codes, fail, finish, graphql, issuer, secret,
                 skip, GraphQLError)
+from qa import run as run_bounded
 
 REALM = 'econ-graph'
 ROLE = os.environ.get('QA_CATALOG_ROLE', 'catalog.fred:read')
@@ -42,6 +44,7 @@ READER_CLIENT = os.environ.get('QA_ANONYMOUS_CLIENT_ID', 'econgraph-anonymous')
 WAIT = float(os.environ.get('QA_CATALOG_WAIT_SECONDS', '420'))
 POLL = float(os.environ.get('QA_CATALOG_POLL_SECONDS', '10'))
 REDEPLOY = os.environ.get('QA_REDEPLOY_COMMAND', '')
+REDEPLOY_TIMEOUT = float(os.environ.get('QA_REDEPLOY_TIMEOUT_SECONDS', '600'))
 KEYCLOAK = (os.environ.get('QA_KEYCLOAK_URL') or issuer().rsplit(f'/realms/{REALM}', 1)[0]).rstrip('/')
 ADMIN_USER = os.environ.get('QA_KEYCLOAK_ADMIN_USERNAME', '')
 ADMIN_PASSWORD = secret('QA_KEYCLOAK_ADMIN_PASSWORD')
@@ -217,9 +220,12 @@ try:
         check('redeploy', True, 'not run: QA_REDEPLOY_COMMAND is unset, so persistence is unchecked')
     else:
         started = time.monotonic()
-        redeploy = subprocess.run(['bash', '-c', REDEPLOY], stdin=subprocess.DEVNULL, check=False)
-        check('redeploy', redeploy.returncode == 0,
-              f'QA_REDEPLOY_COMMAND exited {redeploy.returncode} after {time.monotonic() - started:.0f}s')
+        try:
+            redeploy = run_bounded(['bash', '-c', REDEPLOY], REDEPLOY_TIMEOUT, capture=False)
+            check('redeploy', redeploy.returncode == 0,
+                  f'QA_REDEPLOY_COMMAND exited {redeploy.returncode} after {time.monotonic() - started:.0f}s')
+        except subprocess.TimeoutExpired:
+            check('redeploy', False, f'QA_REDEPLOY_COMMAND overran {REDEPLOY_TIMEOUT:.0f}s and was stopped')
         reachable_admin(admin, time.monotonic() + WAIT)
         effective = effective_roles()
         check('restriction persisted in Keycloak', ROLE not in effective,
@@ -229,6 +235,8 @@ except (RuntimeError, OSError, KeyError) as error:
     check('restrict', False, str(error))
 finally:
     try:
+        # Keycloak may still be restarting after a redeploy that failed or overran.
+        reachable_admin(admin, time.monotonic() + WAIT)
         restore()
         restored = True
     except (RuntimeError, OSError) as error:

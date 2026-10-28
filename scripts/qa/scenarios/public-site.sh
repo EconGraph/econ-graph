@@ -12,8 +12,8 @@
 # a public HTTPS host with its www redirect and Keycloak under /idp). QA_PUBLIC_SITE_ROUTE is
 # `dns` (real DNS, the way a visitor arrives; --via-cloudflare) or `gateway` (curl
 # --connect-to the gateway on this host, with LOCAL_INGRESS_IP, LOCAL_HTTPS_PORT and
-# LOCAL_HTTP_PORT passed through). It defaults to `dns` for the production profile and
-# `gateway` otherwise. QA_CHECK_PUBLIC_SITE overrides the script's path.
+# LOCAL_HTTP_PORT passed through), for a runner on the host whose gateway serves the target. It
+# defaults to `dns`. QA_CHECK_PUBLIC_SITE overrides the script's path.
 set -euo pipefail
 
 repo="${QA_REPO_ROOT:?run through scripts/qa/run-scenarios.sh}"
@@ -35,10 +35,7 @@ print(u.scheme, u.hostname or "-", u.port or "-", u.path.strip("/") or "-")
 [ "$port" = - ] || skip "check-public-site.sh checks the default https port; the target uses ${port}"
 [ "$path" = - ] || skip "check-public-site.sh checks a host's root; the target has the path /${path}"
 
-route="${QA_PUBLIC_SITE_ROUTE:-}"
-if [ -z "$route" ]; then
-    if [ "${QA_PROFILE:-}" = production ]; then route=dns; else route=gateway; fi
-fi
+route="${QA_PUBLIC_SITE_ROUTE:-dns}"
 args=(--host "$host")
 case "$route" in
     dns) args+=(--via-cloudflare) ;;

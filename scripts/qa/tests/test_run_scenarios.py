@@ -200,12 +200,13 @@ class RunnerTest(unittest.TestCase):
     def test_lab_and_ci_refuse_the_production_site(self):
         self.scenario('writer')
         for profile in ('lab', 'ci'):
-            for target in ('https://econgraph.com', 'https://WWW.econgraph.com/'):
+            for target in ('https://econgraph.com', 'https://WWW.econgraph.com/',
+                           'https://econgraph.com.', 'https://www.econgraph.com.:443/'):
                 with self.subTest(profile=profile, target=target):
                     code, report, output = self.report(['--target', target, '--profile', profile])
                     self.assertEqual(code, 2)
                     self.assertIn('refusing', output)
-        env = dict(self.env, QA_PRODUCTION_HOSTS='prod.example')
+        env = dict(self.env, QA_PRODUCTION_HOSTS='prod.example.')
         code, _, _ = self.report(['--target', 'https://prod.example', '--profile', 'ci'], env)
         self.assertEqual(code, 2)
         self.assertEqual(self.ran(), [])
@@ -233,6 +234,10 @@ class RunnerTest(unittest.TestCase):
         self.scenario('lies', mutates='no',
                       body='echo \'{"check": "c", "ok": false, "detail": "bad"}\' >> "$QA_EVIDENCE_FILE"')
         self.scenario('lab-only', mutates='no', profiles='lab')
+        # A skip after a failed check is still a failure.
+        self.scenario('halfskip', mutates='no',
+                      body='echo \'{"check": "c", "ok": false}\' >> "$QA_EVIDENCE_FILE"; '
+                           'echo \'{"skip": "later"}\' >> "$QA_EVIDENCE_FILE"; exit 77')
         code, report, output = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
         self.assertEqual(code, 1)
         status = {r['name']: r for r in report['scenarios']}
@@ -242,8 +247,9 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual((status['skips']['status'], status['skips']['reason']), ('skip', 'nothing to do here'))
         self.assertEqual(status['lies']['status'], 'fail')
         self.assertEqual(status['lab-only']['status'], 'skip')
-        self.assertEqual(report['counts'], {'pass': 1, 'fail': 2, 'skip': 2})
-        self.assertIn('1 passed, 2 failed, 2 skipped', output)
+        self.assertEqual(status['halfskip']['status'], 'fail')
+        self.assertEqual(report['counts'], {'pass': 1, 'fail': 3, 'skip': 2})
+        self.assertIn('1 passed, 3 failed, 2 skipped', output)
         for result in report['scenarios']:
             self.assertIsInstance(result['duration_seconds'], float)
 
@@ -254,6 +260,42 @@ class RunnerTest(unittest.TestCase):
         code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
         self.assertEqual(code, 1)
         self.assertEqual(report['scenarios'][0]['reason'], 'timed out after 1s')
+
+    def test_an_overrun_stops_everything_the_scenario_started(self):
+        pid_file = self.dir / 'child.pid'
+        self.scenario('spawner', mutates='no', body=f'sleep 300 & echo $! > "{pid_file}"; wait')
+        (self.scenarios / 'spawner').write_text((self.scenarios / 'spawner').read_text().replace(
+            '# qa-description', '# qa-timeout: 1\n# qa-description'))
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='2'))
+        self.assertEqual(code, 1)
+        self.assertEqual(report['scenarios'][0]['reason'], 'timed out after 1s')
+        child = int(pid_file.read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+
+    def test_an_overrunning_python_scenario_still_cleans_up(self):
+        cleaned = self.dir / 'cleaned'
+        path = self.scenarios / 'tidy'
+        path.write_text(f'''#!/usr/bin/env python3
+# qa-scenario: tidy
+# qa-mutates: no
+# qa-profiles: ci
+# qa-timeout: 1
+# qa-description: tidy
+import sys, time
+import qa
+try:
+    qa.run(['sleep', '300'], timeout=600)
+finally:
+    open({str(cleaned)!r}, 'w').write('yes')
+''')
+        path.chmod(0o755)
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='10'))
+        self.assertEqual(code, 1)
+        self.assertEqual(cleaned.read_text(), 'yes')
+        self.assertLess(report['scenarios'][0]['duration_seconds'], 10)
 
     def test_secrets_never_reach_the_output(self):
         password_file = self.dir / 'pw'
@@ -290,6 +332,7 @@ class StubSite:
         self.codes: dict[str, str] = {}
         self.authorizations: list[tuple[str, str | None]] = []
         self.data_graphql_tokens: list[str | None] = []
+        self.refuse_deletes = 0
         site = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -378,6 +421,8 @@ class StubSite:
             return h.send(200, self.graphql(json.loads(raw), self.token_user(h)))
         if path == '/mcp':
             return self.mcp(h, json.loads(raw))
+        if path == '/broken-mcp':
+            return h.send(502, b'<html>Bad Gateway</html>', 'text/html')
         h.send(404, b'not found', 'text/plain')
 
     def graphql(self, request, user):
@@ -398,6 +443,9 @@ class StubSite:
             row = self.annotations[self.keys[key]]
             return {'data': {'createAnnotation': {k: row[k] for k in ('id', 'seriesId', 'title', 'visibility')}}}
         if 'deleteAnnotation' in q:
+            if self.refuse_deletes:
+                self.refuse_deletes -= 1
+                return {'data': {'deleteAnnotation': False}}
             return {'data': {'deleteAnnotation': self.annotations.pop(v['id'], None) is not None}}
         if 'annotationsForSeries' in q:
             rows = [{k: a[k] for k in ('id', 'title', 'visibility')} for a in self.annotations.values()
@@ -488,6 +536,17 @@ class ScenarioTest(unittest.TestCase):
         self.assertNotIn(PASSWORD, text)
         self.assertNotIn(site.access_token, text)
 
+    def test_a_delete_that_does_nothing_fails_and_is_retried(self):
+        with StubSite() as site:
+            site.refuse_deletes = 1
+            code, results, _ = self.run_scenarios(site.base, 'ci', 'annotation-round-trip',
+                                                  {'QA_USERNAME': 'qa-alice', 'QA_PASSWORD': PASSWORD})
+        self.assertEqual(code, 1)
+        checks = self.checks(results['annotation-round-trip'])
+        self.assertFalse(checks['delete'])
+        self.assertTrue(checks['clean up'])
+        self.assertEqual(site.annotations, {})
+
     def test_a_wrong_password_fails_sign_in(self):
         with StubSite() as site:
             code, results, _ = self.run_scenarios(site.base, 'ci', 'annotation-round-trip',
@@ -509,6 +568,13 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(self.checks(results['mcp-reads']), {
             'refuses an anonymous caller': True, 'sign in': True, 'tools/list': True,
             'search_economic_series': True, 'get_series_metadata': True, 'get_series_data': True})
+
+    def test_mcp_reads_fail_on_a_broken_endpoint(self):
+        with StubSite() as site:
+            code, results, _ = self.run_scenarios(site.base, 'ci', 'mcp-reads',
+                                                  {'QA_MCP_URL': site.base + '/broken-mcp'})
+        self.assertEqual(code, 1, results)
+        self.assertEqual(results['mcp-reads']['status'], 'fail')
 
     def test_mcp_reads_skip_where_nothing_serves_mcp(self):
         with StubSite() as site:
@@ -535,11 +601,16 @@ exit {exit_code}
         return {'QA_CHECK_PUBLIC_SITE': str(script)}
 
     def test_public_site_calls_the_existing_check(self):
-        for profile, route_args in (('production', '--host site.example --via-cloudflare'),
-                                    ('lab', '--host site.example')):
-            with self.subTest(profile):
+        for profile, route, route_args in (
+                ('production', None, '--host site.example --via-cloudflare'),
+                ('lab', None, '--host site.example --via-cloudflare'),
+                ('lab', 'gateway', '--host site.example')):
+            with self.subTest(profile=profile, route=route):
+                extra = self.fake_check_public_site(0)
+                if route:
+                    extra['QA_PUBLIC_SITE_ROUTE'] = route
                 code, results, _ = self.run_scenarios('https://site.example', profile, 'public-site',
-                                                      self.fake_check_public_site(0))
+                                                      extra)
                 self.assertEqual(code, 0, results)
                 self.assertEqual((self.dir / 'args').read_text().strip(), route_args)
                 self.assertEqual(self.checks(results['public-site']),
@@ -574,6 +645,11 @@ exit {exit_code}
         self.assertEqual(self.checks(results['conversion-checks']), {
             'report lists tables': True, 'economic_series unchanged': False,
             'annotations on their original series': False})
+        report.write_text(json.dumps({'tables': [table]}))
+        code, results, _ = self.run_scenarios('http://lab.example', 'lab', 'conversion-checks',
+                                              {'QA_CONVERSION_REPORT': str(report)})
+        self.assertEqual(code, 1)
+        self.assertIn('not a conversion report', results['conversion-checks']['reason'])
 
     def test_crawl_sample_runs_one_source_at_a_time(self):
         log = self.dir / 'crawl.log'
@@ -591,6 +667,22 @@ echo "end $QA_CRAWL_SOURCE" >> "{log}"
         self.assertEqual(code, 1)
         self.assertEqual(self.checks(results['crawl-sample']), {'crawl FRED': True, 'crawl BLS': False})
         self.assertEqual(log.read_text().split('\n')[:4], ['start FRED', 'end FRED', 'start BLS', 'end BLS'])
+
+    def test_crawl_sample_needs_a_source(self):
+        code, results, _ = self.run_scenarios('http://lab.example', 'lab', 'crawl-sample', {
+            'QA_CRAWL_SAMPLE_COMMAND': 'true', 'QA_CRAWL_SOURCES': ' , '})
+        self.assertEqual(code, 1)
+        self.assertIn('names no source', results['crawl-sample']['reason'])
+
+    def test_a_crawl_hook_that_overruns_is_stopped(self):
+        pid_file = self.dir / 'hook.pid'
+        code, results, _ = self.run_scenarios('http://lab.example', 'lab', 'crawl-sample', {
+            'QA_CRAWL_SAMPLE_COMMAND': f'sleep 300 & echo $! > "{pid_file}"; wait',
+            'QA_CRAWL_SOURCES': 'FRED', 'QA_CRAWL_HOOK_TIMEOUT_SECONDS': '1'})
+        self.assertEqual(code, 1)
+        self.assertIn('overran', results['crawl-sample']['reason'])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
 
     def test_lab_only_scenarios_skip_outside_labs(self):
         code, results, _ = self.run_scenarios('https://site.example', 'ci',

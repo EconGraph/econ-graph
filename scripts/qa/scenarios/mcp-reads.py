@@ -72,9 +72,12 @@ def dig(value, *keys):
 
 # Without a token first: an endpoint that answers is one that is served.
 probe = rpc('tools/list')
-if probe.status in (404, 405) or not probe.is_json():
+# Absent: 404/405, or the frontend's HTML fallback answering 200. Any other non-JSON answer
+# (a 502 page, a bare 401) is a served endpoint misbehaving, and fails below.
+if probe.status in (404, 405) or (200 <= probe.status < 300 and not probe.is_json()):
     skip(f'no MCP endpoint at {ENDPOINT} (HTTP {probe.status}); release builds compile /mcp out')
-check('refuses an anonymous caller', probe.status == 401, f'HTTP {probe.status} without a token')
+check('refuses an anonymous caller', probe.status == 401 and probe.is_json(),
+      f'HTTP {probe.status} ({probe.headers.get("Content-Type")}) without a token')
 
 token = signed_in_token()
 

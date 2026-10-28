@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { asShown, latestShown, recentRows } from '../../e2e/release/seriesPage';
+import { asShown, latestShown, parseShown, recentRows } from '../../e2e/release/seriesPage';
 
 // The QA scenario suite's anonymous browsing (scripts/qa/scenarios/anonymous-browser.sh), against
 // whatever catalog the target serves: nothing here assumes a fixture value. Signed out, read-only.
@@ -63,10 +63,15 @@ test.describe('anonymous browsing', () => {
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) expect(row).toMatch(CSV_ROW);
 
-      // The newest non-missing row is the page's newest observation.
-      const newest = rows.filter(row => !row.endsWith(',')).at(-1) ?? '';
+      // The newest non-missing row is the page's newest observation, date and value. The page
+      // rounds the value for display, so they agree to within half its last shown digit.
+      const [date, value] = (rows.filter(row => !row.endsWith(',')).at(-1) ?? ',').split(',');
       const shown = await latestShown(page);
-      expect(asShown(newest.split(',')[0], shown.date)).toBe(shown.date);
+      expect(asShown(date, shown.date)).toBe(shown.date);
+      const decimals = shown.value.split('.')[1]?.length ?? 0;
+      expect(Math.abs(Number(value) - parseShown(shown.value))).toBeLessThanOrEqual(
+        0.5 * 10 ** -decimals + 1e-9
+      );
     });
   });
 

@@ -2,7 +2,7 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -13,6 +13,9 @@ import { expect, test } from '@playwright/test';
 // goes to QA_REPORT (default frontend/qa-scenarios-report.json) and is attached here.
 
 const repo = resolve(import.meta.dirname, '../../../..');
+
+// Left of the test's timeout once the runner is stopped: enough to attach what it wrote.
+const ATTACH_MARGIN_MS = 60_000;
 
 test('QA scenario suite, ci profile, against the release e2e stack', async ({}, testInfo) => {
   const target = process.env.QA_STACK_TARGET ?? '';
@@ -25,12 +28,45 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
   }
   env.QA_OIDC_ISSUER ??= process.env.QA_STACK_OIDC_ISSUER ?? '';
 
-  const run = spawnSync(
+  // Its own process group (detached), so a runner that outlives the deadline is stopped with
+  // every scenario it started, and the output is still attached.
+  const runner = spawn(
     resolve(repo, 'scripts/qa/run-scenarios.sh'),
     ['--target', target, '--profile', 'ci', '--json', report],
-    { cwd: repo, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 }
+    { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true }
   );
-  const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  let output = '';
+  runner.stdout.on('data', chunk => (output += chunk));
+  runner.stderr.on('data', chunk => (output += chunk));
+  const stopGroup = (signal: NodeJS.Signals) => {
+    try {
+      if (runner.pid) process.kill(-runner.pid, signal);
+    } catch {
+      // Already gone.
+    }
+  };
+
+  let timedOut = false;
+  const status = await new Promise<number | null>((done, failed) => {
+    const deadline = setTimeout(
+      () => {
+        timedOut = true;
+        // SIGTERM first: the runner's scenarios clean up what they created.
+        stopGroup('SIGTERM');
+        setTimeout(() => stopGroup('SIGKILL'), ATTACH_MARGIN_MS / 2).unref();
+      },
+      Math.max(testInfo.timeout - ATTACH_MARGIN_MS, 1_000)
+    );
+    runner.on('error', error => {
+      clearTimeout(deadline);
+      failed(error);
+    });
+    runner.on('close', code => {
+      clearTimeout(deadline);
+      done(code);
+    });
+  });
+
   console.log(output);
   await testInfo.attach('qa-scenarios-output.txt', { body: output, contentType: 'text/plain' });
   try {
@@ -39,8 +75,8 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
       contentType: 'application/json',
     });
   } catch {
-    // No report: the runner refused before running anything; its output says why.
+    // No report: the runner refused or was stopped before writing one; its output says why.
   }
-  expect(run.error, 'the runner started').toBeUndefined();
-  expect(run.status, 'the runner exit status (1: a scenario failed)').toBe(0);
+  expect(timedOut, 'the runner finished before the test deadline').toBe(false);
+  expect(status, 'the runner exit status (1: a scenario failed)').toBe(0);
 });

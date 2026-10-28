@@ -10,7 +10,7 @@
 #
 # Inputs: QA_TARGET; QA_SEARCH_QUERY (default "GDP"). Needs frontend/node_modules and
 # Playwright's Chromium (`npm ci` and `npx playwright install chromium` in frontend/); skipped
-# without them. QA_CHROMIUM_PATH sets a Chromium executable.
+# without either. QA_CHROMIUM_PATH sets a Chromium executable.
 set -euo pipefail
 
 repo="${QA_REPO_ROOT:?run through scripts/qa/run-scenarios.sh}"
@@ -20,6 +20,19 @@ work="${QA_WORK_DIR:?run through scripts/qa/run-scenarios.sh}"
 if [ ! -x "$repo/frontend/node_modules/.bin/playwright" ]; then
     python3 -c 'import json; print(json.dumps({"skip": "Playwright is not installed: run npm ci in frontend/"}))' >>"$evidence"
     echo "skip: Playwright is not installed: run npm ci in frontend/"
+    exit 77
+fi
+
+# The browser too: npm ci installs the Playwright CLI but not its Chromium.
+chromium="${QA_CHROMIUM_PATH:-}"
+if [ -z "$chromium" ]; then
+    chromium="$(cd "$repo/frontend" && node -e \
+        'process.stdout.write(require("@playwright/test").chromium.executablePath())' 2>/dev/null || true)"
+fi
+if [ -z "$chromium" ] || [ ! -x "$chromium" ]; then
+    reason="Chromium is not installed: run npx playwright install chromium in frontend/, or set QA_CHROMIUM_PATH"
+    python3 -c 'import json, sys; print(json.dumps({"skip": sys.argv[1]}))' "$reason" >>"$evidence"
+    echo "skip: $reason"
     exit 77
 fi
 

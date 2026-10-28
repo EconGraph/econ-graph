@@ -31,6 +31,7 @@ import datetime as dt
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,8 @@ PRODUCTION_HOSTS = frozenset({'econgraph.com', 'www.econgraph.com'})
 EXIT_SKIP = 77
 
 DEFAULT_TIMEOUT = 600
+# How long an overrunning scenario gets to clean up after SIGTERM (QA_TIMEOUT_GRACE_SECONDS).
+DEFAULT_GRACE = 60
 
 # Environment variable names whose values are secrets, and *_FILE variables naming a file
 # whose content is one.
@@ -188,7 +191,8 @@ def admit(scenario: Scenario, profile: str, env: dict[str, str]) -> str | None:
 
 
 def production_hosts(env: dict[str, str]) -> set[str]:
-    extra = {h.strip().lower() for h in env.get('QA_PRODUCTION_HOSTS', '').split(',') if h.strip()}
+    extra = {h.strip().rstrip('.').lower() for h in env.get('QA_PRODUCTION_HOSTS', '').split(',')
+             if h.strip()}
     return set(PRODUCTION_HOSTS) | extra
 
 
@@ -201,7 +205,9 @@ def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
         return '--target must not carry credentials; use QA_USERNAME and QA_PASSWORD_FILE'
     if parsed.query or parsed.fragment:
         return '--target must be a base URL without a query or fragment'
-    if profile != 'production' and parsed.hostname.lower() in production_hosts(env):
+    # `econgraph.com.` (the fully qualified form) is the same host.
+    host = parsed.hostname.rstrip('.').lower()
+    if profile != 'production' and host in production_hosts(env):
         return (
             f'refusing the {profile} profile against {parsed.hostname}: it runs state-changing '
             'scenarios; use --profile production for the production site'
@@ -266,6 +272,67 @@ def read_evidence(path: Path) -> tuple[list, str | None]:
     return checks, skip_reason
 
 
+# The running scenario's process group, and whether the runner was asked to stop.
+_current_group: int | None = None
+_stopping = False
+
+
+def _on_sigterm(signum, frame):
+    """Stop: pass SIGTERM to the running scenario so it cleans up, and run nothing more."""
+    global _stopping
+    _stopping = True
+    if _current_group is not None:
+        _signal_group(_current_group, signal.SIGTERM)
+
+
+def _signal_group(pgid: int, sig: int) -> None:
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def run_bounded(command: list[str], env: dict[str, str], timeout: float,
+                grace: float) -> tuple[int, bytes, bool]:
+    """Run a scenario in its own process group: its exit status, output, and whether it overran.
+
+    On overrunning, the group gets SIGTERM (Python scenarios then stop their own commands and run
+    their cleanup), and after `grace` seconds SIGKILL, so nothing it started keeps running.
+    """
+    global _current_group
+    proc = subprocess.Popen(command, env=env, cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True)
+    _current_group = proc.pid
+    try:
+        return _wait_bounded(proc, timeout, grace)
+    finally:
+        _current_group = None
+
+
+def _wait_bounded(proc: subprocess.Popen, timeout: float, grace: float) -> tuple[int, bytes, bool]:
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+        _signal_group(proc.pid, signal.SIGKILL)
+        return proc.returncode, output, False
+    except subprocess.TimeoutExpired:
+        pass
+    _signal_group(proc.pid, signal.SIGTERM)
+    try:
+        output, _ = proc.communicate(timeout=grace)
+    except subprocess.TimeoutExpired:
+        _signal_group(proc.pid, signal.SIGKILL)
+        try:
+            output, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            # Something outside the group still holds the output pipe.
+            proc.kill()
+            output = b''
+    # Whatever of the group outlived the scenario itself.
+    _signal_group(proc.pid, signal.SIGKILL)
+    return -1, output or b'', True
+
+
 def run_scenario(
     scenario: Scenario,
     target: str,
@@ -291,23 +358,9 @@ def run_scenario(
         ),
     )
     started = time.monotonic()
-    timed_out = False
-    try:
-        proc = subprocess.run(
-            [str(scenario.path)],
-            env=child_env,
-            cwd=REPO_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=scenario.timeout,
-            check=False,
-        )
-        code, output = proc.returncode, proc.stdout.decode('utf-8', errors='replace')
-    except subprocess.TimeoutExpired as expired:
-        timed_out = True
-        code = -1
-        output = (expired.stdout or b'').decode('utf-8', errors='replace')
+    code, raw, timed_out = run_bounded([str(scenario.path)], child_env, scenario.timeout,
+                                       float(env.get('QA_TIMEOUT_GRACE_SECONDS', DEFAULT_GRACE)))
+    output = raw.decode('utf-8', errors='replace')
     duration = round(time.monotonic() - started, 2)
 
     checks, skip_reason = read_evidence(evidence_file)
@@ -320,7 +373,7 @@ def run_scenario(
             status, reason = 'fail', f'exited 0 but {len(failed)} check(s) failed'
         else:
             status, reason = 'pass', None
-    elif code == EXIT_SKIP:
+    elif code == EXIT_SKIP and not any(not c.get('ok', False) for c in checks):
         status = 'skip'
         reason = skip_reason or (tail[-1] if tail else 'skipped')
     else:
@@ -437,7 +490,11 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     results = []
     work_parent = env.get('QA_WORK_ROOT') or None
     with tempfile.TemporaryDirectory(prefix='qa-scenarios-', dir=work_parent) as work_root:
+        signal.signal(signal.SIGTERM, _on_sigterm)
         for scenario in selected:
+            if _stopping:
+                results.append(not_run(scenario, 'not run: the runner was stopped'))
+                continue
             why = admit(scenario, args.profile, env)
             if why:
                 results.append(not_run(scenario, why))
@@ -461,7 +518,7 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('\n'.join(redact(line) for line in summary_lines(report)))
-    return 1 if counts['fail'] else 0
+    return 1 if counts['fail'] or _stopping else 0
 
 
 if __name__ == '__main__':

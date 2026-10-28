@@ -68,7 +68,9 @@ try:
         fail('series data', f'none of the first {len(found["series"])} "{QUERY}" results has observations')
 
     series = data_or_raise(*graphql('/graphql', SERIES, {'id': chosen['id']}), 'series')['series']
-    check('open series', bool(series) and series['id'] == chosen['id'],
+    if not series:
+        fail('open series', f'series({chosen["id"]}) returned nothing for a search result')
+    check('open series', series['id'] == chosen['id'],
           f'{series["title"]} ({series["source"]["name"] if series.get("source") else "?"})',
           series_id=chosen['id'], external_id=chosen['externalId'])
 

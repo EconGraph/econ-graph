@@ -25,7 +25,9 @@ The report:
 
 `checksum` is whatever the script computes for the table (e.g. an md5 of its ordered ids); it
 must be present on both sides. Every table must keep its row count and checksum, and every
-annotation its series. An empty table list fails. Skipped without either input.
+annotation its series. An empty table list fails, and so does a report without an
+"annotations" array ([] when the database has none). QA_CONVERSION_TIMEOUT_SECONDS (default
+1500) bounds the command. Skipped without either input.
 """
 
 import json
@@ -34,6 +36,9 @@ import subprocess
 from pathlib import Path
 
 from qa import check, fail, finish, skip
+from qa import run as run_bounded
+
+TIMEOUT = float(os.environ.get('QA_CONVERSION_TIMEOUT_SECONDS', '1500'))
 
 path = os.environ.get('QA_CONVERSION_REPORT', '')
 command = os.environ.get('QA_CONVERSION_CHECK_COMMAND', '')
@@ -43,7 +48,10 @@ if path:
     except OSError as error:
         fail('report', f'{path}: {error.strerror}')
 elif command:
-    run = subprocess.run(['bash', '-c', command], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    try:
+        run = run_bounded(['bash', '-c', command], TIMEOUT)
+    except subprocess.TimeoutExpired:
+        fail('report', f'QA_CONVERSION_CHECK_COMMAND overran {TIMEOUT:.0f}s and was stopped')
     if run.returncode:
         fail('report', f'QA_CONVERSION_CHECK_COMMAND exited {run.returncode}: {run.stderr.strip()[-300:]}')
     text = run.stdout
@@ -53,7 +61,9 @@ else:
 try:
     report = json.loads(text)
     tables = report['tables']
-    annotations = report.get('annotations', [])
+    annotations = report['annotations']
+    if not isinstance(tables, list) or not isinstance(annotations, list):
+        raise TypeError('"tables" and "annotations" must be arrays')
 except (ValueError, KeyError, TypeError) as error:
     fail('report', f'not a conversion report: {error}')
 
