@@ -14,14 +14,13 @@ on:
   # Retargeting a PR to main after its parent merges is an `edited` event, which
   # does not run here (and `types: [edited]` would let title edits cancel runs),
   # so the child's next push after retarget is its first run against main.
+  # No paths-ignore: Core CI Result is a required check and must report on
+  # every PR. A docs-only PR runs only the changes job and the result job
+  # (the code output of changes, below).
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/workflows/README.md'
+  # The merge queue (docs/development/MERGE_QUEUE.md): the full suite, without
+  # path filtering, on the queued PRs merged onto their base branch.
+  merge_group:
   workflow_dispatch:
     inputs:
       run_e2e_tests:
@@ -85,13 +84,31 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
+      # False only on a PR that changes nothing but documentation (the paths
+      # the push trigger ignores); every other event runs the suite.
+      code: ${{ github.event_name != 'pull_request' || steps.code.outputs.code == 'true' }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     - uses: dorny/paths-filter@v3
+      id: code
+      if: github.event_name == 'pull_request'
+      with:
+        # A file counts only if it matches every pattern: anything but docs.
+        predicate-quantifier: every
+        filters: |
+          code:
+            - '**'
+            - '!*.md'
+            - '!docs/**'
+            - '!LICENSE'
+            - '!.gitignore'
+            - '!.github/workflows/README.md'
+    - uses: dorny/paths-filter@v3
       id: filter
-      # Protected-branch pushes run the ordinary suite without path filtering.
-      if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
+      # Protected-branch pushes and merge groups run the ordinary suite without
+      # path filtering.
+      if: github.event_name != 'merge_group' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
       with:
         base: main
         filters: |
@@ -170,7 +187,7 @@ jobs:
     needs: [changes]
     # Only the filter step is skipped on main/develop/release/**; changes succeeds.
     # Keep the explicit selection and failure/cancellation gate for feature refs.
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
     timeout-minutes: 90
 
     steps:
@@ -203,6 +220,8 @@ jobs:
   prometheus-rules:
     name: Prometheus Rules
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 10
 
     steps:
@@ -225,6 +244,8 @@ jobs:
   postgres-backup-scripts:
     name: PostgreSQL Backup Scripts
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -250,6 +271,8 @@ jobs:
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -968,7 +991,7 @@ jobs:
     needs: [changes]
     # Skipped on backend-only PRs; a manual run always gets it. See
     # backend-build-cache for the failure/cancellation gate
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
 
     steps:
     - name: Checkout code
@@ -1014,7 +1037,7 @@ jobs:
     # Skipped on backend-only PRs (and frontend-integration-tests with it);
     # pushes and manual runs always get it, so a manual E2E run is never
     # skipped. See backend-build-cache for the failure/cancellation gate
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
 
     steps:
     - name: Checkout code
@@ -1056,6 +1079,8 @@ jobs:
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 90
 
     steps:
@@ -1066,6 +1091,13 @@ jobs:
 
     - name: Check dev/QA Keycloak data is not deployed to k8s
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
+
+    # The gate of the required checks' result jobs (Core CI Result,
+    # Release E2E Result; docs/development/MERGE_QUEUE.md)
+    - name: Check the required-jobs gate
+      run: |
+        shellcheck ci/scripts/check-required-jobs.sh ci/scripts/test-check-required-jobs.sh
+        ci/scripts/test-check-required-jobs.sh
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.98.1
@@ -2085,6 +2117,60 @@ jobs:
           exit 1
         fi
         docker rm -f frontend-smoke-test
+
+  # The one check branch protection requires of this workflow
+  # (docs/development/MERGE_QUEUE.md). It always runs, and fails when any job
+  # failed or was cancelled. On a pull request a job that path filtering
+  # skipped passes; in a merge group nothing is filtered, so every job of the
+  # ordinary suite must have succeeded, and a skipped one fails it too.
+  ci-result:
+    name: Core CI Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ always() }}
+    needs:
+      - changes
+      - backend-build-cache
+      - prometheus-rules
+      - postgres-backup-scripts
+      - deploy-manifests
+      - backend-migration-validation-tests
+      - backend-smoke-tests
+      - chart-api-integration-tests
+      - backend-mcp-integration-tests
+      - backend-workspace-tests
+      - backend-db-tests
+      - admin-frontend-tests
+      - frontend-tests
+      - quality-checks
+      - security-audit
+      - license-compliance
+      - backend-integration-tests
+      - frontend-integration-tests
+      - e2e-container-build-optimized
+      - e2e-core-tests
+      - e2e-comprehensive-tests
+      - mobile-e2e-tests
+      - docker-build
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        sparse-checkout: ci/scripts
+
+    - name: Check the job results
+      env:
+        NEEDS: ${{ toJSON(needs) }}
+        EVENT: ${{ github.event_name }}
+        # The ordinary suite: in a merge group each of these must succeed.
+        MUST_RUN: >-
+          changes backend-build-cache prometheus-rules postgres-backup-scripts
+          deploy-manifests backend-migration-validation-tests backend-smoke-tests chart-api-integration-tests
+          backend-mcp-integration-tests backend-workspace-tests backend-db-tests admin-frontend-tests
+          frontend-tests quality-checks security-audit license-compliance
+          backend-integration-tests frontend-integration-tests docker-build
+      run: ci/scripts/check-required-jobs.sh
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT

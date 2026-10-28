@@ -1,11 +1,12 @@
 name: Docs Checks
 
-# Runs on every PR, including docs-only ones that Core CI skips and stacked
-# PRs based on another branch.
+# Runs on every PR, including docs-only ones and stacked PRs based on another
+# branch, and on merge groups (docs/development/MERGE_QUEUE.md).
 on:
   push:
     branches: [ main, develop ]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:

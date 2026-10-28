@@ -10,6 +10,8 @@ on:
     tags: [ 'train-*' ]
   # Every PR, whatever its base, so stacked PRs get the check too
   pull_request:
+  # The merge queue (docs/development/MERGE_QUEUE.md)
+  merge_group:
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:

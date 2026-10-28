@@ -6,10 +6,10 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 
 | File | Automatic triggers | Purpose |
 | --- | --- | --- |
-| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/**; PRs into any branch, subject to paths-ignore | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
-| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs | Markdown lint and offline relative-link checks |
-| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; Monday 06:17 UTC | Flag validation and generated-file consistency |
-| [release-e2e.yml](release-e2e.yml) | PRs touching its listed application, Keycloak, release-stack or workflow paths | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
+| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/** (push subject to paths-ignore); all PRs (a docs-only PR runs only Detect changes and Core CI Result); merge groups | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
+| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs; merge groups | Markdown lint and offline relative-link checks |
+| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; merge groups; Monday 06:17 UTC | Flag validation and generated-file consistency |
+| [release-e2e.yml](release-e2e.yml) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
 | [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
 | [update-cost-analysis.yml](update-cost-analysis.yml) | Daily 06:00 UTC | Recalculate cost documentation and attempt to publish changes |
@@ -20,7 +20,7 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [ci-experimental.yml](ci-experimental.yml) | None | Optional RAM-disk experiment |
 | [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | None | Manual build-cache experiment |
 
-All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
+The merge queue's required checks are the result jobs of Core CI and Release E2E, and the Docs Checks and Feature Flags jobs; see [Merge queue](../../docs/development/MERGE_QUEUE.md). All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
 
 ## Operational notes
 
