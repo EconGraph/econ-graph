@@ -291,6 +291,7 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a

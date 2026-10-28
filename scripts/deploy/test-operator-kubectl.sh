@@ -106,7 +106,7 @@ reset; out="$(FAKE_NODES_FAIL=1 run backup-postgres-now.sh)"; rc=$?
 expect "backup-postgres-now.sh with an unreadable identity" nonzero "could not read the identity" none
 reset; out="$(FAKE_NODES_FAIL=1 run restore-postgres-backup.sh --yes)"; rc=$?
 expect "restore-postgres-backup.sh with an unreadable identity" nonzero "could not read the identity" none
-reset; out="$(FAKE_NODES_FAIL=1 run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token)"; rc=$?
+reset; out="$(FAKE_NODES_FAIL=1 CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
 reset; out="$(FAKE_NODES_FAIL=1 run test-letsencrypt-cloudflare.sh -d example.invalid)"; rc=$?
 expect "test-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
@@ -117,7 +117,7 @@ for script in backup-postgres-now.sh restore-postgres-backup.sh; do
     expect "$script --dry-run --context kind-other" 0 "context         kind-other" none
     only_context "$script --context kind-other" kind-other
 done
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --dry-run --context kind-other)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --dry-run --context kind-other)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --dry-run --context kind-other" 0 "Dry run: on context kind-other" none
 only_context "setup-letsencrypt-cloudflare.sh --context kind-other" kind-other
 reset; out="$(run test-letsencrypt-cloudflare.sh -d example.invalid --dry-run --context kind-other)"; rc=$?
@@ -151,11 +151,11 @@ expect "restore-postgres-backup.sh --context ''" nonzero "--context needs a non-
 reset; out="$(run restore-postgres-backup.sh --context missing --yes)"; rc=$?
 expect "restore-postgres-backup.sh on an unknown context" nonzero "has no context missing" none
 
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --dry-run)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --dry-run)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --dry-run" 0 "Dry run: on context kind-econ-graph" none
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --context missing)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --context missing)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh on an unknown context" nonzero "has no context missing" none
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --context '')"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --context '')"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --context ''" nonzero "--context needs a non-empty value" none
 
 reset; out="$(run test-letsencrypt-cloudflare.sh -d example.invalid --dry-run)"; rc=$?
