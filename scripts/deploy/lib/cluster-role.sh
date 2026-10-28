@@ -71,7 +71,7 @@ kc() {
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
-    local fix="reach the kind cluster once with a script that keeps its kubectl there (any kind-env.sh script, e.g. scripts/deploy/precheck-db-migration.sh --dry-run, or scripts/deploy/recreate-kind-cluster.sh --if-missing to create it), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
+    local fix="reach the kind cluster once with a script that keeps its kubectl there (any kind-env.sh script run for real keeps them, e.g. scripts/deploy/precheck-db-migration.sh, which only reads the cluster without --stop-crawler; a --dry-run keeps nothing; scripts/deploy/recreate-kind-cluster.sh --if-missing creates the cluster), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
     if [ -n "${KUBECTL:-}" ]; then
         return 0
     fi

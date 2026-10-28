@@ -34,7 +34,7 @@ HOME_DIR="$WORK/home"
 CACHE="$HOME_DIR/.cache/econgraph"
 LOGS="$WORK/logs"
 ROOTFUL="unix:///var/run/docker.sock"
-mkdir -p "$WORK/bin" "$WORK/tmp" "$WORK/source" "$LOGS" "$CACHE/bin" "$HOME_DIR/.local/share/econgraph/bin"
+mkdir -p "$WORK/bin" "$WORK/tmp" "$WORK/source" "$LOGS" "$CACHE/bin" "$HOME_DIR/.local/share/econgraph/bin" || exit 1
 
 # Plain kubectl and kind: any call is a failure of the test.
 for tool in kubectl kind; do
@@ -79,8 +79,8 @@ esac
 exit 0
 STUB
 echo "# fake kubeconfig of kind cluster econ-graph" >"$WORK/source/kubeconfig"
-cp "$WORK/source/kubectl" "$CACHE/bin/kubectl"
-cp "$WORK/source/kubeconfig" "$CACHE/kubeconfig-econ-graph"
+cp "$WORK/source/kubectl" "$CACHE/bin/kubectl" || exit 1
+cp "$WORK/source/kubeconfig" "$CACHE/kubeconfig-econ-graph" || exit 1
 
 # docker: `info` names a rootful daemon, `cp` of the node's kubectl copies the
 # fake; anything else fails.
@@ -103,7 +103,7 @@ case "$KIND_PINNED" in
     "$HOME_DIR"/*) ;;
     *) echo "FAIL the pinned kind would be $KIND_PINNED, outside the scratch HOME"; exit 1 ;;
 esac
-mkdir -p "$(dirname "$KIND_PINNED")"
+mkdir -p "$(dirname "$KIND_PINNED")" || exit 1
 cat >"$KIND_PINNED" <<'STUB'
 #!/usr/bin/env bash
 echo "kind DOCKER_HOST=${DOCKER_HOST:-} $*" >>"$TEST_LOGS/pinned-kind.log"
@@ -114,13 +114,14 @@ case "$*" in
     *) echo "stub kind: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
-chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED"
+chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED" ||
+    { echo "FAIL could not make the test stubs executable" >&2; exit 1; }
 
 # deploy.sh runs from a copy of scripts/deploy only, so that it skips the
 # Grafana and monitoring linters (absent) and stops at its first apply.
 TREE="$WORK/tree"
-mkdir -p "$TREE/scripts"
-cp -r "$PROJECT_ROOT/scripts/deploy" "$TREE/scripts/deploy"
+mkdir -p "$TREE/scripts" || exit 1
+cp -r "$PROJECT_ROOT/scripts/deploy" "$TREE/scripts/deploy" || exit 1
 
 # run SCRIPT ARGS...: the script with none of KUBECTL, KUBECONFIG, DOCKER_HOST
 # (and the settings that would choose another cluster) set, the scratch HOME,
