@@ -59,7 +59,7 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 
 | Alert | Fires when |
 |---|---|
-| `CrawlerSchedulerDisabled` | Primary workers report automatic scheduling disabled (info, no delay) |
+| `CrawlerSchedulerDisabled` | Every discovered primary worker reports scheduling disabled with a successful scrape (info, no delay) |
 | `CrawlerCoverageLow` | A source's coverage has been under 95% for 6 hours |
 | `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes and automatic scheduling is not explicitly disabled |
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
@@ -110,8 +110,9 @@ no traffic or overdue series. Branch schedulers do not affect the primary's mode
 two alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
 still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/scrape
 failures also remain active: the independent metric pollers must stay healthy.
-`CrawlerSchedulerDisabled` remains visible at info level while primary workers report
-static mode. All crawler alerts select the primary namespace (`econ-graph`); branch
+`CrawlerSchedulerDisabled` remains visible at info level while every discovered primary
+worker reports static mode and has a successful scrape. Missing mode metrics or a failed
+scrape prevent this all-disabled indication, just as they prevent suppression above. All crawler alerts select the primary namespace (`econ-graph`); branch
 worker traffic, coverage and failures do not affect them.
 No blanket Alertmanager silence is required.
 

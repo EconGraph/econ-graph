@@ -94,9 +94,21 @@ data:
       - name: crawler.mode
         rules:
         # Visibility for explicit static mode, even while idle/freshness alerts are suppressed.
+        # Require complete primary telemetry, matching the idle/freshness suppression below.
         # A branch worker cannot change the primary's reported mode.
         - alert: CrawlerSchedulerDisabled
-          expr: max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0
+          expr: |
+            (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+            and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+            unless on()
+            (
+              (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+              or on(job, instance)
+              (
+                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+              )
+            )
           labels:
             severity: info
           annotations:
