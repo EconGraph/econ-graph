@@ -21,6 +21,13 @@ set -euo pipefail
 EVENT="${EVENT:-}"
 MUST_RUN="${MUST_RUN:-}"
 
+# A non-empty object of jobs, or nothing passes: malformed JSON, null, a list
+# or {} would otherwise read as "no job failed".
+if ! jq -e 'type == "object" and length > 0' <<<"$NEEDS" >/dev/null 2>&1; then
+    echo "::error::NEEDS is not a non-empty JSON object of job results: ${NEEDS:0:200}"
+    exit 1
+fi
+
 bad=()
 while IFS=$'\t' read -r job result; do
     [ -n "$job" ] || continue

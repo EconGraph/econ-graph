@@ -44,5 +44,13 @@ if NEEDS='' "$script" >/dev/null 2>&1; then
 else
     echo "ok   no NEEDS fails"
 fi
+# Input that names no job must never pass, on any event.
+for event in pull_request merge_group push; do
+    check "$event, NEEDS {}" fail "$event" "" '{}'
+    check "$event, NEEDS null" fail "$event" "" 'null'
+    check "$event, NEEDS a list" fail "$event" "" '[{"result":"success"}]'
+    check "$event, NEEDS malformed" fail "$event" "" '{"changes": {"result": "success"'
+    check "$event, NEEDS a string" fail "$event" "" '"success"'
+done
 
 exit "$failed"
