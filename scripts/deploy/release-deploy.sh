@@ -799,7 +799,10 @@ run_step() {
     step_argv "$1"
     STEP_NAME="$1"
     STATUS=0
-    (cd "$PROJECT_ROOT" && exec "${ARGV[@]}") <&0 >&"$tee_fd" 2>&1 &
+    # SIGINT and SIGHUP from the terminal go to its whole process group, the
+    # step too: the step ignores them, so only the SIGTERM (or SIGKILL) this
+    # run sends stops it, once, and never in the middle of its cleanup.
+    (trap '' INT HUP; cd "$PROJECT_ROOT" && exec "${ARGV[@]}") <&0 >&"$tee_fd" 2>&1 &
     STEP_PID=$!
     # A signal that came between starting the step and knowing its PID.
     if [ -n "$INTERRUPTED" ] && [ -z "$STOP_SENT" ]; then
@@ -807,12 +810,23 @@ run_step() {
         stop_step TERM
         start_timer
     fi
-    # wait returns early when a trapped signal arrives; wait again until the
-    # step itself has exited.
+    # wait returns early (above 128) when a trapped signal arrives: then wait
+    # again while the step runs. Once it has exited, a further wait gives its
+    # own status, which bash kept when it reaped it (127 when the earlier wait
+    # had already returned it).
+    local seen st again
     while :; do
-        STATUS=0
-        wait "$STEP_PID" || STATUS=$?
-        kill -0 "$STEP_PID" 2>/dev/null || break
+        seen="$SIGNALS"
+        st=0
+        wait "$STEP_PID" || st=$?
+        if [ "$SIGNALS" != "$seen" ]; then
+            kill -0 "$STEP_PID" 2>/dev/null && continue
+            again=0
+            wait "$STEP_PID" 2>/dev/null || again=$?
+            [ "$again" = 127 ] || st="$again"
+        fi
+        STATUS="$st"
+        break
     done
     STEP_PID=""
     if [ -n "$TIMER_PID" ]; then

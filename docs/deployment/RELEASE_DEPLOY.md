@@ -216,7 +216,7 @@ warned about and never cuts the run or its failure output short.
 `scripts/deploy/test-release-deploy.sh` runs `release-deploy.sh` with every step replaced by
 a stub, and stub kubectl, kind and docker in a scratch HOME. It checks the order, the stop
 at each failing step with its state and rollback output, a step that leaves a background
-process holding its output, SIGINT and SIGTERM during the deploy, the restart and restore
+process holding its output, signals during a step (the escalation from SIGTERM to SIGKILL, the step's cleanup, a burst of them), the restart and restore
 guidance across re-runs (a backup that failed partway, records from another cluster,
 paths with blanks), an unwritable record, the checkout checks (each way git can hide a
 change, and a change during the run), the `PUBLIC_HOST` guard, the production

@@ -65,6 +65,28 @@ exit 1
 STUB
 done
 
+# git and sed, slowed down once at a chosen moment so a signal can land there:
+# git's status during the check before the deploy step (STUB_SLOW_GIT), sed's
+# read of the record while a failure is explained (STUB_SLOW_SED).
+cat >"$WORK/bin/git" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${STUB_SLOW_GIT:-}" ] && [[ "$*" == *"status --porcelain --untracked-files=all"* ]] &&
+    grep -q "^precheck-db-migration " "$TEST_LOGS/steps.log" 2>/dev/null && [ ! -e "$TEST_LOGS/slow-git" ]; then
+    : >"$TEST_LOGS/slow-git"
+    sleep 3
+fi
+exec /usr/bin/git "$@"
+STUB
+cat >"$WORK/bin/sed" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${STUB_SLOW_SED:-}" ] && [[ "$*" == *"cluster_uid="* ]] &&
+    grep -q "stub deploy stopped" "$TEST_LOGS/steps.log" 2>/dev/null && [ ! -e "$TEST_LOGS/slow-sed" ]; then
+    : >"$TEST_LOGS/slow-sed"
+    sleep 3
+fi
+exec /usr/bin/sed "$@"
+STUB
+
 # The kind cluster's kubectl: context kind-econ-graph, a kube-system UID, the
 # production marker as STUB_MARKER says (production, none, fails), and the
 # public host the cluster serves as STUB_SERVED_HOST says (default
@@ -155,6 +177,18 @@ case "$name" in
         echo "🗄️  Triggering an ad-hoc backup job: postgres-backup-manual-7"
         # A backup that takes a while (long enough to be interrupted).
         if [ -n "${STUB_BACKUP_SLEEP:-}" ]; then sleep "$STUB_BACKUP_SLEEP"; fi
+        # A backup that completes as the signal comes: SIGTERM ends its wait, and it
+        # finishes normally.
+        if [ -n "${STUB_BACKUP_COMPLETES:-}" ]; then
+            # It finishes at once on SIGTERM, while the run is still in its signal
+            # handler: the run must still read the step's own status, 0.
+            trap 'for db in econ_graph econ_graph_app; do
+                    echo "[pod/x/pg-dump] [${db}] Backup OK: 3 tables, 1.0M in /backups/${db}-20261028T080000Z.dump"
+                  done; exit 0' TERM
+            echo "stub-backup-waiting now" >>"$TEST_LOGS/steps.log"
+            sleep 30 &
+            wait $!
+        fi
         # A backup step that succeeds without naming its dumps.
         if [ -n "${STUB_NO_PATHS:-}" ]; then exit 0; fi
         if [ -n "${STUB_BACKUP_RUNNING:-}" ]; then
@@ -189,6 +223,8 @@ case "$name" in
         # verify runs.
         if [ -n "${STUB_LATE_WRITER:-}" ]; then (sleep 4; printf '\n  unchecked late output of the precheck\n') & fi ;;
     load-release-images)
+        # The signals the step ignores, as /proc reports them.
+        if [ -n "${STUB_SIGIGN:-}" ]; then grep '^SigIgn:' /proc/self/status >"$TEST_LOGS/sigign"; fi
         # A load interrupted while it runs writes its record on the way out
         # (load-release-images.sh's EXIT trap), which takes a moment.
         if [ -n "${STUB_LOAD_SLEEP:-}" ]; then
@@ -712,8 +748,55 @@ if ! has "its Job job/postgres-backup-manual-7 may still be running" || ! has "g
 else
     echo "ok   Ctrl-C during the backup: check its Job before running again"
 fi
-set +m
 
+# A step that completes as the signal comes counts as done; the run stops
+# before the next one.
+start_bg stub-backup-waiting STUB_BACKUP_COMPLETES=1
+kill -TERM "$pid"; wait "$pid"; rc=$?
+if ! grep -qxF "step=backup status=ok" "$WORK/report" ||
+    [ "$(tail -1 "$WORK/report")" != "result=interrupted step=load signal=TERM" ] ||
+    grep -q "^load-release-images " "$LOGS/steps.log"; then
+    fail "a backup that completes as SIGTERM comes: report $(cat "$WORK/report")"
+else
+    echo "ok   a step that completes as the signal comes counts as done"
+fi
+# A Ctrl-C during the check before the deploy step: an interruption, not a refusal.
+rm -f "$LOGS/slow-git"
+start_bg precheck-db-migration STUB_SLOW_GIT=1
+for _ in $(seq 1 100); do [ -e "$LOGS/slow-git" ] && break; sleep 0.1; done
+kill -INT -- -"$pid"; wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+if [ "$rc" != 130 ] || [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ] ||
+    grep -q "^deploy " "$LOGS/steps.log" || has "the checkout changed"; then
+    fail "Ctrl-C during the check before deploy: exit $rc, report $(tail -1 "$WORK/report")"
+else
+    echo "ok   Ctrl-C during the check before deploy is an interruption"
+fi
+# A second Ctrl-C while the failure is explained doesn't cut it short.
+rm -f "$LOGS/slow-sed"
+start_bg deploy STUB_SLEEP=8 STUB_SLOW_SED=1
+kill -INT -- -"$pid"
+for _ in $(seq 1 100); do [ -e "$LOGS/slow-sed" ] && break; sleep 0.1; done
+sleep 0.5
+kill -INT -- -"$pid"; wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+if ! grep -q "^restore_backup=/backups/econ_graph-" "$WORK/report" ||
+    [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ]; then
+    fail "a second Ctrl-C while the failure is explained: report $(cat "$WORK/report")"
+else
+    echo "ok   a second Ctrl-C while the failure is explained doesn't cut it short"
+fi
+sleep 9
+set +m
+# A step ignores SIGINT and SIGHUP, which a terminal sends its whole process
+# group: only the run's own SIGTERM stops it, once.
+run env STUB_SIGIGN=1 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+mask="$(awk '{ print $2 }' "$LOGS/sigign" 2>/dev/null)"
+if [ -z "$mask" ] || [ $(( 16#$mask & 3 )) != 3 ]; then
+    fail "a step does not ignore SIGINT and SIGHUP (SigIgn ${mask:-unknown})"
+else
+    echo "ok   a step ignores SIGINT and SIGHUP from the terminal"
+fi
 # A backup step that succeeds without naming a backup stops the run.
 run env STUB_NO_PATHS=1 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
 [ "$rc" -ne 0 ] && [ "$(steps)" = "backup-postgres-now" ] && has "named no backup it took" ||
