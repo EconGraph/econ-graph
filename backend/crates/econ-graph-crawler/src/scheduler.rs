@@ -46,7 +46,8 @@
 //!    Discovered series and refreshes of existing series take turns in the batch, each kind
 //!    oldest first (never-crawled series first; discovered series never tried before ones whose
 //!    last fetch failed), so neither starves the other.
-//!    Series that already have an active (pending | processing | retrying) job are not candidates;
+//!    Series that already have an active (pending | processing | retrying) `fetch_series` or
+//!    `refetch_series` job are not candidates (a re-fetch reads the series in full anyway);
 //!    a concurrent duplicate rejected by the queue's partial unique index counts as skipped.
 //!
 //! 2. **Catalog discovery** — enqueues one `discover_catalog` job per registry source unless that
@@ -236,7 +237,7 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
          WHERE NOT EXISTS ( \
                  SELECT 1 FROM crawl_queue q \
                  WHERE q.source = c.code AND q.series_id = c.external_id \
-                   AND q.kind = 'fetch_series' \
+                   AND q.kind IN ('fetch_series', 'refetch_series') \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
            AND CASE WHEN c.crawl_status IN ('failed', 'not_found') THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
@@ -1058,6 +1059,24 @@ mod tests {
         assert_eq!(second.series_enqueued, 0, "{second:?}");
         assert_eq!(second.series_due, 0, "{second:?}");
         assert_eq!(queued_series(p).await, expected);
+    }
+
+    /// A due series with an active re-fetch gets no refresh too: the re-fetch already reads it.
+    #[tokio::test]
+    async fn an_active_refetch_stands_in_for_a_refresh() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        use SourceId::Fred;
+        seed(p, Fred, "t15c_rf_due", "Daily", Some(2.0), None).await;
+        seed(p, Fred, "t15c_rf_other", "Daily", Some(2.0), None).await;
+        let job = new_job(Fred, "t15c_rf_due", JobKind::RefetchSeries, 3);
+        CrawlQueueItem::enqueue(p, &job).await.unwrap().unwrap();
+
+        scheduler(p, &[Fred], DEFAULT_BATCH_LIMIT)
+            .tick()
+            .await
+            .unwrap();
+        assert_eq!(queued_series(p).await, set(&["FRED/t15c_rf_other"]));
     }
 
     #[tokio::test]

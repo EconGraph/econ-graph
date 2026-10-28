@@ -30,8 +30,8 @@
 #   GATEWAY_POD_CIDRS       The pod address ranges, space-separated, whose
 #                           X-Forwarded-For the gateway trusts (the tunnel
 #                           connector runs there). Default: the nodes'
-#                           spec.podCIDRs, which kind sets; set it for a CNI
-#                           that does not (MicroK8s's Calico: 10.1.0.0/16).
+#                           spec.podCIDRs (kind sets them), else Calico's IP
+#                           pools (MicroK8s, whose Calico leaves them empty).
 #
 # The routes, and for a public host the https listener, its certificate and
 # the public routes, are applied separately, by
@@ -331,16 +331,21 @@ else
 fi
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gatewayclass.yaml"
 ssa "$FIELD_MANAGER" "$GATEWAY_DIR/gateway.yaml"
-# The client-address policy, trusting X-Forwarded-For from the nodes' pod
-# CIDRs only.
-# GATEWAY_POD_CIDRS overrides them, for a CNI that leaves the Node fields
-# empty (MicroK8s's Calico).
+# The client-address policy, trusting X-Forwarded-For from the pod CIDRs only:
+# GATEWAY_POD_CIDRS if set, else the nodes' spec.podCIDRs (kind), else, for a
+# Calico that leaves those empty (MicroK8s), its IP pools. Read from the
+# cluster on every run, so every script that installs the gateway trusts the
+# same ranges.
 pod_cidrs="${GATEWAY_POD_CIDRS:-}"
 if [ -z "$pod_cidrs" ]; then
     pod_cidrs="$(kc get nodes -o jsonpath='{.items[*].spec.podCIDRs[*]}' 2>/dev/null || true)"
 fi
+if [ -z "$pod_cidrs" ]; then
+    pod_cidrs="$(kc get ippools.crd.projectcalico.org -o jsonpath='{.items[*].spec.cidr}' 2>/dev/null || true)"
+    [ -z "$pod_cidrs" ] || echo "Pod CIDRs from Calico's IP pools: ${pod_cidrs}"
+fi
 [ -n "$pod_cidrs" ] ||
-    die "could not read the nodes' pod CIDRs (spec.podCIDRs) for client-traffic-policy.yaml; set GATEWAY_POD_CIDRS (space-separated)"
+    die "could not read the pod CIDRs (the nodes' spec.podCIDRs, or Calico's IP pools) for client-traffic-policy.yaml; set GATEWAY_POD_CIDRS (space-separated)"
 awk -v cidrs="$pod_cidrs" '
     $0 == "      - __POD_CIDRS__" { n = split(cidrs, c, " "); for (i = 1; i <= n; i++) print "      - " c[i]; next }
     { print }' "$GATEWAY_DIR/client-traffic-policy.yaml" >"$WORK/client-traffic-policy.yaml"

@@ -23,18 +23,14 @@ This directory contains all the necessary files to deploy EconGraph to a local K
   installer; only read-only `kind get` commands fall back to the `kind` on `PATH`, with a
   warning. Re-running the installer does nothing when the right version is in place.
 
-### One-Command Setup
+### Setup
 
 ```bash
-./scripts/deploy/setup-local-k8s.sh
+sudo scripts/host/setup-subvolumes.sh                    # host storage under /srv/econgraph, once per host
+./scripts/deploy/recreate-kind-cluster.sh --if-missing   # the kind cluster, if there is none
+./scripts/deploy/build-images.sh                         # the images
+./scripts/deploy/deploy.sh                               # databases, Secrets, application, routes
 ```
-
-This script will:
-
-1. Create a local Kubernetes cluster using Terraform
-2. Build Docker images for frontend and backend
-3. Deploy the application to the cluster
-4. Install the gateway and the app's routes on it
 
 ## 📁 Directory Structure
 
@@ -67,8 +63,10 @@ terraform/k8s/          # Terraform configuration
 └── outputs.tf         # Outputs
 
 scripts/deploy/         # Deployment scripts
-├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
+├── load-release-images.sh     # Put a release candidate's GHCR images on the nodes
+├── verify-release-images.sh   # Restart and check the pods run them
+├── rollback-release-images.sh # Go back to what ran before the load
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── install-gateway.sh # Install the gateway (run by deploy.sh)
 ├── apply-gateway-routes.sh # Apply the routes, with the https host name (run by deploy.sh)
@@ -112,6 +110,22 @@ once instead.
 ```bash
 ./scripts/deploy/deploy.sh
 ```
+
+### Release images instead of local builds
+
+To run the images that `.github/workflows/release.yml` built for a release candidate tag,
+and not images built here, load them onto the nodes under the manifests' names before
+`deploy.sh`, then restart and check:
+
+```bash
+./scripts/deploy/load-release-images.sh --tag vX.Y.Z-rc.N
+./scripts/deploy/deploy.sh
+./scripts/deploy/verify-release-images.sh --tag vX.Y.Z-rc.N
+```
+
+`./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
+before the load. The load covers every workload that runs the three images, including the
+`crawler-migrate` Job. See [Release images on the kind cluster](../docs/deployment/RELEASE_IMAGES.md).
 
 ## 🔐 Keycloak
 
@@ -223,7 +237,11 @@ that a pod in `econ-graph` reaches the proxy, asks for confirmation, removes the
 ingress-nginx, moves the proxy onto ports 80/443 and checks the routes again. First it saves
 everything a rollback needs, including ingress-nginx's manifest, ConfigMaps, Deployment and
 Secrets and the gateway's release manifests, so neither direction needs the network once
-ingress-nginx is gone; `--rollback <dir>` restores ingress-nginx and the Ingresses. On a
+ingress-nginx is gone; `--rollback <dir>` restores ingress-nginx, the Ingresses and the saved
+NetworkPolicies. When `econ-graph` has any NetworkPolicy, the rollback also adds
+`econ-graph-ingress-nginx-rollback`, which admits ingress-nginx on ports 3000, 8080 and 9876
+(the next cut-over deletes it). It then checks that the frontend answers and that a GraphQL
+query gets data from the database. On a
 cluster with the tunnel it keeps the dashboard's old origin name answering (an ExternalName
 Service `ingress-nginx/ingress-nginx-controller` pointing at the gateway) and prints the
 dashboard change that retires it. Its header lists every step.
@@ -530,6 +548,14 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
+
+Cloudflare DNS-01 uses a separate Secret in `cert-manager`:
+`cloudflare-api-token-secret/api-token`. The certificate setup script accepts
+hidden terminal input or `CLOUDFLARE_API_TOKEN` from a secure environment source
+and writes it through `create-secrets.sh --cloudflare-dns-only`; normal deploys
+do not create this credential. Use a token scoped to one zone, with DNS edit
+and zone read permissions and no account-wide grants. See the
+[DNS-01 setup guide](../docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md).
 
 Read a value back with, for example:
 

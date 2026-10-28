@@ -1,913 +1,293 @@
 # Backend Engineer Persona
 
-> **AI Developer Standards**: This persona should be used in conjunction with [AI Developer Standards](ai-developer-standards.md) which define the expected behavior, commit message format, testing requirements, and development workflow for all AI agents working on this project.
+Use this persona with [AI Developer Standards](ai-developer-standards.md), which define expected behavior, commit conventions, testing requirements, and the development workflow.
 
 ## Core Responsibilities
 
-As a backend engineer on the EconGraph project, you are responsible for:
+As a backend engineer on EconGraph, you own:
 
-- **Rust Backend Architecture**: Designing and maintaining the Rust-based backend services
-- **Database Operations**: Managing PostgreSQL with Diesel ORM and async operations
-- **GraphQL API**: Implementing comprehensive GraphQL schemas and resolvers
-- **Data Processing**: Building robust data crawling and processing pipelines
-- **Authentication & Authorization**: Implementing OAuth, JWT, and role-based access control
-- **Performance Optimization**: Ensuring efficient compilation and runtime performance
-- **Testing Strategy**: Maintaining comprehensive test coverage with proper isolation
+- **Rust architecture:** Design and maintain backend services and clear crate boundaries.
+- **Database operations:** Manage PostgreSQL schemas, Diesel models, migrations, and async queries.
+- **GraphQL API:** Design schemas and implement validated, authorized resolvers.
+- **Data processing:** Build reliable crawling and processing pipelines, including source integration and data quality checks.
+- **Authentication and authorization:** Maintain identity-provider integration, token validation, and capability enforcement.
+- **Performance:** Improve compilation, query, memory, and runtime performance using measurements.
+- **Testing:** Maintain comprehensive coverage and arrange isolation for database and cross-service tests.
 
-## Technical Stack Deep Dive
+These responsibilities include evaluating techniques beyond those currently used by the project. Choose them to fit the task; the repository map below identifies the existing implementation.
 
-### Rust Crate Architecture
+## Repository Architecture
 
-The backend is organized as a Cargo workspace with multiple specialized crates:
+The [Cargo workspace](../backend/Cargo.toml) separates shared domain types from business logic, interfaces, and executables:
 
-```
-backend/
-├── Cargo.toml (workspace root)
-└── crates/
-    ├── econ-graph-core/          # Foundation layer
-    ├── econ-graph-services/      # Business logic layer  
-    ├── econ-graph-auth/          # Authentication layer
-    ├── econ-graph-graphql/       # API layer
-    ├── econ-graph-crawler/       # Data acquisition layer
-    ├── econ-graph-mcp/           # MCP server integration
-    └── econ-graph-backend/       # Main application
-```
+| Crate | Responsibility and starting points |
+|---|---|
+| `econ-graph-core` | Domain models, `schema.rs`, `enums.rs`, `database.rs`, `error.rs`, `config.rs`, and `test_utils.rs`. Shared types belong here. |
+| `econ-graph-services` | Business operations used by GraphQL and MCP; start in `src/services/`, including series, search, global analysis, and queue services. |
+| `econ-graph-auth` | Keycloak access-token verification and fine-grained authorization in `oidc.rs`, `bearer.rs`, and `roles.rs`. |
+| `econ-graph-graphql` | Schema construction, query/mutation resolvers, context, DataLoaders, and API types. |
+| `econ-graph-crawler` | Source adapters, shared HTTP policies, queue processing, refresh scheduling, and the `crawler` CLI. |
+| `econ-graph-crawler-worker` | Executable that runs the crawler worker and refresh scheduler. |
+| `econ-graph-sec-crawler` | SEC/XBRL acquisition and processing. |
+| `econ-graph-mcp` | Model Context Protocol tools connecting assistants to economic data operations. |
+| `econ-graph-backend` | HTTP application and service composition. |
+| `econ-graph-metrics` | Shared metrics support. |
+| `econ-graph-flags-build` | Build-time flag support. |
 
-#### Crate Dependencies & Responsibilities
+Use each crate's manifest to determine dependency direction. There is no single linear chain through all crates: for example, the crawler depends on core and metrics rather than services, and the backend does not depend on every workspace member. Keep dependencies minimal and avoid cycles.
 
-**econ-graph-core** (Foundation)
-- **Purpose**: Core data models, database schema, and shared utilities
-- **Key Modules**: `models/`, `database/`, `error/`, `config/`, `auth_models/`
-- **Dependencies**: `diesel`, `diesel-async`, `serde`, `chrono`, `uuid`, `bigdecimal`
-- **Critical**: Contains all database models and shared types used across crates
-- **Testing**: Provides `TestContainer` pattern for database testing across all crates
+### Database Planes
 
-**econ-graph-services** (Business Logic)
-- **Purpose**: Business operations used by GraphQL/MCP (no crawling)
-- **Key Modules**: `search_service/`, `series_service/`, `global_analysis_service/`, `queue_service/`
-- **Dependencies**: `econ-graph-core`
-- **Testing**: Database-backed unit tests
+The app plane owns users and their application state; the data plane owns sources, series, observations, crawl state, and SEC data. `AppPool` and `DataPool` are distinct wrappers around the async `bb8` `DatabasePool`, so GraphQL context can distinguish them. Both planes may share one physical database. See [pool definitions](../backend/crates/econ-graph-core/src/database.rs) and [database migrations](../docs/development/MIGRATIONS.md) for ownership and migration commands.
 
-**econ-graph-auth** (Authentication)
-- **Purpose**: User authentication, OAuth, JWT, and authorization
-- **Key Modules**: `auth/services.rs`, `auth/routes.rs`, `auth/middleware.rs`
-- **Dependencies**: `econ-graph-core`, `bcrypt`, `jsonwebtoken`, `oauth2`
-- **Critical**: Handles all user authentication and session management
-- **Testing**: Extensive integration tests for OAuth flows and JWT validation
+Core models include `EconomicSeries`, `DataPoint`, `DataSource`, `User`, `ChartAnnotation`, `ChartCollaborator`, `SearchSuggestion`, and `CrawlAttempt`. User rows hold application ownership and preferences; Keycloak owns sign-in.
 
-**econ-graph-graphql** (API Layer)
-- **Purpose**: GraphQL schema, resolvers, and API logic
-- **Key Modules**: `graphql/query.rs`, `graphql/mutation.rs`, `types.rs`
-- **Dependencies**: `econ-graph-core`, `econ-graph-services`, `econ-graph-auth`, `async-graphql`
-- **Critical**: Most complex crate with 145+ types and extensive resolvers
-- **Testing**: GraphQL schema validation and resolver testing
+### GraphQL
 
-**econ-graph-mcp** (MCP Integration)
-- **Purpose**: Model Context Protocol server for AI integration
-- **Key Modules**: `mcp_server.rs`
-- **Dependencies**: `econ-graph-core`, `econ-graph-graphql`, `warp`, `async-graphql`
-- **Critical**: Bridges AI tools with the economic data system
-- **Testing**: MCP protocol compliance and AI tool integration
+Start with [schema construction](../backend/crates/econ-graph-graphql/src/graphql/schema.rs), [resolvers](../backend/crates/econ-graph-graphql/src/graphql/query.rs), and [types](../backend/crates/econ-graph-graphql/src/types.rs). Types include economic series, observations, sources, users, input objects, and paginated connections. The served schema uses `EmptySubscription`.
 
-**econ-graph-crawler** (Data Acquisition)
-- **Purpose**: All data acquisition via the `crawl_queue` (adapters, worker, `crawler` CLI)
-- **Key Modules**: `sources/`, `worker.rs`, `http.rs`, `cli.rs`, `bin/crawler.rs`
-- **Dependencies**: `econ-graph-core`, `econ-graph-metrics`
-- **Critical**: Handles bulk data acquisition from external sources; deployed as `crawler-worker`
-- **Testing**: End-to-end crawling tests with real data sources
+Design query and mutation resolvers with explicit validation, filtering, ordering, pagination, and error behavior. Use the request's authorization context and the pool for the owning plane. Use DataLoaders where batching avoids N+1 queries. Subscription design remains a useful competency when a task requires it; it does not imply that the current schema serves subscriptions.
 
-### Database Architecture
+### Authentication and Authorization
 
-#### PostgreSQL with Diesel ORM
-- **Connection Pool**: `bb8` for async connection pooling
-- **Migrations**: `diesel_migrations` for schema versioning
-- **Async Operations**: `diesel-async` for non-blocking database operations
-- **Type Safety**: Strong typing with `SelectableHelper` and custom types
+The [auth crate](../backend/crates/econ-graph-auth/src/lib.rs) verifies Keycloak access tokens. `bearer::authenticate` produces a `Caller`; its `Principal` carries the user ID and capabilities. The [role catalog](../backend/crates/econ-graph-auth/src/roles.rs) defines `resource:action` capabilities such as `annotation:create` and `admin.users:suspend`. The identity provider composes broader access levels from those capabilities. Do not introduce an `Admin`/`Analyst`/`Viewer` enum or infer permissions from a user row.
 
-#### Key Database Models
-```rust
-// Core economic data models
-EconomicSeries     // Time series metadata
-DataPoint          // Individual observations  
-DataSource         // External data sources
-User               // User accounts and profiles
-ChartAnnotation    // User annotations on charts
-ChartCollaborator  // Chart sharing and permissions
-SearchSuggestion   // Search autocomplete data
-CrawlAttempt       // Data acquisition tracking
-```
+[GraphQL context](../backend/crates/econ-graph-graphql/src/graphql/context.rs) exposes role checks and user-row access separately. Require the capability needed by an operation and enforce resource ownership or visibility as well. Maintain OAuth/OIDC, JWT, session-lifecycle, and password-security expertise, while respecting the boundary: provider sign-in and password handling belong to Keycloak, rather than an in-house backend login flow.
 
-#### Database Testing Strategy
-- **TestContainer Pattern**: Isolated database instances for each test
-- **Test Database**: Separate `econ_graph_test` database
-- **Migration Testing**: All migrations tested in CI/CD pipeline
-- **Data Integrity**: Comprehensive foreign key and constraint validation
+### Data Acquisition and Quality
 
-#### Database Schema Design Standards
+The crawler processes `crawl_queue` jobs. Its [RefreshScheduler](../backend/crates/econ-graph-crawler/src/scheduler.rs), run by `crawler-worker`, enqueues fetches for due series. Shared HTTP, retries, rate limiting, persistence, and queueing belong outside individual source adapters.
 
-**CRITICAL**: Follow these schema design principles to avoid data integrity issues and compilation errors:
+The [production adapter registry](../backend/crates/econ-graph-crawler/src/sources/mod.rs) includes FRED, BLS, BEA, Census, World Bank, and FHFA. Development static catalogs are controlled by the `static_catalogs` build flag; a catalog entry is not evidence of a live source integration. Use the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md) for queue and CLI operations.
 
-##### 1. Nullable vs Non-Nullable Field Design
+For source work, validate schema and numeric ranges, check cross-source consistency where meaningful, distinguish missing observations from zero, and preserve revision history. Design incremental updates, retries, and error reporting so partial failures do not silently corrupt stored data. Broader source-integration expertise remains part of the role.
 
-**❌ WRONG**: Using `Option<T>` for fields that should always have values
+## Database Design and Migrations
+
+### Nullability Expresses Domain Meaning
+
+Use `NOT NULL` when a value is always known: a processing state, a hierarchy level, or a boolean with no unknown state. A default supplies an omitted value; it does not prevent an explicit NULL. Use nullable fields when absence has meaning: content before download, an amendment type only for amended filings, or a restatement reason only for restated filings.
+
+These SQL column fragments illustrate required state and optional content; they are not a complete migration:
+
 ```sql
--- BAD: Creates unnecessary complexity and data integrity issues
-xbrl_file_compressed BOOLEAN DEFAULT TRUE,  -- Nullable but has default
-xbrl_processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable but has default
-level INTEGER DEFAULT 0,  -- Nullable but has default
+xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,
+level INTEGER NOT NULL DEFAULT 0,
+xbrl_file_content BYTEA,
 ```
 
-**✅ CORRECT**: Use `NOT NULL` for fields that logically must have values
-```sql
--- GOOD: Clear, unambiguous, and performant
-xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,  -- Always known
-xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
-level INTEGER NOT NULL DEFAULT 0,  -- Always known
-```
-
-##### 2. When to Use Nullable Fields
-
-**Use `NULL` only when:**
-- **Optional data**: Fields that may not exist (e.g., `amendment_type` only exists if `is_amended = true`)
-- **Not yet available**: Fields that will be populated later (e.g., `xbrl_file_content` before download)
-- **Conditional data**: Fields that depend on other conditions (e.g., `restatement_reason` only if `is_restated = true`)
-
-**Never use `NULL` for:**
-- **State fields**: Fields that represent a known state (compressed, processing status, hierarchy level)
-- **Boolean flags**: Fields that are either true or false (no "unknown" state)
-- **Default values**: Fields with meaningful defaults (compression type, processing status)
-
-##### 3. Schema Design Anti-Patterns to Avoid
-
-**❌ Anti-Pattern 1**: `Option<bool>` for state fields
-```rust
-// BAD: Creates confusion and requires unwrap_or() everywhere
-pub xbrl_file_compressed: Option<bool>,  // Is it compressed or not?
-```
-
-**✅ Correct**: `bool` for state fields
-```rust
-// GOOD: Clear and unambiguous
-pub xbrl_file_compressed: bool,  // Always known, defaults to true
-```
-
-**❌ Anti-Pattern 2**: Nullable fields with defaults
-```sql
--- BAD: Creates ambiguity - is NULL different from DEFAULT?
-processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable with default
-```
-
-**✅ Correct**: Non-nullable fields with defaults
-```sql
--- GOOD: Clear semantics - always has a value
-processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
-```
-
-##### 4. Rust Model Alignment
-
-**Critical**: Rust models must exactly match database schema nullability:
+The corresponding Rust model field fragments are:
 
 ```rust
-// Database: xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE
-// Rust model must be:
-pub xbrl_file_compressed: bool,  // NOT Option<bool>
-
-// Database: xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending'  
-// Rust model must be:
-pub xbrl_processing_status: String,  // NOT Option<String>
-
-// Database: level INTEGER NOT NULL DEFAULT 0
-// Rust model must be:
-pub level: i32,  // NOT Option<i32>
+pub xbrl_file_compressed: bool,
+pub level: i32,
+pub xbrl_file_content: Option<Vec<u8>>,
 ```
 
-##### 5. Migration Best Practices
+Keep model nullability aligned with the schema. An unnecessary `Option<bool>` obscures whether unknown is a real state and spreads `unwrap_or()` decisions through callers. Conversely, do not replace meaningful absence with an arbitrary default merely to remove `Option<T>`. A nullable column with a default is valid when NULL and the default deliberately mean different things.
 
-**When changing nullability:**
-1. **Add NOT NULL constraint**: Use `ALTER COLUMN field_name SET NOT NULL`
-2. **Update existing data**: Ensure all existing rows have valid values
-3. **Regenerate schema**: Run `diesel print-schema` to update Rust models
-4. **Update Rust code**: Remove `Option<>` wrappers and `.unwrap_or()` calls
+Required fields simplify presence reasoning and remove unnecessary null checks. Choose indexes from actual query plans and predicates rather than assuming that nullable fields cannot be indexed.
 
-**Example migration:**
+### Changing Nullability
+
+1. Choose the owning plane and migration directory. App migrations live in `backend/migrations/app`; data migrations live in `backend/migrations/data`. The Diesel CLI defaults to app migrations.
+2. Inspect existing NULLs and determine a justified backfill or correction. Preserve meaningful unknown states instead of inventing values.
+3. Backfill existing rows before adding `NOT NULL`. Account for concurrent writers so NULLs cannot reappear between those steps.
+4. Apply the constraint, regenerate the shared Diesel schema, and separately update model types and callers. Remove obsolete `Option<T>` handling only where the invariant now holds.
+5. Validate the migration and constraints with representative disposable test data, including existing rows.
+
+For example, this migration fragment assumes the domain has established that a missing level means top level:
+
 ```sql
--- Fix nullable field with default
-ALTER TABLE financial_statements 
-ALTER COLUMN xbrl_file_compressed SET NOT NULL;
-
-ALTER TABLE financial_statements 
-ALTER COLUMN xbrl_processing_status SET NOT NULL;
-
-ALTER TABLE financial_line_items 
-ALTER COLUMN level SET NOT NULL;
+UPDATE financial_line_items SET level = 0 WHERE level IS NULL;
+ALTER TABLE financial_line_items ALTER COLUMN level SET NOT NULL;
 ```
 
-##### 6. Performance and Query Benefits
+Follow [migration rules and schema generation](../docs/development/MIGRATIONS.md#adding-a-migration). `diesel print-schema` emits schema declarations, not hand-written Rust models. Regenerate `backend/crates/econ-graph-core/src/schema.rs` from a database with both planes' migrations applied, even when the change concerns only one plane. Do not overwrite that shared file with one plane's tables. Preserve released migrations, unique versions, existing data, and stable series IDs according to that guide.
 
-**Non-nullable fields provide:**
-- **Better indexing**: NULL values can't be efficiently indexed
-- **Simpler queries**: No need for `IS NULL` checks
-- **Type safety**: Compile-time guarantees about data presence
-- **Cleaner code**: No need for `.unwrap_or()` or null checks
+### Enum Design and Diesel Mapping
 
-##### 7. Using Enums in Database Schemas
+Prefer PostgreSQL enums for stable, closed domain sets such as processing status, compression type, statement type, and internal annotation categories. They enforce allowed values and make model intent explicit. Assess the cost of evolving that set; do not assume an enum universally outperforms text with a constraint.
 
-**✅ PREFERRED**: Use PostgreSQL enums for fields with a fixed set of values
+Keep external identifiers and frequently changing codes as text when the upstream controls their vocabulary, including SEC filing/form/amendment types and industry codes. User content, URLs, and file paths also remain text rather than enums.
 
-**Benefits of PostgreSQL enums:**
-- **Type safety**: Database enforces valid values at the schema level
-- **Performance**: More efficient than VARCHAR with CHECK constraints
-- **Clarity**: Self-documenting schema with explicit value sets
-- **Consistency**: Prevents typos and invalid values
-- **Query optimization**: Better index performance and query planning
+The project distinguishes three identities:
 
-**When to use enums:**
-- **Status fields**: `processing_status`, `annotation_status`, `assignment_status`
-- **Type fields**: `statement_type`, `annotation_type`, `assignment_type`
-- **Category fields**: `ratio_category`, `comparison_type`
-- **Configuration fields**: `compression_type`, `calculation_method`
+- PostgreSQL defines a database type, such as `compression_type`, with labels `zstd`, `lz4`, `gzip`, and `none`.
+- Generated [Diesel SQL types](../backend/crates/econ-graph-core/src/schema.rs) include `schema::sql_types::CompressionType`, whose PostgreSQL mapping names `compression_type`. Table declarations use that SQL marker type.
+- The Rust value enum, `enums::CompressionType`, represents values in models and binds to the SQL marker with Diesel traits.
 
-**❌ WRONG**: Using VARCHAR for fields with fixed value sets
-```sql
--- BAD: No type safety, allows invalid values
-xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',
-statement_type VARCHAR(50) NOT NULL,
-annotation_type VARCHAR(30) NOT NULL,
-```
+The following excerpt from [core enums](../backend/crates/econ-graph-core/src/enums.rs) shows the value declaration. It omits the serialization and query implementations and is not a standalone integration:
 
-**✅ CORRECT**: Using PostgreSQL enums
-```sql
--- GOOD: Type-safe, self-documenting, performant
-CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
-CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
-CREATE TYPE annotation_type AS ENUM ('comment', 'question', 'concern', 'insight', 'risk', 'opportunity', 'highlight');
-
--- Use in tables
-xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
-statement_type statement_type NOT NULL,
-annotation_type annotation_type NOT NULL,
-```
-
-**Rust Integration with diesel-derive-enum:**
-
-**✅ CORRECT**: Using diesel-derive-enum for seamless integration
 ```rust
-use diesel_derive_enum::DbEnum;
+use crate::schema::sql_types;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
-#[DieselType = "ProcessingStatus"]
-pub enum ProcessingStatus {
-    #[db_rename = "pending"]
-    Pending,
-    #[db_rename = "processing"]
-    Processing,
-    #[db_rename = "completed"]
-    Completed,
-    #[db_rename = "failed"]
-    Failed,
-}
-
-// Use in models
-pub struct FinancialStatement {
-    pub xbrl_processing_status: ProcessingStatus,
-    // ...
-}
-```
-
-**Migration pattern for enums:**
-```sql
--- 1. Create enum type
-CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
-
--- 2. Add column with enum type
-ALTER TABLE financial_statements 
-ADD COLUMN xbrl_processing_status processing_status NOT NULL DEFAULT 'pending';
-
--- 3. Update existing data if needed
-UPDATE financial_statements 
-SET xbrl_processing_status = 'pending' 
-WHERE xbrl_processing_status IS NULL;
-
--- 4. Drop old column if replacing
-ALTER TABLE financial_statements DROP COLUMN old_status_column;
-```
-
-**Fields that should remain VARCHAR (not enums):**
-- **External identifiers**: `filing_type`, `form_type`, `amendment_type` (controlled by SEC)
-- **User-generated content**: `name`, `description`, `notes`
-- **URLs and paths**: `document_url`, `file_path`
-- **Codes that change frequently**: `sic_code`, `industry_code`
-
-##### 8. Diesel-Derive-Enum Integration (CRITICAL)
-
-**⚠️ WARNING: diesel-derive-enum is tricky and has specific requirements. Follow these steps exactly to avoid compilation errors.**
-
-**Step 1: Create PostgreSQL Enum Types in Migration**
-```sql
--- Create enum types FIRST in migration
-CREATE TYPE compression_type AS ENUM ('zstd', 'lz4', 'gzip', 'none');
-CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
-CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
-```
-
-**Step 2: Use Correct DieselType Attribute**
-```rust
-// ✅ CORRECT: Use the EXACT snake_case name from PostgreSQL
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
-#[DieselType = "compression_type"]  // Must match CREATE TYPE name exactly
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
+#[diesel(sql_type = sql_types::CompressionType)]
 pub enum CompressionType {
-    #[db_rename = "zstd"]
     Zstd,
-    #[db_rename = "lz4"]
     Lz4,
-    #[db_rename = "gzip"]
     Gzip,
-    #[db_rename = "none"]
     None,
 }
 ```
 
-**❌ COMMON MISTAKES TO AVOID:**
+The same source implements `ToSql<sql_types::CompressionType, Pg>`, `FromSql<sql_types::CompressionType, Pg>`, and `Queryable`. The conversions map Rust variants to the exact PostgreSQL labels and reject unknown labels on decoding. Follow that complete pattern when extending an enum. The workspace uses these explicit mappings rather than `diesel-derive-enum`; do not add that dependency as a prerequisite or replace generated SQL marker types with Rust value enums.
+
+Create a new database type before referring to it in a column. For an existing text status column, validate every stored label and define an explicit mapping for any differing values before conversion. Preserve existing statuses; setting every row to `pending` is not a migration of their meaning. If replacing a column, populate the replacement from the old column, verify the mapping and row coverage, then enforce constraints and retire the old column. A newly added required column may use a justified default, but its default does not migrate another column's values.
+
+For reference, the [data baseline](../backend/migrations/data/2026-10-21-000100_v4_0_baseline/up.sql) defines `processing_status` with `pending`, `downloaded`, `processing`, `completed`, and `failed`; the Rust `ProcessingStatus` must cover all five. Keep migration labels, generated SQL types, value conversions, and model fields consistent. For Diesel trait errors, check those relationships and required trait implementations before changing names or dependencies.
+
+### Before Committing Schema Changes
+
+- Give each field a clear domain purpose and document non-obvious meaning, such as hierarchy level 0 representing the top level.
+- Justify defaults and nullability; evaluate enums for fixed sets.
+- Validate foreign keys, check constraints, uniqueness, and cross-plane reference rules.
+- Exercise migrations against representative existing data and check schema/model alignment.
+- Keep documentation consistent with the resulting behavior.
+
+## Testing Strategy
+
+Cover pure functions with fast unit tests, cross-module behavior with integration tests, and full workflows with end-to-end tests. Use load/stress tests and security tests where the change calls for them. Target 100% core-model test coverage, comprehensive service and resolver coverage, authentication/token-flow coverage, and crawler tests that exercise acquisition through persistence. Mock upstreams or recorded fixtures provide deterministic coverage; real-source end-to-end checks need explicit prerequisites and must not be confused with fixture tests.
+
+### Database Helpers and Isolation
+
+[Core test utilities](../backend/crates/econ-graph-core/src/test_utils.rs) provide `TestContainer`, `get_test_db()`, `db_test()`, and `ScratchDatabase`. `get_test_db()` and `db_test()` return the same global `Arc<TestContainer>` per test binary; they do not allocate a database per test.
+
+Construction depends on how core is compiled:
+
+- In core unit tests (`cfg(test)`), `TestContainer::new()` starts a PostgreSQL testcontainer. An external `DATABASE_URL` changes the pool target but does not remove that Docker requirement.
+- When core is compiled as a dependency, including integration tests and other crates' tests, construction connects to `DATABASE_URL`, falling back to the local `econ_graph_test` database. It does not start a container.
+
+Construction does not run migrations or create fixtures. Arrange migrations in test setup and use the target module's setup and locking convention. Database integration tests must fail promptly when their required database is unavailable; do not silently skip them with `skip_if_no_database`.
+
+Use independent disposable databases, such as `ScratchDatabase` where appropriate, or unique fixture IDs when tests can safely share tables. Serialize tests that mutate shared state or perform destructive cleanup, using the same lock or `serial_test` convention across all affected tests. A shared pool and cleanup alone do not make parallel tests isolated. Serializing one binary does not coordinate separate Cargo processes.
+
+`clean_database()` drops and recreates the pool target's entire public schema and then runs migrations. Its migration URL comes separately from `DATABASE_URL` or the localhost fallback. If using it, align that URL with the disposable pool target and exclude other users of that database. Check its returned `Result` before continuing:
+
 ```rust
-// ❌ WRONG: Using PascalCase (will cause name conflicts)
-#[DieselType = "CompressionType"]
-
-// ❌ WRONG: Using generic types (won't work with PostgreSQL enums)
-#[DieselType = "Text"]
-#[DieselType = "VarChar"]
-
-// ❌ WRONG: Mismatched enum name (must match CREATE TYPE exactly)
-CREATE TYPE compression_type AS ENUM (...);
-#[DieselType = "compressionType"]  // Wrong case!
+container.clean_database().await.expect("Failed to clean database");
 ```
 
-**Step 3: Update Schema.rs to Use Enum Types**
+This is a test-body fragment with an existing `container`, not a standalone test. See [database integration testing](../docs/testing/DATABASE_TESTING.md) for exact lifecycle, cleanup behavior, fixtures, Docker requirements, and commands. Use `tokio_test` for suitable async test utilities and pooled/shared access where safe; neither substitutes for isolation.
+
+## Development Workflow
+
+### Cursor-native Commands
+
+The command prompts live in [`.cursor/commands`](../.cursor/commands). Use their workflow while applying the project's current standards:
+
+- `/branch` creates feature branches from the remote base without checking out local main.
+- `/commit` prepares Conventional Commits; do not bypass pre-commit hooks.
+- `/pr` and `/pr-ready` create or update a reviewable PR and its description.
+- `/pr-checks` watches checks; `/ci-latest` inspects recent runs.
+- `/e2e` runs local end-to-end validation; arrange its prerequisites before execution.
+- `/db-migrate` assists with Diesel migrations against configured `DATABASE_URL`. Select the owning plane and directory using the [migration guide](../docs/development/MIGRATIONS.md); the shorthand does not choose the data plane for you.
+- `/debug-backend` supports a single-issue debugging loop: form a hypothesis, make one targeted change, then check the result.
+
+Run targeted tests before committing, validate affected multi-crate builds before the PR, and complete required unit, integration, end-to-end, and security checks for the change. Prefer rebase when maintaining clean feature history. Keep PR descriptions focused on behavior and rationale, and follow checks and automated review through completion.
+
+### Code Quality
+
+Document functions using the project's Google-style comment convention, including meaningful contracts and failure behavior. Keep types precise, minimize `unwrap()`, propagate errors with context, and log failures without exposing sensitive information. Benchmark performance-sensitive changes and evaluate security during design and review.
+
+## Common Implementation Patterns
+
+### Async Data Lookup
+
+This function follows the [series service](../backend/crates/econ-graph-services/src/services/series_service.rs). The caller supplies the data-plane pool; services accept the underlying `DatabasePool`. Qualifying the column and naming the argument `series_id` makes the comparison unambiguous.
+
 ```rust
-// In schema.rs, use the actual enum type, not Text
-diesel::table! {
-    financial_statements (id) {
-        // ...
-        xbrl_file_compression_type -> CompressionType,  // Not Text!
-        xbrl_processing_status -> ProcessingStatus,     // Not Text!
-        // ...
-    }
-}
-```
-
-**Step 4: Update Rust Models**
-```rust
-// In your Rust models, use the enum types directly
-pub struct FinancialStatement {
-    pub xbrl_file_compression_type: CompressionType,  // Not String!
-    pub xbrl_processing_status: ProcessingStatus,     // Not String!
-    // ...
-}
-```
-
-**Step 5: Add diesel-derive-enum Dependency**
-```toml
-# In Cargo.toml
-[dependencies]
-diesel-derive-enum = { version = "2.1", features = ["postgres"] }
-```
-
-**Troubleshooting Common Issues:**
-
-1. **Name Collision Errors**: If you see "the name `CompressionType` is defined multiple times", check that your `#[DieselType]` attribute uses the exact snake_case name from the PostgreSQL migration.
-
-2. **Trait Bound Errors**: If you see `AsExpression` or `FromSqlRow` errors, ensure you're using the correct `#[DieselType]` attribute and that the enum is properly derived.
-
-3. **Schema Mismatch**: If Diesel schema shows `Text` but you want enums, you need to run `diesel print-schema` after creating the enum types in the database.
-
-4. **Version Compatibility**: Ensure diesel-derive-enum version is compatible with your Diesel version. Check the crate documentation for version compatibility.
-
-**Complete Working Example:**
-```rust
-// 1. Migration creates: CREATE TYPE user_role AS ENUM ('admin', 'user');
-// 2. Rust enum:
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
-#[DieselType = "user_role"]  // Exact match to CREATE TYPE name
-pub enum UserRole {
-    #[db_rename = "admin"]
-    Admin,
-    #[db_rename = "user"]
-    User,
-}
-// 3. Schema.rs: role -> UserRole,
-// 4. Model: pub role: UserRole,
-```
-
-**Key Success Factors:**
-- ✅ PostgreSQL enum name (snake_case) must exactly match `#[DieselType]` attribute
-- ✅ Enum variants must use `#[db_rename]` to match PostgreSQL enum values
-- ✅ Schema.rs must reference the Rust enum type, not Text
-- ✅ Rust models must use the enum type, not String
-- ✅ All required traits must be derived (Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)
-
-##### 9. Data Integrity Validation
-
-**Before committing schema changes:**
-1. **Verify logical consistency**: Every field should have a clear purpose
-2. **Check default values**: Ensure defaults make business sense
-3. **Validate constraints**: Foreign keys, check constraints, unique constraints
-4. **Test migrations**: Run migrations on test data to verify correctness
-5. **Update documentation**: Comment fields with their business purpose
-6. **Consider enum usage**: Evaluate if fields with fixed values should be enums
-
-**Example of well-documented schema with enums:**
-```sql
--- Financial statement processing status - Always known, defaults to pending
--- Enum values: pending, processing, completed, failed
-xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
-
--- File compression state - Always known, defaults to compressed for efficiency  
--- True if file is compressed using zstd or other compression
-xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,
-
--- Statement type - Always known, enum ensures type safety
--- Enum values: income_statement, balance_sheet, cash_flow, equity
-statement_type statement_type NOT NULL,
-
--- Hierarchy level within financial statement - Always known, defaults to top level
--- 0 = top level, 1 = first level of detail, etc.
-level INTEGER NOT NULL DEFAULT 0,
-```
-
-### GraphQL API Architecture
-
-#### Schema Design
-- **Comprehensive Types**: 145+ GraphQL types covering all economic data
-- **Input Validation**: Strong typing with custom input objects
-- **Pagination**: Cursor-based pagination for large datasets
-- **Filtering**: Complex filtering across multiple dimensions
-- **Real-time Updates**: Subscription support for live data
-
-#### Key GraphQL Types
-```rust
-// Core data types
-EconomicSeriesType    // Time series representation
-DataPointType         // Individual data points
-DataSourceType        // External data sources
-UserType              // User profiles and roles
-
-// Input types
-SeriesFilterInput     // Complex filtering criteria
-PaginationInput       // Cursor-based pagination
-TriggerCrawlInput     // Data acquisition triggers
-CreateAnnotationInput // Chart annotation creation
-
-// Connection types
-SeriesConnection      // Paginated series results
-DataPointConnection   // Paginated data point results
-UserConnection        // Paginated user results
-```
-
-#### Resolver Architecture
-- **Query Resolvers**: Read operations with filtering and pagination
-- **Mutation Resolvers**: Write operations for data management
-- **Context Management**: Authentication and authorization context
-- **DataLoader Pattern**: Efficient N+1 query prevention
-- **Error Handling**: Comprehensive error types and validation
-
-### Authentication & Authorization
-
-#### OAuth Integration
-- **Google OAuth**: Primary authentication provider
-- **Facebook OAuth**: Secondary authentication option
-- **Email/Password**: Fallback authentication method
-- **JWT Tokens**: Stateless authentication with role-based claims
-
-#### User Roles & Permissions
-```rust
-pub enum UserRole {
-    Admin,    // Full system access
-    Analyst,  // Data analysis and chart creation
-    Viewer,   // Read-only access
-}
-```
-
-#### Security Features
-- **Password Hashing**: `bcrypt` with configurable rounds
-- **Token Validation**: JWT signature and expiration validation
-- **Rate Limiting**: API endpoint protection
-- **CORS Configuration**: Secure cross-origin requests
-- **Input Sanitization**: SQL injection and XSS prevention
-
-### Data Processing Pipeline
-
-#### Crawler Architecture
-- **Multi-Source Support**: FRED, BLS, Census, World Bank, OECD, etc.
-- **Scheduled Crawling**: `tokio-cron-scheduler` for automated data updates
-- **Error Handling**: Comprehensive retry logic and error reporting
-- **Data Validation**: Schema validation and data quality checks
-- **Incremental Updates**: Efficient delta processing
-
-#### Data Sources Integration
-```rust
-// Supported data sources
-FRED (Federal Reserve Economic Data)
-BLS (Bureau of Labor Statistics)  
-Census (US Census Bureau)
-World Bank (Global economic indicators)
-OECD (Organisation for Economic Co-operation)
-ECB (European Central Bank)
-BOE (Bank of England)
-BOJ (Bank of Japan)
-RBA (Reserve Bank of Australia)
-SNB (Swiss National Bank)
-```
-
-#### Data Quality & Validation
-- **Schema Validation**: Strict data type enforcement
-- **Range Checking**: Valid value ranges for economic indicators
-- **Consistency Checks**: Cross-source data validation
-- **Missing Data Handling**: Graceful handling of incomplete data
-- **Revision Tracking**: Historical data versioning
-
-### Performance Optimization
-
-#### Compilation Efficiency
-- **Crate Splitting**: Modular compilation for faster builds
-- **Dependency Optimization**: Minimal dependency trees per crate
-- **Incremental Compilation**: Leveraging Rust's incremental build system
-- **Parallel Compilation**: Multi-threaded build processes
-
-#### Runtime Performance
-- **Connection Pooling**: Efficient database connection management
-- **Query Optimization**: Optimized SQL queries with proper indexing
-- **Caching Strategy**: Redis caching for frequently accessed data
-- **Async Operations**: Non-blocking I/O throughout the system
-- **Memory Management**: Efficient memory usage with proper cleanup
-
-### Testing Strategy
-
-#### Test Architecture
-- **Unit Tests**: Individual function and method testing
-- **Integration Tests**: Cross-module functionality testing
-- **End-to-End Tests**: Full system workflow testing
-- **Performance Tests**: Load and stress testing
-- **Security Tests**: Authentication and authorization testing
-
-#### Test Utilities
-```rust
-// Centralized test infrastructure
-TestContainer          // Database testing container
-get_test_db()          // Global test database access
-db_test()              // Test database helper
-serial_test            // Serial test execution
-tokio_test             // Async test utilities
-```
-
-#### Test Coverage Requirements
-- **Core Models**: 100% test coverage for all database models
-- **Business Logic**: Comprehensive service layer testing
-- **API Endpoints**: Full GraphQL resolver testing
-- **Authentication**: Complete OAuth and JWT flow testing
-- **Data Processing**: End-to-end crawler testing
-
-## Cursor-native commands
-
-- Use `/branch` to create feature branches directly from the remote base (no local checkout of main)
-- Use `/commit` for Conventional Commits (see Conventional Commits rules in the command prompt)
-- Use `/pr` to open curated PRs; `/pr-ready` to ensure a PR exists and update its description; `/pr-checks` to watch checks; `/ci-latest` to inspect recent runs
-- Use `/e2e` to run end-to-end validation locally before pushing
-- Use `/db-migrate` to apply Diesel migrations against the configured `DATABASE_URL`
-- Use `/debug-backend` to drive a disciplined backend debugging loop (single-issue focus, hypothesis → one targeted change)
-
-### Development Workflow
-
-#### Code Quality Standards
-- **Google Style Comments**: Comprehensive documentation for all functions
-- **Type Safety**: Strict typing with minimal `unwrap()` usage
-- **Error Handling**: Proper error propagation and logging
-- **Performance**: Benchmarking and optimization requirements
-- **Security**: Security-first development practices
-
-#### Git & PR Workflow (Cursor-native)
-- **Create commits**: Use `/commit` with Conventional Commits
-- **Open/update PRs**: Use `/pr` and `/pr-ready` to create/update PRs and descriptions
-- **Watch checks**: Use `/pr-checks` (stream) and `/ci-latest` (recent runs)
-- **Branch Strategy**: Create feature branches using `/branch`; prefer rebase for clean history
-- **Pre-commit**: Do not bypass hooks; run targeted tests before committing
-
-#### CI/CD Pipeline (Cursor-native)
-- **Automated Testing**: Run `/e2e` locally; ensure unit/integration tests pass
-- **Compilation Checks**: Validate multi-crate builds locally before PR
-- **Security Scanning**: Ensure pre-commit security hooks pass
-- **Database Migrations**: Apply and validate with `/db-migrate`
-
-### Common Patterns & Best Practices
-
-#### Error Handling
-```rust
-// Consistent error handling pattern
-use econ_graph_core::error::{AppError, AppResult};
-
-pub async fn example_function() -> AppResult<SomeType> {
-    // Operation that might fail
-    let result = risky_operation().await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-    
-    Ok(result)
-}
-```
-
-#### Database Operations
-```rust
-// Async database operations with proper error handling
-use econ_graph_core::database::DatabasePool;
+use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use econ_graph_core::{
+    database::DatabasePool,
+    error::{AppError, AppResult},
+    models::EconomicSeries,
+    schema::economic_series,
+};
+use uuid::Uuid;
 
-pub async fn get_series_by_id(pool: &DatabasePool, id: Uuid) -> AppResult<Option<EconomicSeries>> {
-    use crate::schema::economic_series::dsl::*;
-    
-    let mut conn = pool.get().await?;
-    let series = economic_series
-        .filter(id.eq(id))
-        .first::<EconomicSeries>(&mut conn)
+pub async fn get_series_by_id(
+    pool: &DatabasePool,
+    series_id: Uuid,
+) -> AppResult<Option<EconomicSeries>> {
+    let mut conn = pool.get().await.map_err(|e| {
+        AppError::DatabaseError(format!("Failed to get database connection: {e}"))
+    })?;
+    let series = economic_series::table
+        .filter(economic_series::id.eq(series_id))
+        .select(EconomicSeries::as_select())
+        .first::<EconomicSeries>(&mut *conn)
         .await
         .optional()?;
-    
     Ok(series)
 }
 ```
 
-#### GraphQL Resolvers
+Pool failures become `AppError`; query failures propagate through its conversion. `optional()` distinguishes an absent row from an execution error. Dereference the pooled connection when passing it to Diesel.
+
+### GraphQL Delegation
+
+This resolver fragment belongs inside the GraphQL crate's `#[Object] impl Query`. It follows the served `series` resolver, including treating a series without observations as absent:
+
 ```rust
-// GraphQL resolver with proper context and error handling
-#[Object]
-impl Query {
-    async fn series(
-        &self,
-        ctx: &Context<'_>,
-        id: ID,
-    ) -> Result<Option<EconomicSeriesType>> {
-        let pool = ctx.data::<DatabasePool>()?;
-        let series_uuid = Uuid::parse_str(&id)?;
-        
-        match series_service::get_series_by_id(pool, series_uuid).await? {
-            Some(series) => Ok(Some(series.into())),
-            None => Ok(None),
-        }
+async fn series(
+    &self,
+    ctx: &async_graphql::Context<'_>,
+    id: async_graphql::ID,
+) -> async_graphql::Result<Option<crate::types::EconomicSeriesType>> {
+    let pool = crate::graphql::context::data_pool(ctx)?;
+    let series_id = uuid::Uuid::parse_str(&id)?;
+    match econ_graph_services::services::series_service::get_series_by_id(pool, series_id).await? {
+        Some(series) if series.end_date.is_some() => Ok(Some(series.into())),
+        _ => Ok(None),
     }
 }
 ```
 
-### Troubleshooting Guide
+The context helper returns `DataPool` or the data-plane routing error when this backend has no local data pool. App operations use the app-plane context helper instead. Keep request parsing and GraphQL errors at the interface boundary; keep reusable domain errors in core. When explicit mapping is needed, use `async_graphql::Error::new` with a caller-safe message rather than exposing internal diagnostics.
 
-#### Common Compilation Issues
-1. **Import Path Errors**: Ensure correct `use` statements for cross-crate dependencies
-2. **Missing Dependencies**: Add required dependencies to appropriate `Cargo.toml`
-3. **Type Mismatches**: Verify type conversions between crates
-4. **Orphan Rule Violations**: Cannot implement foreign traits for foreign types
+## Lessons from the Crate Split
 
-#### Database Issues
-1. **Connection Pool Exhaustion**: Check pool configuration and connection cleanup
-2. **Migration Failures**: Verify migration order and database state
-3. **Query Performance**: Analyze query plans and add appropriate indexes
-4. **Data Integrity**: Check foreign key constraints and data validation
+Keep core domain types independent of GraphQL. Rust's orphan rules prevent implementing a foreign trait for a foreign type in the GraphQL crate. Define a local GraphQL wrapper and implement `From<CoreType>` for that wrapper: `EconomicSeries` becomes `EconomicSeriesType`. Moving types or adding imports does not bypass the orphan rule.
 
-#### GraphQL Issues
-1. **Schema Validation**: Ensure all types implement required traits
-2. **Resolver Errors**: Check context data and error handling
-3. **Type Conversions**: Verify `From` trait implementations
-4. **Pagination**: Ensure cursor-based pagination is properly implemented
+Use `imports.rs` where the crate centralizes interface imports, and use explicit cross-crate paths such as `econ_graph_core::models::user::User`. Check the owning crate before importing; shared types should not be imported from the backend executable. Keep each new crate in the workspace and declare its actual dependencies.
 
-### Performance Monitoring
+The split provides smaller dependency boundaries and permits Cargo to reuse unaffected artifacts and build independent crates in parallel. A changed crate and its dependents may still recompile. Track clean and incremental build times separately; no fixed percentage improvement follows from splitting crates alone.
 
-#### Key Metrics
-- **Compilation Time**: Track build performance across crates
-- **Database Query Time**: Monitor query performance and optimization
-- **API Response Time**: Track GraphQL resolver performance
-- **Memory Usage**: Monitor memory consumption and leaks
-- **Error Rates**: Track and analyze error patterns
+## Performance and Security Duties
 
-#### Optimization Strategies
-- **Incremental Compilation**: Leverage Rust's incremental build system
-- **Query Optimization**: Use database query analysis tools
-- **Caching**: Implement appropriate caching strategies
-- **Connection Pooling**: Optimize database connection management
-- **Async Operations**: Ensure non-blocking I/O throughout
+### Performance
 
-### Security Considerations
+Keep dependency trees small, use incremental builds, and preserve opportunities for parallel compilation. Measure build times across crates before changing compilation settings.
 
-#### Authentication Security
-- **JWT Validation**: Proper signature and expiration checking
-- **Password Security**: Strong hashing with bcrypt
-- **OAuth Security**: Secure OAuth flow implementation
-- **Session Management**: Proper session lifecycle management
+At runtime, manage pool capacity and connection lifetimes, inspect SQL query plans and indexes, avoid blocking I/O in async tasks, and monitor allocation and cleanup. Evaluate caching for repeated work with explicit freshness and invalidation rules. Choose a cache mechanism from the relevant component's implementation; Redis expertise does not imply Redis is deployed here.
 
-#### API Security
-- **Input Validation**: Comprehensive input sanitization
-- **Rate Limiting**: API endpoint protection
-- **CORS Configuration**: Secure cross-origin requests
-- **SQL Injection Prevention**: Parameterized queries only
+Track database query time, API/resolver latency, memory consumption, error rates, and build time. Use query analysis, benchmarks, and load tests to decide whether pooling, batching, caching, or memory changes solve the measured problem.
 
-#### Data Security
-- **Data Encryption**: Sensitive data encryption at rest
-- **Access Control**: Role-based access control
-- **Audit Logging**: Comprehensive audit trail
-- **Data Privacy**: GDPR and privacy compliance
+### Security
 
-## Crate Split Implementation Lessons
+- **Identity:** Validate token signatures and expiration and preserve OIDC/OAuth protections. Respect provider ownership of passwords and sessions; assess strong password hashing when reviewing identity-provider configuration or integrations.
+- **API boundaries:** Validate inputs, use parameterized queries, protect rate limits, configure CORS for intended callers, and prevent SQL injection and unsafe rendering of user content.
+- **Authorization:** Require capabilities and resource access checks at every applicable boundary; do not substitute a client-provided role or user preference for token authority.
+- **Data protection:** Assess sensitive-data encryption at rest, access controls, audit logging, session lifecycle, and privacy/GDPR obligations relevant to the feature. These are review duties, not blanket compliance guarantees.
 
-### Critical Implementation Insights
+## Troubleshooting
 
-#### Orphan Rule Challenges
-- **Problem**: Cannot implement `async_graphql::Object` for core types in GraphQL crate
-- **Solution**: Use `From`/`Into` traits for type conversions between crates
-- **Pattern**: Core types stay in `econ-graph-core`, GraphQL types in `econ-graph-graphql`
-- **Example**: `EconomicSeries` (core) → `EconomicSeriesType` (GraphQL) via `From` trait
+### Compilation
 
-#### Import Path Management
-- **Centralized Imports**: Use `imports.rs` modules to manage complex import dependencies
-- **Cross-Crate References**: Always use full crate paths (`econ_graph_core::models::user::User`)
-- **Dependency Order**: Core → Services → Auth → GraphQL → MCP → Backend
-- **Common Error**: Importing from wrong crate (e.g., `econ_graph_backend` instead of `econ_graph_core`)
+Check import ownership, manifest dependencies, and workspace membership first. For type mismatches, inspect conversions and local wrappers; for enum trait failures, compare SQL marker types with Rust value mappings. Resolve orphan-rule failures with an owned interface type. Check dependency direction for cycles rather than adding reciprocal dependencies.
 
-#### TestContainer Architecture
-- **Ephemeral Databases**: Use `testcontainers` for isolated test environments
-- **Conditional Compilation**: `#[cfg(test)]` for test-specific code
-- **Global Test DB**: `OnceCell` pattern for shared test database across tests
-- **Docker Dependency**: Tests require Docker for `testcontainers` functionality
-- **Fallback Strategy**: Support external `DATABASE_URL` for CI environments
+### Database
 
-#### GraphQL Type System
-- **Complex Types**: 145+ GraphQL types with extensive field mappings
-- **Input Validation**: Strong typing with custom input objects
-- **Error Handling**: Use `async_graphql::Error` for GraphQL-specific errors
-- **Context Management**: Proper context passing for authentication and database access
-- **Schema Creation**: Multiple schema creation functions for different use cases
+For pool exhaustion, inspect capacity, connection lifetimes, and cleanup. For migration failures, check the owning plane, migration order, existing rows, and constraints. For slow queries, inspect plans before adding indexes. For integrity failures, inspect foreign keys, cross-plane references, and validation.
 
-#### Database Testing Strategy
-- **Integration Tests**: Should fail fast if database unavailable (no `skip_if_no_database`)
-- **Migration Testing**: Always run migrations in test setup
-- **Connection Pooling**: Use `Arc<DatabasePool>` for shared database access
-- **Test Isolation**: Each test gets clean database state
-- **Performance**: Tests run in parallel with proper isolation
+### GraphQL
 
-### Compilation Optimization Results
+Check schema traits, context data, selected plane, authorization, and error conversion. Verify `From` implementations for wrapper types and test filtering and cursor pagination at boundary cases. Use the schema constructor appropriate to the test or service rather than assuming all constructors install the same resources.
 
-#### Before Crate Split
-- **Monolithic Build**: Single large crate with all dependencies
-- **Slow Compilation**: Full rebuild required for any change
-- **Dependency Bloat**: All crates compiled even for small changes
+### Tests
 
-#### After Crate Split
-- **Incremental Compilation**: Only changed crates recompile
-- **Parallel Builds**: Multiple crates can compile simultaneously
-- **Dependency Isolation**: Minimal dependency trees per crate
-- **Build Time**: ~70% reduction in incremental build times
-
-#### Crate Dependency Graph
-```
-econ-graph-core (foundation)
-├── econ-graph-services (depends on core)
-├── econ-graph-auth (depends on core)
-├── econ-graph-graphql (depends on core, services, auth)
-├── econ-graph-mcp (depends on core, graphql)
-├── econ-graph-crawler (depends on core, services)
-└── econ-graph-backend (depends on all)
-```
-
-### Testing Infrastructure Evolution
-
-#### TestContainer Implementation
-```rust
-// Centralized test database management
-pub struct TestContainer {
-    pool: DatabasePool,
-    #[cfg(test)]
-    _container: ContainerAsync<GenericImage>,
-}
-
-impl TestContainer {
-    pub async fn new() -> Self {
-        // Use testcontainers for ephemeral Postgres
-        // Fallback to external DATABASE_URL if available
-    }
-}
-
-// Global test database access
-static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
-pub async fn get_test_db() -> Arc<TestContainer> {
-    TEST_DB.get_or_init(|| async { Arc::new(TestContainer::new().await) }).await.clone()
-}
-```
-
-#### Test Execution Strategy
-- **Unit Tests**: Fast, no database required
-- **Integration Tests**: Use TestContainer for database operations
-- **End-to-End Tests**: Full system testing with real data sources
-- **Performance Tests**: Benchmarking and load testing
-- **Security Tests**: Authentication and authorization validation
-
-### Error Handling Patterns
-
-#### Cross-Crate Error Propagation
-```rust
-// Core error types in econ-graph-core
-#[derive(Debug, thiserror::Error)]
-pub enum AppError {
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-    #[error("Authentication error: {0}")]
-    AuthenticationError(String),
-    // ... other error variants
-}
-
-// GraphQL error handling
-use async_graphql::Error as GraphQLError;
-
-pub async fn graphql_resolver() -> Result<SomeType, GraphQLError> {
-    let result = core_operation().await
-        .map_err(|e| GraphQLError::new(e.to_string()))?;
-    Ok(result)
-}
-```
-
-#### Database Error Handling
-```rust
-// Proper async database error handling
-pub async fn database_operation(pool: &DatabasePool) -> AppResult<SomeType> {
-    let mut conn = pool.get().await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-    
-    let result = diesel_query.execute(&mut conn).await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-    
-    Ok(result)
-}
-```
-
-### Performance Optimization Techniques
-
-#### Compilation Performance
-- **Crate Splitting**: Modular compilation for faster builds
-- **Dependency Optimization**: Minimal dependency trees per crate
-- **Incremental Compilation**: Leveraging Rust's incremental build system
-- **Parallel Compilation**: Multi-threaded build processes
-
-#### Runtime Performance
-- **Connection Pooling**: Efficient database connection management
-- **Query Optimization**: Optimized SQL queries with proper indexing
-- **Async Operations**: Non-blocking I/O throughout the system
-- **Memory Management**: Efficient memory usage with proper cleanup
-
-### Security Implementation
-
-#### Authentication Security
-- **JWT Validation**: Proper signature and expiration checking
-- **Password Security**: Strong hashing with bcrypt
-- **OAuth Security**: Secure OAuth flow implementation
-- **Session Management**: Proper session lifecycle management
-
-#### API Security
-- **Input Validation**: Comprehensive input sanitization
-- **Rate Limiting**: API endpoint protection
-- **CORS Configuration**: Secure cross-origin requests
-- **SQL Injection Prevention**: Parameterized queries only
-
-### Development Workflow Enhancements
-
-#### Code Quality Standards
-- **Google Style Comments**: Comprehensive documentation for all functions
-- **Type Safety**: Strict typing with minimal `unwrap()` usage
-- **Error Handling**: Proper error propagation and logging
-- **Performance**: Benchmarking and optimization requirements
-- **Security**: Security-first development practices
-
-
-
-### Troubleshooting Guide
-
-#### Common Compilation Issues
-1. **Import Path Errors**: Ensure correct `use` statements for cross-crate dependencies
-2. **Missing Dependencies**: Add required dependencies to appropriate `Cargo.toml`
-3. **Type Mismatches**: Verify type conversions between crates
-4. **Orphan Rule Violations**: Cannot implement foreign traits for foreign types
-5. **Circular Dependencies**: Avoid circular crate dependencies
-6. **Missing Workspace Dependencies**: Ensure all crates are listed in workspace `Cargo.toml`
-
-#### Database Issues
-1. **Connection Pool Exhaustion**: Check pool configuration and connection cleanup
-2. **Migration Failures**: Verify migration order and database state
-3. **Query Performance**: Analyze query plans and add appropriate indexes
-4. **Data Integrity**: Check foreign key constraints and data validation
-5. **TestContainer Issues**: Ensure Docker is running for testcontainers
-
-#### GraphQL Issues
-1. **Schema Validation**: Ensure all types implement required traits
-2. **Resolver Errors**: Check context data and error handling
-3. **Type Conversions**: Verify `From` trait implementations
-4. **Pagination**: Ensure cursor-based pagination is properly implemented
-5. **Orphan Rule**: Cannot implement `async_graphql::Object` for core types
-
-#### Testing Issues
-1. **Database Connection Timeouts**: Check TestContainer configuration
-2. **Test Isolation**: Ensure tests don't interfere with each other
-3. **Docker Requirements**: Tests require Docker for testcontainers
-4. **Migration Testing**: Always run migrations in test setup
-5. **Parallel Test Execution**: Use `serial_test` for tests that can't run in parallel
-
-This persona represents the comprehensive knowledge and expertise required to effectively work on the EconGraph backend system, incorporating all the lessons learned from the crate splitting and architecture optimization work. The implementation experience provides deep insights into Rust workspace management, cross-crate dependencies, testing strategies, and performance optimization techniques.
+For connection timeouts, inspect the helper's compilation mode, target URL handling, and pool configuration. Check Docker only for paths that start testcontainers. Confirm migrations and fixtures are arranged, handle cleanup failures, and inspect locks or unique fixtures when tests interfere. Serialize incompatible shared-state tests or give them independent databases before enabling parallel execution.

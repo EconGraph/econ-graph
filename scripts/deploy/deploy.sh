@@ -60,22 +60,6 @@ else
     echo "⚠️  Grafana dashboard linter not found, skipping..."
 fi
 
-# Run monitoring stack linter (if available)
-if [ -f "scripts/test-monitoring.sh" ]; then
-    echo "🔧 Running monitoring stack linter..."
-    # Only run the linter part, not the full integration test
-    if ./scripts/test-monitoring.sh --lint-only 2>/dev/null || echo "⚠️  Monitoring linter not available, continuing..."; then
-        echo "✅ Monitoring stack linter passed"
-    else
-        echo "⚠️  Monitoring stack linter not available, continuing..."
-    fi
-    echo ""
-else
-    echo "⚠️  Monitoring stack linter not found, skipping..."
-fi
-
-echo "✅ All linter checks passed - proceeding with deployment"
-echo ""
 
 # Load port configuration
 if [ -f "ports.env" ]; then
@@ -116,6 +100,7 @@ ensure_kind_kubectl
 # CLUSTER_ROLE_DRY_RUN to false, so only --dry-run, below, turns it on, never
 # a value from the environment.
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves
 # http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
@@ -132,6 +117,22 @@ fi
 if [ "$DRY_RUN" != true ]; then
     kubectl() { kc "$@"; }
 fi
+
+# Monitoring stack linter: static checks only (--lint-only contacts no cluster).
+# Run after the kind cluster's kubectl and context are set, so nothing before
+# this point can reach another cluster. A failure stops the deploy; a checkout
+# without the script skips it.
+if [ -f scripts/test-monitoring.sh ]; then
+    echo "🔧 Running monitoring stack linter..."
+    if ! ./scripts/test-monitoring.sh --lint-only; then
+        echo "❌ Monitoring stack linter failed - aborting deployment"
+        exit 1
+    fi
+else
+    echo "⚠️  scripts/test-monitoring.sh not found, skipping the monitoring stack linter"
+fi
+echo "✅ All linter checks passed - proceeding with deployment"
+echo ""
 
 public_host_init
 
@@ -213,6 +214,10 @@ fi
 # that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
+# crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
+# deploy (scripts/deploy/precheck-db-migration.sh --stop-crawler) stays stopped while the data
+# migrations run, and stays stopped if the Job fails (a migration that gave up on its table
+# locks, say): the deploy stops here.
 has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
   -o jsonpath='{.data.data-database-url}')"
 if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then

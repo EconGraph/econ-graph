@@ -7,7 +7,6 @@
 use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
 use crate::graphql::schema::{create_schema, SchemaResources};
-use crate::security::{SecurityConfig, SecurityMiddleware};
 use crate::types::EconomicSeriesType;
 use async_graphql::{EmptyMutation, EmptySubscription, Request, Schema};
 use dataloader::non_cached::Loader;
@@ -496,7 +495,6 @@ async fn search_results_load_dataset_fields_by_series_id() {
         data_loaders: Some(Arc::new(DataLoaders::new(
             econ_graph_core::database::DataPool(pool.clone()),
         ))),
-        security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
     };
     let schema = Schema::build(
         SearchLikeQuery { results },

@@ -427,6 +427,7 @@ mod tests {
             http: HttpFetcher::new(HttpConfig::default(), HashMap::new()).unwrap(),
             pool: pool.clone(),
             keys: ApiKeys::default(),
+            bypass_validators: false,
         };
         let worker = Worker::new(
             ctx,

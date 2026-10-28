@@ -1,318 +1,75 @@
 # GraphQL Security Implementation Summary
 
-## Overview
+The backend applies controls at three boundaries: the HTTP route limits and parses requests, the schema limits query depth and complexity, and resolvers check the caller's capabilities and access to particular resources. This summary identifies those enforcement points and the audit records they produce. See the [GraphQL Security Guide](GRAPHQL_SECURITY_GUIDE.md) for related guidance.
 
-This document summarizes the comprehensive security implementation for the EconGraph GraphQL API. The implementation provides defense-in-depth security measures to protect against various attack vectors while maintaining API flexibility and performance.
+## Request flow
 
-## Security Features Implemented
-
-### 1. Query Complexity Analysis
-- **Purpose**: Prevents expensive queries that could cause DoS attacks
-- **Implementation**: Configurable complexity scoring with field-specific weights
-- **Default Limits**: 1000 complexity points
-- **Customizable**: Field complexity values can be adjusted per field
-
-### 2. Query Depth Limiting
-- **Purpose**: Prevents deeply nested queries that could cause stack overflow
-- **Implementation**: Recursive depth calculation with configurable limits
-- **Default Limits**: 10 levels deep
-- **Features**: Supports fragment depth counting and inline fragment handling
-
-### 3. Rate Limiting
-- **Purpose**: Prevents abuse and ensures fair resource usage
-- **Implementation**: Sliding window approach with multiple time windows
-- **Default Limits**: 60 requests/minute, 1000/hour, 10000/day
-- **Features**: Per-IP tracking, automatic cleanup, configurable thresholds
-
-### 4. Input Validation & Sanitization
-- **Purpose**: Prevents injection attacks and ensures data integrity
-- **Implementation**: Comprehensive validation with automatic sanitization
-- **Features**: 
-  - String length validation
-  - Pattern matching and regex validation
-  - HTML entity encoding
-  - SQL injection prevention
-  - XSS prevention
-  - Custom validation rules
-
-### 5. Introspection Protection
-- **Purpose**: Controls access to schema introspection
-- **Implementation**: Configurable blocking of introspection queries
-- **Features**: Environment-based configuration, selective blocking
-
-### 6. Query Filtering
-- **Purpose**: Allows/denies specific query patterns
-- **Implementation**: Whitelist/blacklist with regex support
-- **Features**: Pattern matching, custom rules, case sensitivity options
-
-### 7. Enhanced Authorization
-- **Purpose**: Fine-grained access control
-- **Implementation**: Role-based permissions with granular controls
-- **Features**:
-  - 5 user roles (SuperAdmin, Admin, Analyst, Viewer, Guest)
-  - 20+ specific permissions
-  - Permission combinations (any/all)
-  - Audit logging
-
-### 8. Security Monitoring & Alerting
-- **Purpose**: Real-time threat detection and response
-- **Implementation**: Event tracking with pattern analysis
-- **Features**:
-  - Real-time event monitoring
-  - Anomaly detection
-  - Automated alerting
-  - Multiple notification channels
-  - Security metrics
-
-### 9. Query Timeout Management
-- **Purpose**: Prevents long-running queries from blocking the system
-- **Implementation**: Async timeout with proper cleanup
-- **Default Limits**: 30 seconds
-- **Features**: Custom timeouts, resource monitoring
-
-## Security Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Client Request                           │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                 Rate Limiting                               │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Input Validation                               │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│            Query Analysis & Filtering                       │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│            Authentication & Authorization                   │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Query Execution                                │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Response & Logging                             │
-└─────────────────────────────────────────────────────────────┘
+```text
+GET /graphql (query in URL) or POST /graphql (body)
+    │
+    ├─ POST: count received bytes, stop above 1 MiB, parse a single request
+    │
+    ├─ Authenticate bearer token and check account status, or use anonymous context
+    │
+    ├─ Build schema with this request's GraphQLContext
+    │
+    ├─ Validate query: depth ≤ 15, complexity ≤ 1000
+    │
+    ├─ Execute resolvers: capability and resource checks, operation-specific validation
+    │
+    └─ Finish audit writes, sanitize server errors, return GraphQL response
 ```
 
-## Configuration Examples
+The [backend request route](../../backend/crates/econ-graph-backend/src/main.rs) implements this flow in `graphql_request`, `graphql_caller`, and `build_routes`. Its POST body reader counts bytes as they arrive rather than trusting `Content-Length`; a body above `GRAPHQL_BODY_LIMIT` (1,048,576 bytes) receives HTTP 413 with a GraphQL-shaped error. Malformed request bodies receive a GraphQL-shaped bad-request response. The POST body limit does not impose the same byte limit on GET query URLs.
 
-### Production Configuration
+## Authentication boundary
+
+[Bearer authentication](../../backend/crates/econ-graph-auth/src/bearer.rs) returns a caller containing the user's app database row and a `Principal`. The [OIDC verifier](../../backend/crates/econ-graph-auth/src/oidc.rs) checks the token's RS256 signature against the provider's keys and validates issuer, audience, expiry, and not-before claims. Authentication loads or creates the user's row and checks `is_active` before the request reaches resolvers.
+
+Requests without a bearer token run anonymously. When `OIDC_ISSUER` is unset, sign-in is disabled and no supplied token is trusted. With verification enabled, the backend refuses invalid tokens with HTTP 401, suspended accounts with 403, and account database failures with 500. If the provider's keys cannot be fetched and the token cannot be checked, the request runs anonymously; it gains no token capabilities, so protected operations still require sign-in.
+
+## Query limits and schema tooling
+
+The [schema constructors](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs) apply async-graphql's depth and complexity limits before query execution:
+
+| Control | Limit | Enforcement |
+| --- | --- | --- |
+| Query depth | 15 | `.limit_depth(MAX_QUERY_DEPTH)` |
+| Query complexity | 1000 | `.limit_complexity(MAX_QUERY_COMPLEXITY)`; one per selected field, with `__typename` excluded |
+| POST body size | 1 MiB | Streaming HTTP body reader, before parsing |
+
+Depth and complexity are source constants, not environment-specific configuration settings. They bound query shape and selection cost; they do not specify a wall-clock execution deadline or a request rate policy.
+
+Schema introspection remains available. The depth limit leaves room for the standard introspection query used by GraphiQL, the playground, and code generation tools, and the schema tests check that query. The browser playground is controlled separately: `/playground` is served only when `ENABLE_GRAPHQL_PLAYGROUND` is `1` or `true` (case-insensitive, with surrounding whitespace ignored). Leaving that setting unset disables the playground route without disabling introspection on `/graphql`.
+
+## Capability and resource authorization
+
+Each request's [GraphQL context](../../backend/crates/econ-graph-graphql/src/graphql/context.rs) carries an optional `Principal`. Its fine-grained `Role` values come from the access token's top-level `roles` claim, not a `users.role` staff tier. The [role catalog](../../backend/crates/econ-graph-auth/src/roles.rs) defines individual capabilities such as `annotation:create`, `chart:share`, and `admin.users:read`. A signed-in principal with no catalog roles receives no capabilities.
+
+Resolvers use the free `require_role` helper to require sign-in and the relevant capability. For example, this is the caller check used when creating or updating an annotation:
+
 ```rust
-let config = SecurityConfig {
-    max_complexity: 500,
-    max_depth: 8,
-    max_query_size: 10000,
-    query_timeout: 30,
-    protect_introspection: true,
-    rate_limit: RateLimitConfig {
-        requests_per_minute: 30,
-        requests_per_hour: 500,
-        requests_per_day: 5000,
-        enabled: true,
-    },
-    query_filter: QueryFilterConfig {
-        enable_blacklist: true,
-        blacklist_patterns: vec![
-            "__schema".to_string(),
-            "__type".to_string(),
-            "system".to_string(),
-            "admin".to_string(),
-        ],
-    },
-};
+use econ_graph_auth::Role;
+use econ_graph_graphql::graphql::context::require_role;
+
+// Inside a resolver with ctx: &async_graphql::Context<'_>:
+let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
 ```
 
-### Development Configuration
-```rust
-let config = SecurityConfig {
-    max_complexity: 2000,
-    max_depth: 15,
-    max_query_size: 20000,
-    query_timeout: 60,
-    protect_introspection: false,
-    rate_limit: RateLimitConfig {
-        requests_per_minute: 120,
-        requests_per_hour: 2000,
-        requests_per_day: 20000,
-        enabled: false,
-    },
-    query_filter: QueryFilterConfig {
-        enable_blacklist: false,
-    },
-};
-```
+The caller's identity comes from the authenticated context rather than an input user ID. A capability check is only one part of authorization: [annotation mutations](../../backend/crates/econ-graph-graphql/src/graphql/mutation.rs) pass that identity to the [collaboration service](../../backend/crates/econ-graph-services/src/services/collaboration_service.rs), which permits annotation updates only by the author. Chart sharing requires both `chart:share` and an existing chart collaborator grant with admin permission. Holding a catalog role alone does not establish ownership or access to every resource.
 
-## User Roles & Permissions
+## Input and error handling
 
-### Super Admin
-- All permissions
-- System management
-- Security management
-- User management
+Request parsing and GraphQL argument types establish the request's structure; resolver and service code apply operation-specific checks. For example, annotation mutations parse string IDs as UUIDs before passing them to the collaboration service. These checks are part of the individual operation, rather than a universal input validator that automatically encodes HTML or sanitizes all strings.
 
-### Admin
-- Data management (read/write/delete)
-- User management (create/update)
-- System configuration
-- Crawler management
-- Log viewing
-- Chart and annotation management
+Every schema installs the [error sanitizing extension](../../backend/crates/econ-graph-graphql/src/graphql/errors.rs). It logs typed server-side failures and replaces their public message and extensions with `Internal server error` and `INTERNAL_SERVER_ERROR`. Known client-facing errors retain their messages. Resolver authors must propagate typed errors, for example with `?`, instead of formatting internal failures into hand-written error strings: those strings are treated as client-facing and would bypass this classification.
 
-### Analyst
-- Data reading
-- Chart creation and management
-- Annotation creation and management
-- Metrics viewing
+## Audit records and security events
 
-### Viewer
-- Data reading
-- Basic API access
+The [GraphQL audit writer](../../backend/crates/econ-graph-graphql/src/graphql/audit.rs) records admin mutation attempts after the caller passes the mutation's role check. Each audit row includes the outcome in `details.outcome`; update details name the affected fields without storing their values. Outcomes distinguish success from validation failures, missing targets, conflicts, authorization refusals, self-lockout protection, database errors, and unavailable data.
 
-### Guest
-- Limited data reading
+The free `require_role` helper starts a `permission_denied` security-event write when a signed-in caller lacks a required role. It deduplicates these events by caller and permission within a request, so aliases of the same denied field do not each create a row. Anonymous authentication failures do not produce that event. The backend's `graphql_caller` also records a `suspended_account` event when it refuses a suspended account before execution.
 
-## Security Events Tracked
+The [admin query resolvers](../../backend/crates/econ-graph-graphql/src/graphql/query.rs) expose these records through `auditLogs` (requiring `admin.audit:read`) and `securityEvents` or `securityEventsPage` (requiring `admin.security:read`). The rows live in the app database's `audit_logs` and `security_events` tables. These producers and readers provide an inspection path; they do not define automatic threat detection, notification channels, or alert thresholds.
 
-1. **Rate Limit Exceeded**: When clients exceed rate limits
-2. **Complexity Exceeded**: When queries exceed complexity limits
-3. **Depth Exceeded**: When queries exceed depth limits
-4. **Query Size Exceeded**: When queries exceed size limits
-5. **Introspection Blocked**: When introspection queries are blocked
-6. **Query Filtered**: When queries are filtered by security policies
-
-## Alert Thresholds
-
-- **Rate Limit Violations**: 10 per minute
-- **Complexity Violations**: 50 per hour
-- **Authentication Failures**: 20 per hour
-- **Authorization Violations**: 30 per hour
-- **Suspicious Queries**: 25 per hour
-- **System Errors**: 100 per hour
-
-## Monitoring & Metrics
-
-### Security Metrics
-- Total requests processed
-- Rate limited requests
-- Complexity blocked requests
-- Depth blocked requests
-- Size blocked requests
-- Introspection blocked requests
-- Filtered requests
-- Average query complexity
-- Average query depth
-- Average query size
-
-### Alert Types
-- Rate Limit Violation
-- Complexity Attack
-- Authentication Failure
-- Authorization Violation
-- Suspicious Query
-- System Error
-- Pattern Anomaly
-- Geographic Anomaly
-- Time Anomaly
-
-## Implementation Files
-
-### Core Security Modules
-- `security/mod.rs` - Main security module
-- `security/complexity.rs` - Query complexity analysis
-- `security/depth_limit.rs` - Query depth limiting
-- `security/rate_limit.rs` - Rate limiting implementation
-- `security/query_analysis.rs` - Query analysis and validation
-- `security/introspection.rs` - Introspection protection
-- `security/timeout.rs` - Query timeout management
-- `security/whitelist.rs` - Query filtering
-- `security/input_validation.rs` - Input validation and sanitization
-- `security/monitoring.rs` - Security monitoring and alerting
-- `security/server.rs` - Secure GraphQL server wrapper
-
-### Enhanced Context
-- `graphql/context.rs` - Enhanced authorization context with permissions
-
-### Documentation
-- `docs/security/GRAPHQL_SECURITY_GUIDE.md` - Comprehensive security guide
-- `docs/security/SECURITY_IMPLEMENTATION_SUMMARY.md` - This summary
-
-## Usage Examples
-
-### Basic Security Setup
-```rust
-use econ_graph_graphql::security::{SecurityConfig, SecureGraphQLServer};
-
-let config = SecurityConfig::default();
-let server = SecureGraphQLServer::new(pool, config);
-
-// Execute secure request
-let result = server.execute_secure_request(request, "127.0.0.1").await?;
-```
-
-### Custom Security Configuration
-```rust
-let mut config = SecurityConfig::default();
-config.max_complexity = 500;
-config.max_depth = 8;
-config.rate_limit.requests_per_minute = 30;
-
-let server = SecureGraphQLServer::new(pool, config);
-```
-
-### Permission-Based Authorization
-```rust
-use econ_graph_graphql::graphql::context::{Permission, require_permission};
-
-// In a resolver
-async fn create_chart(ctx: &Context<'_>, input: CreateChartInput) -> Result<ChartType> {
-    require_permission(ctx, &Permission::CreateCharts)?;
-    // ... implementation
-}
-```
-
-### Input Validation
-```rust
-use econ_graph_graphql::security::input_validation::{InputValidator, ValidationConfig};
-
-let validator = InputValidator::new(ValidationConfig::default());
-let validated = validator.validate_string(input, "field_name")?;
-```
-
-## Security Benefits
-
-### Protection Against
-- **DoS Attacks**: Query complexity and rate limiting
-- **Injection Attacks**: Input validation and sanitization
-- **Information Disclosure**: Introspection protection
-- **Unauthorized Access**: Enhanced authorization
-- **Resource Exhaustion**: Timeout management
-- **Abuse**: Rate limiting and query filtering
-
-### Operational Benefits
-- **Real-time Monitoring**: Security event tracking
-- **Automated Alerting**: Threat detection and notification
-- **Audit Trail**: Comprehensive logging
-- **Configurable Security**: Environment-specific settings
-- **Performance Optimization**: Efficient security checks
-
-## Conclusion
-
-The GraphQL security implementation provides comprehensive protection against various attack vectors while maintaining API flexibility and performance. The defense-in-depth approach ensures that multiple security layers work together to protect the system.
-
-Key achievements:
-- ✅ Query complexity analysis and depth limiting
-- ✅ Rate limiting and abuse prevention
-- ✅ Input validation and sanitization
-- ✅ Enhanced authorization with fine-grained permissions
-- ✅ Security monitoring and alerting
-- ✅ Comprehensive documentation and best practices
-
-The implementation is production-ready and can be configured for different environments and security requirements. Regular monitoring and updates will ensure continued security effectiveness.
+Writes are best-effort. The schema waits for already-started permission-denial writes before returning a normal response, and admin attempts await their outcome write. A failed insert is logged and counted by the [admin record model](../../backend/crates/econ-graph-core/src/models/admin.rs), without changing the request's reply. Cancellation leaves detached writes running. An admin attempt interrupted before its result is known is recorded as `cancelled`, because its database change may already have committed. Process crashes or runtime shutdown can still interrupt writes, so this mechanism is not a durable audit queue.

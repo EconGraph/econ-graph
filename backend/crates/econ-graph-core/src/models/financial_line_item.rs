@@ -28,6 +28,7 @@ use crate::schema::financial_line_items;
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_core::models::FinancialLineItem;
+/// use econ_graph_core::enums::{StatementType, StatementSection};
 /// use uuid::Uuid;
 /// use bigdecimal::BigDecimal;
 /// use chrono::Utc;
@@ -40,16 +41,16 @@ use crate::schema::financial_line_items;
 ///     standard_label: Some("Revenues".to_string()),
 ///     custom_label: Some("Net sales".to_string()),
 ///     value: Some(BigDecimal::from(394328000000i64)), // $394.3B
-///     unit: Some("USD".to_string()),
-///     context_ref: Some("c1".to_string()),
+///     unit: "USD".to_string(),
+///     context_ref: "c1".to_string(),
 ///     segment_ref: None,
 ///     scenario_ref: None,
 ///     precision: Some(3),
 ///     decimals: Some(-6), // Values in millions
 ///     is_credit: Some(false),
 ///     is_debit: Some(true),
-///     statement_type: "income_statement".to_string(),
-///     statement_section: "revenue".to_string(),
+///     statement_type: StatementType::IncomeStatement,
+///     statement_section: StatementSection::Revenue,
 ///     parent_concept: Some("IncomeStatementAbstract".to_string()),
 ///     level: 1,
 ///     order_index: Some(1),
@@ -171,6 +172,7 @@ pub struct FinancialLineItem {
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_core::models::NewFinancialLineItem;
+/// use econ_graph_core::enums::{StatementType, StatementSection};
 /// use uuid::Uuid;
 /// use bigdecimal::BigDecimal;
 ///
@@ -181,16 +183,16 @@ pub struct FinancialLineItem {
 ///     standard_label: Some("Revenues".to_string()),
 ///     custom_label: Some("Net sales".to_string()),
 ///     value: Some(BigDecimal::from(394328000000i64)),
-///     unit: Some("USD".to_string()),
-///     context_ref: Some("c1".to_string()),
+///     unit: "USD".to_string(),
+///     context_ref: "c1".to_string(),
 ///     segment_ref: None,
 ///     scenario_ref: None,
 ///     precision: Some(3),
 ///     decimals: Some(-6),
 ///     is_credit: Some(false),
 ///     is_debit: Some(true),
-///     statement_type: "income_statement".to_string(),
-///     statement_section: "revenue".to_string(),
+///     statement_type: StatementType::IncomeStatement,
+///     statement_section: StatementSection::Revenue,
 ///     parent_concept: Some("IncomeStatementAbstract".to_string()),
 ///     level: 1,
 ///     order_index: Some(1),
@@ -283,11 +285,13 @@ pub struct NewFinancialLineItem {
 /// use econ_graph_core::models::{FinancialLineItem, FinancialStatement, Company, FinancialLineItemWithStatement};
 ///
 /// // Line item with complete context
+/// fn with_context(line_item: FinancialLineItem, statement: FinancialStatement, company: Company) {
 /// let line_item_with_context = FinancialLineItemWithStatement {
-///     line_item: FinancialLineItem { /* ... */ },
-///     statement: FinancialStatement { /* ... */ },
-///     company: Company { /* ... */ },
+///     line_item: line_item,
+///     statement: statement,
+///     company: company,
 /// };
+/// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinancialLineItemWithStatement {
@@ -333,7 +337,7 @@ pub struct FinancialLineItemWithStatement {
 ///     levels: None,
 ///     value_min: Some(BigDecimal::from(1000000000i64)), // $1B minimum
 ///     value_max: None,
-///     is_calculated: Some(false),
+///     is_calculated: false,
 ///     fiscal_year: Some(2023),
 ///     fiscal_quarter: None,
 ///     limit: Some(100),

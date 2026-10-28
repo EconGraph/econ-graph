@@ -402,6 +402,7 @@ pub fn test_ctx_with(overrides: HashMap<SourceId, SourcePolicy>) -> CrawlCtx {
         http,
         pool: lazy_pool(),
         keys: test_keys(),
+        bypass_validators: false,
     }
 }
 
