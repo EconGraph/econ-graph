@@ -42,8 +42,10 @@
 #      to copy (unless --allow-missing-nodes).
 #   4. docker pull each image by that digest on the kind cluster's daemon
 #      (lib/kind-env.sh: unix:///var/run/docker.sock, the rootful one, unless
-#      ECONGRAPH_DOCKER_HOST says otherwise; the script stops if it isn't
-#      reachable or is rootless). The packages are private: pulling uses the
+#      ECONGRAPH_DOCKER_HOST says otherwise; the script stops, before anything
+#      changes, if it isn't reachable, is rootless, or keeps images in Docker's
+#      containerd image store, which kind load docker-image and the image ID
+#      checks don't work with). The packages are private: pulling uses the
 #      operator's existing `docker login ghcr.io`. Each pulled image must carry
 #      the digest and an org.opencontainers.image.revision label (release.yml
 #      always sets one) equal to the commit; otherwise the script stops before
@@ -118,6 +120,7 @@ COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify --quiet "refs/tags/${TAG}^{c
 echo "${TAG} is commit ${COMMIT}"
 
 ri_use_rootful_docker
+ri_require_classic_image_store
 # `kind load` needs the pinned kind (scripts/deploy/install-kind.sh): an older
 # one cannot load into the nodes. Checked before anything changes, and in a dry run.
 require_kind_version
@@ -260,6 +263,14 @@ for name in "${RI_NAMES[@]}"; do
     [ "$revision" = "$COMMIT" ] ||
         ri_die "${ref} has org.opencontainers.image.revision ${revision}, not ${COMMIT}; refusing"
     IMAGE_ID[$name]="$(docker image inspect --format '{{.Id}}' "$ref")"
+    # The classic store's .Id is the config digest, which is what the nodes
+    # report. On Docker's containerd image store it is the digest that was
+    # pulled (the index or manifest), so the checks after kind load would fail
+    # with the nodes already changed: refuse here, before step 5.
+    [[ "${IMAGE_ID[$name]}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        ri_die "${ref} has image ID '${IMAGE_ID[$name]}', not a sha256 digest; refusing"
+    [ "${IMAGE_ID[$name]}" != "${DIGEST[$name]}" ] ||
+        ri_die "${ref} has image ID ${IMAGE_ID[$name]}, the registry digest rather than the config digest (Docker's containerd image store); refusing before anything changes"
     echo "${ref}: revision ${revision}, image ID ${IMAGE_ID[$name]}"
 done
 
@@ -302,8 +313,8 @@ for name in "${RI_NAMES[@]}"; do
     kind load docker-image "${LOCAL[$name]}" --name "$CLUSTER"
     for node in "${RI_NODES[@]}"; do
         id="$(ri_node_image_id "$node" "$(ri_node_ref "${LOCAL[$name]}")")" || exit 1
-        # The node's ID is the config digest; Docker's .Id is too, except on
-        # Docker's containerd image store, which this check would refuse.
+        # The node's ID is the config digest; so is Docker's .Id on the classic
+        # image store, which ri_require_classic_image_store and step 4 required.
         [ "$id" = "${IMAGE_ID[$name]}" ] ||
             ri_die "after kind load, ${LOCAL[$name]} on ${node} is '${id}', not ${IMAGE_ID[$name]}"
     done

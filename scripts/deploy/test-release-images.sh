@@ -26,6 +26,8 @@
 #   - load refuses before anything reaches the nodes on: a revision label that
 #     isn't the commit or is missing, a pulled image without the registry's
 #     digest, an rc tag on another digest, an unreachable or rootless daemon,
+#     a daemon on Docker's containerd image store (or whose store can't be
+#     read), a pulled image whose ID is the registry digest,
 #     an unknown tag, pods of one Deployment on different images, a pre-<tag>
 #     copy of another image, a node without the image to keep (unless
 #     --allow-missing-nodes, which exits 3), no node with it, or a node it
@@ -140,6 +142,9 @@ STUB
 #   STUB_CTR_TAG_WRONG=1              ctr images tag points the new ref at another image
 #   STUB_CTR_TAG_FAIL=<name>          ctr images tag of econ-graph-<name> refs fails
 #   STUB_NO_PIN=1                     the CRI never reports an image pinned
+#   STUB_CONTAINERD_STORE=1           the daemon keeps images in Docker's containerd image store
+#   STUB_DRIVER_UNREADABLE=1          docker info can't report the image store
+#   STUB_ID_IS_DIGEST=<name>          that pulled image's .Id is the registry digest (containerd store)
 cat >"$tmp/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 echo "docker DOCKER_HOST=${DOCKER_HOST:-} DOCKER_CONTEXT=${DOCKER_CONTEXT:-} $*" >>"$STUB_LOG"
@@ -149,6 +154,10 @@ case "$1" in
     [ "${STUB_DOCKER_DOWN:-0}" != 1 ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
     case "$*" in
       *SecurityOptions*) if [ "${STUB_ROOTLESS:-0}" = 1 ]; then echo '["name=seccomp","name=rootless"]'; else echo '["name=seccomp"]'; fi ;;
+      *DriverStatus*)
+        [ "${STUB_DRIVER_UNREADABLE:-0}" != 1 ] || { echo "template: error" >&2; exit 1; }
+        if [ "${STUB_CONTAINERD_STORE:-0}" = 1 ]; then echo '[["driver-type","io.containerd.snapshotter.v1"]]'
+        else echo '[["Backing Filesystem","extfs"],["Supports d_type","true"],["Using metacopy","false"],["Native Overlay Diff","true"],["userxattr","false"]]'; fi ;;
       *) echo 28.4.0 ;;
     esac ;;
   buildx)
@@ -178,7 +187,7 @@ case "$1" in
             if [ "${STUB_BAD_REVISION:-}" = "$name" ]; then echo 89ebfa64e3da9efd7db5cade91fe69ae1d57179f
             elif [ "${STUB_NO_REVISION:-}" = "$name" ]; then echo
             else echo "$STUB_COMMIT"; fi ;;
-          "{{.Id}}") id_of "$name" ;;
+          "{{.Id}}") if [ "${STUB_ID_IS_DIGEST:-}" = "$name" ]; then digest_of "$name"; else id_of "$name"; fi ;;
           *) exit 1 ;;
         esac ;;
       econ-graph-*:"$STUB_LOCAL_TAG")
@@ -597,6 +606,15 @@ refuses "a pulled image without the registry's digest" "does not carry digest $(
 refuses "an rc tag on another digest" "refusing" STUB_RC_DIGEST_DIFFERS=1
 refuses "an unreachable daemon" "is not reachable" STUB_DOCKER_DOWN=1
 refuses "a rootless daemon" "is a rootless daemon" STUB_ROOTLESS=1
+# Docker's containerd image store: refused before anything is pulled, and in a dry run.
+refuses "the containerd image store" "keeps images in Docker's containerd image store" STUB_CONTAINERD_STORE=1
+grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite the containerd image store"
+reset
+expect_fail "keeps images in Docker's containerd image store" env STUB_CONTAINERD_STORE=1 "$load" --tag "$TAG" --dry-run
+refuses "an image store it can't read" "could not read the image store" STUB_DRIVER_UNREADABLE=1
+# A pulled image whose ID is the registry digest (what the containerd store reports):
+# refused after the pulls, before any node changes.
+refuses "an image ID that is the registry digest" "the registry digest rather than the config digest" STUB_ID_IS_DIGEST=frontend
 refuses "pods on different images" "use different images" STUB_MIXED=econ-graph-backend
 refuses "a node it can't read" "could not read image" STUB_CRICTL_BROKEN=1
 REFUSE_TAG=v4.0.0-rc.9 refuses "an unknown tag" "tag v4.0.0-rc.9 not found"

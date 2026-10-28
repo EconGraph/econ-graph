@@ -131,6 +131,25 @@ ri_use_rootful_docker() {
     esac
 }
 
+# Refuse, before anything changes, when the daemon keeps images in Docker's
+# containerd image store (the default for new installs since Docker 29) rather
+# than the classic one. With that store `docker pull` of a multi-platform image
+# keeps the whole index but only this platform's content, so `kind load
+# docker-image` can fail on a node part way through, and `docker image inspect
+# .Id` is the manifest or index digest rather than the config digest the nodes
+# report, so every node check after the load would fail. Either way the load
+# would stop after the nodes had changed. A daemon whose store can't be read is
+# refused too.
+ri_require_classic_image_store() {
+    local driver
+    driver="$(docker info --format '{{json .DriverStatus}}' 2>/dev/null)" ||
+        ri_die "could not read the image store of DOCKER_HOST=${DOCKER_HOST} (docker info .DriverStatus)"
+    case "$driver" in
+        *io.containerd.snapshotter*)
+            ri_die "DOCKER_HOST=${DOCKER_HOST} keeps images in Docker's containerd image store; kind load docker-image and the image ID checks need the classic store (\"features\": {\"containerd-snapshotter\": false} in daemon.json). Refusing before anything changes" ;;
+    esac
+}
+
 # Fill RI_NODES with the nodes of kind cluster $1; fail when it has none.
 ri_kind_nodes() {
     local out
