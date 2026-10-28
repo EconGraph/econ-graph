@@ -180,8 +180,17 @@ source "$DEPLOY_DIR/lib/kind-env.sh"
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$DEPLOY_DIR/lib/public-host.sh"
 
+# say MESSAGE...: print to stderr, never failing: after a hangup (a dropped ssh
+# session) the terminal is gone and every write to it fails.
+say() {
+    printf '%s\n' "$*" >&2 || true
+}
+# out MESSAGE...: print to stdout, never failing, for the same reason.
+out() {
+    printf '%s\n' "$*" || true
+}
 die() {
-    echo "${SCRIPT}: error: $*" >&2
+    say "${SCRIPT}: error: $*"
     report "result=refused"
     exit 1
 }
@@ -190,7 +199,7 @@ die() {
 report() {
     [ -n "$REPORT" ] || return 0
     printf '%s\n' "$*" 2>/dev/null >>"$REPORT" ||
-        echo "${SCRIPT}: warning: could not append '$*' to ${REPORT}" >&2
+        say "${SCRIPT}: warning: could not append '$*' to ${REPORT}"
 }
 # Checked before anything else, so an unwritable report stops the run before
 # it changes anything.
@@ -514,13 +523,17 @@ backup_before() {
 }
 
 # print_backups RUN DATE LABEL: the data databases' dumps run RUN recorded, with
-# the restore command for econ_graph's, and report them when LABEL is "restore".
+# the restore command for econ_graph's, reported as restore_backup= (LABEL
+# "restore") or restore_backup_if_restored= (LABEL "later").
 print_backups() {
     local path
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         echo "  ${path}"
-        [ "$3" != restore ] || report "restore_backup=${path}"
+        case "$3" in
+            restore) report "restore_backup=${path}" ;;
+            later) report "restore_backup_if_restored=${path}" ;;
+        esac
         case "${path##*/}" in
             econ_graph-*) echo "    scripts/deploy/restore-postgres-backup.sh --context ${CONTEXT} --file $(printf '%q' "${path##*/}")" ;;
         esac
@@ -568,6 +581,7 @@ explain_restore() {
         fi
         if [ -n "$kc_newer" ] && [ "$kc_newer" != "$kc" ]; then
             echo "  Keycloak (run ${kc_newer%%$'\t'*}, $(cut -f2 <<<"$kc_newer")): $(cut -f3- <<<"$kc_newer")"
+            report "restore_keycloak_backup_if_restored=$(cut -f3- <<<"$kc_newer")"
         fi
     fi
 }
@@ -715,9 +729,14 @@ collect() {
 # without the step stopping, sends SIGKILL, which can cut that cleanup short.
 # Once the run is explaining a failure, further signals are ignored. The run
 # then gives the guidance for that step.
+#
+# After a hangup (a dropped ssh session) the terminal is gone and every write
+# to it fails: what the handlers, the timer and stop() print goes through say,
+# which never fails, and the guidance also goes to a file the report names.
 STOP_TIMEOUT="${ECONGRAPH_STOP_TIMEOUT:-120}"
 STEP_PID=""
 STEP_NAME=""
+STEP_FD=""
 INTERRUPTED=""
 SIGNALS=0
 STOP_SENT=""
@@ -744,23 +763,24 @@ on_signal() {
     [ -n "$INTERRUPTED" ] || INTERRUPTED="$1"
     case "$SIGNALS" in
         1)
-            [ -z "$STEP_PID" ] || {
-                echo "${SCRIPT}: SIG$1: stopping step ${STEP_NAME} (SIGTERM, then up to ${STOP_TIMEOUT}s for it to clean up)" >&2
+            if [ -n "$STEP_PID" ]; then
+                say "${SCRIPT}: SIG$1: stopping step ${STEP_NAME} (SIGTERM, then up to ${STOP_TIMEOUT}s for it to clean up)"
                 STOP_SENT=1
                 stop_step TERM
                 start_timer
-            } ;;
+            fi ;;
         2)
             [ -z "$STEP_PID" ] ||
-                echo "${SCRIPT}: still stopping step ${STEP_NAME}, which is cleaning up; one more signal kills it at once (SIGKILL), which can cut its cleanup short" >&2 ;;
+                say "${SCRIPT}: still stopping step ${STEP_NAME}, which is cleaning up; one more signal kills it at once (SIGKILL), which can cut its cleanup short" ;;
         3)
-            [ -z "$STEP_PID" ] || {
-                echo "${SCRIPT}: warning: killing step ${STEP_NAME} (SIGKILL); its cleanup may be cut short" >&2
+            if [ -n "$STEP_PID" ]; then
+                say "${SCRIPT}: warning: killing step ${STEP_NAME} (SIGKILL); its cleanup may be cut short"
                 stop_step KILL
-            }
+            fi
             # Nothing is left to escalate to.
             trap '' INT TERM HUP ;;
     esac
+    return 0
 }
 set_traps() {
     trap 'on_signal INT' INT
@@ -768,19 +788,35 @@ set_traps() {
     trap 'on_signal HUP' HUP
 }
 # start_timer: SIGKILL for the step's tree if it is still there after
-# STOP_TIMEOUT seconds.
+# STOP_TIMEOUT seconds. The timer ignores the terminal's SIGINT and SIGHUP (a
+# second Ctrl-C must not stop it), doesn't hold the step's output open, and on
+# the SIGTERM that ends it stops its own sleep.
 start_timer() {
     local pid="$STEP_PID" name="$STEP_NAME"
     (
-        trap - INT TERM HUP
+        trap '' INT HUP
+        sleeper=""
+        trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
+        [ -z "$STEP_FD" ] || exec {STEP_FD}>&-
         sleep "$STOP_TIMEOUT" >/dev/null 2>&1 &
-        wait $! || exit 0
+        sleeper=$!
+        wait "$sleeper" || exit 0
         if kill -0 "$pid" 2>/dev/null; then
-            echo "${SCRIPT}: warning: step ${name} did not stop within ${STOP_TIMEOUT}s; killing it (SIGKILL); its cleanup may be cut short" >&2
+            say "${SCRIPT}: warning: step ${name} did not stop within ${STOP_TIMEOUT}s; killing it (SIGKILL); its cleanup may be cut short"
             kill_tree KILL "$pid"
         fi
-    ) &
+    ) </dev/null >/dev/null &
     TIMER_PID=$!
+}
+# timer_alive: the timer is still running and still this run's child (its PID
+# has not been reused since it ended).
+timer_alive() {
+    local stat
+    [ -n "$TIMER_PID" ] || return 1
+    stat="$(cat "/proc/${TIMER_PID}/stat" 2>/dev/null)" || return 1
+    # shellcheck disable=SC2086 # split the fields after the command name
+    set -- ${stat##*\) }
+    [ "${2:-}" = "$$" ]
 }
 
 # Run step $1 with its output on the terminal and in a step log of its own, and
@@ -791,10 +827,10 @@ start_timer() {
 # failure. The step runs in the background with this run's stdin, so a signal
 # reaches the trap above while it runs.
 run_step() {
-    local tee_fd tee_pid i
+    local tee_pid i
     STEP_LOG="${STEP_LOG_DIR}/${1}.log"
     : >"$STEP_LOG" 2>/dev/null || true
-    exec {tee_fd}> >(tee "$STEP_LOG" || true)
+    exec {STEP_FD}> >(tee "$STEP_LOG" || true)
     tee_pid=$!
     step_argv "$1"
     STEP_NAME="$1"
@@ -802,7 +838,7 @@ run_step() {
     # SIGINT and SIGHUP from the terminal go to its whole process group, the
     # step too: the step ignores them, so only the SIGTERM (or SIGKILL) this
     # run sends stops it, once, and never in the middle of its cleanup.
-    (trap '' INT HUP; cd "$PROJECT_ROOT" && exec "${ARGV[@]}") <&0 >&"$tee_fd" 2>&1 &
+    (trap '' INT HUP; cd "$PROJECT_ROOT" && exec "${ARGV[@]}") <&0 >&"$STEP_FD" 2>&1 &
     STEP_PID=$!
     # A signal that came between starting the step and knowing its PID.
     if [ -n "$INTERRUPTED" ] && [ -z "$STOP_SENT" ]; then
@@ -829,12 +865,13 @@ run_step() {
         break
     done
     STEP_PID=""
-    if [ -n "$TIMER_PID" ]; then
-        kill_tree TERM "$TIMER_PID"
+    if timer_alive; then
+        kill -TERM "$TIMER_PID" 2>/dev/null || true
         wait "$TIMER_PID" 2>/dev/null || true
-        TIMER_PID=""
     fi
-    exec {tee_fd}>&-
+    TIMER_PID=""
+    exec {STEP_FD}>&-
+    STEP_FD=""
     for i in $(seq 1 30); do
         kill -0 "$tee_pid" 2>/dev/null || break
         sleep 0.1
@@ -843,16 +880,22 @@ run_step() {
 
 # stop STEP HOW RESULT CODE: the step did not complete: report it, explain,
 # and exit with CODE. Signals are ignored from here on, so the explanation
-# (and the record reads it makes) can't be cut short.
+# (and the record reads it makes) can't be cut short. The guidance goes to the
+# terminal, if it is still there, and to GUIDANCE, which the report names.
+GUIDANCE="$(dirname "$RECORD")/release-deploy-${KIND_CLUSTER}-${RUN_ID}.txt"
 stop() {
     trap '' INT TERM HUP
-    local step="$1" how="$2" result="$3" code="$4"
+    local step="$1" how="$2" result="$3" code="$4" guidance
     report "step=${step} status=${how%% *}"
     if [ "$DRY_RUN" = true ]; then
-        echo
-        echo "==> ${RC_TAG}: the dry run of step ${step} ${how}; nothing was changed."
+        { printf '\n==> %s: the dry run of step %s %s; nothing was changed.\n' "$RC_TAG" "$step" "$how"; } 2>/dev/null || true
     else
-        explain_failure "$step" "$how" || echo "${SCRIPT}: warning: the failure summary above is incomplete" >&2
+        guidance="$(explain_failure "$step" "$how" 2>&1)" ||
+            guidance+=$'\n'"${SCRIPT}: warning: the failure summary above is incomplete"
+        { printf '%s\n' "$guidance"; } 2>/dev/null || true
+        if { printf '%s\n' "$guidance" >"$GUIDANCE"; } 2>/dev/null; then
+            report "guidance=${GUIDANCE}"
+        fi
     fi
     report "result=${result}"
     exit "$code"
@@ -876,12 +919,12 @@ for step in "${STEPS[@]}"; do
         STATE[$step]="not run (interrupted before it started)"
         interrupted "$step" " before it started"
     fi
-    echo
-    echo "==> ${step}: $(step_line "$step")"
+    out
+    out "==> ${step}: $(step_line "$step")"
     if [ "$step" = verify ] && [ "$DRY_RUN" = true ]; then
-        echo "dry run: verify checks the pods against the images the load put on the nodes, so"
-        echo "it can only run after a real load and deploy; it would run:"
-        echo "  $(step_line verify | sed 's/ --dry-run$//')"
+        out "dry run: verify checks the pods against the images the load put on the nodes, so"
+        out "it can only run after a real load and deploy; it would run:"
+        out "  $(step_line verify | sed 's/ --dry-run$//')"
         STATE[$step]="dry run (not run)"
         report "step=${step} status=dry-run"
         continue
@@ -897,7 +940,7 @@ for step in "${STEPS[@]}"; do
             interrupted "$step" " before it started"
         fi
         if [ "$checked" != 0 ]; then
-            echo "${SCRIPT}: error: ${why}" >&2
+            say "${SCRIPT}: error: ${why}"
             NOT_STARTED="the checkout changed during the run"
             STATE[$step]="REFUSED (the checkout changed)"
             stop "$step" "refused" "failed step=${step}" 1
@@ -925,11 +968,11 @@ for step in "${STEPS[@]}"; do
         stop "$step" "failed" "failed step=${step}" 1
     fi
     if [ "$collected" = 2 ]; then
-        echo "${SCRIPT}: error: step ${step} succeeded but named no backup it took (no \"Backup OK\" or \"verified dump\" line); not going on without one" >&2
+        say "${SCRIPT}: error: step ${step} succeeded but named no backup it took (no \"Backup OK\" or \"verified dump\" line); not going on without one"
         STATE[$step]="FAILED (no backup named)"
         stop "$step" "failed" "failed step=${step}" 1
     elif [ "$collected" != 0 ]; then
-        echo "${SCRIPT}: warning: could not read what step ${step} reported from ${STEP_LOG}" >&2
+        say "${SCRIPT}: warning: could not read what step ${step} reported from ${STEP_LOG}"
     fi
     if [ "$STATUS" = 0 ]; then
         STATE[$step]="$([ "$DRY_RUN" = true ] && echo "dry run ok" || echo "done")"
@@ -947,7 +990,7 @@ done
 # A signal as the last step finished.
 if [ -n "$INTERRUPTED" ]; then
     trap '' INT TERM HUP
-    echo "${SCRIPT}: SIG${INTERRUPTED} after the last step had finished; the run is complete" >&2
+    say "${SCRIPT}: SIG${INTERRUPTED} after the last step had finished; the run is complete"
 fi
 trap - INT TERM HUP
 
@@ -956,14 +999,14 @@ if [ "$DRY_RUN" = true ]; then
 else
     report "result=ok$([ -z "$UNCHECKED" ] || echo " unchecked=$(grep -c . <<<"$UNCHECKED")")"
 fi
-echo
+out
 if [ "$DRY_RUN" = true ]; then
-    echo "==> Dry run of ${RC_TAG} on ${CONTEXT} complete: nothing was changed."
+    out "==> Dry run of ${RC_TAG} on ${CONTEXT} complete: nothing was changed."
 else
-    echo "==> ${RC_TAG} is deployed on ${CONTEXT} and verified."
+    out "==> ${RC_TAG} is deployed on ${CONTEXT} and verified."
     if [ -n "$UNCHECKED" ]; then
-        echo "    Not checked (verify-release-images.sh could not; check these by hand):"
-        while IFS= read -r line; do echo "      ${line#"${line%%[! ]*}"}"; done <<<"$UNCHECKED"
+        out "    Not checked (verify-release-images.sh could not; check these by hand):"
+        while IFS= read -r line; do out "      ${line#"${line%%[! ]*}"}"; done <<<"$UNCHECKED"
     fi
-    echo "    Rollback copies of the images that ran before: pre-${RC_TAG} (scripts/deploy/rollback-release-images.sh${cluster_arg})."
+    out "    Rollback copies of the images that ran before: pre-${RC_TAG} (scripts/deploy/rollback-release-images.sh${cluster_arg})."
 fi

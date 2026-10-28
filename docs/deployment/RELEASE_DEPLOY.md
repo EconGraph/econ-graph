@@ -2,9 +2,11 @@
 
 `scripts/deploy/release-deploy.sh` deploys a release candidate to the kind cluster
 `econ-graph` in one command. It is how a production window deploys. Run it from a clean
-checkout of the tag:
+checkout of the tag, inside tmux or screen on the host, so that a dropped ssh session
+doesn't end the run:
 
 ```sh
+tmux new -s release        # or: screen -S release
 git checkout vX.Y.Z-rc.N
 scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N --dry-run   # then without --dry-run
 ```
@@ -91,6 +93,12 @@ ignored. A step that completed as the signal came counts as done, and the run st
 before the next one. Steps ignore the SIGINT and SIGHUP a terminal sends its whole process
 group, so only the run's own signals stop them.
 
+When the terminal is gone (a dropped ssh session outside tmux or screen: SIGHUP), every
+write to it fails; the run still stops the step, writes the report, and writes the
+guidance it would have printed to `~/econgraph-releases/<tag>/release-deploy-<cluster>-<run
+id>.txt`, which the report names (`guidance=PATH`). A run that fails for any other reason
+writes that file too.
+
 ## The run's record
 
 Each run appends to `~/econgraph-releases/<tag>/release-deploy-<cluster>.txt`
@@ -114,7 +122,8 @@ crawler worker may already be at 0, an earlier run's `deploy.sh` may have reset 
 crawler worker to the manifest's replicas, and the databases may already be migrated. The
 earliest value counts. Lines with another kube-system UID (a cluster recreated under the
 same name) are ignored, and the run says how many. A record that can't be written stops
-the run: before any step, or at the step whose result it was recording.
+the run: before any step, or at the step whose result it was recording. A record without
+`deploy_started` lines counts as never deployed.
 
 ## PUBLIC_HOST
 
@@ -205,7 +214,10 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
   that left N things unchecked;
 - the backups taken, `backup=PATH` and `keycloak_backup=DIR`;
 - after a failed deploy or verify, the backups to restore from, `restore_backup=PATH` and
-  `restore_keycloak_backup=DIR`;
+  `restore_keycloak_backup=DIR`, and, when the tag was first deployed before this run,
+  the later ones to use only if the databases were restored to before the tag since,
+  `restore_backup_if_restored=PATH` and `restore_keycloak_backup_if_restored=DIR`;
+- after a failure, `guidance=PATH`: the file with the guidance the run printed;
 - a final `result=ok|failed step=NAME|interrupted step=NAME signal=SIG|dry-run|refused`
   line; `result=ok unchecked=N` when the verify left N things unchecked.
 

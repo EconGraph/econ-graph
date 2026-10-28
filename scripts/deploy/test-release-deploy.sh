@@ -505,7 +505,9 @@ elif grep -qF "20261028T020000Z" <<<"$restore"; then
 elif ! sed -n '/Only if the databases were/,$p' <<<"$out" | grep -qF "/backups/econ_graph-20261028T020000Z.dump"; then
     fail "a re-run after a deploy: does not name this run's backups for databases restored since"
 elif ! grep -qxF "restore_backup=/backups/econ_graph-20261028T010000Z.dump" "$WORK/report" ||
-    grep -qF "20261028T020000Z" <(grep '^restore_' "$WORK/report"); then
+    grep -qF "20261028T020000Z" <(grep -E '^restore_(keycloak_)?backup=' "$WORK/report") ||
+    ! grep -qxF "restore_backup_if_restored=/backups/econ_graph-20261028T020000Z.dump" "$WORK/report" ||
+    ! grep -qxF "restore_keycloak_backup_if_restored=/home/op/econgraph-backups/keycloak/20261028T020000Z" "$WORK/report"; then
     fail "a re-run after a deploy: report $(cat "$WORK/report")"
 else
     echo "ok   a re-run after a deploy: restore from the backups before the first deploy"
@@ -651,6 +653,17 @@ start_bg() {
     for _ in $(seq 1 100); do grep -q "^$marker " "$LOGS/steps.log" && break; sleep 0.1; done
     sleep 0.5
 }
+# leftovers NAME: nothing of the last background run (its process group) is
+# left two seconds after it exited: no step, timer, sleep or tee.
+leftovers() {
+    local left
+    sleep 2
+    left="$(ps -eo pgid=,pid=,args= | awk -v g="$pid" '$1 == g')"
+    if [ -n "$left" ]; then
+        fail "$1: processes left behind: $left"
+        kill -KILL -- -"$pid" 2>/dev/null
+    fi
+}
 for mode in INT:group TERM:script; do
     sig="${mode%%:*}"; target="${mode#*:}"
     rm -rf "$WORK/releases"; : >"$LOGS/steps.log"; rm -f "$WORK/report"
@@ -662,6 +675,7 @@ for mode in INT:group TERM:script; do
     start=$SECONDS
     if [ "$target" = group ]; then kill -"$sig" -- -"$pid"; else kill -"$sig" "$pid"; fi
     wait "$pid"; rc=$?
+    leftovers "the signal case ending at line ${LINENO}"
     elapsed=$((SECONDS - start))
     stopped_before_exit="$(grep -c "stub deploy stopped" "$LOGS/steps.log")"
     sleep 9
@@ -683,6 +697,7 @@ done
 # SIGHUP (the terminal closing) is handled the same way.
 start_bg deploy STUB_SLEEP=8
 kill -HUP "$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 [ "$rc" = 129 ] && [ "$(tail -1 "$WORK/report")" = "result=interrupted step=deploy signal=HUP" ] ||
     fail "SIGHUP during deploy: exit $rc, report $(tail -1 "$WORK/report")"
@@ -691,6 +706,7 @@ sleep 5
 start_bg load-release-images STUB_LOAD_SLEEP=30
 kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"
 wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 if ! grep -q "load record written" "$LOGS/steps.log"; then
     fail "two Ctrl-Cs during the load: its cleanup (the load record) was cut short"
@@ -706,6 +722,7 @@ start_bg deploy STUB_IGNORE_TERM=1
 start=$SECONDS
 kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"
 wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 elapsed=$((SECONDS - start))
 out="$(cat "$WORK/signal.out")"
 if [ "$elapsed" -ge 8 ] || ! has "killing step deploy (SIGKILL); its cleanup may be cut short" ||
@@ -718,6 +735,7 @@ fi
 start_bg deploy STUB_IGNORE_TERM=1 ECONGRAPH_STOP_TIMEOUT=2
 start=$SECONDS
 kill -TERM "$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 elapsed=$((SECONDS - start))
 out="$(cat "$WORK/signal.out")"
 if [ "$elapsed" -ge 10 ] || ! has "did not stop within 2s; killing it (SIGKILL)"; then
@@ -730,6 +748,7 @@ start_bg deploy STUB_SLEEP=8
 end=$((SECONDS + 6))
 while kill -0 "$pid" 2>/dev/null && [ "$SECONDS" -lt "$end" ]; do kill -INT -- -"$pid" 2>/dev/null; sleep 0.005; done
 wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 if kill -0 "$pid" 2>/dev/null || [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ] ||
     ! grep -q "^restore_backup=/backups/econ_graph-" "$WORK/report" || ! has "scale deployment/crawler-worker --replicas=3"; then
@@ -741,6 +760,7 @@ sleep 9
 # Ctrl-C during the backup: its Job may still be running; no second backup.
 start_bg backup-postgres-now STUB_BACKUP_SLEEP=30
 kill -INT -- -"$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 if ! has "its Job job/postgres-backup-manual-7 may still be running" || ! has "get jobs postgres-backup-manual-7" ||
     has "Fix the backup and run this command again"; then
@@ -753,6 +773,7 @@ fi
 # before the next one.
 start_bg stub-backup-waiting STUB_BACKUP_COMPLETES=1
 kill -TERM "$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 if ! grep -qxF "step=backup status=ok" "$WORK/report" ||
     [ "$(tail -1 "$WORK/report")" != "result=interrupted step=load signal=TERM" ] ||
     grep -q "^load-release-images " "$LOGS/steps.log"; then
@@ -765,6 +786,7 @@ rm -f "$LOGS/slow-git"
 start_bg precheck-db-migration STUB_SLOW_GIT=1
 for _ in $(seq 1 100); do [ -e "$LOGS/slow-git" ] && break; sleep 0.1; done
 kill -INT -- -"$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 if [ "$rc" != 130 ] || [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ] ||
     grep -q "^deploy " "$LOGS/steps.log" || has "the checkout changed"; then
@@ -779,6 +801,7 @@ kill -INT -- -"$pid"
 for _ in $(seq 1 100); do [ -e "$LOGS/slow-sed" ] && break; sleep 0.1; done
 sleep 0.5
 kill -INT -- -"$pid"; wait "$pid"; rc=$?
+leftovers "the signal case ending at line ${LINENO}"
 out="$(cat "$WORK/signal.out")"
 if ! grep -q "^restore_backup=/backups/econ_graph-" "$WORK/report" ||
     [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ]; then
@@ -788,6 +811,75 @@ else
 fi
 sleep 9
 set +m
+
+# The terminal hangs up during the deploy step (an ssh session dropped): the
+# run must still stop the step, write the report and the guidance, and exit
+# 129, though every write to the terminal fails. script(1) gives it a
+# terminal, and killing script closes it. The wrapper stands for the login
+# shell: the session leader, which gets the SIGHUP and passes it on to the job
+# it runs, as bash does; it also keeps the run's exit status.
+cat >"$WORK/rc-wrapper" <<'STUB'
+#!/usr/bin/env bash
+"$@" <&0 &
+child=$!
+trap 'kill -HUP "$child" 2>/dev/null' HUP
+status=0
+wait "$child" || status=$?
+while kill -0 "$child" 2>/dev/null; do status=0; wait "$child" || status=$?; done
+echo "$status" >"$TEST_LOGS/hup.rc"
+STUB
+chmod +x "$WORK/rc-wrapper"
+rm -rf "$WORK/releases"; : >"$LOGS/steps.log"; rm -f "$WORK/report" "$LOGS/hup.rc"
+cmd="$(printf '%q ' "${ENV[@]}" STUB_SLEEP=8 "$WORK/rc-wrapper" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report")"
+script -qec "$cmd" /dev/null </dev/null >"$WORK/hup.out" 2>&1 &
+spid=$!
+for _ in $(seq 1 100); do grep -q "^deploy " "$LOGS/steps.log" && break; sleep 0.1; done
+sleep 0.5
+kill -KILL "$spid"
+wait "$spid" 2>/dev/null
+for _ in $(seq 1 200); do [ -s "$LOGS/hup.rc" ] && break; sleep 0.1; done
+sleep 2
+guidance="$(sed -n 's/^guidance=//p' "$WORK/report" 2>/dev/null)"
+left="$(pgrep -af -- "$WORK" || true)"
+if [ "$(cat "$LOGS/hup.rc" 2>/dev/null)" != 129 ]; then
+    fail "a hangup during deploy: exit $(cat "$LOGS/hup.rc" 2>/dev/null || echo none), report $(cat "$WORK/report" 2>/dev/null)"
+elif ! grep -qxF "step=deploy status=interrupted" "$WORK/report" ||
+    [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=HUP" ]; then
+    fail "a hangup during deploy: report $(cat "$WORK/report")"
+elif ! grep -q "stub deploy stopped" "$LOGS/steps.log" || grep -q "stub deploy finished\|^verify-release-images" "$LOGS/steps.log"; then
+    fail "a hangup during deploy: the deploy step was not stopped: $(cat "$LOGS/steps.log")"
+elif [ -z "$guidance" ] || ! grep -qF "rollback-release-images.sh --to pre-$TAG" "$guidance"; then
+    fail "a hangup during deploy: no guidance file named in the report"
+elif [ -n "$left" ]; then
+    fail "a hangup during deploy: processes left behind: $left"
+else
+    echo "ok   a hangup during deploy stops it, reports, writes the guidance and exits 129"
+fi
+# The terminal is gone, but no SIGHUP reaches the run (a login shell that
+# doesn't pass it on): every write to the terminal fails, and the run still
+# finishes and reports.
+cat >"$WORK/rc-keeper" <<'STUB'
+#!/usr/bin/env bash
+trap ':' HUP
+"$@"
+echo $? >"$TEST_LOGS/hup.rc"
+STUB
+chmod +x "$WORK/rc-keeper"
+rm -rf "$WORK/releases"; : >"$LOGS/steps.log"; rm -f "$WORK/report" "$LOGS/hup.rc"
+cmd="$(printf '%q ' "${ENV[@]}" STUB_SLEEP=3 "$WORK/rc-keeper" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report")"
+script -qec "$cmd" /dev/null </dev/null >"$WORK/hup.out" 2>&1 &
+spid=$!
+for _ in $(seq 1 100); do grep -q "^deploy " "$LOGS/steps.log" && break; sleep 0.1; done
+sleep 0.5
+kill -KILL "$spid"
+wait "$spid" 2>/dev/null
+for _ in $(seq 1 200); do [ -s "$LOGS/hup.rc" ] && break; sleep 0.1; done
+if [ "$(cat "$LOGS/hup.rc" 2>/dev/null)" != 0 ] || [ "$(tail -1 "$WORK/report" 2>/dev/null)" != "result=ok" ]; then
+    fail "a terminal gone without a SIGHUP: exit $(cat "$LOGS/hup.rc" 2>/dev/null || echo none), report $(cat "$WORK/report" 2>/dev/null)"
+else
+    echo "ok   a terminal gone without a SIGHUP: the run finishes and reports"
+fi
+
 # A step ignores SIGINT and SIGHUP, which a terminal sends its whole process
 # group: only the run's own SIGTERM stops it, once.
 run env STUB_SIGIGN=1 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
