@@ -55,7 +55,7 @@ cat >"$WORK/source/kubectl" <<'STUB'
 echo "$0 KUBECONFIG=${KUBECONFIG:-} $*" >>"$TEST_LOGS/kind-kubectl.log"
 args=("$@")
 if [ "${args[0]:-}" = --context ]; then
-    [ "${args[1]}" = kind-econ-graph ] || { echo "error: no context ${args[1]}" >&2; exit 1; }
+    case "${args[1]}" in kind-econ-graph | kind-kg-test) ;; *) echo "error: no context ${args[1]}" >&2; exit 1 ;; esac
     args=("${args[@]:2}")
 fi
 if [ "${args[0]:-}" = -n ]; then args=("${args[@]:2}"); fi
@@ -63,7 +63,7 @@ set -- "${args[@]}"
 uid=11111111-2222-3333-4444-555555555555
 case "$*" in
     "version "*) ;;
-    "config get-contexts -o name"*) echo kind-econ-graph ;;
+    "config get-contexts -o name"*) printf 'kind-econ-graph\nkind-kg-test\n' ;;
     "config view --minify"*) printf 'https://127.0.0.1:6443' ;;
     "get nodes"*) printf 'econ-graph-control-plane econ-graph-worker' ;;
     "get namespace kube-system"*) printf '%s' "$uid" ;;
@@ -85,7 +85,7 @@ cat >"$WORK/bin/docker" <<'STUB'
 echo "docker DOCKER_HOST=${DOCKER_HOST:-} $*" >>"$TEST_LOGS/docker.log"
 case "$*" in
     "info --format "*) echo "29.0.0 /var/lib/docker [name=seccomp]" ;;
-    "cp -q -L econ-graph-control-plane:/usr/bin/kubectl "*) cp "$TEST_SOURCE/kubectl" "${*: -1}" ;;
+    "cp -q -L "*"-control-plane:/usr/bin/kubectl "*) cp "$TEST_SOURCE/kubectl" "${*: -1}" ;;
     *) echo "stub docker: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -97,8 +97,8 @@ cat >"$KIND_PINNED" <<'STUB'
 #!/usr/bin/env bash
 echo "kind DOCKER_HOST=${DOCKER_HOST:-} $*" >>"$TEST_LOGS/docker.log"
 case "$*" in
-    "get clusters") echo econ-graph ;;
-    "get kubeconfig --name econ-graph") cat "$TEST_SOURCE/kubeconfig" ;;
+    "get clusters") printf 'econ-graph\nkg-test\n' ;;
+    "get kubeconfig --name "*) cat "$TEST_SOURCE/kubeconfig" ;;
     *) echo "stub kind: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -114,10 +114,15 @@ for step in load-release-images backup-postgres-now backup-keycloak-db precheck-
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0" .sh)"
-echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD" >>"$TEST_LOGS/steps.log"
+echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD" >>"$TEST_LOGS/steps.log"
 if [ "${STUB_FAIL:-}" = "$name" ]; then
     echo "stub $name: failing as asked" >&2
     exit 1
+fi
+# verify-release-images.sh's summary of what it could not check.
+if [ "$name" = verify-release-images ] && [ -n "${STUB_UNCHECKED:-}" ]; then
+    echo "Not checked:"
+    echo "  unchecked job/crawler-migrate: no Job (deploy.sh skips it without a data database, and Kubernetes deletes it a day after it finishes)"
 fi
 STUB
     chmod +x "$TREE/scripts/deploy/$step.sh"
@@ -176,13 +181,14 @@ else
 fi
 no_plain "full run"
 expect_line() { grep -qF -- "$2" "$LOGS/steps.log" || fail "full run: $1: no '$2' in $(cat "$LOGS/steps.log")"; }
-expect_line "load arguments" "load-release-images --tag $TAG |"
+expect_line "load arguments" "load-release-images --tag $TAG --cluster econ-graph |"
 expect_line "backup arguments" "backup-postgres-now --context kind-econ-graph |"
 expect_line "keycloak arguments" "backup-keycloak-db --context kind-econ-graph |"
 expect_line "precheck arguments" "precheck-db-migration --stop-crawler |"
 expect_line "deploy PUBLIC_HOST" "deploy  | PUBLIC_HOST=econgraph.com "
-expect_line "verify arguments" "verify-release-images --tag $TAG |"
-bad="$(grep -vF "KUBECTL=$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph DOCKER_HOST=$ROOTFUL PWD=$TREE" "$LOGS/steps.log" || true)"
+expect_line "verify arguments" "verify-release-images --tag $TAG --cluster econ-graph |"
+expect_line "deploy KIND_CLUSTER" "deploy  | PUBLIC_HOST=econgraph.com KIND_CLUSTER=econ-graph "
+bad="$(grep -vF "KIND_CLUSTER=econ-graph KUBECTL=$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph DOCKER_HOST=$ROOTFUL PWD=$TREE" "$LOGS/steps.log" || true)"
 [ -z "$bad" ] || fail "full run: a step ran without the kind kubectl, the rootful daemon or the repository root: $bad"
 bad="$(grep -vF "DOCKER_HOST=$ROOTFUL " "$LOGS/docker.log" || true)"
 [ -z "$bad" ] || fail "full run: kind or docker on another daemon: $bad"
@@ -318,7 +324,7 @@ no_plain "dry run"
 
 # --- tags ---------------------------------------------------------------------------------------------
 run "$RELEASE_DEPLOY" --tag v4.0.0 --yes
-if [ "$rc" -eq 0 ] && grep -qF "load-release-images --tag v4.0.0-rc.4 |" "$LOGS/steps.log" &&
+if [ "$rc" -eq 0 ] && grep -qF "load-release-images --tag v4.0.0-rc.4 --cluster econ-graph |" "$LOGS/steps.log" &&
     grep -qF "v4.0.0 is v4.0.0-rc.4" <<<"$out"; then
     echo "ok   a final tag deploys the highest release candidate on its commit"
 else
@@ -328,6 +334,46 @@ run "$RELEASE_DEPLOY" --tag v4.0 --yes
 [ "$rc" -eq 2 ] && [ ! -s "$LOGS/steps.log" ] || fail "a malformed tag: exit $rc"
 run "$RELEASE_DEPLOY" --yes
 [ "$rc" -eq 2 ] || fail "no --tag: exit $rc"
+
+# A load that refused changed nothing (load-release-images.sh refuses before any change).
+run env STUB_FAIL=load-release-images "$RELEASE_DEPLOY" --tag "$TAG" --yes
+grep -qF "If the load refused (its last line says so), nothing was changed" <<<"$out" ||
+    fail "failing load: does not say a refusal changed nothing"
+
+# --- verify's unchecked items ---------------------------------------------------------------
+run env STUB_UNCHECKED=1 "$RELEASE_DEPLOY" --tag "$TAG" --yes --report "$WORK/report"
+if [ "$rc" -ne 0 ]; then
+    fail "verify with unchecked items: exit $rc"
+elif ! sed -n '/is deployed on kind-econ-graph and verified/,$p' <<<"$out" | grep -qF "unchecked job/crawler-migrate: no Job"; then
+    fail "verify with unchecked items: the final summary does not list them"
+elif ! grep -qxF "step=verify status=ok unchecked=1" "$WORK/report"; then
+    fail "verify with unchecked items: report is $(cat "$WORK/report")"
+else
+    echo "ok   verify's unchecked items are listed at the end and reported"
+fi
+
+# --- another kind cluster ------------------------------------------------------------------
+run env ECONGRAPH_SCRATCH_STORAGE="$WORK/storage" "$RELEASE_DEPLOY" --tag "$TAG" --cluster kg-test --yes
+if [ "$rc" -ne 0 ]; then
+    fail "--cluster kg-test: exit $rc"
+elif ! grep -qF "load-release-images --tag $TAG --cluster kg-test |" "$LOGS/steps.log" ||
+    ! grep -qF "verify-release-images --tag $TAG --cluster kg-test |" "$LOGS/steps.log" ||
+    ! grep -qF "backup-postgres-now --context kind-kg-test |" "$LOGS/steps.log" ||
+    ! grep -qF "backup-keycloak-db --context kind-kg-test |" "$LOGS/steps.log" ||
+    [ "$(grep -c "KIND_CLUSTER=kg-test KUBECTL=$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-kg-test " "$LOGS/steps.log")" != 6 ]; then
+    fail "--cluster kg-test: the steps did not all get it: $(cat "$LOGS/steps.log")"
+elif [ -e "$WORK/storage" ]; then
+    fail "--cluster kg-test: created the scratch storage"
+else
+    echo "ok   --cluster reaches every step, set before kind-env.sh"
+fi
+# kind-env.sh's rule: a throwaway cluster needs ECONGRAPH_SCRATCH_STORAGE, checked first.
+run "$RELEASE_DEPLOY" --tag "$TAG" --cluster kg-test --yes
+if [ "$rc" -eq 0 ] || [ -s "$LOGS/steps.log" ] || ! grep -qF "needs ECONGRAPH_SCRATCH_STORAGE" <<<"$out"; then
+    fail "--cluster kg-test without scratch storage: exit $rc, steps '$(steps)'"
+else
+    echo "ok   --cluster kg-test without scratch storage is refused before any step"
+fi
 
 if [ "$failed" -ne 0 ]; then
     exit 1

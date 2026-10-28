@@ -12,19 +12,26 @@
 #   6. verify   scripts/deploy/verify-release-images.sh --tag TAG
 #
 # Usage:
-#   scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N [--dry-run] [--yes] [--report FILE]
+#   scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N [--cluster NAME] [--dry-run] [--yes] [--report FILE]
 #   scripts/deploy/release-deploy.sh --tag vX.Y.Z ...
 #
 #   --tag TAG      the release candidate to deploy. A final tag vX.Y.Z deploys
 #                  the release candidate tag on the same commit (the highest
 #                  vX.Y.Z-rc.N there): release.yml publishes the final tag on
 #                  that candidate's images, and the load records go by it.
+#   --cluster NAME the kind cluster (default: KIND_CLUSTER, else econ-graph).
+#                  Every step gets it: --cluster for the load and the verify,
+#                  --context kind-NAME for the backups, KIND_CLUSTER for the
+#                  precheck and deploy.sh. A cluster other than econ-graph is a
+#                  throwaway one and needs ECONGRAPH_SCRATCH_STORAGE
+#                  (lib/kind-env.sh), as for the rehearsal.
 #   --dry-run      run every step's own dry run (load, both backups, precheck
 #                  and deploy.sh --dry-run) and change nothing. verify can't be
 #                  dry-run before a load and deploy have happened: it says what
 #                  it would run.
 #   --yes          don't ask before the first step (needed without a terminal)
-#   --report FILE  append one line per step (step=NAME status=ok|failed|dry-run)
+#   --report FILE  append one line per step (step=NAME status=ok|failed|dry-run,
+#                  and unchecked=N on a verify that left N things unchecked)
 #                  and a final result= line to FILE, for automation such as the
 #                  upgrade rehearsal, which reports the step that failed
 #
@@ -33,7 +40,7 @@
 #     runs on (lib/kind-env.sh: unix:///var/run/docker.sock, or
 #     ECONGRAPH_DOCKER_HOST, never the shell's DOCKER_HOST), and the kind
 #     cluster's own kubectl and kubeconfig (ensure_kind_kubectl), exported to
-#     every step, on context kind-econ-graph. On the production host plain
+#     every step, on context kind-<cluster>. On the production host plain
 #     `kubectl` is the MicroK8s snap wrapper.
 #   - PUBLIC_HOST comes from the host's deploy config,
 #     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV
@@ -47,6 +54,10 @@
 #     in the environment that differs from the config.
 #   - It shows the cluster's identity and the plan, and asks once (--yes
 #     answers; a dry run doesn't ask).
+#
+# verify-release-images.sh passes with things it could not check (a
+# crawler-migrate Job already deleted, a pod that never started); they are
+# listed again at the end, so the run isn't read as fully checked.
 #
 # On a failure it prints which steps ran, which failed, what that leaves
 # changed, and the commands to go back (scripts/deploy/rollback-release-images.sh
@@ -70,6 +81,7 @@ TAG=""
 DRY_RUN=false
 ASSUME_YES=false
 REPORT=""
+CLUSTER="${KIND_CLUSTER:-econ-graph}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag)
@@ -78,6 +90,9 @@ while [ $# -gt 0 ]; do
         --report)
             [ $# -ge 2 ] || { echo "${SCRIPT}: error: --report needs a file" >&2; exit 2; }
             REPORT="$2"; shift 2 ;;
+        --cluster)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "${SCRIPT}: error: --cluster needs a value" >&2; exit 2; }
+            CLUSTER="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         --yes | -y) ASSUME_YES=true; shift ;;
         -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
@@ -94,7 +109,10 @@ ENV_PUBLIC_HOST="${PUBLIC_HOST-}"
 unset PUBLIC_HOST
 
 # Read by kind-env.sh: under a dry run nothing is written to the kubectl cache.
+# The cluster is set before it is sourced, so its checks (a throwaway cluster
+# needs ECONGRAPH_SCRATCH_STORAGE) and every step see the same one.
 export DRY_RUN ASSUME_YES
+export KIND_CLUSTER="$CLUSTER"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$DEPLOY_DIR/lib/kind-env.sh"
 
@@ -182,12 +200,12 @@ dry=()
 [ "$DRY_RUN" = true ] && dry=(--dry-run)
 STEPS=(load backup keycloak precheck deploy verify)
 declare -A CMD=(
-    [load]="$DEPLOY_DIR/load-release-images.sh --tag ${RC_TAG}"
+    [load]="$DEPLOY_DIR/load-release-images.sh --tag ${RC_TAG} --cluster ${KIND_CLUSTER}"
     [backup]="$DEPLOY_DIR/backup-postgres-now.sh --context ${CONTEXT}"
     [keycloak]="$DEPLOY_DIR/backup-keycloak-db.sh --context ${CONTEXT}"
     [precheck]="$DEPLOY_DIR/precheck-db-migration.sh --stop-crawler"
     [deploy]="$DEPLOY_DIR/deploy.sh"
-    [verify]="$DEPLOY_DIR/verify-release-images.sh --tag ${RC_TAG}"
+    [verify]="$DEPLOY_DIR/verify-release-images.sh --tag ${RC_TAG} --cluster ${KIND_CLUSTER}"
 )
 declare -A STATE=()
 
@@ -199,6 +217,9 @@ done
 confirm "Deploy ${RC_TAG} to ${CONTEXT}${PUBLIC_HOST:+ (PUBLIC_HOST=${PUBLIC_HOST})}?"
 
 kubectl_hint="KUBECONFIG=${KUBECONFIG} ${KUBECTL} --context ${CONTEXT} -n ${NAMESPACE}"
+STEP_LOG="$(mktemp "${TMPDIR:-/tmp}/release-deploy.XXXXXX")"
+add_exit_cleanup "rm -f '${STEP_LOG}'"
+UNCHECKED=""
 
 # What a failure at step $1 leaves, and how to go back.
 explain_failure() {
@@ -211,7 +232,8 @@ explain_failure() {
     echo
     case "$failed" in
         load)
-            echo "The images may be partly loaded: if the last record in"
+            echo "If the load refused (its last line says so), nothing was changed. Otherwise"
+            echo "the images may be partly loaded: if the last record in"
             echo "  ${ECONGRAPH_RELEASES_DIR:-$HOME/econgraph-releases}/${RC_TAG}/images.txt"
             echo "says status=partial, some nodes run the new images when their pods restart."
             echo "Fix the cause and run this command again, or go back with:" ;;
@@ -260,10 +282,20 @@ for step in "${STEPS[@]}"; do
         report "step=${step} status=dry-run"
         continue
     fi
+    # The step's output also goes to STEP_LOG, for verify's list of what it
+    # could not check. pipefail: the status is the step's, not tee's.
     # shellcheck disable=SC2086 # CMD holds the command and its arguments, none with spaces
-    if (cd "$PROJECT_ROOT" && ${CMD[$step]} "${dry[@]}"); then
+    if (cd "$PROJECT_ROOT" && ${CMD[$step]} "${dry[@]}") 2>&1 | tee "$STEP_LOG"; then
         STATE[$step]="$([ "$DRY_RUN" = true ] && echo "dry run ok" || echo "done")"
-        report "step=${step} status=$([ "$DRY_RUN" = true ] && echo dry-run || echo ok)"
+        extra=""
+        if [ "$step" = verify ]; then
+            UNCHECKED="$(grep '^  unchecked ' "$STEP_LOG" || true)"
+            if [ -n "$UNCHECKED" ]; then
+                STATE[$step]="done, $(grep -c . <<<"$UNCHECKED") unchecked"
+                extra=" unchecked=$(grep -c . <<<"$UNCHECKED")"
+            fi
+        fi
+        report "step=${step} status=$([ "$DRY_RUN" = true ] && echo dry-run || echo ok)${extra}"
     else
         STATE[$step]="FAILED"
         report "step=${step} status=failed"
@@ -284,5 +316,9 @@ if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run of ${RC_TAG} on ${CONTEXT} complete: nothing was changed."
 else
     echo "==> ${RC_TAG} is deployed on ${CONTEXT} and verified."
+    if [ -n "$UNCHECKED" ]; then
+        echo "    Not checked (verify-release-images.sh could not; check these by hand):"
+        while IFS= read -r line; do echo "      ${line#"${line%%[! ]*}"}"; done <<<"$UNCHECKED"
+    fi
     echo "    Rollback copies of the images that ran before: pre-${RC_TAG} (scripts/deploy/rollback-release-images.sh)."
 fi
