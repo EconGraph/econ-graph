@@ -95,6 +95,8 @@ def check_chain(path):
             st = os.lstat(candidate)
         except FileNotFoundError:
             return
+        except OSError as error:
+            fail(f"cannot check {candidate}: {error.strerror}")
         if stat.S_ISLNK(st.st_mode):
             # The link sits in `current`, already checked; now walk its target.
             hops += 1

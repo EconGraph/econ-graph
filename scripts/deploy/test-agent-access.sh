@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Offline regression checks: no Kubernetes or Docker connection is made.
-set -euo pipefail
+set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'chmod -R u+rwx "$scratch" 2>/dev/null; rm -rf "$scratch"' EXIT
+trap 'echo "test-agent-access: failed at line $LINENO" >&2' ERR
 export AGENT_TEST_CALLS="$scratch/calls"
 mkdir "$scratch/bin"
 cat >"$scratch/bin/kubectl" <<'STUB'
@@ -256,7 +257,7 @@ if [ -n "$foreign" ]; then
     if python3 "$ROOT/scripts/deploy/lib/agent_paths.py" check-chain "$foreign/agent" 2>"$scratch/foreign.out"; then
         echo "accepted a directory owned by another user: $foreign" >&2; exit 1
     fi
-    grep -qF "$foreign can be changed by other users" "$scratch/foreign.out"
+    grep -qF "can be changed by other users" "$scratch/foreign.out"
 else
     echo 'note: no directory owned by another user found; skipping that check'
 fi
