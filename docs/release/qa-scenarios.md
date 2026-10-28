@@ -10,20 +10,26 @@ need a person or a long observation period.
 ## Run it
 
 ```bash
-scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab
+QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab
 scripts/qa/run-scenarios.sh --target https://econgraph.com --profile production --json out.json
-scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab --only anonymous-api,mcp-reads
+QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab \
+    --only anonymous-api,mcp-reads
 scripts/qa/run-scenarios.sh --list
 ```
 
 - `--target` is the site's base URL, the origin a visitor opens.
 - `--profile` is `lab`, `ci` or `production`, as described in [Profiles](#profiles).
-- `--only` runs the named scenarios. Naming one that the profile refuses is an error, and the
-  runner runs nothing.
+- `--only` runs the named scenarios. Naming one that the profile does not run is an error, and
+  the runner runs nothing.
+- `--require-pass` names scenarios that must pass: one that skips fails the run. CI uses it so
+  that a scenario quietly turning into a skip is caught.
 - `--json` writes the report described in [Results](#results).
 
-The runner exits 0 when no scenario failed, 1 when one did, and 2 for a usage error or a
-refusal. A skipped scenario does not fail the run; the summary and the report give its reason.
+The runner exits 0 when no scenario failed and every `--require-pass` scenario passed, 1
+otherwise, and 2 for a usage error (including two scenarios declaring one name) or a refusal. A
+skipped scenario does not otherwise fail the run; the summary and the report give its reason.
+Within a passing scenario, a check that could not run (for example `catalog-roles`' redeploy
+without `QA_REDEPLOY_COMMAND`) is recorded as skipped, and the scenario's reason lists it.
 
 Each scenario runs in its own process group. One that overruns its `qa-timeout` fails. Its
 group gets SIGTERM, so a Python scenario stops the commands it started and runs its cleanup
@@ -39,16 +45,24 @@ Each scenario declares in its header whether it changes state (`qa-mutates: yes`
 which profiles it runs in (`qa-profiles`). A scenario whose `qa-mutates` line is missing or
 unclear counts as changing state.
 
-| Profile | Runs | Refuses |
+| Profile | Runs | Targets |
 |---|---|---|
-| `lab` | every scenario | `econgraph.com` and any host in `QA_PRODUCTION_HOSTS` as the target |
-| `ci` | every scenario except the lab-only ones | the same hosts |
-| `production` | the scenarios that change nothing, plus `annotation-round-trip` as a dedicated QA account | every other state-changing scenario |
+| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com` or a host in `QA_PRODUCTION_HOSTS` |
+| `ci` | every scenario except the lab-only ones | the same |
+| `production` | the scenarios that change nothing, plus `annotation-round-trip` as a dedicated QA account | any |
+
+The lab and ci profiles run state-changing scenarios, so their target must be named: on the
+production host, `http://localhost` or the host's own address reaches production as surely as
+its public name. `QA_LAB_TARGET_OK` is a comma-separated list of host names; the release e2e
+stack's spec sets it to its own host.
 
 The production exception is fixed in the runner (`PRODUCTION_MUTATING_EXCEPTIONS` in
-`scripts/qa/run_scenarios.py`); a scenario cannot grant it to itself. It applies only when
-`QA_USERNAME` names a `qa-*` account and its password is configured. Without one, the
-production profile skips the round trip.
+`scripts/qa/run_scenarios.py`): the name `annotation-round-trip` and the one file that may carry
+it, `scripts/qa/scenarios/annotation-round-trip.py`. A scenario cannot grant it to itself, and a
+file elsewhere declaring the same name gets no exception; the command line only runs the
+scenarios in `scripts/qa/scenarios/`. The exception applies only when `QA_USERNAME` names a
+`qa-*` account and its password is configured. Without one, the production profile skips the
+round trip.
 
 ## Credentials
 
@@ -78,8 +92,8 @@ deployed realm.
 | `anonymous-browser` | no | all | Signed out, in Chromium: the home page without script errors, a search, a series page and its chart, the CSV download against the page's newest point, and the world map's colored countries and value table |
 | `annotation-round-trip` | yes | all, production only as a `qa-*` account | Signs in, creates a private annotation, retries the create with the same idempotency key and gets the same annotation, checks that it is stored once and invisible to an anonymous reader, then deletes it. Anything it created is deleted even when a check fails |
 | `mcp-reads` | no | all | As the QA account: `/mcp` refuses an anonymous caller, lists its tools, and reads a series through `search_economic_series`, `get_series_metadata` and `get_series_data`. Skipped where nothing answers MCP: release builds compile `/mcp` out and the gateway routes no `/mcp` path |
-| `catalog-roles` | yes | lab, ci | Removes one catalog role (`QA_CATALOG_ROLE`, default `catalog.fred:read`) from the anonymous reader as the [Keycloak README](../../config/keycloak/README.md) describes, waits until an anonymous read of that catalog's series is refused, runs `QA_REDEPLOY_COMMAND` and checks that the restriction survived, then restores the original mappings and waits until the series is readable again. Skipped on a realm without catalog roles. Without `QA_REDEPLOY_COMMAND`, the redeploy check reports that persistence was not checked |
-| `backup-restore` | yes | lab | Backs up the lab database (`QA_BACKUP_SOURCE_DATABASE_URL`), restores it into a new database whose name contains `scratch` (`QA_SCRATCH_DATABASE_URL`), and compares every table's owner and row count. `QA_BACKUP_COMMAND` and `QA_RESTORE_COMMAND` replace the default `pg_dump` and `pg_restore` with the lab's own, and `QA_EXPECTED_OWNER` names the role every table must belong to |
+| `catalog-roles` | yes | lab, ci | Removes one catalog role (`QA_CATALOG_ROLE`, default `catalog.fred:read`) from the anonymous reader as the [Keycloak README](../../config/keycloak/README.md) describes, waits until an anonymous read of that catalog's series is refused, runs `QA_REDEPLOY_COMMAND` and checks that the restriction survived, then restores the original mappings and waits until the series is readable again. Skipped on a realm without catalog roles. Without `QA_REDEPLOY_COMMAND`, the redeploy and persistence checks are recorded as skipped |
+| `backup-restore` | yes | lab | Backs up the lab database (`QA_BACKUP_SOURCE_DATABASE_URL`), restores it into a new database whose name contains `scratch` (`QA_SCRATCH_DATABASE_URL`), and compares every table's owner and row count. Database passwords reach `psql`, `pg_dump` and `pg_restore` as `PGPASSWORD`, never on their command lines. `QA_BACKUP_COMMAND` and `QA_RESTORE_COMMAND` replace the default `pg_dump` and `pg_restore` with the lab's own, and `QA_EXPECTED_OWNER` names the role every table must belong to |
 | `conversion-checks` | no | lab | Judges the report of a data conversion ([ECO-426](https://linear.app/econgraph/issue/ECO-426)), read from `QA_CONVERSION_REPORT` or printed by `QA_CONVERSION_CHECK_COMMAND`: every table's row count and checksum unchanged, and every annotation still on its original series. The report must list its annotations, as `[]` when there are none |
 | `crawl-sample` | yes | lab | Runs `QA_CRAWL_SAMPLE_COMMAND` once per source in `QA_CRAWL_SOURCES`, one source at a time, `QA_CRAWL_INTERVAL_SECONDS` apart; each run must report one series fetched with observations |
 
@@ -137,8 +151,10 @@ profile guards and run each scenario against a stub site. The leg then runs
 `RELEASE_E2E_CONFIG=playwright.qa-stack.config.ts scripts/release-e2e.sh`. That command builds
 and seeds the stack as the release suite does and starts the same backend and frontend
 ([`playwright.qa-stack.config.ts`](../../frontend/playwright.qa-stack.config.ts)). It then runs
-the suite with the `ci` profile, signed in as the dev realm's `grace`. The leg uploads the JSON
-report as the `qa-scenarios-report` artifact.
+the suite with the `ci` profile, signed in as the dev realm's `grace`, with
+`--require-pass annotation-round-trip,anonymous-api,anonymous-browser`: those three must pass
+on this stack, not skip. The leg uploads the JSON report as the `qa-scenarios-report`
+artifact.
 
 On that stack, `public-site` skips because the target is plain http. `mcp-reads` skips because
 release builds compile `/mcp` out, and the lab-only scenarios skip as well. Run the same command

@@ -44,12 +44,12 @@ def write_scenario(directory: Path, name: str, header: str, body: str) -> Path:
     return path
 
 
-def run_main(argv, env):
+def run_main(argv, env, scenario_dir=runner.DEFAULT_SCENARIO_DIR):
     """main()'s exit status, stdout and stderr."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
-            code = runner.main(argv, env)
+            code = runner.main(argv, env, scenario_dir)
         except SystemExit as exit_:
             code = exit_.code
     return code, out.getvalue(), err.getvalue()
@@ -134,6 +134,18 @@ class ProductionGuardTest(unittest.TestCase):
             why = runner.admit(runner.parse_scenario(path), 'production', self.qa_env())
             self.assertTrue(why and why.startswith('refused'), why)
 
+    def test_a_copy_of_the_round_trip_elsewhere_gets_no_exception(self):
+        # The exception is the file scripts/qa/scenarios/annotation-round-trip.py, not the name.
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ('annotation-round-trip', 'annotation-round-trip.py'):
+                path = write_scenario(Path(tmp), name, '# qa-scenario: annotation-round-trip\n'
+                                      '# qa-mutates: yes\n# qa-profiles: lab, ci, production\n'
+                                      '# qa-description: spoof', 'true')
+                spoof = runner.parse_scenario(path)
+                self.assertEqual(spoof.name, 'annotation-round-trip')
+                why = runner.admit(spoof, 'production', self.qa_env())
+                self.assertTrue(why and why.startswith('refused'), why)
+
     def test_lab_and_ci_run_mutating_scenarios(self):
         self.assertIsNone(runner.admit(BY_NAME['catalog-roles'], 'ci', {}))
         self.assertIsNone(runner.admit(BY_NAME['backup-restore'], 'lab', {}))
@@ -149,8 +161,8 @@ class RunnerTest(unittest.TestCase):
         self.scenarios = self.dir / 'scenarios'
         self.scenarios.mkdir()
         self.marker = self.dir / 'ran'
-        self.env = {'QA_SCENARIO_DIR': str(self.scenarios), 'PATH': os.environ['PATH'],
-                    'QA_WORK_ROOT': str(self.dir)}
+        self.env = {'PATH': os.environ['PATH'], 'QA_WORK_ROOT': str(self.dir),
+                    'QA_LAB_TARGET_OK': 'localhost,127.0.0.1,lab.example,site.example'}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -167,7 +179,7 @@ class RunnerTest(unittest.TestCase):
 
     def report(self, argv, env=None):
         out = self.dir / 'report.json'
-        code, stdout, stderr = run_main(argv + ['--json', str(out)], env or self.env)
+        code, stdout, stderr = run_main(argv + ['--json', str(out)], env or self.env, self.scenarios)
         return code, (json.loads(out.read_text()) if out.exists() else None), stdout + stderr
 
     def test_production_does_not_run_a_mutating_scenario(self):
@@ -192,13 +204,91 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(self.ran(), [])
         self.assertIn('writer: refused', output)
 
-    def test_the_round_trip_runs_in_production_only_as_a_qa_account(self):
+    def test_a_spoofed_round_trip_does_not_run_in_production(self):
+        # A file elsewhere declaring the exception's name, with a QA account configured.
         self.scenario('annotation-round-trip')
+        env = dict(self.env, QA_USERNAME='qa-alice', QA_PASSWORD='pw-123456')
         argv = ['--target', 'https://site.example', '--profile', 'production']
-        self.report(argv)
+        code, report, _ = self.report(argv, env)
+        self.assertEqual(code, 0)
         self.assertEqual(self.ran(), [])
-        self.report(argv, dict(self.env, QA_USERNAME='qa-alice', QA_PASSWORD='pw-123456'))
-        self.assertEqual(self.ran(), ['annotation-round-trip'])
+        self.assertTrue(report['scenarios'][0]['reason'].startswith('refused'))
+        code, _, output = self.report(argv + ['--only', 'annotation-round-trip'], env)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.ran(), [])
+
+    def test_the_command_line_has_no_scenario_directory_override(self):
+        self.assertNotIn('QA_SCENARIO_DIR', (QA_DIR / 'run_scenarios.py').read_text())
+
+    def test_lab_and_ci_run_only_against_named_targets(self):
+        self.scenario('writer')
+        env = {k: v for k, v in self.env.items() if k != 'QA_LAB_TARGET_OK'}
+        for target in ('http://localhost:18081', 'http://127.0.0.1', 'http://10.0.0.5',
+                       'http://[::1]:8080', 'https://lab-1.example'):
+            for profile in ('lab', 'ci'):
+                with self.subTest(target=target, profile=profile):
+                    code, _, output = self.report(['--target', target, '--profile', profile], env)
+                    self.assertEqual(code, 2)
+                    self.assertIn('QA_LAB_TARGET_OK', output)
+        self.assertEqual(self.ran(), [])
+        # Named, it runs; a production host stays refused even when named.
+        named = dict(env, QA_LAB_TARGET_OK='lab-1.example., localhost')
+        code, _, _ = self.report(['--target', 'https://LAB-1.example', '--profile', 'lab'], named)
+        self.assertEqual(code, 0)
+        code, _, _ = self.report(['--target', 'https://lab-1.example.', '--profile', 'lab'], named)
+        self.assertEqual(code, 0)
+        code, _, _ = self.report(['--target', 'http://localhost:18081', '--profile', 'ci'], named)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ran(), ['writer', 'writer', 'writer'])
+        code, _, _ = self.report(['--target', 'https://econgraph.com', '--profile', 'ci'],
+                                 dict(env, QA_LAB_TARGET_OK='econgraph.com'))
+        self.assertEqual(code, 2)
+        # The production profile needs no list.
+        code, _, _ = self.report(['--target', 'https://site.example', '--profile', 'production'], env)
+        self.assertEqual(code, 0)
+
+    def test_naming_a_scenario_the_profile_does_not_run_is_an_error(self):
+        self.scenario('lab-only', mutates='no', profiles='lab')
+        code, report, output = self.report(['--target', 'http://localhost:1', '--profile', 'ci',
+                                            '--only', 'lab-only'])
+        self.assertEqual(code, 2)
+        self.assertIsNone(report)
+        self.assertIn('not in the ci profile', output)
+
+    def test_duplicate_scenario_names_are_a_usage_error(self):
+        self.scenario('one', mutates='no')
+        write_scenario(self.scenarios, 'two', '# qa-scenario: one\n# qa-mutates: no\n'
+                       '# qa-profiles: ci\n# qa-description: x', 'true')
+        code, report, output = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 2)
+        self.assertIn('duplicate scenario names: one', output)
+        self.assertEqual(self.ran(), [])
+
+    def test_required_scenarios_must_pass_not_skip(self):
+        self.scenario('passes', mutates='no', body='echo fine')
+        self.scenario('skips', mutates='no',
+                      body='echo \'{"skip": "quietly"}\' >> "$QA_EVIDENCE_FILE"; exit 77')
+        argv = ['--target', 'http://localhost:1', '--profile', 'ci']
+        code, _, _ = self.report(argv + ['--require-pass', 'passes'])
+        self.assertEqual(code, 0)
+        code, report, output = self.report(argv + ['--require-pass', 'passes,skips'])
+        self.assertEqual(code, 1)
+        self.assertEqual(report['counts']['fail'], 0)
+        self.assertIn('required to pass but did not: skips', output)
+        code, _, _ = self.report(argv + ['--require-pass', 'nonexistent'])
+        self.assertEqual(code, 2)
+        code, _, _ = self.report(argv + ['--only', 'passes', '--require-pass', 'skips'])
+        self.assertEqual(code, 2)
+
+    def test_a_skipped_check_is_neither_a_pass_nor_a_failure(self):
+        self.scenario('partial', mutates='no', body=(
+            'echo \'{"check": "a", "ok": true}\' >> "$QA_EVIDENCE_FILE"; '
+            'echo \'{"check": "redeploy", "ok": null, "skipped": true}\' >> "$QA_EVIDENCE_FILE"'))
+        code, report, output = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 0)
+        result = report['scenarios'][0]
+        self.assertEqual((result['status'], result['reason']), ('pass', 'skipped checks: redeploy'))
+        self.assertIn('skipped checks: redeploy', output)
 
     def test_lab_and_ci_refuse_the_production_site(self):
         self.scenario('writer')
@@ -237,6 +327,9 @@ class RunnerTest(unittest.TestCase):
         self.scenario('lies', mutates='no',
                       body='echo \'{"check": "c", "ok": false, "detail": "bad"}\' >> "$QA_EVIDENCE_FILE"')
         self.scenario('lab-only', mutates='no', profiles='lab')
+        # A check that does not say it passed did not.
+        self.scenario('unsaid', mutates='no',
+                      body='echo \'{"check": "c", "detail": "no verdict"}\' >> "$QA_EVIDENCE_FILE"')
         # A skip after a failed check is still a failure.
         self.scenario('halfskip', mutates='no',
                       body='echo \'{"check": "c", "ok": false}\' >> "$QA_EVIDENCE_FILE"; '
@@ -251,8 +344,9 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(status['lies']['status'], 'fail')
         self.assertEqual(status['lab-only']['status'], 'skip')
         self.assertEqual(status['halfskip']['status'], 'fail')
-        self.assertEqual(report['counts'], {'pass': 1, 'fail': 3, 'skip': 2})
-        self.assertIn('1 passed, 3 failed, 2 skipped', output)
+        self.assertEqual(status['unsaid']['status'], 'fail')
+        self.assertEqual(report['counts'], {'pass': 1, 'fail': 4, 'skip': 2})
+        self.assertIn('1 passed, 4 failed, 2 skipped', output)
         for result in report['scenarios']:
             self.assertIsInstance(result['duration_seconds'], float)
 
@@ -302,6 +396,7 @@ finally:
 
     def test_stopping_the_runner_lets_the_running_scenario_clean_up(self):
         started, cleaned = self.dir / 'started', self.dir / 'cleaned'
+        child_pid = self.dir / 'child.pid'
         path = self.scenarios / 'a-tidy'
         path.write_text(f'''#!/usr/bin/env python3
 # qa-scenario: a-tidy
@@ -311,7 +406,7 @@ finally:
 import qa
 open({str(started)!r}, 'w').write('yes')
 try:
-    qa.run(['sleep', '300'], timeout=600)
+    qa.run(['sh', '-c', 'echo $$ > {str(child_pid)}; exec sleep 300'], timeout=600)
 finally:
     open({str(cleaned)!r}, 'w').write(str(qa.cleanup_deadline(1000) - qa.stopped_at))
 ''')
@@ -319,16 +414,26 @@ finally:
         self.scenario('b-later', mutates='no', profiles='ci')
         report = self.dir / 'report.json'
         env = dict(self.env, QA_TIMEOUT_GRACE_SECONDS='8')
+        launch = ('import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); '
+                  'import run_scenarios as r; sys.exit(r.main(sys.argv[3:], None, Path(sys.argv[2])))')
         runner_proc = subprocess.Popen(
-            [sys.executable, str(QA_DIR / 'run_scenarios.py'), '--target', 'http://localhost:1',
-             '--profile', 'ci', '--json', str(report)],
+            [sys.executable, '-c', launch, str(QA_DIR), str(self.scenarios),
+             '--target', 'http://localhost:1', '--profile', 'ci', '--json', str(report)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + 20
-        while not started.exists() and time.monotonic() < deadline:
-            time.sleep(0.1)
-        runner_proc.send_signal(signal.SIGTERM)
-        runner_proc.communicate(timeout=30)
+        try:
+            deadline = time.monotonic() + 20
+            while not child_pid.exists() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            runner_proc.send_signal(signal.SIGTERM)
+            runner_proc.communicate(timeout=30)
+        finally:
+            if runner_proc.poll() is None:
+                runner_proc.kill()
+                runner_proc.communicate()
         self.assertEqual(runner_proc.returncode, 1)
+        # The scenario's own command is gone too.
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(child_pid.read_text()), 0)
         # Cleanup ran, with half the grace period for its waits.
         self.assertAlmostEqual(float(cleaned.read_text()), 4.0, delta=0.5)
         self.assertEqual(self.ran(), [])
@@ -533,7 +638,8 @@ class ScenarioTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        self.env = {'PATH': os.environ['PATH'], 'QA_WORK_ROOT': str(self.dir)}
+        self.env = {'PATH': os.environ['PATH'], 'QA_WORK_ROOT': str(self.dir),
+                    'QA_LAB_TARGET_OK': 'localhost,127.0.0.1,lab.example,site.example'}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -722,12 +828,55 @@ echo "end $QA_CRAWL_SOURCE" >> "{log}"
         with self.assertRaises(ProcessLookupError):
             os.kill(int(pid_file.read_text()), 0)
 
-    def test_lab_only_scenarios_skip_outside_labs(self):
-        code, results, _ = self.run_scenarios('https://site.example', 'ci',
-                                              'backup-restore,conversion-checks,crawl-sample')
-        self.assertEqual(code, 0)
+    def test_lab_only_scenarios_are_not_run_outside_labs(self):
+        # Asked for by name, they are an error; in a full run, the runner skips them.
+        code, results, output = self.run_scenarios('https://site.example', 'ci',
+                                                   'backup-restore,conversion-checks,crawl-sample')
+        self.assertEqual(code, 2)
         for name in ('backup-restore', 'conversion-checks', 'crawl-sample'):
-            self.assertIn('not in the ci profile', results[name]['reason'])
+            self.assertIn(f'{name}: not in the ci profile', output)
+        for name in ('backup-restore', 'conversion-checks', 'crawl-sample'):
+            self.assertIn('not in the ci profile', runner.admit(BY_NAME[name], 'ci', {}))
+
+    def test_backup_restore_keeps_database_passwords_off_command_lines(self):
+        # Stand-in psql, pg_dump and pg_restore that log their arguments and PGPASSWORD.
+        bin_dir, log = self.dir / 'bin', self.dir / 'pg.log'
+        bin_dir.mkdir()
+        stub = f'''#!/usr/bin/env python3
+import json, os, sys
+name = os.path.basename(sys.argv[0])
+with open({str(log)!r}, 'a') as out:
+    out.write(json.dumps({{'name': name, 'argv': sys.argv[1:],
+                          'password': os.environ.get('PGPASSWORD')}}) + '\\n')
+if name == 'pg_dump':
+    path = next(a for a in sys.argv if a.startswith('--file='))[len('--file='):]
+    open(path, 'wb').write(b'dump')
+if name == 'psql':
+    sql = sys.argv[sys.argv.index('-c') + 1]
+    if 'pg_get_userbyid' in sql:
+        print('public\\x1fseries\\x1fapp')
+    elif 'count(*)' in sql:
+        print('0\\x1f5')
+'''
+        for tool in ('psql', 'pg_dump', 'pg_restore'):
+            (bin_dir / tool).write_text(stub)
+            (bin_dir / tool).chmod(0o755)
+        code, results, output = self.run_scenarios('http://lab.example', 'lab', 'backup-restore', {
+            'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+            'QA_BACKUP_SOURCE_DATABASE_URL': 'postgres://app:src-pw-1234@127.0.0.1:5439/app',
+            'QA_SCRATCH_DATABASE_URL': 'postgres://admin:scr%40tch-pw@127.0.0.1:5439/app_scratch'})
+        self.assertEqual(code, 0, results)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual({c['name'] for c in calls}, {'psql', 'pg_dump', 'pg_restore'})
+        for call in calls:
+            argv = ' '.join(call['argv'])
+            for secret in ('src-pw-1234', 'scr@tch-pw', 'scr%40tch-pw'):
+                self.assertNotIn(secret, argv, call)
+        by_db = {c['argv'][c['argv'].index('-d') + 1]: c['password'] for c in calls}
+        self.assertEqual(by_db['postgres://app@127.0.0.1:5439/app'], 'src-pw-1234')
+        self.assertEqual(by_db['postgres://admin@127.0.0.1:5439/app_scratch'], 'scr@tch-pw')
+        self.assertEqual(by_db['postgres://admin@127.0.0.1:5439/postgres'], 'scr@tch-pw')
+        self.assertNotIn('src-pw-1234', json.dumps(results) + output)
 
     def test_backup_restore_refuses_a_scratch_database_without_scratch_in_its_name(self):
         code, results, _ = self.run_scenarios('http://lab.example', 'lab', 'backup-restore', {

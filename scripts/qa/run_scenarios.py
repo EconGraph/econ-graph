@@ -3,7 +3,8 @@
 
 Usage:
   scripts/qa/run-scenarios.sh --target BASE_URL --profile {lab,ci,production}
-                              [--only NAME,...] [--json OUT.json] [--list]
+                              [--only NAME,...] [--require-pass NAME,...] [--json OUT.json]
+  scripts/qa/run-scenarios.sh --list
 
 Each scenario is an executable in scripts/qa/scenarios/ whose header declares it:
 
@@ -16,8 +17,9 @@ Each scenario is an executable in scripts/qa/scenarios/ whose header declares it
 A scenario whose `qa-mutates` is missing or anything but `no` counts as changing state.
 
 The production profile runs only scenarios that change nothing, plus the annotation round
-trip when a dedicated QA account (a `qa-` username) is configured. Lab and CI profiles refuse
-a production host. Credentials come from the environment or from files named in it, never
+trip, from this directory only, when a dedicated QA account (a `qa-` username) is configured.
+The lab and ci profiles run only against hosts named in QA_LAB_TARGET_OK, and never against a
+production host. --require-pass names scenarios that must pass, not skip. Credentials come from the environment or from files named in it, never
 from arguments, and are redacted from everything the runner prints or writes.
 
 Exit status: 0 when no scenario failed, 1 when one did, 2 for a usage error or a refusal.
@@ -45,9 +47,12 @@ DEFAULT_SCENARIO_DIR = Path(__file__).resolve().parent / 'scenarios'
 
 PROFILES = ('lab', 'ci', 'production')
 
-# The only state-changing scenario the production profile may run, and only with a QA account.
-# Fixed here rather than declared by a scenario, so no scenario can grant itself an exception.
-PRODUCTION_MUTATING_EXCEPTIONS = frozenset({'annotation-round-trip'})
+# The only state-changing scenario the production profile may run, and only with a QA account:
+# its name, and the one file that may carry it. Fixed here rather than declared by a scenario,
+# so no scenario, and no file elsewhere declaring the same name, can grant itself an exception.
+PRODUCTION_MUTATING_EXCEPTIONS = {
+    'annotation-round-trip': (DEFAULT_SCENARIO_DIR / 'annotation-round-trip.py').resolve(),
+}
 
 # The QA account's username must start with this for the production exception to apply: the
 # dedicated QA users (config/keycloak/qa/) are named qa-*, real accounts are not.
@@ -138,7 +143,7 @@ def discover(directory: Path) -> list[Scenario]:
     names = [s.name for s in scenarios]
     duplicates = sorted({n for n in names if names.count(n) > 1})
     if duplicates:
-        raise SystemExit(f'duplicate scenario names: {", ".join(duplicates)}')
+        raise ValueError(f'duplicate scenario names: {", ".join(duplicates)}')
     return scenarios
 
 
@@ -170,7 +175,7 @@ def admit(scenario: Scenario, profile: str, env: dict[str, str]) -> str | None:
     dedicated QA account is configured.
     """
     if profile == 'production' and scenario.mutates:
-        if scenario.name not in PRODUCTION_MUTATING_EXCEPTIONS:
+        if PRODUCTION_MUTATING_EXCEPTIONS.get(scenario.name) != scenario.path.resolve():
             return 'refused: the production profile runs no scenario that changes state'
     if profile not in scenario.profiles:
         allowed = ', '.join(scenario.profiles) or 'none'
@@ -197,6 +202,12 @@ def production_hosts(env: dict[str, str]) -> set[str]:
     return set(PRODUCTION_HOSTS) | extra
 
 
+def lab_targets(env: dict[str, str]) -> set[str]:
+    """The hosts QA_LAB_TARGET_OK names: the only targets the lab and ci profiles accept."""
+    return {h.strip().rstrip('.').lower() for h in env.get('QA_LAB_TARGET_OK', '').split(',')
+            if h.strip()}
+
+
 def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
     """Why `target` is unusable under `profile`, or None."""
     parsed = urllib.parse.urlsplit(target)
@@ -208,10 +219,20 @@ def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
         return '--target must be a base URL without a query or fragment'
     # `econgraph.com.` (the fully qualified form) is the same host.
     host = parsed.hostname.rstrip('.').lower()
-    if profile != 'production' and host in production_hosts(env):
+    if profile == 'production':
+        return None
+    if host in production_hosts(env):
         return (
             f'refusing the {profile} profile against {parsed.hostname}: it runs state-changing '
             'scenarios; use --profile production for the production site'
+        )
+    # By name only: localhost or an address on the production host reaches production as
+    # surely as its public name does, so the lab and ci profiles accept only hosts named for them.
+    if host not in lab_targets(env):
+        return (
+            f'refusing the {profile} profile against {parsed.hostname}: it runs state-changing '
+            f'scenarios, so its target must be named in QA_LAB_TARGET_OK '
+            f'(e.g. QA_LAB_TARGET_OK={host} for a lab or the release e2e stack)'
         )
     return None
 
@@ -252,6 +273,11 @@ class Redactor:
         return value
 
 
+def failed(check: dict) -> bool:
+    """A check failed unless it says ok or skipped."""
+    return not check.get('ok', False) and not check.get('skipped', False)
+
+
 def read_evidence(path: Path) -> tuple[list, str | None]:
     """A scenario's evidence file: JSON lines, each a check or a `{"skip": reason}`."""
     checks, skip_reason = [], None
@@ -281,19 +307,27 @@ _stopping = False
 _grace = float(DEFAULT_GRACE)
 
 
+def _stop_group(group: int) -> None:
+    """SIGTERM a scenario's group so it cleans up, and SIGKILL it after the grace period."""
+    _signal_group(group, signal.SIGTERM)
+    timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
+    timer.daemon = True
+    timer.start()
+
+
 def _on_sigterm(signum, frame):
-    """Stop (SIGTERM or SIGINT): pass SIGTERM to the running scenario so it cleans up, kill its
-    group if it is still there after the grace period, and run nothing more."""
+    """Stop (SIGTERM or SIGINT): stop the running scenario and run nothing more.
+
+    `_stopping` is set before `_current_group` is read, and run_bounded sets `_current_group`
+    before it reads `_stopping`, so a scenario starting as the signal arrives is stopped by one
+    side or the other (a second SIGTERM is harmless)."""
     global _stopping
     if _stopping:
         return
     _stopping = True
     group = _current_group
     if group is not None:
-        _signal_group(group, signal.SIGTERM)
-        timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
-        timer.daemon = True
-        timer.start()
+        _stop_group(group)
 
 
 def _signal_group(pgid: int, sig: int) -> None:
@@ -315,6 +349,8 @@ def run_bounded(command: list[str], env: dict[str, str], timeout: float,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)
     _current_group = proc.pid
+    if _stopping:
+        _stop_group(proc.pid)
     try:
         return _wait_bounded(proc, timeout, grace)
     finally:
@@ -380,20 +416,22 @@ def run_scenario(
     if timed_out:
         status, reason = 'fail', f'timed out after {scenario.timeout}s'
     elif code == 0:
-        failed = [c for c in checks if not c.get('ok', False)]
-        if failed:
-            status, reason = 'fail', f'exited 0 but {len(failed)} check(s) failed'
+        failures = [c for c in checks if failed(c)]
+        skipped = [c['check'] for c in checks if c.get('skipped')]
+        if failures:
+            status, reason = 'fail', f'exited 0 but {len(failures)} check(s) failed'
         else:
-            status, reason = 'pass', None
-    elif code == EXIT_SKIP and not any(not c.get('ok', False) for c in checks):
+            status = 'pass'
+            reason = f'skipped checks: {", ".join(skipped)}' if skipped else None
+    elif code == EXIT_SKIP and not any(failed(c) for c in checks):
         status = 'skip'
         reason = skip_reason or (tail[-1] if tail else 'skipped')
     else:
-        failed = [c for c in checks if not c.get('ok', False)]
+        failures = [c for c in checks if failed(c)]
         status = 'fail'
         reason = (
-            f'{failed[0].get("check")}: {failed[0].get("detail", "")}'
-            if failed
+            f'{failures[0].get("check")}: {failures[0].get("detail", "")}'
+            if failures
             else f'exited {code}' + (f': {tail[-1]}' if tail else '')
         )
     return redact.deep(
@@ -435,7 +473,7 @@ def summary_lines(report: dict) -> list[str]:
         lines.append(line)
         if result['status'] == 'fail':
             for check in result['evidence']:
-                if not check.get('ok', False):
+                if failed(check):
                     lines.append(f'          - {check.get("check")}: {check.get("detail", "")}')
     counts = report['counts']
     lines.append(f'{counts["pass"]} passed, {counts["fail"]} failed, {counts["skip"]} skipped')
@@ -475,6 +513,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument('--profile', choices=PROFILES)
     parser.add_argument('--only', default='', help='comma-separated scenario names')
     parser.add_argument('--json', dest='json_out', help='write the JSON report here')
+    parser.add_argument('--require-pass', default='',
+                        help='comma-separated scenarios that must pass; a skip of one fails the run')
     parser.add_argument('--list', action='store_true', help='list the scenarios and exit')
     args = parser.parse_args(argv)
     if not args.list and (not args.target or not args.profile):
@@ -482,12 +522,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> int:
+def main(argv: list[str] | None = None, env: dict[str, str] | None = None,
+         scenario_dir: Path = DEFAULT_SCENARIO_DIR) -> int:
+    """The command line. `scenario_dir` exists for the runner's own tests; the command line always
+    runs scripts/qa/scenarios/."""
     global _grace, _stopping
     args = parse_args(sys.argv[1:] if argv is None else argv)
     env = dict(os.environ if env is None else env)
-    scenario_dir = Path(env.get('QA_SCENARIO_DIR') or DEFAULT_SCENARIO_DIR)
-    scenarios = discover(scenario_dir)
+    try:
+        scenarios = discover(scenario_dir)
+    except ValueError as error:
+        print(f'error: {error}', file=sys.stderr)
+        return 2
 
     if args.list:
         for s in scenarios:
@@ -504,20 +550,27 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
 
     by_name = {s.name: s for s in scenarios}
     only = [n.strip() for n in args.only.split(',') if n.strip()]
-    unknown = [n for n in only if n not in by_name]
+    required = [n.strip() for n in args.require_pass.split(',') if n.strip()]
+    unknown = [n for n in only + required if n not in by_name]
     if unknown:
         print(f'error: unknown scenario(s): {", ".join(unknown)}', file=sys.stderr)
         return 2
     selected = [by_name[n] for n in only] if only else scenarios
 
-    # Asking by name for a scenario the profile refuses is an error, before anything runs.
-    if only:
-        refused = [(s, admit(s, args.profile, env)) for s in selected]
-        refused = [(s, why) for s, why in refused if why and why.startswith('refused')]
-        if refused:
-            for s, why in refused:
-                print(f'error: {s.name}: {why}', file=sys.stderr)
-            return 2
+    # Asking for a scenario the profile won't run, by --only or --require-pass, is an error,
+    # before anything runs.
+    asked = [by_name[n] for n in dict.fromkeys(only + required)]
+    refused = [(s, admit(s, args.profile, env)) for s in asked]
+    refused = [(s, why) for s, why in refused if why]
+    if refused:
+        for s, why in refused:
+            print(f'error: {s.name}: {why}', file=sys.stderr)
+        return 2
+    missing = [n for n in required if n not in {s.name for s in selected}]
+    if missing:
+        print(f'error: --require-pass names scenarios --only leaves out: {", ".join(missing)}',
+              file=sys.stderr)
+        return 2
 
     redact = Redactor(env)
     started_at = dt.datetime.now(dt.timezone.utc)
@@ -543,7 +596,11 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('\n'.join(redact(line) for line in summary_lines(report)))
-    return 1 if counts['fail'] or _stopping else 0
+    status = {r['name']: r['status'] for r in results}
+    not_passed = [n for n in required if status.get(n) != 'pass']
+    if not_passed:
+        print(f'required to pass but did not: {", ".join(not_passed)}')
+    return 1 if counts['fail'] or not_passed or _stopping else 0
 
 
 if __name__ == '__main__':

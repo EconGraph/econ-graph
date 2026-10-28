@@ -120,6 +120,12 @@ def check(name: str, ok: bool, detail: str = '', **data) -> bool:
     return bool(ok)
 
 
+def skip_check(name: str, reason: str) -> None:
+    """Record a check that was not run, and why: neither a pass nor a failure."""
+    _record({'check': name, 'ok': None, 'skipped': True, 'detail': reason})
+    print(f'  skip  {name}: {reason}', flush=True)
+
+
 def skip(reason: str) -> None:
     """End the scenario as skipped."""
     _record({'skip': reason})

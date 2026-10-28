@@ -20,6 +20,9 @@ const repo = resolve(import.meta.dirname, '../../../..');
 const GRACE_SECONDS = 45;
 const STOP_MARGIN_MS = (GRACE_SECONDS + 30) * 1000;
 
+// The scenarios this stack must pass, not skip: a regression that turns one into a skip fails.
+const REQUIRED = ['annotation-round-trip', 'anonymous-api', 'anonymous-browser'];
+
 test('QA scenario suite, ci profile, against the release e2e stack', async ({}, testInfo) => {
   const target = process.env.QA_STACK_TARGET ?? '';
   const report = process.env.QA_REPORT ?? resolve(repo, 'frontend/qa-scenarios-report.json');
@@ -31,13 +34,15 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
   }
   env.QA_OIDC_ISSUER ??= process.env.QA_STACK_OIDC_ISSUER ?? '';
   env.QA_TIMEOUT_GRACE_SECONDS = String(GRACE_SECONDS);
+  // This stack is the ci profile's target.
+  env.QA_LAB_TARGET_OK ??= new URL(target).hostname;
 
   // The runner owns its scenarios: on SIGTERM it passes the signal to the running scenario,
   // which cleans up (deletes its annotation, restores catalog roles), kills it after the grace
   // period, and exits. So stopping the runner is enough, here and if this worker exits early.
   const runner = spawn(
     resolve(repo, 'scripts/qa/run-scenarios.sh'),
-    ['--target', target, '--profile', 'ci', '--json', report],
+    ['--target', target, '--profile', 'ci', '--json', report, '--require-pass', REQUIRED.join(',')],
     { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let output = '';
@@ -50,13 +55,17 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
 
   let timedOut = false;
   const status = await new Promise<number | null>((done, failed) => {
-    const deadline = setTimeout(
-      () => {
-        timedOut = true;
-        stopRunner();
-      },
-      Math.max(testInfo.timeout - STOP_MARGIN_MS, 1_000)
-    );
+    // No deadline when Playwright has none (--timeout=0, --debug).
+    const deadline =
+      testInfo.timeout > 0
+        ? setTimeout(
+            () => {
+              timedOut = true;
+              stopRunner();
+            },
+            Math.max(testInfo.timeout - STOP_MARGIN_MS, 1_000)
+          )
+        : undefined;
     runner.on('error', error => {
       clearTimeout(deadline);
       failed(error);
@@ -79,5 +88,5 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
     // No report: the runner refused or was stopped before writing one; its output says why.
   }
   expect(timedOut, 'the runner finished before the test deadline').toBe(false);
-  expect(status, 'the runner exit status (1: a scenario failed)').toBe(0);
+  expect(status, 'the runner exit status (1: a scenario failed or a required one did not pass)').toBe(0);
 });

@@ -23,7 +23,8 @@ Inputs:
 
 Output: one check per comparison. The source's row counts are read right after the dump, so
 writers to the lab database (a crawler) should be paused for an exact comparison. Needs psql,
-pg_dump and pg_restore. Skipped without the two database URLs.
+pg_dump and pg_restore. Skipped without the two database URLs. Their passwords reach the
+client tools as PGPASSWORD, never as an argument.
 """
 
 import os
@@ -73,6 +74,27 @@ for tool in ('psql', 'pg_dump', 'pg_restore'):
         skip(f'{tool} is not installed')
 
 
+def without_password(database_url):
+    """The URL with its password removed, and the password: the password goes to the client
+    tools as PGPASSWORD, never on a command line other users can read."""
+    u = urllib.parse.urlsplit(database_url)
+    password = urllib.parse.unquote(u.password) if u.password is not None else ''
+    netloc = u.hostname or ''
+    if ':' in netloc:
+        netloc = f'[{netloc}]'
+    if u.port:
+        netloc += f':{u.port}'
+    if u.username:
+        netloc = f'{u.username}@{netloc}'
+    return urllib.parse.urlunsplit((u.scheme, netloc, u.path, u.query, u.fragment)), password
+
+
+def client(command, database_url, *rest):
+    """Run a PostgreSQL client tool against a database, its password in PGPASSWORD."""
+    url, password = without_password(database_url)
+    return bounded([*command, '-d', url, *rest], {'PGPASSWORD': password} if password else {})
+
+
 def bounded(command, extra_env=None):
     """Run a command within STEP_TIMEOUT; RuntimeError when it overruns."""
     try:
@@ -83,8 +105,8 @@ def bounded(command, extra_env=None):
 
 def psql(database_url, sql):
     """Rows of a query as lists of strings."""
-    out = bounded(['psql', '--no-psqlrc', '--quiet', '--tuples-only', '--no-align',
-                   f'--field-separator={SEP}', '--set=ON_ERROR_STOP=1', '-d', database_url, '-c', sql])
+    out = client(['psql', '--no-psqlrc', '--quiet', '--tuples-only', '--no-align',
+                  f'--field-separator={SEP}', '--set=ON_ERROR_STOP=1'], database_url, '-c', sql)
     if out.returncode:
         raise RuntimeError(out.stderr.strip().splitlines()[-1] if out.stderr.strip() else 'psql failed')
     return [line.split(SEP) for line in out.stdout.splitlines() if line]
@@ -138,7 +160,7 @@ try:
         backup = bash(os.environ['QA_BACKUP_COMMAND'], {})
     else:
         dump = WORK_DIR / 'backup.dump'
-        backup = bounded(['pg_dump', '--format=custom', f'--file={dump}', '-d', SOURCE])
+        backup = client(['pg_dump', '--format=custom', f'--file={dump}'], SOURCE)
     source_tables = tables(SOURCE)
     source_counts = counts(SOURCE, source_tables)
 except RuntimeError as error:
@@ -162,7 +184,7 @@ try:
         restore = bash(os.environ['QA_RESTORE_COMMAND'],
                        {'QA_BACKUP_PATH': str(dump), 'QA_SCRATCH_DATABASE_URL': SCRATCH})
     else:
-        restore = bounded(['pg_restore', '--exit-on-error', '-d', SCRATCH, str(dump)])
+        restore = client(['pg_restore', '--exit-on-error'], SCRATCH, str(dump))
     check('restore', restore.returncode == 0,
           f'into {scratch_db}' if restore.returncode == 0 else restore.stderr.strip()[-300:])
 

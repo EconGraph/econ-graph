@@ -21,7 +21,8 @@ Inputs:
                                the backend caches anonymous grants for up to five minutes).
   QA_REDEPLOY_COMMAND          run with bash after the restriction is verified, e.g. the lab's
                                deploy.sh; the restriction must survive it. Without it the
-                               redeploy and persistence checks are skipped, and the summary says so.
+                               redeploy and persistence checks are skipped: the scenario passes with
+                               "skipped checks: redeploy" as its reason.
   QA_REDEPLOY_TIMEOUT_SECONDS  how long the redeploy may run (default 600).
 
 Skipped when the realm has no catalog roles (before ECO-657). Whatever the outcome, the
@@ -35,7 +36,7 @@ import urllib.parse
 
 from qa import (Http, check, data_or_raise, error_codes, fail, finish, graphql, issuer, secret,
                 skip, GraphQLError)
-from qa import cleanup_deadline
+from qa import cleanup_deadline, skip_check
 from qa import run as run_bounded
 
 REALM = 'econ-graph'
@@ -91,15 +92,21 @@ class Admin:
 
 
 def reachable_admin(admin, deadline):
-    """Wait for the admin API (Keycloak may be restarting after a redeploy)."""
+    """Wait for the admin API (Keycloak may be restarting after a redeploy), never past
+    `deadline`: each attempt's HTTP timeout and each pause fit in the time left."""
     while True:
+        left = deadline - time.monotonic()
+        admin.http.timeout = max(1.0, min(30.0, left))
         try:
             admin.login()
             return
         except (RuntimeError, OSError) as error:
-            if time.monotonic() > deadline:
+            left = deadline - time.monotonic()
+            if left <= 0:
                 raise RuntimeError(f'Keycloak admin API unreachable: {error}') from error
-            time.sleep(POLL)
+            time.sleep(min(POLL, left))
+        finally:
+            admin.http.timeout = 30.0
 
 
 SERIES = 'query($id: ID!) { series(id: $id) { id } }'
@@ -218,7 +225,7 @@ try:
     wait_for(series['id'], False, 'restriction takes effect')
 
     if not REDEPLOY:
-        check('redeploy', True, 'not run: QA_REDEPLOY_COMMAND is unset, so persistence is unchecked')
+        skip_check('redeploy', 'QA_REDEPLOY_COMMAND is unset, so persistence across a redeploy is unchecked')
     else:
         started = time.monotonic()
         try:
