@@ -384,8 +384,10 @@ job_ran() {
 # A copy of the scripts and k8s/manifests in $tmp/repo, for manifests changed by a case.
 make_repo() {
   rm -rf "${tmp:?}/repo"
-  mkdir -p "$tmp/repo/scripts/deploy" "$tmp/repo/k8s"
+  mkdir -p "$tmp/repo/scripts/deploy" "$tmp/repo/scripts/backup" "$tmp/repo/k8s"
   cp -r "$repo_root/scripts/deploy/lib" "$tmp/repo/scripts/deploy/"
+  # lib/kind-env.sh sources the backup encryption helpers.
+  cp "$repo_root/scripts/backup/encryption.sh" "$tmp/repo/scripts/backup/"
   cp "$load" "$verify" "$rollback" "$tmp/repo/scripts/deploy/"
   cp -r "$repo_root/k8s/manifests" "$tmp/repo/k8s/"
 }
