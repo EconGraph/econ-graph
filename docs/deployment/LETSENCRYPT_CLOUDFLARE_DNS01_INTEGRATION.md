@@ -57,6 +57,12 @@ The DNS-01 challenge integration enables:
   --staging
 ```
 
+The script, like `test-letsencrypt-cloudflare.sh`, acts on one kubectl context,
+`kind-econ-graph` unless `--context` names another, through the kind cluster's
+own kubectl and kubeconfig in `~/.cache/econgraph` when `KUBECTL` and
+`KUBECONFIG` are unset (plain `kubectl` on the production host is MicroK8s'). It
+prints the cluster's identity first; `--dry-run` stops there and changes nothing.
+
 ### 3. Verify Certificate Generation
 
 ```bash

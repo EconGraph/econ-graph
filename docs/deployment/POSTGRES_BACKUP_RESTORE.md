@@ -25,6 +25,15 @@ host, and also works on a cluster without the host tooling. The two share no
 files, schedule or lock, and neither deletes the other's dumps.
 BACKUPS.md says how the two fit together and when the CronJob may be retired.
 
+The commands below run kubectl as `k`, the kind cluster's own kubectl and
+kubeconfig on its context. On the production host, plain `kubectl` is the
+MicroK8s snap wrapper, which reaches a different cluster. Define `k` once
+per shell:
+
+```sh
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
+```
+
 ## What's in place
 
 - **`postgres-backup-cronjob.yaml`**: a nightly (`0 8 * * *` UTC) `CronJob`
@@ -211,6 +220,35 @@ database-side change; verify with a manual backup after deployment.
 
 Creates and waits on a one-off `Job` from the `postgres-backup` CronJob,
 then prints its logs. It dumps the same databases as the nightly run.
+
+### Which cluster
+
+`backup-postgres-now.sh` and `restore-postgres-backup.sh` act on one kubectl
+context, `kind-econ-graph` unless `--context` names another. They don't
+change the current context. Every kubectl call goes through `kc`
+(`scripts/deploy/lib/cluster-role.sh`) with `--context`. With none of
+`KUBECTL`, `KUBECONFIG` and `CLUSTER_ROLE_CONTEXT` set, they use the kind
+cluster's own kubectl and kubeconfig kept in `~/.cache/econgraph`
+(`bin/kubectl`, `kubeconfig-econ-graph`), and say so. On the production
+host, plain `kubectl` is the MicroK8s snap wrapper, which reaches a different
+cluster. A `CLUSTER_ROLE_CONTEXT` inherited from the environment is replaced,
+not followed. An empty `--context` is refused.
+
+Before doing anything else, both print the cluster they reached:
+
+- this host;
+- the kubectl and the `KUBECONFIG`;
+- the context and its API server;
+- the nodes;
+- the `kube-system` namespace UID, which is new for every cluster;
+- whether the cluster carries the production marker that
+  `mark-production-cluster.sh` writes.
+
+The restore prints this before its confirmation prompt, which is read from a
+terminal only. A context the kubeconfig doesn't have, or an identity that can't be
+read (API server, nodes, `kube-system` UID), stops either script before it
+changes anything. `--dry-run` shows the cluster and what would run, and
+starts nothing.
 
 ## Restore
 
@@ -456,9 +494,9 @@ behind in the `Released` phase; it isn't automatically reused. A plain
 redeploy creates a *new*, empty PVC/PV pair, quietly giving you a fresh,
 empty database instead of your old data. To bind back to the old volume:
 
-1. `kubectl get pv` and find the `Released` one (check its capacity/claimRef
+1. `k get pv` and find the `Released` one (check its capacity/claimRef
    to confirm it's the right one).
-2. `kubectl patch pv <pv-name> -p '{"spec":{"claimRef": null}}'` to clear its
+2. `k patch pv <pv-name> -p '{"spec":{"claimRef": null}}'` to clear its
    claim so it's `Available` again.
 3. Apply `postgres-deployment.yaml` as usual; if the new PVC doesn't bind to
    it automatically (StatefulSet-created PVCs don't pin a specific volume),
@@ -480,6 +518,6 @@ The PVC is `ReadWriteOnce`, so delete from a short-lived pod that mounts it whil
 backup Job is running, naming each dump explicitly:
 
 ```bash
-kubectl -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.38 \
+k -n econ-graph run postgres-backup-cleanup --rm -i --restart=Never --image=busybox:1.38 \
   --overrides='{"spec":{"containers":[{"name":"cleanup","image":"busybox:1.38","stdin":true,"command":["rm","-v","/backups/econ_graph-20260101-080000.dump"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
 ```

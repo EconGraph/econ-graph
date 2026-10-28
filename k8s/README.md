@@ -23,18 +23,14 @@ This directory contains all the necessary files to deploy EconGraph to a local K
   installer; only read-only `kind get` commands fall back to the `kind` on `PATH`, with a
   warning. Re-running the installer does nothing when the right version is in place.
 
-### One-Command Setup
+### Setup
 
 ```bash
-./scripts/deploy/setup-local-k8s.sh
+sudo scripts/host/setup-subvolumes.sh                    # host storage under /srv/econgraph, once per host
+./scripts/deploy/recreate-kind-cluster.sh --if-missing   # the kind cluster, if there is none
+./scripts/deploy/build-images.sh                         # the images
+./scripts/deploy/deploy.sh                               # databases, Secrets, application, routes
 ```
-
-This script will:
-
-1. Create a local Kubernetes cluster using Terraform
-2. Build Docker images for frontend and backend
-3. Deploy the application to the cluster
-4. Install the gateway and the app's routes on it
 
 ## 📁 Directory Structure
 
@@ -67,7 +63,6 @@ terraform/k8s/          # Terraform configuration
 └── outputs.tf         # Outputs
 
 scripts/deploy/         # Deployment scripts
-├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── install-gateway.sh # Install the gateway (run by deploy.sh)
