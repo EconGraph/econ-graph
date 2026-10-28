@@ -1,64 +1,34 @@
 # EconGraph Auth
 
-The authentication and authorization layer for the EconGraph system, providing secure user management, OAuth integration, and enterprise-grade security features. This crate serves as the security foundation that enables secure access control across all EconGraph components with comprehensive user authentication and authorization capabilities.
+The authentication and authorization layer for EconGraph verifies Keycloak access tokens and enforces fine-grained roles. Keycloak handles sign-in and upstream identity providers, and supplies the roles in each access token. See the [local Keycloak setup](../../../config/keycloak/README.md#local-stack) to configure sign-in.
 
 ## Features
 
-- **OAuth Integration**: Support for Google, GitHub, and other OAuth providers
-- **JWT Authentication**: Secure token-based authentication with configurable expiration
-- **Role-Based Access Control**: Granular permissions and role management
-- **User Management**: Complete user lifecycle management and profile handling
-- **Security Middleware**: Request authentication and authorization middleware
-- **Session Management**: Secure session handling and token refresh
+- **JWT verification**: `OidcVerifier` checks RS256 signatures against the provider's JWKS, validates issuer, audience and token times, and accepts access tokens only. It caches signing keys and refreshes them to handle key rotation.
+- **Bearer authentication**: `bearer::authenticate` verifies the request's bearer token, loads or creates the app plane user keyed by the token's `sub`, and rejects suspended accounts before returning a `Caller`.
+- **Role-Based Access Control**: `Principal` takes recognized roles from the token's top-level `roles` claim. `authorize` checks whether the caller holds the required role; names outside the `Role` catalog are ignored.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure authentication security, OAuth integration, and authorization functionality work correctly.
+The crate tests cover bearer-header parsing, the role catalog and authorization decisions, and OIDC configuration. Token-verification tests exercise accepted and rejected tokens, discovery, signing-key caching and rotation, and provider failures.
 
-### Test Types
-
-#### **Unit Tests**
-- **Purpose**: Test individual authentication components in isolation
-- **Examples**: JWT token generation/validation, OAuth flow handling, role checking, middleware logic
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
-
-#### **Integration Tests**
-- **Purpose**: Test authentication flows with real OAuth providers and database interactions
-- **Examples**: OAuth callback handling, user registration, session management, role assignment
-- **Benefits**: Catch integration issues, test real-world scenarios, validate OAuth flows
-
-#### **Security Tests**
-- **Purpose**: Validate authentication security measures and attack prevention
-- **Examples**: Token validation, session hijacking prevention, CSRF protection, rate limiting
-- **Benefits**: Ensure security measures work, prevent vulnerabilities, validate attack resistance
-
-#### **Middleware Tests**
-- **Purpose**: Test authentication and authorization middleware functionality
-- **Examples**: Request authentication, permission checking, role validation, error handling
-- **Benefits**: Ensure middleware works correctly, validate authorization logic, test error scenarios
+The verification tests use `testkit::TestIssuer`, which serves OpenID Connect discovery and JWKS endpoints on a local port and signs test tokens. These tests run without a database or a live identity provider. The helper is available automatically during this crate's tests; other crates can enable the optional `testkit` feature to reuse it.
 
 ### Running Tests
 
+Run these commands from the repository's `backend/` directory:
+
 ```bash
-# Run all tests
-cargo test
+# Run the crate's library tests
+cargo test -p econ-graph-auth --lib
 
-# Run specific test modules
-cargo test auth::handlers
-cargo test auth::middleware
-cargo test integration
-
-# Run with OAuth provider testing
-OAUTH_TESTING=true cargo test
+# Run individual test groups
+cargo test -p econ-graph-auth --lib bearer::tests
+cargo test -p econ-graph-auth --lib roles::tests
+cargo test -p econ-graph-auth --lib oidc::tests
+cargo test -p econ-graph-auth --lib oidc::verify_tests
 ```
-
-### Test Infrastructure
-
-- **OAuth Mocking**: Controlled testing of OAuth provider integrations
-- **Database Integration**: Real database operations with test user setup and cleanup
-- **Security Testing**: Automated security measure validation and attack simulation
-- **Middleware Testing**: Request/response cycle testing with authentication middleware
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the [license terms](../../LICENSE) for complete terms and conditions.
