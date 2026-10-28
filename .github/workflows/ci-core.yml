@@ -279,12 +279,14 @@ jobs:
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
-    # rendering against the manifests and the library against a stub kubectl.
+    # rendering against the manifests, and the library and the cut-over's rollback
+    # NetworkPolicy step against a stub kubectl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        scripts/deploy/test-cutover-rollback-policy.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.
@@ -296,9 +298,19 @@ jobs:
     - name: Check that teardown uses only the kind cluster's context
       run: scripts/deploy/test-teardown-kubectl.sh
 
+    # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
+    # reach only the kind cluster's kubectl with --context, never plain kubectl.
+    - name: Check which cluster the operator scripts reach
+      run: scripts/deploy/test-operator-kubectl.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
+
+    # deploy.sh runs test-monitoring.sh --lint-only; it must reach no cluster
+    # and no network (kubectl, kind, docker, curl and the rest are stubs here).
+    - name: Check that the monitoring lint contacts nothing
+      run: scripts/test-monitoring-lint-only.sh
 
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.

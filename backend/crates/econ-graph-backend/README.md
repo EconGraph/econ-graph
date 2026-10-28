@@ -1,64 +1,82 @@
 # EconGraph Backend
 
-The main backend application for the EconGraph system, providing core server infrastructure, metrics collection, and comprehensive integration testing capabilities. This crate serves as the primary backend service that orchestrates all components and provides the main application entry point.
+`econ-graph-backend` is the HTTP application entry point for EconGraph. It serves
+`/graphql`, builds the authentication context for each request, and exposes
+liveness (`/livez`), readiness (`/readyz`), and Prometheus metrics (`/metrics`).
 
-## Features
+The binary assembles the GraphQL schema from `econ-graph-graphql`, verifies bearer
+tokens through `econ-graph-auth`, and uses database pools and migrations from
+`econ-graph-core`. Services in `econ-graph-services` provide application operations,
+including checks against a remote data plane when configured. Crawling runs in the
+separate `crawler-worker` process; the HTTP backend enqueues jobs for that worker.
 
-- **Server Infrastructure**: Core HTTP server with routing and middleware
-- **Metrics Collection**: Application performance and health monitoring
-- **Integration Testing**: Comprehensive end-to-end testing capabilities
-- **Service Orchestration**: Coordination of all backend services and components
-- **Health Monitoring**: System health checks and status reporting
-- **Configuration Management**: Centralized configuration and environment handling
+At startup, the server opens the required app database and applies app plane
+migrations. It also opens the data database when configured, but leaves data plane
+migrations to `crawler migrate`. The two planes can share a database and pool.
+See the [backend setup and configuration](../../README.md#development-workflow)
+for database URLs, server commands, and environment settings.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure backend functionality, server performance, and system integration work correctly.
+The tests cover several parts of the server:
 
-### Test Types
+- [Integration tests](src/integration_tests.rs) exercise database models, queue
+  status, connection checks, and startup failure handling.
+- [Metrics tests](src/metrics.rs) check metric registration, recording, and
+  Prometheus output.
+- [Binary tests](src/main.rs) cover routing, CORS, GraphQL request bodies and size
+  limits, liveness, readiness, and request authentication. Most route checks use
+  Warp's in-process test requests; some checks use a local HTTP server.
+  [OIDC HTTP tests](src/request_auth_tests/oidc_http_tests.rs) exercise bearer-token
+  handling through the production routes with a mock identity provider.
+- [Database startup tests](src/databases_tests.rs) check app plane migrations,
+  optional data access, shared pools, and readiness for each plane. They also
+  compare local database and remote data-plane checks for series existence.
 
-#### **Unit Tests**
-- **Purpose**: Test individual backend components in isolation
-- **Examples**: Server configuration, metrics collection, health checks, configuration loading
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
+The `test_database_connection_test_performance` test asserts that one connection
+check against the local test database completes in under one second. It does not
+measure request load, memory use, or overall server throughput.
 
-#### **Integration Tests**
-- **Purpose**: Test complete backend system with all services and dependencies
-- **Examples**: End-to-end API testing, database integration, service coordination, health monitoring
-- **Benefits**: Catch integration issues, test real-world scenarios, validate system behavior
+### Running tests
 
-#### **Performance Tests**
-- **Purpose**: Ensure backend performance meets requirements under load
-- **Examples**: Server response times, memory usage, concurrent request handling, metrics collection overhead
-- **Benefits**: Prevent performance regressions, validate scalability, ensure efficient resource usage
+For database-backed tests, set `DATABASE_URL` to an existing, disposable PostgreSQL
+database. This test setting is separate from the server's `APP_DATABASE_URL` and
+`DATA_DATABASE_URL`. The integration tests use the core crate's `TestContainer`
+helper as a dependency: it connects to `DATABASE_URL`, falling back to
+`postgres://localhost/econ_graph_test`, and does not start a container.
 
-#### **Health Monitoring Tests**
-- **Purpose**: Validate system health monitoring and status reporting
-- **Examples**: Health check endpoints, metrics accuracy, status reporting, alerting
-- **Benefits**: Ensure monitoring works, validate health reporting, test alerting systems
+Integration-test cleanup drops the entire `public` schema with `CASCADE`, recreates
+it, and runs migrations. Use a role that can perform those operations, and do not
+share the database with an application or another test process. The database
+startup tests and database-backed authentication tests create scratch databases
+on the same PostgreSQL server, so the role must also be able to create and drop
+those databases. See [database testing](../../../docs/testing/DATABASE_TESTING.md)
+for helper behavior and isolation requirements.
 
-### Running Tests
+The scratch-database tests return early when `DATABASE_URL` is absent. Integration
+tests using `TestContainer` instead try the fallback URL and fail if it is
+unreachable. A passing command without `DATABASE_URL` therefore does not establish
+that the scratch-database assertions ran.
+
+Run these commands from `backend/`, after setting up the disposable database for
+commands that need it:
 
 ```bash
-# Run all tests
-cargo test
+# Run this package's tests.
+cargo test -p econ-graph-backend
 
-# Run specific test modules
-cargo test integration_tests
-cargo test metrics
-cargo test health
+# Select database-backed integration tests in the library target.
+cargo test -p econ-graph-backend --lib integration_tests
 
-# Run with performance testing
-PERFORMANCE_TESTING=true cargo test
+# Select metrics tests without a database.
+cargo test -p econ-graph-backend --lib metrics
+
+# Select binary route tests or database startup tests.
+cargo test -p econ-graph-backend --bin econ-graph-backend route_tests
+cargo test -p econ-graph-backend --bin econ-graph-backend databases_tests
 ```
-
-### Test Infrastructure
-
-- **Server Testing**: Complete HTTP server testing with real endpoints
-- **Database Integration**: Real database operations with test data setup and cleanup
-- **Service Coordination**: Multi-service testing with dependency management
-- **Performance Monitoring**: Automated performance testing and benchmarking
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+This project is licensed under the Microsoft Reference Source License (MS-RSL).
+See the [license](../../LICENSE) for complete terms and conditions.

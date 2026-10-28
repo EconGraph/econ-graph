@@ -8,26 +8,35 @@ E2E tests exercise browser workflows against running application services. The s
 | --- | --- | --- |
 | [Release E2E](../../.github/workflows/release-e2e.yml) | Matching application/stack/workflow PR changes; manual dispatch | Release frontend build, real Rust backend and PostgreSQL 18, seeded recorded fixtures; no source API keys |
 | [Core CI optional E2E](../../.github/workflows/ci-core.yml) | Manual dispatch with run_e2e_tests=true | Container-based desktop/mobile suites |
-| [Deployed Playwright](../../.github/workflows/playwright-tests-deployed.yml) | Manual dispatch | Explicit deployed base URL |
+| [Legacy deployed Playwright](../../.github/workflows/playwright-tests-deployed.yml) | Manual dispatch | Default Playwright config; its `base_url` input does not select the deployed target |
 | [Legacy Playwright](../../.github/workflows/playwright-tests.yml) and [comprehensive suite](../../.github/workflows/playwright-tests-comprehensive.yml) | Manual dispatch | Older setups; review workflow comments before use |
 
 Release E2E is independent of Core CI's disabled-by-default E2E jobs. Recorded fixtures keep upstream data reproducible while still exercising the real frontend/backend/database boundary. Real source networking is tested separately by the [manual crawler integration workflow](../../.github/workflows/crawler-integration-test.yml).
 
-## Run the maintained release suite
+## Run a suite
 
 Follow the [release suite README](../../frontend/tests/e2e/release/README.md) for local prerequisites, fixture seeding and test scope. For GitHub runs:
 
 ```bash
 gh workflow run release-e2e.yml --repo EconGraph/econ-graph --ref BRANCH
 gh workflow run ci-core.yml --repo EconGraph/econ-graph --ref BRANCH -f run_e2e_tests=true -f e2e_test_suite=core
-gh workflow run playwright-tests-deployed.yml --repo EconGraph/econ-graph -f base_url=https://YOUR_DEPLOYED_TARGET
 ```
 
 The optional Core workflow exposes its own suite choices. Use its declared inputs; do not assume all legacy suite labels map to an active job.
 
+To test a deployed frontend, use the maintained release suite's [deployed mode](../../frontend/tests/e2e/release/README.md#against-a-deployed-build-rel-qa-check-3). Export `RELEASE_OIDC_ISSUER` with the issuer used by the deployed frontend and export `RELEASE_QA_USER1_PASSWORD` and `RELEASE_QA_USER2_PASSWORD` for the QA realm users, following the README's authentication prerequisites. Then run Playwright directly from `frontend`:
+
+```bash
+cd frontend
+RELEASE_BASE_URL=https://YOUR_DEPLOYED_TARGET \
+  npx playwright test --config=playwright.release.config.ts
+```
+
+This mode starts no local application services and needs no database URL. Specs with deployed-mode assertions check live data rather than recorded fixture values; see the README for scope and authentication options.
+
 ## Interpret results
 
-Distinguish image build failures, service readiness failures, browser startup failures and failed application assertions. If a container build fails, dependent suites may never execute. Scheduled runs can be delayed, and a schedule does not imply successful coverage.
+Distinguish image build failures, service readiness failures, browser startup failures and failed application assertions. If a container build fails, dependent suites may never execute.
 
 Keep browser assertions meaningful. Do not skip required application behavior because a service is unavailable or replace failures with successful shell output. For a suite that explicitly covers an optional external integration, document its prerequisites and scope separately.
 

@@ -90,7 +90,7 @@ images must be present on the nodes before pods start. Do not override `VERSION`
 independently of the manifests. The admin frontend is not built or deployed by this
 workflow.
 
-A deployment applies database, Keycloak, application, ingress and monitoring
+A deployment applies database, Keycloak, application, gateway route and monitoring
 resources; it also creates missing Secrets and runs the data plane migration Job
 before applying the backend and crawler worker. It is broader than a pod restart.
 Before schema changes, use the [backup procedures](BACKUPS.md). Immediately before
@@ -163,7 +163,7 @@ available old replica does not by itself establish that the new image is running
 Check the workloads and their recent logs:
 
 ```bash
-egk get deployments,pods,services,ingress
+egk get deployments,pods,services,httproutes
 egk get events --sort-by=.metadata.creationTimestamp
 egk logs deployment/econ-graph-backend --tail=100
 egk logs deployment/econ-graph-frontend --tail=100
@@ -175,7 +175,7 @@ use `egk describe pod <pod-name>` and the affected deployment's logs. For a rebu
 also check `crawler-worker` and `chart-api-service` logs. Append `-f` to a log command
 to follow it, and use Ctrl-C to stop.
 
-On the cluster host, the kind ingress exposes the frontend at `http://localhost`,
+On the cluster host, the Envoy Gateway proxy exposes the frontend at `http://localhost`,
 GraphQL at `http://localhost/graphql`, and backend health at `http://localhost/health`.
 The checked-in kind port mappings do not expose the services' NodePorts directly.
 For remote access, use the configured public HTTPS hostname and the public-site

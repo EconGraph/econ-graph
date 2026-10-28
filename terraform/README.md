@@ -11,7 +11,9 @@ The Terraform configuration deploys a complete production-ready environment incl
 - **Crawler Service** - Data collection with queue processing
 - **Frontend** - React application with Nginx
 - **Monitoring Stack** - Prometheus and Grafana with custom dashboards
-- **Ingress Controller** - NGINX with SSL termination
+- **No ingress controller** - the HTTP entry point is the Gateway API gateway
+  (Envoy Gateway), installed by `scripts/deploy/install-gateway.sh`, with the
+  app's routes in `k8s/manifests/gateway/routes/`
 
 ## Prerequisites
 
@@ -87,7 +89,6 @@ The Terraform configuration deploys a complete production-ready environment incl
 | `kubeconfig_path` | Path to kubeconfig | `"~/.kube/config"` |
 | `fred_api_key` | FRED API key | `""` |
 | `bls_api_key` | BLS API key | `""` |
-| `monitoring_basic_auth` | htpasswd line (`user:bcrypt-hash`) for basic auth in front of Grafana; generate with `htpasswd -nB admin` (prompts for the password). The bcrypt hash contains `$`, so single-quote it when setting `TF_VAR_monitoring_basic_auth`. Empty means no basic auth (Grafana's own login still applies). Sensitive. | `""` |
 
 Credentials have no committed defaults. Pass them through an untracked
 `terraform.tfvars` or `TF_VAR_*` environment variables (for example
@@ -102,7 +103,7 @@ placeholder from `terraform.tfvars.example`.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Load Balancer │    │  Ingress NGINX  │    │   Cert Manager  │
+│   Load Balancer │    │  Gateway (Envoy)│    │   Cert Manager  │
 │                 │────│                 │────│                 │
 │  (Cloud Provider)│    │  SSL Termination│    │  Let's Encrypt  │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
@@ -162,12 +163,6 @@ by `scripts/deploy/deploy.sh` (see `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`)
 - AlertManager for notifications
 - ServiceMonitors for auto-discovery
 
-### Ingress Module (`modules/ingress/`)
-- NGINX Ingress Controller
-- SSL/TLS termination with Let's Encrypt
-- Security headers and rate limiting
-- Network policies
-
 ## Monitoring and Observability
 
 ### Grafana Dashboards
@@ -200,11 +195,9 @@ by `scripts/deploy/deploy.sh` (see `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`)
 
 ### Accessing Monitoring
 
-- **Grafana**: `https://grafana.yourdomain.com`
+- **Grafana**: not exposed; `kubectl port-forward` (see Debugging Commands)
   - Username: `admin`
   - Password: (generated, see terraform output)
-  - If `monitoring_basic_auth` is set, the ingress asks for that basic-auth
-    login first.
 - **Prometheus**: Internal cluster access only
 
 ## SSL/TLS Configuration
@@ -213,7 +206,7 @@ The deployment automatically provisions SSL certificates using Let's Encrypt:
 
 1. **cert-manager** installs and configures certificate management
 2. **ClusterIssuer** handles Let's Encrypt ACME challenges
-3. **Ingress** resources automatically request certificates
+3. **The gateway's https listener** gets its certificate for the public host (`PUBLIC_HOST`, `scripts/deploy/apply-gateway-routes.sh`)
 4. **Automatic renewal** prevents certificate expiration
 
 To use custom certificates, disable cert-manager:
@@ -258,7 +251,7 @@ PostgreSQL backups can be configured using:
 
 ```bash
 # Backup Kubernetes resources
-kubectl get all,configmaps,secrets,ingress -n econgraph -o yaml > econgraph-backup.yaml
+kubectl get all,configmaps,secrets,httproutes -n econgraph -o yaml > econgraph-backup.yaml
 
 # Backup Terraform state
 terraform state pull > terraform.tfstate.backup
@@ -286,10 +279,10 @@ terraform state pull > terraform.tfstate.backup
    kubectl logs -n cert-manager deployment/cert-manager
    ```
 
-4. **Ingress not accessible**
+4. **Routes not accessible**
    ```bash
-   kubectl get ingress -n econgraph
-   kubectl describe ingress econgraph-ingress -n econgraph
+   kubectl get httproute -n econgraph
+   kubectl -n econ-graph-gateway get gateway econ-graph-gateway
    ```
 
 ### Debugging Commands
@@ -312,7 +305,7 @@ kubectl exec -it -n econgraph deployment/econgraph-backend -- /bin/bash
 ## Security Considerations
 
 ### Network Policies
-- Ingress traffic restricted to ingress controller
+- Ingress traffic restricted to the gateway's Envoy proxy
 - Inter-pod communication controlled
 - Database access limited to application pods
 
@@ -328,8 +321,7 @@ kubectl exec -it -n econgraph deployment/econgraph-backend -- /bin/bash
 
 ### Security Headers
 - CSP, HSTS, and other security headers configured
-- Rate limiting on API endpoints
-- Optional basic auth on Grafana (set `monitoring_basic_auth`)
+- Rate limiting on the GraphQL endpoints
 
 ## Maintenance
 
