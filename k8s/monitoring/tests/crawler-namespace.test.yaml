@@ -1,0 +1,371 @@
+# Branch workers must neither mask primary failures nor trigger primary alerts.
+rule_files:
+- crawler.rules.yml
+evaluation_interval: 1m
+tests:
+- name: Healthy branch traffic and completions cannot hide primary failures.
+  interval: 1m
+  input_series:
+  - series: crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}
+    values: 2000x480
+  - series: crawler_jobs_total{kubernetes_namespace="econ-graph", outcome="completed"}
+    values: '0x480'
+  - series: crawler_queue_failed_24h{kubernetes_namespace="econ-graph", source="FRED"}
+    values: 60x480
+  - series: crawler_coverage_ratio{kubernetes_namespace="econ-graph", source="FRED"}
+    values: 0.9x480
+  - series: crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph", source="FRED"}
+    values: 600x480
+  - series: crawler_curated_missing{kubernetes_namespace="econ-graph", source="FRED"}
+    values: 1x480
+  - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: 0+100x480
+  - series: econgraph_crawler_errors_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: 0+10x480
+  - series: econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: 0+60x480
+  - series: econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: 0+60x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="5"}
+    values: '0x480'
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="10"}
+    values: 0+100x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="+Inf"}
+    values: 0+100x480
+  - series: crawler_queue_items{kubernetes_namespace="econ-graph-br-test", status="pending"}
+    values: '0x480'
+  - series: crawler_jobs_total{kubernetes_namespace="econ-graph-br-test", outcome="completed"}
+    values: 0+10x480
+  - series: crawler_queue_failed_24h{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: '0x480'
+  - series: crawler_coverage_ratio{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: 1x480
+  - series: crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: -7200x480
+  - series: crawler_curated_missing{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: '0x480'
+  - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: 0+10000x480
+  - series: econgraph_crawler_errors_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="5"}
+    values: 0+10000x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="10"}
+    values: 0+10000x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="+Inf"}
+    values: 0+10000x480
+  alert_rule_test:
+  - eval_time: 70m
+    alertname: CrawlerQueueBacklog
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: crawl_queue backlog above 1000 items
+        description: 2k crawl_queue items have been pending/retrying for over an hour; the worker is not keeping
+          up (sources paused, rate limits, or too little CRAWLER_CONCURRENCY).
+  - eval_time: 30m
+    alertname: CrawlerNoCompletions
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: crawl_queue has work but no job completed in the last hour
+        description: crawl_queue holds 2k active items but crawler-worker completed no job in the last hour (all
+          jobs failing/retrying, sources paused, or the worker is stuck).
+  - eval_time: 30m
+    alertname: CrawlerSourceFailing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+      exp_annotations:
+        summary: Source FRED has 60 failed jobs in 24h
+        description: More than 50 crawl_queue items for FRED became failed in the last 24 hours; check crawl_queue.error_message
+          for that source (bad ids, auth, or upstream format change).
+  - eval_time: 7h
+    alertname: CrawlerCoverageLow
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+      exp_annotations:
+        summary: Coverage for FRED is 90% (target 95%)
+        description: Fewer than 95% of the series discovered for FRED have data. Run `crawler coverage` for the
+          numbers and check crawl_queue.error_message for that source.
+  - eval_time: 30m
+    alertname: CrawlerCrawlFailed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+      exp_annotations:
+        summary: A FRED crawl job failed in the last hour
+        description: A crawl_queue job for FRED ended in status failed. Find it with `SELECT series_id, kind, error_message
+          FROM crawl_queue WHERE source = 'FRED' AND status = 'failed' ORDER BY COALESCE(finished_at, updated_at)
+          DESC LIMIT 20`.
+  - eval_time: 30m
+    alertname: CrawlerCuratedEntriesMissing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+      exp_annotations:
+        summary: 1 curated FRED entries are missing upstream
+        description: The last FRED discovery skipped curated entries the source no longer lists (renamed or dropped
+          upstream). The worker log's discovery warning for FRED names them; update the curated list (for BEA, data/bea_tables.csv).
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRate
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: High crawler error rate (>5%)
+        description: Crawler error rate is above 5% for 10 minutes.
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRateBySource
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        crawler_type: fred
+      exp_annotations:
+        summary: High crawler error rate (>5%) for source fred
+        description: Error rate is above 5% for 10 minutes for source fred.
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHits
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Frequent 429 rate limit hits
+        description: Crawlers are frequently hitting upstream rate limits.
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHitsBySource
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        crawler_type: fred
+      exp_annotations:
+        summary: Frequent 429 rate limit hits for fred
+        description: Rate limit hits are frequent for source fred; its SourcePolicy rate may be too high (or more
+          than one worker replica is running).
+  - eval_time: 30m
+    alertname: CrawlerHighTimeouts
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Elevated crawler timeouts
+        description: Timeout rate exceeds threshold.
+  - eval_time: 30m
+    alertname: CrawlerHighTimeoutsBySource
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        crawler_type: fred
+      exp_annotations:
+        summary: Elevated crawler timeouts for fred
+        description: Timeout rate exceeds threshold for source fred.
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: High crawler p95 latency (>5s)
+        description: 95th percentile of request latency is above 5 seconds.
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95BySource
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        crawler_type: fred
+      exp_annotations:
+        summary: High p95 latency (>5s) for fred
+        description: 95th percentile of request latency is above 5 seconds for source fred.
+- name: Branch failures cannot trigger primary alerts.
+  interval: 1m
+  input_series:
+  - series: crawler_queue_items{kubernetes_namespace="econ-graph", status="pending"}
+    values: '0x480'
+  - series: crawler_jobs_total{kubernetes_namespace="econ-graph", outcome="completed"}
+    values: 0+10x480
+  - series: crawler_queue_failed_24h{kubernetes_namespace="econ-graph", source="FRED"}
+    values: '0x480'
+  - series: crawler_coverage_ratio{kubernetes_namespace="econ-graph", source="FRED"}
+    values: 1x480
+  - series: crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph", source="FRED"}
+    values: -7200x480
+  - series: crawler_curated_missing{kubernetes_namespace="econ-graph", source="FRED"}
+    values: '0x480'
+  - series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: 0+10000x480
+  - series: econgraph_crawler_errors_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph", crawler_type="fred"}
+    values: '0x480'
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="5"}
+    values: 0+10000x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="10"}
+    values: 0+10000x480
+  - series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph", crawler_type="fred",
+      le="+Inf"}
+    values: 0+10000x480
+  - &id001
+    series: crawler_queue_items{kubernetes_namespace="econ-graph-br-test", status="pending"}
+    values: 2000x480
+  - &id002
+    series: crawler_jobs_total{kubernetes_namespace="econ-graph-br-test", outcome="completed"}
+    values: '0x480'
+  - &id003
+    series: crawler_queue_failed_24h{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: 60x480
+  - &id004
+    series: crawler_coverage_ratio{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: 0.9x480
+  - &id005
+    series: crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: 600x480
+  - &id006
+    series: crawler_curated_missing{kubernetes_namespace="econ-graph-br-test", source="FRED"}
+    values: 1x480
+  - &id007
+    series: econgraph_crawler_requests_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: 0+100x480
+  - &id008
+    series: econgraph_crawler_errors_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: 0+10x480
+  - &id009
+    series: econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: 0+60x480
+  - &id010
+    series: econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph-br-test", crawler_type="fred"}
+    values: 0+60x480
+  - &id011
+    series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="5"}
+    values: '0x480'
+  - &id012
+    series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="10"}
+    values: 0+100x480
+  - &id013
+    series: econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph-br-test", crawler_type="fred",
+      le="+Inf"}
+    values: 0+100x480
+  alert_rule_test:
+  - eval_time: 70m
+    alertname: CrawlerQueueBacklog
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerNoCompletions
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerSourceFailing
+    exp_alerts: []
+  - eval_time: 7h
+    alertname: CrawlerCoverageLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerCrawlFailed
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerCuratedEntriesMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRate
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRateBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHits
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHitsBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighTimeouts
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighTimeoutsBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95BySource
+    exp_alerts: []
+- name: Branch metrics alone cannot trigger primary alerts.
+  interval: 1m
+  input_series:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  alert_rule_test:
+  - eval_time: 70m
+    alertname: CrawlerQueueBacklog
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerNoCompletions
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerSourceFailing
+    exp_alerts: []
+  - eval_time: 7h
+    alertname: CrawlerCoverageLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerCrawlFailed
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerCuratedEntriesMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRate
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighErrorRateBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHits
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerFrequentRateLimitHitsBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighTimeouts
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighTimeoutsBySource
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CrawlerHighLatencyP95BySource
+    exp_alerts: []
