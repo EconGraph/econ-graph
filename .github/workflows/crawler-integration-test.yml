@@ -2,8 +2,8 @@ name: Crawler Integration Test
 
 # Manually triggered; does NOT run automatically. Enqueues one real series (`crawler enqueue`),
 # runs `crawler-worker` until that job finishes, and checks the job completed and its data points
-# were stored. Needs network access to the chosen source. API keys come from the dispatch inputs
-# or, when those are empty, the FRED_API_KEY / BLS_API_KEY / CENSUS_API_KEY repository secrets;
+# were stored. Needs network access to the chosen source. API keys come only from the
+# FRED_API_KEY / BLS_API_KEY / CENSUS_API_KEY repository secrets;
 # FRED and Census need one.
 on:
   workflow_dispatch:
@@ -18,21 +18,6 @@ on:
         required: false
         type: string
         default: 'GDP'
-      api_key_fred:
-        description: 'FRED API key (defaults to the FRED_API_KEY secret; FRED needs one)'
-        required: false
-        type: string
-        default: ''
-      api_key_bls:
-        description: 'BLS API key (optional; defaults to the BLS_API_KEY secret)'
-        required: false
-        type: string
-        default: ''
-      api_key_census:
-        description: 'Census API key (defaults to the CENSUS_API_KEY secret; required for CENSUS)'
-        required: false
-        type: string
-        default: ''
 
 # Prevent concurrent runs to avoid database conflicts
 concurrency:
@@ -102,19 +87,19 @@ jobs:
 
     - name: Crawl one series through the queue
       env:
-        FRED_API_KEY: ${{ github.event.inputs.api_key_fred || secrets.FRED_API_KEY }}
-        BLS_API_KEY: ${{ github.event.inputs.api_key_bls || secrets.BLS_API_KEY }}
-        CENSUS_API_KEY: ${{ github.event.inputs.api_key_census || secrets.CENSUS_API_KEY }}
+        FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+        CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
         SOURCE: ${{ github.event.inputs.source }}
         SERIES: ${{ github.event.inputs.series }}
       run: |
         set -euo pipefail
         if [ "${SOURCE^^}" = "FRED" ] && [ -z "$FRED_API_KEY" ]; then
-          echo "::error::FRED needs an API key: pass api_key_fred or set the FRED_API_KEY secret"
+          echo "::error::FRED needs an API key: set the FRED_API_KEY secret"
           exit 1
         fi
         if [ "${SOURCE^^}" = "CENSUS" ] && [ -z "$CENSUS_API_KEY" ]; then
-          echo "::error::Census needs an API key: pass api_key_census or set the CENSUS_API_KEY secret"
+          echo "::error::Census needs an API key: set the CENSUS_API_KEY secret"
           exit 1
         fi
         CRAWLER=target/release/crawler
