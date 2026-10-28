@@ -1,60 +1,76 @@
 # End-to-End Integration Test Report
 
 **Generated**: 2025-09-10 15:45:34
-**Test Suite**: Frontend + Backend Integration
-**Database**: PostgreSQL with testcontainers
 
-## Test Results Summary
+This historical summary preserves the outcome and coverage claims printed by the
+[`test-e2e.sh` report generator](../../scripts/test-e2e.sh). For current release
+validation procedures and suite scope, use the maintained
+[E2E testing strategy](../development/e2e-testing-strategy.md).
 
-### ✅ Backend Integration Tests
-- **GraphQL API Workflow**: Complete data flow from API to database
-- **Crawler Monitoring**: Queue operations and worker coordination
-- **Search Integration**: Full-text search with filtering
-- **Data Transformations**: YoY, MoM, QoQ calculations with BigDecimal precision
+## Recorded outcome and evidence
 
-### ✅ Frontend Integration Tests
-- **Dashboard Integration**: Series list loading and display
-- **Search Functionality**: Query execution and result handling
-- **Chart Integration**: Data visualization with transformations
-- **Error Handling**: Graceful degradation and user feedback
-- **Performance**: Large dataset handling and responsiveness
+The original report printed **“ALL INTEGRATION TESTS PASSED”** and labeled the suite
+“Frontend + Backend Integration” with “PostgreSQL with testcontainers.” These labels
+and the pass statement were fixed template text. The generator produced the same
+summary after a successful selected mode: `backend`, `frontend`, `combined`, or all
+three.
 
-### ✅ Combined Tests
-- **API Communication**: Frontend GraphQL queries to backend
-- **Real-time Updates**: Live data synchronization
-- **Error Propagation**: Backend errors surfaced in frontend
-- **Data Consistency**: End-to-end data integrity verification
+The report was [first committed on September 10, 2025](https://github.com/EconGraph/econ-graph/blob/28d5675b5cc904b85441442bb00c0dfe1b338b17/e2e-test-report.md).
+It contains no invocation, selected mode, tested revision, environment details,
+executed test names or counts, or link to run logs. No supporting run artifact was
+identified in that commit's tracked files. The recorded pass therefore does not
+establish which suites or application boundaries were exercised in that run.
 
-## Technical Validation
+## Coverage listed by the template
 
-### Database Integration
-- ✅ PostgreSQL testcontainers setup
-- ✅ Migration execution and rollback
-- ✅ Connection pooling and async operations
-- ✅ Data integrity and foreign key constraints
+The following categories describe what the generated summary claimed to cover;
+they are not individual assertion results recovered from the historical run.
 
-### API Integration
-- ✅ GraphQL schema validation
-- ✅ Query and mutation execution
-- ✅ Data transformation pipeline
-- ✅ Error handling and response formatting
+### Backend integration
 
-### Frontend Integration
-- ✅ Component rendering with real data
-- ✅ User interaction workflows
-- ✅ State management and caching
-- ✅ Performance with production-scale data
+- **GraphQL API workflow**: Data flow from the API to the database.
+- **Crawler monitoring**: Queue operations and worker coordination.
+- **Search integration**: Full-text search with filtering.
+- **Data transformations**: YoY, MoM and QoQ calculations with BigDecimal precision.
 
-## Deployment Readiness
+### Frontend integration
 
-The system has been validated for:
-- **Production Data Volumes**: Tested with 1000+ data points
-- **Concurrent Operations**: Multi-user scenarios simulated
-- **Error Recovery**: Graceful handling of failures
-- **Performance Benchmarks**: Sub-2-second response times
-- **Data Accuracy**: Financial precision with BigDecimal
+- **Dashboard**: Series list loading and display.
+- **Search**: Query execution and result handling.
+- **Charts**: Data visualization with transformations.
+- **Error handling**: Degradation and user feedback.
+- **Performance**: Large dataset handling and responsiveness.
 
----
+### Combined integration
 
-**Status**: ✅ **ALL INTEGRATION TESTS PASSED**
-**Recommendation**: **APPROVED FOR PRODUCTION DEPLOYMENT**
+- **API communication**: Frontend GraphQL queries to the backend.
+- **Real-time updates**: Live data synchronization.
+- **Error propagation**: Backend errors surfaced in the frontend.
+- **Data consistency**: End-to-end data integrity verification.
+
+### Technical validation
+
+| Area | Checks listed in the generated summary |
+| --- | --- |
+| Database | PostgreSQL testcontainers setup; migration execution and rollback; connection pooling and async operations; data integrity and foreign key constraints |
+| API | GraphQL schema validation; query and mutation execution; data transformation pipeline; error handling and response formatting |
+| Frontend | Component rendering with real data; user interaction workflows; state management and caching; performance with production-scale data |
+
+The [frontend test file retained alongside the original report](https://github.com/EconGraph/econ-graph/blob/28d5675b5cc904b85441442bb00c0dfe1b338b17/frontend/src/__tests__/e2e-integration.test.tsx)
+defines local mock components and mock data. Its presence does not establish live
+frontend/backend communication, and the summary supplies no assertion results demonstrating that
+boundary.
+
+## Historical deployment recommendation
+
+The original report printed **“APPROVED FOR PRODUCTION DEPLOYMENT.”** Its deployment
+section claimed testing with 1000+ data points, simulated multi-user operations,
+failure recovery, sub-2-second response times, and financial precision with
+BigDecimal. These were also fixed template statements.
+
+The report supplies no measured operation, timing method, concurrency level, or
+benchmark results supporting those claims. The retained frontend performance
+check times rendering local mock components; it does not establish service
+response times. The historical recommendation records the generator's output,
+not an independently evidenced deployment approval or authorization for a current
+release.
