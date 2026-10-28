@@ -226,6 +226,15 @@ expect "deploy.sh" nonzero "fake kind kubectl: refusing to apply" \
 expect_rootful "deploy.sh"
 grep -qF " config use-context kind-econ-graph" "$LOGS/kind-kubectl.log" ||
     fail "deploy.sh did not switch the kind kubectl to kind-econ-graph"
+# A PUBLIC_HOST the caller set (release-deploy.sh's) wins over one in a local ports.env.
+printf 'BACKEND_NODEPORT=30080\nPUBLIC_HOST=other.example\n' >"$TREE/ports.env"
+run env PUBLIC_HOST= "$TREE/scripts/deploy/deploy.sh"
+rm -f "$TREE/ports.env"
+if grep -qF "No PUBLIC_HOST: serving http://localhost only" <<<"$out" && ! grep -qF "other.example" <<<"$out"; then
+    echo "ok   deploy.sh keeps the caller's PUBLIC_HOST over ports.env's"
+else
+    fail "deploy.sh let ports.env replace the caller's PUBLIC_HOST"
+fi
 
 # The operator's shell exports DOCKER_HOST for the rootless daemon: kind and
 # docker still run on the rootful one.

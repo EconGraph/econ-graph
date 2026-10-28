@@ -64,7 +64,15 @@ fi
 # Load port configuration
 if [ -f "ports.env" ]; then
     echo "📋 Loading port configuration from ports.env..."
+    # A PUBLIC_HOST the caller set (release-deploy.sh's, from the host's deploy
+    # config) wins over one in ports.env, which only configures ports.
+    caller_public_host_set="${PUBLIC_HOST+set}"
+    caller_public_host="${PUBLIC_HOST-}"
     source ports.env
+    if [ "$caller_public_host_set" = set ]; then
+        PUBLIC_HOST="$caller_public_host"
+        export PUBLIC_HOST
+    fi
 else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
