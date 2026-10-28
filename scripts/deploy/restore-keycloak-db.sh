@@ -112,6 +112,11 @@ verified_value() { sed -n "s/^$1=//p" "${DUMP_DIR}/VERIFIED"; }
 taken_with="$(verified_value keycloak_image)"
 dump_uid="$(verified_value cluster_uid)"
 
+# The restore takes an encrypted backup of the current database (with
+# backup-keycloak-db.sh) after stopping Keycloak; check that it can be made
+# before the cluster is touched.
+backup_encryption_preflight
+
 kdb_use_context "$CONTEXT"
 kdb_check_pod
 live_uid="$(kdb_cluster_uid)" || die "could not read the cluster's kube-system UID on context ${CONTEXT}"

@@ -93,10 +93,9 @@ while [ -e "$dest" ] || [ -e "${dest}.partial" ] || [ -e "${dest}.failed" ]; do
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     dest="${KDB_BACKUP_ROOT}/${stamp}"
 done
-staging="$(backup_plaintext_dir)"
-work="$staging/payload"
-mkdir "$work"
 
+# The trap is set before the staging exists, so no failure can leave it behind.
+staging=""
 scratch_db=""
 on_exit() {
     local status=$?
@@ -105,10 +104,15 @@ on_exit() {
             echo "${KDB_SCRIPT}: warning: could not drop the scratch database ${scratch_db}" >&2
     fi
     # Only disposable plaintext staging is removed, never any saved backup.
-    rm -rf -- "$staging"
+    if [ -n "$staging" ]; then
+        rm -rf -- "$staging"
+    fi
     exit "$status"
 }
 trap on_exit EXIT
+staging="$(backup_plaintext_dir)"
+work="$staging/payload"
+mkdir "$work"
 
 kdb_stop_keycloak
 
