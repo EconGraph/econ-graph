@@ -41,6 +41,7 @@
 #   econ-graph-keycloak            admin-username            KEYCLOAK_ADMIN_USERNAME (default admin)
 #                                  admin-password            KEYCLOAK_ADMIN_PASSWORD (generated)
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
+#                                  anonymous-client-secret   KEYCLOAK_ANONYMOUS_CLIENT_SECRET (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
@@ -106,11 +107,12 @@
 # --dry-run runs every check against the cluster and prints, per Secret, the
 # keys it would write and how each value was resolved; it writes nothing.
 #
-# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
-# and its KUBECONFIG, on that kubectl's current context (or --context). Run by hand with none
-# of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
-# kubeconfig when copies are kept in ~/.cache/econgraph, and says so
-# (cluster_role_default_kubectl in lib/cluster-role.sh).
+# Other environment: NAMESPACE (default econ-graph), KUBECTL and its
+# KUBECONFIG, on that kubectl's current context (or --context). Run by hand
+# without KUBECTL, it uses the kind cluster's own kubectl kept in
+# ~/.cache/econgraph, with KUBECONFIG if that is set and the kind cluster's
+# kubeconfig kept there if not, and says so; without those copies it stops
+# (cluster_role_default_kubectl in lib/cluster-role.sh). Never plain kubectl.
 
 set -euo pipefail
 # Never trace: the values handled below are credentials.
@@ -140,6 +142,11 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
 
 if [[ "$CLOUDFLARE_DNS_ONLY" == true && "$PROMPT_TUNNEL_TOKEN" == true ]]; then
     echo "create-secrets: error: DNS-only mode cannot prompt for a tunnel token" >&2
@@ -178,7 +185,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
 # --context=NAME replaces an inherited CLUSTER_ROLE_CONTEXT before the kubectl
 # is chosen, so it is the same kubectl as a run without the inherited one.
 if [[ -n "$CONTEXT_ARG" ]]; then unset CLUSTER_ROLE_CONTEXT; fi
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 
 # --context=NAME pins that context, replacing an inherited one (as
@@ -640,6 +647,7 @@ else
 fi
 add_required KEYCLOAK_ADMIN_PASSWORD admin-password
 add_required KEYCLOAK_DB_PASSWORD db-password
+add_required KEYCLOAK_ANONYMOUS_CLIENT_SECRET anonymous-client-secret
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
 apply_secret

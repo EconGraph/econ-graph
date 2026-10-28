@@ -82,6 +82,15 @@ def render(branch, backend_image, frontend_image, local_data=False, data_image=N
                 d['spec']['rules'][0]['backendRefs'][0]['namespace'] = 'econ-graph'
         if kind not in ('Deployment', 'StatefulSet', 'Job'):
             continue
+        # Prometheus runs in econ-graph, which branch-isolation keeps out, and the
+        # backend's alert rules have no namespace filter: branch pods are not scrape targets.
+        template_meta = d['spec']['template'].get('metadata', {})
+        annotations = {key: value for key, value in template_meta.get('annotations', {}).items()
+                       if not key.startswith('prometheus.io/')}
+        if annotations:
+            template_meta['annotations'] = annotations
+        else:
+            template_meta.pop('annotations', None)
         pod = d['spec']['template']['spec']
         pod['automountServiceAccountToken'] = False
         if kind == 'Deployment':

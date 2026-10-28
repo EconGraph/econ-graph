@@ -119,6 +119,17 @@ spec:
               key: CORS_ORIGIN
         - name: OIDC_ISSUER
           value: http://localhost/idp/realms/econ-graph
+        - name: OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP
+          value: 'true'
+        - name: OIDC_ANONYMOUS_TOKEN_URL
+          value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token
+        - name: OIDC_ANONYMOUS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: anonymous-client-secret
+        - name: ANONYMOUS_GRANTS_STALE_MAX_SECS
+          value: '0'
         - name: OIDC_AUDIENCE
           value: econ-graph-api
         - name: OIDC_JWKS_URL
@@ -726,6 +737,11 @@ spec:
           value: xforwarded
         - name: KC_HEALTH_ENABLED
           value: 'true'
+        - name: KC_ANONYMOUS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: anonymous-client-secret
         - name: KC_WEB_BASE_URL
           value: http://localhost
         - name: KC_WEB_E2E_BASE_URL
@@ -808,7 +824,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
       - name: render-realm
-        image: quay.io/keycloak/keycloak:26.8.1
+        image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5
         command:
         - /bin/bash
         - -c
@@ -818,10 +834,30 @@ spec:
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}"
           ]; then export KC_GOOGLE_ENABLED=true; fi
 
-          bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/econ-graph-realm.json
+          bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/realm-template.json
+
+          python /config/preserve-catalog-grants.py /rendered/realm-template.json
+          > /rendered/econ-graph-realm.json
 
           '
         env:
+        - name: KEYCLOAK_URL
+          value: http://keycloak-service:8080/idp
+        - name: KEYCLOAK_USER
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-username
+        - name: KEYCLOAK_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-password
+        - name: KC_ANONYMOUS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: anonymous-client-secret
         - name: KC_WEB_BASE_URL
           value: http://localhost
         - name: KC_WEB_E2E_BASE_URL
@@ -860,7 +896,6 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
-      containers:
       - name: keycloak-config-cli
         image: adorsys/keycloak-config-cli:6.5.1-26.5.5
         env:
@@ -880,6 +915,8 @@ spec:
           value: 'true'
         - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
           value: 600s
+        - name: IMPORT_BEHAVIORS_REMOVEDEFAULTROLEFROMUSER
+          value: 'true'
         - name: IMPORT_FILES_LOCATIONS
           value: /rendered/econ-graph-realm.json
         volumeMounts:
@@ -896,6 +933,50 @@ spec:
         securityContext:
           runAsNonRoot: true
           runAsUser: 65534
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: finalize-catalog-policy
+        image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5
+        command:
+        - python
+        - /config/preserve-catalog-grants.py
+        - --complete
+        - /rendered/econ-graph-realm.json
+        env:
+        - name: KEYCLOAK_URL
+          value: http://keycloak-service:8080/idp
+        - name: KEYCLOAK_USER
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-username
+        - name: KEYCLOAK_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-password
+        volumeMounts:
+        - name: realm
+          mountPath: /config
+          readOnly: true
+        - name: rendered
+          mountPath: /rendered
+          readOnly: true
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 50m
+          limits:
+            memory: 128Mi
+            cpu: 250m
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
           allowPrivilegeEscalation: false
           capabilities:
             drop:

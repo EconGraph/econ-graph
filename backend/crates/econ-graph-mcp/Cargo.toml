@@ -41,6 +41,7 @@ diesel-async.workspace = true
 
 # Test dependencies
 [dev-dependencies]
+econ-graph-auth = { path = "../econ-graph-auth" }
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true

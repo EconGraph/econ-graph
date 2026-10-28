@@ -396,6 +396,23 @@ impl CollaborationService {
             })
     }
 
+    /// The series an annotation is on: `None` for a chart annotation or a missing annotation.
+    /// An annotation's series never changes, so callers may check catalog access on it before
+    /// reading or writing the annotation.
+    pub async fn annotation_series_id(&self, annotation_id: Uuid) -> AppResult<Option<String>> {
+        let mut conn = self.pool.get().await.map_err(|e| {
+            AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+        })?;
+        Ok(chart_annotations::table
+            .find(annotation_id)
+            .select(chart_annotations::series_id)
+            .first::<Option<String>>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .flatten())
+    }
+
     /// Get annotations for a series
     pub async fn get_annotations_for_series(
         &self,

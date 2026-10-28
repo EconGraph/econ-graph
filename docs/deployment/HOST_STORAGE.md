@@ -68,8 +68,11 @@ the operator account (`<operator>`). Everything after that runs without sudo.
   Secrets); the data plane goes only with `--include-data-plane` and the data
   database's name typed on a terminal. `released-pvs.sh` never deletes a PV
   labelled `econgraph.io/protected=true`, which these three are.
-  `recreate-kind-cluster.sh` takes a dump and asks for a confirmation before
-  deleting the cluster, and `terraform destroy` doesn't delete it.
+  `recreate-kind-cluster.sh` asks for a confirmation and takes a dump before
+  deleting the cluster; on a cluster with a production marker, or one whose
+  marker can't be read, the confirmation is the first 8 characters of its
+  kube-system UID (typed, or `--confirm-production`), never `--yes`.
+  `terraform destroy` doesn't delete it.
 
 ## Which Docker daemon
 
@@ -194,7 +197,11 @@ checks for real and changes nothing.
 | 3. `scripts/deploy/migrate-to-host-storage.sh` | **needs the maintainer's go-ahead** | no | **yes**: downtime, then the kind cluster is deleted and recreated |
 
 Step 3 asks for a typed `yes` before stopping anything (`--yes` skips the
-prompt). It then does the following:
+prompt). If the cluster has a production marker, or its marker can't be read,
+recreating it also needs the first 8 characters of its kube-system UID, given
+as `--confirm-production` or typed at the terminal; `--yes` does not answer it.
+Both confirmations are asked before anything is stopped, and without a
+terminal and without `--confirm-production` the script stops there. It then does the following:
 
 1. **Preflight.** The subvolumes are mounted btrfs owned by you. `pg/` and
    `keycloak-pg/` are empty (move a leftover one aside; the script says how).
@@ -258,28 +265,84 @@ The host subvolumes are not touched by a rollback. Their contents are stale
 from that point on. Move `pg/` and `keycloak-pg/` aside before migrating again
 (the forward preflight refuses non-empty directories).
 
-## Recovering production (ECO-432)
+## Recovering the cluster
 
-On 2026-10-24 at 05:25 UTC the cluster on the rootless daemon was gone, and a
-new one could not start there. Production comes back on the rootful daemon
-from the backup taken just before:
-`~/econgraph-backups/20261024T052524Z/` (dumps, `counts.env`, `secrets/`,
-`local-images.txt`). The older `20261024T0442Z/` has dumps only, no
-`counts.env` and no Secrets, so the restore script refuses it.
+Every command here runs on the rootful daemon, so `DOCKER_HOST` is set
+explicitly (the operator's shell exports the rootless one). Run each script
+step with `--dry-run` first. Every step can be re-run.
 
-Run each step with `--dry-run` first. Every step can be re-run.
+### A cluster whose API server doesn't answer
 
-1. Cluster (deletes an unreachable cluster of the same name only with
-   `--delete-unreachable`, after a typed `yes`; installs the gateway):
+`recreate-kind-cluster.sh` deletes a cluster only after reading its
+kube-system UID inside the control-plane container. When the API server doesn't
+answer, that read fails, and the script refuses even with
+`--delete-unreachable`, because nothing can show that the cluster is not
+production. Bring it back first, so it goes through the normal backup and
+confirmation:
+
+1. **Stopped node containers.** Start them, then check that the API server
+   answers:
 
    ```bash
-   scripts/deploy/recreate-kind-cluster.sh --if-missing --delete-unreachable
+   DOCKER_HOST=unix:///var/run/docker.sock docker ps -a --filter label=io.x-k8s.kind.cluster=econ-graph
+   DOCKER_HOST=unix:///var/run/docker.sock docker start econ-graph-control-plane econ-graph-worker
+   DOCKER_HOST=unix:///var/run/docker.sock docker exec econ-graph-control-plane \
+     kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes
+   ```
+
+2. **Expired certificates.** kubeadm's certificates expire one year after the
+   cluster is created; `kubeadm certs check-expiration` shows them. Renew them
+   inside the control-plane node, which also renews the client certificates in
+   `admin.conf`, `controller-manager.conf` and `scheduler.conf`. The control
+   plane picks up the new certificates only when its static Pods restart
+   ([Certificate Management with kubeadm, "Manual certificate renewal"](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#manual-certificate-renewal)),
+   which restarting the node container does:
+
+   ```bash
+   DOCKER_HOST=unix:///var/run/docker.sock docker exec econ-graph-control-plane kubeadm certs check-expiration
+   DOCKER_HOST=unix:///var/run/docker.sock docker exec econ-graph-control-plane kubeadm certs renew all
+   DOCKER_HOST=unix:///var/run/docker.sock docker restart econ-graph-control-plane
+   DOCKER_HOST=unix:///var/run/docker.sock docker exec econ-graph-control-plane \
+     kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes
+   ```
+
+   `kubeadm certs renew` does not cover a kubelet's own client certificate
+   (`/var/lib/kubelet/pki/kubelet-client-current.pem`), which the kubelet
+   rotates itself. If a node stays `NotReady` and its kubelet log
+   (`docker exec <node> journalctl -u kubelet`) says its certificate has
+   expired, repair it as in
+   [Kubelet client certificate rotation fails](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/#kubelet-client-cert).
+   Once the API server answers, the scripts fetch a fresh kubeconfig
+   themselves (`kind get kubeconfig`), and `recreate-kind-cluster.sh` backs
+   the cluster up and asks for the confirmation as for any other cluster.
+
+3. **Last resort: delete it by hand.** Only when it can't be brought back and
+   you are sure it is the cluster to lose. This skips the backup and the
+   production check: everything in its nodes is lost (the host subvolumes are
+   not). It uses the pinned kind (`scripts/deploy/lib/kind-version.sh`) and
+   the kubeconfig the scripts keep, so `~/.kube/config` is not touched:
+
+   ```bash
+   DOCKER_HOST=unix:///var/run/docker.sock ~/.local/share/econgraph/bin/kind-v0.33.0 \
+     delete cluster --name econ-graph --kubeconfig ~/.cache/econgraph/kubeconfig-econ-graph
+   ```
+
+### Restoring production from a backup
+
+Into a new cluster, from a backup directory taken by
+`backup-kind-databases.sh`, `recreate-kind-cluster.sh` or `teardown.sh`
+(dumps, `counts.env`, `secrets/` and, from a migration, `local-images.txt`):
+
+1. Cluster (creates it when there is none; installs the gateway):
+
+   ```bash
+   scripts/deploy/recreate-kind-cluster.sh --if-missing
    ```
 
 2. Images, from the rootless daemon where they were built:
 
    ```bash
-   scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/20261024T052524Z/local-images.txt
+   scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/<ts>/local-images.txt
    ```
 
 3. Mark the new cluster as production, before anything is restored into it.
@@ -294,12 +357,12 @@ Run each step with `--dry-run` first. Every step can be re-run.
 
 4. Databases: namespace, the saved Secrets, PVs and the Postgres
    StatefulSets, then the restores. It stops with
-   `RESTORE VERIFICATION FAILED` unless `counts.env` says 10,528 series and
-   503,001 data points and the restored database has exactly the counts in
-   `counts.env`:
+   `RESTORE VERIFICATION FAILED` unless the restored database has exactly the
+   counts in `counts.env`; `--expect-series` and `--expect-data-points` also
+   require `counts.env` to hold the counts you expect:
 
    ```bash
-   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/20261024T052524Z --expect-series 10528 --expect-data-points 503001
+   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/<ts> --expect-series N --expect-data-points N
    ```
 
 5. Everything else:
@@ -307,12 +370,6 @@ Run each step with `--dry-run` first. Every step can be re-run.
    ```bash
    PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh
    ```
-
-The rootful daemon still had a kind cluster named `econ-graph` from
-2025-10-02, with its API server down (certificates expired 2026-10-02). It
-holds host ports 80, 443, 3000 and 8080, so step 1 has to delete it.
-`--delete-unreachable` is what allows that; nothing can be backed up from it
-first.
 
 ### After a host reboot
 
@@ -324,8 +381,8 @@ them; `sudo scripts/host/order-docker-after-subvolumes.sh` adds a drop-in that
 orders dockerd after the two mounts.
 
 kubeadm's certificates in a kind cluster expire one year after it is created.
-That is what stopped the 2025 cluster. Renew them, or recreate the cluster,
-before then.
+Renew them, or recreate the cluster, before then (see "A cluster whose API
+server doesn't answer" above).
 
 ## The app database on an existing cluster
 

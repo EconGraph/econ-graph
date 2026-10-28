@@ -23,36 +23,40 @@ patches:
     - op: replace\n  path: /spec\n  value:\n    replicas: 1\n    selector:\n     \
     \ matchLabels:\n        app: econ-graph-backend\n    template:\n      metadata:\n\
     \        labels:\n          app: econ-graph-backend\n          component: backend\n\
-    \        annotations:\n          prometheus.io/scrape: 'true'\n          prometheus.io/port:\
-    \ '9876'\n          prometheus.io/path: /metrics\n      spec:\n        initContainers:\n\
-    \        - name: wait-for-postgres\n          image: busybox:1.38\n          command:\n\
-    \          - sh\n          - -c\n          args:\n          - \"echo \\\"Waiting\
-    \ for PostgreSQL to be ready...\\\"\\nuntil nc -z app-postgres-service\\\n   \
-    \         \\ 5432; do\\n  echo \\\"PostgreSQL is unavailable - sleeping\\\"\\\
-    n  sleep 2\\n\\\n            done\\necho \\\"PostgreSQL is ready!\\\"\\n\"\n \
-    \         resources:\n            requests:\n              memory: 16Mi\n    \
-    \          cpu: 10m\n            limits:\n              memory: 32Mi\n       \
-    \       cpu: 50m\n          securityContext:\n            runAsNonRoot: true\n\
-    \            runAsUser: 1000\n            allowPrivilegeEscalation: false\n  \
-    \          readOnlyRootFilesystem: true\n            capabilities:\n         \
-    \     drop:\n              - ALL\n            seccompProfile:\n              type:\
-    \ RuntimeDefault\n        containers:\n        - name: backend\n          image:\
-    \ econ-graph-backend:branch-example\n          imagePullPolicy: IfNotPresent\n\
-    \          ports:\n          - containerPort: 9876\n            name: http\n \
-    \         env:\n          - name: BACKEND_PORT\n            valueFrom:\n     \
-    \         configMapKeyRef:\n                name: econ-graph-config\n        \
-    \        key: BACKEND_PORT\n          - name: FRONTEND_PORT\n            valueFrom:\n\
+    \      spec:\n        initContainers:\n        - name: wait-for-postgres\n   \
+    \       image: busybox:1.38\n          command:\n          - sh\n          - -c\n\
+    \          args:\n          - \"echo \\\"Waiting for PostgreSQL to be ready...\\\
+    \"\\nuntil nc -z app-postgres-service\\\n            \\ 5432; do\\n  echo \\\"\
+    PostgreSQL is unavailable - sleeping\\\"\\n  sleep 2\\n\\\n            done\\\
+    necho \\\"PostgreSQL is ready!\\\"\\n\"\n          resources:\n            requests:\n\
+    \              memory: 16Mi\n              cpu: 10m\n            limits:\n   \
+    \           memory: 32Mi\n              cpu: 50m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation:\
+    \ false\n            readOnlyRootFilesystem: true\n            capabilities:\n\
+    \              drop:\n              - ALL\n            seccompProfile:\n     \
+    \         type: RuntimeDefault\n        containers:\n        - name: backend\n\
+    \          image: econ-graph-backend:branch-example\n          imagePullPolicy:\
+    \ IfNotPresent\n          ports:\n          - containerPort: 9876\n          \
+    \  name: http\n          env:\n          - name: BACKEND_PORT\n            valueFrom:\n\
     \              configMapKeyRef:\n                name: econ-graph-config\n   \
-    \             key: FRONTEND_PORT\n          - name: APP_DATABASE_URL\n       \
-    \     valueFrom:\n              secretKeyRef:\n                name: econ-graph-secrets\n\
+    \             key: BACKEND_PORT\n          - name: FRONTEND_PORT\n           \
+    \ valueFrom:\n              configMapKeyRef:\n                name: econ-graph-config\n\
+    \                key: FRONTEND_PORT\n          - name: APP_DATABASE_URL\n    \
+    \        valueFrom:\n              secretKeyRef:\n                name: econ-graph-secrets\n\
     \                key: app-database-url\n          - name: RUST_LOG\n         \
     \   valueFrom:\n              configMapKeyRef:\n                name: econ-graph-config\n\
     \                key: RUST_LOG\n          - name: REFERENCE_DATA_DIR\n       \
     \     value: /app/reference\n          - name: CRAWLER_DATA_DIR\n            value:\
     \ /app/data\n          - name: CORS_ALLOWED_ORIGINS\n            valueFrom:\n\
     \              configMapKeyRef:\n                name: econ-graph-config\n   \
-    \             key: CORS_ORIGIN\n          - name: OIDC_AUDIENCE\n            value:\
-    \ econ-graph-api\n          - name: OIDC_JWKS_URL\n            value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs\n\
+    \             key: CORS_ORIGIN\n          - name: OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP\n\
+    \            value: 'true'\n          - name: OIDC_ANONYMOUS_TOKEN_URL\n     \
+    \       value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token\n\
+    \          - name: OIDC_ANONYMOUS_CLIENT_SECRET\n            valueFrom:\n    \
+    \          secretKeyRef:\n                name: econ-graph-keycloak\n        \
+    \        key: anonymous-client-secret\n          - name: ANONYMOUS_GRANTS_STALE_MAX_SECS\n\
+    \            value: '0'\n          - name: OIDC_AUDIENCE\n            value: econ-graph-api\n\
+    \          - name: OIDC_JWKS_URL\n            value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs\n\
     \          - name: OIDC_REQUIRED\n            value: 'true'\n          - name:\
     \ OIDC_ISSUER\n            value: http://example-50d858e098.localhost/idp/realms/econ-graph\n\
     \          - name: DATA_GRAPHQL_URL\n            value: http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql\n\
@@ -278,9 +282,12 @@ patches:
     \          - name: KC_HTTP_RELATIVE_PATH\n            value: /idp\n          -\
     \ name: KC_HTTP_ENABLED\n            value: 'true'\n          - name: KC_PROXY_HEADERS\n\
     \            value: xforwarded\n          - name: KC_HEALTH_ENABLED\n        \
-    \    value: 'true'\n          - name: KC_HOSTNAME\n            value: http://example-50d858e098.localhost/idp\n\
-    \          - name: KC_WEB_BASE_URL\n            value: http://example-50d858e098.localhost\n\
-    \          - name: KC_WEB_E2E_BASE_URL\n            value: http://example-50d858e098.localhost\n\
+    \    value: 'true'\n          - name: KC_ANONYMOUS_CLIENT_SECRET\n           \
+    \ valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: anonymous-client-secret\n          - name: KC_HOSTNAME\n\
+    \            value: http://example-50d858e098.localhost/idp\n          - name:\
+    \ KC_WEB_BASE_URL\n            value: http://example-50d858e098.localhost\n  \
+    \        - name: KC_WEB_E2E_BASE_URL\n            value: http://example-50d858e098.localhost\n\
     \          ports:\n          - containerPort: 8080\n            name: http\n \
     \         - containerPort: 9000\n            name: management\n          resources:\n\
     \            requests:\n              memory: 512Mi\n              cpu: 250m\n\
@@ -308,13 +315,22 @@ patches:
     \ 86400\n    template:\n      metadata:\n        labels:\n          app: keycloak-realm-import\n\
     \          component: auth\n      spec:\n        restartPolicy: Never\n      \
     \  automountServiceAccountToken: false\n        initContainers:\n        - name:\
-    \ render-realm\n          image: quay.io/keycloak/keycloak:26.8.1\n          command:\n\
-    \          - /bin/bash\n          - -c\n          args:\n          - 'set -euo\
-    \ pipefail\n\n            if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\" ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\
-    \n            ]; then export KC_GOOGLE_ENABLED=true; fi\n\n            bash /config/render-realm.sh\
-    \ /config/econ-graph-realm.json > /rendered/econ-graph-realm.json\n\n        \
-    \    '\n          env:\n          - name: KC_WEB_BASE_URL\n            value:\
-    \ http://example-50d858e098.localhost\n          - name: KC_WEB_E2E_BASE_URL\n\
+    \ render-realm\n          image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5\n\
+    \          command:\n          - /bin/bash\n          - -c\n          args:\n\
+    \          - 'set -euo pipefail\n\n            if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
+    \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
+    \ fi\n\n            bash /config/render-realm.sh /config/econ-graph-realm.json\
+    \ > /rendered/realm-template.json\n\n            python /config/preserve-catalog-grants.py\
+    \ /rendered/realm-template.json\n            > /rendered/econ-graph-realm.json\n\
+    \n            '\n          env:\n          - name: KEYCLOAK_URL\n            value:\
+    \ http://keycloak-service:8080/idp\n          - name: KEYCLOAK_USER\n        \
+    \    valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: admin-username\n          - name: KEYCLOAK_PASSWORD\n  \
+    \          valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: admin-password\n          - name: KC_ANONYMOUS_CLIENT_SECRET\n\
+    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: anonymous-client-secret\n          - name: KC_WEB_BASE_URL\n\
+    \            value: http://example-50d858e098.localhost\n          - name: KC_WEB_E2E_BASE_URL\n\
     \            value: http://example-50d858e098.localhost\n          volumeMounts:\n\
     \          - name: realm\n            mountPath: /config\n            readOnly:\
     \ true\n          - name: rendered\n            mountPath: /rendered\n       \
@@ -323,21 +339,38 @@ patches:
     \  cpu: 250m\n          securityContext:\n            runAsNonRoot: true\n   \
     \         runAsUser: 1000\n            allowPrivilegeEscalation: false\n     \
     \       capabilities:\n              drop:\n              - ALL\n            seccompProfile:\n\
-    \              type: RuntimeDefault\n        containers:\n        - name: keycloak-config-cli\n\
-    \          image: adorsys/keycloak-config-cli:6.5.1-26.5.5\n          env:\n \
-    \         - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
+    \              type: RuntimeDefault\n        - name: keycloak-config-cli\n   \
+    \       image: adorsys/keycloak-config-cli:6.5.1-26.5.5\n          env:\n    \
+    \      - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
     \          - name: KEYCLOAK_USER\n            valueFrom:\n              secretKeyRef:\n\
     \                name: econ-graph-keycloak\n                key: admin-username\n\
     \          - name: KEYCLOAK_PASSWORD\n            valueFrom:\n              secretKeyRef:\n\
     \                name: econ-graph-keycloak\n                key: admin-password\n\
     \          - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED\n            value: 'true'\n\
     \          - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT\n            value: 600s\n\
-    \          - name: IMPORT_FILES_LOCATIONS\n            value: /rendered/econ-graph-realm.json\n\
+    \          - name: IMPORT_BEHAVIORS_REMOVEDEFAULTROLEFROMUSER\n            value:\
+    \ 'true'\n          - name: IMPORT_FILES_LOCATIONS\n            value: /rendered/econ-graph-realm.json\n\
     \          volumeMounts:\n          - name: rendered\n            mountPath: /rendered\n\
     \            readOnly: true\n          resources:\n            requests:\n   \
     \           memory: 256Mi\n              cpu: 100m\n            limits:\n    \
     \          memory: 512Mi\n              cpu: 500m\n          securityContext:\n\
     \            runAsNonRoot: true\n            runAsUser: 65534\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n        containers:\n\
+    \        - name: finalize-catalog-policy\n          image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5\n\
+    \          command:\n          - python\n          - /config/preserve-catalog-grants.py\n\
+    \          - --complete\n          - /rendered/econ-graph-realm.json\n       \
+    \   env:\n          - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
+    \          - name: KEYCLOAK_USER\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-username\n\
+    \          - name: KEYCLOAK_PASSWORD\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-password\n\
+    \          volumeMounts:\n          - name: realm\n            mountPath: /config\n\
+    \            readOnly: true\n          - name: rendered\n            mountPath:\
+    \ /rendered\n            readOnly: true\n          resources:\n            requests:\n\
+    \              memory: 64Mi\n              cpu: 50m\n            limits:\n   \
+    \           memory: 128Mi\n              cpu: 250m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation:\
     \ false\n            capabilities:\n              drop:\n              - ALL\n\
     \            seccompProfile:\n              type: RuntimeDefault\n        volumes:\n\
     \        - name: realm\n          configMap:\n            name: keycloak-realm\n\

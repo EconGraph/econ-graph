@@ -99,6 +99,13 @@ impl Mutation {
 
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
         let is_public = input.is_public.unwrap_or(false);
+        // Catalog access first, in the data database or through the data plane: a series the
+        // caller can't read gets the same error as one that doesn't exist.
+        if !crate::graphql::catalogs::series_visible(ctx, series_id).await? {
+            return Err(
+                econ_graph_core::error::AppError::SeriesNotFound(series_id.to_string()).into(),
+            );
+        }
 
         let annotation = collaboration_service
             .create_annotation(
@@ -129,6 +136,12 @@ impl Mutation {
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
+        crate::graphql::catalogs::require_annotation_readable(
+            ctx,
+            &collaboration_service,
+            annotation_id,
+        )
+        .await?;
 
         let comment = collaboration_service
             .add_comment(user_id, annotation_id, input.content)
@@ -180,6 +193,12 @@ impl Mutation {
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
         let is_public = input.is_public;
+        crate::graphql::catalogs::require_annotation_readable(
+            ctx,
+            &collaboration_service,
+            annotation_id,
+        )
+        .await?;
 
         let annotation = collaboration_service
             .update_annotation(

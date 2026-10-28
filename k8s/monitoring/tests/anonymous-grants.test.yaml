@@ -1,0 +1,89 @@
+# promtool unit tests for prometheus-rules-auth.yaml.
+# Run through ../check-prometheus-rules.sh, which writes each rule ConfigMap's files to a temp
+# directory and copies this file next to them.
+rule_files:
+  - auth.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Healthy: renewals succeed, grants held, task running. Nothing fires.
+  - interval: 1m
+    input_series:
+      - series: 'anonymous_grant_renewal_consecutive_failures{app="econ-graph-backend"}'
+        values: '0x30'
+      - series: 'anonymous_catalog_grants{app="econ-graph-backend"}'
+        values: '17x30'
+      - series: 'anonymous_grant_refresh_task_running{app="econ-graph-backend"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AnonymousGrantRenewalFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AnonymousCatalogGrantsEmpty
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AnonymousGrantRefreshStopped
+        exp_alerts: []
+
+  # Keycloak stops answering at 5m. The input climbs by six failures per one-minute sample
+  # (a real outage gives four to six a minute, depending on how long each attempt waits).
+  # Renewal alerts at 7m (six reached at 6m, held a minute), not before. Grants lapse at 10m;
+  # the empty alert needs 10 minutes of that.
+  - interval: 1m
+    input_series:
+      - series: 'anonymous_grant_renewal_consecutive_failures{app="econ-graph-backend"}'
+        values: '0x4 0+6x25'
+      - series: 'anonymous_catalog_grants{app="econ-graph-backend"}'
+        values: '17x9 0x20'
+      - series: 'anonymous_grant_refresh_task_running{app="econ-graph-backend"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AnonymousGrantRenewalFailing
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: AnonymousGrantRenewalFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              app: econ-graph-backend
+            exp_annotations:
+              summary: The backend can't renew anonymous catalog grants from Keycloak
+              description: A backend has failed to renew the anonymous catalog grants six or more times in a row. Once the current grants expire (and any ANONYMOUS_GRANTS_STALE_MAX_SECS window passes), anonymous visitors see no catalogs. Check the backend log for "Anonymous catalog grant renewal failed" or "Keycloak refused the anonymous catalog client", and Keycloak itself.
+      - eval_time: 19m
+        alertname: AnonymousCatalogGrantsEmpty
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AnonymousCatalogGrantsEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              app: econ-graph-backend
+            exp_annotations:
+              summary: Anonymous visitors have had no catalog access for 10 minutes
+              description: A backend has held no anonymous catalog grants for 10 minutes, so anonymous visitors see empty catalogs. Expected only when every catalog was withdrawn from anonymous visitors in Keycloak; otherwise see AnonymousGrantRenewalFailing and the backend log.
+
+  # Two replicas; one's refresh task ends at 3m. The stopped alert fires for that pod alone,
+  # naming it.
+  - interval: 1m
+    input_series:
+      - series: 'anonymous_grant_refresh_task_running{app="econ-graph-backend", kubernetes_pod_name="a"}'
+        values: '1x10'
+      - series: 'anonymous_grant_refresh_task_running{app="econ-graph-backend", kubernetes_pod_name="b"}'
+        values: '1x2 0x8'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AnonymousGrantRefreshStopped
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: AnonymousGrantRefreshStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              app: econ-graph-backend
+              kubernetes_pod_name: b
+            exp_annotations:
+              summary: A backend stopped renewing anonymous catalog grants
+              description: The background task that renews anonymous catalog grants has ended in a backend, so its anonymous grants lapse within five minutes and are never renewed. Restart the backend (`kubectl -n econ-graph rollout restart deployment/econ-graph-backend`) and look for "refresh task" in its log.

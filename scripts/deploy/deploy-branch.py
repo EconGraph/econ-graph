@@ -142,9 +142,12 @@ def main():
         if any(present) and not all(present):
             raise ValueError('incomplete branch credentials; restore missing Secrets or recreate this disposable namespace')
         if not any(present):
-            app, app_admin, kc_db, kc_admin, data, data_admin = [secrets.token_hex(24) for _ in range(6)]
+            app, app_admin, kc_db, kc_admin, kc_anonymous, data, data_admin = [secrets.token_hex(24) for _ in range(7)]
             secret('econ-graph-app-postgres', {'postgres-password': app_admin, 'app-password': app})
-            secret('econ-graph-keycloak', {'admin-username': 'admin', 'admin-password': kc_admin, 'db-password': kc_db})
+            # anonymous-client-secret: the branch backend's anonymous catalog reader in the
+            # branch Keycloak (read by Keycloak, the realm import and the backend).
+            secret('econ-graph-keycloak', {'admin-username': 'admin', 'admin-password': kc_admin, 'db-password': kc_db,
+                                           'anonymous-client-secret': kc_anonymous})
             urls = {'app-database-url': f'postgresql://econgraph:{app}@app-postgres-service:5432/econ_graph_app'}
             if args.local_data:
                 secret('econ-graph-postgres', {'postgres-password': data_admin, 'app-password': data})
@@ -155,7 +158,8 @@ def main():
         docs.append({'apiVersion': 'v1', 'kind': 'ConfigMap',
             'metadata': {'name': 'keycloak-realm', 'namespace': namespace}, 'data': {
                 'econ-graph-realm.json': json.dumps(realm),
-                'render-realm.sh': (renderer.ROOT/'scripts/keycloak/render-realm.sh').read_text()}})
+                'render-realm.sh': (renderer.ROOT/'scripts/keycloak/render-realm.sh').read_text(),
+                'preserve-catalog-grants.py': (renderer.ROOT/'scripts/keycloak/preserve-catalog-grants.py').read_text()}})
         early = [d for d in docs[1:] if d['kind'] not in ('Deployment', 'Job')]
         apply(early)
         for statefulset in ['app-postgres', 'keycloak-postgres'] + (['postgresql'] if args.local_data else []):

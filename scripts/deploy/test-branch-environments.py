@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -142,6 +143,31 @@ class RenderTests(unittest.TestCase):
                 self.assertEqual(route['spec']['hostnames'], [self.slug + '.localhost'])
                 self.assertEqual([p.get('sectionName') for p in route['spec']['parentRefs']], ['http'])
 
+    def test_branch_pods_are_not_scrape_targets(self):
+        # Prometheus runs in econ-graph, which branch-isolation admits no traffic from, and the
+        # backend alert rules (prometheus-rules-auth.yaml) carry no namespace filter.
+        for docs in [self.docs, r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')]:
+            for d in docs:
+                if d['kind'] in ['StatefulSet', 'Deployment', 'Job']:
+                    annotations = d['spec']['template'].get('metadata', {}).get('annotations', {})
+                    self.assertFalse([key for key in annotations if key.startswith('prometheus.io/')], d['metadata']['name'])
+
+    def test_backend_starts_with_a_data_plane_and_branch_local_anonymous_grants(self):
+        # With sign-in on, a backend with neither DATA_DATABASE_URL nor DATA_GRAPHQL_URL refuses
+        # to start. Anonymous catalog grants come from the branch Keycloak, and the data plane
+        # is asked anonymously (no caller-token forwarding to the primary).
+        local = r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')
+        for docs, data_env in [(self.docs, 'DATA_GRAPHQL_URL'), (local, 'DATA_DATABASE_URL')]:
+            backend = by_name(docs, 'Deployment', 'econ-graph-backend')['spec']['template']['spec']['containers'][0]
+            env = {e['name']: e for e in backend['env']}
+            self.assertIn('OIDC_ISSUER', env)
+            self.assertIn(data_env, env)
+            self.assertNotIn('DATA_GRAPHQL_FORWARD_AUTHORIZATION', env)
+            self.assertEqual(env['OIDC_ANONYMOUS_TOKEN_URL']['value'],
+                             'http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token')
+            self.assertEqual(env['OIDC_ANONYMOUS_CLIENT_SECRET']['valueFrom']['secretKeyRef'],
+                             {'name': 'econ-graph-keycloak', 'key': 'anonymous-client-secret'})
+
     def test_local_data_uses_own_backend_and_tagged_data_image(self):
         docs = r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')
         route = by_name(docs, 'HTTPRoute', 'econ-graph-data-graphql')
@@ -202,6 +228,45 @@ class GuardTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('kubectl is required', result.stderr)
             self.assertFalse(marker.exists())
+
+    def test_up_creates_every_secret_key_and_realm_file_the_workloads_use(self):
+        slug, namespace = r.identity('one')
+        sent = []
+        def fake(command, **kwargs):
+            if kwargs.get('input'):
+                sent.extend(d for d in yaml.safe_load_all(kwargs['input']) if d)
+            code, out = 0, ''
+            if 'nc' in command:
+                client, target = command[command.index('exec') + 1], command[-2]
+                code = 0 if ((client == 'branch-network-allow' and target == '10.244.1.3')
+                             or (client == 'branch-network-backend' and target == '10.96.0.13')) else 1
+            elif 'get' in command and 'json' in command:
+                kind, name = command[command.index('get') + 1:command.index('get') + 3]
+                if kind == 'pod':
+                    out = json.dumps({'status': {'podIP': '10.244.1.3'}})
+                elif kind == 'service':
+                    out = json.dumps({'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
+                        'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}[name]}})
+            return subprocess.CompletedProcess(command, code, stdout=out)
+        argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+        with patch.object(sys, 'argv', argv), patch.object(subprocess, 'run', side_effect=fake):
+            deploy.main()
+        secrets_ = {d['metadata']['name']: d['stringData'] for d in sent if d['kind'] == 'Secret'}
+        self.assertIn('anonymous-client-secret', secrets_['econ-graph-keycloak'])
+        realm = next(d for d in sent if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'keycloak-realm')['data']
+        workloads = [d for d in sent if d['kind'] in ['Deployment', 'StatefulSet', 'Job']]
+        self.assertTrue(workloads)
+        for d in workloads:
+            pod = d['spec']['template']['spec']
+            for c in pod.get('initContainers', []) + pod['containers']:
+                for e in c.get('env', []):
+                    ref = e.get('valueFrom', {}).get('secretKeyRef')
+                    if ref and not ref.get('optional'):
+                        self.assertIn(ref['key'], secrets_.get(ref['name'], {}), (d['metadata']['name'], e['name']))
+                text = json.dumps([c.get('command', []), c.get('args', [])])
+                if any(v.get('configMap', {}).get('name') == 'keycloak-realm' for v in pod.get('volumes', [])):
+                    for script in set(re.findall(r'/config/([\w.-]+)', text)):
+                        self.assertIn(script, set(realm), (d['metadata']['name'], c['name']))
 
     def test_local_data_rejects_untagged_crawler(self):
         with self.assertRaises(SystemExit):
