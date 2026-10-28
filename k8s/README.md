@@ -269,7 +269,8 @@ Which cluster it reaches:
   cluster's) and `~/.cache/econgraph/kubeconfig-econ-graph` if not, and say which. They
   never fall back to plain `kubectl`, which may be another cluster's (the microk8s snap
   wrapper ignores `KUBECONFIG` and `~/.kube/config`): when a copy is missing they stop and
-  say which; `scripts/deploy/recreate-kind-cluster.sh` refreshes both, or set `KUBECTL`.
+  say which, with the commands that copy both out of the cluster on the rootful Docker
+  daemon (`docker cp` of its kubectl, `kind get kubeconfig`), or set `KUBECTL`.
 - `deploy.sh` switches the current context of `${KUBECTL:-kubectl}`'s kubeconfig to
   `kind-econ-graph` and pins it (`create-secrets.sh`, run from it, stays on it). So
   `KUBECONFIG` has to be the production cluster's for that reason too: the context is

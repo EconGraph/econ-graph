@@ -288,6 +288,17 @@ run env FAKE_FAIL="get service grafana-service" "$DEPLOY/setup-port-forwarding.s
 expect "setup-port-forwarding.sh, past the cluster check" nonzero \
     "Grafana service not found" "config use-context kind-econ-graph"
 
+# --- the release-image scripts' pin (ri_pin_context, lib/release-images.sh) ------------
+# Without KUBECTL: the kind kubectl and kubeconfig, on kind-<cluster>.
+run bash -c 'RI_SCRIPT=test; source "$1/lib/cluster-role.sh"; source "$1/lib/release-images.sh"; ri_pin_context econ-graph' \
+    _ "$DEPLOY"
+if [ "$rc" -ne 0 ] || [ -s "$LOGS/plain.log" ] || [ ! -s "$LOGS/kind-kubectl.log" ] ||
+    grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph --context kind-econ-graph " "$LOGS/kind-kubectl.log"; then
+    fail "ri_pin_context without KUBECTL: exit $rc, $(cat "$LOGS/plain.log" "$LOGS/kind-kubectl.log")"
+else
+    echo "ok   ri_pin_context without KUBECTL uses the kind kubectl on kind-econ-graph"
+fi
+
 # --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
 # No kind kubectl copies (a HOME whose cache holds only the kind binary): each script
 # stops before any kubectl.
@@ -300,6 +311,12 @@ nocache() { # NAME ARGS...: the script, run without the kind kubectl copies, sto
     if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || [ -s "$LOGS/kind-kubectl.log" ] ||
         ! grep -qF "or set KUBECTL (and KUBECONFIG)" <<<"$out"; then
         fail "$name without the kind kubectl: exit $rc, plain $(cat "$LOGS/plain.log")"
+    # The recovery copies the files on the rootful daemon; it never recreates
+    # the cluster (recreate-kind-cluster.sh deletes it first).
+    elif grep -qF "recreate-kind-cluster" <<<"$out" ||
+        ! grep -qF "DOCKER_HOST=unix:///var/run/docker.sock docker cp -L econ-graph-control-plane:/usr/bin/kubectl" <<<"$out" ||
+        ! grep -qF "DOCKER_HOST=unix:///var/run/docker.sock kind get kubeconfig --name econ-graph >" <<<"$out"; then
+        fail "$name without the kind kubectl: the recovery is not the rootful copy commands: $out"
     else
         echo "ok   $name without the kind kubectl stops"
     fi

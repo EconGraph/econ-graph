@@ -37,7 +37,7 @@ kc() {
 # on the production host that is the MicroK8s snap wrapper, another cluster,
 # and it ignores KUBECONFIG. The kind cluster's own copies live in
 # ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph),
-# kept by scripts/deploy/recreate-kind-cluster.sh, which refreshes them.
+# copied out of the cluster as the error below says.
 #
 #   - KUBECTL set: kept as it is. (deploy.sh exports its KUBECTL with the
 #     context it pins, so scripts it runs keep both.)
@@ -54,7 +54,13 @@ kc() {
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
-    local fix="copy the kind cluster's kubectl and kubeconfig there (docker cp econ-graph-control-plane:/usr/bin/kubectl ${bin}; kind get kubeconfig --name econ-graph >${config}; scripts/deploy/recreate-kind-cluster.sh does both), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
+    # The kind cluster runs on the rootful daemon, whatever DOCKER_HOST the
+    # shell has (it may be the rootless one), so the commands name it.
+    local fix="copy the kind cluster's kubectl and kubeconfig there from the rootful Docker daemon it runs on:
+  mkdir -p ${dir}/bin
+  DOCKER_HOST=unix:///var/run/docker.sock docker cp -L econ-graph-control-plane:/usr/bin/kubectl ${bin}
+  DOCKER_HOST=unix:///var/run/docker.sock kind get kubeconfig --name econ-graph > ${config}
+or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
     if [ -n "${KUBECTL:-}" ]; then
         return 0
     fi
