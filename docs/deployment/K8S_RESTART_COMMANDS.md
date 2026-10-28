@@ -65,15 +65,13 @@ cd ..
 
 ### Step 4: Apply Updated Manifests
 ```bash
-# ingress.yaml first: graphql-ingress.yaml sorts before it and would clash with
-# an older ingress.yaml that still routes /graphql
-kubectl apply -f k8s/manifests/ingress.yaml
 # Every manifest except cloudflared.yaml: it is committed with 0 replicas, so
 # applying it stops the tunnel connector. scripts/deploy/deploy.sh and
 # restart-k8s-rollout.sh start it, on the production cluster only.
 for f in k8s/manifests/*.yaml; do
   [ "${f##*/}" = cloudflared.yaml ] || kubectl apply -f "$f"
 done
+./scripts/deploy/apply-gateway-routes.sh
 kubectl apply -f k8s/monitoring/
 ```
 
@@ -106,8 +104,8 @@ kubectl get deployments -n econ-graph
 # Check services
 kubectl get services -n econ-graph
 
-# Check ingress
-kubectl get ingress -n econ-graph
+# Check routes
+kubectl get httproute -n econ-graph
 ```
 
 ---

@@ -231,8 +231,8 @@ async fn xbrl_taxonomy_schema_enum_columns_round_trip() {
         processing_error: None,
         processing_started_at: None,
         processing_completed_at: None,
-        concepts_extracted: 0,
-        relationships_extracted: 0,
+        concepts_extracted: Some(0),
+        relationships_extracted: Some(0),
         created_at: now,
         updated_at: now,
     };

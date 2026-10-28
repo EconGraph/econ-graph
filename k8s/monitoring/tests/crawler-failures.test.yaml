@@ -51,7 +51,7 @@ tests:
     input_series:
       - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
         values: '1x24'
-      - series: 'crawler_queue_items{status="pending", pod="crawler-worker-1"}'
+      - series: 'crawler_queue_items{kubernetes_namespace="econ-graph", status="pending", pod="crawler-worker-1"}'
         values: '0x24'
     alert_rule_test:
       - eval_time: 1h50m
@@ -62,9 +62,9 @@ tests:
   # though crawler_jobs_total only ever counted failures. Completions keep it quiet.
   - interval: 5m
     input_series:
-      - series: 'crawler_queue_items{status="retrying", pod="crawler-worker-1"}'
+      - series: 'crawler_queue_items{kubernetes_namespace="econ-graph", status="retrying", pod="crawler-worker-1"}'
         values: '40x30'
-      - series: 'crawler_jobs_total{outcome="failed", pod="crawler-worker-1"}'
+      - series: 'crawler_jobs_total{kubernetes_namespace="econ-graph", outcome="failed", pod="crawler-worker-1"}'
         values: '0+5x30'
     alert_rule_test:
       - eval_time: 10m
@@ -80,9 +80,9 @@ tests:
               description: crawl_queue holds 40 active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
   - interval: 5m
     input_series:
-      - series: 'crawler_queue_items{status="pending", pod="crawler-worker-1"}'
+      - series: 'crawler_queue_items{kubernetes_namespace="econ-graph", status="pending", pod="crawler-worker-1"}'
         values: '40x30'
-      - series: 'crawler_jobs_total{outcome="completed", pod="crawler-worker-1"}'
+      - series: 'crawler_jobs_total{kubernetes_namespace="econ-graph", outcome="completed", pod="crawler-worker-1"}'
         values: '0+5x30'
     alert_rule_test:
       - eval_time: 2h
@@ -92,9 +92,9 @@ tests:
   # More than 50 failed jobs in 24h for one source fires for that source only.
   - interval: 5m
     input_series:
-      - series: 'crawler_queue_failed_24h{source="BLS", pod="crawler-worker-1"}'
+      - series: 'crawler_queue_failed_24h{kubernetes_namespace="econ-graph", source="BLS", pod="crawler-worker-1"}'
         values: '10x2 60x10'
-      - series: 'crawler_queue_failed_24h{source="FRED", pod="crawler-worker-1"}'
+      - series: 'crawler_queue_failed_24h{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
         values: '50x12'
     alert_rule_test:
       - eval_time: 20m
@@ -114,13 +114,13 @@ tests:
   # source's 1% doesn't, and the overall rate (about 5.5%) fires the global alert too.
   - interval: 1m
     input_series:
-      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '0+100x30'
-      - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_errors_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '0+10x30'
-      - series: 'econgraph_crawler_requests_total{crawler_type="fred"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="fred"}'
         values: '0+100x30'
-      - series: 'econgraph_crawler_errors_total{crawler_type="fred"}'
+      - series: 'econgraph_crawler_errors_total{kubernetes_namespace="econ-graph", crawler_type="fred"}'
         values: '0+1x30'
     alert_rule_test:
       - eval_time: 10m
@@ -148,9 +148,9 @@ tests:
   # crawler (CrawlerNoTraffic is for that).
   - interval: 1m
     input_series:
-      - series: 'econgraph_crawler_requests_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_requests_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '5x30'
-      - series: 'econgraph_crawler_errors_total{crawler_type="bls"}'
+      - series: 'econgraph_crawler_errors_total{kubernetes_namespace="econ-graph", crawler_type="bls"}'
         values: '5x30'
     alert_rule_test:
       - eval_time: 25m

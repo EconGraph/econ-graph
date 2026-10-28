@@ -6,38 +6,37 @@ use uuid::Uuid;
 use crate::enums::AnnotationType;
 use crate::schema::annotation_templates;
 
-/// Template for reusable annotation patterns
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Insertable)]
+/// Stored template for reusable annotation content.
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = annotation_templates)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AnnotationTemplate {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub template_content: String,
     pub annotation_type: AnnotationType,
-    pub tags: Vec<String>,
-    pub is_public: bool,
+    pub template_content: String,
+    pub usage_count: Option<i32>,
+    pub is_active: bool,
     pub created_by: Uuid,
-    pub usage_count: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-/// New annotation template for insertion
+/// Values needed to store an annotation template.
 #[derive(Debug, Clone, Serialize, Deserialize, Insertable)]
 #[diesel(table_name = annotation_templates)]
 pub struct NewAnnotationTemplate {
     pub name: String,
     pub description: Option<String>,
-    pub template_content: String,
     pub annotation_type: AnnotationType,
-    pub tags: Vec<String>,
-    pub is_public: bool,
+    pub template_content: String,
+    pub is_active: bool,
     pub created_by: Uuid,
 }
 
 impl NewAnnotationTemplate {
-    /// Create a new annotation template
+    /// Create an active template owned by its creator.
     pub fn new(
         name: String,
         template_content: String,
@@ -49,27 +48,13 @@ impl NewAnnotationTemplate {
             description: None,
             template_content,
             annotation_type,
-            tags: Vec::new(),
-            is_public: false,
+            is_active: true,
             created_by,
         }
     }
-
-    /// Add description to the template
+    /// Describe when the template should be used.
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
-        self
-    }
-
-    /// Add tags to the template
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
-        self
-    }
-
-    /// Make template public
-    pub fn as_public(mut self) -> Self {
-        self.is_public = true;
         self
     }
 }
@@ -156,8 +141,7 @@ pub struct DefaultTemplate {
 pub struct AnnotationTemplateFilter {
     pub created_by: Option<Uuid>,
     pub annotation_type: Option<AnnotationType>,
-    pub is_public: Option<bool>,
-    pub tags: Option<Vec<String>>,
+    pub is_active: Option<bool>,
     pub name_contains: Option<String>,
 }
 
@@ -166,8 +150,7 @@ impl Default for AnnotationTemplateFilter {
         Self {
             created_by: None,
             annotation_type: None,
-            is_public: Some(true), // Default to public templates
-            tags: None,
+            is_active: Some(true),
             name_contains: None,
         }
     }

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Tests for scripts/deploy/render-public-host.py against the committed manifests:
-# every localhost Ingress gains a separate -public copy for the public host (https only,
-# without the admin and debug routes; localhost stays as it was), the main public
-# Ingress redirects www, Keycloak's hostname and the backend's issuer agree on
-# https://<host>/idp/realms/econ-graph, the JWKS stays in-cluster, the realm import
-# allows the public origin plus localhost, CORS gains the origin once, and bad host
-# names are refused.
+# every localhost HTTPRoute gains a separate -public copy for the public host (listener
+# https only, without the admin and debug paths; localhost stays as it was), the rate
+# limits cover the copies, plain http and www redirect to https://<host>, Keycloak's
+# hostname and the backend's issuer agree on https://<host>/idp/realms/econ-graph, the
+# JWKS stays in-cluster, the realm import allows the public origin plus localhost, CORS
+# gains the origin once, and bad host names are refused.
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-render-public-host.sh
 set -euo pipefail
@@ -33,43 +33,48 @@ def env(kind, name, container, var):
     for c in spec.get("containers", []) + spec.get("initContainers", []):
         if c["name"] == container:
             return {e["name"]: e.get("value") for e in c.get("env", [])}[var]
+def route(name):
+    return docs[("HTTPRoute", name)]
 def hosts(name):
-    return [r.get("host") for r in docs[("Ingress", name)]["spec"]["rules"]]
+    return route(name)["spec"]["hostnames"]
+def sections(name):
+    return [p.get("sectionName") for p in route(name)["spec"]["parentRefs"]]
 def paths(name):
-    return [p["path"] for r in docs[("Ingress", name)]["spec"]["rules"] for p in r["http"]["paths"]]
+    return [m["path"]["value"] for r in route(name)["spec"]["rules"] for m in r.get("matches", [])]
+def redirect(name):
+    return route(name)["spec"]["rules"][0]["filters"][0]["requestRedirect"]
+def targets(name):
+    return [t["name"] for t in docs[("BackendTrafficPolicy", name)]["spec"]["targetRefs"]]
 sys.exit(0 if eval(sys.argv[1]) else 1)
 ' "$expr" <<<"$rendered" || fail "$name"
 }
 
 rendered="$("$render" econgraph.com \
-  "$manifests/ingress.yaml" "$manifests/graphql-ingress.yaml" \
-  "$manifests/keycloak/ingress.yaml" "$manifests/keycloak/deployment.yaml" \
-  "$manifests/keycloak/realm-import-job.yaml" "$manifests/backend-deployment.yaml" \
-  "$manifests/configmap.yaml" "$manifests/cloudflared.yaml")"
+  "$manifests/gateway/routes/httproutes.yaml" "$manifests/gateway/routes/ratelimit-policies.yaml" \
+  "$manifests/keycloak/deployment.yaml" "$manifests/keycloak/realm-import-job.yaml" \
+  "$manifests/backend-deployment.yaml" "$manifests/configmap.yaml" "$manifests/cloudflared.yaml")"
 
-A="nginx.ingress.kubernetes.io"
-for ingress in econ-graph-ingress econ-graph-graphql-ingress keycloak-ingress; do
-  check "$ingress stays localhost-only" "hosts('$ingress') == ['localhost']"
-  check "$ingress-public serves econgraph.com only" "hosts('$ingress-public') == ['econgraph.com']"
-  check "$ingress-public is labelled for cleanup" \
-    "docs[('Ingress', '$ingress-public')]['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
-  check "$ingress-public redirects plain http to https" \
-    "docs[('Ingress', '$ingress-public')]['metadata']['annotations']['$A/force-ssl-redirect'] == 'true'"
-  check "$ingress-public keeps the original annotations" \
-    "all(docs[('Ingress', '$ingress-public')]['metadata']['annotations'][k] == v for k, v in docs[('Ingress', '$ingress')]['metadata'].get('annotations', {}).items())"
-  check "$ingress itself does not force https (http://localhost keeps working)" \
-    "'$A/force-ssl-redirect' not in docs[('Ingress', '$ingress')]['metadata'].get('annotations', {})"
+for r in econ-graph-frontend econ-graph-backend econ-graph-graphql econ-graph-data-graphql econ-graph-idp; do
+  check "$r stays localhost-only on listener http" "hosts('$r') == ['localhost'] and sections('$r') == ['http']"
+  check "$r-public serves econgraph.com only, on listener https only" \
+    "hosts('$r-public') == ['econgraph.com'] and sections('$r-public') == ['https']"
+  check "$r-public is labelled for cleanup" \
+    "route('$r-public')['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
+  check "$r-public keeps the rules' filters and backends" \
+    "[(r.get('filters'), r['backendRefs']) for r in route('$r-public')['spec']['rules']] == [(r.get('filters'), r['backendRefs']) for r in route('$r')['spec']['rules']]"
 done
-check "the graphql rate limits apply on the public host too" \
-  "docs[('Ingress', 'econ-graph-graphql-ingress-public')]['metadata']['annotations']['$A/limit-rps'] == '20'"
-check "the public host leaves out the admin and debug routes" \
-  "paths('econ-graph-ingress-public') == [p for p in paths('econ-graph-ingress') if p not in ('/admin', '/api/admin', '/playground')] and '/api' in paths('econ-graph-ingress-public')"
-check "the public Keycloak Ingress routes only the econ-graph realm and its resources" \
-  "paths('keycloak-ingress-public') == ['/idp/realms/econ-graph', '/idp/resources']"
-check "www redirects on the main public Ingress only" \
-  "[n for (k, n), d in docs.items() if k == 'Ingress' and d['metadata'].get('annotations', {}).get('$A/from-to-www-redirect') == 'true'] == ['econ-graph-ingress-public']"
-check "nothing trusts client forwarding headers" \
-  "not any('use-forwarded-headers' in str(d) or 'configuration-snippet' in str(d) or 'server-snippet' in str(d) for d in docs.values())"
+check "the rate limits apply on the public host too" \
+  "targets('econ-graph-graphql-ratelimit') == ['econ-graph-graphql', 'econ-graph-graphql-public'] and targets('econ-graph-data-graphql-ratelimit') == ['econ-graph-data-graphql', 'econ-graph-data-graphql-public']"
+check "the public host leaves out the admin and debug paths" \
+  "not any(p == x or p.startswith(x + '/') for r in ('econ-graph-frontend-public', 'econ-graph-backend-public') for p in paths(r) for x in ('/admin', '/api/admin', '/playground')) and '/api' in paths('econ-graph-backend-public')"
+check "the public Keycloak route serves only the econ-graph realm and its resources" \
+  "paths('econ-graph-idp-public') == ['/idp/realms/econ-graph', '/idp/resources']"
+check "plain http for the host and www redirects permanently to https://econgraph.com" \
+  "hosts('econ-graph-public-redirect') == ['econgraph.com', 'www.econgraph.com'] and sections('econ-graph-public-redirect') == ['http'] and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301}"
+check "https for www redirects permanently to https://econgraph.com" \
+  "hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301}"
+check "every route rule sets X-Forwarded-For to the address the gateway settled on" \
+  "all(any(f['type'] == 'RequestHeaderModifier' and {'name': 'X-Forwarded-For', 'value': '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'} in f['requestHeaderModifier'].get('set', []) for f in r.get('filters', [])) for (k, n), d in docs.items() if k == 'HTTPRoute' and not n.endswith('-redirect') for r in d['spec']['rules'])"
 check "KC_HOSTNAME is the https public URL" \
   "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
 check "the admin console stays on the port-forward" \

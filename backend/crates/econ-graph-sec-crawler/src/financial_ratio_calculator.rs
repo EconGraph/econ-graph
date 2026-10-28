@@ -29,7 +29,7 @@ use econ_graph_core::models::{FinancialLineItem, FinancialRatios, FinancialState
 /// use econ_graph_core::models::{FinancialStatement, FinancialLineItem};
 ///
 /// # async fn example() -> anyhow::Result<()> {
-/// let calculator = FinancialRatioCalculator::new();
+/// let calculator = FinancialRatioCalculator::new()?;
 /// let statements = vec![/* financial statements */];
 /// let line_items = vec![/* line items */];
 /// let ratios = calculator.calculate_ratios(&statements, &line_items).await?;

@@ -1,27 +1,21 @@
 # Test Documentation
 
-This is a test documentation file to verify that CI/CD workflows skip on documentation-only changes.
-
-## Test Purpose
-
-This file exists solely to test the path filtering configuration in GitHub Actions workflows. When this file is modified or added, the CI/CD pipeline should skip running tests since it's a documentation-only change.
-
-## Expected Behavior
-
-- CI workflows should skip when only this file is changed
-- The workflow should still run when code files are changed
-- Manual workflow dispatch should always run regardless of paths
+This file is a probe for the documentation-only path filter in [Core CI Tests](../.github/workflows/ci-core.yml).
 
 ## Test Scenarios
 
-1. **Documentation-only change**: Modify this file → CI should skip
-2. **Code change**: Modify any `.rs`, `.tsx`, `.ts`, `.js` file → CI should run
-3. **Mixed change**: Modify both docs and code → CI should run
-4. **Manual trigger**: Manual workflow dispatch → CI should always run
+For the automatic-trigger scenarios below, open a PR into any branch, push commits to an existing PR, or push to a branch enabled by Core CI: `main`, `develop`, `optimize/ci-core-primary` or `release/**`. A push to another branch without a PR cannot test this path filter because Core CI does not run on that push event.
+
+1. **Documentation-only change**: Modify only this file. Core CI should skip. On a PR, Docs Checks and Feature Flags should still run; see the [workflow inventory](../.github/workflows/README.md#workflow-inventory) for other workflows and their triggers.
+2. **Code change**: Modify a code file outside the ignored paths, such as a `.rs`, `.tsx`, `.ts` or `.js` file in an application directory. Core CI should start.
+3. **Mixed change**: Modify both this file and a code file outside the ignored paths. Core CI should start.
+4. **Manual trigger**: Use GitHub's **Run workflow** button (`workflow_dispatch`) for Core CI. This starts the workflow regardless of changed paths.
+
+Starting Core CI does not ensure that every job runs. Jobs have their own selection conditions, and manual dispatch inputs also control optional tests.
 
 ## Implementation Details
 
-The path filtering is implemented using GitHub Actions `paths-ignore` feature:
+Core CI applies the same `paths-ignore` list to its `push` and `pull_request` triggers:
 
 ```yaml
 paths-ignore:
@@ -33,8 +27,8 @@ paths-ignore:
   - '.github/workflows/README.md'
 ```
 
-This configuration ensures that CI/CD resources are not wasted on documentation-only changes while maintaining full testing coverage for actual code changes.
+When all changed paths match this list, Core CI skips the automatic run. Changes outside these paths remain eligible for the push and PR triggers described above.
 
 ## Update Test
 
-This line was added to test the path filtering functionality. If CI/CD skips running when this change is pushed, the path filtering is working correctly.
+Edit this line to probe Core CI's path filtering. When this file is the only change in a PR or an eligible branch push, Core CI should skip; other workflows may still run.

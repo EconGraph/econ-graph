@@ -1,0 +1,58 @@
+# How Envoy Gateway runs the proxy for GatewayClass econ-graph (gatewayclass.yaml).
+#
+# On kind, host ports 80 and 443 are mapped only to the control-plane node
+# (label ingress-ready=true, terraform/k8s/kind-config.yaml). The proxy runs
+# there, one replica, and takes those ports as hostPorts on its container
+# ports 10080 and 10443: Envoy Gateway listens on port + 10000 for every
+# listener port below 1024, so the proxy runs unprivileged. Through a hostPort
+# the proxy sees each client's own source address (requests from the host
+# itself arrive from the Docker bridge gateway), which the per-client rate
+# limits in routes/ratelimit-policies.yaml depend on.
+#
+# A hostPort can be held by one pod per node, so a rollout stops the old
+# proxy before starting the new one (Recreate): a few seconds without the
+# gateway on every proxy upgrade.
+#
+# The proxy Service is pinned to econ-graph-gateway-proxy, ClusterIP: external
+# traffic arrives through the hostPorts, and in-cluster callers use
+#   http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/
+# (port 80, listener http). A NetworkPolicy that admits traffic to the proxy
+# must allow its pod port 10080, not the Service port 80.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: econ-graph-proxy
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        name: econ-graph-gateway-proxy
+        type: ClusterIP
+      envoyDeployment:
+        replicas: 1
+        strategy:
+          type: Recreate
+        pod:
+          nodeSelector:
+            ingress-ready: "true"
+          tolerations:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              template:
+                spec:
+                  containers:
+                  - name: envoy
+                    ports:
+                    - containerPort: 10080
+                      hostPort: 80
+                      protocol: TCP
+                    - containerPort: 10443
+                      hostPort: 443
+                      protocol: TCP

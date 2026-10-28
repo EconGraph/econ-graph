@@ -23,6 +23,8 @@ Code: `backend/crates/econ-graph-crawler` (adapters, worker, CLI) and
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE   # fetch_series jobs
 crawler discover --source BLS                        # discover_catalog job (writes series metadata)
+crawler refetch  --all [--dry-run]                   # refetch_series jobs: forced full-history re-fetch
+crawler refetch-status --all [--failures N]          # per-source progress of those jobs
 crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
@@ -39,6 +41,11 @@ direct `fetch` calls.
 
 An item is enqueued only if no active (pending / processing / retrying) item exists for the
 same `(source, series_id, kind)`.
+
+A `refetch_series` job re-reads a series' whole history, ignoring stored validators and
+incremental bounds, and rewrites stored values in place; see
+[Observation precision and full-history re-fetch](OBSERVATION_PRECISION_REFETCH.md) and
+`scripts/deploy/refetch-full-history.sh`.
 
 ## Run the worker
 
@@ -64,12 +71,32 @@ Configuration (flags or environment):
 | `CRAWLER_POLL_INTERVAL_SECS` | 5 | idle poll interval |
 | `CRAWLER_STUCK_AFTER_SECS` | 1800 | release items locked longer than this |
 | `CRAWLER_PAUSE_AFTER` / `CRAWLER_PAUSE_SECS` | 5 / 300 | pause a source after N consecutive rate-limit/auth errors |
-| `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | per-request timeout |
-| `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`bls_series.csv`, the ids of the BLS series to crawl (their titles, units and frequency come from BLS); and `datasets/<source>.toml` for each adapter that declares datasets, today FRED, BLS, Census and FHFA); the worker exits at startup if any of it is missing |
-| `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared reference data (`countries.csv`, and for the backend `search_abbreviations.csv`: econ-graph-core's `data/`); the worker and the backend exit at startup if it is missing |
+| `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | ordinary HTTP request timeout; source reference-file requests use at least 120 seconds |
+| `CRAWLER_DATA_DIR` | `/app/data` in the image | crawler selection files and dataset definitions, described below |
+| `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared country data and backend search abbreviations, described below |
 | `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |
 | `CRAWLER_SCHEDULER_INTERVAL_SECS` | 300 | seconds between scheduler ticks |
+
+The crawler reads its selection files and dataset definitions from `CRAWLER_DATA_DIR`,
+which defaults to `backend/crates/econ-graph-crawler/data/` in a source checkout.
+`bls_series.csv` and `fred_series.csv` select series to crawl; BLS supplies its series’ titles,
+units and frequency. `wdi_indicators.csv` selects World Bank indicators and their units, and
+`bea_tables.csv` selects BEA tables. Dataset definitions live in `datasets/<source>.toml`;
+the production adapters use `fred.toml`, `bls.toml`, `bea.toml`, `census.toml`, `fhfa.toml` and
+`world_bank.toml`.
+
+Before processing jobs, the worker loads the BLS and FRED lists and validates dataset
+definitions for every registered adapter. Missing or invalid files in these startup checks
+stop the worker. The World Bank indicator list and BEA table list are loaded when their
+adapters first need them. These loaders cache their results, including errors, for the
+process lifetime; restart the worker after correcting a file.
+
+`REFERENCE_DATA_DIR` defaults to `backend/crates/econ-graph-core/data/` in a source checkout.
+Both the worker and backend load `countries.csv` at startup; the backend also loads
+`search_abbreviations.csv`. Missing or invalid files in those checks stop the corresponding
+service. These shipped files serve a different purpose from the provider-published labels
+refreshed into the database under [Source reference data](#source-reference-data).
 
 ## Scheduler
 
@@ -90,13 +117,18 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    | annual, semiannual | 30 days |
    | anything else | 7 days |
 
-   A series that has never been crawled is due immediately. A series whose last crawl failed
-   backs off to twice its interval, measured from the latest of its last crawl and its last
-   attempt, before being retried. A discovered series (no `economic_series` row yet) has no
-   attempt history, so its last failed `fetch_series` queue row stands in instead — and that row
-   is purged after `CRAWLER_QUEUE_RETENTION_DAYS` (14 by default), so a failed quarterly or
-   annual discovered series backs off at most ~14 days, not the full twice-the-interval. See the
-   `scheduler` module docs for the exact rule.
+   A series that has never been crawled is due immediately. A series whose `crawl_status`
+   is `failed` backs off to twice its interval, measured from the latest of its last crawl
+   and its last attempt. A persisted series marked `not_found` backs off to ten times its
+   interval instead.
+
+   A discovered series without an `economic_series` row has no attempt history, so its last
+   failed `fetch_series` queue row supplies the failure time. Finished queue rows are purged
+   after `CRAWLER_QUEUE_RETENTION_DAYS` (14 by default), limiting this backoff to about 14 days
+   for a failed quarterly or annual discovered series. With purging disabled, the full
+   twice-the-interval backoff applies. If the provider reports a metadata-only series as
+   not found, the worker deactivates its `series_metadata` row instead; it becomes a candidate
+   again only when catalog discovery lists that id again.
 
    Only sources in `CRAWLER_SOURCES` (default: all) are considered, and only series whose
    `data_sources` row is enabled and whose own `is_active` flag is set; for Census, only ids
@@ -106,33 +138,52 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    and any such row without an `economic_series` row yet is treated as due like a never-crawled
    series, so it is picked up by the next scheduler tick with no separate enqueue step.
 
-2. **Catalog discovery** — enqueues one `discover_catalog` job per source at most once every 7
-   days (`DISCOVERY_INTERVAL`) after the source's last discovery job *finished*, whether it
-   completed or failed — so a discovery that fails is not retried for 7 days either.
+2. **Catalog discovery** — enqueues a `discover_catalog` job when a source is due and has
+   no active discovery job. A completed or cancelled discovery delays the next job for 7 days
+   (`DISCOVERY_INTERVAL`). After a job exhausts its worker retries and fails, the scheduler
+   waits one hour, doubling the delay after consecutive failed jobs up to a one-day cap.
+   Successful discovery resets that failure backoff. The scheduler derives this history from
+   retained queue rows (14 days by default); purging history can reset the backoff, never
+   lengthen it. Sources whose `data_sources` row is disabled are excluded.
 
-   Applies to every adapter in a release build's `default_registry()` (FRED, BLS, BEA, Census,
-   FHFA, World Bank). A debug build (or `--features static-catalogs`) also registers ten static
-   catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO); those get weekly discovery
-   but never a refresh (`fetch_series` is unimplemented for them). SEC filings are not covered by
-   the scheduler at all; enqueue them with `sec-crawler enqueue --cik <CIK>[,<CIK>...]`
-   (`econ-graph-sec-crawler`'s binary, reads `DATA_DATABASE_URL`).
+   This applies to every adapter in `default_registry()`: FRED, BLS, BEA, Census, FHFA and
+   World Bank with the release flag profile. The `static_catalogs` build flag also registers
+   ten static catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). It is enabled
+   by `FLAGS_PROFILE=dev`, the local Cargo default, and disabled by `FLAGS_PROFILE=release`,
+   the image default. Cargo’s `--release` option controls optimization independently; static
+   catalogs are selected through [build flags](../../config/flags/README.md#how-the-backend-reads-it),
+   not `--features static-catalogs`. Static catalogs follow the same discovery schedule but
+   never get a refresh (`fetch_series` is unimplemented for them). SEC filings are not covered
+   by the scheduler; enqueue them with `sec-crawler enqueue --cik <CIK>[,<CIK>...]`
+   (`econ-graph-sec-crawler`’s binary, reads `DATA_DATABASE_URL`).
 
-**For QA's seven-day run:** with the defaults above, expect at most one catalog discovery per
-source over seven days (and none at all for a source whose discovery fails early in the run).
-Daily series should refresh roughly every day, subject to queue throughput (at most 500
-`fetch_series` jobs enqueued per tick, shared with any large first-time discovery) and each
-source's own rate limits — watch queue depth, not just the schedule. A weekly or monthly series
-crawled at the start of the run becomes due again only at about the 7-day mark, so it may see at
-most one refresh in the window, or none if the run is shorter. Quarterly (14-day) and annual
-(30-day) series are not expected to refresh again inside a single seven-day run. `crawler status`
-and the `crawler_queue_*` / `crawler_coverage_*` Prometheus metrics (see Monitoring below) show
-whether jobs are actually being enqueued and completed on this cadence.
+Over a seven-day observation window, a source that completes discovery near the start is
+not due again until about the end. A failed discovery can produce additional attempts within
+the window under the failure backoff above. Daily series should refresh roughly every day,
+subject to queue throughput (at most 500 `fetch_series` jobs enqueued per tick, shared with
+first-time discovery) and each source’s rate limits. Watch queue depth as well as the schedule.
+A weekly or monthly series crawled at the start becomes due again at about the seven-day mark,
+so it may see at most one further refresh, or none if the window ends sooner. Quarterly
+(14-day) and annual (30-day) series are not expected to refresh again within that window.
+Use [monitoring](#monitoring) to check whether jobs are actually being enqueued and completed
+on this cadence.
 
 ## Source reference data
 
-Labels a source publishes itself (Census state names, BLS code labels) are crawled, never shipped as data files: the worker refreshes each adapter's code lists at startup and before each catalog discovery, with a conditional GET on the validators stored in `reference_file_cache` (`If-None-Match` from the `ETag`, `If-Modified-Since` from the `Last-Modified`). A file whose body hashes the same as the stored copy also counts as unchanged, for sources that honour neither header.
+Provider-published labels, such as Census state names and BLS code labels, are crawled
+rather than shipped as data files. The worker refreshes each selected adapter’s code lists
+in the background at startup, logging failures without holding up queue processing. Each
+catalog discovery refreshes those lists again before discovering series.
 
-A new database can get those labels before the first crawl from a seed migration, `backend/migrations/data/<timestamp>_seed_<source>_reference_codes/`, which loads them with the validators they were downloaded with (`ETag`, `Last-Modified` and body SHA-256), and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
+Refresh requests use the validators stored in `reference_file_cache`: `If-None-Match` from
+the `ETag` and `If-Modified-Since` from `Last-Modified`. A response whose body hashes to the
+stored copy also counts as unchanged, covering sources that honor neither header.
+
+A seed migration can populate a new database with those labels before its first crawl.
+These migrations live in `backend/migrations/data/<timestamp>_seed_<source>_reference_codes/`
+and load the labels with the validators they were downloaded with (`ETag`, `Last-Modified`
+and body SHA-256). A migration loads a reference file only if that database does not already
+contain it. Record one from a machine that can reach the source:
 
 ```bash
 cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS
@@ -152,5 +203,8 @@ Per-source rate limits and backoff are in [CRAWLER_POLITENESS.md](./CRAWLER_POLI
 
 ## Monitoring
 
-`crawler status` or the GraphQL crawler status query (both derived from `crawl_queue`), the
-worker's logs (`RUST_LOG`), and the crawler Prometheus metrics in `econ-graph-metrics`.
+Use `crawler status` or the GraphQL crawler status query to inspect queue-derived status,
+and the worker’s logs (`RUST_LOG`) to diagnose failures. The `crawler_queue_*` and
+`crawler_coverage_*` Prometheus metrics in `econ-graph-metrics` show queue activity and source
+coverage; see the [crawler coverage and freshness runbook](../monitoring/crawler-coverage-runbook.md)
+for queries and alerts.

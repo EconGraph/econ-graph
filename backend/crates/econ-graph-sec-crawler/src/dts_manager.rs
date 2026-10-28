@@ -238,7 +238,8 @@ impl DtsManager {
         // Calculate file hash
         let mut hasher = Sha256::new();
         hasher.update(&content);
-        let file_hash = format!("sha256:{}", hex::encode(hasher.finalize()));
+        // The database column stores the 64 hex digits without an algorithm prefix.
+        let file_hash = hex::encode(hasher.finalize());
 
         // Determine file type and source type
         let file_type = if reference.reference_type == "schemaRef" {
@@ -288,8 +289,8 @@ impl DtsManager {
             processing_error: None,
             processing_started_at: None,
             processing_completed_at: Some(Utc::now()),
-            concepts_extracted: 0,
-            relationships_extracted: 0,
+            concepts_extracted: Some(0),
+            relationships_extracted: Some(0),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -424,4 +425,43 @@ pub struct DtsResolution {
     pub local_file_path: Option<PathBuf>,
     pub is_resolved: bool,
     pub resolution_error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use econ_graph_core::test_utils::TestContainer;
+    use serial_test::serial;
+
+    #[tokio::test]
+    #[serial]
+    async fn local_taxonomy_storage_preserves_content_and_sha256_digest() {
+        let database = TestContainer::new().await;
+        let cache = tempfile::tempdir().unwrap();
+        let content = b"<schema xmlns=\"http://www.w3.org/2001/XMLSchema\"/>";
+        let path = cache.path().join("us-gaap.xsd");
+        fs::write(&path, content).await.unwrap();
+        let manager = DtsManager::new(database.pool().clone(), cache.path().to_path_buf());
+        let reference = DtsReference {
+            reference_type: "schemaRef".into(),
+            reference_href: "https://fasb.org/us-gaap/2023/us-gaap.xsd".into(),
+            reference_role: None,
+            reference_arcrole: None,
+        };
+        let id = manager
+            .store_local_taxonomy_file(&path, &reference, Uuid::new_v4())
+            .await
+            .unwrap();
+        let mut conn = manager.pool.get().await.unwrap();
+        let stored = xbrl_taxonomy_schemas::table
+            .find(id)
+            .select(XbrlTaxonomySchema::as_select())
+            .first::<XbrlTaxonomySchema>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(stored.file_hash, hex::encode(Sha256::digest(content)));
+        assert_eq!(stored.file_hash.len(), 64);
+        assert_eq!(stored.file_content.as_deref(), Some(content.as_slice()));
+        assert_eq!(stored.file_size_bytes, content.len() as i64);
+    }
 }

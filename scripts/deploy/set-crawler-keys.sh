@@ -255,7 +255,7 @@ if [ "$TUNNEL" = true ] && [ "$entered" -gt 0 ]; then
         # the way deploy.sh starts it, apply_cloudflared, which checks the
         # production marker, the Secret and the public host again.
         PUBLIC_HOST="$(public_host_in_cluster)" ||
-            die "could not read the cluster's Ingresses to see which public host it serves"
+            die "could not read the cluster's routes to see which public host it serves"
         if [ -z "$PUBLIC_HOST" ]; then
             echo "==> cloudflared stays at 0 replicas: this cluster serves no public host yet."
             echo "    Deploy with PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh to start it."
