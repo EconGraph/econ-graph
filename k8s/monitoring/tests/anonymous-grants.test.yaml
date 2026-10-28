@@ -27,9 +27,10 @@ tests:
         alertname: AnonymousGrantRefreshStopped
         exp_alerts: []
 
-  # Keycloak stops answering at 5m: failures climb by six a minute. Renewal alerts at 7m
-  # (six reached at 6m, held a minute), not before. Grants lapse at 10m; the empty alert
-  # needs 10 minutes of that.
+  # Keycloak stops answering at 5m. The input climbs by six failures per one-minute sample
+  # (a real outage gives four to six a minute, depending on how long each attempt waits).
+  # Renewal alerts at 7m (six reached at 6m, held a minute), not before. Grants lapse at 10m;
+  # the empty alert needs 10 minutes of that.
   - interval: 1m
     input_series:
       - series: 'anonymous_grant_renewal_consecutive_failures{app="econ-graph-backend"}'

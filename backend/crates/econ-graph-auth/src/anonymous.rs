@@ -100,6 +100,8 @@ struct RenewalStats {
     refusals: AtomicU64,
     consecutive_failures: AtomicU64,
     task_running: AtomicBool,
+    /// Set when the process is shutting down, so the task's end is expected, not an error.
+    shutting_down: AtomicBool,
 }
 
 /// A snapshot of anonymous grant renewal, for metrics and alerts.
@@ -190,6 +192,21 @@ impl OidcVerifier {
             Some(provider) => provider.current(Instant::now()),
             None => BTreeSet::new(),
         }
+    }
+
+    /// Record that the process is shutting down: the refresh task ending from now on is
+    /// expected and logged at info, not as an error.
+    pub fn begin_anonymous_refresh_shutdown(&self) {
+        if let Some(provider) = &self.anonymous {
+            provider.stats.shutting_down.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether [`OidcVerifier::begin_anonymous_refresh_shutdown`] has been called.
+    pub fn anonymous_refresh_shutting_down(&self) -> bool {
+        self.anonymous
+            .as_ref()
+            .is_some_and(|provider| provider.stats.shutting_down.load(Ordering::Relaxed))
     }
 
     /// Renewal counters and the current grant count; `None` without anonymous grants.
@@ -308,13 +325,18 @@ struct TaskRunning(Arc<OidcVerifier>);
 
 impl Drop for TaskRunning {
     fn drop(&mut self) {
-        if let Some(provider) = &self.0.anonymous {
-            provider.stats.task_running.store(false, Ordering::Relaxed);
+        let Some(provider) = &self.0.anonymous else {
+            return;
+        };
+        provider.stats.task_running.store(false, Ordering::Relaxed);
+        if provider.stats.shutting_down.load(Ordering::Relaxed) {
+            tracing::info!("The anonymous catalog grant refresh task stopped for shutdown");
+        } else {
+            tracing::error!(
+                "The anonymous catalog grant refresh task stopped; anonymous grants will lapse \
+                 at their expiry. Restart the backend."
+            );
         }
-        tracing::error!(
-            "The anonymous catalog grant refresh task stopped; anonymous grants will lapse at \
-             their expiry. Restart the backend."
-        );
     }
 }
 
@@ -919,5 +941,66 @@ mod tests {
         assert!(refresh.await.unwrap_err().is_cancelled());
         assert!(!verifier.anonymous_renewal_stats().unwrap().task_running);
         task.abort();
+    }
+
+    #[derive(Clone, Default)]
+    struct Logs(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Logs {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The task ending unexpectedly is an error (it alerts operators); ending because the
+    /// process is shutting down, as on every rollout, is not.
+    #[tokio::test]
+    async fn the_refresh_task_ending_is_an_error_only_outside_shutdown() {
+        let issuer = TestIssuer::start().await;
+        let token = issuer.mint_token(Uuid::new_v4(), &["catalog.fred:read"]);
+        for shutting_down in [false, true] {
+            let (verifier, _, _, task) = provider(
+                json!({"access_token":token,"expires_in":300}),
+                &issuer,
+                Duration::ZERO,
+            )
+            .await;
+            let logs = Logs::default();
+            let writer = logs.clone();
+            let _guard = tracing::subscriber::set_default(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_writer(move || writer.clone())
+                    .finish(),
+            );
+            let refresh = verifier.spawn_anonymous_refresh().unwrap();
+            if shutting_down {
+                verifier.begin_anonymous_refresh_shutdown();
+            }
+            assert_eq!(verifier.anonymous_refresh_shutting_down(), shutting_down);
+            refresh.abort();
+            let _ = refresh.await;
+            let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+            let line = text
+                .lines()
+                .find(|line| line.contains("refresh task stopped"))
+                .unwrap_or_else(|| panic!("no stop logged: {text}"));
+            if shutting_down {
+                assert!(
+                    line.contains("INFO") && line.contains("for shutdown"),
+                    "{line}"
+                );
+            } else {
+                assert!(
+                    line.contains("ERROR") && line.contains("Restart the backend"),
+                    "{line}"
+                );
+            }
+            task.abort();
+        }
     }
 }

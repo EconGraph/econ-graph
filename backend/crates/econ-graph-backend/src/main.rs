@@ -1057,13 +1057,17 @@ async fn main() -> AppResult<()> {
         .and_then(|verifier| verifier.spawn_anonymous_refresh())
     {
         info!("🔑 Anonymous catalog grants: renewing in the background");
-        metrics::watch_anonymous_grants(Arc::clone(verifier.as_ref().expect("spawned above")));
+        let watched = Arc::clone(verifier.as_ref().expect("spawned above"));
+        metrics::watch_anonymous_grants(Arc::clone(&watched));
         tokio::spawn(async move {
             let ended = refresh.await;
-            tracing::error!(
-                "Anonymous catalog grant refresh task ended ({ended:?}); anonymous visitors lose \
-                 catalog access when the current grants expire. Restart the backend."
-            );
+            // Ending during shutdown is expected (shutdown_signal records it first).
+            if !watched.anonymous_refresh_shutting_down() {
+                tracing::error!(
+                    "Anonymous catalog grant refresh task ended ({ended:?}); anonymous visitors \
+                     lose catalog access when the current grants expire. Restart the backend."
+                );
+            }
         });
     }
 
@@ -1205,7 +1209,13 @@ async fn main() -> AppResult<()> {
         .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
         .http1_only(true)
         .serve(make_svc)
-        .with_graceful_shutdown(shutdown_signal());
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            // From here the anonymous refresh task stopping is part of shutdown, not an error.
+            if let Some(verifier) = &verifier {
+                verifier.begin_anonymous_refresh_shutdown();
+            }
+        });
 
     info!("✅ Server is now running and accepting connections!");
     server

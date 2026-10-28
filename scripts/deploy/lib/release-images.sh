@@ -322,7 +322,7 @@ ri_check_job_pods() {
         return 2
     }
     if [ -z "$uid" ]; then
-        line="unchecked job/${job}: no Job (deploy.sh skips it without a data database, and Kubernetes deletes it a day after it finishes)"
+        line="unchecked job/${job}: no Job (never run here, or deleted by Kubernetes a day after it finished)"
         echo "  ${line}"
         RI_REPORT+="${line}"$'\n'
         return 0

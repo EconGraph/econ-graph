@@ -33,8 +33,8 @@
 #      loaded crawler-worker image. It is not restarted. A pod whose container
 #      never started (Pending, ErrImageNeverPull, in an init container), or that
 #      is being deleted, is recorded as unchecked. So is a missing Job, or one
-#      with no pod (deploy.sh skips it in a namespace without a data database,
-#      and Kubernetes deletes it a day after it finishes): unchecked, not a
+#      with no pod (one never run here, or one
+#      Kubernetes deleted a day after it finished): unchecked, not a
 #      failure. The summary lists everything unchecked; run this soon after
 #      deploy.sh to have the Job checked.
 #   4. Append the result to ~/econgraph-releases/<tag>/verified.txt.

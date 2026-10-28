@@ -525,9 +525,10 @@ The data migrations go to the data database and the app migrations to the databa
 No service applies the data migrations at startup. `deploy.sh` runs the Job `crawler-migrate`
 (`manifests/crawler-migrate-job.yaml`: `/app/crawler migrate` from the crawler-worker image,
 reading `data-database-url`) after PostgreSQL is ready and before it applies the backend and
-the crawler-worker. A failed Job stops the deploy and prints its logs. The Job runs only in a
-namespace that owns a data database, i.e. whose `econ-graph-secrets` has the key
-`data-database-url`; without that key `deploy.sh` skips it. The backend applies the app
+the crawler-worker. A failed Job stops the deploy and prints its logs. Without the key
+`data-database-url` in `econ-graph-secrets`, `deploy.sh` stops before applying the backend:
+with sign-in on and no data database, the backend refuses to start (it could not apply catalog
+grants to annotations). `scripts/deploy/create-secrets.sh` writes the key. The backend applies the app
 migrations itself at startup. `deploy.sh --dry-run` prints every command of the deploy,
 including the Job, and changes nothing.
 

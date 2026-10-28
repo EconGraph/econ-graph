@@ -3,8 +3,8 @@
 # (config/keycloak/README.md, "Catalog access, including anonymous visitors"). If renewal keeps
 # failing, or the task stops, the grants lapse and anonymous visitors see empty catalogs.
 #
-# Metrics, served by the backend on /metrics (scraped by the 'econgraph-backend' job in
-# prometheus-config.yaml) only when anonymous grants are configured:
+# Metrics, served by the backend on /metrics (scraped once, by the annotation-based
+# 'kubernetes-pods' job in prometheus-config.yaml) only when anonymous grants are configured:
 #   anonymous_grant_renewals_total{outcome}           counter; outcome = success|outage|refused
 #   anonymous_grant_renewal_consecutive_failures      gauge; failed renewals since the last success
 #                                                     (renewal retries every 10 seconds)
@@ -29,8 +29,10 @@ data:
       groups:
       - name: anonymous-grants
         rules:
-        # Six failures in a row is a minute of Keycloak not answering the backend (or refusing
-        # its anonymous client). Grants survive that only until they expire.
+        # Six failures in a row is Keycloak not answering the backend (or refusing its anonymous
+        # client) for 60 to 90 seconds: each attempt can wait out its 5-second timeout before
+        # the 10-second retry. With the 1-minute hold, the alert fires about 2 to 2.5 minutes
+        # into an outage. Grants survive that only until they expire.
         - alert: AnonymousGrantRenewalFailing
           expr: anonymous_grant_renewal_consecutive_failures >= 6
           for: 1m
