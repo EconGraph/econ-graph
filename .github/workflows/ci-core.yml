@@ -328,6 +328,15 @@ jobs:
     - name: Check that teardown uses only the kind cluster's context
       run: scripts/deploy/test-teardown-kubectl.sh
 
+    # recreate-kind-cluster.sh identifies the cluster inside its control plane on
+    # the rootful daemon and, before any backup, delete or create, asks for the
+    # kube-system UID prefix on a cluster with a production marker (or one that
+    # can't be read), never taking --yes for it (all stubs here).
+    - name: Check that recreate-kind-cluster confirms before deleting
+      run: |
+        shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
+        scripts/deploy/test-recreate-kind-cluster.sh
+
     # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
     # reach only the kind cluster's kubectl with --context, never plain kubectl.
     - name: Check which cluster the operator scripts reach
