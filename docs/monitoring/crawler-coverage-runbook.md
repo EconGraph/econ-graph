@@ -47,7 +47,8 @@ crawler-worker serves the same numbers on `:9102/metrics`, refreshed every 5 min
 poller, which runs every 30 seconds, adds `crawler_last_failure_timestamp_seconds{source}`.
 The worker also exports `crawler_scheduler_enabled`: 1 when automatic scheduling is on,
 0 when it was explicitly disabled. The value describes startup configuration, not whether
-scheduler ticks are succeeding.
+scheduler ticks are succeeding. It defaults to 1 until startup configuration explicitly
+sets the mode to 0.
 
 The alerts are in `k8s/monitoring/prometheus-rules-crawler.yaml` (a ConfigMap that
 Prometheus mounts at `/etc/prometheus/rules`; `scripts/deploy/restart-k8s-rollout.sh`
@@ -58,6 +59,7 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 
 | Alert | Fires when |
 |---|---|
+| `CrawlerSchedulerDisabled` | Every discovered primary worker reports scheduling disabled with a successful scrape (info, no delay) |
 | `CrawlerCoverageLow` | A source's coverage has been under 95% for 6 hours |
 | `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes and automatic scheduling is not explicitly disabled |
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
@@ -108,12 +110,15 @@ no traffic or overdue series. Branch schedulers do not affect the primary's mode
 two alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
 still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/scrape
 failures also remain active: the independent metric pollers must stay healthy.
+`CrawlerSchedulerDisabled` remains visible at info level while every discovered primary
+worker reports static mode and has a successful scrape. Missing mode metrics or a failed
+scrape prevent this all-disabled indication, just as they prevent suppression above. All crawler alerts select the primary namespace (`econ-graph`); branch
+worker traffic, coverage and failures do not affect them.
 No blanket Alertmanager silence is required.
 
-Before a deliberate refresh, obtain the operator's approval for the source and series,
-confirm the data-plane conversion is complete, use a tagged release image, and retain a
-verified host backup. For example, refresh two existing FRED series without enabling the
-automatic scheduler:
+A deliberate refresh uses a selected source and series on the converted data plane,
+a tagged release image, and a verified host backup. For example, two existing FRED
+series can be refreshed without enabling the automatic scheduler:
 
 ```sh
 kubectl -n econ-graph exec deploy/crawler-worker -- \
@@ -122,14 +127,14 @@ kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler status
 kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler coverage --fail-under 95
 ```
 
-Monitor until those jobs complete; coverage is a separate check, not proof of an empty
-queue. `crawler discover --source FRED` refreshes the source catalog but is not itself a
-full crawl of every series. A full-source refresh needs an explicitly reviewed series
-selection or a deliberate temporary scheduler run. Neither path should recreate the
-data database or delete and reinsert series. Verify that all prior series IDs remain and
-still match the stable-ID function, retain a verified backup of the completed crawl, and
-observe the static deployment for 48 hours for unexpected alerts. These operational
-checks require a real approved run; the rule tests only simulate alert behavior.
+The refresh is complete when those jobs have completed; coverage is a separate check,
+not proof of an empty queue. `crawler discover --source FRED` refreshes the source catalog
+but is not itself a full crawl of every series. A full-source refresh uses a selected set
+of series or a deliberate temporary scheduler run. Both paths preserve the data database and existing series rows: prior series IDs
+remain present and match the stable-ID function. The static deployment retains a verified
+backup of the completed crawl, with `CrawlerSchedulerDisabled` showing its mode and
+the failure and telemetry alerts showing its health. The rule tests simulate alert
+behavior; they do not verify a live refresh or backup.
 
 ## Forcing the alerts (QA)
 

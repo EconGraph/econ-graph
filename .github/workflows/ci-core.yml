@@ -91,6 +91,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
     - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
       id: code
       if: github.event_name == 'pull_request'
@@ -216,6 +218,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -249,6 +252,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
 
     - name: Install promtool
       run: |
@@ -310,6 +315,7 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
@@ -326,6 +332,12 @@ jobs:
     # reach only the kind cluster's kubectl with --context, never plain kubectl.
     - name: Check which cluster the operator scripts reach
       run: scripts/deploy/test-operator-kubectl.sh
+
+    # With none of KUBECTL, KUBECONFIG and DOCKER_HOST set, the deploy, Keycloak
+    # backup, gateway and port-forwarding scripts reach the kind cluster's own
+    # kubectl, and kind on the rootful Docker daemon, never plain kubectl or kind.
+    - name: Check that the deploy scripts default to the kind cluster's kubectl
+      run: scripts/deploy/test-kind-kubectl-default.sh
 
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
@@ -346,6 +358,21 @@ jobs:
     - name: Check the pre-deploy database check
       run: scripts/deploy/test-precheck-db-migration.sh
 
+    # Loading a release candidate's GHCR images into the kind cluster, the
+    # restart and image check after deploy.sh, and the rollback, against stub
+    # git, docker, kind and kubectl.
+    - name: Check the release image load, verify and rollback scripts
+      run: |
+        shellcheck -x scripts/deploy/load-release-images.sh scripts/deploy/verify-release-images.sh \
+          scripts/deploy/rollback-release-images.sh scripts/deploy/test-release-images.sh \
+          scripts/deploy/lib/release-images.sh
+        scripts/deploy/test-release-images.sh
+
+    # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
+    # identity printed first, and the resume hint keeping the run's options, against stubs.
+    - name: Check the full-history re-fetch script
+      run: scripts/deploy/test-refetch-full-history.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
@@ -359,6 +386,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
@@ -441,6 +469,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -550,6 +579,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -620,6 +650,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -974,6 +1005,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1109,6 +1141,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1163,6 +1196,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1207,6 +1241,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Check dev/QA Keycloak data is not deployed to k8s
@@ -1280,6 +1315,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1347,6 +1383,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1456,6 +1493,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1503,6 +1541,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1533,6 +1572,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
@@ -1589,6 +1629,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Load CI port configuration
@@ -1737,6 +1778,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1940,6 +1982,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -2137,6 +2180,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     # Plain docker build on the runner's daemon, not buildx with the GHA cache:
@@ -2190,6 +2234,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx

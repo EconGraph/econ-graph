@@ -560,6 +560,8 @@ impl CrawlerSchedulerMetrics {
             "crawler_scheduler_enabled",
             "Whether this worker starts the automatic refresh scheduler (1 enabled, 0 disabled)",
         )?;
+        // Fail open until startup configuration explicitly selects static mode.
+        enabled.set(1);
         registry.register(Box::new(enabled.clone()))?;
         let last_discovery_success_timestamp_seconds = GaugeVec::new(
             Opts::new(
@@ -647,6 +649,7 @@ mod queue_metrics_tests {
         use prometheus::Encoder;
         let registry = Registry::new();
         let metrics = CrawlerSchedulerMetrics::new(&registry).unwrap();
+        assert_eq!(metrics.enabled.get(), 1);
         for enabled in [false, true] {
             metrics.enabled.set(i64::from(enabled));
             let mut encoded = Vec::new();

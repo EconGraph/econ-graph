@@ -91,6 +91,30 @@ data:
             summary: crawler-worker metrics are not being scraped
             description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
 
+      - name: crawler.mode
+        rules:
+        # Visibility for explicit static mode, even while idle/freshness alerts are suppressed.
+        # Require complete primary telemetry, matching the idle/freshness suppression below.
+        # A branch worker cannot change the primary's reported mode.
+        - alert: CrawlerSchedulerDisabled
+          expr: |
+            (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+            and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+            unless on()
+            (
+              (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+              or on(job, instance)
+              (
+                up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+              )
+            )
+          labels:
+            severity: info
+          annotations:
+            summary: Primary crawler automatic scheduling is disabled
+            description: Primary crawler workers report CRAWLER_SCHEDULER=false. Queued jobs still drain, but automatic refresh is disabled; check that static mode is intentional.
+
       - name: crawler.rules
         interval: 30s
         rules:
@@ -98,7 +122,7 @@ data:
         # by zero (the previous clamp_max(..., 1) capped the denominator at 1 req/s, which
         # inflated or hid the ratio).
         - alert: CrawlerHighErrorRate
-          expr: sum(rate(econgraph_crawler_errors_total[5m])) / (sum(rate(econgraph_crawler_requests_total[5m])) > 0) > 0.05
+          expr: sum(rate(econgraph_crawler_errors_total{kubernetes_namespace="econ-graph"}[5m])) / (sum(rate(econgraph_crawler_requests_total{kubernetes_namespace="econ-graph"}[5m])) > 0) > 0.05
           for: 10m
           labels:
             severity: warning
@@ -107,7 +131,7 @@ data:
             description: Crawler error rate is above 5% for 10 minutes.
 
         - alert: CrawlerHighErrorRateBySource
-          expr: sum by (crawler_type) (rate(econgraph_crawler_errors_total[5m])) / (sum by (crawler_type) (rate(econgraph_crawler_requests_total[5m])) > 0) > 0.05
+          expr: sum by (crawler_type) (rate(econgraph_crawler_errors_total{kubernetes_namespace="econ-graph"}[5m])) / (sum by (crawler_type) (rate(econgraph_crawler_requests_total{kubernetes_namespace="econ-graph"}[5m])) > 0) > 0.05
           for: 10m
           labels:
             severity: warning
@@ -116,7 +140,7 @@ data:
             description: Error rate is above 5% for 10 minutes for source {{ $labels.crawler_type }}.
 
         - alert: CrawlerFrequentRateLimitHits
-          expr: sum(rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.5
+          expr: sum(rate(econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph"}[15m])) > 0.5
           for: 15m
           labels:
             severity: warning
@@ -125,7 +149,7 @@ data:
             description: Crawlers are frequently hitting upstream rate limits.
 
         - alert: CrawlerFrequentRateLimitHitsBySource
-          expr: sum by (crawler_type) (rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.1
+          expr: sum by (crawler_type) (rate(econgraph_crawler_rate_limit_hits_total{kubernetes_namespace="econ-graph"}[15m])) > 0.1
           for: 15m
           labels:
             severity: warning
@@ -134,7 +158,7 @@ data:
             description: Rate limit hits are frequent for source {{ $labels.crawler_type }}; its SourcePolicy rate may be too high (or more than one worker replica is running).
 
         - alert: CrawlerHighTimeouts
-          expr: sum(rate(econgraph_crawler_timeouts_total[10m])) > 0.2
+          expr: sum(rate(econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph"}[10m])) > 0.2
           for: 10m
           labels:
             severity: warning
@@ -143,7 +167,7 @@ data:
             description: Timeout rate exceeds threshold.
 
         - alert: CrawlerHighTimeoutsBySource
-          expr: sum by (crawler_type) (rate(econgraph_crawler_timeouts_total[10m])) > 0.05
+          expr: sum by (crawler_type) (rate(econgraph_crawler_timeouts_total{kubernetes_namespace="econ-graph"}[10m])) > 0.05
           for: 10m
           labels:
             severity: warning
@@ -152,7 +176,7 @@ data:
             description: Timeout rate exceeds threshold for source {{ $labels.crawler_type }}.
 
         - alert: CrawlerHighLatencyP95
-          expr: histogram_quantile(0.95, sum by (le) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
+          expr: histogram_quantile(0.95, sum by (le) (rate(econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph"}[5m]))) > 5
           for: 10m
           labels:
             severity: warning
@@ -161,7 +185,7 @@ data:
             description: 95th percentile of request latency is above 5 seconds.
 
         - alert: CrawlerHighLatencyP95BySource
-          expr: histogram_quantile(0.95, sum by (le, crawler_type) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
+          expr: histogram_quantile(0.95, sum by (le, crawler_type) (rate(econgraph_crawler_request_duration_seconds_bucket{kubernetes_namespace="econ-graph"}[5m]))) > 5
           for: 10m
           labels:
             severity: warning
@@ -202,7 +226,7 @@ data:
       - name: crawler.queue
         rules:
         - alert: CrawlerQueueBacklog
-          expr: sum(crawler_queue_items{status=~"pending|retrying"}) > 1000
+          expr: sum(crawler_queue_items{kubernetes_namespace="econ-graph", status=~"pending|retrying"}) > 1000
           for: 1h
           labels:
             severity: warning
@@ -215,9 +239,9 @@ data:
         # Due-in-the-future retries also count as non-empty, hence the 1h window plus `for`.
         - alert: CrawlerNoCompletions
           expr: |
-            (sum(crawler_queue_items) > 0)
+            (sum(crawler_queue_items{kubernetes_namespace="econ-graph"}) > 0)
             and on()
-            ((sum(increase(crawler_jobs_total{outcome="completed"}[1h])) or on() vector(0)) == 0)
+            ((sum(increase(crawler_jobs_total{kubernetes_namespace="econ-graph", outcome="completed"}[1h])) or on() vector(0)) == 0)
           for: 15m
           labels:
             severity: warning
@@ -226,7 +250,7 @@ data:
             description: crawl_queue holds {{ $value | humanize }} active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
 
         - alert: CrawlerSourceFailing
-          expr: max by (source) (crawler_queue_failed_24h) > 50
+          expr: max by (source) (crawler_queue_failed_24h{kubernetes_namespace="econ-graph"}) > 50
           for: 15m
           labels:
             severity: warning
@@ -243,7 +267,7 @@ data:
         # `last_over_time` over an 8-day subquery of the per-source max keeps the last reported
         # value through that gap, so the alert keeps firing, and a discovery reporting 0 clears it.
         - alert: CrawlerCuratedEntriesMissing
-          expr: last_over_time((max by (source) (crawler_curated_missing))[8d:5m]) > 0
+          expr: last_over_time((max by (source) (crawler_curated_missing{kubernetes_namespace="econ-graph"}))[8d:5m]) > 0
           for: 15m
           labels:
             severity: warning
@@ -261,7 +285,7 @@ data:
         # discovery found but nobody enqueued keep coverage low, so this can fire for them;
         # `crawler coverage` shows it.
         - alert: CrawlerCoverageLow
-          expr: max by (source) (crawler_coverage_ratio) < 0.95
+          expr: max by (source) (crawler_coverage_ratio{kubernetes_namespace="econ-graph"}) < 0.95
           for: 6h
           labels:
             severity: warning
@@ -301,7 +325,7 @@ data:
         # Fires for an hour after any crawl_queue job of the source fails for good (retries
         # exhausted, or a non-retryable error such as an unknown series id).
         - alert: CrawlerCrawlFailed
-          expr: time() - max by (source) (crawler_last_failure_timestamp_seconds) < 3600
+          expr: time() - max by (source) (crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph"}) < 3600
           labels:
             severity: warning
           annotations:
