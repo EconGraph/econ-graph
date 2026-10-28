@@ -39,8 +39,12 @@
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Under TMPDIR when it is set, else the user's cache directory (/tmp may be a
+# small shared tmpfs).
+SCRATCH_PARENT="${TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}}"
+mkdir -p "$SCRATCH_PARENT" || exit 1
+WORK="$(mktemp -d "$SCRATCH_PARENT/test-release-deploy.XXXXXX")" || exit 1
+trap 'chmod -R u+rwX "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 HOME_DIR="$WORK/home"
 CACHE="$HOME_DIR/.cache/econgraph"
 CONFIG="$HOME_DIR/.config/econgraph/deploy.env"
@@ -148,12 +152,15 @@ echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:
 stamp="${STUB_STAMP:-20261028T080000Z}"
 case "$name" in
     backup-postgres-now)
+        echo "🗄️  Triggering an ad-hoc backup job: postgres-backup-manual-7"
+        # A backup that takes a while (long enough to be interrupted).
+        if [ -n "${STUB_BACKUP_SLEEP:-}" ]; then sleep "$STUB_BACKUP_SLEEP"; fi
+        # A backup step that succeeds without naming its dumps.
+        if [ -n "${STUB_NO_PATHS:-}" ]; then exit 0; fi
         if [ -n "${STUB_BACKUP_RUNNING:-}" ]; then
             echo "backup-postgres-now: still running: job/postgres-backup-manual-1"
             exit 1
         fi
-        # A step that makes the next steps' tee fail to write the step log.
-        if [ -n "${STUB_BREAK_LOG:-}" ]; then chmod 000 "$XDG_RUNTIME_DIR"/release-deploy.*; fi
         # A record that becomes unwritable during the run.
         if [ -n "${STUB_BREAK_RECORD:-}" ]; then chmod 444 "$ECONGRAPH_RELEASES_DIR"/*/release-deploy-*.txt; fi
         dir="${STUB_BACKUP_DIR:-/backups}"
@@ -168,9 +175,12 @@ case "$name" in
                 echo "[pod/postgres-backup-manual-1-x/pg-dump] [${db}] Backup OK: 3 tables, 1.0M in ${dir}/${db}-${stamp}.dump"
             done ;;
     backup-keycloak-db)
+        if [ -n "${STUB_NO_KC_PATH:-}" ]; then exit 0; fi
         [ "${STUB_FAIL:-}" = "$name" ] ||
             echo "backup-keycloak-db: verified dump in ${STUB_KC_ROOT:-/home/op/econgraph-backups/keycloak}/${stamp}" ;;
     precheck-db-migration)
+        # A step that makes the next steps' tee fail to write their step logs.
+        if [ -n "${STUB_BREAK_LOG:-}" ]; then chmod 000 "$XDG_RUNTIME_DIR"/release-deploy.*; fi
         [ -z "${STUB_CRAWLER_FROM-3}" ] ||
             echo "precheck-db-migration: scaling deployment/crawler-worker from ${STUB_CRAWLER_FROM-3} to 0"
         # The checkout changes while the run goes on.
@@ -178,7 +188,21 @@ case "$name" in
         # A process left behind that writes to the step's output later, while
         # verify runs.
         if [ -n "${STUB_LATE_WRITER:-}" ]; then (sleep 4; printf '\n  unchecked late output of the precheck\n') & fi ;;
+    load-release-images)
+        # A load interrupted while it runs writes its record on the way out
+        # (load-release-images.sh's EXIT trap), which takes a moment.
+        if [ -n "${STUB_LOAD_SLEEP:-}" ]; then
+            trap 'sleep 1; echo "load record written" >>"$TEST_LOGS/steps.log"' EXIT
+            sleep "$STUB_LOAD_SLEEP" &
+            wait $!
+        fi ;;
     deploy)
+        # A deploy that ignores SIGTERM: only SIGKILL stops it.
+        if [ -n "${STUB_IGNORE_TERM:-}" ]; then
+            trap '' TERM
+            for _ in $(seq 1 150); do sleep 0.2; done
+            echo "stub deploy finished" >>"$TEST_LOGS/steps.log"
+        fi
         # A deploy that takes a while: long enough to be interrupted.
         if [ -n "${STUB_SLEEP:-}" ]; then
             # It takes a moment to stop: the run must wait for it.
@@ -432,19 +456,35 @@ elif ! grep -qxF "restore_backup=/backups/econ_graph-20261028T010000Z.dump" "$WO
 else
     echo "ok   failing deploy: the restores name this run's backups"
 fi
+# A re-run after that deploy: the backups before the first deploy hold the
+# state before the tag's migrations; this run's are named only as the ones for
+# databases restored since.
 KEEP_RECORDS=1 run env STUB_FAIL=deploy STUB_STAMP=20261028T020000Z "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
-restore="$(sed -n '/restore them from the backups/,/use the ones above, not these/p' <<<"$out")"
+restore="$(sed -n '/restore them from the last backups/,/Only if the databases were/p' <<<"$out")"
 if ! grep -qF "restore-postgres-backup.sh --context kind-econ-graph --file econ_graph-20261028T010000Z.dump" <<<"$restore" ||
     ! grep -qF "restore-keycloak-db.sh /home/op/econgraph-backups/keycloak/20261028T010000Z" <<<"$restore"; then
-    fail "a re-run that fails at deploy: the restores do not name the first run's backups"
+    fail "a re-run after a deploy: the restores do not name the backups before the first deploy"
 elif grep -qF "20261028T020000Z" <<<"$restore"; then
-    fail "a re-run that fails at deploy: offers this run's backups as the ones to restore"
-elif ! sed -n '/use the ones above, not these/,$p' <<<"$out" | grep -qF "/backups/econ_graph-20261028T020000Z.dump"; then
-    fail "a re-run that fails at deploy: does not list this run's backups as not to use"
-elif ! grep -qxF "restore_backup=/backups/econ_graph-20261028T010000Z.dump" "$WORK/report"; then
-    fail "a re-run that fails at deploy: report $(cat "$WORK/report")"
+    fail "a re-run after a deploy: offers this run's backups as the ones to restore"
+elif ! sed -n '/Only if the databases were/,$p' <<<"$out" | grep -qF "/backups/econ_graph-20261028T020000Z.dump"; then
+    fail "a re-run after a deploy: does not name this run's backups for databases restored since"
+elif ! grep -qxF "restore_backup=/backups/econ_graph-20261028T010000Z.dump" "$WORK/report" ||
+    grep -qF "20261028T020000Z" <(grep '^restore_' "$WORK/report"); then
+    fail "a re-run after a deploy: report $(cat "$WORK/report")"
 else
-    echo "ok   a re-run that fails at deploy: restore from the first run's backups, not this run's"
+    echo "ok   a re-run after a deploy: restore from the backups before the first deploy"
+fi
+# A first run that never deployed (it failed at the load): its backup is older
+# than the next run's, which is the last one before the first deploy.
+run env STUB_FAIL=load-release-images STUB_STAMP=20261020T000000Z "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+KEEP_RECORDS=1 run env STUB_FAIL=deploy STUB_STAMP=20261028T000000Z "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
+if ! has "restore-postgres-backup.sh --context kind-econ-graph --file econ_graph-20261028T000000Z.dump" ||
+    ! has "restore-keycloak-db.sh /home/op/econgraph-backups/keycloak/20261028T000000Z"; then
+    fail "an earlier run that never deployed: the restores do not name the last backups before the deploy"
+elif has "20261020T000000Z" || has "Only if the databases were"; then
+    fail "an earlier run that never deployed: offers its older backup"
+else
+    echo "ok   an earlier run that never deployed: restore from the last backups before the deploy"
 fi
 
 # A backup Job still running at the timeout: wait for it, no second backup.
@@ -466,15 +506,15 @@ if ! has "restore-postgres-backup.sh --context kind-econ-graph --file econ_graph
     fail "a partial backup, then a complete one: no restore from the complete one"
 elif has "econ_graph_app-20261028T010000Z.dump"; then
     fail "a partial backup, then a complete one: offers the partial backup's dump"
-elif has "use the ones above, not these"; then
-    fail "a partial backup, then a complete one: lists the backups to restore as ones to avoid"
+elif has "Only if the databases were"; then
+    fail "a partial backup, then a complete one: names other backups"
 elif grep -qF "20261028T010000Z" "$WORK/report"; then
     fail "a partial backup, then a complete one: the report names the partial backup: $(cat "$WORK/report")"
 else
     echo "ok   a backup that failed partway is not the one to restore from"
 fi
 # The first run's date is shown with its backups.
-grep -qE "first deployed on this cluster \(run [0-9TZ-]+, 20[0-9-]+T[0-9:]+Z\)" <<<"$out" ||
+grep -qE "data databases \(run [0-9TZ-]+, 20[0-9-]+T[0-9:]+Z\):" <<<"$out" ||
     fail "the restore advice does not show the first run's id and date"
 # Records from another cluster of the same name (another kube-system UID), and
 # from before records carried one, are ignored.
@@ -562,6 +602,19 @@ chmod -R u+w "$WORK/releases" 2>/dev/null
 # Job control (set -m) starts the run in a process group of its own, as a
 # terminal does, without SIGINT ignored as in a background job.
 set -m
+# start_bg STEP-LINE ENV...: start a run in the background (its own process
+# group) with the extra environment, and wait until the step log has
+# STEP-LINE. The run's PID is in $pid.
+start_bg() {
+    local marker="$1"
+    shift
+    rm -rf "$WORK/releases"; : >"$LOGS/steps.log"; rm -f "$WORK/report"
+    "${ENV[@]}" "$@" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report" \
+        </dev/null >"$WORK/signal.out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 100); do grep -q "^$marker " "$LOGS/steps.log" && break; sleep 0.1; done
+    sleep 0.5
+}
 for mode in INT:group TERM:script; do
     sig="${mode%%:*}"; target="${mode#*:}"
     rm -rf "$WORK/releases"; : >"$LOGS/steps.log"; rm -f "$WORK/report"
@@ -591,7 +644,83 @@ for mode in INT:group TERM:script; do
         echo "ok   SIG$sig during deploy stops it, with the guidance and result=interrupted"
     fi
 done
+# SIGHUP (the terminal closing) is handled the same way.
+start_bg deploy STUB_SLEEP=8
+kill -HUP "$pid"; wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+[ "$rc" = 129 ] && [ "$(tail -1 "$WORK/report")" = "result=interrupted step=deploy signal=HUP" ] ||
+    fail "SIGHUP during deploy: exit $rc, report $(tail -1 "$WORK/report")"
+sleep 5
+# A second Ctrl-C while the step cleans up does not cut its cleanup short.
+start_bg load-release-images STUB_LOAD_SLEEP=30
+kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"
+wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+if ! grep -q "load record written" "$LOGS/steps.log"; then
+    fail "two Ctrl-Cs during the load: its cleanup (the load record) was cut short"
+elif ! has "still stopping step load"; then
+    fail "two Ctrl-Cs during the load: the second does not say the run is still stopping"
+elif [ "$(tail -1 "$WORK/report")" != "result=interrupted step=load signal=INT" ]; then
+    fail "two Ctrl-Cs during the load: report $(tail -1 "$WORK/report")"
+else
+    echo "ok   a second Ctrl-C lets the step finish cleaning up"
+fi
+# A step that ignores SIGTERM: a third Ctrl-C kills it, with a warning.
+start_bg deploy STUB_IGNORE_TERM=1
+start=$SECONDS
+kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"; sleep 0.5; kill -INT -- -"$pid"
+wait "$pid"; rc=$?
+elapsed=$((SECONDS - start))
+out="$(cat "$WORK/signal.out")"
+if [ "$elapsed" -ge 8 ] || ! has "killing step deploy (SIGKILL); its cleanup may be cut short" ||
+    [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ]; then
+    fail "three Ctrl-Cs and a step that ignores SIGTERM: exit $rc after ${elapsed}s, report $(tail -1 "$WORK/report")"
+else
+    echo "ok   a third Ctrl-C kills a step that ignores SIGTERM"
+fi
+# ... and after STOP_TIMEOUT seconds without one.
+start_bg deploy STUB_IGNORE_TERM=1 ECONGRAPH_STOP_TIMEOUT=2
+start=$SECONDS
+kill -TERM "$pid"; wait "$pid"; rc=$?
+elapsed=$((SECONDS - start))
+out="$(cat "$WORK/signal.out")"
+if [ "$elapsed" -ge 10 ] || ! has "did not stop within 2s; killing it (SIGKILL)"; then
+    fail "a step that ignores SIGTERM: not killed after the timeout (exit $rc after ${elapsed}s)"
+else
+    echo "ok   a step that ignores SIGTERM is killed after the timeout"
+fi
+# A burst of Ctrl-Cs: the run still stops the step, explains and reports.
+start_bg deploy STUB_SLEEP=8
+end=$((SECONDS + 6))
+while kill -0 "$pid" 2>/dev/null && [ "$SECONDS" -lt "$end" ]; do kill -INT -- -"$pid" 2>/dev/null; sleep 0.005; done
+wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+if kill -0 "$pid" 2>/dev/null || [ "$(tail -1 "$WORK/report")" != "result=interrupted step=deploy signal=INT" ] ||
+    ! grep -q "^restore_backup=/backups/econ_graph-" "$WORK/report" || ! has "scale deployment/crawler-worker --replicas=3"; then
+    fail "a burst of Ctrl-Cs during deploy: exit $rc, report $(cat "$WORK/report")"
+else
+    echo "ok   a burst of Ctrl-Cs during deploy: stopped, explained and reported"
+fi
+sleep 9
+# Ctrl-C during the backup: its Job may still be running; no second backup.
+start_bg backup-postgres-now STUB_BACKUP_SLEEP=30
+kill -INT -- -"$pid"; wait "$pid"; rc=$?
+out="$(cat "$WORK/signal.out")"
+if ! has "its Job job/postgres-backup-manual-7 may still be running" || ! has "get jobs postgres-backup-manual-7" ||
+    has "Fix the backup and run this command again"; then
+    fail "Ctrl-C during the backup: does not say its Job may still be running"
+else
+    echo "ok   Ctrl-C during the backup: check its Job before running again"
+fi
 set +m
+
+# A backup step that succeeds without naming a backup stops the run.
+run env STUB_NO_PATHS=1 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
+[ "$rc" -ne 0 ] && [ "$(steps)" = "backup-postgres-now" ] && has "named no backup it took" ||
+    fail "a backup step that names no dump: exit $rc, steps '$(steps)'"
+run env STUB_NO_KC_PATH=1 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -ne 0 ] && [ "$(steps)" = "backup-postgres-now load-release-images backup-keycloak-db" ] && has "named no backup it took" ||
+    fail "a Keycloak backup step that names no dump: exit $rc, steps '$(steps)'"
 
 # --- the report -------------------------------------------------------------------------------
 mkdir -p "$WORK/readonly" && chmod 0555 "$WORK/readonly"
@@ -672,6 +801,14 @@ echo "kind: ConfigMap" >"$TREE/k8s/manifests/extra.yaml"
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a checkout with an untracked file" "k8s/manifests/extra.yaml"
 rm -f "$TREE/k8s/manifests/extra.yaml"
+
+run env GIT_DIR="$TREE/.git" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "GIT_DIR set in the environment" "GIT_DIR is set in the environment"
+cp -a "$TREE" "$WORK/my tree"
+run "$WORK/my tree/scripts/deploy/release-deploy.sh" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && [ "$(steps)" = "$ALL" ] ||
+    fail "a checkout whose path has a blank: exit $rc, steps '$(steps)'"
+rm -rf "$WORK/my tree"
 
 # --- the PUBLIC_HOST guard --------------------------------------------------------------------
 rm -f "$CONFIG"

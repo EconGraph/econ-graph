@@ -55,8 +55,8 @@
 #                  the backups taken (backup= and keycloak_backup=), on a
 #                  failure the backups to restore from (restore_backup= and
 #                  restore_keycloak_backup=), and a final result= line to FILE
-#                  (result=interrupted step=NAME signal=SIG after Ctrl-C or
-#                  SIGTERM), for a caller that reads which step failed
+#                  (result=interrupted step=NAME signal=SIG after Ctrl-C,
+#                  SIGTERM or SIGHUP), for a caller that reads which step failed
 #
 # Before any step, with nothing changed yet:
 #   - The checkout is the tag's commit and clean (see --tag).
@@ -90,23 +90,26 @@
 # On a failure it prints which steps ran, which failed, what that leaves
 # changed, and the commands to go back: scripts/deploy/rollback-release-images.sh
 # --to pre-TAG for the images; the commands that start Keycloak and the crawler
-# worker at their earlier replicas; and the database restores, from the backups
-# taken before the tag's first deploy attempt.
+# worker at their earlier replicas; and the database restores, from the last
+# complete backups taken before the tag was first deployed on the cluster.
 #
 # Each run appends what it found and took to
 # ${ECONGRAPH_RELEASES_DIR:-~/econgraph-releases}/<tag>/release-deploy-<cluster>.txt,
 # each line with the run's id, the cluster's kube-system UID and the time:
 # Keycloak's and the crawler worker's replicas before the run, the replicas the
 # precheck scaled the crawler down from, and the backups, recorded only when
-# their step succeeded (backup_complete=1 marks a complete database backup). A
+# their step succeeded (backup_complete=1 marks a complete database backup), and
+# deploy_started just before each deploy step. A
 # later run of the same tag on the same cluster reads them, since by then
 # Keycloak and the crawler may already be at 0 and the databases may already be
 # migrated; lines from another cluster (another kube-system UID, such as one
 # recreated under the same name) are ignored. A record that can't be written
 # stops the run.
 #
-# Ctrl-C or SIGTERM during a step stops that step (and what it started), and
-# prints the same guidance as a failure of that step.
+# Ctrl-C, SIGTERM or SIGHUP during a step sends that step and its child
+# processes SIGTERM once and waits for them to clean up; a third signal, or
+# ECONGRAPH_STOP_TIMEOUT seconds (default 120), sends SIGKILL. It then prints
+# the same guidance as a failure of that step.
 #
 # Idempotent: every step is safe to run again with the same tag (the load keeps
 # its first record's rollback copies, the backups add new ones, precheck only
@@ -197,6 +200,11 @@ if [ -n "$REPORT" ] && ! { : >>"$REPORT"; } 2>/dev/null; then
 fi
 
 # --- the tag ------------------------------------------------------------------------
+# git must read this checkout's own repository and index, not ones the
+# environment names.
+for var in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_NAMESPACE; do
+    [ -z "${!var+set}" ] || die "${var} is set in the environment; unset it, so git checks this checkout itself"
+done
 RC_TAG="$TAG"
 if [[ "$TAG" != *-rc.* ]]; then
     git -C "$PROJECT_ROOT" fetch --tags origin >/dev/null 2>&1 ||
@@ -218,6 +226,8 @@ fi
 # or untracked cache, files marked skip-worktree or assume-unchanged refused,
 # and ignored files (.gitignore, .git/info/exclude) refused where deploy.sh
 # reads. git status compares the index with HEAD as well as the working tree.
+# Not caught: a change git itself can't see (a clean filter that hides one),
+# and a change made while deploy.sh runs, after the last check.
 tag_commit="$(git -C "$PROJECT_ROOT" rev-parse --verify --quiet "refs/tags/${RC_TAG}^{commit}")" ||
     die "tag ${RC_TAG} is not in this checkout (git fetch --tags origin)"
 DEPLOY_READS=(k8s config scripts grafana-dashboards ports.env)
@@ -404,20 +414,32 @@ unset CLUSTER_ROLE_CONTEXT
 dry=()
 [ "$DRY_RUN" = true ] && dry=(--dry-run)
 STEPS=(backup load keycloak precheck deploy verify)
-declare -A CMD=(
-    [backup]="$DEPLOY_DIR/backup-postgres-now.sh --context ${CONTEXT}"
-    [load]="$DEPLOY_DIR/load-release-images.sh --tag ${RC_TAG} --cluster ${KIND_CLUSTER}"
-    [keycloak]="$DEPLOY_DIR/backup-keycloak-db.sh --context ${CONTEXT}"
-    [precheck]="$DEPLOY_DIR/precheck-db-migration.sh --stop-crawler"
-    [deploy]="$DEPLOY_DIR/deploy.sh"
-    [verify]="$DEPLOY_DIR/verify-release-images.sh --tag ${RC_TAG} --cluster ${KIND_CLUSTER}"
-)
+# step_argv STEP: set ARGV to the command step STEP runs, as an array (so a
+# PROJECT_ROOT with blanks in it stays one word).
+step_argv() {
+    case "$1" in
+        backup) ARGV=("$DEPLOY_DIR/backup-postgres-now.sh" --context "$CONTEXT") ;;
+        load) ARGV=("$DEPLOY_DIR/load-release-images.sh" --tag "$RC_TAG" --cluster "$KIND_CLUSTER") ;;
+        keycloak) ARGV=("$DEPLOY_DIR/backup-keycloak-db.sh" --context "$CONTEXT") ;;
+        precheck) ARGV=("$DEPLOY_DIR/precheck-db-migration.sh" --stop-crawler) ;;
+        deploy) ARGV=("$DEPLOY_DIR/deploy.sh") ;;
+        verify) ARGV=("$DEPLOY_DIR/verify-release-images.sh" --tag "$RC_TAG" --cluster "$KIND_CLUSTER") ;;
+    esac
+    ARGV+=("${dry[@]}")
+}
+# step_line STEP: the command step STEP runs, for the plan and the log, relative
+# to the repository.
+step_line() {
+    step_argv "$1"
+    local line="${ARGV[*]}"
+    echo "${line#"$PROJECT_ROOT"/}"
+}
 declare -A STATE=()
 
 echo
 echo "Plan for ${RC_TAG}$([ "$DRY_RUN" = true ] && echo ' (dry run: each step dry-runs)'):"
 for step in "${STEPS[@]}"; do
-    echo "  ${step}: ${CMD[$step]#"$PROJECT_ROOT"/}${dry[*]:+ ${dry[*]}}"
+    echo "  ${step}: $(step_line "$step")"
 done
 question="Deploy ${RC_TAG} to ${CONTEXT}${PUBLIC_HOST:+ (PUBLIC_HOST=${PUBLIC_HOST})}?"
 if [ "$marker" = 0 ] && [ "$DRY_RUN" != true ]; then
@@ -434,9 +456,9 @@ else
     confirm "$question"
 fi
 
-kubectl_hint="KUBECONFIG=${KUBECONFIG} ${KUBECTL} --context ${CONTEXT} -n ${NAMESPACE}"
+kubectl_hint="$(printf 'KUBECONFIG=%q %q --context %q -n %q' "$KUBECONFIG" "$KUBECTL" "$CONTEXT" "$NAMESPACE")"
 cluster_arg=""
-[ "$KIND_CLUSTER" = "$DEFAULT_CLUSTER" ] || cluster_arg=" --cluster ${KIND_CLUSTER}"
+[ "$KIND_CLUSTER" = "$DEFAULT_CLUSTER" ] || cluster_arg=" --cluster $(printf '%q' "$KIND_CLUSTER")"
 # Each step's output, also kept for what a step reports (verify's unchecked
 # items, the backups' paths), in a file of its own per step, so a tee still
 # writing for one step can't mix into the next. Not in /tmp, which may be
@@ -445,7 +467,7 @@ STEP_LOG_PARENT="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/econgr
 if ! { mkdir -p "$STEP_LOG_PARENT" && STEP_LOG_DIR="$(mktemp -d "${STEP_LOG_PARENT}/release-deploy.XXXXXX")"; }; then
     die "cannot create a step log in ${STEP_LOG_PARENT}; nothing was changed. Free space there or set XDG_RUNTIME_DIR to a writable directory, then run this again"
 fi
-add_exit_cleanup "rm -rf '${STEP_LOG_DIR}' 2>/dev/null || true"
+add_exit_cleanup "rm -rf $(printf '%q' "$STEP_LOG_DIR") 2>/dev/null || true"
 STEP_LOG=""
 [ -z "$keycloak_now" ] || [ "$keycloak_now" = 0 ] || record keycloak_replicas "$keycloak_now" ||
     die "cannot write ${RECORD}; nothing was changed"
@@ -453,6 +475,7 @@ STEP_LOG=""
     die "cannot write ${RECORD}; nothing was changed"
 UNCHECKED=""
 BACKUP_STILL_RUNNING=""
+BACKUP_JOB=""
 BACKUPS=()
 KEYCLOAK_BACKUP=""
 NOT_STARTED=""
@@ -478,52 +501,79 @@ replicas_advice() {
     fi
 }
 
-# The database restores: from the backups of the first run of the tag on this
-# cluster whose backup step completed, which come before any deploy of the tag
-# and so hold the state before its migrations. This run's own are listed too
-# when they differ.
+# backup_before KEY ANCHOR: the latest record line with KEY (on this cluster)
+# before the anchor, as RUN<tab>DATE<tab>VALUE. ANCHOR "first" is the first
+# deploy_started of the tag on this cluster, "run:ID" the first of run ID; with
+# no such deploy_started, the latest line with KEY.
+backup_before() {
+    record_entries | awk -F'\t' -v k="$1" -v mode="$2" '
+        { r[NR] = $1; d[NR] = $2; key[NR] = $3; v[NR] = $4
+          if ($3 == "deploy_started" && a == "" && (mode == "first" || mode == "run:" $1)) a = NR }
+        END { if (a == "") a = NR + 1
+              for (i = a - 1; i >= 1; i--) if (key[i] == k) { print r[i] "\t" d[i] "\t" v[i]; exit } }'
+}
+
+# print_backups RUN DATE LABEL: the data databases' dumps run RUN recorded, with
+# the restore command for econ_graph's, and report them when LABEL is "restore".
+print_backups() {
+    local path
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        echo "  ${path}"
+        [ "$3" != restore ] || report "restore_backup=${path}"
+        case "${path##*/}" in
+            econ_graph-*) echo "    scripts/deploy/restore-postgres-backup.sh --context ${CONTEXT} --file $(printf '%q' "${path##*/}")" ;;
+        esac
+    done < <(recorded_in_run "$1" backup)
+}
+
+# The database restores, from the last complete backup taken before the tag
+# was first deployed on this cluster (the first deploy_started): it holds the
+# state just before the tag's migrations, and nothing later is lost that need
+# not be. Before any deploy was started, the latest complete backup. When this
+# run's deploy came later, the latest backup before it is named too, for the
+# case where the databases were restored to before the tag since.
 explain_restore() {
-    local first first_id first_date path kc_first kc_path
-    first="$(first_run_with backup_complete)"
-    first_id="${first%%$'\t'*}"
-    first_date="${first#*$'\t'}"
+    local chosen run date newer kc kc_newer
+    chosen="$(backup_before backup_complete first)"
+    run="${chosen%%$'\t'*}"
+    date="$(cut -f2 <<<"$chosen")"
     echo
     echo "If the data migrations (the crawler-migrate Job) ran, or Keycloak started on a new"
-    echo "version, the databases are migrated: restore them from the backups taken before"
-    echo "${RC_TAG} was first deployed on this cluster${first:+ (run ${first_id}, ${first_date})}:"
-    if [ -n "$first" ]; then
-        while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            echo "  ${path}"
-            report "restore_backup=${path}"
-            case "${path##*/}" in
-                econ_graph-*) echo "    scripts/deploy/restore-postgres-backup.sh --context ${CONTEXT} --file $(printf '%q' "${path##*/}")" ;;
-            esac
-        done < <(recorded_in_run "$first_id" backup)
+    echo "version, the databases are migrated: restore them from the last backups taken before"
+    echo "${RC_TAG} was first deployed on this cluster:"
+    if [ -n "$chosen" ]; then
+        echo "  data databases (run ${run}, ${date}):"
+        print_backups "$run" "$date" restore
         echo "    (the others: docs/deployment/POSTGRES_BACKUP_RESTORE.md)"
     else
-        echo "  (no complete backup of the data databases is recorded for ${RC_TAG} on this cluster in ${RECORD})"
+        echo "  data databases: no complete backup is recorded for ${RC_TAG} on this cluster in ${RECORD}"
     fi
-    kc_first="$(first_run_with keycloak_backup)"
-    if [ -n "$kc_first" ]; then
-        kc_path="$(first_recorded keycloak_backup)"
-        echo "  Keycloak (run ${kc_first%%$'\t'*}, ${kc_first#*$'\t'}): scripts/deploy/restore-keycloak-db.sh $(printf '%q' "$kc_path") --context ${CONTEXT}"
-        report "restore_keycloak_backup=${kc_path}"
+    kc="$(backup_before keycloak_backup first)"
+    if [ -n "$kc" ]; then
+        echo "  Keycloak (run ${kc%%$'\t'*}, $(cut -f2 <<<"$kc")): scripts/deploy/restore-keycloak-db.sh $(printf '%q' "$(cut -f3- <<<"$kc")") --context ${CONTEXT}"
+        report "restore_keycloak_backup=$(cut -f3- <<<"$kc")"
     else
         echo "  Keycloak: no verified dump is recorded for ${RC_TAG} on this cluster; scripts/deploy/restore-keycloak-db.sh --list"
     fi
-    local later=()
-    [ "${#BACKUPS[@]}" -eq 0 ] || [ "$first_id" = "$RUN_ID" ] || later+=("${BACKUPS[@]}")
-    [ -z "$KEYCLOAK_BACKUP" ] || [ "$KEYCLOAK_BACKUP" = "${kc_path:-}" ] || later+=("$KEYCLOAK_BACKUP")
-    if [ "${#later[@]}" -gt 0 ]; then
-        echo "This run's backups below were taken after an earlier run of ${RC_TAG}, which may have"
-        echo "migrated the databases already: use the ones above, not these:"
-        printf '  %s\n' "${later[@]}"
+    newer="$(backup_before backup_complete "run:${RUN_ID}")"
+    kc_newer="$(backup_before keycloak_backup "run:${RUN_ID}")"
+    if { [ -n "$newer" ] && [ "$newer" != "$chosen" ]; } || { [ -n "$kc_newer" ] && [ "$kc_newer" != "$kc" ]; }; then
+        echo "${RC_TAG} was first deployed on this cluster before this run. Only if the databases were"
+        echo "restored to before ${RC_TAG} since then, the later backups taken before this run's deploy"
+        echo "are newer; otherwise they may already hold ${RC_TAG}'s migrations:"
+        if [ -n "$newer" ] && [ "$newer" != "$chosen" ]; then
+            echo "  data databases (run ${newer%%$'\t'*}, $(cut -f2 <<<"$newer")):"
+            print_backups "${newer%%$'\t'*}" "" later
+        fi
+        if [ -n "$kc_newer" ] && [ "$kc_newer" != "$kc" ]; then
+            echo "  Keycloak (run ${kc_newer%%$'\t'*}, $(cut -f2 <<<"$kc_newer")): $(cut -f3- <<<"$kc_newer")"
+        fi
     fi
 }
 
 # What a failure at step $1 leaves, and how to go back. HOW says what happened
-# to it (failed, or was interrupted).
+# to it (failed, was interrupted, or was refused).
 explain_failure() {
     local failed="$1" how="${2:-failed}" step
     echo
@@ -544,6 +594,13 @@ explain_failure() {
                 echo "  ${kubectl_hint} wait --for=condition=complete ${BACKUP_STILL_RUNNING} --timeout=3600s"
                 echo "and only then run this command again: a run starts another backup Job, which"
                 echo "would run beside this one. Nothing else was changed."
+            elif [ -n "$INTERRUPTED" ]; then
+                echo "The backup was interrupted here, but its Job${BACKUP_JOB:+ ${BACKUP_JOB}} may still be running in the"
+                echo "cluster: stopping this run does not stop it. Check it before running this command"
+                echo "again, which starts another backup Job:"
+                echo "  ${kubectl_hint} get jobs${BACKUP_JOB:+ ${BACKUP_JOB#job/}}"
+                [ -z "$BACKUP_JOB" ] || echo "  ${kubectl_hint} wait --for=condition=complete ${BACKUP_JOB} --timeout=3600s"
+                echo "Nothing else was changed."
             else
                 echo "No image was loaded and the databases are unchanged. Fix the backup and run this"
                 echo "command again."
@@ -567,7 +624,7 @@ explain_failure() {
             if [ -n "$NOT_STARTED" ]; then
                 echo "deploy.sh was not started: ${NOT_STARTED}. The new images are loaded, the backups"
                 echo "are taken, and Keycloak and the crawler worker may be stopped (see below)."
-                echo "Restore the checkout and run this command again, or go back with:"
+                echo "Run this command again, or go back with:"
             else
                 echo "deploy.sh stopped partway: some manifests are applied, and the data migrations"
                 echo "(crawler-migrate Job) may have run. Pods that restarted run the new images."
@@ -607,13 +664,16 @@ explain_failure() {
     esac
 }
 
-# What step $1 (exit status $2) reported in STEP_LOG, kept for the summary, the
+# What step $1 (exit status $2) reported in its log, kept for the summary, the
 # report and the record. Backups count only from a step that succeeded: a
-# backup step that failed partway took no complete backup.
+# backup step that failed partway took no complete backup. Returns 2 when a
+# backup step succeeded without naming its backup, 1 when the record can't be
+# written.
 collect() {
     local path status="$2"
     case "$1" in
         backup)
+            BACKUP_JOB="$(sed -n 's/.*Triggering an ad-hoc backup job: \([^ ]*\)$/job\/\1/p' "$STEP_LOG" | tail -1)"
             BACKUP_STILL_RUNNING="$(sed -n 's/^backup-postgres-now: still running: \(job\/[^ ]*\)$/\1/p' "$STEP_LOG" | tail -1)"
             [ "$status" = 0 ] || return 0
             # backup.sh's line per dump: "[name] Backup OK: N tables, SIZE in PATH".
@@ -623,13 +683,19 @@ collect() {
                 report "backup=${path}"
                 record backup "$path" || return 1
             done < <(sed -n 's/.*Backup OK: [0-9]* tables, [^ ]* in \(.*\.dump\)$/\1/p' "$STEP_LOG")
-            [ "${#BACKUPS[@]}" -eq 0 ] || record backup_complete 1 ;;
+            if [ "${#BACKUPS[@]}" -eq 0 ]; then
+                [ "$DRY_RUN" = true ] || return 2
+            else
+                record backup_complete 1
+            fi ;;
         keycloak)
             [ "$status" = 0 ] || return 0
             KEYCLOAK_BACKUP="$(sed -n 's/^backup-keycloak-db: verified dump in \(.*\)$/\1/p' "$STEP_LOG" | tail -1)"
             if [ -n "$KEYCLOAK_BACKUP" ]; then
                 report "keycloak_backup=${KEYCLOAK_BACKUP}"
                 record keycloak_backup "$KEYCLOAK_BACKUP"
+            elif [ "$DRY_RUN" != true ] && [ -n "$keycloak_now" ]; then
+                return 2
             fi ;;
         precheck)
             # Recorded whether or not the precheck then passed: it did scale the worker down.
@@ -640,19 +706,81 @@ collect() {
     esac
 }
 
-# Ctrl-C and SIGTERM: stop the running step and everything it started, then
-# give the guidance for that step. A step runs in the background (which ignores
-# SIGINT from the terminal), so it is sent SIGTERM whatever the signal was.
+# --- stopping on a signal -------------------------------------------------------------------
+# Ctrl-C, SIGTERM and SIGHUP while a step runs: the step and the processes it
+# started (its children, found with pgrep -P; a process that detached itself
+# from them is not found) are sent SIGTERM once, so they can clean up (the load
+# writes its record, the Keycloak backup moves its directory aside). A second
+# signal only says the run is still stopping; a third, or STOP_TIMEOUT seconds
+# without the step stopping, sends SIGKILL, which can cut that cleanup short.
+# Once the run is explaining a failure, further signals are ignored. The run
+# then gives the guidance for that step.
+STOP_TIMEOUT="${ECONGRAPH_STOP_TIMEOUT:-120}"
 STEP_PID=""
+STEP_NAME=""
 INTERRUPTED=""
+SIGNALS=0
+STOP_SENT=""
+TIMER_PID=""
+# kill_tree SIG PID: send SIG to PID's descendants, then PID. Without pgrep,
+# only PID.
 kill_tree() {
     local child
-    for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
-    kill -TERM "$1" 2>/dev/null || true
+    if command -v pgrep >/dev/null 2>&1; then
+        for child in $(pgrep -P "$2" 2>/dev/null); do kill_tree "$1" "$child"; done
+    fi
+    kill -"$1" "$2" 2>/dev/null || true
+}
+# stop_step SIG: signal the running step's tree with SIG, with the other
+# signals ignored meanwhile, so a burst of them can't cut the walk short.
+stop_step() {
+    [ -n "$STEP_PID" ] || return 0
+    trap '' INT TERM HUP
+    kill_tree "$1" "$STEP_PID"
+    set_traps
 }
 on_signal() {
+    SIGNALS=$((SIGNALS + 1))
     [ -n "$INTERRUPTED" ] || INTERRUPTED="$1"
-    [ -z "$STEP_PID" ] || kill_tree "$STEP_PID"
+    case "$SIGNALS" in
+        1)
+            [ -z "$STEP_PID" ] || {
+                echo "${SCRIPT}: SIG$1: stopping step ${STEP_NAME} (SIGTERM, then up to ${STOP_TIMEOUT}s for it to clean up)" >&2
+                STOP_SENT=1
+                stop_step TERM
+                start_timer
+            } ;;
+        2)
+            [ -z "$STEP_PID" ] ||
+                echo "${SCRIPT}: still stopping step ${STEP_NAME}, which is cleaning up; one more signal kills it at once (SIGKILL), which can cut its cleanup short" >&2 ;;
+        3)
+            [ -z "$STEP_PID" ] || {
+                echo "${SCRIPT}: warning: killing step ${STEP_NAME} (SIGKILL); its cleanup may be cut short" >&2
+                stop_step KILL
+            }
+            # Nothing is left to escalate to.
+            trap '' INT TERM HUP ;;
+    esac
+}
+set_traps() {
+    trap 'on_signal INT' INT
+    trap 'on_signal TERM' TERM
+    trap 'on_signal HUP' HUP
+}
+# start_timer: SIGKILL for the step's tree if it is still there after
+# STOP_TIMEOUT seconds.
+start_timer() {
+    local pid="$STEP_PID" name="$STEP_NAME"
+    (
+        trap - INT TERM HUP
+        sleep "$STOP_TIMEOUT" >/dev/null 2>&1 &
+        wait $! || exit 0
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "${SCRIPT}: warning: step ${name} did not stop within ${STOP_TIMEOUT}s; killing it (SIGKILL); its cleanup may be cut short" >&2
+            kill_tree KILL "$pid"
+        fi
+    ) &
+    TIMER_PID=$!
 }
 
 # Run step $1 with its output on the terminal and in a step log of its own, and
@@ -668,10 +796,17 @@ run_step() {
     : >"$STEP_LOG" 2>/dev/null || true
     exec {tee_fd}> >(tee "$STEP_LOG" || true)
     tee_pid=$!
+    step_argv "$1"
+    STEP_NAME="$1"
     STATUS=0
-    # shellcheck disable=SC2086 # CMD holds the command and its arguments, none with spaces
-    (cd "$PROJECT_ROOT" && exec ${CMD[$1]} "${dry[@]}") <&0 >&"$tee_fd" 2>&1 &
+    (cd "$PROJECT_ROOT" && exec "${ARGV[@]}") <&0 >&"$tee_fd" 2>&1 &
     STEP_PID=$!
+    # A signal that came between starting the step and knowing its PID.
+    if [ -n "$INTERRUPTED" ] && [ -z "$STOP_SENT" ]; then
+        STOP_SENT=1
+        stop_step TERM
+        start_timer
+    fi
     # wait returns early when a trapped signal arrives; wait again until the
     # step itself has exited.
     while :; do
@@ -680,6 +815,11 @@ run_step() {
         kill -0 "$STEP_PID" 2>/dev/null || break
     done
     STEP_PID=""
+    if [ -n "$TIMER_PID" ]; then
+        kill_tree TERM "$TIMER_PID"
+        wait "$TIMER_PID" 2>/dev/null || true
+        TIMER_PID=""
+    fi
     exec {tee_fd}>&-
     for i in $(seq 1 30); do
         kill -0 "$tee_pid" 2>/dev/null || break
@@ -687,10 +827,12 @@ run_step() {
     done
 }
 
-# stop STEP STATUS-WORD RESULT: the step did not complete: report it, explain,
-# and exit.
+# stop STEP HOW RESULT CODE: the step did not complete: report it, explain,
+# and exit with CODE. Signals are ignored from here on, so the explanation
+# (and the record reads it makes) can't be cut short.
 stop() {
-    local step="$1" how="$2" result="$3"
+    trap '' INT TERM HUP
+    local step="$1" how="$2" result="$3" code="$4"
     report "step=${step} status=${how%% *}"
     if [ "$DRY_RUN" = true ]; then
         echo
@@ -699,54 +841,82 @@ stop() {
         explain_failure "$step" "$how" || echo "${SCRIPT}: warning: the failure summary above is incomplete" >&2
     fi
     report "result=${result}"
-    case "$INTERRUPTED" in
-        INT) exit 130 ;;
-        TERM) exit 143 ;;
+    exit "$code"
+}
+# The exit status for an interruption by SIG$1.
+signal_code() {
+    case "$1" in
+        INT) echo 130 ;;
+        TERM) echo 143 ;;
+        HUP) echo 129 ;;
+        *) echo 1 ;;
     esac
-    exit 1
+}
+interrupted() { # STEP HOW-PREFIX
+    stop "$1" "interrupted (SIG${INTERRUPTED})$2" "interrupted step=$1 signal=${INTERRUPTED}" "$(signal_code "$INTERRUPTED")"
 }
 
-trap 'on_signal INT' INT
-trap 'on_signal TERM' TERM
+set_traps
 for step in "${STEPS[@]}"; do
     if [ -n "$INTERRUPTED" ]; then
         STATE[$step]="not run (interrupted before it started)"
-        stop "$step" "interrupted (SIG${INTERRUPTED}) before it started" "interrupted step=${step} signal=${INTERRUPTED}"
+        interrupted "$step" " before it started"
     fi
     echo
-    echo "==> ${step}: ${CMD[$step]#"$PROJECT_ROOT"/}${dry[*]:+ ${dry[*]}}"
+    echo "==> ${step}: $(step_line "$step")"
     if [ "$step" = verify ] && [ "$DRY_RUN" = true ]; then
         echo "dry run: verify checks the pods against the images the load put on the nodes, so"
         echo "it can only run after a real load and deploy; it would run:"
-        echo "  ${CMD[verify]#"$PROJECT_ROOT"/}"
+        echo "  $(step_line verify | sed 's/ --dry-run$//')"
         STATE[$step]="dry run (not run)"
         report "step=${step} status=dry-run"
         continue
     fi
-    # deploy.sh applies what is in the checkout now: check it again.
-    if [ "$step" = deploy ] && ! why="$(check_checkout)"; then
-        echo "${SCRIPT}: error: ${why}" >&2
-        NOT_STARTED="the checkout changed during the run"
-        STATE[$step]="REFUSED (the checkout changed)"
-        stop "$step" "refused" "failed step=${step}"
+    if [ "$step" = deploy ]; then
+        # deploy.sh applies what is in the checkout now: check it again. A
+        # signal during the check is an interruption, not a refusal.
+        checked=0
+        why="$(check_checkout)" || checked=$?
+        if [ -n "$INTERRUPTED" ]; then
+            NOT_STARTED="the run was interrupted before it"
+            STATE[$step]="not run (interrupted before it started)"
+            interrupted "$step" " before it started"
+        fi
+        if [ "$checked" != 0 ]; then
+            echo "${SCRIPT}: error: ${why}" >&2
+            NOT_STARTED="the checkout changed during the run"
+            STATE[$step]="REFUSED (the checkout changed)"
+            stop "$step" "refused" "failed step=${step}" 1
+        fi
+        # Marks the tag as deployed on this cluster from here on: the restore
+        # advice uses the backups taken before the first such mark.
+        if ! record deploy_started 1; then
+            NOT_STARTED="its start could not be recorded in ${RECORD}"
+            STATE[$step]="not run (could not record its start)"
+            stop "$step" "failed" "failed step=${step}" 1
+        fi
     fi
     run_step "$step"
-    if [ -n "$INTERRUPTED" ]; then
-        collect "$step" 1 || true
+    # A step that completed counts, even when a signal came as it finished; the
+    # interruption then stops the run before the next step.
+    if [ -n "$INTERRUPTED" ] && [ "$STATUS" != 0 ]; then
+        collect "$step" "$STATUS" || true
         STATE[$step]="INTERRUPTED (SIG${INTERRUPTED})"
-        stop "$step" "interrupted (SIG${INTERRUPTED})" "interrupted step=${step} signal=${INTERRUPTED}"
+        interrupted "$step" ""
     fi
-    if ! collect "$step" "$STATUS"; then
-        if [ -n "$RECORD_FAILED" ]; then
-            STATE[$step]="FAILED (could not record its result in ${RECORD})"
-            stop "$step" "failed" "failed step=${step}"
-        fi
+    collected=0
+    collect "$step" "$STATUS" || collected=$?
+    if [ -n "$RECORD_FAILED" ]; then
+        STATE[$step]="FAILED (could not record its result in ${RECORD})"
+        stop "$step" "failed" "failed step=${step}" 1
+    fi
+    if [ "$collected" = 2 ]; then
+        echo "${SCRIPT}: error: step ${step} succeeded but named no backup it took (no \"Backup OK\" or \"verified dump\" line); not going on without one" >&2
+        STATE[$step]="FAILED (no backup named)"
+        stop "$step" "failed" "failed step=${step}" 1
+    elif [ "$collected" != 0 ]; then
         echo "${SCRIPT}: warning: could not read what step ${step} reported from ${STEP_LOG}" >&2
     fi
-    [ -z "$RECORD_FAILED" ] || {
-        STATE[$step]="FAILED (could not record its result in ${RECORD})"
-        stop "$step" "failed" "failed step=${step}"
-    }
     if [ "$STATUS" = 0 ]; then
         STATE[$step]="$([ "$DRY_RUN" = true ] && echo "dry run ok" || echo "done")"
         extra=""
@@ -757,10 +927,15 @@ for step in "${STEPS[@]}"; do
         report "step=${step} status=$([ "$DRY_RUN" = true ] && echo dry-run || echo ok)${extra}"
     else
         STATE[$step]="FAILED"
-        stop "$step" "failed" "failed step=${step}"
+        stop "$step" "failed" "failed step=${step}" 1
     fi
 done
-trap - INT TERM
+# A signal as the last step finished.
+if [ -n "$INTERRUPTED" ]; then
+    trap '' INT TERM HUP
+    echo "${SCRIPT}: SIG${INTERRUPTED} after the last step had finished; the run is complete" >&2
+fi
+trap - INT TERM HUP
 
 if [ "$DRY_RUN" = true ]; then
     report "result=dry-run"

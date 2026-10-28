@@ -32,6 +32,9 @@ Before any step, and with nothing changed yet:
   not show; and no ignored file (`.gitignore`, `.git/info/exclude`) where `deploy.sh`
   reads: `k8s`, `config`, `scripts`, `grafana-dashboards` and `ports.env`. The checkout is
   checked again just before the deploy step; if it changed, `deploy.sh` is not started.
+  `GIT_DIR`, `GIT_WORK_TREE` and the like in the environment are refused, so git reads
+  this checkout's own repository. Not caught: a change git can't see (a clean filter
+  that hides it) and a change made while `deploy.sh` runs.
 - It pins the cluster: the rootful Docker daemon the kind cluster runs on
   (`unix:///var/run/docker.sock`, or `ECONGRAPH_DOCKER_HOST`; never the shell's
   `DOCKER_HOST`) and the kind cluster's own kubectl and kubeconfig, which every step then
@@ -76,9 +79,16 @@ whether it failed: a step log that can't be written doesn't, and neither does a 
 step leaves running in the background with its output open. Each step has a log of its
 own.
 
-Ctrl-C or SIGTERM during a step stops that step and the processes it started, prints the
-same guidance as a failure of that step, reports `result=interrupted step=NAME
-signal=INT|TERM` and exits 130 or 143.
+Ctrl-C, SIGTERM or SIGHUP during a step sends that step and its child processes (found
+with `pgrep -P`; a process that detached itself from them is not reached) SIGTERM once,
+and waits for them: a step's own cleanup, such as the load writing its record, runs to
+the end. A second signal only says the run is still stopping. A third, or
+`ECONGRAPH_STOP_TIMEOUT` seconds (default 120) without the step stopping, sends SIGKILL,
+with a warning that the step's cleanup may be cut short. The run then prints the same
+guidance as a failure of that step, reports `result=interrupted step=NAME
+signal=INT|TERM|HUP` and exits 130, 143 or 129; signals during that explanation are
+ignored. A step that completed as the signal came counts as done, and the run stops
+before the next one.
 
 ## The run's record
 
@@ -95,7 +105,8 @@ path may hold blanks):
 - `backup=PATH`: each dump of a backup step that succeeded (`/backups/econ_graph-<stamp>.dump`
   and the others, on the backup volume), then `backup_complete=1`. A backup step that
   fails partway records nothing;
-- `keycloak_backup=DIR`: the verified Keycloak dump.
+- `keycloak_backup=DIR`: the verified Keycloak dump;
+- `deploy_started=1`: just before the deploy step starts.
 
 A later run of the same tag on the same cluster reads them: by then Keycloak and the
 crawler worker may already be at 0, an earlier run's `deploy.sh` may have reset the
@@ -156,7 +167,11 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
 
 - **backup**: no image was loaded and the databases are unchanged. When the backup Job
   timed out but is still running, it says so, with the command to wait for it: run again
-  only once it has finished, since a run starts another backup Job.
+  only once it has finished, since a run starts another backup Job. After a Ctrl-C during
+  the backup, it says the Job may still be running in the cluster, with the commands to
+  check it. A backup step that succeeds without naming the dumps it wrote (no
+  `Backup OK ... in PATH` line), or a Keycloak backup without its verified dump, stops
+  the run there.
 - **load**: a load that refuses (an earlier load of the tag under another image name, a
   digest or label mismatch) changes nothing first, as its last line says.
 - **keycloak, precheck, deploy**: Keycloak may be stopped (the keycloak step scales it to
@@ -172,12 +187,14 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
   the rollback, or once a deploy has applied the migrations.
 - **deploy, verify**: if the data migrations ran, or Keycloak started on a new version,
   the databases need restoring. It names the backups to restore from, with the run's id
-  and date: the data databases' from the tag's first run on this cluster whose backup
-  step completed, and Keycloak's earliest verified dump, which come before any deploy of
-  the tag and so hold the state before its migrations, with the commands
-  (`restore-postgres-backup.sh --context kind-NAME --file econ_graph-<stamp>.dump`,
-  `restore-keycloak-db.sh DIR --context kind-NAME`). This run's backups that are not those
-  are listed as the ones not to use.
+  and date: the last complete backup of the data databases, and the last verified
+  Keycloak dump, recorded before the first `deploy_started` of the tag on this cluster.
+  They hold the state just before the tag's migrations, without losing the writes that
+  came after an earlier run that never deployed. The commands are
+  `restore-postgres-backup.sh --context kind-NAME --file econ_graph-<stamp>.dump` and
+  `restore-keycloak-db.sh DIR --context kind-NAME`. When the tag was first deployed
+  before this run, it also names the later backups taken before this run's deploy, to
+  use only if the databases were restored to before the tag since then.
 
 ## Automation
 
