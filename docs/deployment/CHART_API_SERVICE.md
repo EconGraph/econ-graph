@@ -2,62 +2,43 @@
 
 ## Overview
 
-The EconGraph Chart API Service is a private, secure Express.js service that provides professional chart generation capabilities for the MCP (Model Context Protocol) server integration. This service runs as a standalone microservice with internal-only network access and generates Chart.js configurations for economic data visualization.
+The chart service is a standalone Node.js/Express service that converts economic series into Chart.js configuration and data for the [MCP server](../technical/MCP_SERVER.md). It supports line, bar, and scatter requests, sorts points by date, assigns stable default colors from series IDs, and returns series counts, point counts, and a date range.
 
-## Architecture
+The HTTP response is JSON, not a rendered chart or image. A consuming client must configure Chart.js and its date adapter and render the result. JavaScript tooltip and tick callbacks created by the generator are omitted during JSON serialization; the client must supply any callback formatting it needs.
 
-### Service Design
-- **Framework**: Express.js with Node.js
-- **Chart Library**: Chart.js v4.4.0 with date-fns adapter
-- **Security**: Internal network access only with header-based authentication
-- **Deployment**: Kubernetes-ready with Docker support
-- **Integration**: Designed for MCP server communication
+## Access and URLs
 
-### Security Model
-- **Network Isolation**: Only accessible from internal networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-- **Header Authentication**: Requires specific headers for internal requests
-- **Rate Limiting**: 1000 requests per 15-minute window
-- **No CORS**: Disabled for security (internal service only)
+The server listens on `0.0.0.0:3001` by default. Deployment controls must provide network isolation: the checked-in Kubernetes Service is ClusterIP, while the package’s Docker run command publishes port 3001 on the host.
 
-## Features
+The [access helper](../../chart-api-service/src/security.js) accepts a request if its IP matches its loopback/private-address checks **or** both of these caller-supplied marker headers equal the string `true`:
 
-### 🔧 Chart Generation
-- **Chart Types**: Line, Bar, and Scatter charts
-- **Time Series Support**: Automatic date parsing and time scale configuration
-- **Multiple Series**: Support for multiple data series with different colors
-- **Custom Styling**: Configurable colors, legends, and grid display
-- **Professional Output**: Chart.js configurations ready for frontend rendering
-
-### 🔒 Security Features
-- **Internal Network Only**: Restricted to private IP ranges
-- **Header Validation**: Required headers for authentication
-- **Rate Limiting**: Protection against abuse
-- **Input Validation**: Comprehensive request validation
-- **Error Handling**: Secure error responses without information leakage
-
-### 📊 Data Processing
-- **Data Sorting**: Automatic chronological sorting of data points
-- **Metadata Generation**: Series count, data point count, and date ranges
-- **Color Management**: Default color assignment with consistent series coloring
-- **Flexible Input**: Handles various data formats and missing values
-
-## API Endpoints
-
-### Base URL
-- **Development**: `http://localhost:3001`
-  -- **Production**: Internal Kubernetes service (`chart-api-service.econ-graph.svc.cluster.local:3001`)
-
-### Authentication Headers
-All requests must include:
-```
+```http
 X-MCP-Server-Request: true
 X-Internal-Request: true
 ```
 
+Send both headers in service calls, as MCP does. They are not identity authentication or secret credentials. The helper lists `127.0.0.1`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`; its range parser is IPv4-oriented, so these checks should not be treated as general IPv6/CIDR enforcement. CORS disables browser cross-origin response access but does not isolate direct HTTP callers.
+
+The [server middleware](../../chart-api-service/src/server.js) limits each IP to 1,000 requests per 15-minute window before endpoint handling, including health checks. The default in-memory quota is local to each process; replicas do not share one quota. Responses include standard rate-limit headers rather than legacy `X-RateLimit-*` headers.
+
+| Use | URL |
+| --- | --- |
+| Local service origin | `http://localhost:3001` |
+| Kubernetes service origin | `http://chart-api-service.econ-graph.svc.cluster.local:3001` |
+| Local generation endpoint | `http://localhost:3001/api/chart/generate` |
+| Local MCP setting | `CHART_API_SERVICE_URL=http://localhost:3001/api/chart` |
+| MCP default | `http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart` |
+
+`CHART_API_SERVICE_URL` is the `/api/chart` prefix: MCP appends `/generate`. Set it without a trailing slash and without the `/generate` suffix. The localhost commands below assume a local process, a published Docker container, or the port-forward described under Deployment.
+
+## API endpoints
+
+Examples use illustrative timestamps and uptime. All four endpoints pass through the access and rate-limit middleware.
+
 ### 1. Health Check
 **GET** `/health`
 
-Returns service health status and version information.
+Returns process uptime, service version, and environment. This endpoint does not check backend or database readiness.
 
 **Response:**
 ```json
@@ -72,11 +53,11 @@ Returns service health status and version information.
 ```
 
 ### 2. Chart Generation
+
 **POST** `/api/chart/generate`
 
-Generates Chart.js configuration for economic data visualization.
+This complete two-series request includes explicit colors and display controls:
 
-**Request Body:**
 ```json
 {
   "seriesData": [
@@ -84,19 +65,17 @@ Generates Chart.js configuration for economic data visualization.
       "id": "series-1",
       "name": "GDP",
       "dataPoints": [
-        { "date": "2020-01-01", "value": 100.0 },
-        { "date": "2020-02-01", "value": 101.5 },
-        { "date": "2020-03-01", "value": 102.3 }
+        { "date": "2020-01-01", "value": 100 },
+        { "date": "2020-02-01", "value": 101.5 }
       ],
       "color": "#1976d2"
     },
     {
-      "id": "series-2", 
+      "id": "series-2",
       "name": "Unemployment Rate",
       "dataPoints": [
         { "date": "2020-01-01", "value": 3.5 },
-        { "date": "2020-02-01", "value": 3.6 },
-        { "date": "2020-03-01", "value": 3.8 }
+        { "date": "2020-02-01", "value": 3.6 }
       ],
       "color": "#d32f2f"
     }
@@ -110,7 +89,8 @@ Generates Chart.js configuration for economic data visualization.
 }
 ```
 
-**Response:**
+The corresponding serialized response contains both datasets in `chartConfig.data` and `chartData`. The two fields contain the same data; metadata counts both series and all four points.
+
 ```json
 {
   "success": true,
@@ -121,14 +101,28 @@ Generates Chart.js configuration for economic data visualization.
         {
           "label": "GDP",
           "data": [
-            { "x": "2020-01-01", "y": 100.0 },
-            { "x": "2020-02-01", "y": 101.5 },
-            { "x": "2020-03-01", "y": 102.3 }
+            { "x": "2020-01-01", "y": 100 },
+            { "x": "2020-02-01", "y": 101.5 }
           ],
           "borderColor": "#1976d2",
           "backgroundColor": "#1976d220",
           "fill": false,
-          "tension": 0.1
+          "tension": 0.1,
+          "pointRadius": 2,
+          "pointHoverRadius": 4
+        },
+        {
+          "label": "Unemployment Rate",
+          "data": [
+            { "x": "2020-01-01", "y": 3.5 },
+            { "x": "2020-02-01", "y": 3.6 }
+          ],
+          "borderColor": "#d32f2f",
+          "backgroundColor": "#d32f2f20",
+          "fill": false,
+          "tension": 0.1,
+          "pointRadius": 2,
+          "pointHoverRadius": 4
         }
       ]
     },
@@ -138,39 +132,97 @@ Generates Chart.js configuration for economic data visualization.
       "plugins": {
         "title": {
           "display": true,
-          "text": "Economic Indicators"
+          "text": "Economic Indicators",
+          "font": {
+            "size": 16,
+            "weight": "bold"
+          }
         },
         "legend": {
           "display": true,
           "position": "top"
+        },
+        "tooltip": {
+          "mode": "index",
+          "intersect": false,
+          "callbacks": {}
         }
       },
       "scales": {
         "x": {
-          "type": "time",
+          "display": true,
           "title": {
             "display": true,
             "text": "Date"
+          },
+          "type": "time",
+          "time": {
+            "parser": "YYYY-MM-DD",
+            "displayFormats": {
+              "day": "MMM DD",
+              "month": "MMM YYYY",
+              "year": "YYYY"
+            }
+          },
+          "grid": {
+            "display": true
           }
         },
         "y": {
+          "display": true,
           "title": {
             "display": true,
             "text": "Value"
-          }
+          },
+          "grid": {
+            "display": true
+          },
+          "ticks": {}
         }
+      },
+      "interaction": {
+        "mode": "nearest",
+        "axis": "x",
+        "intersect": false
       }
     }
   },
   "chartData": {
-    "datasets": [...]
+    "datasets": [
+      {
+        "label": "GDP",
+        "data": [
+          { "x": "2020-01-01", "y": 100 },
+          { "x": "2020-02-01", "y": 101.5 }
+        ],
+        "borderColor": "#1976d2",
+        "backgroundColor": "#1976d220",
+        "fill": false,
+        "tension": 0.1,
+        "pointRadius": 2,
+        "pointHoverRadius": 4
+      },
+      {
+        "label": "Unemployment Rate",
+        "data": [
+          { "x": "2020-01-01", "y": 3.5 },
+          { "x": "2020-02-01", "y": 3.6 }
+        ],
+        "borderColor": "#d32f2f",
+        "backgroundColor": "#d32f2f20",
+        "fill": false,
+        "tension": 0.1,
+        "pointRadius": 2,
+        "pointHoverRadius": 4
+      }
+    ]
   },
   "metadata": {
     "seriesCount": 2,
-    "dataPointCount": 6,
+    "dataPointCount": 4,
     "dateRange": {
       "start": "2020-01-01",
-      "end": "2020-03-01"
+      "end": "2020-02-01"
     }
   },
   "message": "Chart configuration generated successfully",
@@ -208,10 +260,12 @@ Returns information about supported chart types.
 }
 ```
 
+The `/api/chart/types` feature strings are descriptive labels returned by the endpoint. They do not enable stacking, trend lines, or correlation calculations. The generator uses a time x-axis for all three chart types, including bar and scatter.
+
 ### 4. Service Information
 **GET** `/api/info`
 
-Returns comprehensive service information and configuration details.
+Returns endpoint and service labels. The `security` labels describe the service’s intended use; the actual access decision is explained above.
 
 **Response:**
 ```json
@@ -235,32 +289,25 @@ Returns comprehensive service information and configuration details.
 }
 ```
 
-## Request/Response Specifications
+## Request and response contract
 
-### Chart Generation Request
+The top-level validator checks only that `seriesData` is a nonempty array and `chartType` is `line`, `bar`, or `scatter`. It does not validate nested series or normalize missing values. Callers should supply the following shape so generation and subsequent client rendering can use it:
 
-#### Required Fields
-- **seriesData** (array): Array of data series objects
-- **chartType** (string): Chart type ("line", "bar", or "scatter")
+| Field | Caller input |
+| --- | --- |
+| `seriesData` | Nonempty array of series objects. |
+| `seriesData[].id` | String used to choose a stable default color when `color` is absent. |
+| `seriesData[].name` | Display name used as the dataset label. |
+| `seriesData[].dataPoints` | Array of points with `date` and `value` fields. |
+| `dataPoints[].date` | Date string suitable for the client’s time adapter, such as `2020-01-01`. |
+| `dataPoints[].value` | Numeric value suitable for the client chart. |
+| `seriesData[].color` | Optional color; use a hex value such as `#1976d2`. The generator appends `20` for background opacity. |
+| `chartType` | Required string: `line`, `bar`, or `scatter`. |
+| `title` | Optional chart title. |
+| `showLegend`, `showGrid` | Optional booleans, both defaulting to `true`. |
+| `yAxisLabel`, `xAxisLabel` | Optional axis titles; omitted labels hide their titles. |
 
-#### Optional Fields
-- **title** (string): Chart title
-- **showLegend** (boolean): Display legend (default: true)
-- **showGrid** (boolean): Display grid lines (default: true)
-- **yAxisLabel** (string): Y-axis label
-- **xAxisLabel** (string): X-axis label
-
-#### Series Data Structure
-```json
-{
-  "id": "unique-series-id",
-  "name": "Series Display Name",
-  "dataPoints": [
-    { "date": "YYYY-MM-DD", "value": number }
-  ],
-  "color": "#hex-color-code"
-}
-```
+The [generator](../../chart-api-service/src/chartApi.js) sorts each series’ points using JavaScript dates, then copies each `date` to `x` and `value` to `y` without coercion or missing-value handling. The metadata date range uses the first and last distinct date strings in lexical order; use consistent ISO dates as in the example. No date-range filtering occurs in this service.
 
 ### Error Responses
 
@@ -286,8 +333,7 @@ Returns comprehensive service information and configuration details.
 ```json
 {
   "success": false,
-  "error": "Too many requests from this IP, please try again later.",
-  "timestamp": "2025-01-15T10:30:00.000Z"
+  "error": "Too many requests from this IP, please try again later."
 }
 ```
 
@@ -300,316 +346,103 @@ Returns comprehensive service information and configuration details.
 }
 ```
 
-## Security Implementation
+Malformed JSON returns HTTP 400 with `error: "Invalid JSON in request body"`. Nested inputs can pass top-level validation and then fail generation; those failures also return 400 with the generator’s error text and a timestamp. The 500 example above is for unexpected exceptions in the generation handler; other unhandled errors use `"Internal server error"`. Unknown endpoints return 404 with `availableEndpoints`. Unlike the application error envelopes, the configured 429 body has no timestamp.
 
-### Network Security
-```javascript
-// Internal network IP ranges
-const internalIPs = [
-  '127.0.0.1',      // localhost
-  '::1',            // IPv6 localhost
-  '10.0.0.0/8',     // Private network
-  '172.16.0.0/12',  // Private network
-  '192.168.0.0/16', // Private network
-];
+## Development and testing
 
-// Required headers for internal requests
-const requiredHeaders = [
-  'x-mcp-server-request',
-  'x-internal-request'
-];
-```
+Use Node.js 26, as required by [package.json](../../chart-api-service/package.json) and the repository’s [`.nvmrc`](../../.nvmrc). From the repository root:
 
-### Rate Limiting
-```javascript
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per windowMs
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.'
-  }
-});
-```
-
-### Input Validation
-```javascript
-function validateChartRequest(request) {
-  return (
-    Array.isArray(request.seriesData) &&
-    request.seriesData.length > 0 &&
-    typeof request.chartType === 'string' &&
-    ['line', 'bar', 'scatter'].includes(request.chartType)
-  );
-}
-```
-
-## Testing
-
-### Test Coverage
-- **Overall Coverage**: 71.42%
-- **chartApi.js**: 100% coverage (12/12 statements)
-- **server.js**: 100% coverage (12/12 statements)
-- **security.js**: 52.94% coverage (9/17 statements)
-
-### Test Structure
-```javascript
-// Unit tests for chart generation
-describe('Chart API', () => {
-  test('generates line chart correctly', () => {
-    const result = generateChartConfig({
-      seriesData: mockData,
-      chartType: 'line',
-      title: 'Test Chart'
-    });
-    expect(result.success).toBe(true);
-    expect(result.chartConfig.type).toBe('line');
-  });
-});
-
-// Integration tests for HTTP endpoints
-describe('Server Integration', () => {
-  test('POST /api/chart/generate returns valid chart data', () => {
-    return request(app)
-      .post('/api/chart/generate')
-      .set('X-MCP-Server-Request', 'true')
-      .set('X-Internal-Request', 'true')
-      .send(validChartRequest)
-      .expect(200)
-      .expect((res) => {
-        expect(res.body.success).toBe(true);
-        expect(res.body.chartConfig).toBeDefined();
-      });
-  });
-});
-```
-
-### Running Tests
 ```bash
-# Run all tests
+cd chart-api-service
+npm ci
+npm run dev
+```
+
+`npm run dev` starts the nodemon development server; use `npm start` to start Node directly. `PORT` defaults to `3001` and `NODE_ENV` defaults to `development`. Set `NODE_ENV=production` for production-style request logs. Package metadata and the lockfile define dependency versions.
+
+Run these commands from `chart-api-service`:
+
+```bash
 npm test
-
-# Run tests with coverage
 npm run test:coverage
-
-# Run tests in watch mode
 npm run test:watch
-
-# Run linting
 npm run lint
 ```
 
-## Development
+[`tests/chartApi.test.js`](../../chart-api-service/tests/chartApi.test.js) exercises configuration generation, data processing, metadata, validation, and error cases. [`tests/server.test.js`](../../chart-api-service/tests/server.test.js) exercises HTTP endpoints, access checks, and error responses through Supertest. `npm run test:coverage` generates a Jest coverage report for the revision under test.
 
-### Local Development
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Start production server
-npm start
-
-# Run tests
-npm test
-```
-
-### Environment Variables
-```bash
-PORT=3001                    # Server port
-NODE_ENV=development         # Environment mode
-```
-
-### Docker Support
-```bash
-# Build Docker image
-npm run docker:build
-
-# Run Docker container
-npm run docker:run
-```
-
-### Dependencies
-
-#### Production Dependencies
-- **express**: ^4.18.2 - Web framework
-- **cors**: ^2.8.5 - Cross-origin resource sharing
-- **helmet**: ^7.1.0 - Security headers
-- **express-rate-limit**: ^7.1.5 - Rate limiting
-- **compression**: ^1.7.4 - Response compression
-- **morgan**: ^1.10.0 - HTTP request logging
-- **dotenv**: ^16.3.1 - Environment variable loading
-- **chart.js**: ^4.4.0 - Chart generation library
-- **chartjs-adapter-date-fns**: ^3.0.0 - Date handling for Chart.js
-- **date-fns**: ^2.30.0 - Date utility library
-
-#### Development Dependencies
-- **jest**: ^29.7.0 - Testing framework
-- **supertest**: ^6.3.3 - HTTP testing
-- **nodemon**: ^3.0.2 - Development server
-- **eslint**: ^8.55.0 - Code linting
-- **@types/jest**: ^29.5.8 - Jest type definitions
+In [CI Core](../../.github/workflows/ci-core.yml), **Chart API Integration Tests** installs dependencies, lints, runs the package’s build script (which only prints that no build step is required), starts the service, checks health, and runs `npm run test:coverage`. Its subsequent generation curl posts to `/api/chart` rather than `/api/chart/generate` and tolerates failure, so that probe does not establish successful generation. **Backend MCP Integration Tests** starts the chart service and backend, then runs the Rust MCP integration suite with the valid `/api/chart` MCP prefix. MCP’s fallback means successful integration assertions alone need not prove that chart generation succeeded. These jobs do not certify Kubernetes reachability or rendered output.
 
 ## Deployment
 
-### Kubernetes Deployment
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: chart-api-service
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: chart-api-service
-  template:
-    metadata:
-      labels:
-        app: chart-api-service
-    spec:
-      containers:
-      - name: chart-api
-        image: econ-graph-chart-api:latest
-        ports:
-        - containerPort: 3001
-        env:
-        - name: NODE_ENV
-          value: "production"
-        - name: PORT
-          value: "3001"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: chart-api-service
-spec:
-  selector:
-    app: chart-api-service
-  ports:
-  - port: 3001
-    targetPort: 3001
-  type: ClusterIP
-```
+### Docker
 
-### Docker Configuration
-```dockerfile
-FROM node:24-alpine
+From `chart-api-service`:
 
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci --only=production
-
-COPY src/ ./src/
-
-EXPOSE 3001
-
-USER node
-
-CMD ["npm", "start"]
-```
-
-## Integration with MCP Server
-
-### MCP Server Integration
-The Chart API service is designed to be called by the MCP server for visualization generation:
-
-```rust
-// MCP server calls Chart API
-let chart_request = serde_json::json!({
-    "seriesData": series_data,
-    "chartType": "line",
-    "title": "Economic Data Visualization"
-});
-
-let response = client
-    .post(&chart_api_url)
-    .header("X-MCP-Server-Request", "true")
-    .header("X-Internal-Request", "true")
-    .json(&chart_request)
-    .send()
-    .await?;
-```
-
-### Service Discovery
-- **Internal Communication**: Uses Kubernetes service discovery
-- **Health Checks**: Regular health monitoring
-- **Load Balancing**: Multiple replicas for high availability
-- **Circuit Breaker**: Graceful degradation on service failures
-
-## Monitoring and Observability
-
-### Health Monitoring
-- **Health Endpoint**: `/health` for service status
-- **Uptime Tracking**: Process uptime monitoring
-- **Version Information**: Service version and environment details
-
-### Logging
-- **Request Logging**: Morgan middleware for HTTP request logging
-- **Error Logging**: Comprehensive error logging and tracking
-- **Security Events**: Access denied and rate limit logging
-
-### Metrics
-- **Request Count**: Total requests processed
-- **Response Time**: Average response time tracking
-- **Error Rate**: Error rate monitoring
-- **Rate Limit Hits**: Rate limiting event tracking
-
-## Performance Characteristics
-
-### Response Times
-- **Chart Generation**: <50ms for typical requests
-- **Health Checks**: <10ms response time
-- **Metadata Endpoints**: <20ms response time
-
-### Resource Usage
-- **Memory**: ~30MB baseline with Chart.js
-- **CPU**: Low CPU usage for chart generation
-- **Network**: Minimal bandwidth for internal communication
-
-### Scalability
-- **Horizontal Scaling**: Stateless design supports multiple replicas
-- **Load Balancing**: Kubernetes service load balancing
-- **Resource Limits**: Configurable CPU and memory limits
-
-## Troubleshooting
-
-### Common Issues
-
-#### Service Not Accessible
 ```bash
-# Check service health
-curl -H "X-MCP-Server-Request: true" \
-     -H "X-Internal-Request: true" \
-     http://localhost:3001/health
+npm run docker:build
+npm run docker:run
 ```
 
-#### Rate Limit Issues
-- Check request frequency
-- Verify rate limit configuration
-- Monitor rate limit headers in responses
+The [checked-in Dockerfile](../../chart-api-service/Dockerfile) uses Node 26 Alpine, installs production dependencies, runs as a non-root user, and configures a `/health` check. The scripts build `econ-graph-chart-api` and publish port 3001. That local image tag differs from the Kubernetes manifest’s tag.
 
-#### Chart Generation Failures
-- Validate request format
-- Check series data structure
-- Verify chart type is supported
+### Kubernetes
 
-### Debug Commands
+Follow the [Kubernetes deployment procedure](../../k8s/README.md). The repository’s [deployment script](../../scripts/deploy/deploy.sh) applies [chart-api-deployment.yaml](../../k8s/manifests/chart-api-deployment.yaml) and [chart-api-service.yaml](../../k8s/manifests/chart-api-service.yaml) in namespace `econ-graph`. Use these manifests for that procedure rather than the separate copies under `chart-api-service/k8s`.
+
+The deployment specifies two replicas of `econ-graph-chart-api:v1.0.0` with `imagePullPolicy: Never`, so that exact image must already be available on the scheduled nodes. The Service selects the chart pods and exposes port 3001 as ClusterIP. Configuration generation keeps no persistent chart state and can run across replicas, while rate-limit state remains per process.
+
+Each replica requests `100m` CPU and `128Mi` memory, with limits of `500m` CPU and `512Mi` memory. Liveness probes call `/health` after 30 seconds and every 10 seconds; readiness probes start after 5 seconds and repeat every 5 seconds. These are configured resource budgets and checks, not measured usage or guarantees of readiness beyond this endpoint.
+
+For local access to an existing cluster deployment, keep this command running in a separate terminal:
+
 ```bash
-# Check service logs
-kubectl logs -f deployment/chart-api-service
+kubectl -n econ-graph port-forward service/chart-api-service 3001:3001
+```
 
-# Test chart generation
-curl -X POST http://localhost:3001/api/chart/generate \
+The localhost curl commands then use that forwarding connection. In-cluster clients can use the service DNS origin from the URL table.
+
+## MCP integration
+
+The [MCP implementation](../../backend/crates/econ-graph-mcp/src/mcp_server.rs) collects series data, builds the chart request, and sends it with both marker headers to `format!("{}/generate", self.frontend_chart_api_url)`. For a local chart service, configure the MCP process with:
+
+```bash
+export CHART_API_SERVICE_URL=http://localhost:3001/api/chart
+```
+
+On a successful response containing `chartConfig`, MCP returns the configuration and metadata as text for the caller to consume. If the HTTP call fails, JSON decoding fails, or the response lacks `chartConfig`, it returns series data, chart type, title, and metadata for manual visualization. This fallback is returned with `is_error: false`. Returning fallback data does not suppress later chart API calls.
+
+## Monitoring and troubleshooting
+
+`/health` reports process uptime, version, and environment. Kubernetes probes use that endpoint; they do not check backend or database availability. Morgan emits `combined` logs in production and `dev` logs otherwise, and server error handlers write to the console. The rate limiter runs before Morgan, so requests rejected by the limiter do not reach that request logger. The service does not expose aggregate request counts, error rates, rate-limit event metrics, or a metrics endpoint. Aggregate metrics require external collection.
+
+For cluster logs:
+
+```bash
+kubectl -n econ-graph logs -f deployment/chart-api-service
+```
+
+For a local service or the forwarding connection above, check health and inspect rate-limit response headers:
+
+```bash
+curl -i -H "X-MCP-Server-Request: true" \
+  -H "X-Internal-Request: true" http://localhost:3001/health
+```
+
+If access fails, check the selected service origin, namespace, forwarding connection, and access headers. A 403 means the application access check rejected the request; a 429 means that process’s per-IP quota was exceeded. Reduce request frequency and inspect the returned rate-limit headers.
+
+For generation failures, check the chart type and every series’ nested fields, not just whether the body is valid JSON. This complete minimal request isolates the generation route:
+
+```bash
+curl -i -X POST http://localhost:3001/api/chart/generate \
   -H "Content-Type: application/json" \
   -H "X-MCP-Server-Request: true" \
   -H "X-Internal-Request: true" \
-  -d '{"seriesData": [...], "chartType": "line"}'
+  -d '{"seriesData":[{"id":"gdp","name":"GDP","dataPoints":[{"date":"2020-01-01","value":100}],"color":"#1976d2"}],"chartType":"line"}'
 ```
+
+A 400 response can identify either top-level validation failure or a generator error; consult its `error` field. Check service logs for unexpected 500 responses. If MCP returns fallback data, inspect the configured `/api/chart` prefix and test the full generation endpoint directly with the payload above.
 
 ## License
 
-This project is licensed under the MIT License. See the main project LICENSE file for complete terms and conditions.
+See the repository’s [Microsoft Reference Source License (MS-RSL)](../../LICENSE) for its terms.

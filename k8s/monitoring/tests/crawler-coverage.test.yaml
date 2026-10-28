@@ -11,11 +11,11 @@ tests:
   # nothing discovered reports 0 and fires like any other.
   - interval: 5m
     input_series:
-      - series: 'crawler_coverage_ratio{source="FRED", pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_ratio{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
         values: '0.9x96'
-      - series: 'crawler_coverage_ratio{source="BLS", pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_ratio{kubernetes_namespace="econ-graph", source="BLS", pod="crawler-worker-1"}'
         values: '0.99x96'
-      - series: 'crawler_coverage_ratio{source="CENSUS", pod="crawler-worker-1"}'
+      - series: 'crawler_coverage_ratio{kubernetes_namespace="econ-graph", source="CENSUS", pod="crawler-worker-1"}'
         values: '0x96'
     alert_rule_test:
       - eval_time: 5h
@@ -62,7 +62,7 @@ tests:
   # hour after the failure.
   - interval: 5m
     input_series:
-      - series: 'crawler_last_failure_timestamp_seconds{source="FRED", pod="crawler-worker-1"}'
+      - series: 'crawler_last_failure_timestamp_seconds{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
         values: '_ _ 600x30'
     alert_rule_test:
       - eval_time: 5m
