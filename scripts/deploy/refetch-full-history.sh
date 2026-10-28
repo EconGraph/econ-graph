@@ -21,7 +21,9 @@
 # (scripts/deploy/lib/kind-env.sh) on context kind-econ-graph, through kc
 # (scripts/deploy/lib/cluster-role.sh), without changing the current context. The
 # cluster's context, kube-system UID and production marker are printed before the
-# crawler runs. --dry-run changes nothing.
+# crawler runs. --dry-run runs the crawler's own dry run and enqueues nothing; like every
+# run, it may first install the kind cluster's kubectl and kubeconfig under
+# ~/.cache/econgraph (kind-env.sh).
 #
 # Environment: KIND_CLUSTER (default econ-graph), NAMESPACE (default econ-graph),
 # DEPLOYMENT (default crawler-worker).
@@ -89,7 +91,7 @@ role_status=0
 cluster_is_marked_production || role_status=$?
 case "$role_status" in
     0) cluster_role="marked production" ;;
-    1) cluster_role="not marked production" ;;
+    1) cluster_role="not marked production${CLUSTER_ROLE_REASON:+: ${CLUSTER_ROLE_REASON}}" ;;
     *) cluster_role="production marker unknown: ${CLUSTER_ROLE_REASON}" ;;
 esac
 cluster_uid="$(kube_system_uid)" || cluster_uid="unknown"

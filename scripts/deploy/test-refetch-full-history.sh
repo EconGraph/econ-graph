@@ -48,6 +48,7 @@ EOF
 # nothing is changed.
 #   STUB_NO_KIND=1         its kubeconfig has no kind-econ-graph context
 #   STUB_PRODUCTION=false  the cluster carries no production marker
+#   STUB_MARKER_FAILS=1    reading the production marker fails
 cat >"$work/kind-kubectl" <<EOF
 #!/bin/sh
 echo "kubectl \$*" >>"$log"
@@ -59,6 +60,7 @@ case " \$* " in
   *" config current-context "*) echo other ;;
   *" get namespace kube-system "*) echo "$cluster_uid" ;;
   *" get configmap econgraph-cluster-role "*)
+    if [ "\${STUB_MARKER_FAILS:-0}" = 1 ]; then echo "connection refused" >&2; exit 1; fi
     [ "\${STUB_PRODUCTION:-true}" = true ] && printf 'production $cluster_uid' ;;
   *" exec deploy/crawler-worker -- /app/crawler "*) echo "crawler ran" ;;
 esac
@@ -108,6 +110,13 @@ run() {
     HOME="$work/home" XDG_DATA_HOME="$work/home/.local/share" XDG_CACHE_HOME="$work/cache" \
     TMPDIR="$work/tmp" PATH="$work/bin:/usr/local/bin:/usr/bin:/bin" \
     "${envs[@]}" "$script" "$@" </dev/null >"$out" 2>&1 || status=$?
+  # The same run's stdout alone, for checks that stderr text stays out of it.
+  env -u KUBECONFIG -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER -u NAMESPACE -u DEPLOYMENT \
+    -u ECONGRAPH_DOCKER_HOST \
+    KUBECTL="$work/bin/kubectl" CLUSTER_ROLE_CONTEXT=other \
+    HOME="$work/home" XDG_DATA_HOME="$work/home/.local/share" XDG_CACHE_HOME="$work/cache" \
+    TMPDIR="$work/tmp" PATH="$work/bin:/usr/local/bin:/usr/bin:/bin" \
+    "${envs[@]}" "$script" "$@" </dev/null >"$out.stdout" 2>/dev/null || true
 }
 called() { grep -qF -- "$1" "$log"; }
 # Every call but kind-env.sh's reachability check and listing the contexts is on
@@ -141,6 +150,15 @@ grep -qE "^Resume: +$script --source FRED,BLS --include-inactive --priority 7 --
   fail "the Resume hint drops options: $(cat "$out")"
 grep -qE "^Progress: +$script --status --source FRED,BLS --since [0-9TZ:-]+ --failures 50$" "$out" ||
   fail "the Progress hint is wrong: $(cat "$out")"
+
+# The identity goes to stderr only, so stdout (e.g. --json output) stays clean.
+if grep -q "^Cluster:" "$out.stdout"; then fail "the cluster identity went to stdout: $(cat "$out.stdout")"; fi
+
+# A marker that can't be read is never shown as production, and says why.
+run STUB_MARKER_FAILS=1 -- --all
+grep -qF "Cluster: context kind-econ-graph, kube-system UID $cluster_uid, production marker unknown: could not read ConfigMap" "$out" ||
+  fail "an unreadable marker is not reported as unknown: $(cat "$out")"
+if grep -q "^Cluster:.*, marked production" "$out"; then fail "an unreadable marker is shown as production: $(cat "$out")"; fi
 
 # An unmarked cluster is named as such.
 run STUB_PRODUCTION=false -- --all
