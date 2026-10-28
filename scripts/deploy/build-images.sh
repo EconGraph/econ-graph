@@ -11,6 +11,14 @@ echo "Building EconGraph Docker images..."
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Build on the Docker daemon the kind cluster runs on (the rootful one,
+# whatever DOCKER_HOST the shell has; ECONGRAPH_DOCKER_HOST chooses another):
+# `kind load docker-image` reads the images from that daemon.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+cluster_role_kind_docker_host
+kind() { cluster_role_kind "$@"; }
+
 # Version to tag images with, read from backend/Cargo.toml (the one place the
 # version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml
 # and crawler-worker.yaml hard-code this same tag, so it can't be overridden

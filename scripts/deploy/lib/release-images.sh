@@ -126,7 +126,7 @@ ri_kind_nodes() {
 # without changing the current context. The check goes through kc too, so
 # even it names the context.
 ri_pin_context() {
-    cluster_role_default_kubectl
+    cluster_role_default_kubectl || ri_die "no kubectl for the kind cluster (see above)"
     CLUSTER_ROLE_CONTEXT="kind-$1"
     export CLUSTER_ROLE_CONTEXT
     kc config get-contexts -o name "$CLUSTER_ROLE_CONTEXT" >/dev/null 2>&1 ||

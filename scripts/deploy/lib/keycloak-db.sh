@@ -25,9 +25,17 @@ KDB_BACKUP_ROOT="${KEYCLOAK_BACKUP_ROOT:-${HOME}/econgraph-backups/keycloak}"
 KDB_COUNT_SQL="select table_name, (xpath('/row/c/text()', query_to_xml(format('select count(*) as c from %I.%I', table_schema, table_name), false, true, '')))[1]::text from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name"
 
 # Pin every kc call to context $1, which must exist. Unlike
-# cluster_role_use_context, the current context stays as it is.
+# cluster_role_use_context, the current context stays as it is. kubectl is
+# KUBECTL, or with none of KUBECTL and KUBECONFIG set, the kind cluster's own
+# kubectl and kubeconfig kept in ~/.cache/econgraph (cluster_role_default_kubectl
+# in lib/cluster-role.sh): on the production host plain `kubectl` is the
+# MicroK8s snap wrapper. A CLUSTER_ROLE_CONTEXT from the environment is
+# replaced, so it doesn't keep that default from applying.
 kdb_use_context() {
     local names
+    unset CLUSTER_ROLE_CONTEXT
+    cluster_role_default_kubectl || return 1
+    export KUBECTL
     # Captured first: grep -q exiting early could SIGPIPE kubectl and fail the pipeline.
     names="$(command "${KUBECTL:-kubectl}" config get-contexts -o name)" || return 1
     if ! grep -qxF -- "$1" <<<"$names"; then

@@ -57,7 +57,7 @@ kubectl and context as the rest of the deploy. It:
 3. checks that exactly one node, `econ-graph-worker`, carries the label, that
    it bind-mounts both subvolumes, and that `pg/` and `keycloak-pg/` have the
    same inode numbers in the node as on the host (`docker exec
-   econ-graph-worker`, through the caller's `DOCKER_HOST`, as `kind` in
+   econ-graph-worker`, on the rootful Docker daemon, as `kind` in
    `deploy.sh` uses);
 4. stops if a data directory already holds a database while the Secret with
    its passwords (`econ-graph-postgres`, `econ-graph-keycloak`) is missing:
@@ -91,9 +91,11 @@ itself, so without them it stops at the Secret check (step 4) and changes
 nothing. With them, it re-arms the PVs, and the databases come
 back as they were.
 
-Run the deploy scripts against the rootful daemon
-(`DOCKER_HOST=unix:///var/run/docker.sock`) so that `kind` and `docker` see
-the cluster.
+The deploy scripts run `kind` and `docker` on the rootful daemon
+(`unix:///var/run/docker.sock`), where the cluster is, whatever `DOCKER_HOST`
+the shell has, and say so (`cluster_role_kind_docker_host` in
+`scripts/deploy/lib/cluster-role.sh`). `ECONGRAPH_DOCKER_HOST` chooses another
+daemon.
 
 ## A new host
 

@@ -38,7 +38,7 @@ done
 # One kubectl and one context for every call below, never a
 # CLUSTER_ROLE_CONTEXT inherited from the environment.
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 command -v "${KUBECTL}" >/dev/null 2>&1 || { echo "${KUBECTL} not found" >&2; exit 1; }
 cluster_role_pin_named_context "${CONTEXT}" ||

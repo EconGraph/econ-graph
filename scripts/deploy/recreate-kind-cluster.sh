@@ -17,6 +17,13 @@ for dir in /srv/econgraph/data-plane /srv/econgraph/app-prod; do
     fi
 done
 
+# kind and docker on the Docker daemon the cluster runs on: the rootful one,
+# whatever DOCKER_HOST the shell has (ECONGRAPH_DOCKER_HOST chooses another).
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+cluster_role_kind_docker_host
+kind() { cluster_role_kind "$@"; }
+
 # Delete existing cluster
 echo "🗑️  Deleting existing kind cluster..."
 kind delete cluster --name econ-graph
@@ -25,9 +32,23 @@ kind delete cluster --name econ-graph
 echo "🏗️  Creating new kind cluster with port mappings..."
 kind create cluster --name econ-graph --config terraform/k8s/kind-config.yaml
 
+# The new cluster's own kubectl and kubeconfig, kept in ~/.cache/econgraph,
+# where the other scripts look for them (cluster_role_default_kubectl): the
+# copies of the old cluster no longer reach it, and on the production host plain
+# `kubectl` is the MicroK8s snap wrapper.
+kube_cache="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
+mkdir -p "${kube_cache}/bin"
+docker cp -q -L econ-graph-control-plane:/usr/bin/kubectl "${kube_cache}/bin/kubectl.new"
+chmod 0755 "${kube_cache}/bin/kubectl.new"
+mv -f "${kube_cache}/bin/kubectl.new" "${kube_cache}/bin/kubectl"
+(umask 077 && kind get kubeconfig --name econ-graph >"${kube_cache}/kubeconfig-econ-graph")
+echo "🔑 kubectl ${kube_cache}/bin/kubectl, KUBECONFIG=${kube_cache}/kubeconfig-econ-graph"
+unset CLUSTER_ROLE_CONTEXT
+cluster_role_default_kubectl || exit 1
+
 # Wait for cluster to be ready
 echo "⏳ Waiting for cluster to be ready..."
-kubectl wait --for=condition=Ready nodes --all --timeout=300s
+command "${KUBECTL:-kubectl}" --context kind-econ-graph wait --for=condition=Ready nodes --all --timeout=300s
 
 echo "✅ Kind cluster recreated successfully!"
 echo ""

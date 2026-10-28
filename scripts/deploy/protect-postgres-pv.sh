@@ -20,7 +20,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "${PROJECT_ROOT}/scripts/deploy/lib/cluster-role.sh"
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 if ! cluster_role_pin_context; then
     echo "❌ ${KUBECTL:-kubectl} has no current context" >&2
     exit 1
