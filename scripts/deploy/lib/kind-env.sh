@@ -420,14 +420,14 @@ backup_encryption_lib="$(dirname "${BASH_SOURCE[0]}")/../../backup/encryption.sh
 source "$backup_encryption_lib"
 
 # backup_databases OUTPUT: the encrypted recovery bundle every destructive
-# script takes first. Writers into one root are serialized by a lock on
-# BACKUP_ROOT/.lock (OUTPUT's parent/.lock for an output elsewhere), taken
-# before the destination is checked and released once the bundle is published
-# (a failed attempt keeps it until the caller exits). BACKUP_LOCK_NONBLOCK=true
-# fails instead of waiting (the nightly timer); otherwise a second writer
-# waits for the first.
+# script takes first. Every writer staging plaintext in BACKUP_PLAINTEXT_ROOT
+# is serialized by backup_staging_lock (scripts/backup/encryption.sh),
+# whatever its destination root, taken before the destination is checked (or
+# earlier, by backup_check_tmpfs_space) and released once the bundle is
+# published (a failed attempt keeps it until the caller exits).
+# BACKUP_LOCK_NONBLOCK=true fails instead of waiting (the nightly timer).
 backup_databases() {
-    local output="$1" lock_root lock_fd scratch cleanup
+    local output="$1" scratch cleanup
     umask 077
     backup_encryption_preflight
     if [[ "${DRY_RUN}" == true ]]; then
@@ -435,18 +435,7 @@ backup_databases() {
         echo "+ encrypt the verified dumps, counts and Secrets into $output/backup.tar.age"
         return
     fi
-    if [[ "$output" == "${BACKUP_ROOT%/}/"* ]]; then
-        lock_root="$BACKUP_ROOT"
-    else
-        lock_root="$(dirname -- "$output")"
-    fi
-    mkdir -p -- "$lock_root" || die "could not create $lock_root"
-    exec {lock_fd}>"$lock_root/.lock" || die "could not open $lock_root/.lock"
-    if [[ "${BACKUP_LOCK_NONBLOCK:-false}" == true ]]; then
-        flock -n "$lock_fd" || die "another host dump is running (lock $lock_root/.lock)"
-    else
-        flock "$lock_fd" || die "could not lock $lock_root/.lock"
-    fi
+    backup_staging_lock
     [[ ! -e "$output" && ! -e "${output}.partial" ]] || die "$output already exists"
     scratch="$(backup_plaintext_dir)" || die "could not create private tmpfs staging"
     # This is only disposable RAM staging, never a backup directory.
@@ -461,17 +450,22 @@ backup_databases() {
     backup_seal_dir "$scratch/payload" "$output" || return
     BACKUP_ACTIVE_OUTPUT="$output"
     BACKUP_ACTIVE_DIR="$scratch/payload"
-    exec {lock_fd}>&-
+    backup_staging_unlock
     log "Encrypted backup complete: $output (no identity used)"
 }
 
 # Check, before any downtime, that the private tmpfs staging has room for the
 # dumps backup_databases will write there: at least the on-disk size of every
 # running database (a custom-format dump is compressed and leaves out indexes,
-# so it is smaller) plus 64 MiB for counts and Secrets. Read-only; call after
-# backup_encryption_preflight, which picks BACKUP_PLAINTEXT_ROOT.
+# so it is smaller) plus 64 MiB for counts and Secrets. Room is the smaller of
+# the tmpfs's free space and the memory available to fill it (MemAvailable).
+# Call after backup_encryption_preflight, which picks BACKUP_PLAINTEXT_ROOT.
+# Outside a dry run it first takes backup_staging_lock, which backup_databases
+# then keeps, so no other writer can use the room between the check and the
+# backup.
 backup_check_tmpfs_space() {
-    local spec pod container user db size need=$((64 * 1024 * 1024)) free
+    local spec pod container user db size need=$((64 * 1024 * 1024)) free mem
+    [[ "${DRY_RUN}" == true ]] || backup_staging_lock
     for spec in "postgresql-0 postgresql postgres econ_graph" \
         "app-postgres-0 postgres postgres econ_graph_app" \
         "keycloak-postgres-0 postgres keycloak keycloak"; do
@@ -486,8 +480,13 @@ backup_check_tmpfs_space() {
     free="$(df -B1 --output=avail -- "${BACKUP_PLAINTEXT_ROOT}" | tail -n 1 | tr -d '[:space:]')" ||
         die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
     [[ "$free" =~ ^[0-9]+$ ]] || die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
+    # tmpfs size limits are usually larger than the memory actually free.
+    mem="$(awk '$1 == "MemAvailable:" { printf "%.0f\n", $2 * 1024 }' "${BACKUP_MEMINFO:-/proc/meminfo}")" ||
+        die "could not read MemAvailable; nothing was stopped"
+    [[ "$mem" =~ ^[0-9]+$ ]] || die "could not read MemAvailable; nothing was stopped"
+    ((mem >= free)) || free="$mem"
     if ((free < need)); then
-        die "${BACKUP_PLAINTEXT_ROOT} has $((free / 1048576)) MiB free, but the backup may need $((need / 1048576)) MiB of private tmpfs staging; nothing was stopped. Enlarge it (sudo mount -o remount,size=... ${BACKUP_PLAINTEXT_ROOT}) or point BACKUP_PLAINTEXT_ROOT at a larger tmpfs"
+        die "${BACKUP_PLAINTEXT_ROOT} has $((free / 1048576)) MiB free (the smaller of its free space and MemAvailable), but the backup may need $((need / 1048576)) MiB of private tmpfs staging; nothing was stopped. Enlarge it (sudo mount -o remount,size=... ${BACKUP_PLAINTEXT_ROOT}) or point BACKUP_PLAINTEXT_ROOT at a larger tmpfs"
     fi
     echo "  tmpfs staging: $((free / 1048576)) MiB free in ${BACKUP_PLAINTEXT_ROOT}, at most $((need / 1048576)) MiB needed"
 }
