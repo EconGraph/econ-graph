@@ -3,6 +3,9 @@ name: Release E2E
 # The release end-to-end suite (frontend/playwright.release.config.ts): the frontend release
 # build against the backend on Postgres 18, seeded from recorded fixtures. No network access to
 # any data source and no API keys. See frontend/tests/e2e/release/README.md.
+#
+# The QA scenario suite (scripts/qa/, docs/release/qa-scenarios.md) runs with its ci profile
+# against the same stack, set up the same way, as a second leg of the matrix.
 
 on:
   # No branch filter: pull requests into another feature branch (stacked PRs)
@@ -15,6 +18,8 @@ on:
       - 'docker-compose.release-e2e.yml'
       - 'scripts/release-e2e.sh'
       - 'scripts/tests/test_release_e2e.py'
+      - 'scripts/qa/**'
+      - 'scripts/deploy/check-public-site.sh'
       - '.github/workflows/release-e2e.yml'
   workflow_dispatch:
 
@@ -35,9 +40,19 @@ env:
 
 jobs:
   release-e2e:
-    name: Release E2E (Chromium)
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Release E2E (Chromium)
+            suite: release
+            config: playwright.release.config.ts
+          - name: QA scenarios (ci profile)
+            suite: qa-scenarios
+            config: playwright.qa-stack.config.ts
 
     services:
       postgres:
@@ -57,6 +72,14 @@ jobs:
     env:
       # scripts/release-e2e.sh uses this instead of starting its own Postgres
       RELEASE_E2E_DATABASE_URL: postgres://postgres:password@localhost:5439/econ_graph_e2e
+      RELEASE_E2E_CONFIG: ${{ matrix.config }}
+      # The QA suite's accounts on this stack: the dev realm's grace and the Keycloak bootstrap
+      # admin from docker-compose.release-e2e.yml. Development values, not secrets.
+      QA_USERNAME: grace
+      QA_PASSWORD: grace-dev-password
+      QA_KEYCLOAK_ADMIN_USERNAME: admin
+      QA_KEYCLOAK_ADMIN_PASSWORD: admin
+      QA_REPORT: ${{ github.workspace }}/frontend/qa-scenarios-report.json
 
     steps:
     - name: Checkout code
@@ -74,7 +97,7 @@ jobs:
         # Core CI builds dev artifacts; this suite also needs optimized backend dependencies.
         # Save both profiles here so subsequent runs do not repeat a cold release build.
         shared-key: release-e2e
-        save-if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+        save-if: ${{ matrix.suite == 'release' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
 
     - name: Setup Node.js
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -94,15 +117,31 @@ jobs:
     - name: Check release build orchestration
       run: python3 scripts/tests/test_release_e2e.py
 
-    - name: Build, seed and run the release suite
+    # The runner's guards (the production profile refuses state-changing scenarios) and each
+    # scenario against a stub site, before the stack.
+    - name: Check the QA scenario runner
+      if: matrix.suite == 'qa-scenarios'
+      run: python3 -m unittest discover -s scripts/qa/tests -v
+
+    - name: Build, seed and run the ${{ matrix.suite }} suite
       run: scripts/release-e2e.sh
+
+    - name: Upload the QA scenario report
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      if: always() && matrix.suite == 'qa-scenarios'
+      with:
+        name: qa-scenarios-report
+        path: frontend/qa-scenarios-report.json
+        if-no-files-found: warn
+        retention-days: 14
 
     - name: Upload Playwright report
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       if: failure()
       with:
-        name: release-e2e-report
+        name: ${{ matrix.suite }}-e2e-report
         path: |
           frontend/playwright-report-release/
           frontend/test-results-release/
+          frontend/test-results-qa-stack/
         retention-days: 14
