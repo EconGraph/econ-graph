@@ -308,6 +308,17 @@ nocache "backup-keycloak-db.sh --dry-run" "$DEPLOY/backup-keycloak-db.sh" --dry-
 nocache "setup-port-forwarding.sh" "$DEPLOY/setup-port-forwarding.sh"
 nocache "setup-letsencrypt-cloudflare.sh" "$DEPLOY/setup-letsencrypt-cloudflare.sh" -d example.org -t stub-token --staging
 nocache "backup-postgres-now.sh" "$DEPLOY/backup-postgres-now.sh"
+nocache "protect-postgres-pv.sh with only CLUSTER_ROLE_CONTEXT" env CLUSTER_ROLE_CONTEXT=kind-econ-graph \
+    "$DEPLOY/protect-postgres-pv.sh"
+# A CLUSTER_ROLE_CONTEXT left in the environment, without KUBECTL, doesn't choose the
+# kubectl: the kind one, on that context.
+run env CLUSTER_ROLE_CONTEXT=kind-econ-graph "$DEPLOY/protect-postgres-pv.sh"
+if [ -s "$LOGS/plain.log" ] || [ ! -s "$LOGS/kind-kubectl.log" ] ||
+    grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph --context kind-econ-graph " "$LOGS/kind-kubectl.log"; then
+    fail "protect-postgres-pv.sh with only CLUSTER_ROLE_CONTEXT: $(cat "$LOGS/plain.log" "$LOGS/kind-kubectl.log")"
+else
+    echo "ok   protect-postgres-pv.sh with only CLUSTER_ROLE_CONTEXT uses the kind kubectl on it"
+fi
 # KUBECONFIG alone: the kind kubectl binary with it (plain kubectl may ignore it).
 other="$WORK/other-kubeconfig"
 echo "# another kubeconfig" >"$other"

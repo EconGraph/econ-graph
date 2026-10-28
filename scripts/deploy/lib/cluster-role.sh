@@ -39,19 +39,23 @@ kc() {
 # ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph),
 # kept by scripts/deploy/recreate-kind-cluster.sh, which refreshes them.
 #
-#   - KUBECTL set, or a context pinned by the calling script (deploy.sh, which
-#     exports its KUBECTL with it): kept as it is.
+#   - KUBECTL set: kept as it is. (deploy.sh exports its KUBECTL with the
+#     context it pins, so scripts it runs keep both.)
 #   - KUBECONFIG set: the kind kubectl binary with that KUBECONFIG; fails when
 #     there is no kind kubectl (set KUBECTL as well).
 #   - neither: the kind kubectl and its kubeconfig; fails, naming the missing
 #     file, when either is missing.
+#
+# A pinned CLUSTER_ROLE_CONTEXT without KUBECTL is kept, and the kubectl is
+# still chosen as above: the context names a cluster, not the kubectl to reach
+# it with.
 #
 # A failure prints how to go on and returns 1, having changed nothing.
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
     local fix="copy the kind cluster's kubectl and kubeconfig there (docker cp econ-graph-control-plane:/usr/bin/kubectl ${bin}; kind get kubeconfig --name econ-graph >${config}; scripts/deploy/recreate-kind-cluster.sh does both), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
-    if [ -n "${KUBECTL:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
+    if [ -n "${KUBECTL:-}" ]; then
         return 0
     fi
     if [ -n "${KUBECONFIG:-}" ]; then
