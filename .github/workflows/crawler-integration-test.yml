@@ -114,9 +114,11 @@ jobs:
         trap 'kill "$WORKER_PID" 2>/dev/null || true; cat worker.log' EXIT
 
         job_status() {
-          psql "$DATABASE_URL" -Atc "SELECT status FROM crawl_queue
-            WHERE kind = 'fetch_series' AND source = UPPER('$SOURCE') AND series_id = '$SERIES'
-            ORDER BY created_at DESC LIMIT 1"
+          psql "$DATABASE_URL" -XAt -v ON_ERROR_STOP=1 -v source="$SOURCE" -v series="$SERIES" <<'SQL'
+        SELECT status FROM crawl_queue
+          WHERE kind = 'fetch_series' AND source = UPPER(:'source') AND series_id = :'series'
+          ORDER BY created_at DESC LIMIT 1;
+        SQL
         }
         status=""
         for _ in $(seq 1 300); do
@@ -126,15 +128,20 @@ jobs:
         done
         $CRAWLER status
         if [ "$status" != "completed" ]; then
-          psql "$DATABASE_URL" -c "SELECT status, retry_count, error_message FROM crawl_queue
-            WHERE source = UPPER('$SOURCE') AND series_id = '$SERIES'"
+          psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -v source="$SOURCE" -v series="$SERIES" <<'SQL'
+        SELECT status, retry_count, error_message FROM crawl_queue
+          WHERE source = UPPER(:'source') AND series_id = :'series';
+        SQL
           echo "::error::Queue job for $SOURCE/$SERIES ended as '${status:-still pending}', not completed"
           exit 1
         fi
 
-        points=$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM data_points dp
+        points=$(psql "$DATABASE_URL" -XAt -v ON_ERROR_STOP=1 -v series="$SERIES" <<'SQL'
+        SELECT COUNT(*) FROM data_points dp
           JOIN economic_series es ON es.id = dp.series_id
-          WHERE es.external_id = '$SERIES'")
+          WHERE es.external_id = :'series';
+        SQL
+        )
         echo "Stored $points data points for $SOURCE/$SERIES"
         if [ "$points" -eq 0 ]; then
           echo "::error::The job completed but stored no data points"

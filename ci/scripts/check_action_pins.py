@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject mutable external action references in workflows and composite actions."""
+"""Reject mutable action references and persisted checkout credentials."""
 
 from pathlib import Path
 import re
@@ -9,7 +9,7 @@ import yaml
 
 
 def check_document(document, location):
-    """Collect mutable action references while ignoring scalar script bodies."""
+    """Check action references and checkout inputs, ignoring scalar script bodies."""
     errors = []
     if isinstance(document, dict):
         for key, value in document.items():
@@ -24,6 +24,10 @@ def check_document(document, location):
                         errors.append(f"{here}: Docker actions need a sha256 digest: {value}")
                 elif not re.fullmatch(r"[^@\s]+/[^@\s]+@[0-9a-f]{40}", value):
                     errors.append(f"{here}: external actions need a full commit SHA: {value}")
+                if isinstance(value, str) and value.split("@", 1)[0].lower() == "actions/checkout":
+                    inputs = document.get("with")
+                    if not isinstance(inputs, dict) or inputs.get("persist-credentials") is not False:
+                        errors.append(f"{location}.with.persist-credentials: checkout must explicitly set false")
             errors.extend(check_document(value, here))
     elif isinstance(document, list):
         for index, value in enumerate(document):
@@ -49,7 +53,7 @@ def main():
         print(error, file=sys.stderr)
     if errors:
         return 1
-    print(f"External actions are pinned in {len(files)} YAML files")
+    print(f"Actions are pinned and checkout credentials are not persisted in {len(files)} YAML files")
     return 0
 
 
