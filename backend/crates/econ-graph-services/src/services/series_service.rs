@@ -244,6 +244,28 @@ pub async fn get_series_by_id(
     Ok(series)
 }
 
+/// The catalog (its data source's `name`) of the series with this id, observations or not;
+/// `None` when there is no such series.
+pub async fn series_catalog(
+    pool: &DatabasePool,
+    series_id: uuid::Uuid,
+) -> AppResult<Option<String>> {
+    use econ_graph_core::schema::data_sources;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {e}"
+        ))
+    })?;
+    economic_series::table
+        .inner_join(data_sources::table)
+        .filter(economic_series::id.eq(series_id))
+        .select(data_sources::name)
+        .first::<String>(&mut *conn)
+        .await
+        .optional()
+        .map_err(|e| econ_graph_core::error::AppError::DatabaseError(e.to_string()))
+}
+
 /// Whether `economic_series` has a row with this id, whether or not it has observations.
 pub async fn series_exists(pool: &DatabasePool, series_id: uuid::Uuid) -> AppResult<bool> {
     let mut conn = pool.get().await.map_err(|e| {

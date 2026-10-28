@@ -134,6 +134,11 @@ fi
 echo "✅ All linter checks passed - proceeding with deployment"
 echo ""
 
+# Secrets from an earlier version may lack keys this one needs: stop before applying anything.
+# shellcheck source=scripts/deploy/lib/keycloak-secret.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/keycloak-secret.sh"
+require_anonymous_client_secret || exit 1
+
 public_host_init
 
 # Apply all manifests

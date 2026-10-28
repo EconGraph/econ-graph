@@ -43,7 +43,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
       - name: render-realm
-        image: python:3.12.12-slim
+        image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5
         command: ["/bin/bash", "-c"]
         args:
         - |
@@ -159,7 +159,7 @@ spec:
             type: RuntimeDefault
       containers:
       - name: finalize-catalog-policy
-        image: python:3.12.12-slim
+        image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5
         command: ["python", "/config/preserve-catalog-grants.py", "--complete", "/rendered/econ-graph-realm.json"]
         env:
         - name: KEYCLOAK_URL

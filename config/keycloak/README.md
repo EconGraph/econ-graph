@@ -153,10 +153,17 @@ Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:
 `catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
 canonical data-source names to these capabilities; adding a source requires its role and mapping.
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
+So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
+`updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
+caller can't read; `createAnnotation` answers as for a missing series. Lookups by id or external id
+(`series`, `seriesExists`, `seriesCatalog`, `seriesByExternalId`) return null or `false`, as for a
+missing series, so none of them reveals what an unreadable catalog contains.
 MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
 
 The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
-the `econgraph-anonymous` service account inherit it. Remove a catalog read role from
+the `econgraph-anonymous` service account inherit it, so it may hold only `econ-graph-api`
+`catalog.*:read` roles: a deploy stops, before importing anything, while it holds any other
+composite (the error names each one to remove). Remove a catalog read role from
 `catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
 Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
@@ -176,21 +183,44 @@ Configure the backend with:
 | `OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP` | Explicit `true` allows private-network HTTP credential transport; enabled only for the internal Compose/Kubernetes Keycloak service |
 | `OIDC_ANONYMOUS_CLIENT_ID` | Defaults to `econgraph-anonymous` |
 | `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
+| `ANONYMOUS_GRANTS_STALE_MAX_SECS` | Seconds (0 to 86400, default 0) that the last fetched anonymous grants may still be used after they expire, only while renewal is failing; see below |
 
 Missing anonymous configuration grants no anonymous data access, including when sign-in is off.
 Partial configuration fails startup. Keycloak omits the roles claim for a reader with no grants;
-that is cached as an empty permission set. Signed-in token verification remains strict.
-Cached anonymous grants last no longer than the token's
-absolute expiry, `expires_in`, or five minutes, whichever is shortest. Renewals are coalesced per
-backend process. Failed renewals deny access after expiry and retry at most once per ten seconds;
-unexpired grants remain usable through an outage. User role removals take effect when existing
-five-minute access tokens expire, plus the verifier's 30-second clock tolerance. No permission
-check calls Keycloak; anonymous token renewal is the only additional request.
+that is an empty grant set. Signed-in token verification remains strict.
+
+Anonymous grants are renewed by one background task per backend process, never by a request:
+requests read the current grant set from memory and never wait for Keycloak. The task fetches at
+startup (until it succeeds, anonymous visitors have no catalog access), then again when three
+quarters of each grant set's lifetime has passed, and every ten seconds while renewal fails. A
+grant set lasts no longer than its token's absolute expiry, `expires_in`, or five minutes,
+whichever is shortest. A successful renewal replaces the grant set at once, so a revocation in
+Keycloak reaches anonymous visitors at the next renewal, within about four minutes. Keycloak refusing the client (disabled, or a wrong secret) or issuing a token
+that fails verification drops the grants at once.
+
+During a Keycloak outage (no answer, a timeout, or a server error), unexpired grants stay in use.
+What happens after they expire depends on `ANONYMOUS_GRANTS_STALE_MAX_SECS`:
+
+- `0`, the default, fails closed: anonymous visitors lose catalog access when the grants expire.
+- Above `0`, the last successfully fetched grants stay in use for at most that many seconds past
+  their expiry, only while renewal keeps failing, and the backend logs a warning on every failed
+  renewal while it serves them. The first successful renewal replaces them, so a revocation made
+  during the outage takes effect as soon as Keycloak answers again.
+
+A stale window delays only revocations that can't be fetched; it never extends grants past a
+successful renewal. Disabling the anonymous client counts as a refusal, not an outage, so it
+revokes anonymous access at once whatever the setting.
+
+User role removals take effect when existing five-minute access tokens expire, plus the
+verifier's 30-second clock tolerance. No permission check calls Keycloak.
 
 Docker Compose uses a development-only client secret. Kubernetes provisions a random credential
 through `scripts/deploy/create-secrets.sh`, preserving it across deployments, and supplies the
 same Secret key (`econ-graph-keycloak/anonymous-client-secret`) to the backend, Keycloak and realm
 import Job. Set `KEYCLOAK_ANONYMOUS_CLIENT_SECRET` to supply a managed credential instead.
+`scripts/deploy/deploy.sh` stops before applying anything when that Secret exists without the
+`anonymous-client-secret` key; run `scripts/deploy/create-secrets.sh` (it keeps every existing
+value and adds the key), then deploy again.
 Existing Compose realms need the normal development realm reset. Kubernetes reapplies structural
 configuration on deployment, but `preserve-catalog-grants.py` snapshots catalog policy first.
 Existing catalog-public grants, catalog edges on managed composites, anonymous-reader mappings,
@@ -216,7 +246,11 @@ anonymous catalog grants**, rather than that branch user's roles. Set the fronte
 then signed-in catalog roles apply there. A denied or invalid token is never retried anonymously
 except for the existing explicit suspended-account public-read behavior.
 
-Annotation creation on an app-only backend checks the series through `DATA_GRAPHQL_URL`.
+An app-only backend checks an annotation's series through `DATA_GRAPHQL_URL`, asking
+`seriesCatalog(id)` before creating the annotation or showing it, its comments, or writes to it.
+The data plane answers null for a series it doesn't have or won't let this request read; this
+backend then applies its own caller's catalog grants to the catalog name. If the data plane can't
+answer, these annotation requests fail with `DATA_PLANE_UNAVAILABLE` rather than skip the check.
 This preflight likewise uses anonymous grants by default. For a trusted data plane, set
 `DATA_GRAPHQL_FORWARD_AUTHORIZATION=true` so the preflight can read a catalog granted to the
 signed-in caller even when anonymous access is disabled. Forwarding requires HTTPS by default.

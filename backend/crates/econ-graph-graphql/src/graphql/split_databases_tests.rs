@@ -177,7 +177,7 @@ fn data_plane(url: String, timeout: std::time::Duration) -> Arc<DataPlaneClient>
     )
 }
 
-/// A stand-in data plane's `/data/graphql` that knows only the series `known`.
+/// A stand-in data plane's `/data/graphql` that knows only the series `known`, in FRED.
 struct StubDataPlane {
     known: String,
 }
@@ -186,8 +186,13 @@ impl wiremock::Respond for StubDataPlane {
     fn respond(&self, request: &wiremock::Request) -> wiremock::ResponseTemplate {
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
         let exists = body["variables"]["id"].as_str() == Some(self.known.as_str());
-        wiremock::ResponseTemplate::new(200)
-            .set_body_json(json!({ "data": { "seriesExists": exists } }))
+        let data = match body["operationName"].as_str() {
+            Some("SeriesCatalog") => json!({
+                "seriesCatalog": exists.then_some("Federal Reserve Economic Data (FRED)")
+            }),
+            _ => json!({ "seriesExists": exists }),
+        };
+        wiremock::ResponseTemplate::new(200).set_body_json(json!({ "data": data }))
     }
 }
 
@@ -505,8 +510,21 @@ async fn with_a_data_plane_url_the_series_is_checked_over_http() {
         1
     );
 
+    // The known series: its catalog, then its existence; the unknown one: its catalog only.
     let requests = stub.received_requests().await.expect("recorded requests");
-    assert_eq!(requests.len(), 2);
+    let operations: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            serde_json::from_slice::<Value>(&request.body).unwrap()["operationName"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        operations,
+        ["SeriesCatalog", "SeriesExists", "SeriesCatalog"]
+    );
     for request in &requests {
         assert!(request.headers.get("authorization").is_none());
         assert!(request.headers.get("cookie").is_none());
@@ -515,8 +533,8 @@ async fn with_a_data_plane_url_the_series_is_checked_over_http() {
 }
 
 /// A data plane that is down or slower than the timeout refuses the annotation with
-/// `DATA_PLANE_UNAVAILABLE` and writes nothing; annotations already made still list, since
-/// they come from the app database.
+/// `DATA_PLANE_UNAVAILABLE` and writes nothing. Listing the annotations already made fails
+/// the same way, since it needs the series' catalog from the data plane.
 #[tokio::test]
 #[serial_test::serial]
 async fn an_unavailable_data_plane_refuses_the_annotation() {
@@ -566,16 +584,16 @@ async fn an_unavailable_data_plane_refuses_the_annotation() {
             1
         );
 
-        let listed = ok(run_with_data_plane(
-            app,
-            &data_plane,
-            &user,
-            &format!(r#"{{ annotationsForSeries(seriesId: "{series_id}") {{ title }} }}"#),
-        )
-        .await);
-        assert_eq!(
-            listed["annotationsForSeries"],
-            json!([{ "title": "Split" }])
+        // Reading the annotations needs the series' catalog, so it fails closed too: a
+        // revoked catalog stays revoked while the data plane is down.
+        assert_data_plane_unavailable(
+            &run_with_data_plane(
+                app,
+                &data_plane,
+                &user,
+                &format!(r#"{{ annotationsForSeries(seriesId: "{series_id}") {{ title }} }}"#),
+            )
+            .await,
         );
     }
 }

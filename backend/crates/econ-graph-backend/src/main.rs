@@ -857,7 +857,7 @@ fn build_routes(
                     });
                     let anonymous_roles = if caller.is_none() {
                         match verifier.as_deref() {
-                            Some(verifier) => verifier.anonymous_catalog_roles().await,
+                            Some(verifier) => verifier.anonymous_catalog_roles(),
                             None => Default::default(),
                         }
                     } else {
@@ -1040,6 +1040,13 @@ async fn main() -> AppResult<()> {
             None => verifier,
         })
     });
+    // Anonymous catalog grants are renewed in the background; requests only read them.
+    if verifier
+        .as_ref()
+        .is_some_and(|verifier| verifier.spawn_anonymous_refresh().is_some())
+    {
+        info!("🔑 Anonymous catalog grants: renewing in the background");
+    }
 
     info!("📊 Configuration loaded successfully:");
     info!("  - Server host: {}", config.server.host);

@@ -87,8 +87,21 @@ def required(value):
     return value
 
 
+def check_public_declaration(role):
+    """The checked-in catalog-public defaults may also hold only catalog reads."""
+    composites = role.get("composites") or {}
+    clients = composites.get("client") or {}
+    if composites.get("realm") or set(clients) - {API_CLIENT} or not all(
+            catalog_read(name) for name in clients.get(API_CLIENT, [])):
+        raise RuntimeError("The realm file's %s may contain only %s catalog.*:read client roles"
+                           % (PUBLIC_ROLE, API_CLIENT))
+
+
 def merge_catalog_policy(realm, get):
     """Merge current operator policy into a rendered import, seeding defaults only once."""
+    for role in realm.get("roles", {}).get("realm", []):
+        if role["name"] == PUBLIC_ROLE:
+            check_public_declaration(role)
     prefix = "/admin/realms/" + urllib.parse.quote(realm["realm"], safe="")
     observed = get(prefix)
     observed_attrs = (observed or {}).get("attributes") or {}
@@ -148,15 +161,20 @@ def merge_catalog_policy(realm, get):
                         r.get("containerId") == api_id and catalog_read(r["name"])]
         desired = role.setdefault("composites", {})
         if role["name"] == PUBLIC_ROLE:
-            # Preserve all current edges, including custom composite roles. Resolve client
-            # UUIDs to names because the import format addresses clients by clientId.
-            clients = {c["id"]: c["clientId"] for c in required(get(prefix + "/clients"))}
-            client_edges = {}
-            for edge in composites:
-                if edge.get("clientRole"):
-                    client_edges.setdefault(clients[edge["containerId"]], []).append(edge["name"])
-            role["composites"] = {"realm": live_realm, "client": client_edges}
-            role["composite"] = bool(composites)
+            # Every account inherits catalog-public, so it may hold nothing but catalog reads.
+            # Preserve exactly those edges and refuse the deploy on anything else, rather than
+            # silently importing (or silently dropping) a broader grant an operator added.
+            unexpected = [edge for edge in composites if not (
+                edge.get("clientRole") and edge.get("containerId") == api_id and catalog_read(edge["name"]))]
+            if unexpected:
+                clients = {c["id"]: c["clientId"] for c in required(get(prefix + "/clients"))}
+                names = sorted(clients.get(edge.get("containerId"), "?") + "/" + edge["name"]
+                               if edge.get("clientRole") else edge["name"] for edge in unexpected)
+                raise RuntimeError(
+                    "%s may contain only %s catalog.*:read client roles; remove these composites "
+                    "in Keycloak before deploying: %s" % (PUBLIC_ROLE, API_CLIENT, ", ".join(names)))
+            role["composites"] = {"realm": [], "client": {API_CLIENT: live_catalog} if live_catalog else {}}
+            role["composite"] = bool(live_catalog)
         else:
             desired_realm = desired.get("realm", [])
             desired["realm"] = [r for r in desired_realm if r != PUBLIC_ROLE]

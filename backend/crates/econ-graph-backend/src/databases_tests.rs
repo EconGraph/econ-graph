@@ -359,7 +359,12 @@ async fn the_data_plane_check_agrees_with_the_database_check() {
             token_url: format!("http://{token_addr}/token"),
             client_id: "econgraph-anonymous".into(),
             client_secret: "test-only".into(),
+            stale_max: std::time::Duration::ZERO,
         });
+    assert!(matches!(
+        verifier.renew_anonymous_grants().await,
+        econ_graph_auth::anonymous::Renewal::Renewed(_)
+    ));
     let routes = build_routes(
         plane.clone(),
         None,

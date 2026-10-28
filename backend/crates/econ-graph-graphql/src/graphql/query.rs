@@ -55,7 +55,13 @@ impl Query {
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
-        catalogs::require_series(ctx, series_uuid).await?;
+        // A series in a catalog the caller can't read is null, exactly like an unknown id.
+        if catalogs::readable_series_catalog(ctx, series_uuid)
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
 
         match series_service::get_series_by_id(&pool, series_uuid).await? {
             // A series with no data points (e.g. a discovered series whose source adapter was
@@ -69,18 +75,31 @@ impl Query {
     ///
     /// Unlike `series`, a series with no data points counts. Backends without a data database
     /// ask this before storing an annotation on the series.
+    ///
+    /// `false` for a series in a catalog the caller can't read, exactly as for an unknown id.
     async fn series_exists(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
-        catalogs::require_series(ctx, series_uuid).await?;
-        Ok(series_service::series_exists(pool, series_uuid).await?)
+        Ok(catalogs::readable_series_catalog(ctx, series_uuid)
+            .await?
+            .is_some())
+    }
+
+    /// The catalog (data source name) of a series the caller may read, observations or not;
+    /// null for an unknown id or a series in a catalog the caller can't read.
+    ///
+    /// Backends without a data database ask this before storing or showing annotations on the
+    /// series, then apply their own caller's catalog grants to the name.
+    async fn series_catalog(&self, ctx: &Context<'_>, id: ID) -> Result<Option<String>> {
+        let series_uuid = Uuid::parse_str(&id)?;
+        catalogs::readable_series_catalog(ctx, series_uuid).await
     }
 
     /// Get an economic series by its source's name and the source's own id for it
     ///
     /// `sourceName` is the data source's `name` exactly as `dataSources` returns it (for
     /// example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
-    /// id (for example "GDP"). Returns null when no such series exists.
+    /// id (for example "GDP"). Returns null when no such series exists, or when it is in a
+    /// catalog the caller can't read.
     async fn series_by_external_id(
         &self,
         ctx: &Context<'_>,
@@ -104,10 +123,16 @@ impl Query {
             .optional()?;
 
         drop(conn);
-        if let Some(series) = &series {
-            catalogs::require_source(ctx, series.source_id).await?;
+        let Some(series) = series else {
+            return Ok(None);
+        };
+        if !catalogs::allowed_sources(ctx)
+            .await?
+            .contains(&series.source_id)
+        {
+            return Ok(None);
         }
-        Ok(series.map(EconomicSeriesType::from))
+        Ok(Some(EconomicSeriesType::from(series)))
     }
 
     /// List economic series with filtering and pagination
@@ -484,6 +509,7 @@ impl Query {
     }
 
     /// Get annotations for a specific series: public ones, plus the caller's own private ones.
+    /// Empty for a series in a catalog the caller can't read, as for an unknown series.
     async fn annotations_for_series(
         &self,
         ctx: &Context<'_>,
@@ -493,6 +519,13 @@ impl Query {
         let _ = user_id;
         let viewer = current_user_id_opt(ctx)?;
         let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
+        let readable = match Uuid::parse_str(&series_id) {
+            Ok(series) => catalogs::series_visible(ctx, series).await?,
+            Err(_) => false,
+        };
+        if !readable {
+            return Ok(Vec::new());
+        }
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotations = collaboration_service
@@ -504,7 +537,8 @@ impl Query {
             .collect())
     }
 
-    /// Get comments for an annotation the caller can see (public, or their own)
+    /// Get comments for an annotation the caller can see (public, or their own) on a series
+    /// whose catalog they may read. Any other annotation is reported as not found.
     async fn comments_for_annotation(
         &self,
         ctx: &Context<'_>,
@@ -515,6 +549,7 @@ impl Query {
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
+        catalogs::require_annotation_readable(ctx, &collaboration_service, annotation_uuid).await?;
         let comments = collaboration_service
             .get_comments_for_annotation(annotation_uuid, viewer)
             .await?;

@@ -124,6 +124,10 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: anonymous-client-secret
+        # Seconds the last anonymous catalog grants stay in use past expiry while Keycloak
+        # can't renew them; 0 fails closed (config/keycloak/README.md).
+        - name: ANONYMOUS_GRANTS_STALE_MAX_SECS
+          value: "0"
         - name: OIDC_AUDIENCE
           value: "econ-graph-api"
         - name: OIDC_JWKS_URL

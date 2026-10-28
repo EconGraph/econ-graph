@@ -57,7 +57,6 @@ class CatalogPolicyTests(unittest.TestCase):
     def test_selective_grants_and_custom_reader_memberships_survive(self):
         self.state[self.prefix + "/roles/catalog-public/composites"] = [
             {"name":"catalog.bea:read","clientRole":True,"containerId":"api"},
-            {"name":"custom-public-policy","clientRole":False},
         ]
         self.state[self.prefix + "/roles/user/composites"] = [{"name":"catalog-public","clientRole":False}]
         self.state[self.prefix + "/users/reader/role-mappings"] = {
@@ -67,10 +66,37 @@ class CatalogPolicyTests(unittest.TestCase):
         self.state[self.prefix + "/users/reader/groups"] = [{"path": "/public-readers"}]
         merged = self.merge()
         self.assertEqual(merged["users"][0]["groups"],["/public-readers"])
-        self.assertEqual(self.role(merged,"catalog-public")["composites"],{"realm":["custom-public-policy"],"client":{"econ-graph-api":["catalog.bea:read"]}})
+        self.assertEqual(self.role(merged,"catalog-public")["composites"],{"realm":[],"client":{"econ-graph-api":["catalog.bea:read"]}})
         self.assertEqual(merged["users"][0]["realmRoles"],["custom-public-policy"])
         self.assertEqual(merged["users"][0]["clientRoles"],{"econ-graph-api":["catalog.fred:read"]})
         self.assertIn("catalog-public",self.role(merged,"user")["composites"]["realm"])
+
+    def test_public_policy_holding_anything_but_catalog_reads_fails_the_deploy(self):
+        # Every account inherits catalog-public: a broader edge must stop the deploy, never be
+        # preserved (granting it to everyone) or silently dropped.
+        self.state[self.prefix + "/clients"].append({"id": "other", "clientId": "other-client"})
+        for edge, shown in [
+            ({"name":"custom-public-policy","clientRole":False}, "custom-public-policy"),
+            ({"name":"admin","clientRole":False}, "admin"),
+            ({"name":"annotation:create","clientRole":True,"containerId":"api"}, "econ-graph-api/annotation:create"),
+            ({"name":"admin.users:delete","clientRole":True,"containerId":"api"}, "econ-graph-api/admin.users:delete"),
+            ({"name":"catalog.fred:read","clientRole":True,"containerId":"other"}, "other-client/catalog.fred:read"),
+        ]:
+            self.state[self.prefix + "/roles/catalog-public/composites"] = [
+                {"name":"catalog.bea:read","clientRole":True,"containerId":"api"}, edge]
+            with self.assertRaises(RuntimeError) as raised:
+                self.merge()
+            self.assertIn(shown, str(raised.exception))
+
+    def test_realm_file_public_policy_is_checked_too(self):
+        self.state[self.prefix] = None  # a new realm seeds the declared defaults
+        self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"].append("annotation:create")
+        with self.assertRaises(RuntimeError):
+            self.merge()
+        self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"].pop()
+        self.role(self.realm, "catalog-public")["composites"]["realm"] = ["user"]
+        with self.assertRaises(RuntimeError):
+            self.merge()
 
     def test_reader_does_not_inherit_signed_in_default_grants(self):
         self.state[self.prefix + "/users/reader/role-mappings"] = {"realmMappings": [
