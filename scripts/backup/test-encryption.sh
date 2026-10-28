@@ -318,7 +318,8 @@ chmod +x "$scratch/race-bin/mv"
 if (PATH="$scratch/race-bin:$PATH"; backup_seal_dir "$payload" "$scratch/raced") 2>"$scratch/raced.log"; then
     die 'reported success although the output appeared before the rename'
 fi
-grep -q 'appeared before' "$scratch/raced.log" || die "no rename race message: $(cat "$scratch/raced.log")"
+# coreutils 9.7 exits 0 (caught by the rename check); older mv -n exits 1 itself.
+grep -qE 'appeared before|not replacing' "$scratch/raced.log" || die "no rename race message: $(cat "$scratch/raced.log")"
 [[ "$(ls -A "$scratch/raced")" == planted ]] || die 'the output that appeared was changed'
 [[ ! -e "$scratch/raced.partial/VERIFIED" ]] || die 'left VERIFIED on an unpublished bundle'
 # The hash stage runs isolated (python3 -I): a hashlib.py in the caller's
