@@ -2,447 +2,164 @@
 
 ## Overview
 
-The Global Analysis feature provides interactive visualization of economic data across countries using D3.js-powered world maps, React Context API for state management, and Material-UI for responsive design. This document details the technical architecture, component structure, and implementation patterns.
+The Global Analysis page at `/global` compares countries through a choropleth of one World Bank World Development Indicator (WDI). React owns the indicator and display choices, TanStack Query owns fetched data, and D3 draws and transforms the SVG. Keeping those responsibilities separate lets indicator changes recolor existing country paths while the tooltip and table expose the underlying values.
 
-## Table of Contents
+This reference describes the routed world map. [GlobalAnalysis](../../frontend/src/pages/GlobalAnalysis.tsx) shows only the **World Map** tab in release builds. Comparison, events and impact tabs are gated by `__FLAGS__.global_analysis_tabs`; the first two load separate components lazily, and impact is a placeholder. See [build flags](../../frontend/docs/build-flags.md) for the development profile.
 
-- [System Architecture](#system-architecture)
-- [Component Architecture](#component-architecture)
-- [State Management](#state-management)
-- [Data Flow](#data-flow)
-- [D3.js Integration](#d3js-integration)
-- [Type System](#type-system)
-- [Testing Strategy](#testing-strategy)
-- [Performance Considerations](#performance-considerations)
+## Contents
+
+- [System and component architecture](#system-and-component-architecture)
+- [State and data flow](#state-and-data-flow)
+- [Data contracts](#data-contracts)
+- [D3 integration](#d3-integration)
+- [Rendering lifecycle](#rendering-lifecycle)
+- [Testing boundaries](#testing-boundaries)
 - [Accessibility](#accessibility)
-- [Future Enhancements](#future-enhancements)
 
-## System Architecture
+## System and component architecture
 
-### High-Level Architecture
+The frontend uses React and TypeScript, MUI controls, D3 v7, `topojson-client`, and TanStack Query. Vite builds the application; Vitest with React Testing Library covers components and hooks, and Playwright covers browser interactions. The [package manifest](../../frontend/package.json) and [Vite configuration](../../frontend/vite.config.ts) define the toolchain.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Global Analysis UI                       │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │   React App     │  │   D3.js Maps    │  │  Material-UI │ │
-│  │   Components    │  │   Visualizations│  │  Components  │ │
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │  Context API    │  │   Custom Hooks  │  │  Type System │ │
-│  │  State Mgmt     │  │   D3 Logic      │  │  TypeScript  │ │
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │   Sample Data   │  │   World Atlas   │  │  Test Suite  │ │
-│  │   Mock Data     │  │   TopoJSON      │  │  Jest/Playwright│
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```text
+GlobalAnalysis (/global)
+└── WorldMapTab
+    ├── Indicator picker
+    ├── WorldMapControls (projection and color scheme)
+    ├── InteractiveWorldMap
+    │   └── WorldMapContent (D3 SVG and zoom controls)
+    │       └── CountryTooltip
+    ├── MapValuesTable
+    └── MapLegend
 ```
 
-### Technology Stack
+[WorldMapTab](../../frontend/src/components/global/WorldMapTab.tsx) coordinates the queries, selected indicator, projection and color scheme. It derives a shared color scale and passes it to the map and legend, so they describe the same values. It also turns a country click into navigation to `/series/{seriesId}`.
 
-- **Frontend Framework**: React 18 with TypeScript
-- **Visualization**: D3.js v7 with d3-geo, d3-scale, d3-zoom
-- **UI Components**: Material-UI (MUI) v5
-- **State Management**: React Context API
-- **Data Format**: TopoJSON for world map data
-- **Testing**: Jest + React Testing Library + Playwright
-- **Build Tools**: Create React App with custom Jest configuration
+[InteractiveWorldMap](../../frontend/src/components/global/InteractiveWorldMap.tsx) loads the outline and mounts `WorldMapContent` once it is available. The content component owns the SVG, pointer hover state, touch tap tracking, and zoom buttons. D3 converts the TopoJSON into country paths and a border mesh. The drawing uses a 960 × 500 coordinate space supplied by the tab and scales down to fit narrower containers.
 
-## Component Architecture
+[WorldMapControls](../../frontend/src/components/global/WorldMapControls.tsx) provides the projection and color pickers. Zoom controls belong to the map: they sit over its top-right corner on larger screens and in a bar below it on phones, where an overlay would obscure countries.
 
-### Component Hierarchy
+[CountryTooltip](../../frontend/src/components/global/CountryTooltip.tsx) shows the hovered country's name, value, unit and observation date, or **No data**. It chooses its position relative to the pointer and map edges. [MapLegend](../../frontend/src/components/global/MapLegend.tsx) explains the selected indicator's scale, unit, missing-data fill, drawable country count and date range. It also counts values with no corresponding shape and directs readers to the table.
 
-```
-GlobalAnalysisDemo
-├── InteractiveWorldMap
-│   ├── CountryTooltip
-│   └── MapLegend
-├── WorldMapControls
-└── SelectedCountriesList
-```
+[MapValuesTable](../../frontend/src/components/global/MapValuesTable.tsx) is a collapsed table of every returned country value, sorted highest first, with country links to the series. Unlike the map, it includes countries that cannot be drawn. Its rows render in a scroll container when expanded; they are not virtualized.
 
-### Core Components
+## State and data flow
 
-#### 1. InteractiveWorldMap
+The map uses local React state rather than a Global Analysis Context provider. `WorldMapTab` owns indicator, projection and color choices; the page owns its active tab. `WorldMapContent` owns hover state, while [useWorldMap](../../frontend/src/components/global/hooks/useWorldMap.ts) owns the projection, path generator, zoom behavior and zoom status. D3 applies the zoom transform directly to `.map-container`.
 
-**Purpose**: Main D3.js-powered world map component
+### WDI queries
 
-**Key Features**:
-- Multiple map projections (Natural Earth, Mercator, Orthographic)
-- Zoom and pan interactions
-- Country selection and hover states
-- Economic data visualization with color coding
-- Responsive design
+[useWorldMapData](../../frontend/src/components/global/hooks/useWorldMapData.ts) contains the dataset and cross-section queries:
 
-**Technical Implementation**:
-```typescript
-interface InteractiveWorldMapProps {
-  data: CountryData[];
-  selectedIndicator: string;
-  timeRange: { start: Date; end: Date };
-  onCountryClick: (country: CountryData) => void;
-  onCountryHover: (country: CountryData | null) => void;
-  width?: number;
-  height?: number;
-  className?: string;
-}
+1. `useMapDataset()` reads `datasets`, selects code `wdi`, and finds the area dimension through its `countries` code list. It accepts a dataset with exactly one other dimension, whose codes populate the indicator picker. The initial indicator is GDP per capita (`NY.GDP.PCAP.CD`) when available, otherwise the first code.
+2. `useMapCrossSection(dataset, indicator)` filters that indicator dimension and queries across the area dimension with `latest: true`. Each country therefore has its own latest observation date; the result is not a common-year snapshot.
+3. The hook keeps entries whose area kind is `COUNTRY`, with non-null values and dates and finite numeric conversions. Aggregates, unknown areas and missing observations do not become country values.
+4. For a nonempty result, it queries the first country's series for units and frequency, treating those as shared by all series of the indicator. The indicator code's unit takes precedence over the series unit. If metadata lookup fails, values remain usable, the code unit is retained if known, and dates use their full-date format. Cancellation still stops the query.
+
+The dataset query uses `['worldMap', 'dataset']` with a 30-minute stale time. The cross-section query uses `['worldMap', 'crossSection', dataset?.id, indicator]` with a five-minute stale time and runs only when both dataset and indicator are known. Both pass the query cancellation signal to the GraphQL client.
+
+On an indicator switch, `keepPreviousData` preserves the preceding result while the next query loads. The map, legend and table take their indicator identity from that result, rather than relabeling old values with the picker's new choice. A progress bar shows fetching, and query failures offer retry actions. Missing WDI metadata and an empty drawable result have separate informational messages.
+
+```text
+WDI metadata → indicator choice → latest cross-section → country values
+                                                        ├→ values table
+Bundled atlas → drawable ISO numeric IDs ────────────────┴→ useCountryData
+                                                            ├→ map fills
+                                                            └→ legend ranges/counts
 ```
 
-**D3.js Integration**:
-- Uses `d3-geo` for map projections
-- Implements `d3-zoom` for pan/zoom behavior
-- Applies `d3-scale` for color mapping
-- Loads TopoJSON data from CDN
+### Outline loading
 
-#### 2. WorldMapControls
+[worldAtlas](../../frontend/src/components/global/worldAtlas.ts) dynamically imports `world-atlas/countries-50m.json` from the pinned package. Vite bundles this 1:50m TopoJSON as a separate chunk loaded when the map is used. The outline does not come from a third-party CDN. The finer outline includes small countries omitted by the package's 1:110m file, though some microstates and territories still have no shape.
 
-**Purpose**: Control panel for map interactions
+The tab and map share `worldAtlasQuery` under the `['world-atlas']` key. Its stale time and garbage-collection time are infinite, so both consumers reuse the loaded outline. A load failure is retried once, then displayed in place of the map with a **Reload** action; a missing application chunk may require a page reload.
 
-**Features**:
-- Zoom in/out buttons
-- Projection type selector
-- Color scheme selector
-- Map view state management
+## Data contracts
 
-#### 3. CountryTooltip
-
-**Purpose**: Displays country information on hover
-
-**Features**:
-- Dynamic positioning
-- Economic indicator values
-- Color-coded values
-- Responsive design
-
-#### 4. MapLegend
-
-**Purpose**: Color scale legend for data interpretation
-
-**Features**:
-- Gradient color bar
-- Min/max value display
-- Interactive filtering (future)
-- Responsive layout
-
-### Custom Hooks
-
-#### 1. useWorldMap
-
-**Purpose**: Encapsulates D3.js map logic
-
-**Responsibilities**:
-- Map projection management
-- Zoom behavior configuration
-- Path generation
-- View state updates
+The routed map's value type is [MapCountryValue](../../frontend/src/components/global/hooks/useWorldMapData.ts):
 
 ```typescript
-export const useWorldMap = (
-  svgRef: React.RefObject<SVGSVGElement>,
-  initialProjectionType: ProjectionType = 'geoNaturalEarth1',
-  initialMapViewState: MapViewState = { scale: 150, translation: [480, 250] }
-) => {
-  // Returns: projection, path, zoomBehavior, mapViewState, setMapViewState, etc.
-};
-```
-
-#### 2. useCountryData
-
-**Purpose**: Manages country data processing and color scaling
-
-**Responsibilities**:
-- Data normalization
-- Color scale generation
-- Statistical calculations
-- Data filtering and sorting
-
-```typescript
-export const useCountryData = (
-  countries: CountryData[],
-  selectedIndicator: string,
-  colorScheme: string = 'viridis'
-) => {
-  // Returns: processedData, colorScale, dataRange, statistics, etc.
-};
-```
-
-## State Management
-
-### GlobalAnalysisContext
-
-**Purpose**: Centralized state management for global analysis features
-
-**State Structure**:
-```typescript
-interface GlobalAnalysisState {
-  selectedCountries: string[];
-  selectedIndicator: EconomicIndicator;
-  mapViewState: MapViewState;
-  projectionType: ProjectionType;
-  colorScheme: ColorScheme;
-  hoveredCountry: string | null;
-}
-```
-
-**Actions**:
-```typescript
-interface GlobalAnalysisActions {
-  selectCountry: (countryId: string) => void;
-  deselectCountry: (countryId: string) => void;
-  toggleCountry: (countryId: string) => void;
-  setSelectedIndicator: (indicator: EconomicIndicator) => void;
-  setMapViewState: (viewState: MapViewState) => void;
-  setProjectionType: (type: ProjectionType) => void;
-  setColorScheme: (scheme: ColorScheme) => void;
-  setHoveredCountry: (countryId: string | null) => void;
-}
-```
-
-**Performance Optimizations**:
-- Split state into logical groups
-- Use `useCallback` for action functions
-- Memoize computed values with `useMemo`
-- Prevent unnecessary re-renders
-
-## Data Flow
-
-### 1. Data Loading
-
-```
-Sample Data → useCountryData → Processed Data → Color Scale → Map Rendering
-```
-
-### 2. User Interactions
-
-```
-User Action → Context Update → Component Re-render → D3 Update → Visual Change
-```
-
-### 3. State Updates
-
-```
-Component Event → Context Action → State Update → Dependent Components Update
-```
-
-## D3.js Integration
-
-### Map Projections
-
-**Supported Projections**:
-- `geoNaturalEarth1`: Balanced world view
-- `geoMercator`: Rectangular projection
-- `geoOrthographic`: Globe view
-
-**Implementation**:
-```typescript
-const getProjection = useCallback(() => {
-  switch (projectionType) {
-    case 'geoMercator':
-      return geoMercator();
-    case 'geoOrthographic':
-      return geoOrthographic().rotate([mapViewState.rotation?.[0] || 0, mapViewState.rotation?.[1] || 0]);
-    case 'geoNaturalEarth1':
-    default:
-      return geoNaturalEarth1();
-  }
-}, [projectionType, mapViewState.rotation]);
-```
-
-### Color Scaling
-
-**Color Schemes**:
-- Viridis: Perceptually uniform
-- Blues: Sequential blue scale
-- Reds: Sequential red scale
-
-**Implementation**:
-```typescript
-const colorScale = useMemo(() => {
-  const interpolator = COLOR_SCHEMES[colorScheme] || interpolateViridis;
-  return scaleSequential(interpolator).domain([dataRange.min, dataRange.max]);
-}, [dataRange, colorScheme]);
-```
-
-### Zoom and Pan
-
-**Implementation**:
-```typescript
-const zoomBehavior = useRef(
-  zoom<SVGSVGElement, unknown>()
-    .scaleExtent([1, 8])
-    .on('zoom', (event) => {
-      const { transform } = event;
-      setMapViewState((prev) => ({
-        ...prev,
-        scale: transform.k,
-        translation: [transform.x, transform.y],
-      }));
-    })
-);
-```
-
-## Type System
-
-### Core Types
-
-```typescript
-interface CountryData {
-  id: string; // ISO 3166-1 alpha-3 code
+interface MapCountryValue {
+  key: string;                 // Area key, ISO alpha-3
   name: string;
-  gdp: number;
-  inflation: number;
-  unemployment: number;
-  region?: string;
-  subregion?: string;
-  economicIndicators?: EconomicIndicator[];
-}
-
-interface EconomicIndicator {
-  name: string;
-  value: number;
-  unit: string;
-  date: Date;
-  source: string;
-}
-
-interface MapViewState {
-  scale: number;
-  translation: [number, number];
-  rotation?: [number, number, number];
+  isoNumeric: number | null;   // Join key for world-atlas features
+  seriesId: string;
+  date: string;                // YYYY-MM-DD
+  value: string;               // API decimal for display
+  numericValue: number;        // Number used for color and sorting
 }
 ```
 
-### Type Safety Features
+Country identity has two roles: the API's area key identifies the observation, while ISO numeric code joins it to a world-atlas feature. Feature IDs such as `"040"` are converted to numbers before lookup. There is deliberately no fallback join by country name. Kosovo has no ISO numeric code; other countries can have a code but no shape in the atlas. Their values stay in the table and are excluded from map scale bounds, date ranges and drawable counts once the outline is known.
 
-- Strict TypeScript configuration
-- Comprehensive interface definitions
-- Generic type parameters for D3 scales
-- Union types for projection and color schemes
-- Optional properties with proper null checks
+[useCountryData](../../frontend/src/components/global/hooks/useCountryData.ts) accepts the values, a color scheme (default `viridis`) and optional drawable IDs:
 
-## Testing Strategy
-
-### Unit Tests (Jest + React Testing Library)
-
-**Coverage Areas**:
-- Component rendering
-- Hook functionality
-- Context state management
-- D3.js integration mocking
-- User interactions
-
-**Test Files**:
-- `InteractiveWorldMap.test.tsx`
-- `WorldMapControls.test.tsx`
-- `CountryTooltip.test.tsx`
-- `MapLegend.test.tsx`
-- `useWorldMap.test.ts`
-- `useCountryData.test.ts`
-- `GlobalAnalysisContext.test.tsx`
-
-### Integration Tests (Playwright)
-
-**Test Scenarios**:
-- Map loading and rendering
-- Country selection workflows
-- Indicator switching
-- Projection changes
-- Responsive design
-- Error handling
-
-**Test Files**:
-- `global-analysis-enhanced.spec.ts`
-- `d3-visualization.spec.ts`
-- `global-analysis-context.spec.ts`
-- `global-analysis-performance.spec.ts`
-- `global-analysis-accessibility.spec.ts`
-
-### Test Configuration
-
-**Jest Configuration**:
-```javascript
-module.exports = {
-  transformIgnorePatterns: [
-    'node_modules/(?!(d3|d3-.*|topojson-client)/)'
-  ],
-  setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
-  testEnvironment: 'jsdom',
-  moduleNameMapping: {
-    '^d3$': '<rootDir>/src/__mocks__/d3.js'
-  }
+```typescript
+const useCountryData = (
+  countries: MapCountryValue[],
+  colorScheme: string = 'viridis',
+  drawableIds?: ReadonlySet<number>
+) => {
+  // Derive the numeric index, scale, ranges and drawable-country lists.
 };
 ```
 
-## Performance Considerations
+It returns `valuesByIsoNumeric`, `colorScale`, `dataRange`, `dateRange`, `countriesWithData` and `countriesWithoutData`. Until drawable IDs are available, any finite value with a numeric code is considered drawable. A shape without a joined value receives the gray `NO_DATA_FILL`, shows **No data** in its tooltip and does not open a series on click.
 
-### Optimization Strategies
+The decimal string and number serve different purposes. [mapFormat](../../frontend/src/components/global/mapFormat.ts) formats the string through decimal arithmetic, grouping thousands and rounding to at most two decimal places without trailing zeros. It avoids binary-number conversion for displayed values; this does not mean that every original decimal digit is displayed. Color interpolation and table sorting use `numericValue`. Date formatting uses series frequency to show annual, quarterly or monthly periods, with full dates when frequency is unknown.
 
-1. **D3.js Performance**:
-   - Use `useRef` for D3 selections
-   - Minimize DOM manipulations
-   - Implement efficient data binding
-   - Use D3 transitions for smooth animations
+The map's required inputs are `valuesByIsoNumeric: ReadonlyMap<number, MapCountryValue>`, `colorScale: (value: number) => string`, `width: number` and `height: number`. Optional props provide unit, frequency, `onCountryClick`, projection, borders and label settings. See [InteractiveWorldMapProps](../../frontend/src/components/global/InteractiveWorldMap.tsx) for the full contract; the component does not accept an indicator or time-range filter.
 
-2. **React Performance**:
-   - Memoize expensive calculations
-   - Use `useCallback` for event handlers
-   - Split context to prevent unnecessary re-renders
-   - Implement virtual scrolling for large datasets
+## D3 integration
 
-3. **Memory Management**:
-   - Clean up D3 event listeners
-   - Dispose of unused subscriptions
-   - Implement proper component unmounting
+### Projection and zoom
 
-### Performance Metrics
+`useWorldMap(svgRef, projectionType = 'naturalEarth', size?)` returns `projection`, `path`, `zoomBehavior`, `zoomLevel`, `isTransformed`, `zoomBy`, `resetZoom` and the projection keys. Each map instance receives a fresh projection. With a known drawing size, the hook fits the projection to a GeoJSON sphere; without one, it refits on window resize using the SVG bounds.
 
-- **Initial Load**: < 2 seconds
-- **Map Rendering**: < 500ms
-- **Interaction Response**: < 100ms
-- **Memory Usage**: < 50MB for 200+ countries
+The selector keys differ from the D3 constructor names:
+
+| Application key | D3 constructor | View |
+| --- | --- | --- |
+| `naturalEarth` | `geoNaturalEarth1` | Balanced world overview, the default |
+| `mercator` | `geoMercator` | Rectangular world view |
+| `orthographic` | `geoOrthographic` | Globe view |
+
+Unknown projection keys fall back to Natural Earth. Orthographic is a projection choice, not a globe-rotation control.
+
+D3 zoom uses `scaleExtent([1, 8])`: scale 1 is the fitted whole-world view and scale 8 is the maximum magnification. When dimensions are known, `translateExtent` bounds panning to the drawing area. Zoom events transform `.map-container` and update the displayed zoom percentage and reset availability. Buttons zoom by a factor of 1.5 or its inverse; reset applies `zoomIdentity`. Rebuilding geometry preserves the SVG's current zoom transform.
+
+### Color scale
+
+`useCountryData` derives the minimum and maximum from drawable numeric values and uses a sequential interpolator:
+
+```typescript
+const interpolator = COLOR_SCHEMES[colorScheme as ColorScheme] || interpolateViridis;
+return scaleSequential(interpolator).domain([dataRange.min, dataRange.max]);
+```
+
+The available schemes are Viridis, Blues, Reds and Greens. Viridis supplies a perceptually uniform sequential scale; the single-hue schemes offer alternative presentations of the same domain. With no drawable values, the range falls back to `[0, 1]` and the legend omits the value gradient. The legend's date range likewise describes drawable observations, not all entries in the table.
+
+## Rendering lifecycle
+
+The map separates geometry construction from data styling. Its construction effect converts TopoJSON to features, generates paths and borders, adds optional labels, and installs pointer and click handlers. It runs when the outline, path generator, dimensions, border/label settings or zoom behavior change. A second effect updates fills and cursors when values or the color scale change, retaining existing country nodes.
+
+Handlers read current values and the click callback through a ref updated in a layout effect. Changing indicators therefore does not require rebuilding handlers. Hover changes update tooltip state and the hovered path's stroke without reconstructing map geometry. A mouse click on a country with data opens its series; on touch screens, the first tap exposes the tooltip and the second opens the series.
+
+These mechanisms avoid repeated geometry work during indicator and pointer interactions. They describe the implemented lifecycle, not measured load-time, interaction-latency or memory guarantees.
+
+## Testing boundaries
+
+The active [Vitest configuration](../../frontend/vitest.config.ts) uses jsdom and [setupTests.vitest.ts](../../frontend/src/setupTests.vitest.ts), with D3 dependencies included in its dependency handling. The shared setup stubs some D3 modules; tests needing real paths explicitly unmock them.
+
+- [WorldMapTab.test.tsx](../../frontend/src/components/global/__tests__/WorldMapTab.test.tsx) uses mocked GraphQL with real map paths to exercise indicator loading, fills, tooltip formatting, series navigation, touch taps, table values and errors. It also asserts that hover and indicator changes retain country nodes.
+- [Hook tests](../../frontend/src/components/global/hooks/__tests__) exercise dataset selection, country filtering, ISO numeric indexing, ranges, color scales, projection fitting and zoom bounds.
+- [worldAtlas.test.tsx](../../frontend/src/components/global/__tests__/worldAtlas.test.tsx) checks package loading and outline rendering without fetching. [InteractiveWorldMap.error.test.tsx](../../frontend/src/components/global/__tests__/InteractiveWorldMap.error.test.tsx) exercises the outline failure state.
+
+Browser tests live under [release/world-map](../../frontend/tests/e2e/release/world-map). `world-map-mocked.spec.ts` intercepts GraphQL to check UI behavior, including aggregate exclusion and missing shapes. `world-atlas.spec.ts` checks bundled loading and an aborted outline load. The [standalone Global Analysis configuration](../../frontend/ci/configs/playwright-global-analysis.config.ts) excludes `world-map.spec.ts`, which requires the seeded release backend.
+
+`world-map.spec.ts` checks seeded countries across indicators, displayed values and dates, tooltips and outline requests. `world-map-every-country.spec.ts` derives expectations from recorded World Bank responses for fixture mode and checks seeded values and no-data outlines after indicator changes. Its seed omits aggregates, so the mocked spec supplies coverage of the frontend aggregate filter. These layers separate UI behavior under controlled responses from integration with the release fixture stack; they do not establish live World Bank coverage, performance budgets or accessibility conformance.
 
 ## Accessibility
 
-### WCAG 2.1 Compliance
+The SVG has `role="img"` and `aria-label="World map"`. Indicator, projection and color selectors have labels; zoom buttons have accessible names, and the zoom percentage uses a polite live region. These controls provide keyboard access to display choices and zoom.
 
-**Level AA Standards**:
-- Keyboard navigation support
-- Screen reader compatibility
-- Color contrast ratios (4.5:1 minimum)
-- Focus management
-- Alternative text for visual elements
-
-**Implementation**:
-```typescript
-// Keyboard navigation
-const handleKeyDown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' || event.key === ' ') {
-    toggleCountry(countryId);
-  }
-};
-
-// ARIA labels
-<svg
-  role="img"
-  aria-label="Interactive world map showing economic data"
-  aria-describedby="map-legend"
->
-```
-
-### Accessibility Features
-
-- **Keyboard Navigation**: Full keyboard support for all interactions
-- **Screen Reader Support**: Proper ARIA labels and descriptions
-- **High Contrast**: Support for high contrast mode
-- **Focus Indicators**: Clear focus indicators for all interactive elements
-- **Alternative Text**: Descriptive text for visual data representations
-
-## Conclusion
-
-The Global Analysis architecture provides a robust, scalable foundation for interactive economic data visualization. The combination of React's component model, D3.js's powerful visualization capabilities, and TypeScript's type safety creates a maintainable and extensible system that can grow with future requirements.
-
-The modular design allows for easy testing, debugging, and feature additions while maintaining high performance and accessibility standards. The comprehensive test suite ensures reliability across different browsers and devices.
+Individual country paths use pointer handlers and are not keyboard-focusable. The expandable **Values as a table** provides an alternative route to country data and series navigation through ordinary links, with country, value and date columns and a labeled table. It includes returned values without drawable shapes, so data exploration does not depend entirely on color, hover or map geometry. This implementation does not establish WCAG AA conformance or full keyboard operation of the SVG countries.

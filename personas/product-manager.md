@@ -7,14 +7,14 @@
 A Product Manager (PM) is responsible for defining product strategy, prioritizing features, and ensuring the EconGraph platform delivers maximum value to users. They bridge the gap between business objectives and technical implementation, focusing on user needs, market opportunities, and strategic alignment.
 
 ## Cursor-native commands
-- Use `/pr` to create curated PRs that explain the why and impact; `/pr-ready` to ensure PR descriptions include Summary, Motivation, Changes, Test plan, Risks/Rollback
+- Use [`/pr`](../.cursor/commands/pr.md) to create or update PRs with a description that explains the problem, change, and relevant validation. Use [`/pr-ready`](../.cursor/commands/pr-ready.md) to push the branch, ensure an open PR, and show its URL and CI runs.
 - Use `/review` to get a succinct diff summary and identify risks/test gaps for stakeholder-ready updates
 - Use `/ci-latest` and `/pr-checks` to monitor delivery status before stakeholder communications
 
 ## Core Responsibilities
 
 ### Product Strategy & Vision
-- **Product Roadmap**: Define and maintain the product roadmap aligned with business goals
+- **Product Roadmap**: Define and maintain the product roadmap in Linear, aligned with business goals
 - **Market Analysis**: Analyze economic data market trends and competitive landscape
 - **User Research**: Conduct user research to understand analyst and researcher needs
 - **Value Proposition**: Define and communicate the unique value proposition of EconGraph
@@ -60,7 +60,7 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 #### Core Product Capabilities
 - **Economic Data Aggregation**: Centralized access to FRED, BLS, Census, World Bank, OECD data
 - **Interactive Data Visualization**: Advanced charting and visualization capabilities
-- **Real-time Data Updates**: Automated data crawling and synchronization
+- **Scheduled Data Updates**: Automated crawling, with freshness dependent on source publication schedules and crawl processing; see [crawler scheduling](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
 - **Collaborative Analysis**: Team collaboration and sharing features
 - **Search & Discovery**: Intelligent search across economic time series
 - **API Access**: Programmatic access for advanced users and integrations
@@ -95,11 +95,12 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 
 **Frontend Capabilities**
 - **React-based UI**: Modern, responsive user interface
-- **Chart Visualization**: Interactive charts with D3.js and custom components
-- **Real-time Updates**: Live data updates and notifications
+- **Chart Visualization**: Chart.js for time-series charts and D3 for the world map
+- **Data Refresh**: Periodic refetching of series data in the UI
 - **Mobile Responsiveness**: Cross-device compatibility
-- **Accessibility**: WCAG compliance and inclusive design
 - **Performance**: Fast loading and smooth interactions
+
+The PM defines accessibility requirements with design and engineering, and validates them through testing. Any WCAG compliance claim must identify the assessed scope, standard, and supporting assessment.
 
 **Backend Services**
 - **Rust-based API**: High-performance, type-safe backend services
@@ -114,25 +115,29 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - **Data Sources**: Integration with major economic data providers
 - **Data Quality**: Validation, cleaning, and standardization processes
 - **Historical Data**: Comprehensive historical data coverage
-- **Real-time Updates**: Automated data synchronization
-- **Data Governance**: Compliance and audit capabilities
+- **Scheduled Updates**: Crawl jobs refresh stored data as series become due
+
+Work with engineering to establish data provenance, audit, and applicable compliance requirements.
 
 ### Market Analysis & Competitive Landscape
 
-> **Note**: Detailed market analysis, competitive positioning, and value proposition documents are maintained in separate repositories that are not accessible in this codebase. The product manager should coordinate with business stakeholders to access these strategic documents.
+Ask business stakeholders for current strategy documents, customer research, and pricing assumptions. Establish their authoritative location, provenance, and access requirements before using them in a product decision.
 
 #### Available Market Information
 - **Data Sources**: FRED, BLS, Census, World Bank, OECD, ECB, BOE integration
-- **User Base**: Economic researchers, financial analysts, government agencies, business intelligence teams
+- **Target Users**: Economic researchers, financial analysts, government agencies, business intelligence teams
 - **Technology Stack**: Modern Rust/React architecture vs. legacy systems
-- **Open Source**: Transparency and customization advantages
+- **Source Reference**: Code is available for reference under the [repository license](../LICENSE), whose use restrictions prohibit modification, distribution, and commercial use
 
-#### Competitive Positioning (Internal Assessment)
+#### Competitive Positioning
+
+Evaluate these positioning hypotheses against current product behavior, competitor evidence, and user research before using them in market claims.
+
 - **Technology Leadership**: Modern architecture vs. legacy systems
 - **User Experience**: Intuitive interface vs. complex legacy tools
 - **Data Integration**: Multi-source unified platform vs. scattered sources
 - **API Access**: Comprehensive GraphQL API vs. limited endpoints
-- **Customization**: Open-source flexibility vs. vendor lock-in
+- **Customization**: Compare integration and customization needs with the rights available under the repository license; obtain applicable licensing terms from business stakeholders before promising those rights
 
 #### Market Research Requirements
 - **External Analysis**: Access to business strategy documents for detailed competitive analysis
@@ -142,16 +147,20 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 
 ### Product Metrics & KPIs
 
-> **Note**: Business metrics, revenue data, and customer acquisition metrics are maintained in separate business repositories. The product manager should coordinate with business stakeholders for access to these metrics.
+Use the following framework to choose measures for a product question. Before reporting a result, establish its definition, source, measurement period, and limitations. Ask business stakeholders for business metrics and their authoritative sources.
 
-#### Available Technical Metrics
+#### Operational Evidence
+
+The [monitoring guidance](../docs/monitoring/README.md) describes Prometheus metrics for request performance, crawler activity, errors, and system health. Confirm which series are collected in the environment being assessed and whether dashboard queries match them before interpreting results. These operational signals do not by themselves establish feature adoption, user satisfaction, or accessibility compliance.
+
+#### Technical Measures to Define or Obtain
 - **System Performance**: API response times, database query performance, uptime statistics
 - **Data Quality**: Data freshness, source synchronization status, error rates
 - **User Experience**: Page load times, chart rendering performance, search response times
 - **Feature Usage**: GraphQL query patterns, most accessed data sources, popular transformations
 - **Technical Health**: Test coverage, deployment success rates, security scan results
 
-#### Product Performance Metrics (Internal)
+#### Product Performance Measures to Define or Obtain
 - **Data Freshness**: Time between data source update and platform availability
 - **Search Success Rate**: Percentage of successful searches
 - **Chart Load Time**: Performance of data visualization
@@ -159,24 +168,27 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - **Uptime**: System availability and reliability
 - **Error Rate**: Frequency of user-facing errors
 
-#### User Experience Metrics (Internal)
+#### User Experience Measures to Define or Obtain
 - **Feature Adoption**: Usage of specific features and capabilities
 - **User Feedback**: Qualitative feedback from technical users and developers
 - **Support Requests**: Technical support and feature request patterns
 - **Usability Test Results**: User experience testing outcomes
-- **Accessibility Compliance**: WCAG compliance scores
+- **Accessibility Assessment**: Findings from scoped WCAG assessments and usability testing with people with diverse needs
 
 #### Business Metrics Requirements
-- **External Access Needed**: User engagement, revenue, customer acquisition, market share
+- **Stakeholder Evidence**: User engagement, revenue, customer acquisition, market share
 - **Customer Research**: User interviews, satisfaction surveys, NPS scores
 - **Market Analysis**: Competitive positioning, pricing strategy, go-to-market metrics
 
 ### Feature Prioritization Framework
 
 #### RICE Scoring Model
+
+Use this simplified ordinal rubric to compare features within a defined user population and assessment period. Score each factor from 1 to 3.
+
 **Reach**: How many users will this feature impact?
 - **High (3)**: Affects 80%+ of users
-- **Medium (2)**: Affects 40-80% of users
+- **Medium (2)**: Affects at least 40% but less than 80% of users
 - **Low (1)**: Affects <40% of users
 
 **Impact**: How much will this feature impact users?
@@ -191,12 +203,15 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 
 **Effort**: How much work is required to build this feature?
 - **High (3)**: 3+ months of development
-- **Medium (2)**: 1-3 months of development
+- **Medium (2)**: At least 1 but less than 3 months of development
 - **Low (1)**: <1 month of development
 
 **RICE Score = (Reach × Impact × Confidence) / Effort**
 
 #### MoSCoW Prioritization
+
+The following feature lists illustrate possible classifications for a prioritization exercise. Set the release or decision scope first, then validate each classification against user needs and constraints. Record actual scope decisions and requirements in Linear.
+
 **Must Have**: Critical features without which the product cannot function
 - Core data access and visualization
 - User authentication and security
@@ -215,13 +230,16 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - Third-party integrations
 - Advanced notification systems
 
-**Won't Have**: Features that are not planned for current roadmap
+**Won't Have**: Features excluded from the scope of this prioritization exercise
 - Features with low user demand
 - Features that don't align with strategy
 - Features with high effort and low impact
 - Features that conflict with core product vision
 
 #### Kano Model Analysis
+
+Treat these classifications as hypotheses to test through user research. A feature may meet different needs for different user groups; these examples do not establish approved product scope.
+
 **Basic Needs**: Features users expect as standard
 - Data accuracy and reliability
 - Fast loading times
@@ -243,6 +261,9 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 ### User Research & Validation
 
 #### Research Methods
+
+Use these methods and cadences to structure the PM’s research work, adapting recruitment and measures to the question. Record research plans and resulting feature requirements in Linear.
+
 **User Interviews**: One-on-one interviews with target users
 - **Frequency**: Monthly interviews with 5-10 users
 - **Focus Areas**: Feature needs, pain points, usage patterns
@@ -265,7 +286,7 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - **Metrics**: Success rate, time to complete, error rate
 
 **Analytics Analysis**: Behavioral data from product usage
-- **Tools**: Google Analytics, Mixpanel, custom tracking
+- **Tool Evaluation**: Google Analytics, Mixpanel, and custom tracking are options to evaluate and select according to the research question, evidence availability, and applicable privacy requirements. Check collection proposals against the [user-facing privacy policy](../frontend/src/pages/PrivacyPolicy.tsx)
 - **Metrics**: User flows, feature usage, drop-off points
 - **Frequency**: Weekly analysis and reporting
 - **Segmentation**: Analysis by user type, geography, usage patterns
@@ -348,6 +369,8 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - **Retention**: User engagement and churn prevention
 
 ### Product Analytics & Measurement
+
+The methods and KPIs below are a catalogue for selecting an analysis approach. They do not establish that the corresponding events, datasets, experiments, or business measures are collected. Define the measures needed for the decision and verify their evidence sources before drawing conclusions; proposals for new collection or experiments belong in Linear.
 
 #### Analytics Implementation
 **Event Tracking**: User interaction and behavior tracking
@@ -471,5 +494,3 @@ A Product Manager (PM) is responsible for defining product strategy, prioritizin
 - **Team Development**: Cross-training and knowledge sharing
 - **Partnership Management**: Strong partner relationships and contracts
 - **Financial Planning**: Conservative financial planning and reserves
-
-This persona represents the comprehensive knowledge and expertise required to effectively manage the EconGraph product, incorporating strategic thinking, user research, market analysis, and cross-functional collaboration to deliver maximum value to users and business stakeholders.

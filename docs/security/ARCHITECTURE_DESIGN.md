@@ -1,487 +1,319 @@
-# GraphQL Security Architecture Design
+# GraphQL Security Architecture
 
-## Overview
+EconGraph distributes GraphQL request protection across Envoy Gateway, the backend HTTP
+route, the schema, and individual resolvers and services. These boundaries address
+different threats: the Gateway limits request frequency, the backend bounds POST body
+buffering and establishes identity, and the schema and resolvers control query
+shape and access to application data. No single layer substitutes for the others.
 
-This document provides a comprehensive overview of the GraphQL security architecture implemented for the econ-graph4 project. The security system is designed to provide defense-in-depth protection while maintaining API flexibility and performance.
+This document explains those mechanisms and their trade-offs for maintainers.
+See the [GraphQL API reference](../api/GRAPHQL_API.md) for the caller contract and
+[admin audit guidance](ADMIN_AUDIT.md) for audit records and operational checks.
 
-## Design Philosophy
+## Request and trust boundaries
 
-### Core Principles
-
-1. **Defense in Depth**: Multiple layers of security working together
-2. **Fail Secure**: Security controls default to the most restrictive setting
-3. **Performance First**: Security measures should not significantly impact API performance
-4. **Configurability**: Security policies can be adjusted without code changes
-5. **Observability**: Complete audit trail and monitoring of security events
-6. **Flexibility**: API remains flexible while preventing abuse
-
-### Security Model
-
-The security architecture follows a **layered defense model** with the following components:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Client Request                           │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                 Rate Limiting                              │
-│              (Per-IP Request Control)                      │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Input Validation & Sanitization               │
-│            (XSS, SQL Injection Prevention)                 │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                Query Analysis                              │
-│         (Complexity, Depth, Size Analysis)                 │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Authorization & Access Control                │
-│              (Role-Based Permissions)                      │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Introspection Protection                      │
-│            (Environment-Aware Schema Access)               │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                Query Filtering                             │
-│            (Whitelist/Blacklist Support)                   │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                Timeout Management                          │
-│            (Long-Running Query Prevention)                 │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              Security Monitoring & Alerting                │
-│            (Real-time Threat Detection)                    │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                GraphQL Execution                           │
-└─────────────────────────────────────────────────────────────┘
+```text
+Client
+  |
+  +---------------------------------------------+
+  |                                             |
+  v                                             v
+Envoy Gateway                                   Direct backend / admin proxy
+  /graphql: retains bearer credentials           bypasses GraphQL route limits
+  /data/graphql: strips credentials,
+    rewrites to /graphql
+  per-client rate limits; request timeout
+  |                                             |
+  +------+--------------------------------------+
+         |
+         v
+Backend /graphql HTTP route
+  GET query parsing / POST streaming body cap and request parsing
+         |
+         v
+Bearer authentication + active app-plane account lookup
+  -> refusal, anonymous context, or signed-in Principal
+         |
+         v
+Schema execution boundary
+  type validation + depth/complexity limits
+         |
+         v
+Resolvers and services
+  required capabilities + resource visibility/ownership + operation validation
+         |
+         v
+App/data resources through typed pools and query construction
+         |
+         v
+Response boundary
+  audit completion on normal responses + internal-error sanitization
 ```
 
-## Component Architecture
-
-### 1. Rate Limiting System
-
-**Design**: Sliding window rate limiting with multiple time periods
-
-**Architecture**:
-- **Per-IP Tracking**: Each client IP has its own rate limit bucket
-- **Multiple Windows**: Minute, hour, and day-based limits
-- **Sliding Window**: More accurate than fixed windows
-- **Automatic Cleanup**: Expired entries are automatically removed
-
-**Tradeoffs**:
-- **Memory Usage**: O(n) where n is the number of unique IPs
-- **Accuracy**: Sliding window provides more accurate rate limiting
-- **Performance**: Minimal overhead with efficient data structures
-
-**Configuration**:
-```rust
-pub struct RateLimitConfig {
-    pub requests_per_minute: u32,  // Default: 60
-    pub requests_per_hour: u32,    // Default: 1000
-    pub requests_per_day: u32,     // Default: 10000
-    pub enabled: bool,             // Default: true
-}
-```
-
-### 2. Query Complexity Analysis
-
-**Design**: Recursive complexity calculation with configurable field weights
-
-**Architecture**:
-- **Field-Based Weights**: Different fields have different complexity costs
-- **List Multipliers**: List fields increase complexity exponentially
-- **Depth Consideration**: Nested queries increase complexity
-- **Configurable Limits**: Maximum complexity can be adjusted
-
-**Tradeoffs**:
-- **Accuracy**: Field-based weights provide more accurate complexity estimation
-- **Performance**: O(n) where n is the number of fields in the query
-- **Flexibility**: Easy to adjust complexity for different field types
-
-**Configuration**:
-```rust
-pub struct ComplexityConfig {
-    pub max_complexity: u32,           // Default: 1000
-    pub list_complexity_multiplier: f64, // Default: 2.0
-    pub field_weights: HashMap<String, u32>, // Custom field weights
-}
-```
-
-### 3. Query Depth Limiting
-
-**Design**: Recursive depth calculation to prevent deeply nested queries
-
-**Architecture**:
-- **Operation-Based**: Calculates depth for each operation
-- **Selection Tracking**: Tracks nested selections
-- **Fragment Support**: Handles inline fragments and fragment spreads
-- **Configurable Limits**: Maximum depth can be adjusted
-
-**Tradeoffs**:
-- **Protection**: Prevents stack overflow attacks
-- **Performance**: O(d) where d is the maximum depth
-- **Flexibility**: Different depth limits for different operation types
-
-**Configuration**:
-```rust
-pub struct DepthLimitConfig {
-    pub max_depth: u32,              // Default: 10
-    pub count_inline_fragments: bool, // Default: true
-    pub count_fragment_spreads: bool, // Default: false
-}
-```
-
-### 4. Input Validation & Sanitization
-
-**Design**: Comprehensive input validation with multiple sanitization layers
-
-**Architecture**:
-- **String Validation**: Length, character, and pattern validation
-- **Type Validation**: Email, UUID, and custom type validation
-- **Sanitization**: HTML, SQL injection, and XSS prevention
-- **Custom Rules**: Extensible validation rules
-
-**Tradeoffs**:
-- **Security**: Multiple layers prevent various injection attacks
-- **Performance**: Validation adds minimal overhead
-- **Flexibility**: Custom rules can be added for specific use cases
-
-**Configuration**:
-```rust
-pub struct InputValidationConfig {
-    pub max_string_length: usize,        // Default: 1000
-    pub min_string_length: usize,        // Default: 1
-    pub blocked_characters: Option<String>, // Default: "[<>\"'&]"
-    pub enable_html_sanitization: bool,  // Default: true
-    pub enable_sql_injection_prevention: bool, // Default: true
-    pub enable_xss_prevention: bool,     // Default: true
-    pub custom_rules: HashMap<String, InputValidationRule>,
-}
-```
-
-### 5. Enhanced Authorization System
-
-**Design**: Role-based access control with fine-grained permissions
-
-**Architecture**:
-- **Role Hierarchy**: 5 distinct user roles with different permission levels
-- **Permission System**: 20+ specific permissions for granular control
-- **Context-Aware**: Permissions are checked in the GraphQL context
-- **Audit Trail**: All authorization decisions are logged
-
-**Tradeoffs**:
-- **Granularity**: Fine-grained permissions provide precise access control
-- **Complexity**: More complex than simple role-based systems
-- **Performance**: Permission checks add minimal overhead
-- **Maintainability**: Clear separation of concerns
-
-**Role Hierarchy**:
-```rust
-pub enum UserRole {
-    SuperAdmin,  // All permissions
-    Admin,       // Most permissions, no system management
-    Analyst,     // Data access and analysis permissions
-    Viewer,      // Read-only permissions
-    Guest,       // Limited read permissions
-}
-```
-
-**Permission Categories**:
-- **Data Access**: Read, Write, Delete economic data
-- **User Management**: Create, Update, Delete users
-- **System Administration**: Configuration, logs, security
-- **Chart Management**: Create, Update, Delete, Share charts
-- **API Access**: GraphQL, REST, MCP access
-- **Monitoring**: Metrics, health, security events
-
-### 6. Introspection Protection
-
-**Design**: Environment-aware introspection control
-
-**Architecture**:
-- **Environment Detection**: Automatically detects development vs production
-- **Selective Access**: Allows specific introspection fields in development
-- **Blocked Fields**: Prevents access to sensitive schema information
-- **Configurable**: Can be overridden via configuration
-
-**Tradeoffs**:
-- **Security**: Prevents schema information disclosure in production
-- **Development**: Maintains development workflow in dev environments
-- **Flexibility**: Can be configured per environment
-
-**Configuration**:
-```rust
-pub struct IntrospectionConfig {
-    pub protect_introspection: bool,     // Default: true
-    pub allowed_fields: Vec<String>,     // Fields allowed in dev
-    pub blocked_fields: Vec<String>,     // Fields blocked in prod
-    pub environment_aware: bool,         // Default: true
-}
-```
-
-### 7. Query Filtering System
-
-**Design**: Whitelist/blacklist system with regex support
-
-**Architecture**:
-- **Pattern Matching**: Supports exact matches and regex patterns
-- **Case Sensitivity**: Configurable case sensitivity
-- **Partial Matching**: Supports partial query matching
-- **Multiple Lists**: Separate whitelist and blacklist
-
-**Tradeoffs**:
-- **Flexibility**: Supports complex filtering patterns
-- **Performance**: Pattern matching adds some overhead
-- **Complexity**: More complex than simple string matching
-
-**Configuration**:
-```rust
-pub struct QueryFilterConfig {
-    pub enable_whitelist: bool,          // Default: false
-    pub enable_blacklist: bool,          // Default: true
-    pub whitelist_patterns: Vec<String>, // Allowed patterns
-    pub blacklist_patterns: Vec<String>, // Blocked patterns
-    pub case_sensitive: bool,            // Default: false
-    pub use_regex: bool,                 // Default: false
-    pub allow_partial_matches: bool,     // Default: true
-}
-```
-
-### 8. Timeout Management
-
-**Design**: Configurable timeout system with escalation
-
-**Architecture**:
-- **Per-Query Timeouts**: Individual timeout for each query
-- **Escalation**: Timeout can be increased for complex queries
-- **Resource Management**: Prevents resource exhaustion
-- **Monitoring**: Tracks timeout events
-
-**Tradeoffs**:
-- **Resource Protection**: Prevents long-running queries from consuming resources
-- **User Experience**: May interrupt legitimate long-running queries
-- **Complexity**: Requires careful timeout configuration
-
-**Configuration**:
-```rust
-pub struct TimeoutConfig {
-    pub default_timeout: u64,        // Default: 30 seconds
-    pub max_timeout: u64,            // Default: 300 seconds
-    pub min_timeout: u64,            // Default: 5 seconds
-    pub enabled: bool,               // Default: true
-    pub escalation_factor: f64,      // Default: 1.5
-}
-```
-
-### 9. Security Monitoring & Alerting
-
-**Design**: Real-time security event monitoring with multiple notification channels
-
-**Architecture**:
-- **Event Tracking**: Comprehensive security event logging
-- **Pattern Analysis**: Detects suspicious patterns
-- **Alerting**: Multiple notification channels (email, webhook, etc.)
-- **Metrics**: Security metrics and statistics
-
-**Tradeoffs**:
-- **Visibility**: Provides complete security visibility
-- **Performance**: Monitoring adds some overhead
-- **Storage**: Event logs require storage space
-- **Complexity**: Requires alerting infrastructure
-
-**Event Types**:
-- Rate limit violations
-- Query complexity violations
-- Query depth violations
-- Input validation failures
-- Authorization failures
-- Timeout events
-- Suspicious query patterns
-
-## Performance Considerations
-
-### Optimization Strategies
-
-1. **Lazy Evaluation**: Security checks are performed only when necessary
-2. **Caching**: Frequently accessed data is cached
-3. **Async Processing**: Non-blocking security operations
-4. **Resource Pooling**: Efficient resource management
-5. **Batch Processing**: Multiple operations are batched when possible
-
-### Performance Impact
-
-- **Rate Limiting**: ~0.1ms overhead per request
-- **Complexity Analysis**: ~0.5ms overhead per query
-- **Depth Limiting**: ~0.2ms overhead per query
-- **Input Validation**: ~0.3ms overhead per request
-- **Authorization**: ~0.1ms overhead per request
-- **Total Overhead**: ~1.2ms per request (acceptable for most use cases)
-
-### Scalability
-
-- **Horizontal Scaling**: Security components are stateless
-- **Load Distribution**: Rate limiting is per-IP, not global
-- **Resource Usage**: Memory usage scales with number of unique clients
-- **Database Impact**: Minimal database overhead
-
-## Security Considerations
-
-### Threat Model
-
-The security system protects against:
-
-1. **Denial of Service (DoS)**
-   - Rate limiting prevents request flooding
-   - Complexity analysis prevents resource exhaustion
-   - Timeout management prevents long-running queries
-
-2. **Injection Attacks**
-   - Input validation prevents SQL injection
-   - Sanitization prevents XSS attacks
-   - Type validation prevents data corruption
-
-3. **Authorization Bypass**
-   - Role-based access control prevents unauthorized access
-   - Permission checks prevent privilege escalation
-   - Audit trail provides accountability
-
-4. **Information Disclosure**
-   - Introspection protection prevents schema disclosure
-   - Query filtering prevents sensitive data access
-   - Input validation prevents data leakage
-
-5. **Resource Exhaustion**
-   - Depth limiting prevents stack overflow
-   - Complexity analysis prevents CPU exhaustion
-   - Timeout management prevents memory exhaustion
-
-### Security Best Practices
-
-1. **Default Secure**: All security features are enabled by default
-2. **Fail Secure**: Security failures default to blocking requests
-3. **Audit Everything**: All security events are logged
-4. **Regular Updates**: Security policies are regularly reviewed
-5. **Testing**: Security features are thoroughly tested
-
-## Configuration Management
-
-### Environment-Specific Configuration
+The diagram follows the [backend route](../../backend/crates/econ-graph-backend/src/main.rs)
+and [schema builder](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs).
+Audit writes also begin during execution; cancellation can leave them running
+after the request ends. Resolver checks run where the operation needs them,
+rather than in a universal input-sanitization pass before execution.
+
+## Gateway: request frequency and proxy trust
+
+The [GraphQL HTTPRoutes](../../k8s/manifests/gateway/routes/httproutes.yaml)
+forward `/graphql` to the backend. The separate `/data/graphql` route rewrites
+that prefix to `/graphql` and removes `Authorization` and `Cookie`, so data
+requests reach the backend anonymously regardless of browser credentials.
+The [BackendTrafficPolicies](../../k8s/manifests/gateway/routes/ratelimit-policies.yaml)
+give each route independent per-client-address token buckets, refilled at
+20 requests per second. Exhausting a bucket produces HTTP 429. These inbound
+limits are separate from the crawler's outbound source-fetching limits.
+
+The ordinary bucket holds 20 tokens. A burst of 100 requires the matching
+`EnvoyPatchPolicy` to raise its capacity while retaining the 20-per-second refill:
+[the HTTP patch](../../k8s/manifests/gateway/ratelimit-burst.yaml) and
+[the HTTPS patch](../../k8s/manifests/gateway/gateway-https.yaml) target their
+respective listeners. The larger burst applies only when the patch is effective
+in the generated Envoy configuration; the base rate-limit policy alone allows
+bursts of 20. Counting is local to each proxy replica. The
+[proxy manifest](../../k8s/manifests/gateway/envoy-proxy.yaml) sets one replica;
+adding replicas gives each its own buckets rather than sharing a global quota.
+
+The [route application script](../../scripts/deploy/apply-gateway-routes.sh)
+applies the localhost routes and policies. For a public host, its
+[renderer](../../scripts/deploy/render-public-host.py) also produces HTTPS route
+copies and extends the rate-limit policy targets to cover them. The backend
+NodePort and the [admin frontend proxy](../../k8s/manifests/admin-frontend-nginx-configmap.yaml)
+at `/admin/graphql` bypass the GraphQL Gateway route limits. Backend body,
+identity and schema checks still apply through those paths. See the
+[Kubernetes deployment guide](../../k8s/README.md) for Gateway setup and routing.
+
+Per-client fairness depends on the address the proxy selects. The
+[`ClientTrafficPolicy`](../../k8s/manifests/gateway/client-traffic-policy.yaml)
+uses the TCP peer unless that peer belongs to a trusted pod CIDR. For a pod peer,
+it reads `X-Forwarded-For` from right to left and selects the first non-pod
+address. The [Gateway installer](../../scripts/deploy/install-gateway.sh)
+substitutes the trusted pod ranges into the policy. This accommodates the
+Cloudflare Tunnel connector, but any pod can claim a client address through
+this trust boundary. In-cluster client addresses therefore are not reliable
+evidence of origin.
+
+Every route replaces `X-Forwarded-For` with the address the Gateway selected.
+The client policy removes supplied `X-Forwarded-Host`, `X-Forwarded-Port`,
+`X-Forwarded-Proto`, `Forwarded` and `X-Real-IP` before Envoy adds its own headers;
+Envoy derives `X-Forwarded-Proto` from the listener. These rules prevent an
+external caller from passing an arbitrary forwarding chain to services.
+Source NAT can still collapse clients into one bucket: clients behind a shared
+NAT share a budget even with correct attribution. Frequency limits trade
+protection from repeated expensive requests against legitimate shared-network
+traffic, and their scope is each route on each proxy replica.
+
+Both GraphQL route rules set a 30-second request timeout. This bounds the proxy's
+wait for a response, not total resolver or database execution time. A client can
+lose a legitimate long-running response while work continues; the setting does
+not establish backend cancellation or an escalating per-query timeout policy.
+
+The backend independently determines addresses for audit records. Its
+`client_ip` function ignores `X-Forwarded-For` unless the immediate peer is in
+`TRUSTED_PROXIES`. It then walks the chain from right to left through trusted
+proxies, stopping at the first untrusted address or malformed entry. The default
+empty trust list uses the peer address. This audit-address boundary must match
+the actual proxy chain; trusting a peer also trusts the address claims that peer
+can forward. Gateway client detection and backend audit attribution are separate
+configurations.
+
+## HTTP parsing and browser access
+
+The backend's `graphql_request` filter accepts a query in a GET URL or a POST
+body. POST uses a streaming cap of 1 MiB (`GRAPHQL_BODY_LIMIT`) before parsing:
+chunks that would exceed the cap are refused instead of extending the buffer.
+An oversized body receives HTTP 413 with a GraphQL-shaped error. The POST parser
+converts the parsed batch representation into a single request, rejecting batch
+requests. This cap bounds POST body buffering; it is not a row limit or a GET URL
+size limit.
+
+The backend validates `CORS_ALLOWED_ORIGINS` at startup and applies its CORS
+filter to routes. CORS governs browser cross-origin access; non-browser callers
+still need the same authentication and authorization checks. The Gateway routes
+leave CORS enforcement to the backend so that this policy has one owner.
+
+## Authentication establishes identity; resolvers authorize actions
+
+[`OidcVerifier`](../../backend/crates/econ-graph-auth/src/oidc.rs) checks RS256
+access-token signatures using the identity provider's JWKS, together with issuer,
+audience, expiry and not-before claims. Keys are fetched lazily and cached.
+An unknown signing-key ID triggers a rate-limited refresh; aged keys also trigger
+refresh, with bounded stale-key use during provider outages. This reduces
+provider calls while allowing key rotation, at the cost of a period during
+which cached keys remain usable.
+
+[`authenticate`](../../backend/crates/econ-graph-auth/src/bearer.rs) loads or
+creates the token subject's user row in the app plane and checks `is_active`.
+The result is a `Caller` containing that row and a `Principal` with the user ID
+and recognized fine-grained roles from the top-level token `roles` claim.
+Unknown role names grant no capability. The backend does not authorize using a
+`users.role` hierarchy: the identity provider composes broader user or staff
+roles from the capabilities in the [role catalog](../../backend/crates/econ-graph-auth/src/roles.rs).
+
+The HTTP route deliberately distinguishes authentication failures:
+
+| Condition | GraphQL route behavior |
+| --- | --- |
+| No bearer token, or sign-in disabled by an absent verifier | Run anonymously; trust no token |
+| Verification unavailable because provider keys cannot be obtained | Run anonymously, granting no token roles |
+| Invalid or expired token | Refuse with HTTP 401 and a bearer challenge |
+| Suspended account | Refuse with HTTP 403 and record a suspended-account event |
+| Account lookup or creation fails | Refuse with HTTP 500 |
+
+Anonymous fallback preserves public browsing through a provider outage. It does
+not permit protected actions: [`GraphQLContext`](../../backend/crates/econ-graph-graphql/src/graphql/context.rs)
+requires a principal before checking a role. A signed-in caller lacking the
+required role receives an insufficient-permissions error.
+
+Roles and resource checks solve different access problems. For example,
+[`create_annotation`](../../backend/crates/econ-graph-graphql/src/graphql/mutation.rs)
+requires `annotation:create` and derives the author ID from the principal,
+rather than trusting a submitted user ID. Commenting requires
+`annotation:comment`, while the collaboration service also checks whether the
+caller can see the target annotation. Public annotations are visible to everyone;
+private ones are visible only to their author. Chart sharing requires both
+`chart:share` and an existing chart collaborator grant that permits
+administration. A capability alone does not establish ownership or visibility.
+
+## Schema limits and introspection
+
+The executable schema applies these compiled settings in
+[`create_schema_with_data_plane`](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs):
 
 ```rust
-// Development
-let dev_config = SecurityConfig {
-    max_complexity: 2000,        // Higher limits for development
-    protect_introspection: false, // Allow introspection in dev
-    rate_limit: RateLimitConfig {
-        requests_per_minute: 120, // Higher rate limits
-        ..Default::default()
-    },
-    ..Default::default()
-};
-
-// Production
-let prod_config = SecurityConfig {
-    max_complexity: 1000,        // Stricter limits
-    protect_introspection: true, // Block introspection
-    rate_limit: RateLimitConfig {
-        requests_per_minute: 60, // Standard rate limits
-        ..Default::default()
-    },
-    ..Default::default()
-};
+.limit_depth(MAX_QUERY_DEPTH)           // 15
+.limit_complexity(MAX_QUERY_COMPLEXITY) // 1000
 ```
 
-### Dynamic Configuration
+Complexity counts one per selected field, with `__typename` excluded by
+async-graphql; it does not assign custom field weights or multiply cost by the
+size of returned lists. Depth limits nested selection shape. The depth allowance
+leaves room for the standard introspection query, which nests 13 levels, while
+refusing more deeply nested queries before
+resolver execution. The tests exercise the complexity boundary with aliases,
+so repeating selections still consumes the budget.
 
-- **Runtime Updates**: Security configuration can be updated without restart
-- **Hot Reloading**: Configuration changes are applied immediately
-- **Validation**: Configuration changes are validated before application
-- **Rollback**: Failed configuration changes can be rolled back
+These limits constrain query shape, not the number of rows a field can return
+or the cost of each database operation. A shallow series-data request can still
+return thousands of points. Gateway frequency limits and operation-specific
+pagination address different parts of that resource cost. Increasing the shape
+budget can admit legitimate larger selections and also more work per request;
+it requires a code change and rebuild.
 
-## Monitoring and Observability
+Introspection is available, including the standard tooling query tested in the
+schema module. Schema visibility is therefore not an authorization barrier.
+`/playground` is a separate browser interface, disabled unless
+`ENABLE_GRAPHQL_PLAYGROUND` is `true` or `1`; hiding that interface does not
+remove introspection from `/graphql`.
 
-### Metrics
+## Validation, SQL construction and error disclosure
 
-- **Request Metrics**: Total requests, blocked requests, average response time
-- **Security Metrics**: Rate limit violations, complexity violations, authorization failures
-- **Performance Metrics**: Security overhead, cache hit rates, resource usage
-- **Error Metrics**: Security errors, configuration errors, system errors
+GraphQL validates operation types and argument shapes. Resolvers and services
+then validate domain rules. The
+[collaboration service](../../backend/crates/econ-graph-services/src/services/collaboration_service.rs),
+for example, rejects blank titles, bounds annotation titles to 200 characters,
+notes to 5,000 and comments to 2,000, and validates annotation dates and numeric
+values before storage. The annotation resolver separately parses the series ID
+as a UUID. These checks reject malformed application data; they do not replace
+permissions or safely construct SQL by themselves.
 
-### Logging
+The annotation insert passes a `NewChartAnnotation` value to Diesel's
+`insert_into(...).values(...)`, and its idempotent lookup uses typed predicates
+such as `.filter(chart_annotations::user_id.eq(user_id))`. User values are query
+parameters through that construction, rather than strings interpolated into
+SQL syntax. This is the relevant injection boundary for these operations.
+Character filtering is not the mechanism that makes those queries safe, and
+these examples do not establish the construction of every query in the system.
 
-- **Structured Logging**: All logs are structured for easy parsing
-- **Security Events**: All security events are logged with context
-- **Performance Logs**: Performance-related events are logged
-- **Error Logs**: All errors are logged with stack traces
+[`SanitizeErrors`](../../backend/crates/econ-graph-graphql/src/graphql/errors.rs)
+is a response-disclosure control. It keeps known client-facing errors and hides
+other typed server errors behind `Internal server error` with
+`extensions.code = INTERNAL_SERVER_ERROR`, logging the detail on the server.
+For hidden errors it also replaces extensions, which may contain internal
+information. A resolver must pass the typed error through, using `?` or
+`Error::new_with_source`; formatting a driver error into a hand-written message
+marks it as client-facing and defeats this distinction.
 
-### Alerting
+Error sanitization does not sanitize stored HTML or make content safe in every
+browser rendering context. Maintaining these separate responsibilities avoids
+mistaking a friendly validation error or hidden database message for a general
+SQL-injection or XSS guarantee.
 
-- **Real-time Alerts**: Security violations trigger immediate alerts
-- **Threshold Alerts**: Metrics exceeding thresholds trigger alerts
-- **Trend Alerts**: Unusual patterns trigger alerts
-- **Escalation**: Alerts can be escalated based on severity
+## Audit and observability boundaries
 
-## Testing Strategy
+The [`audit` module](../../backend/crates/econ-graph-graphql/src/graphql/audit.rs)
+records admin mutation attempts by callers holding the mutation's role, with
+an outcome describing success, refusal, validation failure or other termination.
+Audit rows include actor, action, resource, client information and request ID;
+update details name changed fields without storing their values. A signed-in
+caller denied a required role produces a `permission_denied` security event,
+deduplicated per caller and permission within a request. This prevents aliases
+of one denied field from producing hundreds of identical records. Anonymous
+requests do not produce these signed-in role-denial events.
 
-### Unit Tests
+Writes are best-effort: insertion failure is logged and counted without changing
+the request result. Normal responses wait for pending denial writes. Cancellation
+leaves detached writes running; an interrupted admin attempt is recorded as
+`cancelled` because cancellation cannot establish whether its statement committed.
+Process crashes or runtime shutdown can still interrupt writes. This preserves
+request availability when audit storage fails, with a corresponding limit on
+audit durability; the mechanism is not a durable queue or an audit of every
+request and authorization decision.
 
-- **Component Testing**: Each security component is tested in isolation
-- **Mock Testing**: External dependencies are mocked
-- **Edge Cases**: Edge cases and error conditions are tested
-- **Performance Testing**: Performance characteristics are validated
+The backend's [metrics exporter](../../backend/crates/econ-graph-backend/src/metrics.rs)
+exposes `audit_write_failures_total` with a `table` label for `audit_logs` and
+`security_events`, synchronized from the model's failure counters at scrape time.
+Registered HTTP and GraphQL metric families do not by themselves prove coverage
+of the active request route. The active `/graphql` closure executes the schema
+directly, without calling the separate GraphQL metric-recording helper.
+Audit records and exported counters also do not themselves send notifications.
+See [monitoring guidance](../monitoring/README.md) for metric consumers and alert
+configuration, and [admin audit guidance](ADMIN_AUDIT.md) for event coverage and
+failure handling.
 
-### Integration Tests
+## Configuration, cost and verification
 
-- **End-to-End Testing**: Complete security flow is tested
-- **Configuration Testing**: Different configurations are tested
-- **Load Testing**: System behavior under load is tested
-- **Security Testing**: Security vulnerabilities are tested
+The security controls have distinct configuration lifecycles. Gateway routes and
+traffic policies take effect through applied controller configuration. Body, depth
+and complexity limits are compiled constants. The backend loads CORS and playground
+settings at startup; trusted proxy ranges are initialized once from the
+environment. There is no shared runtime `SecurityConfig` API that validates,
+hot-reloads and rolls back all of these policies together. Updating one boundary
+must account for the others, particularly Gateway bypasses and proxy identity.
 
-### Security Testing
+Request costs include parsing and selection validation, token verification and
+key-cache refresh, app-plane account lookup, resolver work and audit writes.
+Adding backend replicas does not remove the shared database cost or make audit
+writes durable. Capacity decisions need measurements for the workload and
+routing arrangement being deployed; this architecture supplies no fixed latency
+or memory allowance for a separate security subsystem. Use the
+[Kubernetes deployment guide](../../k8s/README.md) for deployment settings and
+[host storage guidance](../deployment/HOST_STORAGE.md) for backup and recovery
+procedures.
 
-- **Penetration Testing**: External security testing
-- **Vulnerability Scanning**: Automated vulnerability detection
-- **Code Review**: Security-focused code review
-- **Threat Modeling**: Regular threat model updates
+Existing test sources protect specific boundaries:
 
-## Deployment Considerations
+- [Backend route tests](../../backend/crates/econ-graph-backend/src/main.rs) exercise
+  body-size refusal and authentication response behavior.
+- [Schema tests](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs)
+  exercise depth and complexity rejection and standard introspection acceptance.
+- [Context tests](../../backend/crates/econ-graph-graphql/src/graphql/context.rs)
+  check anonymous callers, token-derived roles and empty role sets.
+- [Authorization tests](../../backend/crates/econ-graph-graphql/src/graphql/authorization_tests.rs)
+  and [annotation visibility tests](../../backend/crates/econ-graph-graphql/src/graphql/annotation_visibility_tests.rs)
+  cover capability and resource-access decisions.
+- [Error tests](../../backend/crates/econ-graph-graphql/src/graphql/errors.rs) and
+  [audit tests](../../backend/crates/econ-graph-graphql/src/graphql/audit.rs) cover
+  response disclosure, failed-mutation audit outcomes and cancellation behavior.
 
-### Infrastructure Requirements
-
-- **Memory**: Minimum 512MB for security components
-- **CPU**: Minimal CPU overhead, scales with request volume
-- **Storage**: Log storage requirements depend on retention policy
-- **Network**: No additional network requirements
-
-### Deployment Strategy
-
-- **Blue-Green Deployment**: Zero-downtime deployments
-- **Canary Releases**: Gradual rollout of security changes
-- **Rollback Plan**: Quick rollback capability
-- **Monitoring**: Comprehensive deployment monitoring
-
-### Maintenance
-
-- **Regular Updates**: Security policies are regularly updated
-- **Performance Tuning**: Performance is regularly monitored and tuned
-- **Capacity Planning**: Resource usage is monitored and planned
-- **Disaster Recovery**: Backup and recovery procedures are in place
-
-## Conclusion
-
-The GraphQL security architecture provides comprehensive protection while maintaining API flexibility and performance. The defense-in-depth approach ensures that multiple security layers work together to protect against various threats. The system is designed to be configurable, observable, and maintainable, making it suitable for production use in various environments.
-
-The architecture balances security, performance, and usability, providing a robust foundation for secure GraphQL API operations. Regular updates and improvements ensure that the security system remains effective against evolving threats.
+These are test contracts, not evidence of a live deployment's configuration or a
+penetration-test result. The [security workflow](../../.github/workflows/security.yml)
+runs daily or by manual dispatch. It collects Rust and npm dependency audits,
+Trivy filesystem and container-image scans, JavaScript CodeQL analysis, and
+license reports. Its Rust and npm audit steps allow failures, so their artifacts
+require inspection even when the workflow passes. These checks complement the
+request-boundary tests; they do not establish live routing behavior, application
+penetration-test results or successful delivery of security alerts.
