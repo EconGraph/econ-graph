@@ -307,6 +307,11 @@ jobs:
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
 
+    # deploy.sh runs test-monitoring.sh --lint-only; it must reach no cluster
+    # and no network (kubectl, kind, docker, curl and the rest are stubs here).
+    - name: Check that the monitoring lint contacts nothing
+      run: scripts/test-monitoring-lint-only.sh
+
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
     - name: Check the kind installer
