@@ -182,7 +182,8 @@ case "$name" in
         # A deploy that takes a while: long enough to be interrupted.
         if [ -n "${STUB_SLEEP:-}" ]; then
             # It takes a moment to stop: the run must wait for it.
-            trap 'sleep 4; echo "stub deploy stopped" >>"$TEST_LOGS/steps.log"; exit 143' TERM
+            # (on SIGTERM from the run, or SIGINT from the terminal where it is not ignored).
+            trap 'trap "" INT TERM; sleep 4; echo "stub deploy stopped" >>"$TEST_LOGS/steps.log"; exit 143' INT TERM
             sleep "$STUB_SLEEP" &
             wait $!
             echo "stub deploy finished" >>"$TEST_LOGS/steps.log"
