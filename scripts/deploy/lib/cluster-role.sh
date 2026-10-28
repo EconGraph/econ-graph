@@ -49,23 +49,39 @@ kc() {
     fi
 }
 
-# For a script run by hand (create-secrets.sh): when
-# none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT is set, use the kind
-# cluster's own kubectl and kubeconfig if copies are kept in
-# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph).
-# Plain kubectl may be another cluster's: the microk8s snap wrapper ignores
-# ~/.kube/config. Says what it chose, that an exported KUBECONFIG kept it from
-# looking, or which of the two files is missing. An explicit KUBECTL or
-# KUBECONFIG, or a context pinned by the calling script (deploy.sh), always wins.
+# For a script run by hand (create-secrets.sh, the gateway scripts): choose the
+# kubectl, exported as KUBECTL, and say which. Never plain `kubectl` from PATH:
+# on the production host that is the MicroK8s snap wrapper, another cluster,
+# and it ignores KUBECONFIG. The kind cluster's own copies live in
+# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph),
+# kept by the kind-env.sh scripts (ensure_kind_kubectl).
+#
+#   - KUBECTL set, or a context pinned by the calling script (deploy.sh, which
+#     exports its KUBECTL with it): kept as it is.
+#   - KUBECONFIG set: the kind kubectl binary with that KUBECONFIG; fails when
+#     there is no kind kubectl (set KUBECTL as well).
+#   - neither: the kind kubectl and its kubeconfig; fails, naming the missing
+#     file, when either is missing.
+#
+# A failure prints how to go on and returns 1, having changed nothing.
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
+    local fix="reach the kind cluster once with a script that keeps its kubectl there (any kind-env.sh script, e.g. scripts/deploy/precheck-db-migration.sh --dry-run, or scripts/deploy/recreate-kind-cluster.sh --if-missing to create it), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
     if [ -n "${KUBECTL:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
         return 0
     fi
     if [ -n "${KUBECONFIG:-}" ]; then
-        echo "KUBECONFIG is set (${KUBECONFIG}): using kubectl with it, not the kind cluster's" \
-            "kubectl in ${dir} (unset KUBECONFIG to use that one)" >&2
+        if [ ! -x "$bin" ]; then
+            echo "error: KUBECONFIG is set (${KUBECONFIG}) but KUBECTL is not, and there is no kind" \
+                "kubectl at ${bin}; plain kubectl may ignore KUBECONFIG (the MicroK8s wrapper does)." \
+                "Set KUBECTL too, or ${fix}" >&2
+            return 1
+        fi
+        KUBECTL="$bin"
+        export KUBECTL KUBECONFIG
+        echo "Using the kind cluster's kubectl ${KUBECTL} with KUBECONFIG=${KUBECONFIG}" \
+            "(from the environment; set KUBECTL to choose another kubectl)" >&2
         return 0
     fi
     if [ -x "$bin" ] && [ -s "$config" ]; then
@@ -74,11 +90,17 @@ cluster_role_default_kubectl() {
         export KUBECTL KUBECONFIG
         echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
             "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
-    elif [ -x "$bin" ]; then
-        echo "warning: found ${bin} but not ${config}: using plain kubectl" >&2
-    elif [ -s "$config" ]; then
-        echo "warning: found ${config} but not ${bin}: using plain kubectl" >&2
+        return 0
     fi
+    local missing="${bin} and ${config}"
+    if [ -x "$bin" ]; then
+        missing="$config"
+    elif [ -s "$config" ]; then
+        missing="$bin"
+    fi
+    echo "error: no KUBECTL is set and the kind cluster's kubectl is not kept here (no ${missing});" \
+        "plain kubectl may be another cluster's. ${fix^}" >&2
+    return 1
 }
 
 # Pin CLUSTER_ROLE_CONTEXT to the current context, unless it is set already
@@ -163,8 +185,7 @@ cluster_role_show_identity() {
 # the identity can't be read.
 cluster_role_operator_context() {
     unset CLUSTER_ROLE_CONTEXT
-    cluster_role_default_kubectl
-    KUBECTL="${KUBECTL:-kubectl}"
+    cluster_role_default_kubectl || return 1
     export KUBECTL
     if ! command -v "${KUBECTL}" >/dev/null 2>&1; then
         echo "${KUBECTL} not found" >&2

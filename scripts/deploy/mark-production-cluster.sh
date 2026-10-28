@@ -29,9 +29,10 @@
 # Which cluster: without KUBECTL or KUBECONFIG, the kind cluster econ-graph,
 # through its own kubectl and kubeconfig (scripts/deploy/lib/kind-env.sh) on
 # context kind-econ-graph; on this host plain kubectl is the microk8s snap
-# wrapper, another cluster. With KUBECTL=/path/to/kubectl, or an exported
-# KUBECONFIG (other than the kind one, which it says), that kubectl's current
-# context. Every run shows the kubectl, KUBECONFIG, context, API server, nodes
+# wrapper, another cluster. With KUBECTL=/path/to/kubectl, that kubectl's
+# current context; with only an exported KUBECONFIG (other than the kind one),
+# the kind cluster's kubectl binary with it, on its current context (it says so,
+# and stops when there is no kind kubectl: set KUBECTL then). Every run shows the kubectl, KUBECONFIG, context, API server, nodes
 # and kube-system UID it reached.
 
 set -euo pipefail
@@ -44,8 +45,11 @@ if [ -z "${KUBECTL:-}" ] && { [ -z "${KUBECONFIG:-}" ] || [ "$KUBECONFIG" = "$ki
     # shellcheck source=scripts/deploy/lib/kind-env.sh
     source "$(dirname "${BASH_SOURCE[0]}")/lib/kind-env.sh"
 elif [ -z "${KUBECTL:-}" ]; then
-    echo "KUBECONFIG is set (${KUBECONFIG}): using kubectl with it, not the kind cluster's" \
-        "kubectl (unset KUBECONFIG to use that one)" >&2
+    # Another KUBECONFIG: the kind kubectl binary with it, never plain kubectl
+    # (cluster_role_default_kubectl), which says so.
+    # shellcheck source=scripts/deploy/lib/cluster-role.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+    cluster_role_default_kubectl || exit 1
 fi
 KUBECTL="${KUBECTL:-kubectl}"
 # Where cloudflared and its token live; fixed, like in lib/public-host.sh.

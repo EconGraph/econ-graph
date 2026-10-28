@@ -101,11 +101,12 @@
 # --dry-run runs every check against the cluster and prints, per Secret, the
 # keys it would write and how each value was resolved; it writes nothing.
 #
-# Other environment: NAMESPACE (default econ-graph), KUBECTL (default kubectl)
-# and its KUBECONFIG, on that kubectl's current context. Run by hand with none
-# of KUBECTL and KUBECONFIG set, it uses the kind cluster's own kubectl and
-# kubeconfig when copies are kept in ~/.cache/econgraph, and says so
-# (cluster_role_default_kubectl in lib/cluster-role.sh).
+# Other environment: NAMESPACE (default econ-graph), KUBECTL and its
+# KUBECONFIG, on that kubectl's current context. Run by hand without KUBECTL,
+# it uses the kind cluster's own kubectl kept in ~/.cache/econgraph, with
+# KUBECONFIG if that is set and the kind cluster's kubeconfig kept there if
+# not, and says so; without those copies it stops (cluster_role_default_kubectl
+# in lib/cluster-role.sh). Never plain kubectl.
 
 set -euo pipefail
 # Never trace: the values handled below are credentials.
@@ -159,7 +160,7 @@ log() {
 # context, the same one the production check reads.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 
 # A CLUSTER_ROLE_CONTEXT from the environment is followed only while it is the

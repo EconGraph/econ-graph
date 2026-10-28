@@ -12,18 +12,19 @@
 #   --dry-run       Print every step; change nothing.
 #   --yes           Answer the confirmation before ingress-nginx is removed.
 #   --context NAME  kubectl context (default kind-econ-graph).
-#
-# kubectl is KUBECTL, with the KUBECONFIG it finds. With none of KUBECTL and
-# KUBECONFIG set, it is the kind cluster's own kubectl and kubeconfig kept in
-# ${XDG_CACHE_HOME:-~/.cache}/econgraph (cluster_role_default_kubectl in
-# lib/cluster-role.sh): plain `kubectl` may be another cluster's, such as the
-# MicroK8s snap wrapper. install-gateway.sh and apply-gateway-routes.sh get the
-# same one.
 #   --host-url URL  Where host port 80 answers (default http://localhost).
 #   --host-https-url URL
 #                   Where host port 443 answers (default https://localhost);
 #                   checked only for a public host.
 #   --rollback DIR  Undo a cut-over from the state it saved in DIR (below).
+#
+# kubectl is KUBECTL, with the KUBECONFIG it finds. Without KUBECTL, it is the
+# kind cluster's own kubectl kept in ${XDG_CACHE_HOME:-~/.cache}/econgraph, with
+# KUBECONFIG if that is set and the kind cluster's kubeconfig kept there if not
+# (cluster_role_default_kubectl in lib/cluster-role.sh); without those copies
+# the script stops before anything runs. Never plain `kubectl`: it may be
+# another cluster's, such as the MicroK8s snap wrapper. install-gateway.sh and
+# apply-gateway-routes.sh get the same one.
 #
 # Steps:
 #   1. Read-only checks: the API server answers, namespace econ-graph and the
@@ -168,7 +169,7 @@ die() {
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 export KUBECTL="${KUBECTL:-kubectl}"
 kc() { command "$KUBECTL" --context "$KUBE_CONTEXT" "$@"; }
 

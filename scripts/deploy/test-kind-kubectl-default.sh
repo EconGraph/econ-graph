@@ -265,6 +265,43 @@ else
     echo "ok   setup-port-forwarding.sh stops without the kind cluster"
 fi
 expect_rootful "setup-port-forwarding.sh"
+# An explicit KUBECTL is used as it is (here the same fake), without kind or docker.
+run env KUBECTL="$CACHE/bin/kubectl" KUBECONFIG="$CACHE/kubeconfig-econ-graph" FAKE_FAIL=cluster-info \
+    "$DEPLOY/setup-port-forwarding.sh"
+expect "setup-port-forwarding.sh with KUBECTL" nonzero "Cannot connect to Kubernetes cluster" "cluster-info"
+if [ -s "$LOGS/pinned-kind.log" ] || [ -s "$LOGS/docker.log" ]; then
+    fail "setup-port-forwarding.sh with KUBECTL: still ran kind or docker"
+fi
+
+# --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
+# No kind copies (a HOME without the cache): the gateway and Postgres backup scripts stop
+# before any kubectl.
+for script in install-gateway.sh apply-gateway-routes.sh cutover-to-gateway.sh backup-postgres-now.sh; do
+    run env HOME="$WORK/empty-home" "$DEPLOY/$script" --dry-run
+    if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || [ -s "$LOGS/kind-kubectl.log" ] ||
+        ! grep -qF "or set KUBECTL (and KUBECONFIG)" <<<"$out"; then
+        fail "$script without the kind kubectl: exit $rc, plain $(cat "$LOGS/plain.log")"
+    else
+        echo "ok   $script without the kind kubectl stops"
+    fi
+done
+# KUBECONFIG alone: the kind kubectl binary with it (plain kubectl may ignore it).
+other="$WORK/other-kubeconfig"
+echo "# another kubeconfig" >"$other"
+run env KUBECONFIG="$other" PUBLIC_HOST=none "$DEPLOY/apply-gateway-routes.sh" --dry-run
+if [ "$rc" -ne 0 ] || [ -s "$LOGS/plain.log" ] ||
+    grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$other " "$LOGS/kind-kubectl.log" ||
+    ! grep -qF "Using the kind cluster's kubectl $CACHE/bin/kubectl with KUBECONFIG=$other" <<<"$out"; then
+    fail "apply-gateway-routes.sh with only KUBECONFIG: exit $rc, $(cat "$LOGS/kind-kubectl.log" "$LOGS/plain.log")"
+else
+    echo "ok   apply-gateway-routes.sh with only KUBECONFIG uses the kind kubectl with it"
+fi
+run env HOME="$WORK/empty-home" KUBECONFIG="$other" "$DEPLOY/install-gateway.sh" --dry-run
+if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || ! grep -qF "Set KUBECTL too" <<<"$out"; then
+    fail "install-gateway.sh with only KUBECONFIG and no kind kubectl: exit $rc"
+else
+    echo "ok   install-gateway.sh with only KUBECONFIG and no kind kubectl stops"
+fi
 
 if [ "$failed" -ne 0 ]; then
     exit 1
