@@ -12,14 +12,13 @@ on:
       - 'ci/scripts/check_action_pins.py'
       - 'ci/scripts/test_action_pins.py'
       - 'ci/scripts/test_crawler_secrets.py'
+      - 'ci/scripts/check-required-jobs.sh'
+      - 'ci/scripts/test-check-required-jobs.sh'
+  # Every PR and merge group, without a path filter: Lint workflows is a
+  # required check (docs/development/MERGE_QUEUE.md), and a filtered-out
+  # workflow never reports one. The job takes about a minute.
   pull_request:
-    paths:
-      - '.github/workflows/**'
-      - '.github/actionlint.yaml'
-      - '.github/actions/**'
-      - 'ci/scripts/check_action_pins.py'
-      - 'ci/scripts/test_action_pins.py'
-      - 'ci/scripts/test_crawler_secrets.py'
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -73,6 +72,10 @@ jobs:
         "$python" -m unittest discover -s ci/scripts -p 'test_action_pins.py'
         "$python" ci/scripts/check_action_pins.py
         "$python" -m unittest discover -s ci/scripts -p 'test_crawler_secrets.py'
+
+    # The result jobs of the required workflows (ci-core.yml, release-e2e.yml)
+    - name: Check the required-jobs gate
+      run: ci/scripts/test-check-required-jobs.sh
 
     - name: Run actionlint
       run: |
