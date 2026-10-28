@@ -2,15 +2,14 @@
 
 Production, UAT and integration testing all run on one home server
 (threadripper), in the kind cluster `econ-graph` on the rootful Docker daemon
-(`unix:///var/run/docker.sock`, data root on ext4). Until
-this change both Postgres databases lived in local-path volumes inside the
-`econ-graph-worker` node container, so `kind delete cluster` deleted them. They
-now live on btrfs subvolumes on the host (the `/home` RAID10 NVMe filesystem),
-bind-mounted into the cluster. Deleting or recreating the cluster leaves the
-data alone.
+(`unix:///var/run/docker.sock`, data root on ext4). The Postgres databases live
+on btrfs subvolumes on the host (the `/home` RAID10 NVMe filesystem),
+bind-mounted into `econ-graph-worker`. Deleting or recreating the cluster
+leaves these host directories intact. Databases on older clusters that use
+node-local volumes are lost when their node containers are deleted.
 
 Snapshots and backups of these subvolumes are covered in
-[BACKUPS.md](BACKUPS.md) (PR #420). This page covers the layout, ownership,
+[the backup guide](BACKUPS.md). This page covers the layout, ownership,
 moving the live deployment onto it, and recovering production.
 
 ## Layout
@@ -35,7 +34,9 @@ app plane (the app database and its sign-in) snapshots as one unit.
 
 `scripts/host/setup-subvolumes.sh` (needs sudo) creates the subvolumes, adds
 them to `/etc/fstab` and mounts them, with the subvolume roots owned by
-the operator account (`<operator>`). Everything after that runs without sudo.
+the operator account (`<operator>`). The one-time
+[Docker mount-order setup](#after-a-host-reboot) also needs sudo. Deployment
+and backup scripts run as the operator without sudo.
 
 ### How the cluster reaches them
 
@@ -83,18 +84,18 @@ run (kind, docker, `deploy.sh`). Override it with `ECONGRAPH_DOCKER_HOST`.
 The operator account is in the `docker` group, so none of this needs sudo. Every script
 prints the daemon it uses and warns if it is a rootless one.
 
-Images built before the switch exist only in the rootless daemon.
+If required images are held in another Docker daemon,
 `scripts/deploy/load-kind-images.sh --from-docker-host <socket>` exports them
-from there (`docker save`) and loads them into the cluster
+from that daemon (`docker save`) and loads them into the cluster
 (`kind load image-archive`), checking each image ID on every node.
-`build-images.sh` now builds into the rootful daemon.
+`build-images.sh` builds into the rootful daemon.
 
 ## Which kind
 
 The scripts run kind v0.33.0 from
 `~/.local/share/econgraph/bin/kind-v0.33.0` (under `$XDG_DATA_HOME` when it
-is set), whatever `kind` is on `PATH`. Older kind cannot load images into a
-node running Kubernetes 1.36 or newer ("unknown containerd config version:
+is set), regardless of which `kind` is on `PATH`. Older kind cannot load
+images into a node running Kubernetes 1.36 or newer ("unknown containerd config version:
 4"). Install it once, as the operator account and without sudo:
 
 ```bash
@@ -145,9 +146,10 @@ What this means in practice:
   **999:999**, mode 0700. The operator account can't list or read them directly.
   The subvolume roots stay the operator account's, so unprivileged
   `btrfs subvolume snapshot -r` still works.
-- To read the files without sudo, go through the cluster (`kubectl exec` into
-  the Postgres pod) or `docker exec econ-graph-worker`; both run as root on
-  the rootful daemon. The backup scripts use `pg_dump` through `kubectl exec`.
+- To read the files without sudo, use `kubectl exec` into the Postgres
+  container as UID 999, or `docker exec econ-graph-worker` as root. Rootful
+  Docker preserves the UID mapping; it does not make pod exec run as root.
+  The backup scripts use `pg_dump` through `kubectl exec`.
 - Snapshots keep UID 999, so restoring a snapshot needs no ownership changes.
   A copy must keep ownership (`cp -a` as root). If ownership is lost,
   `init-data-dir` repairs it on the next pod start.
@@ -160,10 +162,12 @@ What this means in practice:
   UID changes with it; set `ECONGRAPH_HOST_POSTGRES_UID` for the scripts'
   ownership check, and `init-data-dir` re-chowns `PGDATA` on the next start.
 
-### Verified on this host
+### Earlier ownership verification
 
-These checks ran under the earlier rootless daemon, so the host-side owner they
-saw was a user-namespace UID, not 999. `migrate-to-host-storage.sh`'s verify
+The following historical checks establish the initContainer behavior, not the
+current production state or a required recovery point. They ran under the
+earlier rootless daemon, so the host-side owner they saw was a user-namespace
+UID, not 999. `migrate-to-host-storage.sh`'s verify
 step checks that `pg/` is owned by 999.
 
 - With a scratch directory under `~/.cache` and then throwaway
@@ -184,8 +188,16 @@ step checks that `pg/` is owned by 999.
 
 ## Moving the live deployment
 
-Everything is scripted. Every script supports `--dry-run`, which runs all the
-checks for real and changes nothing.
+The migration scripts support `--dry-run` to check available prerequisites
+and display planned actions without changing the cluster or databases. A dry
+run does not perform the restore or verify its resulting row counts, PVs,
+pods and ownership; those checks run during the actual migration. The scripts
+may create temporary copies of `kubectl` and kubeconfig, as described in
+[Other notes](#other-notes).
+
+This migration moves a deployment from node-local storage. It does not split
+app plane rows out of a shared data database; see
+[the app database on an existing cluster](#the-app-database-on-an-existing-cluster).
 
 | Step | Who | sudo | Destructive |
 |---|---|---|---|
@@ -202,7 +214,8 @@ prompt). It then does the following:
 2. **Stops the writers** (`econ-graph-backend`, `crawler-worker`, `keycloak`)
    so the dump is final. Downtime starts here.
 3. **Backs up** to `~/econgraph-backups/<UTC timestamp>/` with
-   `backup-kind-databases.sh`: `econ_graph.dump` and `keycloak.dump`
+   `backup-kind-databases.sh`: `econ_graph.dump`, `keycloak.dump`, and
+   `econ_graph_app.dump` when the separate app database is deployed
    (`pg_dump -Fc`, each read back in full before it counts), `counts.env`
    (row counts) and `secrets/` (the app Secrets: the database passwords the
    data was initialised with, plus any API keys). All files are owner-only.
@@ -214,18 +227,15 @@ prompt). It then does the following:
    the saved tunnel token is only restored into a marked cluster.
 5. **Bootstraps the databases.** Creates the namespace and the saved Secrets
    (`cloudflare-tunnel` only on a cluster marked production), then runs `create-secrets.sh` (which keeps them), `apply-host-storage.sh`,
-   and both Postgres StatefulSets. The initContainers set ownership and
+   and the Postgres StatefulSets. The initContainers set ownership and
    Postgres initialises empty directories on the subvolumes.
-6. **Restores** both dumps with `restore-kind-databases.sh`. This runs before
+6. **Restores** the saved dumps with `restore-kind-databases.sh`. This runs before
    any app starts, so the backend's migrations find a complete schema. Each
    restore is a single transaction and the row counts must match `counts.env`.
 7. **Deploys** everything else with `deploy.sh`.
-8. **Verifies.** Row counts are at least the backup's; both PVs are `Bound` to
-   the host paths; `pg/` is owned by 999; it lists the pods.
-
-As of the 2026-10-24 dump, the expected counts are 10,528 rows in
-`economic_series` and 503,001 in `data_points`. The script compares against
-the counts recorded in its own backup, not these numbers.
+8. **Verifies.** Data database row counts are at least the backup's; the data
+   and Keycloak PVs are `Bound` to the host paths; `pg/` is owned by 999; it
+   lists the pods.
 
 **Re-running is safe.** The backup directory in use is remembered in
 `~/.cache/econgraph/host-storage-migration.env`. A run that stopped after the
@@ -238,7 +248,7 @@ re-run only verifies.
 subvolumes. Fix the cause and re-run the migration script, or run `deploy.sh`.
 Without `PUBLIC_HOST` the site is not served publicly from the new cluster; the
 script says so at the end. Deploy again with `PUBLIC_HOST=econgraph.com` on the
-marked production cluster (see "Production marker" in `k8s/README.md`).
+marked production cluster (see [production marking](../../k8s/README.md#production-marker)).
 
 ### Rollback
 
@@ -248,8 +258,8 @@ It needs **the maintainer's go-ahead**, because it deletes and recreates the clu
 1. It stops the writers and takes a fresh backup of the current databases, so
    writes made since the migration are kept. Use `--resume-from DIR` to restore
    an older backup instead.
-2. It checks out `--ref` (default `origin/release/v4.0`, i.e. node-local
-   storage as before this change) into `~/.cache/econgraph/rollback-src`, and
+2. It checks out `--ref` (default `origin/release/v4.0`, i.e. the node-local
+   storage configuration) into `~/.cache/econgraph/rollback-src`, and
    recreates the cluster from that ref's kind config.
 3. It bootstraps the Secrets and databases from that ref's manifests, restores,
    runs that ref's `deploy.sh`, and verifies the row counts.
@@ -258,85 +268,183 @@ The host subvolumes are not touched by a rollback. Their contents are stale
 from that point on. Move `pg/` and `keycloak-pg/` aside before migrating again
 (the forward preflight refuses non-empty directories).
 
-## Recovering production (ECO-432)
+## Recovering production
 
-On 2026-10-24 at 05:25 UTC the cluster on the rootless daemon was gone, and a
-new one could not start there. Production comes back on the rootful daemon
-from the backup taken just before:
-`~/econgraph-backups/20261024T052524Z/` (dumps, `counts.env`, `secrets/`,
-`local-images.txt`). The older `20261024T0442Z/` has dumps only, no
-`counts.env` and no Secrets, so the restore script refuses it.
+Recovery and saved-Secret restoration are human operator tasks. Run these
+commands yourself; agents may review the examples as text but must never
+read, enter, copy or decrypt actual secret values, including saved Secret
+manifests and database dumps containing credentials. See
+[Secrets management](../technical/SECRETS_MANAGEMENT.md).
 
-Run each step with `--dry-run` first. Every step can be re-run.
+Use this procedure to recreate a missing cluster or replace an unreachable
+cluster, then restore a chosen host-side backup. Cluster deletion loses
+node-local data, including Grafana data and the in-cluster backup PVC; it
+does not remove the host database directories. If those directories still
+hold the required data, recreating the cluster can reuse them without a dump
+restore, but the matching password Secrets must also be restored before
+deployment. For snapshot recovery, see [the backup guide](BACKUPS.md).
 
-1. Cluster (deletes an unreachable cluster of the same name only with
-   `--delete-unreachable`, after a typed `yes`; installs the gateway):
+Choose the recovery point before proceeding. For a full dump recovery, the
+backup directory must contain a dump for each database being recovered,
+`counts.env` with the corresponding row counts, and `secrets/` with the saved
+passwords and application Secrets. Data and Keycloak dumps without their
+required counts are refused. An app dump without app row counts is skipped
+because the app database had no tables when backed up. Missing saved Secrets
+produce a warning, but newly generated passwords will not match an existing
+database. Do not proceed with a full recovery without the matching Secrets.
+A backup from a shared-database deployment need not contain
+`econ_graph_app.dump`.
+
+For retained-data recovery, only the matching saved Secrets are needed; no
+dumps or `counts.env` are read by that recovery branch.
+
+Set `BACKUP_DIR` to the chosen directory. Run each script with `--dry-run`
+first and inspect the plan; a dry run cannot validate a restore that has not
+yet run. The steps can be re-run, subject to the restore protections below.
+
+1. Create the cluster if it is missing and install
+   [Envoy Gateway](../../k8s/README.md#-gateway). The recreation script
+   installs Gateway API and Envoy Gateway resources; deployment in step 5
+   applies the application routes:
 
    ```bash
-   scripts/deploy/recreate-kind-cluster.sh --if-missing --delete-unreachable
+   scripts/deploy/recreate-kind-cluster.sh --if-missing
    ```
 
-2. Images, from the rootless daemon where they were built:
+   If a cluster of the same name exists but its API server is unreachable,
+   inspect the failure first. To replace it, add `--delete-unreachable`. This
+   deletes the cluster without a fresh backup, after a typed `yes`; its node
+   containers may still hold the host ports needed by the replacement. The
+   script checks host storage before deletion. An unreachable API alone does
+   not establish that the host database files are lost.
+
+2. If required images are held in another daemon, import them using its socket
+   and the backup's image list. For example, with the operator's rootless daemon:
 
    ```bash
-   scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list ~/econgraph-backups/20261024T052524Z/local-images.txt
+   scripts/deploy/load-kind-images.sh --from-docker-host unix:///run/user/1000/docker.sock --list "$BACKUP_DIR/local-images.txt"
    ```
 
-3. Mark the new cluster as production, before anything is restored into it.
-   It has a new kube-system UID, so no earlier marker counts; without one the
-   restore leaves the saved tunnel token out, `deploy.sh` refuses `PUBLIC_HOST`
-   and cloudflared stays at 0 replicas (see "Production marker" in
-   `k8s/README.md`):
+   This step needs `local-images.txt` and the listed images in the source
+   daemon. Otherwise, build or obtain the required images before deployment.
+
+3. Mark a newly created production cluster before restoring Secrets. Its new
+   kube-system UID invalidates the old marker. Without a current marker, the
+   restore omits the saved tunnel token, `deploy.sh` refuses `PUBLIC_HOST`,
+   and cloudflared stays at 0 replicas. See
+   [production marking](../../k8s/README.md#production-marker).
 
    ```bash
    scripts/deploy/mark-production-cluster.sh
    ```
 
-4. Databases: namespace, the saved Secrets, PVs and the Postgres
-   StatefulSets, then the restores. It stops with
-   `RESTORE VERIFICATION FAILED` unless `counts.env` says 10,528 series and
-   503,001 data points and the restored database has exactly the counts in
-   `counts.env`:
+4. Prepare the databases using the appropriate recovery route.
+
+   **To reuse surviving host data**, restore its matching saved Secrets before
+   deployment. From the repository root, the operator can preview namespace
+   and Secret creation with this Bash subshell, then set `DRY_RUN=false` to
+   perform it:
 
    ```bash
-   scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/20261024T052524Z --expect-series 10528 --expect-data-points 503001
+   (
+     set -euo pipefail
+     DRY_RUN=true
+     source scripts/deploy/lib/kind-env.sh
+     use_kind_kubectl
+     run kubectl apply -f k8s/manifests/namespace.yaml
+     restore_secrets "$BACKUP_DIR"
+   )
    ```
 
-5. Everything else:
+   These helpers select the cluster's kubectl and kubeconfig, create missing
+   saved Secrets, and leave existing Secrets unchanged. The tunnel Secret is
+   restored only when the production marker is valid. This branch does not
+   restore dumps or compare database row counts. Confirm that the saved
+   database password Secrets match the retained databases before continuing;
+   the helper does not check password correctness or whether every required
+   Secret was saved, and only warns if no saved Secrets are found. If matching
+   Secrets are unavailable, stop rather than let deployment generate replacements.
+   Deployment in step 5 applies the PVs and StatefulSets to the retained data.
+
+   **To recover from dumps**, bootstrap the namespace, saved Secrets, PVs and
+   Postgres StatefulSets, then restore:
+
+   ```bash
+   scripts/deploy/restore-kind-databases.sh --from "$BACKUP_DIR"
+   ```
+
+   Each database restore is a single transaction. The script skips missing
+   dumps and leaves a database alone when its checked row counts already
+   match the backup. It refuses a database with different data unless
+   `--replace` is supplied; replacement drops and recreates objects from the
+   dump after typed confirmation. Check that all intended databases were
+   restored. A row-count mismatch stops with `RESTORE VERIFICATION FAILED`;
+   resolve it before deploying. To guard against selecting the wrong backup,
+   add `--expect-series N --expect-data-points N` using independently known
+   counts for the chosen recovery point. These flags first check `counts.env`;
+   the restore then checks the database against that file.
+
+5. Deploy the remaining services on the marked production cluster:
 
    ```bash
    PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh
    ```
 
-The rootful daemon still had a kind cluster named `econ-graph` from
-2025-10-02, with its API server down (certificates expired 2026-10-02). It
-holds host ports 80, 443, 3000 and 8080, so step 1 has to delete it.
-`--delete-unreachable` is what allows that; nothing can be backed up from it
-first.
-
 ### After a host reboot
 
-The cluster comes back by itself: `docker.service` is enabled at boot, and
-kind gives its node containers the restart policy `on-failure:1`, which
-dockerd honours when it starts. `recreate-kind-cluster.sh` prints both. The
-subvolumes' fstab entries use `nofail`, which doesn't make dockerd wait for
-them; `sudo scripts/host/order-docker-after-subvolumes.sh` adds a drop-in that
-orders dockerd after the two mounts.
+Docker needs the storage subvolumes mounted before it starts, so the worker
+binds the database subvolumes rather than the underlying directories. Their
+`fstab` entries use `nofail`, so those entries do not make Docker wait for the
+mounts. Run `sudo scripts/host/order-docker-after-subvolumes.sh` once to add
+that startup ordering. The script reloads systemd without restarting Docker;
+the drop-in applies on subsequent Docker startup. It uses `Wants=` and
+`After=`, so Docker can still start after a failed mount attempt. Check both
+mounts after a reboot before starting the nodes.
+
+`recreate-kind-cluster.sh` reports Docker service enablement and node restart
+policies. These reports do not establish automatic recovery: kind's
+`on-failure:1` policy retries a failed container once, but
+[Docker does not start `on-failure` containers when the daemon restarts](https://docs.docker.com/engine/containers/start-containers-automatically/).
+After a reboot, check the mounts and containers on the rootful daemon:
+
+```bash
+findmnt --mountpoint /srv/econgraph/data-plane
+findmnt --mountpoint /srv/econgraph/app-prod
+DOCKER_HOST=unix:///var/run/docker.sock docker ps -a --filter label=io.x-k8s.kind.cluster=econ-graph
+```
+
+If both subvolumes are mounted and the existing node containers are stopped,
+start them explicitly:
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock docker start econ-graph-control-plane econ-graph-worker
+```
+
+Check node readiness and the database pods using the cluster's kubectl and
+kubeconfig described in [Other notes](#other-notes). If the worker started
+before the mounts were ready, stop Postgres and restart the worker as
+described under [Ownership](#ownership). If the API remains unreachable,
+investigate before using the cluster replacement procedure above.
 
 kubeadm's certificates in a kind cluster expire one year after it is created.
-That is what stopped the 2025 cluster. Renew them, or recreate the cluster,
-before then.
+Renew the certificates or recreate the cluster before they expire.
 
 ## The app database on an existing cluster
 
-`deploy.sh` creates `app-pg/`, the PV `econgraph-app-prod-app-pg`, the Secret
-`econ-graph-app-postgres` and the StatefulSet `app-postgres` wherever they are
-missing, and leaves everything else as it is. It moves no rows: on a cluster
-whose `app-database-url` names the data database (`APP_DATABASE=shared`, see
-`k8s/README.md`), the app keeps using the data database until its rows are
-moved and `create-secrets.sh` runs with `APP_DATABASE=separate`. Until the
-StatefulSet exists, the nightly dump skips the app database and notes it in
-its `MANIFEST`.
+`deploy.sh` creates any missing app database resources: the `app-pg/`
+directory, PV `econgraph-app-prod-app-pg`, Secret `econ-graph-app-postgres`, and
+StatefulSet `app-postgres`. By default, deployment keeps existing Secrets
+and the selected database URL while applying the manifests. It does not move
+rows.
+
+On a cluster using `APP_DATABASE=shared`, `app-database-url` points to the data
+database. Creating the separate app database does not change that setting.
+The app continues to use the data database until its rows are moved and
+`create-secrets.sh` is run with `APP_DATABASE=separate`. See
+[database settings](../../k8s/README.md#databases) for configuration details.
+
+Until the `app-postgres` StatefulSet exists, the nightly dump skips the app
+database and records the skip in its `MANIFEST`.
 
 ## Testing on a scratch cluster
 
@@ -369,12 +477,13 @@ the subvolumes.
   the cluster's own `kubectl` out of `econ-graph-control-plane` into
   `~/.cache/econgraph/bin` and use `kind get kubeconfig`. They don't change
   `~/.kube`: `kind create/delete cluster` get `--kubeconfig` pointing at
-  `~/.cache/econgraph/kubeconfig-econ-graph`. A `--dry-run` writes neither:
-  it uses the cached pair if it still reaches the cluster, and otherwise
-  copies fresh ones into a temporary directory that is removed on exit.
+  `~/.cache/econgraph/kubeconfig-econ-graph`. A dry run does not update the
+  cached `kubectl` or kubeconfig. It uses the cached copies if they can reach
+  the cluster; otherwise, it obtains fresh copies in a temporary directory
+  and removes that directory on exit.
 - The in-cluster nightly `postgres-backup` CronJob and its
   `postgres-backup-data` PVC, and Grafana's data, are still node-local. They
   are lost when the cluster is deleted, which is one reason
   `recreate-kind-cluster.sh` and `teardown.sh` take a host-side dump first.
-- Hostpath volumes have no size limit. The PV capacities (50Gi and 5Gi) are
+- Hostpath volumes have no size limit. The PV capacities (50Gi, 10Gi and 5Gi) are
   informational; the real limit is free space on the btrfs filesystem.
