@@ -767,6 +767,40 @@ grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore
 run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
+# require_recreate_confirmation: before the downtime, without a terminal, a cluster that
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
+# but none, one that can't be read, or one noted as production) needs a matching
+# --confirm-production. Stdin is /dev/null, so there is no terminal.
+# shellcheck disable=SC2016 # expanded by run_migrate's bash
+rrc='source scripts/deploy/lib/cluster-role.sh
+  kube_system_uid() { echo uid-kind-cluster; }
+  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"
+  require_recreate_confirmation </dev/null && echo went on'
+for marker in "production uid-kind-cluster" "Production uid-other" "staging uid-kind-cluster"; do
+  if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker"; then
+    fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
+  fi
+  grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_WAS=true; then
+  fail "require_recreate_confirmation: went on without a terminal for a cluster noted as production"
+fi
+for marker in "" "none uid-kind-cluster"; do
+  run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker" ||
+    fail "require_recreate_confirmation: refused a cluster without a production marker ('$marker'): $(cat "$out")"
+done
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind ||
+  fail "require_recreate_confirmation: refused a matching --confirm-production: $(cat "$out")"
+if run_migrate "$rrc" STUB_RC=1 STUB_CONFIRM=uid-othe; then
+  fail "require_recreate_confirmation: took a --confirm-production that doesn't match"
+fi
+grep -q 'does not match' "$out" || fail "require_recreate_confirmation: the mismatch was not reported: $(cat "$out")"
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" DRY_RUN=true ||
+  fail "require_recreate_confirmation: refused a dry run"
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached

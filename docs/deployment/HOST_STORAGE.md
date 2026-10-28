@@ -68,8 +68,11 @@ the operator account (`<operator>`). Everything after that runs without sudo.
   Secrets); the data plane goes only with `--include-data-plane` and the data
   database's name typed on a terminal. `released-pvs.sh` never deletes a PV
   labelled `econgraph.io/protected=true`, which these three are.
-  `recreate-kind-cluster.sh` takes a dump and asks for a confirmation before
-  deleting the cluster, and `terraform destroy` doesn't delete it.
+  `recreate-kind-cluster.sh` asks for a confirmation and takes a dump before
+  deleting the cluster; on a cluster with a production marker, or one whose
+  marker can't be read, the confirmation is the first 8 characters of its
+  kube-system UID (typed, or `--confirm-production`), never `--yes`.
+  `terraform destroy` doesn't delete it.
 
 ## Which Docker daemon
 
@@ -194,7 +197,11 @@ checks for real and changes nothing.
 | 3. `scripts/deploy/migrate-to-host-storage.sh` | **needs the maintainer's go-ahead** | no | **yes**: downtime, then the kind cluster is deleted and recreated |
 
 Step 3 asks for a typed `yes` before stopping anything (`--yes` skips the
-prompt). It then does the following:
+prompt). If the cluster has a production marker, or its marker can't be read,
+recreating it also needs the first 8 characters of its kube-system UID: typed
+at the terminal in step 4, or given up front as `--confirm-production`.
+Without a terminal and without `--confirm-production`, the script stops
+before anything is stopped. It then does the following:
 
 1. **Preflight.** The subvolumes are mounted btrfs owned by you. `pg/` and
    `keycloak-pg/` are empty (move a leftover one aside; the script says how).
@@ -270,7 +277,10 @@ from the backup taken just before:
 Run each step with `--dry-run` first. Every step can be re-run.
 
 1. Cluster (deletes an unreachable cluster of the same name only with
-   `--delete-unreachable`, after a typed `yes`; installs the gateway):
+   `--delete-unreachable`, and only when its kube-system UID can still be read
+   inside its control-plane container, after the confirmation its production
+   marker calls for; one whose marker can't be read takes the UID prefix.
+   Installs the gateway):
 
    ```bash
    scripts/deploy/recreate-kind-cluster.sh --if-missing --delete-unreachable
