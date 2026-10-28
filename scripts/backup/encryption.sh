@@ -57,10 +57,17 @@ with open(sys.argv[1], "w") as out:
 # BACKUP_LOCK_NONBLOCK=true fails at once if another writer holds it;
 # otherwise this says who holds it and waits up to BACKUP_LOCK_TIMEOUT
 # seconds (default 3600), then refuses.
+# A script run by a holder that exported BACKUP_STAGING_LOCK_FD (and so
+# inherited that open lock) reuses it: open-backup.sh around a restore, a
+# Keycloak restore around its safety backup.
 backup_staging_lock() {
     local lock fd timeout="${BACKUP_LOCK_TIMEOUT:-3600}"
-    [[ -z "${BACKUP_STAGING_LOCK_FD:-}" ]] || return 0
     lock="${BACKUP_PLAINTEXT_ROOT:-/dev/shm}/.econgraph-backup-$(id -u).lock"
+    if [[ -n "${BACKUP_STAGING_LOCK_FD:-}" ]]; then
+        [[ "$BACKUP_STAGING_LOCK_FD" =~ ^[0-9]+$ && /dev/fd/$BACKUP_STAGING_LOCK_FD -ef "$lock" ]] && return 0
+        # Not the open lock of this staging root (stale or foreign): ignore it.
+        BACKUP_STAGING_LOCK_FD=""
+    fi
     [[ ! -L "$lock" ]] || die "$lock is a symlink; refusing to use it as the backup lock"
     exec {fd}>>"$lock" || die "could not open the backup lock $lock"
     [[ -O "$lock" && ! -L "$lock" ]] || die "$lock is not a lock file owned by $(id -un); refusing it"
@@ -103,13 +110,12 @@ backup_seal_dir() {
     # pipeline stage is reported here rather than ending the subshell early.
     (umask 077
         set +e -o pipefail
-        mkdir -p -- "$(dirname "$output")" || exit
-        mkdir -- "$partial" || exit
-        keydir="$(mktemp -d "${BACKUP_PLAINTEXT_ROOT:-/dev/shm}/econgraph-verify-key.XXXXXXXX")" || exit
+        keydir=""
         # An interrupted/failed final rename must not leave an unpublished
         # directory eligible for off-site selection. The throwaway key never
         # outlives this subshell.
-        trap 'rm -f -- "$partial/VERIFIED"; rm -rf -- "$keydir"' EXIT
+        trap 'rm -f -- "$partial/VERIFIED"; [[ -z "$keydir" ]] || rm -rf -- "$keydir"' EXIT
+        keydir="$(mktemp -d "${BACKUP_PLAINTEXT_ROOT:-/dev/shm}/econgraph-verify-key.XXXXXXXX")" || exit
         [[ "$(stat -f -c %T -- "$keydir")" == tmpfs ]] || {
             echo "error: $keydir is not on tmpfs; refusing to write the throwaway key there" >&2
             exit 1
@@ -117,6 +123,10 @@ backup_seal_dir() {
         age-keygen -o "$keydir/key" 2>/dev/null || exit
         check_recipient="$(age-keygen -y "$keydir/key")" || exit
         [[ "$check_recipient" =~ ^age1[0-9a-z]+$ ]] || exit 1
+        # The .partial directory is made last, once the key is ready, so a
+        # failed setup leaves nothing that would block the next run.
+        mkdir -p -- "$(dirname "$output")" || exit
+        mkdir -- "$partial" || exit
         # Hash the tar stream on its way to age. A plain pipeline stage: if
         # either neighbour fails it fails too, and nothing can block on it.
         # Each stage's status is checked: a file tar could not read (tar
