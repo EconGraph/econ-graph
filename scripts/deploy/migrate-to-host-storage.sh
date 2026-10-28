@@ -331,6 +331,7 @@ forward() {
         note_production
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
         backup_encryption_preflight
+        backup_check_tmpfs_space
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
@@ -387,6 +388,7 @@ rollback() {
         note_production
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
         backup_encryption_preflight
+        backup_check_tmpfs_space
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
