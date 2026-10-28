@@ -3,7 +3,7 @@
 # Smoke-check the public site (ECO-457).
 #
 # Usage:
-#   scripts/deploy/check-public-site.sh --host econgraph.com             # local ingress
+#   scripts/deploy/check-public-site.sh --host econgraph.com             # local gateway
 #   scripts/deploy/check-public-site.sh --host econgraph.com --via-cloudflare
 #
 # What it checks:
@@ -20,11 +20,12 @@
 #     realm, metrics, the GraphQL playground and the admin API, including
 #     encoded-traversal variants.
 #
-# Default (local) mode needs no DNS and no tunnel: curl --resolve sends each
-# request to the kind ingress on this host (LOCAL_INGRESS_IP, default
-# 127.0.0.1) with the public Host header, over https to port 443, as
-# cloudflared does (ingress-nginx's default certificate is not verified,
-# like the tunnel's No TLS Verify). Plain http goes to port 80.
+# Default (local) mode needs no DNS and no tunnel: curl --connect-to sends
+# each request to the gateway on this host (LOCAL_INGRESS_IP, default
+# 127.0.0.1) with the public Host header, over https to port 443
+# (LOCAL_HTTPS_PORT), as cloudflared does (the gateway's certificate is not
+# verified, like the tunnel's No TLS Verify). Plain http goes to port 80
+# (LOCAL_HTTP_PORT).
 # --via-cloudflare goes the way a visitor does: real DNS, through Cloudflare
 # and the cloudflared tunnel.
 #
@@ -35,6 +36,8 @@ set -euo pipefail
 HOST=""
 VIA_CLOUDFLARE=false
 LOCAL_INGRESS_IP="${LOCAL_INGRESS_IP:-127.0.0.1}"
+LOCAL_HTTPS_PORT="${LOCAL_HTTPS_PORT:-443}"
+LOCAL_HTTP_PORT="${LOCAL_HTTP_PORT:-80}"
 REALM="econ-graph"
 CLIENT_ID="econ-graph-web"
 SPOOF_HOST="spoofed.invalid"
@@ -84,9 +87,10 @@ if [ "$VIA_CLOUDFLARE" = true ]; then
     echo "==> Checking ${BASE} through Cloudflare"
 else
     CURL+=(--insecure
-        --resolve "${HOST}:443:${LOCAL_INGRESS_IP}" --resolve "www.${HOST}:443:${LOCAL_INGRESS_IP}"
-        --resolve "${HOST}:80:${LOCAL_INGRESS_IP}")
-    echo "==> Checking ${HOST} on the local ingress (${LOCAL_INGRESS_IP}), as the tunnel would send it"
+        --connect-to "${HOST}:443:${LOCAL_INGRESS_IP}:${LOCAL_HTTPS_PORT}"
+        --connect-to "www.${HOST}:443:${LOCAL_INGRESS_IP}:${LOCAL_HTTPS_PORT}"
+        --connect-to "${HOST}:80:${LOCAL_INGRESS_IP}:${LOCAL_HTTP_PORT}")
+    echo "==> Checking ${HOST} on the local gateway (${LOCAL_INGRESS_IP}), as the tunnel would send it"
 fi
 SPOOF=(-H "X-Forwarded-Proto: http" -H "X-Forwarded-Host: ${SPOOF_HOST}" -H "X-Forwarded-Port: 8443")
 
@@ -127,8 +131,8 @@ json() {
         "$tmp/$1" "$2" 2>/dev/null || true
 }
 
-# A redirect target with the default https port dropped (ingress-nginx's www
-# redirect spells it out: https://HOST:443/path).
+# A redirect target with the default https port dropped, should one spell it
+# out (https://HOST:443/path).
 normalize_location() {
     printf '%s' "$1" | sed -E 's#^https://([^/:]+):443#https://\1#'
 }
@@ -216,8 +220,9 @@ case "$status" in
 esac
 
 # 7. Spoofing. A client's X-Forwarded-Proto/-Host/-Port must not reach anything
-# that builds URLs from them: ingress-nginx overwrites them with the connection's
-# own values (no use-forwarded-headers), and Keycloak uses its fixed KC_HOSTNAME.
+# that builds URLs from them: the gateway drops them and sets the scheme from the
+# connection (k8s/manifests/gateway/client-traffic-policy.yaml), and Keycloak
+# uses its fixed KC_HOSTNAME.
 status="$(fetch spoof-discovery "${SPOOF[@]}" "${BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
 if [ "$(json spoof-discovery issuer)" = "$ISSUER" ] && ! grep -q "$SPOOF_HOST\|:8443" "$tmp/spoof-discovery"; then
     pass "spoofed X-Forwarded-* headers leave the discovery document alone"

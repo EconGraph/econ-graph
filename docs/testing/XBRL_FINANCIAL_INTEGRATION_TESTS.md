@@ -1,139 +1,59 @@
 # XBRL Financial Statement Integration Tests
 
-This document describes the comprehensive integration tests for the XBRL financial statement features in the EconGraph project.
+Use this guide to choose and run the SEC crawler's XBRL integration target and the
+financial UI integration tests. The Rust target checks database persistence and
+parser construction. The React tests check rendering with mocked financial data.
+Together, these suites do not establish an end-to-end flow from SEC EDGAR crawling
+to parsed statements or calculated ratios.
 
-## Overview
+## Backend test map
 
-The integration tests verify the complete end-to-end flow from SEC EDGAR crawling through XBRL parsing, DTS management, and financial data processing. They ensure proper integration between:
+The [SEC crawler integration target](../../backend/crates/econ-graph-sec-crawler/tests/xbrl_financial_integration_tests.rs)
+contains five tests. Its [Cargo manifest](../../backend/crates/econ-graph-sec-crawler/Cargo.toml)
+requires the `xbrl-parser` feature to select this target. DTS means Discoverable
+Taxonomy Set.
 
-- SEC EDGAR crawler and XBRL instance discovery
-- XBRL parser and DTS (Discoverable Taxonomy Set) management
-- Financial statement generation from XBRL facts
-- Financial ratio calculation and analysis
-- Frontend components and backend APIs
+| Test | What its assertions establish |
+| --- | --- |
+| `test_xbrl_taxonomy_schema_storage` | Inserts a taxonomy schema, checks its namespace, filename, source type, byte content storage mode, and matching byte length, then retrieves it and checks its ID and namespace. |
+| `test_financial_statement_processing` | Inserts a company, a statement, and two line items. Checks the inserted and retrieved item counts and the ordered concepts `Assets` and `Liabilities`. |
+| `test_xbrl_parser_integration` | Checks that `XbrlParser::new()` succeeds. It does not parse an instance document. |
+| `test_dts_dependency_management` | Inserts US-GAAP and SEC-DEI schemas and checks their namespaces. It does not create or resolve a dependency between them. |
+| `test_xbrl_instance_dts_reference_tracking` | Inserts a company, statement, and schema, then checks the statement's company ID and the schema's namespace. It does not create or validate a statement-to-schema reference. |
 
-## Test Structure
+The statement fixtures are supplied directly to Diesel. This target does not
+extract facts, generate statements, validate the balance-sheet equation, calculate
+ratios, or crawl SEC EDGAR.
 
-### Backend Integration Tests
+## Frontend test map
 
-#### 1. XBRL Financial Integration Tests (`integration_xbrl_financial_tests.rs`)
+The [frontend integration file](../../frontend/src/__tests__/integration/xbrl-financial-integration.test.tsx)
+renders financial components with React Query and router providers. It installs
+MSW handlers and directly mocks `executeGraphQL` to return canned GraphQL
+responses; chart rendering is also mocked by the
+[integration setup](../../frontend/src/setupTests.integration.ts).
 
-**Test: `test_xbrl_taxonomy_schema_storage`**
-- Verifies XBRL taxonomy schema storage and retrieval
-- Tests database operations for taxonomy schemas
-- Validates schema metadata (namespace, prefix, version, file type)
+| Suite | Observable assertions |
+| --- | --- |
+| Financial Dashboard Integration | Company name, ticker, and industry appear. Ratio values include ROE `14.7%` and current ratio `104.0%`. Benchmark content includes “Industry Benchmark Analysis” and “Above Average.” |
+| Financial Statement Viewer Integration | Balance-sheet and income-statement labels and formatted values appear, including Total Assets, Current Assets, Total Liabilities, Stockholders' Equity, Net Sales, and Net Income. The hierarchy-named test checks labels and values, without asserting parent-child layout. |
+| Benchmark Comparison Integration | Benchmark labels, the 75th-percentile ranking, “Above Average,” and supplied P10, P25, median, P75, and P90 values appear. |
+| Trend Analysis Integration | The trend heading, “Trend Visualization” heading, and direction and strength labels appear. |
+| XBRL Data Processing Integration | Company and industry content or asset labels appear. These assertions do not verify processing status transitions or taxonomy reference resolution. |
+| Error Handling Integration | The viewer heading or company name appears. These assertions do not verify parsing-error recovery or missing-taxonomy handling. |
+| Performance Integration | Rendering until “Total Assets” appears takes less than two seconds. |
 
-**Test: `test_xbrl_instance_processing`**
-- Tests XBRL instance document processing end-to-end
-- Verifies company creation, instance storage, and fact extraction
-- Validates XBRL facts storage and retrieval
+Several tests configure a local `mockFetch` stub, including the status, error, and
+performance cases. That stub is not assigned to `global.fetch`, while the GraphQL
+mock continues to return its normal fixtures. In particular, the performance case
+creates 1,000 line items on the unattached stub. Its elapsed-time assertion is a
+fixture-render check, not a benchmark of processing or rendering 1,000 items.
+These tests also do not measure memory use or database query efficiency.
 
-**Test: `test_financial_statement_generation`**
-- Tests financial statement generation from XBRL data
-- Verifies balance sheet equation (Assets = Liabilities + Equity)
-- Tests hierarchical line item structure
+### Recognizing the mock data
 
-**Test: `test_sec_crawler_xbrl_integration`**
-- Tests SEC crawler integration with XBRL processing
-- Verifies crawler configuration and setup
-- Tests company discovery and crawling progress
+The frontend file includes this company fixture:
 
-**Test: `test_xbrl_parser_dts_integration`**
-- Tests XBRL parser integration with DTS manager
-- Verifies local DTS support and taxonomy caching
-- Tests parsing of complex XBRL documents
-
-**Test: `test_financial_ratio_calculation`**
-- Tests financial ratio calculation from XBRL data
-- Verifies key ratios (ROE, profit margin, debt-to-equity)
-- Tests percentile ranking and industry benchmarking
-
-**Test: `test_xbrl_dts_dependency_management`**
-- Tests XBRL DTS dependency management
-- Verifies taxonomy schema relationships
-- Tests dependency tracking and resolution
-
-**Test: `test_xbrl_instance_dts_references`**
-- Tests XBRL instance DTS reference tracking
-- Verifies taxonomy schema references
-- Tests reference resolution and validation
-
-#### 2. SEC Crawler XBRL Pipeline Tests (`integration_sec_crawler_xbrl_pipeline.rs`)
-
-**Test: `test_sec_crawler_xbrl_pipeline`**
-- Tests complete SEC crawler pipeline with XBRL processing
-- Verifies end-to-end flow from crawling to financial analysis
-- Tests all pipeline stages:
-  1. Company discovery and creation
-  2. XBRL instance discovery
-  3. DTS reference discovery
-  4. XBRL parsing
-  5. Financial statement generation
-  6. Financial line item extraction
-  7. Financial ratio calculation
-
-**Test: `test_dts_management_pipeline`**
-- Tests DTS management and taxonomy schema processing
-- Verifies taxonomy component storage
-- Tests DTS dependency creation and management
-
-**Test: `test_xbrl_parser_dts_integration`**
-- Tests XBRL parser integration with DTS manager
-- Verifies parsing with local DTS support
-- Tests complex XBRL document parsing
-
-**Test: `test_financial_statement_generation_pipeline`**
-- Tests financial statement generation from XBRL facts
-- Verifies balance sheet equation validation
-- Tests hierarchical line item structure
-
-**Test: `test_financial_ratio_calculation_pipeline`**
-- Tests financial ratio calculation pipeline
-- Verifies key financial ratios
-- Tests ratio storage and retrieval
-
-### Frontend Integration Tests
-
-#### XBRL Financial Integration Tests (`xbrl-financial-integration.test.tsx`)
-
-**Test Suite: Financial Dashboard Integration**
-- Tests company financial data loading from XBRL sources
-- Verifies financial ratios display
-- Tests benchmark comparisons with industry data
-
-**Test Suite: Financial Statement Viewer Integration**
-- Tests balance sheet data display from XBRL parsing
-- Tests income statement data display
-- Tests hierarchical line item display
-
-**Test Suite: Benchmark Comparison Integration**
-- Tests industry benchmark data display for XBRL-derived ratios
-- Tests industry distribution percentiles
-- Verifies performance indicators
-
-**Test Suite: Trend Analysis Integration**
-- Tests trend analysis for XBRL-derived financial ratios
-- Tests trend direction and strength indicators
-- Verifies historical data display
-
-**Test Suite: XBRL Data Processing Integration**
-- Tests XBRL instance document processing status
-- Tests XBRL taxonomy schema references
-- Verifies data processing pipeline
-
-**Test Suite: Error Handling Integration**
-- Tests XBRL parsing error handling
-- Tests missing XBRL taxonomy schema handling
-- Verifies graceful error recovery
-
-**Test Suite: Performance Integration**
-- Tests large XBRL dataset handling
-- Verifies performance requirements
-- Tests data loading efficiency
-
-## Test Data
-
-### Mock Company Data
 ```typescript
 const mockCompany = {
   id: 'test-company-1',
@@ -145,148 +65,114 @@ const mockCompany = {
 };
 ```
 
-### Mock Financial Statements
-- Balance Sheet with Assets, Liabilities, and Stockholders' Equity
-- Income Statement with Revenues and Net Income
-- Hierarchical line item structure with proper parent-child relationships
+The dashboard's GraphQL fixture supplies the displayed industry “Technology
+Hardware & Equipment.” The local company object above belongs to the separate
+`mockFetch` setup, so changing it alone does not change the dashboard response.
 
-### Mock Financial Ratios
-- Return on Equity (ROE): 14.7%
-- Net Profit Margin: 25.3%
-- Industry benchmarks and percentile rankings
+The statement display checks expect Total Assets of `$352.76B`, Current Assets of
+`$143.57B`, Total Liabilities of `$258.55B`, Stockholders' Equity of `$94.21B`, and
+Net Sales of `$383.29B`. The local ratio fixtures include ROE `0.147` (14.7%) and
+net profit margin `0.253` (25.3%). These are supplied values, not evidence that the
+suite calculates ratios from XBRL input. The benchmark props supply P10 `0.08`,
+P25 `0.10`, median `0.12`, P75 `0.15`, and P90 `0.18`.
 
-### Mock Benchmark Data
-- Industry distribution percentiles (P10, P25, Median, P75, P90)
-- Performance indicators and confidence levels
-- Trend analysis data
+## Prerequisites
 
-## Running the Tests
+### Backend
 
-### Backend Integration Tests
+Use the repository's Rust toolchain and an already reachable, disposable
+PostgreSQL database. Set `DATABASE_URL` explicitly to that database. The database
+role must be able to drop and recreate its `public` schema and run migrations.
+
+In this target, core is compiled as a dependency, so `TestContainer::new()` connects
+to `DATABASE_URL`; it does not start a container or create a database. Its fallback
+is `postgres://localhost/econ_graph_test`. Each of the four database-backed tests
+calls `clean_database()`, which **drops the entire `public` schema with `CASCADE`,
+recreates it, and runs migrations**. The parser-construction test does not call
+this helper. See [TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle)
+and [cleaning and migration targets](DATABASE_TESTING.md#cleaning-and-migration-targets).
+
+Run the target serially, and do not run other tests against the same database at
+the same time. `--test-threads=1` only serializes tests within a test binary; it
+does not coordinate separate Cargo processes. The helper applies migrations, so
+these commands do not require a separate Diesel CLI migration step.
+
+### Frontend
+
+Use Node.js 26, as specified by [`.nvmrc`](../../.nvmrc), and npm. Install the
+frontend dependencies with `npm ci` from `frontend/`. This suite supplies mocked
+GraphQL data and does not require a running backend API or a database. Select the
+[integration Vitest configuration](../../frontend/vitest.integration.config.ts);
+the default configuration excludes this TSX integration file.
+
+## Running the tests
+
+### Backend target
+
+Run this block from `backend/`. Replace the example URL with your disposable test
+database before executing the tests; the schema cleanup described above applies.
 
 ```bash
-# Run all backend integration tests
-cd backend
-./scripts/run-integration-tests.sh
-
-# Run specific test file
-cargo test --test integration_xbrl_financial_tests -- --nocapture
-
-# Run specific test
-cargo test test_xbrl_taxonomy_schema_storage --test integration_xbrl_financial_tests -- --nocapture
+export DATABASE_URL='postgres://localhost/econ_graph_test'
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture --test-threads=1
 ```
 
-### Frontend Integration Tests
+To select one test, run this command from `backend/`, with `DATABASE_URL` already
+set to the same disposable database:
 
 ```bash
-# Run all frontend integration tests
-cd frontend
-./scripts/run-integration-tests.sh
-
-# Run specific test file
-npm test -- --testNamePattern="xbrl-financial-integration"
-
-# Run specific test suite
-npm test -- --testNamePattern="Financial Dashboard Integration"
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture --test-threads=1
 ```
 
-## Test Environment Setup
+### Frontend file
 
-### Database Requirements
-- PostgreSQL database running on localhost:5432
-- Test database: `econgraph_test`
-- User: `econgraph` with password `password`
+Run this command from `frontend/`, after installing dependencies:
 
-### Dependencies
-- Rust toolchain with Cargo
-- Node.js and npm
-- PostgreSQL client tools
-- Diesel CLI for database migrations
-
-### Environment Variables
 ```bash
-export DATABASE_URL="postgresql://econgraph:password@localhost/econgraph_test"
-export REACT_APP_API_URL="http://localhost:8080"
-export REACT_APP_ENVIRONMENT="test"
+npm run test:integration -- src/__tests__/integration/xbrl-financial-integration.test.tsx
 ```
 
-## Test Coverage
+To select the dashboard suite, run this command from `frontend/`:
 
-The integration tests cover:
+```bash
+npm run test:integration -- src/__tests__/integration/xbrl-financial-integration.test.tsx -t 'Financial Dashboard Integration'
+```
 
-### Backend Coverage
-- ✅ XBRL taxonomy schema storage and retrieval
-- ✅ XBRL instance document processing
-- ✅ DTS reference discovery and management
-- ✅ XBRL parsing with local DTS support
-- ✅ Financial statement generation from XBRL facts
-- ✅ Financial ratio calculation and analysis
-- ✅ SEC crawler integration
-- ✅ Database operations and data integrity
-- ✅ Error handling and edge cases
+The [`test:integration` script](../../frontend/package.json) selects
+`vitest.integration.config.ts`. A test-name filter alone does not override the
+integration-file exclusions in the [default Vitest configuration](../../frontend/vitest.config.ts).
 
-### Frontend Coverage
-- ✅ Financial dashboard component integration
-- ✅ Financial statement viewer integration
-- ✅ Benchmark comparison integration
-- ✅ Trend analysis integration
-- ✅ XBRL data processing integration
-- ✅ Error handling and user feedback
-- ✅ Performance with large datasets
-- ✅ API integration and data flow
+## Continuous integration
 
-## Test Validation
+[Core CI](../../.github/workflows/ci-core.yml) runs the SEC crawler's tests with
+`--features xbrl-parser --no-fail-fast --tests -- --test-threads=1` in its workspace
+test step, which selects this backend integration target. Its database setup is
+part of the workflow; the local commands above require an existing database.
 
-### Data Integrity Checks
-- Balance sheet equation validation (Assets = Liabilities + Equity)
-- XBRL fact accuracy and completeness
-- Financial ratio calculation accuracy
-- Industry benchmark data validation
-
-### Performance Requirements
-- Large dataset processing (< 2 seconds)
-- Memory usage optimization
-- Database query efficiency
-- Frontend rendering performance
-
-### Error Handling
-- XBRL parsing error recovery
-- Missing taxonomy schema handling
-- Network error handling
-- Database connection error handling
-
-## Continuous Integration
-
-The integration tests are designed to run in CI/CD pipelines:
-
-1. **Database Setup**: Automated test database creation and migration
-2. **Test Execution**: Parallel test execution where possible
-3. **Cleanup**: Automated test database cleanup
-4. **Reporting**: Detailed test results and coverage reports
+The job named “Frontend Integration Tests” runs `npm run test:coverage`. That
+script uses the default Vitest configuration, which excludes
+`**/__tests__/integration/**/*.test.tsx`. A passing result from that job therefore
+does not establish that this frontend file ran. Use the explicit integration
+command above to select it locally.
 
 ## Troubleshooting
 
-### Common Issues
+For database connection or cleanup failures, check that `DATABASE_URL` names the
+intended disposable database, PostgreSQL is reachable, and the role can recreate
+its schema and apply migrations. Check for another test process using the same
+database if fixtures disappear or tables change during a run.
 
-**Database Connection Errors**
-- Ensure PostgreSQL is running
-- Verify database credentials
-- Check network connectivity
+Parser initialization failures belong to `XbrlParser::new()`; this target does
+not diagnose XML parsing or DTS resolution from an instance document.
 
-**XBRL Parsing Errors**
-- Verify test data format
-- Check DTS schema availability
-- Validate XML structure
+For frontend failures, first confirm that the integration configuration selected
+the file. Then check the mocked GraphQL operation names, fixture responses, and
+component props against the failing assertion. Changes to the unattached
+`mockFetch` stub do not change `executeGraphQL` responses.
 
-**Frontend Test Failures**
-- Ensure backend API is accessible
-- Check mock data consistency
-- Verify component dependencies
+The backend commands already include `--nocapture`. For verbose frontend output,
+run this command from `frontend/`:
 
-### Debug Mode
-
-Run tests with verbose output for debugging:
 ```bash
-cargo test -- --nocapture --test-threads=1
-npm test -- --verbose
+npm run test:integration -- src/__tests__/integration/xbrl-financial-integration.test.tsx --reporter=verbose
 ```

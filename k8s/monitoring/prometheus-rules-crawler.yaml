@@ -83,7 +83,7 @@ data:
         # counters only appear after the first upstream request), so its absence means the
         # worker's /metrics is not being scraped.
         - alert: CrawlerMetricsMissing
-          expr: absent(crawler_queue_items) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
+          expr: absent(sum(crawler_queue_items{kubernetes_namespace="econ-graph"})) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
           for: 1h
           labels:
             severity: info
@@ -172,8 +172,26 @@ data:
         # The worker only makes requests when due jobs exist, so an empty queue also yields
         # zero traffic; this is a warning, not critical. Per-source "no traffic" alerts were
         # dropped: sources are crawled on their own schedules and an idle source is normal.
+        # Scope static-mode suppression to the primary data plane. Every discovered primary worker
+        # scrape target must report its mode; a missing/failed scrape or old image fails open.
+        # Branch workers cannot mute primary warnings or re-enable them on a static primary.
         - alert: CrawlerNoTraffic
-          expr: sum(rate(econgraph_crawler_requests_total[15m])) == 0
+          expr: |
+            (sum(rate(econgraph_crawler_requests_total{kubernetes_namespace="econ-graph"}[15m])) == 0)
+            unless on()
+            (
+              (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+              and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+              unless on()
+              (
+                (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+                or on(job, instance)
+                (
+                  up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                  unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                )
+              )
+            )
           for: 1h
           labels:
             severity: warning
@@ -255,8 +273,24 @@ data:
         # successful crawl is older than twice that. The scheduler retries a failed series only after
         # twice its interval, so one failed refresh is enough to make it overdue until a retry succeeds;
         # a series that always fails keeps it firing until it is fixed or deactivated (runbook).
+        # Suppress primary freshness only with complete, explicitly disabled scheduler modes.
         - alert: CrawlerSourceNotRefreshed
-          expr: max by (source) (crawler_coverage_series_overdue) > 0
+          expr: |
+            (max by (source) (crawler_coverage_series_overdue{kubernetes_namespace="econ-graph"}) > 0)
+            unless on()
+            (
+              (max(crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}) == 0)
+              and on() (count(up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}) > 0)
+              unless on()
+              (
+                (up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"} == 0)
+                or on(job, instance)
+                (
+                  up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph"}
+                  unless on(job, instance) crawler_scheduler_enabled{kubernetes_namespace="econ-graph"}
+                )
+              )
+            )
           for: 30m
           labels:
             severity: warning
@@ -280,8 +314,8 @@ data:
         - alert: CrawlerCoverageStale
           expr: |
             (
-              (time() - max(crawler_coverage_last_refresh_timestamp_seconds) > 900)
-              or on() absent(crawler_coverage_last_refresh_timestamp_seconds)
+              (time() - max(crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}) > 900)
+              or on() absent(sum(crawler_coverage_last_refresh_timestamp_seconds{kubernetes_namespace="econ-graph"}))
             )
             and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
           for: 30m

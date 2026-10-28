@@ -1,279 +1,175 @@
-# XBRL Financial CI Integration Tests Documentation
+# XBRL Financial CI Integration Tests
 
-## Overview
-
-This document describes the comprehensive CI integration test structure for XBRL financial statement features, organized within the existing CI framework using testcontainers for proper isolation and reproducibility.
-
-## Architecture
-
-The integration tests are organized into two main components:
-
-### Backend Integration Tests
-- **Location**: `backend/crates/econ-graph-sec-crawler/tests/xbrl_financial_integration_tests.rs`
-- **Technology**: Rust with testcontainers for PostgreSQL
-- **Scope**: End-to-end XBRL processing pipeline from SEC EDGAR crawling through financial data processing
-
-### Frontend Integration Tests
-- **Location**: `frontend/src/__tests__/integration/xbrl-financial/`
-- **Technology**: React Testing Library with Jest
-- **Scope**: UI component integration with XBRL financial data APIs
+The XBRL financial tests cover backend record persistence and parser initialization,
+and frontend components rendered with mocked financial data. They do not exercise
+SEC EDGAR crawling or parse a filing through to the UI. This guide explains what
+the suites assert, how to select them locally, and which routes CI uses.
 
 ## Backend Integration Tests
 
-### Test Structure
+The [backend test target](../../backend/crates/econ-graph-sec-crawler/tests/xbrl_financial_integration_tests.rs)
+is `xbrl_financial_integration_tests` in `econ-graph-sec-crawler`. It requires the
+`xbrl-parser` feature.
 
-The backend integration tests use testcontainers to provide isolated PostgreSQL instances for each test run, ensuring:
+### Database Prerequisites
 
-1. **Isolation**: Each test runs with a clean database state
-2. **Reproducibility**: Tests produce consistent results across environments
-3. **Parallel Execution**: Multiple tests can run simultaneously without conflicts
+Provide a reachable, disposable PostgreSQL database before running this target.
+Although the tests use `TestContainer`, the core crate is compiled as a dependency
+of this integration-test binary. In that mode, the helper connects to
+`DATABASE_URL`, falling back to `postgres://localhost/econ_graph_test`; it does not
+start a container. See the [TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle).
 
-### Key Test Categories
+The four persistence tests call `clean_database()`, which **drops the entire
+`public` schema with `CASCADE`**, recreates it, and runs migrations. Set
+`DATABASE_URL` explicitly to the disposable database and keep other test binaries,
+Cargo processes, and applications away from that database while this suite runs.
+All five tests have `#[serial]`, which coordinates these tests within the binary;
+it does not protect the database from other processes. See
+[cleaning and migration targets](DATABASE_TESTING.md#cleaning-and-migration-targets).
 
-#### 1. XBRL Taxonomy Schema Storage and Retrieval
-```rust
-#[tokio::test]
-#[serial]
-async fn test_xbrl_taxonomy_schema_storage() {
-    let container = TestContainer::new().await;
-    container.clean_database().await.unwrap();
-    // Test taxonomy schema storage and retrieval
-}
-```
+### Assertions and Fixtures
 
-#### 2. XBRL Instance Document Processing
-```rust
-#[tokio::test]
-#[serial]
-async fn test_xbrl_instance_processing() {
-    // Test complete XBRL instance processing pipeline
-}
-```
+The target contains five tests:
 
-#### 3. Financial Statement Generation
-```rust
-#[tokio::test]
-#[serial]
-async fn test_financial_statement_generation() {
-    // Test generation of financial statements from XBRL facts
-}
-```
+| Test | What it checks |
+| --- | --- |
+| `test_xbrl_taxonomy_schema_storage` | Inserts a taxonomy schema, checks its namespace, filename, source type and byte storage, then retrieves it by ID. |
+| `test_financial_statement_processing` | Inserts a company, statement and two line items; checks that Assets and Liabilities are inserted and retrieved in order. |
+| `test_xbrl_parser_integration` | Checks that `XbrlParser::new()` returns successfully. It does not parse a document. |
+| `test_dts_dependency_management` | Inserts US-GAAP and SEC-DEI schema records and checks their namespaces. It does not resolve dependencies. |
+| `test_xbrl_instance_dts_reference_tracking` | Inserts company, statement and schema records; checks the statement's company ID and schema namespace. It does not assert a statement-to-schema reference. |
 
-#### 4. SEC Crawler Integration
-```rust
-#[tokio::test]
-#[serial]
-async fn test_sec_crawler_xbrl_integration() {
-    // Test SEC crawler with XBRL processing
-}
-```
+These tests construct small records directly. Schema fixtures contain minimal
+schema bytes; filing URLs and `10-K` metadata are record fields, not downloaded
+filings. The target does not test crawling, filing parsing, or statement generation
+from XBRL facts.
 
-#### 5. Complete Pipeline Testing
-```rust
-#[tokio::test]
-#[serial]
-async fn test_complete_sec_crawler_xbrl_pipeline() {
-    // Test end-to-end pipeline from crawling to financial analysis
-}
-```
+### Running and Debugging
 
-### Running Backend Tests
+From the repository root, enter the Cargo workspace. First set `DATABASE_URL` in
+your shell to the disposable database described above.
 
 ```bash
-# Run all XBRL financial integration tests
-cargo test --package econ-graph-sec-crawler --features xbrl-parser --test "xbrl_financial_integration_tests"
+cd backend
+cargo test --package econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests
 
-# Run with verbose output
-cargo test --package econ-graph-sec-crawler --features xbrl-parser --test "xbrl_financial_integration_tests" -- --nocapture
+# Show test output.
+cargo test --package econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture
 
-# Run using the optimized test runner
-./scripts/run-tests-optimized.sh
+# Focus on one test with debug logging.
+RUST_LOG=debug cargo test --package econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture
 ```
+
+From `backend/`, `./scripts/run-tests-optimized.sh` also selects this target with
+`xbrl-parser` in its full mode, along with other backend suites. Its quick mode
+skips integration tests; use the explicit Cargo command above to run only this
+target.
 
 ## Frontend Integration Tests
 
-### Test Structure
+The [frontend test file](../../frontend/src/__tests__/integration/xbrl-financial-integration.test.tsx)
+uses Vitest and React Testing Library in jsdom. The
+[integration configuration](../../frontend/vitest.integration.config.ts) selects
+integration `.test.tsx` files and loads
+[the integration setup](../../frontend/src/setupTests.integration.ts).
 
-The frontend integration tests are organized within the CI structure and use the existing test framework:
+The suite renders financial components with React Query and routing providers.
+It defines MSW handlers and an `executeGraphQL` mock for financial statements,
+ratios and benchmarks. Some scenarios also configure a `mockFetch` function, but
+the assignment to `global.fetch` is commented out in the file. The suite does not
+require a live backend or a browser session. Successful assertions would establish
+component behavior with mock responses rather than backend API compatibility.
 
-- **Configuration**: `frontend/ci/configs/xbrl-financial-integration.config.ts`
-- **Setup**: `frontend/ci/configs/setup/xbrl-financial-global-setup.ts`
-- **Teardown**: `frontend/ci/configs/setup/xbrl-financial-global-teardown.ts`
+### Test Categories
 
-### Key Test Categories
+The file's describe-block names provide navigation; their assertions cover the
+following behavior:
 
-#### 1. Financial Dashboard Integration
-```typescript
-describe('Financial Dashboard Integration', () => {
-  it('should load and display company financial data from XBRL sources', async () => {
-    // Test dashboard with XBRL data
-  });
-});
-```
+- **Financial Dashboard Integration** checks company data, ratios and benchmark comparisons.
+- **Financial Statement Viewer Integration** checks balance sheets, income statements and hierarchical line items.
+- **Benchmark Comparison Integration** checks industry benchmarks and distribution percentiles.
+- **Trend Analysis Integration** checks ratio trends, direction and strength.
+- **XBRL Data Processing Integration** checks company and industry text in one case,
+  and Total Assets and Current Assets labels in another. It does not assert
+  processing-status or taxonomy-reference displays.
+- **Error Handling Integration** checks the Financial Statements heading or Apple
+  Inc. text. It does not assert parsing-error or missing-schema displays.
+- **Performance Integration** times rendering until Total Assets appears and
+  asserts a duration below two seconds.
 
-#### 2. Financial Statement Viewer Integration
-```typescript
-describe('Financial Statement Viewer Integration', () => {
-  it('should display balance sheet data from XBRL parsing', async () => {
-    // Test statement viewer with XBRL data
-  });
-});
-```
+The processing, taxonomy and error scenarios configure responses on the
+disconnected `mockFetch` function described above. The performance case also puts
+its 1,000-row dataset on that unused mock, so its timing assertion does not
+establish large-dataset rendering performance. Passing these cases would not
+verify the scenario-specific behavior suggested by their names. Separately, the
+frontend assertion failures and missing CI selection are tracked in
+[ECO-442](https://linear.app/econgraph/issue/ECO-442).
 
-#### 3. Benchmark Comparison Integration
-```typescript
-describe('Benchmark Comparison Integration', () => {
-  it('should display industry benchmark data for XBRL-derived ratios', async () => {
-    // Test benchmark comparison with XBRL ratios
-  });
-});
-```
+### Running and Debugging
 
-### Running Frontend Tests
+With frontend dependencies installed, run these commands from the repository root:
 
 ```bash
-# Run XBRL financial integration tests
-npm run test:xbrl-financial:integration
+cd frontend
+# Select the XBRL component suite using the integration configuration.
+npm run test:integration -- src/__tests__/integration/xbrl-financial-integration.test.tsx
 
-# Run all integration tests
+# Select all component integration tests.
 npm run test:integration
 
-# Run with CI configuration
-npx playwright test --config=ci/configs/xbrl-financial-integration.config.ts
+# Focus on a describe block and show individual results.
+npm run test:integration -- src/__tests__/integration/xbrl-financial-integration.test.tsx -t "Financial Dashboard Integration" --reporter=verbose
 ```
 
-## CI Integration
+Use the integration configuration explicitly. The dedicated
+`test:xbrl-financial:integration` npm script uses the default Vitest configuration,
+which excludes integration `.test.tsx` files, so that alias does not run this suite.
+The separate [Playwright configuration](../../frontend/ci/configs/xbrl-financial-integration.config.ts)
+uses a different runner and resolves its test directory under `frontend/ci/src/`,
+where this suite does not live. It is not an alternative entry point for these
+jsdom tests.
 
-### Docker Compose Configuration
+## CI and the Compose Helper
 
-The XBRL financial integration tests are integrated into the main CI pipeline:
+### Hosted CI
 
-```yaml
-# XBRL Financial Integration Tests
-test-xbrl-financial:
-  build:
-    context: ../../
-    dockerfile: ci/docker/Dockerfile.test-runner
-  environment:
-    - BACKEND_URL=http://backend:9876
-    - FRONTEND_URL=http://frontend:18473
-    - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
-    - REACT_APP_ENABLE_XBRL_FEATURES=true
-    - REACT_APP_ENABLE_FINANCIAL_ANALYSIS=true
-  command: ["npm", "run", "test:xbrl-financial:integration"]
-  volumes:
-    - ./test-results/xbrl-financial:/app/test-results
-  depends_on:
-    - frontend
-    - backend
-```
-
-### Running in CI
+The [core CI workflow](../../.github/workflows/ci-core.yml) runs backend workspace
+tests and then explicitly runs SEC crawler tests with `xbrl-parser` enabled. Its
+feature-enabled command, from `backend/`, includes this integration target:
 
 ```bash
-# Run all test groups including XBRL financial
-./ci/scripts/run-tests.sh --group all
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1
+```
 
-# Run only XBRL financial integration tests
+The workflow's **Frontend Integration Tests** job runs `npm run test:coverage`.
+That script uses the default Vitest configuration, whose integration-file exclusion
+also applies here. A green frontend coverage job therefore does not validate the
+XBRL component suite.
+
+### Manual Compose Execution and Debugging
+
+The [Compose configuration](../../ci/docker/docker-compose.best-practice.yml)
+defines a `test-xbrl-financial` service with frontend and backend dependencies.
+The [test wrapper](../../ci/scripts/run-tests.sh) selects that service with the
+`xbrl-financial` group or includes it in `all`. This is a separate route from the
+hosted workflow. The service invokes `npm run test:xbrl-financial:integration`, so
+it has the same frontend selection gap described above; invoking the helper does
+not establish that the XBRL suite ran.
+
+For inspecting this Compose setup, the wrapper accepts the following commands
+from the repository root. They start services and require Docker and disposable
+test infrastructure.
+
+```bash
 ./ci/scripts/run-tests.sh --group xbrl-financial
 
-# Run without cleanup (for debugging)
-./ci/scripts/run-tests.sh --group xbrl-financial --no-cleanup
-```
-
-## Test Data Management
-
-### Mock Data Strategy
-
-Both backend and frontend tests use comprehensive mock data:
-
-#### Backend Mock Data
-- **Companies**: Real company data (Apple Inc., Chevron, etc.)
-- **XBRL Instances**: Sample 10-K filings with realistic financial data
-- **Taxonomy Schemas**: US-GAAP and company-specific schemas
-- **Financial Facts**: Comprehensive balance sheet and income statement data
-
-#### Frontend Mock Data
-- **API Responses**: Mocked financial statements, ratios, and benchmark data
-- **Component Props**: Realistic data for all financial UI components
-- **Error Scenarios**: Mocked API errors for error handling tests
-
-### Test Isolation
-
-Each test is completely isolated:
-- **Database**: Fresh testcontainers instance for each test
-- **API Calls**: Mocked responses with predictable data
-- **UI State**: Clean component state for each test
-- **Browser**: Isolated browser context for frontend tests
-
-## Performance Considerations
-
-### Backend Tests
-- **Parallel Execution**: Tests run in parallel using `#[serial]` only where necessary
-- **Testcontainers**: Efficient container reuse and cleanup
-- **Database Optimization**: Optimized queries and minimal test data
-
-### Frontend Tests
-- **Component Mocking**: Efficient mocking of heavy dependencies
-- **Async Testing**: Proper async/await patterns for API calls
-- **Performance Testing**: Tests for large dataset handling
-
-## Error Handling and Debugging
-
-### Backend Debugging
-```bash
-# Run with verbose output
-RUST_LOG=debug cargo test --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture
-
-# Run specific test
-cargo test --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture
-```
-
-### Frontend Debugging
-```bash
-# Run with debugging output
-npm run test:xbrl-financial:integration -- --verbose
-
-# Run specific test file
-npm run test:xbrl-financial:integration -- --testNamePattern="Financial Dashboard Integration"
-```
-
-### CI Debugging
-```bash
-# Run with no cleanup to inspect containers
+# Retain containers after the run for inspection.
 ./ci/scripts/run-tests.sh --group xbrl-financial --no-cleanup
 
-# Access running container
-docker exec -it <container_name> /bin/bash
+# Run every group supported by the wrapper.
+./ci/scripts/run-tests.sh --group all
 ```
 
-## Best Practices
-
-### Test Design
-1. **Single Responsibility**: Each test focuses on one specific integration point
-2. **Realistic Data**: Use realistic financial data that mirrors production scenarios
-3. **Error Scenarios**: Test both success and failure paths
-4. **Performance**: Include performance benchmarks for critical paths
-
-### CI Integration
-1. **Parallel Execution**: Tests run in parallel where possible
-2. **Resource Management**: Efficient use of testcontainers and cleanup
-3. **Reporting**: Comprehensive test reports with detailed failure information
-4. **Artifacts**: Test results and screenshots saved for debugging
-
-### Maintenance
-1. **Regular Updates**: Keep mock data current with real financial reporting
-2. **Schema Validation**: Ensure tests validate against current XBRL taxonomies
-3. **Performance Monitoring**: Track test execution times and optimize as needed
-4. **Documentation**: Keep test documentation current with implementation changes
-
-## Conclusion
-
-The XBRL financial CI integration tests provide comprehensive coverage of the entire XBRL processing pipeline, from SEC EDGAR data ingestion through financial analysis and visualization. The use of testcontainers ensures reliable, isolated testing while the CI integration provides automated validation of the complete system.
-
-This structure supports:
-- **Reliable Testing**: Consistent results across different environments
-- **Comprehensive Coverage**: End-to-end validation of XBRL features
-- **Efficient Execution**: Parallel testing with proper resource management
-- **Easy Debugging**: Clear test structure and debugging capabilities
-- **CI Integration**: Seamless integration with existing CI/CD pipeline
+Use test output to confirm that the intended file was selected and its assertions
+passed. Neither the presence of a Compose service nor a passing coverage job
+substitutes for running the component suite through its integration configuration.

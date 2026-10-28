@@ -6,7 +6,7 @@ commands below from `backend/`, and use a disposable test database.
 ## Current Infrastructure
 
 - [Core test utilities](../../backend/crates/econ-graph-core/src/test_utils.rs) provide
-  `TestContainer`, `get_test_db()`, and `db_test()`.
+  `TestContainer`, `get_test_db()`, `db_test()`, and `ScratchDatabase`.
 - [Dataset tests](../../backend/crates/econ-graph-core/src/models/dataset/tests.rs) show
   a separate pool helper, one-time migrations, and unique rows per test.
 - [GraphQL migration helper](../../backend/crates/econ-graph-graphql/src/graphql/test_db.rs)
@@ -76,11 +76,24 @@ For a new database test, follow the target module's existing setup and locking
 convention. Prefer unique fixture IDs when cleanup is unnecessary. See the dataset
 tests for an example that runs migrations once and avoids dropping the schema.
 
+## ScratchDatabase Lifecycle
+
+Core migration tests use `ScratchDatabase::create()` to create a uniquely named
+database on the server named by `DATABASE_URL`, falling back to
+`postgres://localhost/econ_graph_test`. Each scratch database is separate from the
+database used by the shared `TestContainer`. The helper attempts to drop the
+scratch database when it goes out of scope; cleanup errors are ignored.
+
 ## Running Tests
 
 Prerequisites are Rust, a reachable disposable PostgreSQL instance for tests using
 external pools, and a running Docker daemon for container-backed tests. Schema
 validation additionally invokes the Diesel CLI's `print-schema`.
+
+Core migration tests, including those run by the full core unit suite and workspace
+suite below, also require the `DATABASE_URL` role to be allowed to create databases
+on that disposable PostgreSQL server (for example, with `CREATEDB`). The dataset-only
+command uses an existing database and does not require database-creation permission.
 
 From the repository root:
 

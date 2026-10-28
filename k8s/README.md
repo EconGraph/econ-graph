@@ -23,18 +23,14 @@ This directory contains all the necessary files to deploy EconGraph to a local K
   installer; only read-only `kind get` commands fall back to the `kind` on `PATH`, with a
   warning. Re-running the installer does nothing when the right version is in place.
 
-### One-Command Setup
+### Setup
 
 ```bash
-./scripts/deploy/setup-local-k8s.sh
+sudo scripts/host/setup-subvolumes.sh                    # host storage under /srv/econgraph, once per host
+./scripts/deploy/recreate-kind-cluster.sh --if-missing   # the kind cluster, if there is none
+./scripts/deploy/build-images.sh                         # the images
+./scripts/deploy/deploy.sh                               # databases, Secrets, application, routes
 ```
-
-This script will:
-
-1. Create a local Kubernetes cluster using Terraform
-2. Build Docker images for frontend and backend
-3. Deploy the application to the cluster
-4. Set up ingress and services
 
 ## 📁 Directory Structure
 
@@ -53,8 +49,12 @@ k8s/
 │   ├── frontend-deployment.yaml # Frontend deployment
 │   ├── admin-frontend-deployment.yaml # Admin UI deployment
 │   ├── admin-frontend-service.yaml    # Admin UI service
-│   ├── ingress.yaml     # Ingress configuration
-│   └── graphql-ingress.yaml # /graphql, rate-limited per client IP
+│   └── gateway/         # The gateway (Envoy Gateway): see "Gateway" below
+│       ├── envoy-proxy.yaml, gatewayclass.yaml, gateway.yaml
+│       ├── gateway-https.yaml   # optional listener https
+│       ├── client-traffic-policy.yaml # drops client-sent forwarding headers
+│       ├── ratelimit-burst.yaml # bursts of 100 for the GraphQL rate limits
+│       └── routes/          # this namespace's HTTPRoutes and rate limits
 └── README.md           # This file
 
 terraform/k8s/          # Terraform configuration
@@ -63,9 +63,12 @@ terraform/k8s/          # Terraform configuration
 └── outputs.tf         # Outputs
 
 scripts/deploy/         # Deployment scripts
-├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
+├── install-gateway.sh # Install the gateway (run by deploy.sh)
+├── apply-gateway-routes.sh # Apply the routes, with the https host name (run by deploy.sh)
+├── test-gateway-routes.sh # Check every route on the gateway
+├── cutover-to-gateway.sh  # Move a cluster from ingress-nginx to the gateway
 ├── deploy.sh          # Deploy to K8s
 ├── mark-production-cluster.sh # Mark the cluster that serves the public site
 ├── teardown.sh        # Remove the app plane (the data plane only on request)
@@ -124,8 +127,8 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 
 - Issuer: `http://localhost/idp/realms/econ-graph`, or `https://<PUBLIC_HOST>/idp/realms/econ-graph`
   with a public host (see [Public site](#-public-site-cloudflare-tunnel)). Only `/idp/realms/econ-graph`
-  and `/idp/resources` are routed by the ingress; the master realm is not reachable
-  from outside the cluster.
+  and `/idp/resources` are routed by the gateway; the master realm and the admin console are not
+  reachable from outside the cluster.
 - Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
   then <http://localhost:18080/idp/admin>. The password is in the Secret:
   `kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d`
@@ -152,23 +155,90 @@ After deployment, the application will be available at:
 - **GraphQL**: <http://localhost/graphql>
 - **Health Check**: <http://localhost/health>
 
-**Note**: `k8s/manifests/ingress.yaml` and `k8s/manifests/keycloak/ingress.yaml` route on
-`host: localhost`, so no `/etc/hosts` entry is needed. The admin frontend isn't deployed by
-`deploy.sh`: `ingress.yaml` routes `/admin` to `econ-graph-admin-frontend-service`, which
-`deploy.sh` doesn't create, so it removes that route before applying the ingress.
+**Note**: the routes match host name `localhost`, so no `/etc/hosts` entry is needed. The admin
+frontend isn't deployed by `deploy.sh`, and `/admin` is not routed.
+
+## 🚪 Gateway
+
+The cluster's HTTP entry point is a Gateway API gateway run by Envoy Gateway.
+`scripts/deploy/install-gateway.sh` (run by `deploy.sh`; `--dry-run` prints what it
+would apply) installs pinned versions from the upstream release manifests, with no Helm:
+
+| Component | Version | Notes |
+| --- | --- | --- |
+| Gateway API CRDs | v1.6.3, standard channel | |
+| Envoy Gateway | v1.9.2 (Envoy Proxy 1.39) | supports Kubernetes v1.33 to v1.36 |
+
+New kind clusters run Kubernetes 1.36: `terraform/k8s/kind-config.yaml` pins
+`kindest/node:v1.36.4` by digest, which needs kind v0.33.0 or newer
+(`recreate-kind-cluster.sh` checks). A cluster created earlier keeps its Kubernetes version
+until it is recreated; `install-gateway.sh` accepts v1.33 to v1.36.
+
+| Object | Name | Where |
+| --- | --- | --- |
+| EnvoyProxy | `econ-graph-proxy` | `envoy-gateway-system`: one proxy replica on the node labelled `ingress-ready=true` (kind's control-plane node; the MicroK8s setup scripts label their node), holding host ports 80/443 as hostPorts; Service `econ-graph-gateway-proxy` (ClusterIP) |
+| GatewayClass | `econ-graph` | cluster |
+| Gateway | `econ-graph-gateway` | namespace `econ-graph-gateway`. Listener `http` (port 80) admits routes from namespaces labelled `econgraph.io/gateway-access: "true"`; listener `https` (port 443) exists only for a public host (see [Public site](#-public-site-cloudflare-tunnel)) |
+| ClientTrafficPolicy | `econ-graph-client-headers` | the client address: the TCP peer, or for a peer in the pod CIDRs (the tunnel connector) the rightmost `X-Forwarded-For` entry outside them; drops client-sent `X-Forwarded-Proto/-Host/-Port`, `Forwarded` and `X-Real-IP` |
+
+Routes in `econ-graph` (`k8s/manifests/gateway/routes/`), on host `localhost`:
+
+| HTTPRoute | Paths | Backend |
+| --- | --- | --- |
+| `econ-graph-frontend` | `/`, `/auth/callback`, `/silent-callback.html` | frontend; sets the security headers (CSP, HSTS, X-Frame-Options; only `/silent-callback.html` may be framed, by this origin) |
+| `econ-graph-backend` | `/api`, `/auth`, `/health` | backend; sets `X-Content-Type-Options`, `X-Frame-Options` and HSTS, as do the two GraphQL routes |
+| `econ-graph-graphql` | `/graphql` | backend; 20 requests a second per client address (IPv4 and IPv6), bursts of 100, then 429 |
+| `econ-graph-data-graphql` | `/data/graphql` | backend `/graphql`, with `Authorization` and `Cookie` removed; same rate limit |
+| `econ-graph-idp` | `/idp/realms/econ-graph`, `/idp/resources` | Keycloak |
+
+Every route sets `X-Forwarded-For` to the client address the gateway settled on, so Keycloak
+and the backend never see an entry a client wrote.
+
+The rate limit counts per client address: through the hostPorts that is the client's own
+address, except that requests from the host itself all arrive from the Docker bridge gateway;
+through the tunnel it is the visitor's. In-cluster callers reach the gateway at
+`http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/` with a `Host` header
+that one of the routes matches. NetworkPolicies match the proxy pod's ports (10080 for listener
+`http`, 10443 for `https`), not the Service port 80; `k8s/manifests/network-policy.yaml` lets
+every pod in `econ-graph` reach them, and admits the proxy only to the frontend, backend and
+Keycloak ports.
+
+Check every route with `./scripts/deploy/test-gateway-routes.sh [--rate-limit] [BASE_URL]`.
+Apply the routes with `./scripts/deploy/apply-gateway-routes.sh` (as `deploy.sh` does), not
+with `kubectl apply` on the directory: it also keeps the public host's routes, listener and
+certificate, or removes them (`PUBLIC_HOST`, below).
+
+While another pod holds host port 80 or 443 (kind's ingress-nginx, or MicroK8s's ingress
+add-on), `install-gateway.sh` runs the proxy without host ports and says how to free them.
+
+**Moving a cluster from ingress-nginx.** `./scripts/deploy/cutover-to-gateway.sh --dry-run`
+prints the steps; without `--dry-run` it installs the gateway next to ingress-nginx, checks every
+route through the proxy Service (the public host's too, over https as the tunnel sends it) and
+that a pod in `econ-graph` reaches the proxy, asks for confirmation, removes the Ingresses and
+ingress-nginx, moves the proxy onto ports 80/443 and checks the routes again. First it saves
+everything a rollback needs, including ingress-nginx's manifest, ConfigMaps, Deployment and
+Secrets and the gateway's release manifests, so neither direction needs the network once
+ingress-nginx is gone; `--rollback <dir>` restores ingress-nginx, the Ingresses and the saved
+NetworkPolicies. When `econ-graph` has any NetworkPolicy, the rollback also adds
+`econ-graph-ingress-nginx-rollback`, which admits ingress-nginx on ports 3000, 8080 and 9876
+(the next cut-over deletes it). It then checks that the frontend answers and that a GraphQL
+query gets data from the database. On a
+cluster with the tunnel it keeps the dashboard's old origin name answering (an ExternalName
+Service `ingress-nginx/ingress-nginx-controller` pointing at the gateway) and prints the
+dashboard change that retires it. Its header lists every step.
 
 ## 🌍 Public site (Cloudflare Tunnel)
 
 Production is served at <https://econgraph.com> (no hyphen) through a Cloudflare Tunnel:
 
 ```text
-browser --https--> Cloudflare edge --tunnel--> cloudflared (pod) --https--> ingress-nginx --> app, Keycloak
+browser --https--> Cloudflare edge --tunnel--> cloudflared (pod) --https--> gateway (listener https) --> app, Keycloak
 ```
 
 TLS for visitors ends at Cloudflare. The `cloudflared` Deployment
 (`k8s/manifests/cloudflared.yaml`) dials out to Cloudflare, so no port is opened for it on
 the host, and it runs in the cluster, so it comes back with the cluster after a reboot or a
-recreate. It reaches ingress-nginx over https, so the scheme ingress-nginx passes on is the
+recreate. It reaches the gateway's https listener, so the scheme the gateway passes on is the
 connection's own.
 
 **The host name is one setting, `PUBLIC_HOST`.** `deploy.sh` and `restart-k8s-rollout.sh`
@@ -178,31 +248,32 @@ apply it through `scripts/deploy/lib/public-host.sh` and
 
 | What | Value for `PUBLIC_HOST=econgraph.com` |
 | --- | --- |
-| Ingresses | a separate `<name>-public` Ingress per localhost one, for `econgraph.com`, labelled `econgraph.io/public-host=true`, with `force-ssl-redirect` and without `/admin`, `/api/admin` and `/playground` |
-| `www.econgraph.com` | permanent redirect to `https://econgraph.com`, same path (ingress-nginx `from-to-www-redirect`) |
+| Gateway | listener `https` (port 443, no host name, so any TLS server name gets the certificate), certificate `econ-graph-tls` for `econgraph.com` and `www.econgraph.com` from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `econ-graph-selfsigned`: only the tunnel connector sees it, unverified) |
+| HTTPRoutes | a separate `<name>-public` route per localhost one, for `econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
+| `www.econgraph.com` and plain http | `econ-graph-www-redirect` and `econ-graph-public-redirect`: permanent redirects to `https://econgraph.com`, same path |
 | Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
 | Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` and `http://localhost` |
 | Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
 | Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
-| ingress-nginx controller ConfigMap | `enable-real-ip`, `forwarded-for-header: CF-Connecting-IP`, `proxy-real-ip-cidr: <the nodes' pod CIDRs>` |
 
-`PUBLIC_HOST=` (empty) removes every piece again: the public Ingresses, the controller
-settings, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no
+`PUBLIC_HOST=` (empty) removes every piece again: the public routes, the https listener and its
+certificate, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no
 public host is deployed localhost-only, and on one that does, the scripts stop rather than
 take the site down. A non-empty `PUBLIC_HOST` is accepted only on a cluster marked
 production (see [Production marker](#production-marker)); anywhere else the deploy stops
 before applying anything.
 
-**What comes from client headers.** Only the visitor's address, from `CF-Connecting-IP`,
-and only when the request comes from a pod address (cloudflared). `use-forwarded-headers`
-is off, so ingress-nginx overwrites `X-Forwarded-Proto`, `-Host` and `-Port` with the
-connection's own scheme, `Host` and port, whatever a client sends. A plain-http request
+**What comes from client headers.** Only the visitor's address, from `X-Forwarded-For`
+(cloudflared sends it, as the Cloudflare edge saw the visitor), and only when the request
+comes from a pod address. The gateway drops `X-Forwarded-Proto`, `-Host` and `-Port` that a
+client sends and sets the scheme from the connection
+(`k8s/manifests/gateway/client-traffic-policy.yaml`). A plain-http request
 for `econgraph.com` (say from the LAN to the host's port 80) is redirected to https and
 never reaches the app or Keycloak in clear text. Keycloak builds its URLs from the full
 `KC_HOSTNAME`. `KC_PROXY_HEADERS=xforwarded` is kept only so that its events and
-brute-force detection see the visitor's address (`X-Forwarded-For`, which ingress-nginx
-sets). Any pod can claim an address in `CF-Connecting-IP`, so addresses logged for
-in-cluster callers are not audit-grade.
+brute-force detection see the visitor's address (`X-Forwarded-For`, which every route sets to
+the address the gateway settled on). Any pod can claim an address that way, so addresses
+logged for in-cluster callers are not audit-grade.
 
 The frontend image needs no rebuild per host: `build-images.sh` builds it with the issuer
 `/idp/realms/econ-graph`, which the app resolves against the page's origin at runtime.
@@ -211,10 +282,6 @@ Images built before ECO-457 have an absolute issuer baked in, so rebuild them on
 www is redirected rather than served because sign-in uses one Keycloak issuer that the
 backend checks exactly. A second origin would need its own redirect URIs, web origins and
 CORS entry, and would split sessions between hosts.
-
-The old `k8s/manifests/ssl-ingress.yaml` is retired. It served econgraph.com and www without
-the `/graphql` rate limits, and the deploy scripts delete its Ingress
-(`econ-graph-ssl-ingress`) if a cluster still has it.
 
 **Tunnel token.** The token is the Secret `cloudflare-tunnel` (key `token`). Enter it
 yourself with hidden input, on the production cluster only, after marking it. It is never
@@ -245,18 +312,16 @@ one entry per host name:
 
 | Subdomain | Domain | Path | Service type | URL |
 | --- | --- | --- | --- | --- |
-| (empty) | `econgraph.com` | (empty) | `HTTPS` | `ingress-nginx-controller.ingress-nginx.svc.cluster.local:443` |
-| `www` | `econgraph.com` | (empty) | `HTTPS` | `ingress-nginx-controller.ingress-nginx.svc.cluster.local:443` |
+| (empty) | `econgraph.com` | (empty) | `HTTPS` | `econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443` |
+| `www` | `econgraph.com` | (empty) | `HTTPS` | `econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443` |
 
-Under *Additional application settings*, turn *TLS > No TLS Verify* on: ingress-nginx
-answers with its default certificate, and this hop stays inside the cluster. Leave *HTTP
-Settings > HTTP Host Header* empty, so that cloudflared sends the visitor's host
-(`econgraph.com` or `www.econgraph.com`), which is what the ingress rules match on. When
-ingress-nginx gives way to the Gateway API (ECO-433), the service URL changes to the
-Gateway's Service.
+Under *Additional application settings*, turn *TLS > No TLS Verify* on: the gateway answers
+with a self-signed certificate, and this hop stays inside the cluster. Leave *HTTP Settings >
+HTTP Host Header* empty, so that cloudflared sends the visitor's host (`econgraph.com` or
+`www.econgraph.com`), which is what the public routes match on.
 
 **Checks.** `scripts/deploy/check-public-site.sh --host econgraph.com` runs against the local
-ingress without DNS or the tunnel, connecting over https as cloudflared does. It checks:
+gateway without DNS or the tunnel, connecting over https as cloudflared does. It checks:
 
 - the frontend and a `/graphql` search;
 - the Keycloak discovery document (issuer `https://econgraph.com/idp/realms/econ-graph`) and the sign-in page;
@@ -462,7 +527,7 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
-| `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
+| `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |
 
 Read a value back with, for example:
@@ -503,10 +568,6 @@ export MONITORING_BASIC_AUTH="$(htpasswd -nB admin)"  # prompts for the password
 If you already replaced them another way, run the script once with
 `ALLOW_EXISTING_GRAFANA_VOLUME=1` or `ALLOW_MANIFEST_MONITORING_AUTH=1` to skip the check;
 later runs don't need them.
-
-Without `monitoring-auth`, the monitoring host in `ingress-cloudflare-dns01.yaml` returns 503
-until the Secret exists; `create-secrets.sh` warns when `MONITORING_BASIC_AUTH` is unset and the
-Secret is missing.
 
 ## 🗑️ Cleanup
 
@@ -572,10 +633,13 @@ place.
 
 3. **Pods not starting**: Check logs with `kubectl logs <pod-name> -n econ-graph`
 
-4. **Ingress not working**: Verify NGINX ingress controller is running:
+4. **Routes not answering**: check the gateway, its proxy and the routes' status:
 
    ```bash
-   kubectl get pods -n ingress-nginx
+   kubectl -n econ-graph-gateway get gateway econ-graph-gateway
+   kubectl -n envoy-gateway-system get pods
+   kubectl -n econ-graph get httproute -o wide
+   ./scripts/deploy/test-gateway-routes.sh
    ```
 
 ### Debug Commands
@@ -590,8 +654,8 @@ kubectl cluster-info
 # Check node status
 kubectl get nodes
 
-# Check ingress status
-kubectl get ingress -n econ-graph
+# Check route status
+kubectl -n econ-graph describe httproute
 ```
 
 ## 📈 Performance Tuning
@@ -640,7 +704,7 @@ For production use, consider:
 - [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [kind Documentation](https://kind.sigs.k8s.io/)
 - [Terraform Documentation](https://www.terraform.io/docs/)
-- [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+- [Envoy Gateway](https://gateway.envoyproxy.io/) and the [Gateway API](https://gateway-api.sigs.k8s.io/)
 
 Admin audit client-IP attribution depends on the verified proxy chain. See
 [Admin audit and trusted proxies](../docs/security/ADMIN_AUDIT.md) before setting

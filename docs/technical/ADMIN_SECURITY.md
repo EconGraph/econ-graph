@@ -1,299 +1,86 @@
 # EconGraph Administrative Interface Security
 
-## Overview
+The admin frontend provides crawler monitoring and management through the same backend used by the public application. Network access to the frontend and authorization of backend operations are separate controls: reaching the UI does not grant a backend role.
 
-The EconGraph administrative interface is a separate, secure web application designed for system administrators to monitor and manage the EconGraph platform. This interface is completely isolated from the public-facing application and includes multiple layers of security controls.
+## Deployment paths and reachability
 
-## Security Architecture
+The normal [deployment script](../../scripts/deploy/deploy.sh) does not deploy the admin frontend. It deletes existing standalone admin Deployment and Service resources. The [Gateway routes](../../k8s/manifests/gateway/routes/httproutes.yaml) send `/admin` through the public frontend's `/` fallback, not to the admin frontend. See the [Kubernetes deployment guide](../../k8s/README.md) for the supported deployment workflow.
 
-### Network Isolation
+The repository also contains standalone manifests and a Terraform frontend module. Their resource names, ports, and network configuration differ:
 
-The admin interface is deployed with strict network isolation:
+| Resource | Standalone Kubernetes manifests | Terraform frontend module |
+| --- | --- | --- |
+| Namespace | `econ-graph` | `econ-graph-admin` |
+| Deployment | `econ-graph-admin-frontend` | `admin-frontend` |
+| Service | `econ-graph-admin-frontend-service`, NodePort `30002`, Service and target port `3001` | `admin-frontend-service`, ClusterIP, Service and target port `3000` |
+| Frontend exposure | NodePort; no admin frontend Gateway route | ClusterIP; no supplied admin frontend Gateway route or ingress |
 
-- **Separate Namespace**: Deployed in `econ-graph-admin` namespace
-- **Network Policies**: Kubernetes network policies restrict traffic flow
-- **Separate Ingress**: Uses dedicated ingress controller with strict access controls
-- **Port Separation**: Runs on different ports from public interface
+The standalone definitions are the [Deployment](../../k8s/manifests/admin-frontend-deployment.yaml), [Service](../../k8s/manifests/admin-frontend-service.yaml), and [NGINX ConfigMap](../../k8s/manifests/admin-frontend-nginx-configmap.yaml). The [Terraform frontend module](../../terraform/modules/admin-frontend/main.tf) declares the namespace, frontend workload, Service, configuration, authentication Secret, service account and RBAC, and network policy. Neither path supplies a dedicated admin ingress controller or IP-filtered admin endpoint. The root Terraform `allowed_admin_ips` input does not configure an access filter in the surviving frontend module.
 
-### Access Controls
+The shared Gateway routes `/graphql` to backend port `9876`, retaining bearer credentials. It rewrites `/data/graphql` to the backend's `/graphql` after removing `Authorization` and `Cookie`, so that data route cannot carry staff credentials. The `/graphql` route exposes administrative GraphQL operations subject to backend authorization; omitting the admin frontend does not remove this backend route. A route declaration does not create a backend endpoint: the current backend does not implement the admin REST authentication routes described by the unused frontend contexts.
 
-#### IP Whitelisting
-- Only specified IP ranges can access the admin interface
-- Configurable via `allowed_admin_ips` in Terraform variables
-- Enforced at ingress level with NGINX whitelist
+**Terraform image compatibility:** the module expects its `${image_repository}/econ-graph-admin:${image_tag}` image to serve HTTP on port `3000`, with successful responses at `/health` for liveness and `/ready` for readiness. The checked-in [admin Dockerfile](../../admin-frontend/Dockerfile) and [NGINX configuration](../../admin-frontend/nginx.conf) instead use `3001`. An image built from that source does not match the module's Service targets or probes without configuration changes. A custom image may satisfy the module's `3000` contract; verify that contract before using the module or its port-forward example below.
 
-#### Authentication & Authorization
-- **Multi-Factor Authentication**: Required by default
-- **Role-Based Access Control**: Three levels (read_only, admin, super_admin)
-- **Session Management**: Short session timeouts (30 minutes default)
-- **JWT Tokens**: Secure token-based authentication
+### Network policy and Gateway controls
 
-#### Rate Limiting
-- **Request Rate Limiting**: 10 requests per second per IP
-- **Connection Limiting**: 5 concurrent connections per IP
-- **Login Attempts**: Protection against brute force attacks
+Terraform's `admin-network-isolation` policy selects all pods in `econ-graph-admin`. It declares TCP `3000` ingress from namespaces labeled `name=monitoring` or addresses in `10.0.0.0/8`, UDP `53` egress for DNS, and TCP `8081` egress to namespaces labeled `name=econ-graph`. These are the supplied policy rules, not proof of isolation in a running cluster; their effect depends on network-policy support, namespace labels, and the actual traffic path. The policy does not configure browser access to the backend or supply a backend Service on port `8081`.
 
-### Security Headers
+The shared [GatewayClass](../../k8s/manifests/gateway/gatewayclass.yaml) is `econ-graph`, served by Envoy Gateway. The [HTTP listener](../../k8s/manifests/gateway/gateway.yaml) admits routes from namespaces labeled `econgraph.io/gateway-access: "true"`; the [public HTTPS listener](../../k8s/manifests/gateway/gateway-https.yaml) admits routes from namespaces labeled `econgraph.io/env: production`. These control which namespaces can attach routes, not which users may perform admin operations. See the [Gateway guidance](../../k8s/README.md#-gateway) for deployment and status checks.
 
-The admin interface enforces strict security headers:
+The [GraphQL rate-limit policies](../../k8s/manifests/gateway/routes/ratelimit-policies.yaml) declare 20 requests per second per client address on each GraphQL route, with separate buckets for `/graphql` and `/data/graphql`. The [HTTP burst patch](../../k8s/manifests/gateway/ratelimit-burst.yaml) and HTTPS listener configuration raise the burst capacity to 100 when applied. Limits are local to each proxy replica; the checked-in proxy configuration runs one replica. They limit requests through those routes, not login attempts or frontend connections.
 
-```
-X-Frame-Options: DENY
-X-Content-Type-Options: nosniff
-X-XSS-Protection: 1; mode=block
-Referrer-Policy: no-referrer
-Content-Security-Policy: default-src 'self'
-Strict-Transport-Security: max-age=31536000
-```
+The [client traffic policy](../../k8s/manifests/gateway/client-traffic-policy.yaml) derives the client address from the TCP peer, trusting forwarded addresses from pod CIDRs for tunnel traffic. The routes replace `X-Forwarded-For` with that derived address before forwarding to services. Callers sharing a NAT can share a rate bucket, and an in-cluster pod can claim a forwarded address; do not treat these client addresses as authoritative audit identity.
 
-### Monitoring & Alerting
+## Authentication and backend roles
 
-#### Security Events
-- All access attempts are logged
-- Failed authentication attempts trigger alerts
-- Unusual activity patterns are monitored
-- Real-time security event tracking
+The active [entry point](../../admin-frontend/src/main.tsx) renders [App](../../admin-frontend/src/App.tsx) directly, without the `AuthProvider` or `SecurityProvider`. The crawler tabs therefore have no sign-in gate from those providers. The [Apollo client](../../admin-frontend/src/services/graphqlClient.ts) uses `VITE_GRAPHQL_ENDPOINT`, defaulting to same-origin `/graphql`, and sends `localStorage.auth_token` as a bearer token when present. This entry point does not provide a Keycloak login flow to obtain that token.
 
-#### Audit Logging
-- Complete audit trail of all admin actions
-- Immutable log storage
-- Log retention for compliance requirements
-- Integration with SIEM systems
+The backend's [GraphQL caller handling](../../backend/crates/econ-graph-backend/src/main.rs) authenticates bearer tokens through the [OIDC verifier](../../backend/crates/econ-graph-auth/src/oidc.rs). `OIDC_ISSUER` configures the issuer, `OIDC_AUDIENCE` defaults to `econ-graph-api`, and `OIDC_JWKS_URL` can override key discovery. `OIDC_REQUIRED=true` makes startup fail when the issuer is absent; without an issuer, callers are anonymous. Protected admin operations require fine-grained roles such as `admin.crawlers:manage` and `admin.system:read` from the [backend role catalog](../../backend/crates/econ-graph-auth/src/roles.rs).
 
-## Deployment Configuration
+Staff role assignments belong in Keycloak. The [Keycloak roles reference](../../config/keycloak/README.md#roles) explains how realm composites grant the API client roles carried in the token. The `read_only`, `admin`, and `super_admin` hierarchy in the unused frontend `SecurityContext` is not the backend authorization model.
 
-### Terraform Variables
+The unused [AuthContext](../../admin-frontend/src/contexts/AuthContext.tsx) expects `/api/admin/auth/*` REST endpoints. The unused [SecurityContext](../../admin-frontend/src/contexts/SecurityContext.tsx) keeps browser events in React state and attempts to post high/critical events to `/api/admin/security/events`. Those endpoints are not in the current backend route composition, so these contexts do not establish a working authentication or durable event path.
 
-Required variables for admin interface deployment:
+Terraform declares `REACT_APP_MFA_REQUIRED=true`, `REACT_APP_SESSION_TIMEOUT=1800`, and `REACT_APP_AUDIT_LOGGING=true` in `admin-frontend-config`. These labels do not enforce MFA, a 30-minute session timeout, or audit capture in the active UI. Likewise, `admin_jwt_secret`, `admin_session_key`, and `admin_encryption_key` populate `admin-auth-secret`, which the module does not inject into the frontend container. They do not configure backend OIDC verification. Configure identity-provider authentication and session policy explicitly; do not rely on these frontend declarations as defaults or treat their rotation as OIDC session revocation.
 
-```hcl
-# Admin domain (use internal domain)
-admin_domain = "admin.internal.company.com"
+## Response headers and access logs
 
-# IP whitelist (customize for your environment)
-allowed_admin_ips = [
-  "10.0.0.0/8",      # Internal corporate network
-  "172.16.0.0/12",   # VPN network
-  "192.168.1.0/24",  # Admin workstation subnet
-]
+The [image NGINX configuration](../../admin-frontend/nginx.conf) and [standalone NGINX ConfigMap](../../k8s/manifests/admin-frontend-nginx-configmap.yaml) declare server-level `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: no-referrer-when-downgrade`, and CSP `default-src 'self' http: https: data: blob: 'unsafe-inline'`. The standalone Deployment mounts its ConfigMap over the image configuration. Static-asset and health locations declare their own `add_header` directives, so the server-level list does not establish the headers on every response. Assess the configuration and response location used by the installed frontend.
 
-# Authentication secrets (generate strong random values)
-admin_jwt_secret     = "256-bit-random-secret"
-admin_session_key    = "256-bit-random-secret"
-admin_encryption_key = "256-bit-random-secret"
+The Gateway's backend and GraphQL routes separately declare response filters setting `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and HSTS `max-age=31536000; includeSubDomains; preload`. Browsers apply HSTS only over HTTPS. The public frontend route has its own CSP and other headers; those filters do not apply to a separately installed admin frontend without a matching route.
 
-# TLS certificates (use internal CA)
-admin_tls_cert = "base64-encoded-certificate"
-admin_tls_key  = "base64-encoded-private-key"
+The frontend NGINX files declare access and error logs at `/var/log/nginx/access.log` and `/var/log/nginx/error.log`; `/health` disables access logging. Collect the logs actually produced by the installed components and arrange their storage separately from backend audit records. These file declarations do not provide centralized or immutable storage.
+
+## Audit records and monitoring
+
+The backend writes `audit_logs` and `security_events` to the app database. Its [audit implementation](../../backend/crates/econ-graph-graphql/src/graphql/audit.rs) records admin mutation attempts by callers holding the required role, including an outcome, and records signed-in callers' permission denials as security events. Writes are best-effort: an insert failure leaves the operation's reply unchanged, and process shutdown can interrupt a write. The [audit models](../../backend/crates/econ-graph-core/src/models/admin.rs) count write failures, exported by the [backend metrics](../../backend/crates/econ-graph-backend/src/metrics.rs) as `audit_write_failures_total`. These records are not a guaranteed complete or immutable trail.
+
+The [GraphQL queries](../../backend/crates/econ-graph-graphql/src/graphql/query.rs) require `admin.audit:read` for `auditLogs` and `admin.security:read` for `securityEvents` and `securityEventsPage`. Operators must arrange retention, backups, and any export to a SIEM for backend records and infrastructure logs.
+
+The supplied admin frontend module does not configure security alert rules or delivery. Operators must select the records and metrics relevant to their installation and arrange alert routing; permission denials and audit-write failures do not by themselves produce a delivered incident alert.
+
+## Diagnosis and recovery prerequisites
+
+Maintain cluster-operator access and an identity-provider recovery procedure independently of the admin UI. The [Keycloak Kubernetes reference](../../config/keycloak/README.md#kubernetes) describes the realm import and its administrator credential dependency; the [roles reference](../../config/keycloak/README.md#roles) describes staff mappings. The repository supplies no emergency-user executable or application break-glass account procedure.
+
+For a reachability failure, first identify the deployment path above. With the normal deploy, missing admin resources are expected. For a separately installed frontend, check its pods, Service ports, installed exposure path, DNS, TLS configuration, and network policies. If a custom Gateway route is used, check its parent listener and route status as well. For backend authorization failures, check OIDC issuer/audience configuration and staff role mappings. Bypassing the frontend exposure path changes reachability; it does not grant a role or repair the missing UI login flow.
+
+For standalone manifests, these diagnostic commands target the declared resources:
+
+```bash
+kubectl get pods -n econ-graph -l app=econ-graph-admin-frontend
+kubectl logs -n econ-graph deployment/econ-graph-admin-frontend
+kubectl port-forward -n econ-graph service/econ-graph-admin-frontend-service 8080:3001
 ```
 
-### Kubernetes Resources
+For Terraform, use its namespace and Deployment. Use the port-forward only with an image/configuration that satisfies the module's `3000` port contract:
 
-The admin interface creates the following isolated resources:
-
-- **Namespace**: `econ-graph-admin`
-- **Deployment**: Admin frontend with security context
-- **Service**: Internal ClusterIP service
-- **NetworkPolicy**: Ingress/egress traffic restrictions
-- **Ingress**: Secure external access with IP filtering
-- **ConfigMaps**: Security configuration
-- **Secrets**: Authentication credentials
-
-### Network Policies
-
-```yaml
-# Example network policy (applied automatically)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: admin-network-isolation
-  namespace: econ-graph-admin
-spec:
-  podSelector: {}
-  policyTypes: ["Ingress", "Egress"]
-  ingress:
-  - from:
-    - ipBlock:
-        cidr: 10.0.0.0/8  # Internal network only
-    ports:
-    - protocol: TCP
-      port: 3000
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          name: econ-graph
-    ports:
-    - protocol: TCP
-      port: 8081  # Backend admin API
+```bash
+kubectl get pods -n econ-graph-admin -l app=admin-frontend
+kubectl logs -n econ-graph-admin deployment/admin-frontend
+kubectl port-forward -n econ-graph-admin service/admin-frontend-service 8080:3000
 ```
 
-## Security Best Practices
+A frontend port-forward alone does not supply the same-origin backend `/graphql` route. It is useful for diagnosing the frontend, not as a complete alternative access path.
 
-### Infrastructure Security
-
-1. **VPN Access**: Deploy admin interface behind corporate VPN
-2. **Bastion Host**: Use jump server for additional security layer
-3. **Internal DNS**: Use internal domain names, not public DNS
-4. **Certificate Management**: Use internal CA for TLS certificates
-5. **Network Segmentation**: Isolate admin network from public traffic
-
-### Operational Security
-
-1. **Least Privilege**: Grant minimum required permissions
-2. **Regular Audits**: Review access logs and user permissions
-3. **Key Rotation**: Regularly rotate authentication secrets
-4. **Session Management**: Implement automatic session timeout
-5. **Incident Response**: Have procedures for security incidents
-
-### User Management
-
-1. **Strong Authentication**: Enforce MFA for all admin users
-2. **Account Lifecycle**: Promptly disable unused accounts
-3. **Password Policy**: Enforce strong password requirements
-4. **Access Reviews**: Regular review of user access rights
-5. **Training**: Security awareness training for admin users
-
-## Monitoring & Alerting
-
-### Security Metrics
-
-The admin interface provides metrics for:
-
-- Authentication attempts (successful/failed)
-- Session duration and timeout events
-- Permission denied events
-- Unusual access patterns
-- System configuration changes
-
-### Alert Conditions
-
-Automatic alerts are triggered for:
-
-- Multiple failed login attempts
-- Access from unauthorized IP addresses
-- Privilege escalation attempts
-- Suspicious activity patterns
-- System configuration changes
-- Service availability issues
-
-### Log Analysis
-
-Key log sources for security analysis:
-
-- **Authentication Logs**: Login attempts and session events
-- **Access Logs**: All HTTP requests with detailed metadata
-- **Audit Logs**: Administrative actions and configuration changes
-- **Security Events**: Custom security events from the application
-- **Infrastructure Logs**: Kubernetes and ingress controller logs
-
-## Incident Response
-
-### Security Incident Procedures
-
-1. **Detection**: Automated alerts and monitoring
-2. **Assessment**: Determine severity and scope
-3. **Containment**: Isolate affected systems
-4. **Investigation**: Analyze logs and gather evidence
-5. **Recovery**: Restore normal operations
-6. **Post-Incident**: Document lessons learned
-
-### Emergency Procedures
-
-#### Suspected Compromise
-1. Immediately disable admin interface access
-2. Revoke all active sessions
-3. Change all authentication secrets
-4. Review all recent admin actions
-5. Analyze logs for indicators of compromise
-
-#### System Lockout
-1. Use emergency access procedures
-2. Check network policies and IP whitelists
-3. Verify certificate validity
-4. Review authentication service status
-5. Use kubectl for direct cluster access if needed
-
-## Compliance & Governance
-
-### Security Standards
-
-The admin interface is designed to meet:
-
-- **SOC 2 Type II**: Security controls and monitoring
-- **ISO 27001**: Information security management
-- **NIST Cybersecurity Framework**: Risk management
-- **CIS Controls**: Security best practices
-
-### Documentation Requirements
-
-Maintain documentation for:
-
-- Security policies and procedures
-- User access rights and reviews
-- Incident response procedures
-- Change management processes
-- Risk assessments and mitigation
-
-### Regular Security Activities
-
-- **Quarterly**: Access reviews and permission audits
-- **Monthly**: Security patch updates and vulnerability scans
-- **Weekly**: Log analysis and security metric reviews
-- **Daily**: Monitoring alert review and incident response
-
-## Troubleshooting
-
-### Common Issues
-
-#### Cannot Access Admin Interface
-1. Verify IP address is in whitelist
-2. Check DNS resolution for admin domain
-3. Verify TLS certificate validity
-4. Check ingress controller status
-5. Review network policies
-
-#### Authentication Failures
-1. Verify user credentials and MFA setup
-2. Check JWT secret configuration
-3. Review session timeout settings
-4. Analyze authentication service logs
-5. Verify user role assignments
-
-#### Performance Issues
-1. Check resource limits and usage
-2. Review rate limiting configuration
-3. Analyze database connection status
-4. Monitor backend API performance
-5. Check network latency and connectivity
-
-### Emergency Access
-
-If normal admin access is unavailable:
-
-1. **kubectl Access**: Direct cluster administration
-   ```bash
-   kubectl get pods -n econ-graph-admin
-   kubectl logs -n econ-graph-admin -l app=admin-frontend
-   ```
-
-2. **Port Forwarding**: Bypass ingress for troubleshooting
-   ```bash
-   kubectl port-forward -n econ-graph-admin service/admin-frontend-service 8080:3000
-   ```
-
-3. **Emergency User**: Create temporary admin user via kubectl
-   ```bash
-   kubectl exec -n econ-graph deployment/backend -- /app/create-emergency-user
-   ```
-
-## Contact Information
-
-For security incidents or questions:
-
-- **Security Team**: support@econgraph.com
-- **Emergency Escalation**: Follow incident response procedures
-
----
-
-**⚠️ SECURITY WARNING**: This administrative interface provides full control over the EconGraph platform. Unauthorized access could result in data loss, system compromise, or service disruption. Always follow security procedures and report any suspicious activity immediately.
+Operators own the incident response procedure for their installation, including restricting frontend and backend reachability, preserving available records, and recovering identity-provider administrator access. Review staff assignments and the identity provider's session/token controls as part of that procedure. Do not assume changing a frontend Secret invalidates already issued bearer tokens.

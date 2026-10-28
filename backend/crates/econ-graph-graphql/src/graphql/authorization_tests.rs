@@ -409,11 +409,13 @@ async fn read_user(pool: &DatabasePool, id: Uuid) -> Option<User> {
         .unwrap()
 }
 
+/// Execute an administration mutation with an actor present for the liveness recheck.
 async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> Vec<String> {
+    let actor = insert_user(pool).await;
     let schema = create_schema_with_data(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool.clone())),
-        Arc::new(caller_with(user(), roles.iter().copied())),
+        Arc::new(caller_with(actor, roles.iter().copied())),
     );
     schema
         .execute(query)
@@ -857,4 +859,124 @@ async fn deleting_a_chart_inviter_preserves_other_users_access() {
     ))
     .await
     .unwrap();
+}
+
+/// Both requests carry valid principals captured before either account is removed.
+/// A gate transaction blocks both at the database before releasing the race; the
+/// original independent UPDATE/DELETE statements then remove both active admins.
+#[tokio::test]
+async fn concurrent_admin_removals_leave_an_active_admin() {
+    use diesel::prelude::*;
+    use diesel::sql_types::BigInt;
+    use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
+    use econ_graph_core::schema::users;
+
+    #[derive(QueryableByName)]
+    struct Waiting {
+        #[diesel(sql_type = BigInt)]
+        count: i64,
+    }
+    /// Build a mutation that deletes or deactivates the reciprocal request's actor.
+    fn query(action: &str, target: Uuid) -> String {
+        match action {
+            "update" => format!(
+                r#"mutation {{ updateUser(id: "{target}", input: {{ isActive: false }}) {{ id }} }}"#
+            ),
+            _ => format!(r#"mutation {{ {action}User(id: "{target}") }}"#),
+        }
+    }
+
+    let url = required_database_url();
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .unwrap();
+    let pool = econ_graph_core::database::create_pool(&url).await.unwrap();
+    let staff: Vec<_> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
+    for (first_action, second_action) in [
+        ("suspend", "suspend"),
+        ("delete", "delete"),
+        ("delete", "suspend"),
+        ("update", "suspend"),
+        ("delete", "update"),
+        ("update", "update"),
+    ] {
+        let first = insert_user(&pool).await;
+        let second = insert_user(&pool).await;
+        let schema_for = |actor| {
+            create_schema_with_data(
+                econ_graph_core::database::AppPool(pool.clone()),
+                Some(econ_graph_core::database::DataPool(pool.clone())),
+                Arc::new(caller_with(actor, staff.iter().copied())),
+            )
+        };
+        let first_schema = schema_for(first.clone());
+        let second_schema = schema_for(second.clone());
+        let mut gate = pool.get().await.unwrap();
+        gate.batch_execute("BEGIN").await.unwrap();
+        users::table
+            .filter(users::id.eq_any([first.id, second.id]))
+            .order(users::id.asc())
+            .for_update()
+            .select(users::id)
+            .load::<Uuid>(&mut gate)
+            .await
+            .unwrap();
+        let first_query = query(first_action, second.id);
+        let second_query = query(second_action, first.id);
+        let first_request = tokio::spawn(async move {
+            async_graphql::Schema::execute(&first_schema, first_query).await
+        });
+        let second_request = tokio::spawn(async move {
+            async_graphql::Schema::execute(&second_schema, second_query).await
+        });
+        let mut observer = pool.get().await.unwrap();
+        let blocked = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let row: Waiting = diesel::sql_query(
+                    "SELECT count(*)::bigint AS count FROM pg_stat_activity \
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .get_result(&mut observer)
+                .await
+                .unwrap();
+                if row.count >= 2 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        // Release even if observation times out, so failures cannot strand the tasks.
+        gate.batch_execute("COMMIT").await.unwrap();
+        blocked.expect("both admin requests must reach the locked rows before release");
+        let (one, two) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(first_request, second_request)
+        })
+        .await
+        .expect("reciprocal account locks must not deadlock");
+        let responses = [one.unwrap(), two.unwrap()];
+        assert_eq!(
+            responses.iter().filter(|r| r.errors.is_empty()).count(),
+            1,
+            "{first_action}/{second_action}: {responses:?}"
+        );
+        let denied = responses.iter().find(|r| !r.errors.is_empty()).unwrap();
+        assert_eq!(denied.errors[0].message, "Acting user is no longer active");
+        let remaining: i64 = users::table
+            .filter(users::id.eq_any([first.id, second.id]))
+            .filter(users::is_active.eq(true))
+            .count()
+            .get_result(&mut observer)
+            .await
+            .unwrap();
+        assert_eq!(
+            remaining, 1,
+            "{first_action}/{second_action} must preserve an active admin"
+        );
+    }
 }
