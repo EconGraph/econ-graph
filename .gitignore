@@ -4,6 +4,9 @@
 *.pdb
 *.profraw
 
+# Python bytecode (the deploy scripts' tests import them)
+__pycache__/
+
 # Node.js - ignore all node_modules directories
 node_modules/
 /frontend/node_modules/

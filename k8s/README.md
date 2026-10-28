@@ -752,3 +752,139 @@ Admin audit client-IP attribution depends on the verified proxy chain. See
 `TRUSTED_PROXIES`; the manifests default to the backend TCP peer.
 
 Coding agents that need Kubernetes access should use the [read-only agent session](../docs/deployment/AGENT_ACCESS.md). Its namespaced identity can read workloads, pod logs and ConfigMaps but not Secrets, and cannot change anything; deployments and restarts stay with the operator scripts.
+
+### Disposable branch environments
+
+A branch runs in `econ-graph-br-<slug>` with its own app database, Keycloak,
+Keycloak database and users. The slug combines a readable branch name with a
+hash, so branch names that normalize to the same text do not share a namespace.
+The frontend is served at `http://<slug>.localhost`; `/graphql` writes only to the
+branch app database, while `/data/graphql` reads the shared primary through the
+Gateway. Browser credentials are removed on that data route. The primary
+backend's authorization guards reject anonymous mutations; removing credentials
+is not a substitute for those guards.
+
+Catalog access in a branch follows two Keycloaks. Data read through
+`/data/graphql` is read anonymously, so every branch visitor, signed in or not,
+sees the catalogs the primary grants anonymous visitors. The branch Keycloak's
+realm import sets up catalog roles, including its own anonymous catalog
+reader, whose credential `up` generates with the other branch Secrets.
+Changes to catalog grants in the primary's Keycloak do not reach branches. For
+annotations and their comments, the branch backend asks the primary
+anonymously which catalog a series belongs to, then applies the branch caller's
+own grants. A series the primary grants only to signed-in users therefore cannot be
+annotated in a primary-mode branch: it is refused as if it did not exist. In
+local-data mode the branch backend checks its own data database and only the
+branch's grants apply. Branch pods are not Prometheus scrape targets:
+`branch-isolation` admits no traffic from `econ-graph`, where Prometheus runs.
+
+The shared Gateway must already be installed and the primary data plane must be
+available. **An enforcing NetworkPolicy CNI is required.** CNI names or installed NetworkPolicy objects alone do not prove enforcement.
+`up` creates temporary probe pods only in the branch namespace and checks positive connectivity, an isolated client's
+negative connectivity, blocked direct primary access and backend-only gateway
+access before creating any credentials or database workloads. A failed probe
+stops deployment and cleans up its pods; the empty branch namespace and policies
+remain for diagnosis. The script never installs a CNI or changes cluster-wide configuration.
+For local crawler egress, the cluster's pod/service networks must use private
+IPv4 ranges; HTTPS egress excludes private, loopback, link-local and reserved
+ranges, and no IPv6 internet egress is granted.
+
+The operator needs Python 3.11+, PyYAML, kubectl and a kubeconfig authorized for
+branch namespaces, reading the primary Service metadata and creating exactly the
+branch's ReferenceGrant in `econ-graph`. Use an explicit context on every command;
+the script never switches the current context or reads production Secrets.
+It never runs a plain `kubectl` from `PATH`, and chooses one as the other deploy
+scripts do (`cluster_role_default_kubectl` in `scripts/deploy/lib/cluster-role.sh`).
+`KUBECTL` is used when set. Otherwise the kind cluster's kubectl kept in
+`~/.cache/econgraph/bin` is used, with `KUBECONFIG` when it is set and with
+`~/.cache/econgraph/kubeconfig-econ-graph` when it is not. Without them the
+script stops before contacting any cluster. A `--dry-run` and `build-frontend`
+need no kubectl.
+
+```bash
+scripts/deploy/deploy-branch.sh build-frontend feature/my-change \
+  --context kind-econ-graph --frontend-image econ-graph-frontend:my-change
+# build-frontend builds on the kind cluster's Docker daemon (ECONGRAPH_DOCKER_HOST,
+# default unix:///var/run/docker.sock), not the caller's DOCKER_HOST. Build the
+# backend from this checkout on the same daemon, then load both into kind.
+# load-kind-images.sh compares image IDs, so a stale image under the same tag
+# is replaced.
+DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}" \
+  docker build -t econ-graph-backend:my-change backend
+scripts/deploy/load-kind-images.sh \
+  econ-graph-backend:my-change econ-graph-frontend:my-change
+scripts/deploy/deploy-branch.sh up feature/my-change --context kind-econ-graph \
+  --backend-image econ-graph-backend:my-change \
+  --frontend-image econ-graph-frontend:my-change --dry-run
+# Remove --dry-run to deploy after reviewing the plan.
+scripts/deploy/deploy-branch.sh list --context kind-econ-graph
+scripts/deploy/deploy-branch.sh down feature/my-change --context kind-econ-graph
+```
+
+`build-frontend` sets the branch OIDC issuer and `VITE_DATA_GRAPHQL_URL=/data/graphql`
+at build time. Runtime environment variables cannot change an existing Vite
+bundle. Rebuild the frontend for each branch hostname. The frontend image must
+match the branch passed to `up`. No Google or Facebook credentials or seeded QA
+users are copied into branches. To create two test users, port-forward the branch
+Keycloak Service to port 18080, open `http://localhost:18080/idp/admin`, and create
+them in the `econ-graph` realm. The operator retrieves the generated admin
+credentials from that branch's `econ-graph-keycloak` Secret privately. This does
+not enable the password grant or change production user seeding.
+
+The branch Namespace has `econgraph.io/env=branch`, `econgraph.io/branch=<slug>`,
+`econgraph.io/data-mode=primary` and `econgraph.io/gateway-access=true`. Network
+policies allow namespace-local traffic and DNS; only backend pods may call the
+shared gateway. Direct access to the primary backend or database is denied. All
+branch Services are ClusterIP, all database PVCs are disposable local-path claims,
+and branches never bind production PVs. The sole primary-namespace write is
+`ReferenceGrant/data-graphql-from-<slug>`, limited to the primary backend Service.
+`down` requires the typed namespace, checks ownership and removes only that grant
+and namespace. It never calls `kind delete`, removes a shared controller or
+changes host storage. Deleting a branch permanently discards its users and app
+records through its disposable PVCs. Production data is never deleted. A
+namespace-local ConfigMap lock prevents concurrent deploy/delete operations from
+racing credentials or restores. If an operator kills the process, inspect the
+branch before manually removing `branch-deploy-lock` and retrying.
+
+For crawler development, use `up ... --local-data --data-image
+<worker>:v<release> --seed-dir <verified-primary-dump-directory>`. The directory
+must contain `VERIFIED`, `SHA256SUMS` and `econ_graph.dump`; the dump checksum is
+checked and dumps still containing app tables are refused. If backups are
+encrypted, the operator decrypts the data-only dump into a private staging
+bundle first. With the encrypted host-bundle tooling installed, use
+`open-backup.sh <bundle> -- scripts/deploy/deploy-branch.sh up <branch> ... --seed-dir @BACKUP@`;
+the wrapper authenticates the bundle and holds plaintext in private tmpfs only
+for that command. The branch tool receives no age identity. `pg_restore` is
+required locally for archive inspection and must support the archive version:
+production PostgreSQL 18 dumps need a PostgreSQL 18-compatible client. After
+installing that client, select it for this command through `PATH` (for example,
+`PATH=/usr/lib/postgresql/18/bin:$PATH scripts/deploy/deploy-branch.sh ...`)
+instead of changing the system-wide client default. The dump
+is streamed exclusively into the branch's data Postgres before data migrations
+run. An existing nonempty, unmarked database is refused. Subsequent deploys
+require the same seed checksum and never restore over existing data. The data
+plane always runs a tagged release image, independently of the branch backend
+image. `/data/graphql` then routes to the branch backend and no ReferenceGrant
+is created. The scheduler is disabled; deliberate test crawls may be queued by
+a branch administrator. Source API keys may be entered privately into the branch
+`crawler-api-keys` Secret only in this mode. A branch's data mode cannot be changed
+in place; delete/recreate the disposable namespace to switch modes.
+
+`k8s/base` is a namespace-free application base shared by the production rendering
+and branch renderer. `kubectl kustomize k8s/overlays/production` renders the same
+application objects as the existing production manifest inputs; CI checks this
+parity. Production's existing ordered deployment remains responsible for shared
+controllers, host PVs, monitoring, credentials and Jobs. They are deliberately
+outside the application base and are never installed by a branch. The checked
+`k8s/overlays/branch` is an example overlay for inspection with `kubectl kustomize`;
+`deploy-branch.sh` renders actual branch names, images and data mode. After changing
+a production application manifest, refresh the base with
+`python3 scripts/deploy/render-branch.py --refresh-base` and review the parity test.
+
+Before relying on a new cluster, validate two branches side by side: sign in with
+two manually created users, read real series, create an annotation in each branch,
+and confirm the records remain in their respective app databases. Verify that
+above-limit GraphQL requests receive 429s and that each route's BackendTrafficPolicy
+is accepted; the shared Gateway's burst policy applies to branch routes too.
+Finally remove one branch and confirm the other branch and primary row counts are
+unchanged. Offline rendering/guard tests cannot replace these runtime checks.
