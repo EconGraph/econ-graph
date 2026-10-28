@@ -121,6 +121,27 @@ class RenderTests(unittest.TestCase):
                 self.assertEqual(d['spec']['type'], 'ClusterIP')
                 self.assertTrue(all('nodePort' not in port for port in d['spec']['ports']))
 
+    def test_branch_is_never_production_public_or_tunnelled(self):
+        # The https listener admits only namespaces labelled econgraph.io/env=production,
+        # cloudflared serves only that listener, and the production marker is a kube-system
+        # ConfigMap. A branch, in either data mode, must carry none of these.
+        for docs in [self.docs, r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')]:
+            namespace = docs[0]
+            self.assertEqual(namespace['kind'], 'Namespace')
+            self.assertEqual(namespace['metadata']['labels']['econgraph.io/env'], 'branch')
+            self.assertEqual(sum(d['kind'] == 'Namespace' for d in docs), 1)
+            for d in docs[1:]:
+                self.assertEqual(d['metadata']['namespace'], self.namespace)
+                self.assertNotEqual(d['metadata'].get('labels', {}).get('econgraph.io/env'), 'production')
+                self.assertNotIn('cloudflared', d['metadata']['name'])
+            text = yaml.safe_dump_all(docs).lower()
+            for marker in ['econgraph.com', 'econ-graph.com', 'cloudflare-tunnel', 'tunnel_token',
+                           'econgraph-cluster-role', 'kube-system/']:
+                self.assertNotIn(marker, text)
+            for route in (d for d in docs if d['kind'] == 'HTTPRoute'):
+                self.assertEqual(route['spec']['hostnames'], [self.slug + '.localhost'])
+                self.assertEqual([p.get('sectionName') for p in route['spec']['parentRefs']], ['http'])
+
     def test_local_data_uses_own_backend_and_tagged_data_image(self):
         docs = r.render('feature/one', 'backend:branch', 'frontend:branch', True, 'worker:v4.1.0')
         route = by_name(docs, 'HTTPRoute', 'econ-graph-data-graphql')
