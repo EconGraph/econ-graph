@@ -305,7 +305,9 @@ same tmpfs (`BACKUP_PLAINTEXT_ROOT`), whatever its destination root, holds one
 lock there (`.econgraph-backup-<uid>.lock`); the migration takes it before its
 room check and keeps it through its backup. The nightly timer fails rather
 than wait; the deployment scripts say which writer holds it and wait up to
-`BACKUP_LOCK_TIMEOUT` seconds (default 3600), then refuse. Existing backups are never overwritten, deleted or
+`BACKUP_LOCK_TIMEOUT` seconds (default 3600), then refuse. `open-backup.sh`
+holds the same lock while its command runs, since it decrypts into the same
+tmpfs; a backup that command takes reuses the lock it inherited. Existing backups are never overwritten, deleted or
 converted automatically. The files are 0600 and directories 0700.
 `--target-dir` or `BACKUP_ROOT` selects the nightly output root; the default
 uses `/srv/econgraph-backups/dumps` when available, otherwise
