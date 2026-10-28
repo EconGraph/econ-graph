@@ -142,6 +142,11 @@ for arg in "$@"; do
     esac
 done
 
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
+
 if [[ "$CLOUDFLARE_DNS_ONLY" == true && "$PROMPT_TUNNEL_TOKEN" == true ]]; then
     echo "create-secrets: error: DNS-only mode cannot prompt for a tunnel token" >&2
     exit 2
