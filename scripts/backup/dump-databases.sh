@@ -36,6 +36,7 @@ source "$kind_lib"
 backup_encryption_preflight
 check_docker_daemon
 ensure_kind_kubectl
-# backup_databases locks BACKUP_ROOT; the timer fails rather than wait for it.
+# backup_databases takes the shared plaintext-staging lock; the timer fails
+# rather than wait for another writer.
 BACKUP_LOCK_NONBLOCK=true
 backup_databases "$(new_backup_dir)"

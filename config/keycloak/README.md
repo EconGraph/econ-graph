@@ -33,7 +33,8 @@ scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's acces
 
 ### Test users
 
-The release end-to-end suite depends on these. Keep the usernames, ids and
+The release end-to-end suite depends on these; the QA scenario suite signs in as
+`grace` against the release e2e stack. Keep the usernames, ids and
 passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 
 | Username | Id (`sub`) | Password |
@@ -44,6 +45,7 @@ passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 | `carol` | `0199a0e0-0000-7000-8000-00000000ca01` | `carol-dev-password` |
 | `erin` | `0199a0e0-0000-7000-8000-0000000000e1` | `erin-dev-password` |
 | `frank` | `0199a0e0-0000-7000-8000-0000000000f1` | `frank-dev-password` |
+| `grace` | `0199a0e0-0000-7000-8000-0000000009a7` | `grace-dev-password` |
 | `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
 
 Imported users get no default roles automatically, so each one lists

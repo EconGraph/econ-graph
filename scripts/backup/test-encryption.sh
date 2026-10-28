@@ -292,6 +292,49 @@ expect_unsealed recipient-only 'does not decrypt'
 # Ciphertext that decrypts, but to a different stream than was encrypted.
 fake_age truncated '{ head -c 512; cat >/dev/null; } | "$real" "$@"'
 expect_unsealed truncated 'different stream'
+# A payload file tar cannot read: tar still writes the rest and exits 2, which
+# must stop the seal (not only through pipefail).
+[[ "$(id -u)" != 0 ]] || die "run as a regular user: root reads unreadable files"
+unreadable="$(backup_plaintext_dir)"
+cp -a "$payload/." "$unreadable/"
+chmod 000 "$unreadable/econ_graph.dump"
+if (set +o pipefail; backup_seal_dir "$unreadable" "$scratch/sealed-unreadable") 2>"$scratch/unreadable.log"; then
+    die 'sealed a payload with an unreadable file'
+fi
+chmod 600 "$unreadable/econ_graph.dump"
+rm -rf -- "$unreadable"
+[[ ! -e "$scratch/sealed-unreadable" && ! -e "$scratch/sealed-unreadable.partial/VERIFIED" ]] || die 'published a payload with an unreadable file'
+grep -q 'sealing .* failed (tar 2' "$scratch/unreadable.log" || die "no tar failure message: $(cat "$scratch/unreadable.log")"
+# The output appears between the check and the rename: mv -n then moves
+# nothing (and on coreutils 9.7 still exits 0). Nothing is replaced or published.
+mkdir "$scratch/race-bin"
+cat > "$scratch/race-bin/mv" <<EOF
+#!/bin/bash
+target="\${*: -1}"
+mkdir -p -- "\$target" && echo planted > "\$target/planted"
+exec $(command -v mv) "\$@"
+EOF
+chmod +x "$scratch/race-bin/mv"
+if (PATH="$scratch/race-bin:$PATH"; backup_seal_dir "$payload" "$scratch/raced") 2>"$scratch/raced.log"; then
+    die 'reported success although the output appeared before the rename'
+fi
+grep -q 'appeared before' "$scratch/raced.log" || die "no rename race message: $(cat "$scratch/raced.log")"
+[[ "$(ls -A "$scratch/raced")" == planted ]] || die 'the output that appeared was changed'
+[[ ! -e "$scratch/raced.partial/VERIFIED" ]] || die 'left VERIFIED on an unpublished bundle'
+# The hash stage runs isolated (python3 -I): a hashlib.py in the caller's
+# working directory is never imported.
+mkdir "$scratch/hostile-cwd"
+printf 'open(%s, "w").close()\nraise SystemExit(3)\n' "'$scratch/hostile-imported'" > "$scratch/hostile-cwd/hashlib.py"
+(cd "$scratch/hostile-cwd" && backup_seal_dir "$payload" "$scratch/sealed-from-hostile-cwd") ||
+    die 'sealing failed from a directory with a hashlib.py'
+[[ ! -e "$scratch/hostile-imported" ]] || die 'the hash stage imported a module from the working directory'
+# The throwaway key is only ever written to tmpfs.
+if (BACKUP_PLAINTEXT_ROOT="$scratch"; backup_seal_dir "$payload" "$scratch/key-on-disk") 2>"$scratch/key-on-disk.log"; then
+    die 'wrote the throwaway key to disk'
+fi
+grep -q 'not on tmpfs' "$scratch/key-on-disk.log" || die "no throwaway-key tmpfs refusal: $(cat "$scratch/key-on-disk.log")"
+[[ ! -e "$scratch/key-on-disk" ]] || die 'published with the throwaway key on disk'
+if compgen -G "$scratch/econgraph-verify-key.*" >/dev/null; then die 'left a throwaway key on disk'; fi
 # Everything is flushed to disk before VERIFIED and before publication, and
 # the publishing rename is flushed too; a failed flush publishes nothing.
 mkdir "$scratch/sync-bin"
@@ -364,39 +407,49 @@ grep -q 'set BACKUP_AGE_RECIPIENT' "$scratch/refused-recipient.log" || die 'no r
 grep -q 'must be tmpfs' "$scratch/refused-staging.log" || die 'no tmpfs refusal message'
 
 # --- the backup lock ------------------------------------------------------------------
-# A second writer into the same root fails (non-blocking) or waits (blocking)
-# while another holds the lock, before it checks or writes anything.
-mkdir "$scratch/locked-root"
-lock_writer() {
+# Every writer staging plaintext in the same tmpfs shares one lock, whatever
+# its destination root. A second writer fails (non-blocking), or says whom it
+# waits for and waits (blocking) up to BACKUP_LOCK_TIMEOUT, before it checks or
+# writes anything.
+staging_lock="$BACKUP_PLAINTEXT_ROOT/.econgraph-backup-$(id -u).lock"
+lock_writer() { # lock_writer ROOT NAME: backup_databases into ROOT/NAME
     (
         trap - EXIT
         # shellcheck source=scripts/deploy/lib/kind-env.sh
         source "$root/scripts/deploy/lib/kind-env.sh"
         backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
-        BACKUP_ROOT="$scratch/locked-root"
-        backup_databases "$scratch/locked-root/$1"
+        BACKUP_ROOT="$scratch/$1"
+        backup_databases "$scratch/$1/$2"
     )
 }
+mkdir "$scratch/root-a" "$scratch/root-b"
+printf 'pid=1 command=other-writer\n' > "$staging_lock"
 # -o: the lock belongs to flock itself, so killing it releases the lock.
-flock -o "$scratch/locked-root/.lock" sleep 30 &
+flock -o "$staging_lock" sleep 30 &
 holder=$!
 for _ in $(seq 50); do
-    if ! flock -n "$scratch/locked-root/.lock" true; then break; fi
+    if ! flock -n "$staging_lock" true; then break; fi
     sleep 0.1
 done
-if BACKUP_LOCK_NONBLOCK=true lock_writer nonblocking >"$scratch/lock-nonblocking.log" 2>&1; then
+if BACKUP_LOCK_NONBLOCK=true lock_writer root-a nonblocking >"$scratch/lock-nonblocking.log" 2>&1; then
     die 'a non-blocking writer ran while another held the lock'
 fi
-grep -q 'another host dump is running' "$scratch/lock-nonblocking.log" || die 'no lock refusal message'
-[[ ! -e "$scratch/locked-root/nonblocking" && ! -e "$scratch/locked-root/nonblocking.partial" ]] || die 'a refused writer wrote'
-lock_writer blocking >"$scratch/lock-blocking.log" 2>&1 &
+grep -q 'another backup is staging plaintext in .*command=other-writer' "$scratch/lock-nonblocking.log" || die 'no lock refusal message'
+[[ ! -e "$scratch/root-a/nonblocking" && ! -e "$scratch/root-a/nonblocking.partial" ]] || die 'a refused writer wrote'
+if BACKUP_LOCK_TIMEOUT=1 lock_writer root-b timed-out >"$scratch/lock-timeout.log" 2>&1; then
+    die 'a blocking writer went ahead after its lock timeout'
+fi
+grep -q 'Waiting up to 1s for another backup .*command=other-writer' "$scratch/lock-timeout.log" || die 'a waiting writer did not say whom it waits for'
+grep -q 'still holds .* after 1s .*nothing was stopped or changed' "$scratch/lock-timeout.log" || die 'no lock timeout refusal'
+[[ ! -e "$scratch/root-b/timed-out" && ! -e "$scratch/root-b/timed-out.partial" ]] || die 'a timed-out writer wrote'
+lock_writer root-b blocking >"$scratch/lock-blocking.log" 2>&1 &
 waiter=$!
 sleep 2
-[[ ! -e "$scratch/locked-root/blocking" && ! -e "$scratch/locked-root/blocking.partial" ]] || die 'a blocking writer did not wait for the lock'
+[[ ! -e "$scratch/root-b/blocking" && ! -e "$scratch/root-b/blocking.partial" ]] || die 'a writer into another root did not wait for the lock'
 kill "$holder"
 wait "$holder" 2>/dev/null || true
 wait "$waiter" || die 'a blocking writer failed after the lock was released'
-[[ -f "$scratch/locked-root/blocking/VERIFIED" ]] || die 'a blocking writer did not publish after the lock was released'
+[[ -f "$scratch/root-b/blocking/VERIFIED" ]] || die 'a blocking writer did not publish after the lock was released'
 # The lock is released once the bundle is published, while the caller (a
 # migration that goes on to recreate the cluster) is still running.
 (
@@ -404,10 +457,16 @@ wait "$waiter" || die 'a blocking writer failed after the lock was released'
     # shellcheck source=scripts/deploy/lib/kind-env.sh
     source "$root/scripts/deploy/lib/kind-env.sh"
     backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
-    BACKUP_ROOT="$scratch/locked-root"
-    backup_databases "$scratch/locked-root/released" >/dev/null
-    flock -n "$scratch/locked-root/.lock" true
+    backup_databases "$scratch/root-a/released" >/dev/null
+    flock -n "$staging_lock" true
 ) || die 'the lock is still held after the bundle was published'
+# A lock path that is a symlink is refused.
+rm -f "$staging_lock"
+ln -s "$scratch/elsewhere" "$staging_lock"
+if lock_writer root-a symlinked >"$scratch/lock-symlink.log" 2>&1; then die 'used a symlinked lock'; fi
+grep -q 'is a symlink' "$scratch/lock-symlink.log" || die 'no symlinked-lock refusal'
+[[ ! -e "$scratch/elsewhere" ]] || die 'wrote through a symlinked lock'
+rm -f "$staging_lock"
 
 # --- consumers of an unopened bundle ----------------------------------------------------
 if (backup_source_dir "$scratch/bundle") >/dev/null 2>"$scratch/source-dir.log"; then

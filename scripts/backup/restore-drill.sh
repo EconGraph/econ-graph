@@ -73,11 +73,28 @@ trap cleanup EXIT
 
 log "drill: restoring ${dump} into throwaway container ${name} (${PG_IMAGE})"
 # The restored databases are plaintext production data: keep the server's
-# data directory (PGDATA is under /var/lib/postgresql) in RAM, never in a
-# Docker volume on disk.
+# data directory in RAM, never in a Docker volume on disk. Every VOLUME the
+# image declares gets a tmpfs (otherwise Docker makes an anonymous volume on
+# disk there), and PGDATA must lie under one of them.
+docker image inspect "${PG_IMAGE}" >/dev/null 2>&1 || docker pull -q "${PG_IMAGE}" >/dev/null ||
+    die "could not pull ${PG_IMAGE}"
+volumes="$(docker image inspect --format '{{range $path, $_ := .Config.Volumes}}{{println $path}}{{end}}' "${PG_IMAGE}")" ||
+    die "could not read the volumes of ${PG_IMAGE}"
+pgdata="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${PG_IMAGE}" | sed -n 's/^PGDATA=//p')" ||
+    die "could not read PGDATA of ${PG_IMAGE}"
+tmpfs_args=()
+covered=false
+while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    [[ "${path}" == /* ]] || die "${PG_IMAGE} declares a relative VOLUME ${path}; refusing"
+    tmpfs_args+=(--tmpfs "${path}")
+    [[ -z "${pgdata}" || "${pgdata%/}/" != "${path%/}/"* ]] || covered=true
+done < <(printf '%s\n' /var/lib/postgresql "${volumes}" | sort -u)
+[[ -n "${pgdata}" && "${covered}" == true ]] ||
+    die "${PG_IMAGE}'s PGDATA (${pgdata:-unset}) is not under a tmpfs mount; refusing to restore plaintext onto disk"
 docker run -d --rm --name "${name}" \
     -e POSTGRES_PASSWORD="${password}" \
-    --tmpfs /var/lib/postgresql \
+    "${tmpfs_args[@]}" \
     -p 127.0.0.1::5432 \
     -v "${dump_dir}:/dumps:ro" \
     "${PG_IMAGE}" >/dev/null
