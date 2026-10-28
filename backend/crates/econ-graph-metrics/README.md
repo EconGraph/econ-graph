@@ -1,57 +1,37 @@
 # EconGraph Metrics
 
-The metrics collection crate for the EconGraph system, providing comprehensive monitoring capabilities for crawlers, performance tracking, and system health using Prometheus. This crate serves as the central metrics layer that enables observability across all EconGraph components, from web crawlers to data processing pipelines.
+This crate defines Prometheus metrics for EconGraph crawlers and provides the shared `DEFAULT_REGISTRY`. Crawlers and the refresh scheduler record observations through these metrics; the crawler worker polls the database for queue and coverage gauges and exposes the shared registry at `/metrics`.
 
-## Features
+## Metrics and registration
 
-- **Crawler Metrics**: Request tracking, duration monitoring, and error reporting
-- **Performance Monitoring**: Request duration histograms and throughput metrics  
-- **Error Tracking**: Comprehensive error categorization and counting
-- **Resource Usage**: Bandwidth and data collection metrics
-- **Rate Limiting**: Track rate limit hits and retry attempts
+The [crawler module](src/crawler.rs) defines five groups:
+
+- **HTTP requests (`CrawlerMetrics`)**: Request counts and duration histograms, downloaded bytes, collected items, errors, rate limit hits, retries, and timeouts.
+- **Queue (`CrawlerQueueMetrics`)**: Job outcomes, queue counts by source and status, recent failures, and the latest success and failure timestamps.
+- **Coverage (`CrawlerCoverageMetrics`)**: Discovered series, series with data, coverage ratios, overdue series, and freshness timestamps.
+- **Discovery (`CrawlerDiscoveryMetrics`)**: Curated or configured entries missing from the source's catalog at the last discovery.
+- **Refresh scheduler (`CrawlerSchedulerMetrics`)**: Scheduling passes, jobs enqueued, and the latest successful discovery in retained queue history.
+
+Each group's `new(&Registry)` constructor registers its metrics with the supplied registry. The lazy globals `CRAWLER_METRICS`, `CRAWLER_QUEUE_METRICS`, `CRAWLER_COVERAGE_METRICS`, `CRAWLER_DISCOVERY_METRICS`, and `CRAWLER_SCHEDULER_METRICS` register with `DEFAULT_REGISTRY` when initialized. Callers use recording helpers or set the metric fields directly to supply observations.
+
+The [worker metrics module](../econ-graph-crawler-worker/src/metrics.rs) implements the HTTP endpoint and database polling. See the [monitoring guide](../../../docs/monitoring/README.md) for scrape configuration and operational guidance.
 
 ## Testing
 
-The crate includes comprehensive tests to ensure metrics collection works correctly and provides accurate monitoring data.
+The three unit tests in `crawler::queue_metrics_tests` each create a fresh Prometheus registry, register queue, coverage, or discovery metrics, and record sample observations. They gather the registry's metric families and assert that selected family names are present.
 
-### Test Types
-
-#### **Unit Tests**
-- **Purpose**: Test individual metric collection methods in isolation
-- **Examples**: Metric initialization, counter increments, histogram observations, label validation
-- **Benefits**: Fast execution, no external dependencies, catch logic errors early
-
-#### **Integration Tests**
-- **Purpose**: Test metrics collection with real Prometheus registry interactions
-- **Examples**: Metric registration, label value validation, metric export functionality
-- **Benefits**: Catch registry-specific issues, test real-world scenarios, validate metric accuracy
-
-#### **Performance Tests**
-- **Purpose**: Ensure metrics collection doesn't impact application performance
-- **Examples**: High-frequency metric recording, memory usage validation, concurrent access
-- **Benefits**: Prevent performance regressions, validate scalability, ensure minimal overhead
-
-### Running Tests
+From `backend/`, run the package's tests:
 
 ```bash
-# Run all tests
-cargo test
-
-# Run specific test modules
-cargo test crawler
-cargo test integration
-
-# Run with metrics validation
-RUST_LOG=debug cargo test
+cargo test -p econ-graph-metrics
 ```
 
-### Test Infrastructure
+To select just those three unit tests:
 
-- **Prometheus Registry**: Each test gets a fresh registry for complete isolation
-- **Metric Validation**: Tests verify metric names, labels, and values are correct
-- **Concurrent Testing**: Validates thread-safe metric collection under load
-- **Memory Testing**: Ensures metrics don't leak memory during long-running operations
+```bash
+cargo test -p econ-graph-metrics queue_metrics_tests
+```
 
 ## License
 
-This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+The repository's [LICENSE](../../../LICENSE) is headed Microsoft Reference Source License (MS-RSL). See that file for the terms and conditions.
