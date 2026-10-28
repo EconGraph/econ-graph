@@ -72,7 +72,6 @@ jobs:
     env:
       # scripts/release-e2e.sh uses this instead of starting its own Postgres
       RELEASE_E2E_DATABASE_URL: postgres://postgres:password@localhost:5439/econ_graph_e2e
-      RELEASE_E2E_CONFIG: ${{ matrix.config }}
       # The QA suite's accounts on this stack: the dev realm's grace and the Keycloak bootstrap
       # admin from docker-compose.release-e2e.yml. Development values, not secrets.
       QA_USERNAME: grace
@@ -124,6 +123,8 @@ jobs:
       run: python3 -m unittest discover -s scripts/qa/tests -v
 
     - name: Build, seed and run the ${{ matrix.suite }} suite
+      env:
+        RELEASE_E2E_CONFIG: ${{ matrix.config }}
       run: scripts/release-e2e.sh
 
     - name: Upload the QA scenario report
