@@ -737,4 +737,4 @@ Admin audit client-IP attribution depends on the verified proxy chain. See
 [Admin audit and trusted proxies](../docs/security/ADMIN_AUDIT.md) before setting
 `TRUSTED_PROXIES`; the manifests default to the backend TCP peer.
 
-Coding agents that need Kubernetes access should use the [restricted agent session](../docs/deployment/AGENT_ACCESS.md). Its namespaced identity denies direct Secret access; deployment permissions and a shared Unix account still require trusted tools.
+Coding agents that need Kubernetes access should use the [read-only agent session](../docs/deployment/AGENT_ACCESS.md). Its namespaced identity can read workloads, pod logs and ConfigMaps but not Secrets, and cannot change anything; deployments and restarts stay with the operator scripts.

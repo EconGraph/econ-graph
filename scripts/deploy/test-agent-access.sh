@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+trap 'chmod -R u+rwx "$scratch" 2>/dev/null; rm -rf "$scratch"' EXIT
 export AGENT_TEST_CALLS="$scratch/calls"
 mkdir "$scratch/bin"
 cat >"$scratch/bin/kubectl" <<'STUB'
@@ -21,9 +21,10 @@ case "$*" in
     *'get configmap econgraph-cluster-role'*) ;;
     *'config view --minify --flatten --raw'*)
         printf '[{"name":"operator-cluster","cluster":{"server":"https://example.invalid","certificate-authority-data":"Y2E="}}]' ;;
-    *'config view --minify'*'.namespace}'*) printf econ-graph ;;
+    *'config view --minify'*'.namespace}'*) printf '%s' "${AGENT_TEST_NS-econ-graph}" ;;
     *'config view --minify'*) printf '%s' "${AGENT_TEST_USER:-econgraph-agent}" ;;
-    *'apply -f -'*) cat >/dev/null ;;
+    # The applied manifest is kept: the rules review below answers from it.
+    *'apply -f -'*) cat >"$AGENT_TEST_CALLS.manifest" ;;
     *'create token econgraph-agent --duration=1h'*)
         # A JWT shaped token; its signature part carries the marker the test
         # greps for in output.
@@ -32,15 +33,42 @@ claims = {"exp": int(time.time()) + int(sys.argv[1])}
 enc = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 print(enc(b"{}") + "." + enc(json.dumps(claims).encode()) + ".test-bearer-token")' \
             "${AGENT_TEST_TOKEN_SECONDS:-3600}" ;;
-    *'get namespaces -o'*) printf 'econ-graph\nkube-system\n' ;;
+    *'get namespaces -o'*)
+        [ "${AGENT_TEST_NO_NAMESPACES:-false}" = true ] || printf 'econ-graph\nkube-system\n' ;;
+    *'create --raw /apis/authorization.k8s.io/v1/selfsubjectrulesreviews -f '*)
+        # What the API server answers: the defaults every identity has, the
+        # applied Role's rules in its namespace, and an injected extra grant.
+        python3 - "${@: -1}" "$AGENT_TEST_CALLS.manifest" <<'PY'
+import json
+import os
+import sys
+ns = json.load(open(sys.argv[1]))["spec"]["namespace"]
+items = json.load(open(sys.argv[2]))["items"]
+role = next(i for i in items if i["kind"] == "Role")
+rules = [{"verbs": ["create"], "apiGroups": ["authorization.k8s.io"],
+          "resources": ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]},
+         {"verbs": ["create"], "apiGroups": ["authentication.k8s.io"],
+          "resources": ["selfsubjectreviews"]}]
+if ns == role["metadata"]["namespace"]:
+    rules += role["rules"]
+urls = [{"verbs": ["get"], "nonResourceURLs": [
+    "/api", "/api/*", "/apis", "/apis/*", "/healthz", "/livez", "/openapi", "/openapi/*",
+    "/readyz", "/version", "/version/", "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/", "/openid/v1/jwks", "/openid/v1/jwks/"]}]
+if ns == os.environ.get("AGENT_TEST_EXTRA_NS", "kube-system"):
+    extra = json.loads(os.environ.get("AGENT_TEST_EXTRA_RULE", "null"))
+    if extra and "nonResourceURLs" in extra:
+        urls.append(extra)
+    elif extra:
+        rules.append(extra)
+status = {"resourceRules": rules, "nonResourceRules": urls,
+          "incomplete": os.environ.get("AGENT_TEST_INCOMPLETE") == "true"}
+print(json.dumps({"kind": "SelfSubjectRulesReview", "status": status}))
+PY
+        ;;
     *'auth can-i get pods -n'* | *'auth can-i get pods --subresource=log -n'*)
+        if [[ "$*" == *"${AGENT_TEST_NO_READ:-no such check}"* ]]; then printf no; exit 1; fi
         printf yes; [ "${AGENT_TEST_EXPIRED:-false}" != true ] ;;
-    *'auth can-i'*secrets*)
-        if [ "${AGENT_TEST_ALLOW_SECRETS:-false}" = true ] && [[ "$*" == *' -n kube-system' ]]; then
-            printf yes
-        else
-            printf no; exit 1
-        fi ;;
     *'auth can-i'*) printf no; exit 1 ;;
     *) echo "unexpected kubectl call: $*" >&2; exit 1 ;;
 esac
@@ -48,79 +76,64 @@ STUB
 chmod +x "$scratch/bin/kubectl"
 export KUBECTL="$scratch/bin/kubectl"
 unset ECONGRAPH_AGENT_SESSION KUBECONFIG
-"$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
-    --kubectl "$KUBECTL" --output-dir "$scratch/agent" --dry-run >"$scratch/rbac.yaml"
+bootstrap() {
+    "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
+        --kubectl "$KUBECTL" "$@"
+}
+# refused NAME MESSAGE ARG...: the bootstrap fails, says MESSAGE, publishes no
+# kubeconfig and never prints the token.
+published() { find "$scratch" -name kubeconfig-econ-graph | wc -l; }
+refused() {
+    local name="$1" message="$2" before
+    shift 2
+    before="$(published)"
+    if bootstrap "$@" >"$scratch/$name.out" 2>&1; then
+        echo "bootstrap accepted: $name" >&2; exit 1
+    fi
+    grep -qF -- "$message" "$scratch/$name.out" || {
+        echo "$name: expected '$message' in:" >&2; cat "$scratch/$name.out" >&2; exit 1
+    }
+    if grep -q test-bearer-token "$scratch/$name.out"; then exit 1; fi
+    [ "$(published)" = "$before" ] || { echo "$name: a kubeconfig was published" >&2; exit 1; }
+}
+
+# --- The Role: read-only, exactly -------------------------------------------
+bootstrap --output-dir "$scratch/agent" --dry-run >"$scratch/rbac.json" 2>"$scratch/rbac.err"
 [ ! -f "$AGENT_TEST_CALLS" ]
-python3 - "$scratch/rbac.yaml" <<'PY'
+python3 - "$scratch/rbac.json" <<'PY'
+import json
 import sys
-import yaml
-resources = list(yaml.safe_load_all(open(sys.argv[1])))
-assert resources[0]["automountServiceAccountToken"] is False
-role = resources[1]
-assert role["kind"] == "Role"
-for rule in role["rules"]:
-    assert "*" not in rule["resources"]
-    assert "secrets" not in rule["resources"]
-    assert "serviceaccounts/token" not in rule["resources"]
-    assert "pods/exec" not in rule["resources"]
-    assert not ({"bind", "escalate", "impersonate"} & set(rule["verbs"]))
-binding = resources[2]
-assert binding["kind"] == "RoleBinding"
+items = json.load(open(sys.argv[1]))["items"]
+assert [i["kind"] for i in items] == ["ServiceAccount", "Role", "RoleBinding"]
+assert items[0]["automountServiceAccountToken"] is False
+role, binding = items[1], items[2]
 assert binding["roleRef"] == {
     "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "econgraph-agent"}
 assert binding["subjects"] == [{
     "kind": "ServiceAccount", "name": "econgraph-agent",
     "namespace": binding["metadata"]["namespace"]}]
-assert role["metadata"]["namespace"] == binding["metadata"]["namespace"]
-allowed = {"pods", "pods/log", "services", "configmaps", "persistentvolumeclaims", "events",
-           "deployments", "replicasets", "statefulsets", "daemonsets",
-           "jobs", "cronjobs", "networkpolicies", "ingresses"}
-assert {r for rule in role["rules"] for r in rule["resources"]} <= allowed
-assert all("*" not in rule["verbs"] and "*" not in rule["apiGroups"] for rule in role["rules"])
+assert role["metadata"]["namespace"] == binding["metadata"]["namespace"] == "econ-graph"
+assert all(set(rule) == {"apiGroups", "resources", "verbs"} for rule in role["rules"]), \
+    "no resourceNames or nonResourceURLs"
 permissions = {(group, resource, verb) for rule in role["rules"]
                for group in rule["apiGroups"] for resource in rule["resources"]
                for verb in rule["verbs"]}
-workload_verbs = {"get", "list", "watch", "create", "update", "patch", "delete"}
-required = {
-    "": {"services", "configmaps", "persistentvolumeclaims", "events"},
+readable = {
+    "": {"pods", "pods/log", "services", "endpoints", "configmaps", "events",
+         "persistentvolumeclaims"},
     "apps": {"deployments", "replicasets", "statefulsets", "daemonsets"},
     "batch": {"jobs", "cronjobs"},
     "networking.k8s.io": {"networkpolicies", "ingresses"},
+    "gateway.networking.k8s.io": {"httproutes"},
 }
-expected = {(group, resource, verb) for group, names in required.items()
-            for resource in names for verb in workload_verbs}
-# Nothing automated deletes data: volume claims and StatefulSets lose delete.
-expected -= {("", "persistentvolumeclaims", "delete"), ("apps", "statefulsets", "delete")}
-expected |= {("", "pods", verb) for verb in ("get", "list", "watch", "delete")}
-expected.add(("", "pods/log", "get"))
-assert permissions == expected, "Role must grant exactly the documented workload/log permissions"
-
-# The denial matrix, evaluated as the RBAC authorizer would for this Role alone.
-def allowed_by_role(group, resource, verb):
-    return any(group in r["apiGroups"] and resource in r["resources"] and verb in r["verbs"]
-               for r in role["rules"])
-rbac = "rbac.authorization.k8s.io"
-denied = [("", "secrets", v) for v in ("get", "list", "watch", "create", "update", "patch")]
-denied += [("", "pods", v) for v in ("create", "update", "patch")]
-denied += [("", f"pods/{s}", v) for s in ("exec", "attach", "portforward")
-           for v in ("get", "create")]
-denied += [("", "pods/ephemeralcontainers", "patch"), ("", "services/proxy", "get"),
-           ("", "serviceaccounts/token", "create"), ("", "serviceaccounts", "impersonate"),
-           ("", "users", "impersonate"), ("", "groups", "impersonate"),
-           ("", "nodes/proxy", "get"), ("", "namespaces", "create")]
-denied += [(rbac, k, v) for k in ("roles", "rolebindings", "clusterroles", "clusterrolebindings")
-           for v in ("create", "update", "patch", "delete", "bind", "escalate")]
-denied += [(g, r, v) for g, r in (("", "persistentvolumeclaims"), ("apps", "statefulsets"),
-                                  ("", "persistentvolumes"))
-           for v in ("delete", "deletecollection")]
-denied += [("", "persistentvolumes", v) for v in ("create", "update", "patch")]
-denied += [(g, r, "deletecollection") for rule in role["rules"]
-           for g in rule["apiGroups"] for r in rule["resources"]]
-for check in denied:
-    assert not allowed_by_role(*check), f"Role must deny {check}"
+expected = {(group, resource, verb) for group, names in readable.items()
+            for resource in names for verb in ("get", "list", "watch")}
+assert permissions == expected, sorted(permissions ^ expected)
 PY
-"$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
-    --kubectl "$KUBECTL" --output-dir "$scratch/agent" >"$scratch/output"
+
+# --- A clean bootstrap ------------------------------------------------------
+mkdir -m 0755 "$scratch/agent"   # an existing, too-open directory is made private
+bootstrap --output-dir "$scratch/agent" >"$scratch/output"
 if grep -q test-bearer-token "$scratch/output"; then exit 1; fi
 python3 - "$scratch/agent/kubeconfig-econ-graph" <<'PY'
 import json
@@ -137,53 +150,114 @@ assert c["users"][0]["user"]["token"].endswith(".test-bearer-token")
 assert c["contexts"][0]["context"]["user"] == "econgraph-agent"
 assert c["clusters"][0]["cluster"]["server"] == "https://example.invalid"
 PY
-# A preexisting broad binding must stop publication of a new kubeconfig.
-if AGENT_TEST_ALLOW_SECRETS=true "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" \
-    --operator-kubeconfig "$scratch/operator" --kubectl "$KUBECTL" \
-    --output-dir "$scratch/refused" >"$scratch/refused-output" 2>&1; then
-    echo 'bootstrap accepted inherited Secret access' >&2; exit 1
-fi
-[ ! -f "$scratch/refused/kubeconfig-econ-graph" ]
-grep -q 'access verification failed' "$scratch/refused-output"
-
-# Subresources are asked with --subresource, never as TYPE/NAME (which kubectl
-# reads as a resource name), and every namespace is checked.
-grep -q 'auth can-i create pods --subresource=exec -n kube-system' "$AGENT_TEST_CALLS"
-grep -q 'auth can-i create pods --subresource=portforward -n econ-graph' "$AGENT_TEST_CALLS"
-grep -q 'auth can-i create serviceaccounts --subresource=token -n kube-system' "$AGENT_TEST_CALLS"
-grep -q 'auth can-i delete persistentvolumeclaims -n econ-graph' "$AGENT_TEST_CALLS"
-grep -q 'auth can-i deletecollection statefulsets.apps -n kube-system' "$AGENT_TEST_CALLS"
-grep -q 'auth can-i delete persistentvolumes' "$AGENT_TEST_CALLS"
-if grep -Eq 'auth can-i [a-z]+ [a-z.]+/' "$AGENT_TEST_CALLS"; then
-    echo 'a permission check names a subresource as TYPE/NAME' >&2; exit 1
-fi
+# Every namespace's permissions were listed with the issued token.
+for ns in econ-graph kube-system; do
+    grep -q -- "--kubeconfig $scratch/agent/.bootstrap.*/kubeconfig create --raw /apis/authorization.k8s.io/v1/selfsubjectrulesreviews -f .*/rules/$ns.request" \
+        "$AGENT_TEST_CALLS"
+done
 # Operator calls pin kind-econ-graph in the operator config; nothing switches
 # the current context (the stub fails on use-context/set-context).
 grep -q -- "--kubeconfig $scratch/operator --context kind-econ-graph apply -f -" "$AGENT_TEST_CALLS"
 grep -q "KUBECONFIG=$scratch/operator --context kind-econ-graph get nodes" "$AGENT_TEST_CALLS.env"
 
-# A token issued for longer than requested is not published.
-if AGENT_TEST_TOKEN_SECONDS=31536000 "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" \
-    --operator-kubeconfig "$scratch/operator" --kubectl "$KUBECTL" \
-    --output-dir "$scratch/long" >"$scratch/long-output" 2>&1; then
-    echo 'bootstrap accepted a long-lived token' >&2; exit 1
-fi
-[ ! -f "$scratch/long/kubeconfig-econ-graph" ]
-grep -q 'more than 1 hour' "$scratch/long-output"
-if grep -q test-bearer-token "$scratch/long-output"; then exit 1; fi
+# --- Anything beyond the reads stops publication ----------------------------
+# One extra verb on a resource the Role reads.
+AGENT_TEST_EXTRA_NS=econ-graph AGENT_TEST_EXTRA_RULE='{"verbs":["patch"],"apiGroups":[""],"resources":["pods"]}' \
+    refused extra-verb 'namespace econ-graph: patch pods' --output-dir "$scratch/extra-verb"
+# A read the Role grants, but in another namespace.
+AGENT_TEST_EXTRA_RULE='{"verbs":["get"],"apiGroups":[""],"resources":["pods"]}' \
+    refused other-namespace 'namespace kube-system: get pods' --output-dir "$scratch/other-namespace"
+n=0
+while IFS='|' read -r rule message; do
+    n=$((n + 1))
+    AGENT_TEST_EXTRA_RULE="$rule" refused "grant-$n" "$message" --output-dir "$scratch/grant-$n"
+done <<'GRANTS'
+{"verbs":["get"],"apiGroups":[""],"resources":["secrets"]}|namespace kube-system: get secrets
+{"verbs":["*"],"apiGroups":["*"],"resources":["*"]}|namespace kube-system: * *.*
+{"verbs":["get"],"apiGroups":[""],"resources":["pods/*"]}|namespace kube-system: get pods/*
+{"verbs":["create"],"apiGroups":["admissionregistration.k8s.io"],"resources":["mutatingwebhookconfigurations"]}|create mutatingwebhookconfigurations.admissionregistration.k8s.io
+{"verbs":["create"],"apiGroups":["apiextensions.k8s.io"],"resources":["customresourcedefinitions"]}|create customresourcedefinitions.apiextensions.k8s.io
+{"verbs":["approve"],"apiGroups":["certificates.k8s.io"],"resources":["signers"]}|approve signers.certificates.k8s.io
+{"verbs":["create"],"apiGroups":["certificates.k8s.io"],"resources":["certificatesigningrequests"]}|create certificatesigningrequests.certificates.k8s.io
+{"verbs":["impersonate"],"apiGroups":["authentication.k8s.io"],"resources":["uids","userextras/scopes"]}|impersonate userextras/scopes.authentication.k8s.io
+{"verbs":["create"],"apiGroups":[""],"resources":["nodes/proxy"]}|create nodes/proxy
+{"verbs":["delete"],"apiGroups":[""],"resources":["namespaces"]}|delete namespaces
+{"verbs":["patch"],"apiGroups":[""],"resources":["persistentvolumes"]}|patch persistentvolumes
+{"verbs":["update"],"apiGroups":[""],"resources":["pods/ephemeralcontainers"]}|update pods/ephemeralcontainers
+{"verbs":["update","patch"],"apiGroups":[""],"resources":["pods"]}|update pods
+{"verbs":["create"],"apiGroups":[""],"resources":["serviceaccounts/token"]}|create serviceaccounts/token
+{"verbs":["get"],"nonResourceURLs":["/metrics"]}|namespace kube-system: get /metrics
+{"verbs":["post"],"nonResourceURLs":["/api/*"]}|namespace kube-system: post /api/*
+GRANTS
+AGENT_TEST_INCOMPLETE=true refused incomplete 'could not list every permission' \
+    --output-dir "$scratch/incomplete"
+AGENT_TEST_NO_NAMESPACES=true refused no-namespaces 'could not enumerate namespaces' \
+    --output-dir "$scratch/no-namespaces"
+# The reads it is for must work, logs included.
+AGENT_TEST_NO_READ='get pods -n' refused no-pods 'cannot get pods in econ-graph' \
+    --output-dir "$scratch/no-pods"
+AGENT_TEST_NO_READ='--subresource=log' refused no-logs 'cannot get pods --subresource=log' \
+    --output-dir "$scratch/no-logs"
+refused bad-namespace 'must be a DNS label' --namespace '' --output-dir "$scratch/bad-namespace"
 
-# Never into a git work tree, where the token could be committed.
+# --- Token lifetime: at most 65 minutes -------------------------------------
+AGENT_TEST_TOKEN_SECONDS=3840 bootstrap --output-dir "$scratch/64min" >/dev/null   # 64 minutes
+for seconds in 4200 7200 86400 31536000; do   # 70 minutes, 2 hours, 1 day, 1 year
+    AGENT_TEST_TOKEN_SECONDS=$seconds refused "token-$seconds" 'more than 1 hour' \
+        --output-dir "$scratch/token-$seconds"
+done
+
+# --- Where the kubeconfig may go --------------------------------------------
 mkdir "$scratch/repo"
 git -C "$scratch/repo" init -q
-if "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
-    --kubectl "$KUBECTL" --output-dir "$scratch/repo/agent" >"$scratch/repo-output" 2>&1; then
-    echo 'bootstrap wrote into a git work tree' >&2; exit 1
-fi
+refused repo 'inside a git work tree' --output-dir "$scratch/repo/agent"
 [ ! -e "$scratch/repo/agent" ]
-grep -q 'inside a git work tree' "$scratch/repo-output"
+mkdir "$scratch/target"
+ln -s "$scratch/target" "$scratch/linked"
+refused symlink 'output directory is a symlink' --output-dir "$scratch/linked"
+[ -z "$(ls -A "$scratch/target")" ]
+if [ "$(id -u)" != 0 ]; then
+    : >"$AGENT_TEST_CALLS"
+    refused not-owned 'output directory must be owned by you' --output-dir /usr
+    [ ! -s "$AGENT_TEST_CALLS" ]
+fi
+# A directory above it that others can write: refused before anything is created.
+mkdir -m 0777 "$scratch/open"
+chmod 0777 "$scratch/open"
+refused open-parent "$scratch/open can be changed by other users" --output-dir "$scratch/open/a/agent"
+[ ! -e "$scratch/open/a" ]
+# A directory above it owned by another user (a stat stub reports the owner).
+mkdir -p "$scratch/foreign" "$scratch/stat-bin"
+cat >"$scratch/stat-bin/stat" <<STAT
+#!/usr/bin/env bash
+if [ "\$1 \$2" = "-c %u %g %a" ] && [ "\$3" = "$scratch/foreign" ]; then echo '54321 54321 755'; exit 0; fi
+exec "$(command -v stat)" "\$@"
+STAT
+chmod +x "$scratch/stat-bin/stat"
+PATH="$scratch/stat-bin:$PATH" refused foreign-parent "$scratch/foreign can be changed by other users" \
+    --output-dir "$scratch/foreign/agent"
+[ ! -e "$scratch/foreign/agent" ]
+# Sticky directories (like /tmp) are fine.
+mkdir "$scratch/sticky"
+chmod 1777 "$scratch/sticky"
+bootstrap --output-dir "$scratch/sticky/agent" >/dev/null
+# Group-writable only for your own private group.
+other_group="$(id -G | tr ' ' '\n' | grep -vx "$(id -g)" | head -n1 || true)"
+if [ -n "$other_group" ]; then
+    mkdir "$scratch/shared"
+    chgrp "$other_group" "$scratch/shared"
+    chmod 0770 "$scratch/shared"
+    refused group-parent "$scratch/shared can be changed by other users" --output-dir "$scratch/shared/agent"
+fi
+if [ "$(id -gn)" = "$(id -un)" ]; then
+    mkdir "$scratch/private-group"
+    chmod 0770 "$scratch/private-group"
+    bootstrap --output-dir "$scratch/private-group/agent" >/dev/null
+fi
 
-# Kubectl defaulting, as cluster_role_default_kubectl: without flags or
-# KUBECTL/KUBECONFIG, the kind cluster's kubectl and kubeconfig in the cache.
+# --- Which kubectl ----------------------------------------------------------
+# Without flags or KUBECTL/KUBECONFIG: the kind cluster's kubectl and
+# kubeconfig in the cache (cluster_role_default_kubectl).
 mkdir -p "$scratch/cache/econgraph/bin"
 cp "$KUBECTL" "$scratch/cache/econgraph/bin/kubectl"
 echo cache >"$scratch/cache/econgraph/kubeconfig-econ-graph"
@@ -215,17 +289,42 @@ fi
 [ ! -s "$AGENT_TEST_CALLS" ]
 [ ! -e "$scratch/plain" ]
 grep -qi 'kind.*kubectl' "$scratch/plain-output"
-# A MicroK8s kubectl named explicitly is refused too.
-mkdir -p "$scratch/snap/bin"
-cp "$scratch/plain-bin/kubectl" "$scratch/snap/bin/microk8s.kubectl"
-if "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
-    --kubectl "$scratch/snap/bin/microk8s.kubectl" --output-dir "$scratch/snapped" \
-    >"$scratch/snap-output" 2>&1; then
-    echo 'bootstrap accepted the MicroK8s kubectl' >&2; exit 1
-fi
-grep -q 'MicroK8s' "$scratch/snap-output"
+# MicroK8s kubectl, at any link of the chain. The real one:
+# /snap/bin/kubectl -> /usr/bin/snap -> /usr/lib/snapd/snapd.
+fake="$scratch/fake"
+mkdir -p "$fake/snap/bin" "$fake/usr/bin" "$fake/usr/lib/snapd" "$fake/links"
+cp "$scratch/plain-bin/kubectl" "$fake/usr/lib/snapd/snapd"
+cp "$scratch/plain-bin/kubectl" "$fake/snap/bin/microk8s"
+cp "$scratch/plain-bin/kubectl" "$fake/snap/bin/plain-file"
+cp "$scratch/plain-bin/kubectl" "$fake/microk8s-kubectl"
+ln -s "$fake/usr/lib/snapd/snapd" "$fake/usr/bin/snap"
+ln -s "$fake/usr/bin/snap" "$fake/snap/bin/kubectl"
+ln -s ../usr/bin/snap "$fake/links/via-snap"           # relative, outside /snap/bin
+ln -s "$fake/usr/lib/snapd/snapd" "$fake/links/via-snapd"
+ln -s "$fake/microk8s-kubectl" "$fake/links/via-microk8s"
+ln -s "$KUBECTL" "$fake/links/kind-kubectl"
+# Ends at a file named snap; passes through /snap/bin to an innocent end.
+mkdir -p "$fake/other"
+cp "$scratch/plain-bin/kubectl" "$fake/other/snap"
+ln -s "$fake/other/snap" "$fake/links/to-snap-file"
+ln -s "$KUBECTL" "$fake/snap/bin/hop"
+ln -s "$fake/snap/bin/hop" "$fake/links/via-snap-bin"
+: >"$AGENT_TEST_CALLS"
+for kubectl in "$fake/snap/bin/kubectl" "$fake/snap/bin/plain-file" "$fake/snap/bin/microk8s" \
+    "$fake/links/via-snap" "$fake/links/via-snapd" "$fake/links/via-microk8s" \
+    "$fake/links/to-snap-file" "$fake/links/via-snap-bin"; do
+    if "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
+        --kubectl "$kubectl" --output-dir "$scratch/snapped" --dry-run >"$scratch/snap-output" 2>&1; then
+        echo "bootstrap accepted the MicroK8s kubectl $kubectl" >&2; exit 1
+    fi
+    grep -q 'MicroK8s' "$scratch/snap-output"
+done
 [ ! -s "$AGENT_TEST_CALLS" ]
+# A symlink chain that ends at a real kubectl is fine.
+"$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
+    --kubectl "$fake/links/kind-kubectl" --output-dir "$scratch/snapped" --dry-run >/dev/null 2>&1
 
+# --- The launcher and the credential guards ---------------------------------
 # The launcher overrides inherited admin selections and the helper never calls Docker/kind.
 cat >"$scratch/check-session" <<'CHECK'
 #!/usr/bin/env bash
@@ -264,6 +363,9 @@ done
 AGENT_TEST_USER="admin" "$ROOT/scripts/deploy/run-agent-session.sh" \
     --config-dir "$scratch/agent" -- true >"$scratch/guard" 2>&1 && exit 1
 grep -q 'non-agent kubeconfig' "$scratch/guard"
+AGENT_TEST_NS="" "$ROOT/scripts/deploy/run-agent-session.sh" \
+    --config-dir "$scratch/agent" -- true >"$scratch/guard" 2>&1 && exit 1
+grep -q 'must select a namespace' "$scratch/guard"
 if "$ROOT/scripts/deploy/run-agent-session.sh" --config-dir relative -- true >"$scratch/guard" 2>&1; then
     echo 'launcher accepted relative config directory' >&2; exit 1
 fi
