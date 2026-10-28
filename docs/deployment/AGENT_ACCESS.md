@@ -19,8 +19,11 @@ garbage collector delete data. Restarts, rollouts and every other change are run
 by an operator with the operator scripts.
 
 What a read-only identity still exposes: application pod logs, ConfigMaps, and
-literal `env` values in pod and workload specs. Keep credentials in Secrets, not
-in those, and do not log them. The identity does not isolate the operator's own
+literal `env` values and container `command`/`args` in pod and workload specs.
+Keep credentials in Secrets, not in those, and do not log them. It can also open
+`watch` and log-follow (`kubectl logs -f`) streams, which are unbounded and load
+the API server and kubelet; the one-hour token limits how long new ones can be
+opened. The identity does not isolate the operator's own
 files: a process running as the operator's Unix user can read that user's admin
 kubeconfig and plaintext backups, and access to the rootful Docker socket can
 recover kind's admin credentials or mount host files. Environment flags and script
@@ -34,11 +37,12 @@ operator kubeconfig as the other operator scripts do (`cluster_role_default_kube
 in `lib/cluster-role.sh`): `--kubectl` and `--operator-kubeconfig`, else `KUBECTL`
 and `KUBECONFIG`, else the kind cluster's kubectl and kubeconfig kept in
 `~/.cache/econgraph`. It never uses plain `kubectl` from `PATH`, and refuses a
-MicroK8s kubectl: on this host `/snap/bin/kubectl` is a symlink to `/usr/bin/snap`
-(and on to `/usr/lib/snapd/snapd`), which reaches MicroK8s and ignores the
+MicroK8s kubectl: on this host `/snap/bin/kubectl` -> `microk8s.kubectl` ->
+`/usr/bin/snap` -> `../lib/snapd/snapd`, which reaches MicroK8s and ignores the
 kubeconfig. Every link of the kubectl's symlink chain is checked: a path under
 `/snap/bin/`, or a name starting with `microk8s` or equal to `snap` or `snapd`, is
-refused. It works on context `kind-econ-graph` (`kind-<cluster>` with `--cluster`)
+refused. So is a binary inside `/snap` or one that a `/snap/bin` entry resolves
+to, and a script (rather than an ELF binary) that mentions snap or MicroK8s. It works on context `kind-econ-graph` (`kind-<cluster>` with `--cluster`)
 of that kubeconfig, prints that cluster's identity before writing, and leaves the
 kubeconfig's current context unchanged. The namespace must already exist.
 
@@ -67,13 +71,18 @@ must be able to list namespaces for these checks.
 
 The token is requested for one hour, and a token the API server issues for more
 than 65 minutes is refused. Re-run bootstrap to renew it. The kubeconfig is written
-0600 in a 0700 directory you own. Bootstrap refuses an output directory that is a
-symlink, is not yours, or is inside a git work tree, and refuses when it or any
-directory above it can be changed by another user (writable by others without the
-sticky bit, or by a group other than your own private group). Never attach or paste
-the kubeconfig in an issue, terminal output or chat.
+0600, with a private 0700 copy of the kubectl in `bin/`, in a 0700 directory you
+own; none of them may be a symlink or carry an extended or default POSIX ACL.
+Bootstrap refuses an output directory that is a symlink, is not yours, or is
+inside a git work tree. It also refuses when any directory on the way to it can be
+changed by another user: writable by others without the sticky bit, by a group
+other than your own private group, or by another user or group through an ACL.
+That walk follows symlinks one component at a time, so the directory holding a
+symlink is checked as well as where it points. Never attach or paste the
+kubeconfig in an issue, terminal output or chat.
 
-The launcher replaces inherited kubectl/config selections and marks the session.
+The launcher runs nothing from the directory unless these checks still pass. It
+replaces inherited kubectl/config selections and marks the session.
 The shared kind helper preserves that identity and fails when it cannot use the
 restricted config; it never falls back to `kind get kubeconfig` in such a session.
 Agents can inspect the namespace; deployments, restarts and the provisioning

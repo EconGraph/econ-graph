@@ -63,6 +63,8 @@ if ns == os.environ.get("AGENT_TEST_EXTRA_NS", "kube-system"):
         rules.append(extra)
 status = {"resourceRules": rules, "nonResourceRules": urls,
           "incomplete": os.environ.get("AGENT_TEST_INCOMPLETE") == "true"}
+if os.environ.get("AGENT_TEST_EVALUATION_ERROR"):
+    status["evaluationError"] = os.environ["AGENT_TEST_EVALUATION_ERROR"]
 print(json.dumps({"kind": "SelfSubjectRulesReview", "status": status}))
 PY
         ;;
@@ -149,6 +151,11 @@ assert list(c["users"][0]["user"]) == ["token"]
 assert c["users"][0]["user"]["token"].endswith(".test-bearer-token")
 assert c["contexts"][0]["context"]["user"] == "econgraph-agent"
 assert c["clusters"][0]["cluster"]["server"] == "https://example.invalid"
+# The launcher's kubectl is a private copy, not a symlink out.
+kubectl = p.parent / "bin" / "kubectl"
+assert not kubectl.is_symlink() and kubectl.is_file()
+assert stat.S_IMODE(kubectl.stat().st_mode) == 0o700
+assert stat.S_IMODE(kubectl.parent.stat().st_mode) == 0o700
 PY
 # Every namespace's permissions were listed with the issued token.
 for ns in econ-graph kube-system; do
@@ -191,6 +198,8 @@ done <<'GRANTS'
 GRANTS
 AGENT_TEST_INCOMPLETE=true refused incomplete 'could not list every permission' \
     --output-dir "$scratch/incomplete"
+AGENT_TEST_EVALUATION_ERROR='webhook authorizer unavailable' refused evaluation-error \
+    'could not list every permission' --output-dir "$scratch/evaluation-error"
 AGENT_TEST_NO_NAMESPACES=true refused no-namespaces 'could not enumerate namespaces' \
     --output-dir "$scratch/no-namespaces"
 # The reads it is for must work, logs included.
@@ -226,17 +235,31 @@ mkdir -m 0777 "$scratch/open"
 chmod 0777 "$scratch/open"
 refused open-parent "$scratch/open can be changed by other users" --output-dir "$scratch/open/a/agent"
 [ ! -e "$scratch/open/a" ]
-# A directory above it owned by another user (a stat stub reports the owner).
-mkdir -p "$scratch/foreign" "$scratch/stat-bin"
-cat >"$scratch/stat-bin/stat" <<STAT
-#!/usr/bin/env bash
-if [ "\$1 \$2" = "-c %u %g %a" ] && [ "\$3" = "$scratch/foreign" ]; then echo '54321 54321 755'; exit 0; fi
-exec "$(command -v stat)" "\$@"
-STAT
-chmod +x "$scratch/stat-bin/stat"
-PATH="$scratch/stat-bin:$PATH" refused foreign-parent "$scratch/foreign can be changed by other users" \
-    --output-dir "$scratch/foreign/agent"
-[ ! -e "$scratch/foreign/agent" ]
+# A symlink inside an open directory: the directory holding the link counts,
+# not only where it points.
+mkdir -m 0777 "$scratch/ww"
+chmod 0777 "$scratch/ww"
+mkdir "$scratch/priv"
+ln -s ../priv "$scratch/ww/link"
+refused symlinked-ancestor "$scratch/ww can be changed by other users" --output-dir "$scratch/ww/link/agent"
+[ ! -e "$scratch/priv/agent" ]
+# ... also when the open directory is only on the way to the link's target.
+ln -s "$scratch/ww/link" "$scratch/via-ww"
+refused symlink-target "$scratch/ww can be changed by other users" --output-dir "$scratch/via-ww/agent"
+# A trusted symlink is fine.
+ln -s priv "$scratch/priv-link"
+bootstrap --output-dir "$scratch/priv-link/agent" >/dev/null
+[ -f "$scratch/priv/agent/kubeconfig-econ-graph" ]
+# A directory above it owned by another user (one that exists on this host).
+foreign="$(find /var /srv /opt /run -maxdepth 3 -type d ! -uid 0 ! -uid "$(id -u)" 2>/dev/null | head -n1 || true)"
+if [ -n "$foreign" ]; then
+    if python3 "$ROOT/scripts/deploy/lib/agent_paths.py" check-chain "$foreign/agent" 2>"$scratch/foreign.out"; then
+        echo "accepted a directory owned by another user: $foreign" >&2; exit 1
+    fi
+    grep -qF "$foreign can be changed by other users" "$scratch/foreign.out"
+else
+    echo 'note: no directory owned by another user found; skipping that check'
+fi
 # Sticky directories (like /tmp) are fine.
 mkdir "$scratch/sticky"
 chmod 1777 "$scratch/sticky"
@@ -253,6 +276,60 @@ if [ "$(id -gn)" = "$(id -un)" ]; then
     mkdir "$scratch/private-group"
     chmod 0770 "$scratch/private-group"
     bootstrap --output-dir "$scratch/private-group/agent" >/dev/null
+fi
+# The bin directory: never a symlink, made private if it is not.
+mkdir -p "$scratch/binlink/agent" "$scratch/elsewhere"
+chmod 0700 "$scratch/binlink/agent"
+chmod 0755 "$scratch/elsewhere"
+ln -s "$scratch/elsewhere" "$scratch/binlink/agent/bin"
+refused bin-symlink 'output bin directory is a symlink' --output-dir "$scratch/binlink/agent"
+[ -z "$(ls -A "$scratch/elsewhere")" ]
+[ "$(stat -c %a "$scratch/elsewhere")" = 755 ]   # nothing was chmod-ed through the link
+# A path component that is a file, not a directory.
+: >"$scratch/a-file"
+refused file-component "$scratch/a-file is not a directory" --output-dir "$scratch/a-file/agent"
+mkdir -p "$scratch/binmode/agent/bin"
+chmod 0777 "$scratch/binmode/agent/bin"
+bootstrap --output-dir "$scratch/binmode/agent" >/dev/null
+[ "$(stat -c %a "$scratch/binmode/agent/bin")" = 700 ]
+# The helper's ownership check, on a directory that is root's.
+if [ "$(id -u)" != 0 ]; then
+    if python3 "$ROOT/scripts/deploy/lib/agent_paths.py" check-private 'test dir' dir 755 /usr \
+        2>"$scratch/owner.out"; then
+        echo 'check-private accepted a directory owned by root' >&2; exit 1
+    fi
+    grep -q 'test dir must be owned by you' "$scratch/owner.out"
+fi
+
+# --- POSIX ACLs --------------------------------------------------------------
+mkdir "$scratch/acl-probe"
+if command -v setfacl >/dev/null 2>&1 && setfacl -m u:65534:r-x "$scratch/acl-probe" 2>/dev/null; then
+    # On the output directory: any extended entry, or a default ACL.
+    mkdir -p "$scratch/acl-out/agent" "$scratch/acl-default/agent"
+    setfacl -m u:65534:r-x "$scratch/acl-out/agent"
+    refused acl-out 'output directory has an extended ACL' --output-dir "$scratch/acl-out/agent"
+    setfacl -d -m u:65534:r-x "$scratch/acl-default/agent"
+    refused acl-default 'output directory has an extended ACL' --output-dir "$scratch/acl-default/agent"
+    mkdir -p "$scratch/acl-bin/agent/bin"
+    chmod 0700 "$scratch/acl-bin/agent"
+    setfacl -m u:65534:r-x "$scratch/acl-bin/agent/bin"
+    refused acl-bin 'output bin directory has an extended ACL' --output-dir "$scratch/acl-bin/agent"
+    # On a directory above it: write for another user or group is refused,
+    # read is fine.
+    mkdir "$scratch/acl-write" "$scratch/acl-group-write" "$scratch/acl-read"
+    setfacl -m u:65534:rwx "$scratch/acl-write"
+    refused acl-write "$scratch/acl-write can be changed by other users" --output-dir "$scratch/acl-write/agent"
+    setfacl -m g:65534:rwx "$scratch/acl-group-write"
+    refused acl-group-write "$scratch/acl-group-write can be changed by other users" \
+        --output-dir "$scratch/acl-group-write/agent"
+    setfacl -m u:65534:r-x "$scratch/acl-read"
+    bootstrap --output-dir "$scratch/acl-read/agent" >/dev/null
+    # A mask without write disables a named entry's write.
+    mkdir "$scratch/acl-masked"
+    setfacl -m u:65534:rwx,m::r-x "$scratch/acl-masked"
+    bootstrap --output-dir "$scratch/acl-masked/agent" >/dev/null
+else
+    echo 'note: setfacl unavailable or ACLs unsupported here; skipping the ACL checks'
 fi
 
 # --- Which kubectl ----------------------------------------------------------
@@ -290,15 +367,16 @@ fi
 [ ! -e "$scratch/plain" ]
 grep -qi 'kind.*kubectl' "$scratch/plain-output"
 # MicroK8s kubectl, at any link of the chain. The real one:
-# /snap/bin/kubectl -> /usr/bin/snap -> /usr/lib/snapd/snapd.
+# /snap/bin/kubectl -> microk8s.kubectl -> /usr/bin/snap -> ../lib/snapd/snapd.
 fake="$scratch/fake"
 mkdir -p "$fake/snap/bin" "$fake/usr/bin" "$fake/usr/lib/snapd" "$fake/links"
 cp "$scratch/plain-bin/kubectl" "$fake/usr/lib/snapd/snapd"
 cp "$scratch/plain-bin/kubectl" "$fake/snap/bin/microk8s"
 cp "$scratch/plain-bin/kubectl" "$fake/snap/bin/plain-file"
 cp "$scratch/plain-bin/kubectl" "$fake/microk8s-kubectl"
-ln -s "$fake/usr/lib/snapd/snapd" "$fake/usr/bin/snap"
-ln -s "$fake/usr/bin/snap" "$fake/snap/bin/kubectl"
+ln -s ../lib/snapd/snapd "$fake/usr/bin/snap"
+ln -s "$fake/usr/bin/snap" "$fake/snap/bin/microk8s.kubectl"
+ln -s microk8s.kubectl "$fake/snap/bin/kubectl"
 ln -s ../usr/bin/snap "$fake/links/via-snap"           # relative, outside /snap/bin
 ln -s "$fake/usr/lib/snapd/snapd" "$fake/links/via-snapd"
 ln -s "$fake/microk8s-kubectl" "$fake/links/via-microk8s"
@@ -320,6 +398,29 @@ for kubectl in "$fake/snap/bin/kubectl" "$fake/snap/bin/plain-file" "$fake/snap/
     grep -q 'MicroK8s' "$scratch/snap-output"
 done
 [ ! -s "$AGENT_TEST_CALLS" ]
+# A wrapper script that runs it, and a binary a snap's bin entry resolves to
+# or that lives inside a snap (a fake snap root).
+mkdir -p "$fake/wrap" "$fake/snaproot/bin" "$fake/snaproot/microk8s/current" "$fake/opt"
+printf '#!/bin/sh\nexec /snap/bin/microk8s kubectl "$@"\n' >"$fake/wrap/kubectl"
+printf '#!/bin/sh\nexec snap run kubectl "$@"\n' >"$fake/wrap/kubectl-snap"
+cp "$KUBECTL" "$fake/opt/kubectl"
+ln -s "$fake/opt/kubectl" "$fake/snaproot/bin/kubectl"
+cp "$KUBECTL" "$fake/snaproot/microk8s/current/kubectl"
+chmod +x "$fake/wrap/kubectl" "$fake/wrap/kubectl-snap"
+for kubectl in "$fake/wrap/kubectl" "$fake/wrap/kubectl-snap" "$fake/opt/kubectl" \
+    "$fake/snaproot/microk8s/current/kubectl"; do
+    if ECONGRAPH_SNAP_ROOT="$fake/snaproot" "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" \
+        --operator-kubeconfig "$scratch/operator" --kubectl "$kubectl" --output-dir "$scratch/snapped" \
+        --dry-run >"$scratch/snap-output" 2>&1; then
+        echo "bootstrap accepted the MicroK8s kubectl $kubectl" >&2; exit 1
+    fi
+    grep -q 'MicroK8s' "$scratch/snap-output"
+done
+[ ! -s "$AGENT_TEST_CALLS" ]
+# A script that does not mention snap or MicroK8s (like these stubs) is fine.
+ECONGRAPH_SNAP_ROOT="$fake/snaproot" "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" \
+    --operator-kubeconfig "$scratch/operator" --kubectl "$KUBECTL" --output-dir "$scratch/snapped" \
+    --dry-run >/dev/null 2>&1
 # A symlink chain that ends at a real kubectl is fine.
 "$ROOT/scripts/deploy/create-agent-kubeconfig.sh" --operator-kubeconfig "$scratch/operator" \
     --kubectl "$fake/links/kind-kubectl" --output-dir "$scratch/snapped" --dry-run >/dev/null 2>&1
@@ -366,6 +467,43 @@ grep -q 'non-agent kubeconfig' "$scratch/guard"
 AGENT_TEST_NS="" "$ROOT/scripts/deploy/run-agent-session.sh" \
     --config-dir "$scratch/agent" -- true >"$scratch/guard" 2>&1 && exit 1
 grep -q 'must select a namespace' "$scratch/guard"
+# The launcher runs nothing from a config directory that is no longer private.
+launcher_refuses() {
+    local name="$1" message="$2" dir="$scratch/session-$1"
+    shift 2
+    cp -a "$scratch/agent" "$dir"
+    (cd "$dir" && "$@")
+    : >"$AGENT_TEST_CALLS"
+    if "$ROOT/scripts/deploy/run-agent-session.sh" --config-dir "$dir" -- true >"$scratch/guard" 2>&1; then
+        echo "launcher accepted: $name" >&2; exit 1
+    fi
+    grep -qF -- "$message" "$scratch/guard" || {
+        echo "$name: expected '$message' in:" >&2; cat "$scratch/guard" >&2; exit 1
+    }
+    [ ! -s "$AGENT_TEST_CALLS" ] || { echo "$name: kubectl ran" >&2; exit 1; }
+}
+launcher_refuses kubectl-symlink 'agent kubectl is a symlink' ln -sf "$KUBECTL" bin/kubectl
+launcher_refuses kubectl-mode 'agent kubectl has mode 777' chmod 0777 bin/kubectl
+launcher_refuses bin-symlink 'agent bin directory is a symlink' \
+    sh -c 'mv bin real-bin && ln -s real-bin bin'
+launcher_refuses bin-mode 'agent bin directory has mode 755' chmod 0755 bin
+launcher_refuses dir-mode 'agent config directory has mode 755' chmod 0755 .
+launcher_refuses kubeconfig-mode 'agent kubeconfig has mode 644' chmod 0644 kubeconfig-econ-graph
+mkdir -m 0777 "$scratch/open-sessions"
+chmod 0777 "$scratch/open-sessions"
+cp -a "$scratch/agent" "$scratch/open-sessions/agent"
+: >"$AGENT_TEST_CALLS"
+if "$ROOT/scripts/deploy/run-agent-session.sh" --config-dir "$scratch/open-sessions/agent" -- true \
+    >"$scratch/guard" 2>&1; then
+    echo 'launcher accepted a config directory under an open one' >&2; exit 1
+fi
+grep -qF "$scratch/open-sessions can be changed by other users" "$scratch/guard"
+[ ! -s "$AGENT_TEST_CALLS" ]
+if command -v setfacl >/dev/null 2>&1 && setfacl -m u:65534:r-x "$scratch/acl-probe" 2>/dev/null; then
+    launcher_refuses kubeconfig-acl 'agent kubeconfig has an extended ACL' \
+        setfacl -m u:65534:r-- kubeconfig-econ-graph
+    launcher_refuses kubectl-acl 'agent kubectl has an extended ACL' setfacl -m u:65534:r-x bin/kubectl
+fi
 if "$ROOT/scripts/deploy/run-agent-session.sh" --config-dir relative -- true >"$scratch/guard" 2>&1; then
     echo 'launcher accepted relative config directory' >&2; exit 1
 fi

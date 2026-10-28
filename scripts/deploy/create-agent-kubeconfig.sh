@@ -51,19 +51,34 @@ kubectl_bin="${KUBECTL:-}" operator_config="${KUBECONFIG:-}"
     echo 'error: no kind kubectl found; pass --kubectl with an absolute executable path' >&2
     exit 2
 }
-# Every link of the chain counts, not only its end: /snap/bin/kubectl is a
-# symlink to /usr/bin/snap, which re-executes as MicroK8s' kubectl.
+# MicroK8s' kubectl: /snap/bin/kubectl -> microk8s.kubectl -> /usr/bin/snap ->
+# ../lib/snapd/snapd, which re-executes as MicroK8s' kubectl. Every link of the
+# chain counts, not only its end; so does a wrapper script that runs it, and a
+# binary that a /snap/bin entry resolves to or that lives in a snap. (The snap
+# root is a setting only so the tests can build a fake one.)
+snap_root="${ECONGRAPH_SNAP_ROOT:-/snap}"
 snap_kubectl() {
-    local path="$1" target hops=0
+    local path="$1" target hops=0 real entry
     while :; do
         case "$path" in */snap/bin/*) return 0 ;; esac
         case "$(basename "$path")" in microk8s* | snap | snapd) return 0 ;; esac
-        [ -L "$path" ] || return 1
+        [ -L "$path" ] || break
         hops=$((hops + 1))
         [ "$hops" -le 40 ] || return 0
         target="$(readlink "$path")"
         case "$target" in /*) path="$target" ;; *) path="$(dirname "$path")/$target" ;; esac
     done
+    real="$(readlink -f "$1")"
+    case "$real" in "$snap_root"/*) return 0 ;; esac
+    for entry in "$snap_root"/bin/*; do
+        [ -e "$entry" ] && [ "$(readlink -f "$entry")" = "$real" ] && return 0
+    done
+    # A script rather than an ELF binary: refused when it mentions snap or MicroK8s.
+    if [ "$(head -c 4 "$real" | od -An -tx1 | tr -d ' \n')" != 7f454c46 ] &&
+        grep -qiE 'snap|microk8s' "$real"; then
+        return 0
+    fi
+    return 1
 }
 if snap_kubectl "$kubectl_bin"; then
     echo "error: $kubectl_bin is the MicroK8s (snap) kubectl; use the kind cluster's kubectl" >&2
@@ -126,47 +141,24 @@ if [ "$dry_run" = true ]; then
     exit 0
 fi
 
-# The output directory and every directory above it must be writable only by
-# you or root (sticky directories such as /tmp aside; a group-writable one only
-# when the group is your own private group), so nobody else can swap a path
-# component between the checks and the writes below.
-trusted_dir() {
-    local owner group mode
-    read -r owner group mode < <(stat -c '%u %g %a' "$1") || return 1
-    [ "$owner" = 0 ] || [ "$owner" = "$(id -u)" ] || return 1
-    mode=$((8#$mode))
-    (( mode & 01000 )) && return 0
-    (( mode & 0002 )) && return 1
-    if (( mode & 0020 )); then
-        [ "$group" = "$(id -g)" ] && [ "$(id -gn)" = "$(id -un)" ] || return 1
-    fi
-    return 0
-}
-check_ancestors() {
-    local dir
-    dir="$(realpath -e "$1")" || return 1
-    while :; do
-        trusted_dir "$dir" || {
-            echo "error: $dir can be changed by other users; choose another --output-dir" >&2
-            return 1
-        }
-        [ "$dir" != / ] || return 0
-        dir="$(dirname "$dir")"
-    done
-}
+# Every directory on the way to the output directory, symlinks followed one
+# component at a time, must be changeable only by you or root (see
+# lib/agent_paths.py), so nobody else can swap a path component between the
+# checks and the writes below. Checked before anything is created, and again
+# once the parents exist.
+paths() { python3 "$ROOT/scripts/deploy/lib/agent_paths.py" "$@"; }
 parent="$(dirname "$output_dir")"
-existing="$parent"
-while [ ! -e "$existing" ]; do existing="$(dirname "$existing")"; done
-check_ancestors "$existing" || exit 1
+paths check-chain "$parent" || exit 1
 mkdir -p "$parent"
-check_ancestors "$parent" || exit 1
-# Create, then verify what is there: no check-then-create window.
+paths check-chain "$parent" || exit 1
+# Create, then verify what is there: no check-then-create window. The -L and
+# -O checks come before chmod, which would follow a symlink.
 mkdir "$output_dir" 2>/dev/null || true
 [ ! -L "$output_dir" ] || { echo 'error: output directory is a symlink' >&2; exit 1; }
 [ -d "$output_dir" ] || { echo 'error: output directory could not be created' >&2; exit 1; }
 [ -O "$output_dir" ] || { echo 'error: output directory must be owned by you' >&2; exit 1; }
 chmod 0700 "$output_dir"
-[ "$(stat -c %a "$output_dir")" = 700 ] || { echo 'error: could not make the output directory private' >&2; exit 1; }
+paths check-private 'output directory' dir 700 "$output_dir" || exit 1
 
 # Pin kind-<cluster> in the operator config (its current context stays as it
 # is) and show which cluster that is before writing to it.
@@ -288,10 +280,20 @@ for check in "get pods" "get pods --subresource=log"; do
         exit 1
     }
 done
+# The launcher runs bin/kubectl: a private copy, not a symlink out of the
+# directory, in a private bin directory.
+mkdir "$output_dir/bin" 2>/dev/null || true
 [ ! -L "$output_dir/bin" ] || { echo 'error: output bin directory is a symlink' >&2; exit 1; }
-mkdir -p "$output_dir/bin"
-ln -sfn "$kubectl_bin" "$output_dir/bin/kubectl"
+[ -O "$output_dir/bin" ] || { echo 'error: output bin directory must be owned by you' >&2; exit 1; }
+chmod 0700 "$output_dir/bin"
+paths check-private 'output bin directory' dir 700 "$output_dir/bin" || exit 1
+cp "$kubectl_bin" "$work/kubectl"
+chmod 0700 "$work/kubectl"
+mv -f "$work/kubectl" "$output_dir/bin/kubectl"
+paths check-private 'agent kubectl' file 700 "$output_dir/bin/kubectl" || exit 1
 mv -f "$work/kubeconfig" "$output_dir/kubeconfig-${cluster}"
+chmod 0600 "$output_dir/kubeconfig-${cluster}"
+paths check-private 'agent kubeconfig' file 600 "$output_dir/kubeconfig-${cluster}" || exit 1
 echo "Agent kubeconfig written privately to ${output_dir}/kubeconfig-${cluster}."
 echo 'Token requested for 1 hour; a longer one is refused. Re-run to renew.'
 echo 'Launch agent tools through scripts/deploy/run-agent-session.sh.'

@@ -25,6 +25,19 @@ export KUBECTL="$config_dir/bin/kubectl"
     echo 'error: restricted config missing; ask the operator to run create-agent-kubeconfig.sh' >&2
     exit 1
 }
+# Run nothing from the directory unless it is still private: every directory
+# on the way changeable only by you or root, and the directory, its bin, the
+# kubectl copy and the kubeconfig yours, not symlinks, with the modes
+# create-agent-kubeconfig.sh gave them and no extended ACL.
+paths() { python3 "$(dirname "${BASH_SOURCE[0]}")/lib/agent_paths.py" "$@"; }
+if ! { paths check-chain "$config_dir" &&
+    paths check-private 'agent config directory' dir 700 "$config_dir" &&
+    paths check-private 'agent bin directory' dir 700 "$config_dir/bin" &&
+    paths check-private 'agent kubectl' file 700 "$KUBECTL" &&
+    paths check-private 'agent kubeconfig' file 600 "$KUBECONFIG"; }; then
+    echo 'Ask the operator to re-run create-agent-kubeconfig.sh.' >&2
+    exit 1
+fi
 user="$("$KUBECTL" --kubeconfig "$KUBECONFIG" config view --minify -o 'jsonpath={.contexts[0].context.user}')"
 [ "$user" = econgraph-agent ] || { echo 'error: refusing a non-agent kubeconfig' >&2; exit 1; }
 NAMESPACE="$("$KUBECTL" --kubeconfig "$KUBECONFIG" config view --minify -o 'jsonpath={.contexts[0].context.namespace}')"
