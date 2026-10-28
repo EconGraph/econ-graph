@@ -2,6 +2,8 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
+use std::str::FromStr;
+
 use super::*;
 use crate::testkit::{test_ctx, MockSource, Reply, Route};
 
@@ -26,6 +28,16 @@ fn route(indicator: &str) -> Route {
 
 fn date(y: i32, m: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, 1).unwrap()
+}
+
+/// [`parse_rows`] of `items`, written out as JSON text the way a response carries them.
+fn parse_rows_json(what: &str, items: Vec<Value>) -> Result<Vec<Row>, CrawlError> {
+    let body = serde_json::to_string(&Value::Array(vec![
+        serde_json::json!({}),
+        Value::Array(items),
+    ]))
+    .unwrap();
+    parse_rows(what, &raw_items(what, &body).unwrap())
 }
 
 fn ids(v: &[&str]) -> Vec<String> {
@@ -160,7 +172,7 @@ fn area_lookup() {
 /// once per area).
 #[test]
 fn resolve_merges_rows_that_reach_the_same_area_by_two_raw_codes() {
-    let rows = parse_rows(
+    let rows = parse_rows_json(
         "x",
         vec![
             // countryiso3code set: resolves via by_wb_code/by_iso3 first (sorts before "").
@@ -416,13 +428,13 @@ fn response_shapes() {
             "countryiso3code": "USA", "date": date, "value": value})
     };
     assert_eq!(
-        parse_rows("x", vec![row("20x3", serde_json::json!(1))])
+        parse_rows_json("x", vec![row("20x3", serde_json::json!(1))])
             .unwrap_err()
             .kind(),
         "parse"
     );
     // Large and exponent-formatted numbers keep their value.
-    let rows = parse_rows(
+    let rows = parse_rows_json(
         "x",
         vec![
             row("2023", serde_json::json!(2.7360935e13)),

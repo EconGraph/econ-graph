@@ -23,7 +23,8 @@ resource "local_file" "kind_config" {
     apiVersion = "kind.x-k8s.io/v1alpha4"
     nodes = [
       {
-        role = "control-plane"
+        role  = "control-plane"
+        image = var.node_image
         kubeadmConfigPatches = [
           "kind: InitConfiguration\nnodeRegistration:\n  kubeletExtraArgs:\n    node-labels: \"ingress-ready=true\""
         ]
@@ -56,7 +57,8 @@ resource "local_file" "kind_config" {
         # The static PVs in k8s/manifests/host-storage.yaml point at these
         # paths and are pinned to this node by the label below, so deleting
         # the cluster no longer deletes the database.
-        role = "worker"
+        role  = "worker"
+        image = var.node_image
         labels = {
           "econgraph.io/host-storage" = "true"
         }
@@ -130,21 +132,14 @@ resource "null_resource" "kind_cluster" {
   # the databases up first and ask for confirmation.
 }
 
-# Install NGINX Ingress Controller
-resource "null_resource" "nginx_ingress" {
+# Install the gateway: Gateway API CRDs, Envoy Gateway and its proxy on host
+# ports 80/443 (scripts/deploy/install-gateway.sh, pinned versions).
+resource "null_resource" "gateway" {
   depends_on = [null_resource.kind_cluster]
 
   provisioner "local-exec" {
-    command = <<-EOT
-      echo "Installing NGINX Ingress Controller..."
-      kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
-
-      echo "Waiting for ingress controller to be ready..."
-      kubectl wait --namespace ingress-nginx \
-        --for=condition=ready pod \
-        --selector=app.kubernetes.io/component=controller \
-        --timeout=90s
-    EOT
+    interpreter = ["/bin/bash", "-c"]
+    command     = "${path.module}/../../scripts/deploy/install-gateway.sh --context kind-econ-graph"
   }
 }
 

@@ -118,7 +118,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -139,6 +138,7 @@ use crate::reference::{data_dir, DATA_DIR_ENV};
 use crate::reference_file::{download_seed_entries, seed_migration_sql};
 use crate::reference_file::{labels_only, refresh_code_list_with, CodeList};
 use crate::source::SourceId;
+use crate::value::{check_observation_value, parse_observation_value};
 use econ_graph_core::error::AppError;
 
 /// The real BEA API root.
@@ -1459,9 +1459,14 @@ fn parse_value(raw: &str, mult: u32) -> Result<Option<BigDecimal>, CrawlError> {
     if !v.bytes().any(|b| b.is_ascii_digit()) {
         return Ok(None);
     }
-    let value = BigDecimal::from_str(&v.replace(',', ""))
+    let value = parse_observation_value(&v.replace(',', ""))
         .map_err(|e| CrawlError::Parse(format!("BEA: invalid DataValue {raw:?}: {e}")))?;
-    Ok(Some(value * BigDecimal::from(10u64.pow(mult))))
+    // Exact: a BigDecimal product keeps every digit of both factors.
+    let scaled = value * BigDecimal::from(10u64.pow(mult));
+    check_observation_value(&scaled).map_err(|e| {
+        CrawlError::Parse(format!("BEA: DataValue {raw:?} scaled by 10^{mult}: {e}"))
+    })?;
+    Ok(Some(scaled))
 }
 
 /// The units of a scaled value: `CL_UNIT`, or `METRIC_NAME` when `CL_UNIT` is `Level`, with a
@@ -1726,6 +1731,8 @@ pub struct BeaError {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::testkit::contract::assert_discover_ok;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};

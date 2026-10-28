@@ -20,6 +20,7 @@
 use crate::graphql::audit::{self, fail, OrOutcome, Outcome};
 use crate::imports::*;
 use crate::types::*;
+use diesel_async::AsyncConnection;
 
 /// Root mutation object
 pub struct Mutation;
@@ -266,21 +267,27 @@ impl Mutation {
             }
             require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
             let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
-            diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(&changes)
-                .returning(User::as_select())
-                .get_result::<User>(&mut conn)
-                .await
-                .map_err(|error| match error {
-                    diesel::result::Error::NotFound => fail(Outcome::NotFound, "User not found"),
-                    diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        info,
-                    ) if info.constraint_name() == Some("users_email_key") => {
-                        fail(Outcome::Conflict, "User with this email already exists")
-                    }
-                    other => fail(Outcome::Error, other),
-                })
+            conn.transaction::<User, audit::Failure, _>(async |conn| {
+                lock_active_admin(conn, caller.user_id, user_id).await?;
+                diesel::update(users::table.filter(users::id.eq(user_id)))
+                    .set(&changes)
+                    .returning(User::as_select())
+                    .get_result::<User>(conn)
+                    .await
+                    .map_err(|error| match error {
+                        diesel::result::Error::NotFound => {
+                            fail(Outcome::NotFound, "User not found")
+                        }
+                        diesel::result::Error::DatabaseError(
+                            diesel::result::DatabaseErrorKind::UniqueViolation,
+                            info,
+                        ) if info.constraint_name() == Some("users_email_key") => {
+                            fail(Outcome::Conflict, "User with this email already exists")
+                        }
+                        other => fail(Outcome::Error, other),
+                    })
+            })
+            .await
         }
         .await;
         let final_user = audit.finish(details, attempt).await?;
@@ -310,15 +317,17 @@ impl Mutation {
             refuse_self_lockout(caller, user_id, "delete").or_outcome(Outcome::SelfLockout)?;
             require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
             let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
-            // Delete user (cascade will handle related records)
-            let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
-                .execute(&mut conn)
-                .await
-                .or_outcome(Outcome::Error)?;
-            if deleted == 0 {
-                return Err(fail(Outcome::NotFound, "User not found"));
-            }
-            Ok(true)
+            conn.transaction::<bool, audit::Failure, _>(async |conn| {
+                lock_active_admin(conn, caller.user_id, user_id).await?;
+                let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
+                    .execute(conn)
+                    .await?;
+                if deleted == 0 {
+                    return Err(fail(Outcome::NotFound, "User not found"));
+                }
+                Ok(true)
+            })
+            .await
         }
         .await;
         audit.finish(serde_json::json!({}), attempt).await
@@ -369,18 +378,53 @@ async fn set_user_active(
         }
         require_manageable(ctx, caller, user_id).or_outcome(Outcome::Denied)?;
         let mut conn = pool.get().await.or_outcome(Outcome::Error)?;
-        let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
-            .set(users::is_active.eq(active))
-            .execute(&mut conn)
-            .await
-            .or_outcome(Outcome::Error)?;
-        if updated == 0 {
-            return Err(fail(Outcome::NotFound, "User not found"));
-        }
-        Ok(true)
+        conn.transaction::<bool, audit::Failure, _>(async |conn| {
+            lock_active_admin(conn, caller.user_id, user_id).await?;
+            let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
+                .set(users::is_active.eq(active))
+                .execute(conn)
+                .await?;
+            if updated == 0 {
+                return Err(fail(Outcome::NotFound, "User not found"));
+            }
+            Ok(true)
+        })
+        .await
     }
     .await;
     audit.finish(serde_json::json!({}), attempt).await
+}
+
+/// Lock both accounts until the caller's change commits, then recheck caller liveness.
+///
+/// Acting on another user requires every staff role, supplied by the identity provider.
+/// Those roles are not stored locally, so counting database roles cannot identify admins.
+/// Instead, self-lockout is refused and every destructive change leaves its acting admin
+/// active. Reciprocal requests lock the same rows in UUID order: the loser observes that
+/// its caller was suspended or deleted and cannot remove the surviving admin.
+async fn lock_active_admin(
+    conn: &mut diesel_async::AsyncPgConnection,
+    caller_id: uuid::Uuid,
+    target_id: uuid::Uuid,
+) -> std::result::Result<(), audit::Failure> {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::schema::users;
+
+    let accounts: Vec<(uuid::Uuid, bool)> = users::table
+        .filter(users::id.eq_any([caller_id, target_id]))
+        .order(users::id.asc())
+        .for_update()
+        .select((users::id, users::is_active))
+        .load(conn)
+        .await?;
+    if !accounts
+        .iter()
+        .any(|&(id, active)| id == caller_id && active)
+    {
+        return Err(fail(Outcome::Denied, "Acting user is no longer active"));
+    }
+    Ok(())
 }
 
 /// Turns a `triggerCrawl` input into queue rows, or a validation message.
@@ -581,7 +625,8 @@ fn require_manageable(ctx: &Context<'_>, caller: &Principal, target_id: uuid::Uu
 /// A suspended or deleted account is refused on every request, `activateUser` included, so an
 /// admin who did this to themselves could not undo it, and with a single admin nobody could.
 /// Refusing it also keeps the last active admin: whoever suspends or deletes someone else is
-/// still active afterwards. (Roles live in the identity provider, so the API cannot demote anyone.)
+/// still active afterwards because [`lock_active_admin`] rechecks and locks both accounts in
+/// the same transaction. Roles live in the identity provider, so the API cannot demote anyone.
 fn refuse_self_lockout(caller: &Principal, target_id: uuid::Uuid, action: &str) -> Result<()> {
     if target_id == caller.user_id {
         return Err(GraphQLError::new(format!(

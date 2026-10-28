@@ -78,10 +78,8 @@
 //! is `NotFound`.
 
 use std::collections::HashSet;
-use std::str::FromStr;
 
 use async_trait::async_trait;
-use bigdecimal::BigDecimal;
 use chrono::{Datelike, NaiveDate};
 use serde_json::Value;
 
@@ -92,6 +90,7 @@ use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
 use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
+use crate::value::parse_observation_value;
 
 /// The real Census Data API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.census.gov/data";
@@ -621,7 +620,19 @@ fn parse_bds_rows(
             continue;
         }
         let raw = cell(&row[value_idx]);
-        let value = BigDecimal::from_str(raw.trim()).ok();
+        // Census writes a missing or suppressed cell as a marker without digits (a letter
+        // flag, or null); it is no value. A cell with digits that isn't a number within the
+        // value limits is an error, never a missing value: storing it as NULL would overwrite
+        // the value already stored for that year.
+        let value = if raw.bytes().any(|b| b.is_ascii_digit()) {
+            Some(parse_observation_value(&raw).map_err(|e| {
+                CrawlError::Parse(format!(
+                    "Census {external_id}: invalid {variable} on {date}: {e}"
+                ))
+            })?)
+        } else {
+            None
+        };
         points.push(FetchedPoint {
             date,
             value,
@@ -1539,6 +1550,16 @@ mod tests {
         assert!(parse_bds_rows("X", "ESTAB", r#"[["ESTAB","YEAR","us"]]"#)
             .unwrap()
             .is_empty());
+        // A cell with digits that isn't a value within the limits fails the series rather than
+        // becoming NULL (which would overwrite the stored value).
+        for bad in ["1e999", "12abc", "1,234"] {
+            let body = format!(r#"[["YEAR","ESTAB","us"],["2020","{bad}","1"]]"#);
+            assert_eq!(
+                parse_bds_rows("X", "ESTAB", &body).unwrap_err().kind(),
+                "parse",
+                "{bad}"
+            );
+        }
     }
 }
 

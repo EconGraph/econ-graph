@@ -31,8 +31,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> AppResult<()> {
-//!     let pool = DatabasePool::new();
-//!     let schema = create_schema(Arc::new(pool));
+//!     let pool = econ_graph_core::create_pool("postgres://localhost/econ_graph").await?;
+//!     let schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool)));
 //!
 //!     // Use schema for GraphQL operations
 //!     Ok(())
@@ -41,7 +41,6 @@
 
 pub mod graphql;
 pub mod imports;
-pub mod security;
 pub mod types;
 
 // Re-export commonly used GraphQL types

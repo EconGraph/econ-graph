@@ -13,7 +13,7 @@ them into `frontend/flags/release.json` and `frontend/flags/dev.json`, which are
 committed so the frontend Docker build can see them.
 
 `flags.config.ts` reads the file for one profile and gives Vite a `define` entry
-per `kind: "build"` flag, `__FLAGS__.<key>` (`__FLAGS__.world_map`), set to
+per `kind: "build"` flag, `__FLAGS__.<key>` (`__FLAGS__.build_canary`), set to
 `true` or `false`. Each flag is its own dotted `define` key; a whole `__FLAGS__`
 object would not be folded, so flagged code would stay in the bundle.
 
@@ -35,33 +35,40 @@ not a boolean.
    generated `flags/release.json` (a type-only import), so the new name
    typechecks and an unknown name does not.
 2. Read it as `__FLAGS__.<key>` in the condition that guards the code, and load
-   the guarded code with `React.lazy` behind it:
+   the guarded code with `React.lazy` behind it.
+
+For example, `src/App.tsx` uses the existing `build_canary` flag to guard the
+canary page and its route:
 
 <!-- prettier-ignore -->
 ```tsx
-const WorldMap = __FLAGS__.world_map ? lazy(() => import('./pages/WorldMap')) : null;
+const FlagCanary = __FLAGS__.build_canary ? lazy(() => import('./pages/FlagCanary')) : null;
 
 // In the routes:
-{WorldMap && (
+{FlagCanary && (
   <Route
-    path='/world'
+    path='/flags/canary'
     element={
       <Suspense fallback={null}>
-        <WorldMap />
+        <FlagCanary />
       </Suspense>
     }
   />
 )}
-
-// In a menu:
-{__FLAGS__.world_map && <MenuItem onClick={() => navigate('/world')}>World map</MenuItem>}
 ```
 
-Vite replaces `__FLAGS__.world_map` with `false` in a release build, so the
-bundler drops the branch, and with it the only `import()` of the page. The
-page's module, and anything only it imports, is left out of the bundle. The
+Vite replaces `__FLAGS__.build_canary` with `true` in dev and `false` in release.
+In a release build, the bundler drops the branch and its only `import()` of the
+page. The page's module, and anything only it imports, is left out of the bundle. The
 guard itself (the route path and the `import()` path) stays readable in the
 served sourcemaps.
+
+The canary has no menu entry. If it had one, the same flag would guard navigation:
+
+<!-- prettier-ignore -->
+```tsx
+{__FLAGS__.build_canary && <MenuItem onClick={() => navigate('/flags/canary')}>Build flag canary</MenuItem>}
+```
 
 Rules:
 

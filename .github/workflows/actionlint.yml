@@ -8,10 +8,18 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/actionlint.yaml'
+      - '.github/actions/**'
+      - 'ci/scripts/check_action_pins.py'
+      - 'ci/scripts/test_action_pins.py'
+      - 'ci/scripts/test_crawler_secrets.py'
   pull_request:
     paths:
       - '.github/workflows/**'
       - '.github/actionlint.yaml'
+      - '.github/actions/**'
+      - 'ci/scripts/check_action_pins.py'
+      - 'ci/scripts/test_action_pins.py'
+      - 'ci/scripts/test_crawler_secrets.py'
   workflow_dispatch:
 
 permissions:
@@ -32,7 +40,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
 
@@ -56,6 +64,15 @@ jobs:
         tar -xzf "$shellcheck_tgz" -C "$bin" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
 
         echo "$bin" >> "$GITHUB_PATH"
+
+    - name: Check immutable action references
+      run: |
+        python3 -m venv "$RUNNER_TEMP/action-pins-venv"
+        python="$RUNNER_TEMP/action-pins-venv/bin/python"
+        "$python" -m pip install 'PyYAML==6.0.3'
+        "$python" -m unittest discover -s ci/scripts -p 'test_action_pins.py'
+        "$python" ci/scripts/check_action_pins.py
+        "$python" -m unittest discover -s ci/scripts -p 'test_crawler_secrets.py'
 
     - name: Run actionlint
       run: |
