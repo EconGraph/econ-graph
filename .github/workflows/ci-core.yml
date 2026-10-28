@@ -322,6 +322,11 @@ jobs:
     - name: Check the pre-deploy database check
       run: scripts/deploy/test-precheck-db-migration.sh
 
+    # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
+    # identity printed first, and the resume hint keeping the run's options, against stubs.
+    - name: Check the full-history re-fetch script
+      run: scripts/deploy/test-refetch-full-history.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

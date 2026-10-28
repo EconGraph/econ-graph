@@ -19,7 +19,9 @@
 # The crawler CLI in the pod reads the data database from the worker's DATA_DATABASE_URL.
 # Every kubectl call goes to the kind cluster's own kubectl and kubeconfig
 # (scripts/deploy/lib/kind-env.sh) on context kind-econ-graph, through kc
-# (scripts/deploy/lib/cluster-role.sh), without changing the current context.
+# (scripts/deploy/lib/cluster-role.sh), without changing the current context. The
+# cluster's context, kube-system UID and production marker are printed before the
+# crawler runs. --dry-run changes nothing.
 #
 # Environment: KIND_CLUSTER (default econ-graph), NAMESPACE (default econ-graph),
 # DEPLOYMENT (default crawler-worker).
@@ -27,7 +29,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -81,6 +83,18 @@ command "$KUBECTL" config get-contexts -o name | grep -qxF -- "kind-${KIND_CLUST
     die "$KUBECTL has no context kind-${KIND_CLUSTER}"
 CLUSTER_ROLE_CONTEXT="kind-${KIND_CLUSTER}"
 export KUBECTL CLUSTER_ROLE_CONTEXT
+
+# Say which cluster this is before running anything in it.
+role_status=0
+cluster_is_marked_production || role_status=$?
+case "$role_status" in
+    0) cluster_role="marked production" ;;
+    1) cluster_role="not marked production" ;;
+    *) cluster_role="production marker unknown: ${CLUSTER_ROLE_REASON}" ;;
+esac
+cluster_uid="$(kube_system_uid)" || cluster_uid="unknown"
+echo "Cluster: context ${CLUSTER_ROLE_CONTEXT}, kube-system UID ${cluster_uid}, ${cluster_role}" \
+    "(kubectl ${KUBECTL}, KUBECONFIG=${KUBECONFIG:-default})" >&2
 
 if $status; then
     subcommand=refetch-status
