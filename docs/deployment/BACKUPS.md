@@ -9,6 +9,10 @@ The older in-cluster dump job is covered in
 [The in-cluster `postgres-backup` CronJob](#the-in-cluster-postgres-backup-cronjob)
 for how the two fit together.
 
+Sanitized copies of these dumps, for release labs and CI, are built by
+`scripts/fixtures/build-sanitized-fixture.sh`; see
+[SANITIZED_FIXTURES.md](SANITIZED_FIXTURES.md).
+
 ## Layout
 
 All production data lives on btrfs subvolumes at the top level of the
