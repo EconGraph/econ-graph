@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # Deploy a release to the kind cluster econ-graph: the one entry point for a
-# production window, and for the upgrade rehearsal in CI. It runs, in order,
-# stopping at the first failure:
+# production window. It runs, in order, stopping at the first failure:
 #
 #   1. backup   scripts/deploy/backup-postgres-now.sh (the nightly backup Job, now)
 #   2. load     scripts/deploy/load-release-images.sh --tag TAG
@@ -26,14 +25,17 @@
 #                  the release candidate tag on the same commit (the highest
 #                  vX.Y.Z-rc.N there): release.yml publishes the final tag on
 #                  that candidate's images, and the load records go by it.
-#                  The checkout must be that commit, with no changes and no
-#                  untracked files: deploy.sh applies k8s/manifests from it.
+#                  The checkout must be that commit, with no changes, no
+#                  untracked files, no files git is told to overlook
+#                  (skip-worktree, assume-unchanged) and no ignored files where
+#                  deploy.sh reads: deploy.sh applies k8s/manifests from it. It
+#                  is checked again just before the deploy step.
 #   --cluster NAME the kind cluster (default: KIND_CLUSTER, else econ-graph).
 #                  Every step gets it: --cluster for the load and the verify,
 #                  --context kind-NAME for the backups, KIND_CLUSTER for the
 #                  precheck and deploy.sh. A cluster other than econ-graph is a
 #                  throwaway one and needs ECONGRAPH_SCRATCH_STORAGE
-#                  (lib/kind-env.sh), as for the rehearsal.
+#                  (lib/kind-env.sh).
 #   --dry-run      run every step's own dry run (backup, load, keycloak,
 #                  precheck and deploy.sh --dry-run) and change nothing. verify
 #                  can't be dry-run before a load and deploy have happened: it
@@ -52,12 +54,12 @@
 #                  and unchecked=N on a verify that left N things unchecked),
 #                  the backups taken (backup= and keycloak_backup=), on a
 #                  failure the backups to restore from (restore_backup= and
-#                  restore_keycloak_backup=), and a final result= line to FILE,
-#                  for automation such as the upgrade rehearsal, which reports
-#                  the step that failed
+#                  restore_keycloak_backup=), and a final result= line to FILE
+#                  (result=interrupted step=NAME signal=SIG after Ctrl-C or
+#                  SIGTERM), for a caller that reads which step failed
 #
 # Before any step, with nothing changed yet:
-#   - The checkout is the tag's commit and clean (git status --porcelain).
+#   - The checkout is the tag's commit and clean (see --tag).
 #   - It pins the cluster itself: the rootful Docker daemon the kind cluster
 #     runs on (lib/kind-env.sh: unix:///var/run/docker.sock, or
 #     ECONGRAPH_DOCKER_HOST, never the shell's DOCKER_HOST), and the kind
@@ -92,11 +94,19 @@
 # taken before the tag's first deploy attempt.
 #
 # Each run appends what it found and took to
-# ${ECONGRAPH_RELEASES_DIR:-~/econgraph-releases}/<tag>/release-deploy-<cluster>.txt:
-# Keycloak's replicas before the keycloak step stopped it, the crawler worker's
-# before the precheck stopped it, and the backups' paths. A later run of the
-# same tag reads them, since by then Keycloak and the crawler may already be at
-# 0 and the databases may already be migrated.
+# ${ECONGRAPH_RELEASES_DIR:-~/econgraph-releases}/<tag>/release-deploy-<cluster>.txt,
+# each line with the run's id, the cluster's kube-system UID and the time:
+# Keycloak's and the crawler worker's replicas before the run, the replicas the
+# precheck scaled the crawler down from, and the backups, recorded only when
+# their step succeeded (backup_complete=1 marks a complete database backup). A
+# later run of the same tag on the same cluster reads them, since by then
+# Keycloak and the crawler may already be at 0 and the databases may already be
+# migrated; lines from another cluster (another kube-system UID, such as one
+# recreated under the same name) are ignored. A record that can't be written
+# stops the run.
+#
+# Ctrl-C or SIGTERM during a step stops that step (and what it started), and
+# prints the same guidance as a failure of that step.
 #
 # Idempotent: every step is safe to run again with the same tag (the load keeps
 # its first record's rollback copies, the backups add new ones, precheck only
@@ -202,18 +212,48 @@ fi
 
 # --- the checkout: the tag's commit, unchanged ---------------------------------------
 # deploy.sh applies k8s/manifests (and runs the scripts) from this working tree,
-# so it must be exactly what the tag names.
+# so it must be exactly what the tag names. git is asked with the settings that
+# could hide a change turned off: every untracked file listed
+# (--untracked-files=all, whatever status.showUntrackedFiles says), no fsmonitor
+# or untracked cache, files marked skip-worktree or assume-unchanged refused,
+# and ignored files (.gitignore, .git/info/exclude) refused where deploy.sh
+# reads. git status compares the index with HEAD as well as the working tree.
 tag_commit="$(git -C "$PROJECT_ROOT" rev-parse --verify --quiet "refs/tags/${RC_TAG}^{commit}")" ||
     die "tag ${RC_TAG} is not in this checkout (git fetch --tags origin)"
-head_commit="$(git -C "$PROJECT_ROOT" rev-parse --verify HEAD)" ||
-    die "could not read the commit of ${PROJECT_ROOT}"
-[ "$head_commit" = "$tag_commit" ] ||
-    die "${PROJECT_ROOT} is at ${head_commit}, not ${RC_TAG} (${tag_commit}): deploy.sh applies the manifests in this checkout. Check out the tag (git checkout ${RC_TAG}) and run this again"
-changes="$(git -C "$PROJECT_ROOT" status --porcelain)" ||
-    die "could not read git status of ${PROJECT_ROOT}"
-[ -z "$changes" ] ||
-    die "${PROJECT_ROOT} has changes or untracked files, which deploy.sh would apply with ${RC_TAG}; commit, stash or remove them first:
-$(head -20 <<<"$changes")"
+DEPLOY_READS=(k8s config scripts grafana-dashboards ports.env)
+# check_checkout: fails, saying why, unless the checkout is the tag's commit and clean.
+check_checkout() {
+    local g=(git -C "$PROJECT_ROOT" -c core.fsmonitor=false -c core.untrackedCache=false) head changes flagged ignored
+    head="$("${g[@]}" rev-parse --verify HEAD)" || { echo "could not read the commit of ${PROJECT_ROOT}"; return 1; }
+    if [ "$head" != "$tag_commit" ]; then
+        echo "${PROJECT_ROOT} is at ${head}, not ${RC_TAG} (${tag_commit}): deploy.sh applies the manifests in this checkout. Check out the tag (git checkout ${RC_TAG}) and run this again"
+        return 1
+    fi
+    "${g[@]}" update-index -q --really-refresh >/dev/null 2>&1 || true
+    changes="$("${g[@]}" status --porcelain --untracked-files=all)" || { echo "could not read git status of ${PROJECT_ROOT}"; return 1; }
+    if [ -n "$changes" ]; then
+        echo "${PROJECT_ROOT} has changes or untracked files, which deploy.sh would apply with ${RC_TAG}; commit, stash or remove them first:"
+        head -20 <<<"$changes"
+        return 1
+    fi
+    # git ls-files -v: S is skip-worktree, a lowercase tag assume-unchanged;
+    # git status does not show changes to either.
+    flagged="$("${g[@]}" ls-files -v | grep -v '^H ' || true)"
+    if [ -n "$flagged" ]; then
+        echo "${PROJECT_ROOT} has files git is told to overlook (skip-worktree or assume-unchanged), whose changes git status does not show; clear the flags (git update-index --no-skip-worktree --no-assume-unchanged FILE) and check them:"
+        head -20 <<<"$flagged"
+        return 1
+    fi
+    ignored="$("${g[@]}" status --porcelain --untracked-files=all --ignored=matching -- "${DEPLOY_READS[@]}" | grep '^!! ' || true)"
+    if [ -n "$ignored" ]; then
+        echo "${PROJECT_ROOT} has ignored files where deploy.sh reads (${DEPLOY_READS[*]}), which it would apply or source with ${RC_TAG}; remove them first:"
+        head -20 <<<"$ignored"
+        return 1
+    fi
+}
+if ! why="$(check_checkout)"; then
+    die "$why"
+fi
 echo "Checkout: ${PROJECT_ROOT} at ${RC_TAG} (${tag_commit}), clean"
 
 # --- the cluster, pinned ---------------------------------------------------------------
@@ -294,10 +334,10 @@ case "$marker" in
 esac
 # --confirm-production names one cluster: refuse it for any other, marked or not.
 if [ -n "$CONFIRM_PRODUCTION" ] && [ "$CONFIRM_PRODUCTION" != "$UID_PREFIX" ]; then
-    die "--confirm-production ${CONFIRM_PRODUCTION} does not match ${CONTEXT}'s kube-system UID (${CLUSTER_UID}); nothing was changed"
+    die "--confirm-production ${CONFIRM_PRODUCTION} does not match ${CONTEXT}'s kube-system UID; nothing was changed"
 fi
 if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] && [ ! -t 0 ]; then
-    die "deploying to the production cluster needs --confirm-production with the first 8 characters of its kube-system UID (${UID_PREFIX}), or a terminal to type them on; --yes alone does not answer it"
+    die "deploying to the production cluster needs --confirm-production with the first 8 characters of its kube-system UID, or a terminal to type them on; --yes alone does not answer it. Read the UID from the cluster's identity above, on the terminal you deploy from"
 fi
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
@@ -306,54 +346,58 @@ echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_EN
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 RECORD="${ECONGRAPH_RELEASES_DIR:-$HOME/econgraph-releases}/${RC_TAG}/release-deploy-${KIND_CLUSTER}.txt"
 if [ "$DRY_RUN" != true ] &&
-    ! { mkdir -p "$(dirname "$RECORD")" && : >>"$RECORD"; } 2>/dev/null; then
+    ! { mkdir -p "$(dirname "$RECORD")" && : >>"$RECORD" && [ -w "$RECORD" ]; } 2>/dev/null; then
     die "cannot write ${RECORD}, where this run records Keycloak's and the crawler's replicas and its backups"
 fi
-# record KEY=VALUE...: append to this tag's record (not in a dry run). A write
-# that fails is said, never fatal.
+RECORD_FAILED=""
+# record KEY VALUE: append "run=ID cluster_uid=UID date=TIME KEY=VALUE" to this
+# tag's record (not in a dry run). VALUE is the rest of the line, so it may hold
+# blanks. A write that fails sets RECORD_FAILED, which stops the run.
 record() {
     [ "$DRY_RUN" != true ] || return 0
-    printf 'run=%s %s\n' "$RUN_ID" "$*" 2>/dev/null >>"$RECORD" ||
-        echo "${SCRIPT}: warning: could not append '$*' to ${RECORD}" >&2
+    if ! printf 'run=%s cluster_uid=%s date=%s %s=%s\n' "$RUN_ID" "$CLUSTER_UID" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" 2>/dev/null >>"$RECORD"; then
+        echo "${SCRIPT}: error: could not append $1=$2 to ${RECORD}" >&2
+        RECORD_FAILED="$1"
+        return 1
+    fi
 }
-# first_recorded KEY: the value of KEY in the earliest record line that has one.
+# record_entries [KEY]: this cluster's record lines (its kube-system UID), as
+# RUN<tab>DATE<tab>KEY<tab>VALUE, in the order they were written.
+record_entries() {
+    [ -f "$RECORD" ] || return 0
+    sed -n "s/^run=\([^ ]*\) cluster_uid=${CLUSTER_UID} date=\([^ ]*\) \([a-z_]*\)=\(.*\)\$/\1\t\2\t\3\t\4/p" "$RECORD" |
+        awk -F'\t' -v k="${1:-}" 'k == "" || $3 == k'
+}
+# first_recorded KEY: the value of KEY in this cluster's earliest line with one.
 first_recorded() {
-    [ -f "$RECORD" ] || return 0
-    awk -v k="$1=" '{ for (i = 2; i <= NF; i++) if (index($i, k) == 1) { print substr($i, length(k) + 1); exit } }' "$RECORD"
+    record_entries "$1" | head -1 | cut -f4-
 }
-# recorded_in_first_run KEY: every value of KEY from the earliest run that
-# recorded one, one per line, and that run's id first, as "run=ID".
-recorded_in_first_run() {
-    [ -f "$RECORD" ] || return 0
-    awk -v k="$1=" '
-        { run = $1; for (i = 2; i <= NF; i++) if (index($i, k) == 1) {
-              if (first == "") { first = run; print run }
-              if (run == first) print substr($i, length(k) + 1) } }' "$RECORD"
+# first_run_with KEY: the id and date (RUN<tab>DATE) of the earliest run on this
+# cluster that recorded KEY.
+first_run_with() {
+    record_entries "$1" | head -1 | cut -f1,2
+}
+# recorded_in_run RUN KEY: the values of KEY that run RUN recorded, one per line.
+recorded_in_run() {
+    record_entries "$2" | awk -F'\t' -v r="$1" '$1 == r { print $4 }'
 }
 # manifest_replicas FILE: spec.replicas of the Deployment in FILE.
 manifest_replicas() {
     awk '/^spec:/ { s = 1; next } s && /^  replicas:/ { print $2; exit }' "$PROJECT_ROOT/$1"
 }
+if [ -f "$RECORD" ] && stale="$(grep -vc " cluster_uid=${CLUSTER_UID} " "$RECORD")" && [ "$stale" != 0 ]; then
+    echo "  record          ${RECORD}: ${stale} line(s) from another cluster (another kube-system UID) ignored"
+fi
 
-# Keycloak's replicas before this tag's runs: the keycloak step scales it to 0
-# and leaves it there until deploy.sh applies it again, so a failure in between
-# says how to start it. Read now when it runs; when it is already at 0 (an
-# earlier run of the tag stopped it), from that run's record, else the manifest.
+# Keycloak's and the crawler worker's replicas now: the keycloak step and the
+# precheck scale them to 0, and only deploy.sh starts them again, so a failure
+# in between says how to start them. Recorded (once the run is confirmed) when
+# they run; a later run that finds them at 0 reads the earliest record.
 keycloak_now="$(kc -n "$NAMESPACE" get deployment keycloak --ignore-not-found \
     -o 'jsonpath={.spec.replicas}')" || die "could not read deployment/keycloak on ${CONTEXT}"
-KEYCLOAK_REPLICAS=""
-KEYCLOAK_REPLICAS_FROM=""
-if [ -n "$keycloak_now" ] && [ "$keycloak_now" != 0 ]; then
-    KEYCLOAK_REPLICAS="$keycloak_now"
-    KEYCLOAK_REPLICAS_FROM="before this run"
-elif [ -n "$keycloak_now" ]; then
-    KEYCLOAK_REPLICAS="$(first_recorded keycloak_replicas)"
-    KEYCLOAK_REPLICAS_FROM="before the first run of ${RC_TAG}, as recorded in ${RECORD}"
-    if [ -z "$KEYCLOAK_REPLICAS" ]; then
-        KEYCLOAK_REPLICAS="$(manifest_replicas k8s/manifests/keycloak/deployment.yaml)"
-        KEYCLOAK_REPLICAS_FROM="k8s/manifests/keycloak/deployment.yaml's replicas (it is at 0 now, and no earlier run of ${RC_TAG} recorded it running)"
-    fi
-fi
+crawler_now="$(kc -n "$NAMESPACE" get deployment crawler-worker --ignore-not-found \
+    -o 'jsonpath={.spec.replicas}')" || die "could not read deployment/crawler-worker on ${CONTEXT}"
 unset CLUSTER_ROLE_CONTEXT
 
 # --- the steps ------------------------------------------------------------------------------
@@ -382,7 +426,7 @@ if [ "$marker" = 0 ] && [ "$DRY_RUN" != true ]; then
     if [ -n "$CONFIRM_PRODUCTION" ]; then
         echo "${question} (--confirm-production ${CONFIRM_PRODUCTION} matches this cluster)"
     else
-        read -r -p "${question} This is the PRODUCTION cluster: type the first 8 characters of its kube-system UID (${UID_PREFIX}) to continue: " answer ||
+        read -r -p "${question} This is the PRODUCTION cluster: type the first 8 characters of its kube-system UID (shown above) to continue: " answer ||
             die "aborted; nothing was changed"
         [ "$answer" = "$UID_PREFIX" ] || die "aborted; nothing was changed"
     fi
@@ -394,79 +438,96 @@ kubectl_hint="KUBECONFIG=${KUBECONFIG} ${KUBECTL} --context ${CONTEXT} -n ${NAME
 cluster_arg=""
 [ "$KIND_CLUSTER" = "$DEFAULT_CLUSTER" ] || cluster_arg=" --cluster ${KIND_CLUSTER}"
 # Each step's output, also kept for what a step reports (verify's unchecked
-# items, the backups' paths). Not in /tmp, which may be small and shared.
-STEP_LOG_DIR="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/econgraph}"
-if ! { mkdir -p "$STEP_LOG_DIR" && STEP_LOG="$(mktemp "${STEP_LOG_DIR}/release-deploy.XXXXXX")"; }; then
-    die "cannot create a step log in ${STEP_LOG_DIR}; nothing was changed. Free space there or set XDG_RUNTIME_DIR to a writable directory, then run this again"
+# items, the backups' paths), in a file of its own per step, so a tee still
+# writing for one step can't mix into the next. Not in /tmp, which may be
+# small and shared.
+STEP_LOG_PARENT="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/econgraph}"
+if ! { mkdir -p "$STEP_LOG_PARENT" && STEP_LOG_DIR="$(mktemp -d "${STEP_LOG_PARENT}/release-deploy.XXXXXX")"; }; then
+    die "cannot create a step log in ${STEP_LOG_PARENT}; nothing was changed. Free space there or set XDG_RUNTIME_DIR to a writable directory, then run this again"
 fi
-add_exit_cleanup "rm -f '${STEP_LOG}'"
-[ "$KEYCLOAK_REPLICAS_FROM" != "before this run" ] || record "keycloak_replicas=${KEYCLOAK_REPLICAS}"
+add_exit_cleanup "rm -rf '${STEP_LOG_DIR}' 2>/dev/null || true"
+STEP_LOG=""
+[ -z "$keycloak_now" ] || [ "$keycloak_now" = 0 ] || record keycloak_replicas "$keycloak_now" ||
+    die "cannot write ${RECORD}; nothing was changed"
+[ -z "$crawler_now" ] || [ "$crawler_now" = 0 ] || record crawler_replicas "$crawler_now" ||
+    die "cannot write ${RECORD}; nothing was changed"
 UNCHECKED=""
 BACKUP_STILL_RUNNING=""
-CRAWLER_SCALED_FROM=""
 BACKUPS=()
 KEYCLOAK_BACKUP=""
+NOT_STARTED=""
 
-# The crawler worker's replicas to start it again at: what the precheck scaled
-# it down from in this run, else what an earlier run of the tag recorded, else
-# the manifest's. Sets CRAWLER_REPLICAS and CRAWLER_REPLICAS_FROM.
-crawler_replicas() {
-    CRAWLER_REPLICAS="$CRAWLER_SCALED_FROM"
-    CRAWLER_REPLICAS_FROM="the precheck scaled it down from ${CRAWLER_REPLICAS} in this run"
-    if [ -z "$CRAWLER_REPLICAS" ]; then
-        CRAWLER_REPLICAS="$(first_recorded crawler_replicas)"
-        CRAWLER_REPLICAS_FROM="the precheck of an earlier run of ${RC_TAG} scaled it down from ${CRAWLER_REPLICAS} (${RECORD})"
-    fi
-    if [ -z "$CRAWLER_REPLICAS" ]; then
-        CRAWLER_REPLICAS="$(manifest_replicas k8s/manifests/crawler-worker.yaml)"
-        CRAWLER_REPLICAS_FROM="k8s/manifests/crawler-worker.yaml's replicas; no run of ${RC_TAG} recorded scaling it down"
+# replicas_advice NAME NOW KEY MANIFEST: set REPLICAS and REPLICAS_FROM for
+# deployment NAME: the earliest record on this cluster (the replicas before the
+# tag's first run, read then or scaled down from by a precheck), else, when it
+# ran before this run, what it ran, else the manifest's, saying it was at 0.
+replicas_advice() {
+    local name="$1" now="$2" key="$3" manifest="$4" first
+    REPLICAS="$(first_recorded "$key")"
+    if [ -n "$REPLICAS" ]; then
+        first="$(first_run_with "$key")"
+        REPLICAS_FROM="it ran ${REPLICAS} replica(s) before ${RC_TAG}'s first run on this cluster (${first#*$'\t'}), as recorded in ${RECORD}"
+    elif [ -n "$now" ] && [ "$now" != 0 ]; then
+        REPLICAS="$now"
+        REPLICAS_FROM="it ran ${REPLICAS} replica(s) before this run"
+    elif [ -n "$now" ]; then
+        REPLICAS="$(manifest_replicas "$manifest")"
+        REPLICAS_FROM="it was at 0 replicas before this run, and no run of ${RC_TAG} on this cluster recorded it running; ${manifest} runs ${REPLICAS}"
+    else
+        REPLICAS=""
     fi
 }
 
-# The database restores: from the backups taken before the tag's first deploy
-# attempt (the first run that took any), which hold the state before any
-# migration of this tag; this run's own are listed too when they differ.
+# The database restores: from the backups of the first run of the tag on this
+# cluster whose backup step completed, which come before any deploy of the tag
+# and so hold the state before its migrations. This run's own are listed too
+# when they differ.
 explain_restore() {
-    local first first_run path
-    first="$(recorded_in_first_run backup)"
-    first_run="$(head -1 <<<"$first")"
+    local first first_id first_date path kc_first kc_path
+    first="$(first_run_with backup_complete)"
+    first_id="${first%%$'\t'*}"
+    first_date="${first#*$'\t'}"
     echo
     echo "If the data migrations (the crawler-migrate Job) ran, or Keycloak started on a new"
     echo "version, the databases are migrated: restore them from the backups taken before"
-    echo "${RC_TAG} was first deployed${first_run:+ (${first_run#run=})}:"
+    echo "${RC_TAG} was first deployed on this cluster${first:+ (run ${first_id}, ${first_date})}:"
     if [ -n "$first" ]; then
         while IFS= read -r path; do
             [ -n "$path" ] || continue
             echo "  ${path}"
             report "restore_backup=${path}"
             case "${path##*/}" in
-                econ_graph-*) echo "    scripts/deploy/restore-postgres-backup.sh --context ${CONTEXT} --file ${path##*/}" ;;
+                econ_graph-*) echo "    scripts/deploy/restore-postgres-backup.sh --context ${CONTEXT} --file $(printf '%q' "${path##*/}")" ;;
             esac
-        done < <(tail -n +2 <<<"$first")
+        done < <(recorded_in_run "$first_id" backup)
         echo "    (the others: docs/deployment/POSTGRES_BACKUP_RESTORE.md)"
     else
-        echo "  (no backup of the data databases is recorded for ${RC_TAG} in ${RECORD})"
+        echo "  (no complete backup of the data databases is recorded for ${RC_TAG} on this cluster in ${RECORD})"
     fi
-    first="$(recorded_in_first_run keycloak_backup)"
-    if [ -n "$first" ]; then
-        path="$(sed -n 2p <<<"$first")"
-        echo "  Keycloak: scripts/deploy/restore-keycloak-db.sh ${path} --context ${CONTEXT}"
-        report "restore_keycloak_backup=${path}"
+    kc_first="$(first_run_with keycloak_backup)"
+    if [ -n "$kc_first" ]; then
+        kc_path="$(first_recorded keycloak_backup)"
+        echo "  Keycloak (run ${kc_first%%$'\t'*}, ${kc_first#*$'\t'}): scripts/deploy/restore-keycloak-db.sh $(printf '%q' "$kc_path") --context ${CONTEXT}"
+        report "restore_keycloak_backup=${kc_path}"
     else
-        echo "  Keycloak: no verified dump is recorded for ${RC_TAG}; scripts/deploy/restore-keycloak-db.sh --list"
+        echo "  Keycloak: no verified dump is recorded for ${RC_TAG} on this cluster; scripts/deploy/restore-keycloak-db.sh --list"
     fi
-    if [ "${#BACKUPS[@]}" -gt 0 ] && [ "$first_run" != "run=${RUN_ID}" ]; then
-        echo "This run's backups were taken after an earlier run of ${RC_TAG}, which may have"
+    local later=()
+    [ "${#BACKUPS[@]}" -eq 0 ] || [ "$first_id" = "$RUN_ID" ] || later+=("${BACKUPS[@]}")
+    [ -z "$KEYCLOAK_BACKUP" ] || [ "$KEYCLOAK_BACKUP" = "${kc_path:-}" ] || later+=("$KEYCLOAK_BACKUP")
+    if [ "${#later[@]}" -gt 0 ]; then
+        echo "This run's backups below were taken after an earlier run of ${RC_TAG}, which may have"
         echo "migrated the databases already: use the ones above, not these:"
-        printf '  %s\n' "${BACKUPS[@]}" ${KEYCLOAK_BACKUP:+"$KEYCLOAK_BACKUP"}
+        printf '  %s\n' "${later[@]}"
     fi
 }
 
-# What a failure at step $1 leaves, and how to go back.
+# What a failure at step $1 leaves, and how to go back. HOW says what happened
+# to it (failed, or was interrupted).
 explain_failure() {
-    local failed="$1" step
+    local failed="$1" how="${2:-failed}" step
     echo
-    echo "==> ${RC_TAG}: step ${failed} failed; nothing after it ran."
+    echo "==> ${RC_TAG}: step ${failed} ${how}; nothing after it ran."
     for step in "${STEPS[@]}"; do
         printf '  %-9s %s\n' "$step" "${STATE[$step]:-not run}"
     done
@@ -503,83 +564,122 @@ explain_failure() {
             echo "may be stopped (see below)."
             echo "Fix what the precheck reported and run this command again, or go back with:" ;;
         deploy)
-            echo "deploy.sh stopped partway: some manifests are applied, and the data migrations"
-            echo "(crawler-migrate Job) may have run. Pods that restarted run the new images."
-            echo "Go back with:" ;;
+            if [ -n "$NOT_STARTED" ]; then
+                echo "deploy.sh was not started: ${NOT_STARTED}. The new images are loaded, the backups"
+                echo "are taken, and Keycloak and the crawler worker may be stopped (see below)."
+                echo "Restore the checkout and run this command again, or go back with:"
+            else
+                echo "deploy.sh stopped partway: some manifests are applied, and the data migrations"
+                echo "(crawler-migrate Job) may have run. Pods that restarted run the new images."
+                echo "Go back with:"
+            fi ;;
         verify)
             echo "The deploy finished, but not every pod runs ${RC_TAG}'s images (see above)."
             echo "Run the verify step again once rollouts settle, or go back with:" ;;
     esac
     echo "  scripts/deploy/rollback-release-images.sh --to pre-${RC_TAG}${cluster_arg} --dry-run   # then without --dry-run"
     case "$failed" in
-        deploy | verify) explain_restore ;;
+        deploy | verify) [ -n "$NOT_STARTED" ] || explain_restore ;;
     esac
     case "$failed" in
         keycloak | precheck | deploy)
-            if [ -n "$KEYCLOAK_REPLICAS" ] && [ "$KEYCLOAK_REPLICAS" != 0 ]; then
+            replicas_advice keycloak "$keycloak_now" keycloak_replicas k8s/manifests/keycloak/deployment.yaml
+            if [ -n "$REPLICAS" ] && [ "$REPLICAS" != 0 ]; then
                 echo
                 echo "Keycloak (sign-in) may be stopped: the keycloak step scales it to 0, and only"
-                echo "deploy.sh applies it again. It ran ${KEYCLOAK_REPLICAS} replica(s) (${KEYCLOAK_REPLICAS_FROM});"
-                echo "if it is at 0, start it with:"
-                echo "  ${kubectl_hint} scale deployment/keycloak --replicas=${KEYCLOAK_REPLICAS}"
+                echo "deploy.sh applies it again; ${REPLICAS_FROM}."
+                echo "If it is at 0, start it with:"
+                echo "  ${kubectl_hint} scale deployment/keycloak --replicas=${REPLICAS}"
             fi ;;
     esac
     case "$failed" in
         precheck | deploy)
-            crawler_replicas
-            if [ -n "$CRAWLER_REPLICAS" ] && [ "$CRAWLER_REPLICAS" != 0 ]; then
+            replicas_advice crawler-worker "$crawler_now" crawler_replicas k8s/manifests/crawler-worker.yaml
+            if [ -n "$REPLICAS" ] && [ "$REPLICAS" != 0 ]; then
                 echo
                 echo "The crawler worker may be stopped: the precheck scales it to 0, and only deploy.sh"
                 echo "starts it again, when it applies crawler-worker.yaml after the crawler-migrate Job."
-                echo "Any failure before that leaves it at 0. It ran ${CRAWLER_REPLICAS} replica(s) (${CRAWLER_REPLICAS_FROM})."
+                echo "Any failure before that leaves it at 0. Here, ${REPLICAS_FROM}."
                 echo "The nodes hold ${RC_TAG}'s crawler image under the name it runs, so start it only after"
                 echo "the rollback above (or a restore), or once a deploy has applied the migrations:"
-                echo "  ${kubectl_hint} scale deployment/crawler-worker --replicas=${CRAWLER_REPLICAS}"
+                echo "  ${kubectl_hint} scale deployment/crawler-worker --replicas=${REPLICAS}"
             fi ;;
     esac
 }
 
-# What step $1 reported in STEP_LOG, kept for the summary, the report and the
-# record.
+# What step $1 (exit status $2) reported in STEP_LOG, kept for the summary, the
+# report and the record. Backups count only from a step that succeeded: a
+# backup step that failed partway took no complete backup.
 collect() {
-    local path
+    local path status="$2"
     case "$1" in
         backup)
+            BACKUP_STILL_RUNNING="$(sed -n 's/^backup-postgres-now: still running: \(job\/[^ ]*\)$/\1/p' "$STEP_LOG" | tail -1)"
+            [ "$status" = 0 ] || return 0
             # backup.sh's line per dump: "[name] Backup OK: N tables, SIZE in PATH".
             while IFS= read -r path; do
                 [ -n "$path" ] || continue
                 BACKUPS+=("$path")
                 report "backup=${path}"
-                record "backup=${path}"
-            done < <(sed -n 's/.*Backup OK: .* in \([^ ]*\.dump\)$/\1/p' "$STEP_LOG")
-            BACKUP_STILL_RUNNING="$(sed -n 's/^backup-postgres-now: still running: \(job\/[^ ]*\)$/\1/p' "$STEP_LOG" | tail -1)" ;;
+                record backup "$path" || return 1
+            done < <(sed -n 's/.*Backup OK: [0-9]* tables, [^ ]* in \(.*\.dump\)$/\1/p' "$STEP_LOG")
+            [ "${#BACKUPS[@]}" -eq 0 ] || record backup_complete 1 ;;
         keycloak)
+            [ "$status" = 0 ] || return 0
             KEYCLOAK_BACKUP="$(sed -n 's/^backup-keycloak-db: verified dump in \(.*\)$/\1/p' "$STEP_LOG" | tail -1)"
             if [ -n "$KEYCLOAK_BACKUP" ]; then
                 report "keycloak_backup=${KEYCLOAK_BACKUP}"
-                record "keycloak_backup=${KEYCLOAK_BACKUP}"
+                record keycloak_backup "$KEYCLOAK_BACKUP"
             fi ;;
         precheck)
-            CRAWLER_SCALED_FROM="$(sed -n 's/^precheck-db-migration: scaling deployment\/crawler-worker from \([0-9][0-9]*\) to 0$/\1/p' "$STEP_LOG" | tail -1)"
-            [ -z "$CRAWLER_SCALED_FROM" ] || record "crawler_replicas=${CRAWLER_SCALED_FROM}" ;;
+            # Recorded whether or not the precheck then passed: it did scale the worker down.
+            path="$(sed -n 's/^precheck-db-migration: scaling deployment\/crawler-worker from \([0-9][0-9]*\) to 0$/\1/p' "$STEP_LOG" | tail -1)"
+            [ -z "$path" ] || record crawler_replicas "$path" ;;
         verify)
             UNCHECKED="$(grep '^  unchecked ' "$STEP_LOG" || true)" ;;
     esac
 }
 
-# Run step $1 with its output on the terminal and in STEP_LOG, and set STATUS
-# to the step's own exit status. Its output goes through tee in a process
-# substitution, not a pipe: a background process the step leaves behind keeps
-# that open, and the run must not wait for it to close. tee gets a moment to
-# finish writing STEP_LOG; a tee that fails to write is not the step's failure.
+# Ctrl-C and SIGTERM: stop the running step and everything it started, then
+# give the guidance for that step. A step runs in the background (which ignores
+# SIGINT from the terminal), so it is sent SIGTERM whatever the signal was.
+STEP_PID=""
+INTERRUPTED=""
+kill_tree() {
+    local child
+    for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
+    kill -TERM "$1" 2>/dev/null || true
+}
+on_signal() {
+    [ -n "$INTERRUPTED" ] || INTERRUPTED="$1"
+    [ -z "$STEP_PID" ] || kill_tree "$STEP_PID"
+}
+
+# Run step $1 with its output on the terminal and in a step log of its own, and
+# set STATUS to the step's own exit status. Its output goes through tee in a
+# process substitution, not a pipe: a background process the step leaves behind
+# keeps that open, and the run must not wait for it to close. tee gets a moment
+# to finish writing the log; a tee that fails to write is not the step's
+# failure. The step runs in the background with this run's stdin, so a signal
+# reaches the trap above while it runs.
 run_step() {
     local tee_fd tee_pid i
+    STEP_LOG="${STEP_LOG_DIR}/${1}.log"
     : >"$STEP_LOG" 2>/dev/null || true
     exec {tee_fd}> >(tee "$STEP_LOG" || true)
     tee_pid=$!
     STATUS=0
     # shellcheck disable=SC2086 # CMD holds the command and its arguments, none with spaces
-    (cd "$PROJECT_ROOT" && exec ${CMD[$1]} "${dry[@]}") >&"$tee_fd" 2>&1 || STATUS=$?
+    (cd "$PROJECT_ROOT" && exec ${CMD[$1]} "${dry[@]}") <&0 >&"$tee_fd" 2>&1 &
+    STEP_PID=$!
+    # wait returns early when a trapped signal arrives; wait again until the
+    # step itself has exited.
+    while :; do
+        STATUS=0
+        wait "$STEP_PID" || STATUS=$?
+        kill -0 "$STEP_PID" 2>/dev/null || break
+    done
+    STEP_PID=""
     exec {tee_fd}>&-
     for i in $(seq 1 30); do
         kill -0 "$tee_pid" 2>/dev/null || break
@@ -587,7 +687,32 @@ run_step() {
     done
 }
 
+# stop STEP STATUS-WORD RESULT: the step did not complete: report it, explain,
+# and exit.
+stop() {
+    local step="$1" how="$2" result="$3"
+    report "step=${step} status=${how%% *}"
+    if [ "$DRY_RUN" = true ]; then
+        echo
+        echo "==> ${RC_TAG}: the dry run of step ${step} ${how}; nothing was changed."
+    else
+        explain_failure "$step" "$how" || echo "${SCRIPT}: warning: the failure summary above is incomplete" >&2
+    fi
+    report "result=${result}"
+    case "$INTERRUPTED" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+    esac
+    exit 1
+}
+
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
 for step in "${STEPS[@]}"; do
+    if [ -n "$INTERRUPTED" ]; then
+        STATE[$step]="not run (interrupted before it started)"
+        stop "$step" "interrupted (SIG${INTERRUPTED}) before it started" "interrupted step=${step} signal=${INTERRUPTED}"
+    fi
     echo
     echo "==> ${step}: ${CMD[$step]#"$PROJECT_ROOT"/}${dry[*]:+ ${dry[*]}}"
     if [ "$step" = verify ] && [ "$DRY_RUN" = true ]; then
@@ -598,8 +723,30 @@ for step in "${STEPS[@]}"; do
         report "step=${step} status=dry-run"
         continue
     fi
+    # deploy.sh applies what is in the checkout now: check it again.
+    if [ "$step" = deploy ] && ! why="$(check_checkout)"; then
+        echo "${SCRIPT}: error: ${why}" >&2
+        NOT_STARTED="the checkout changed during the run"
+        STATE[$step]="REFUSED (the checkout changed)"
+        stop "$step" "refused" "failed step=${step}"
+    fi
     run_step "$step"
-    collect "$step" || echo "${SCRIPT}: warning: could not read what step ${step} reported from ${STEP_LOG}" >&2
+    if [ -n "$INTERRUPTED" ]; then
+        collect "$step" 1 || true
+        STATE[$step]="INTERRUPTED (SIG${INTERRUPTED})"
+        stop "$step" "interrupted (SIG${INTERRUPTED})" "interrupted step=${step} signal=${INTERRUPTED}"
+    fi
+    if ! collect "$step" "$STATUS"; then
+        if [ -n "$RECORD_FAILED" ]; then
+            STATE[$step]="FAILED (could not record its result in ${RECORD})"
+            stop "$step" "failed" "failed step=${step}"
+        fi
+        echo "${SCRIPT}: warning: could not read what step ${step} reported from ${STEP_LOG}" >&2
+    fi
+    [ -z "$RECORD_FAILED" ] || {
+        STATE[$step]="FAILED (could not record its result in ${RECORD})"
+        stop "$step" "failed" "failed step=${step}"
+    }
     if [ "$STATUS" = 0 ]; then
         STATE[$step]="$([ "$DRY_RUN" = true ] && echo "dry run ok" || echo "done")"
         extra=""
@@ -610,17 +757,10 @@ for step in "${STEPS[@]}"; do
         report "step=${step} status=$([ "$DRY_RUN" = true ] && echo dry-run || echo ok)${extra}"
     else
         STATE[$step]="FAILED"
-        report "step=${step} status=failed"
-        if [ "$DRY_RUN" = true ]; then
-            echo
-            echo "==> ${RC_TAG}: the dry run of step ${step} failed; nothing was changed."
-        else
-            explain_failure "$step" || echo "${SCRIPT}: warning: the failure summary above is incomplete" >&2
-        fi
-        report "result=failed step=${step}"
-        exit 1
+        stop "$step" "failed" "failed step=${step}"
     fi
 done
+trap - INT TERM
 
 if [ "$DRY_RUN" = true ]; then
     report "result=dry-run"

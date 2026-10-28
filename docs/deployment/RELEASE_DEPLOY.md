@@ -1,8 +1,8 @@
 # Deploying a release
 
 `scripts/deploy/release-deploy.sh` deploys a release candidate to the kind cluster
-`econ-graph` in one command. It is how a production window deploys, and how the upgrade
-rehearsal in CI deploys. Run it from a clean checkout of the tag:
+`econ-graph` in one command. It is how a production window deploys. Run it from a clean
+checkout of the tag:
 
 ```sh
 git checkout vX.Y.Z-rc.N
@@ -23,9 +23,15 @@ It is set before `scripts/deploy/lib/kind-env.sh` is read, so a throwaway cluste
 
 Before any step, and with nothing changed yet:
 
-- The checkout must be the tag's commit (`git rev-parse HEAD`), with no changes and no
-  untracked files (`git status --porcelain`): `deploy.sh` applies `k8s/manifests` from the
-  working tree, so anything else would deploy manifests the tag doesn't have.
+- The checkout must be the tag's commit (`git rev-parse HEAD`) and clean: `deploy.sh`
+  applies `k8s/manifests` from the working tree, so anything else would deploy manifests
+  the tag doesn't have. Clean means no changes in the index or the working tree and no
+  untracked files, asked with the settings that could hide them turned off
+  (`status.showUntrackedFiles`, fsmonitor, the untracked cache); no file marked
+  skip-worktree or assume-unchanged (`git ls-files -v`), whose changes `git status` does
+  not show; and no ignored file (`.gitignore`, `.git/info/exclude`) where `deploy.sh`
+  reads: `k8s`, `config`, `scripts`, `grafana-dashboards` and `ports.env`. The checkout is
+  checked again just before the deploy step; if it changed, `deploy.sh` is not started.
 - It pins the cluster: the rootful Docker daemon the kind cluster runs on
   (`unix:///var/run/docker.sock`, or `ECONGRAPH_DOCKER_HOST`; never the shell's
   `DOCKER_HOST`) and the kind cluster's own kubectl and kubeconfig, which every step then
@@ -67,21 +73,36 @@ Each step's output goes to the terminal and to a step log under `$XDG_RUNTIME_DI
 `~/.local/state/econgraph`), from which the run reads the backups' paths, the crawler
 worker's replicas and verify's unchecked items. The step's own exit status decides
 whether it failed: a step log that can't be written doesn't, and neither does a process a
-step leaves running in the background with its output open.
+step leaves running in the background with its output open. Each step has a log of its
+own.
+
+Ctrl-C or SIGTERM during a step stops that step and the processes it started, prints the
+same guidance as a failure of that step, reports `result=interrupted step=NAME
+signal=INT|TERM` and exits 130 or 143.
 
 ## The run's record
 
 Each run appends to `~/econgraph-releases/<tag>/release-deploy-<cluster>.txt`
-(`ECONGRAPH_RELEASES_DIR` overrides the root), one line per item, each with the run's id:
+(`ECONGRAPH_RELEASES_DIR` overrides the root), one line per item, each starting with the
+run's id, the cluster's kube-system UID and the time
+(`run=ID cluster_uid=UID date=TIME KEY=VALUE`; the value is the rest of the line, so a
+path may hold blanks):
 
-- `keycloak_replicas=N`: Keycloak's replicas, when it runs before the keycloak step;
-- `backup=PATH`: each dump the backup step wrote (`/backups/econ_graph-<stamp>.dump` and
-  the others, on the backup volume);
-- `keycloak_backup=DIR`: the verified Keycloak dump;
-- `crawler_replicas=N`: the replicas the precheck scaled the crawler worker down from.
+- `keycloak_replicas=N` and `crawler_replicas=N`: their replicas before the run, when
+  they run;
+- `crawler_replicas=N` also when the precheck scales the crawler worker down from N, even
+  if the precheck then fails;
+- `backup=PATH`: each dump of a backup step that succeeded (`/backups/econ_graph-<stamp>.dump`
+  and the others, on the backup volume), then `backup_complete=1`. A backup step that
+  fails partway records nothing;
+- `keycloak_backup=DIR`: the verified Keycloak dump.
 
-A later run of the same tag reads them: by then Keycloak and the crawler worker may
-already be at 0, and the databases may already be migrated.
+A later run of the same tag on the same cluster reads them: by then Keycloak and the
+crawler worker may already be at 0, an earlier run's `deploy.sh` may have reset the
+crawler worker to the manifest's replicas, and the databases may already be migrated. The
+earliest value counts. Lines with another kube-system UID (a cluster recreated under the
+same name) are ignored, and the run says how many. A record that can't be written stops
+the run: before any step, or at the step whose result it was recording.
 
 ## PUBLIC_HOST
 
@@ -140,22 +161,23 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
   digest or label mismatch) changes nothing first, as its last line says.
 - **keycloak, precheck, deploy**: Keycloak may be stopped (the keycloak step scales it to
   0, and only `deploy.sh` applies it again). It prints the command that starts it at the
-  replicas it ran before the tag's first run: read before this run, or from the record,
-  or the manifest's.
+  replicas it ran before the tag's first run on this cluster, from the record. When it was
+  already at 0 and no run recorded it running, it says so, with the manifest's replicas.
 - **precheck, deploy**: the crawler worker may be stopped. The precheck scales it to 0,
   and only `deploy.sh` starts it again, when it applies `crawler-worker.yaml` after the
   `crawler-migrate` Job; any failure before that leaves it at 0. It prints the command
-  that starts it at the replicas the precheck scaled it from (this run's, else the
-  record's, else the manifest's). The nodes hold the new crawler image under the name it
-  runs, so it says to start it only after the rollback, or once a deploy has applied the
-  migrations.
+  that starts it at the replicas it ran before the tag's first run on this cluster (the
+  earliest record), or says it was already at 0, with the manifest's replicas. The nodes
+  hold the new crawler image under the name it runs, so it says to start it only after
+  the rollback, or once a deploy has applied the migrations.
 - **deploy, verify**: if the data migrations ran, or Keycloak started on a new version,
-  the databases need restoring. It names the backups to restore from: those of the tag's
-  first run that took any, which hold the state before any of the tag's migrations, with
-  the commands (`restore-postgres-backup.sh --context kind-NAME --file
-  econ_graph-<stamp>.dump`, `restore-keycloak-db.sh DIR --context kind-NAME`). When this
-  run's backups were taken after an earlier run of the tag, it lists them as the ones not
-  to use.
+  the databases need restoring. It names the backups to restore from, with the run's id
+  and date: the data databases' from the tag's first run on this cluster whose backup
+  step completed, and Keycloak's earliest verified dump, which come before any deploy of
+  the tag and so hold the state before its migrations, with the commands
+  (`restore-postgres-backup.sh --context kind-NAME --file econ_graph-<stamp>.dump`,
+  `restore-keycloak-db.sh DIR --context kind-NAME`). This run's backups that are not those
+  are listed as the ones not to use.
 
 ## Automation
 
@@ -166,21 +188,21 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
 - the backups taken, `backup=PATH` and `keycloak_backup=DIR`;
 - after a failed deploy or verify, the backups to restore from, `restore_backup=PATH` and
   `restore_keycloak_backup=DIR`;
-- a final `result=ok|failed step=NAME|dry-run|refused` line; `result=ok unchecked=N` when
-  the verify left N things unchecked.
+- a final `result=ok|failed step=NAME|interrupted step=NAME signal=SIG|dry-run|refused`
+  line; `result=ok unchecked=N` when the verify left N things unchecked.
 
 A report that can't be written stops the run before any step; a later write that fails is
-warned about and never cuts the run or its failure output short. The upgrade rehearsal
-runs `release-deploy.sh --tag ... --yes --report FILE` on a throwaway cluster and reports
-the failed step from it.
+warned about and never cuts the run or its failure output short.
 
 ## Tests
 
 `scripts/deploy/test-release-deploy.sh` runs `release-deploy.sh` with every step replaced by
 a stub, and stub kubectl, kind and docker in a scratch HOME. It checks the order, the stop
 at each failing step with its state and rollback output, a step that leaves a background
-process holding its output, the restart and restore guidance across re-runs, the
-checkout check, the `PUBLIC_HOST` guard, the production confirmation, the dry run and the
-final-tag resolution. CI runs it, with shellcheck, in the Deploy Manifest Rendering job.
+process holding its output, SIGINT and SIGTERM during the deploy, the restart and restore
+guidance across re-runs (a backup that failed partway, records from another cluster,
+paths with blanks), an unwritable record, the checkout checks (each way git can hide a
+change, and a change during the run), the `PUBLIC_HOST` guard, the production
+confirmation, the dry run and the final-tag resolution. CI runs it, with shellcheck, in the Deploy Manifest Rendering job.
 `scripts/deploy/test-kind-kubectl-default.sh` checks that `deploy.sh` stops its pod status
 monitor when a wait fails.
