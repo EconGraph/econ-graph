@@ -89,6 +89,8 @@ required = {
 }
 expected = {(group, resource, verb) for group, names in required.items()
             for resource in names for verb in workload_verbs}
+# Nothing automated deletes data: volume claims and StatefulSets lose delete.
+expected -= {("", "persistentvolumeclaims", "delete"), ("apps", "statefulsets", "delete")}
 expected |= {("", "pods", verb) for verb in ("get", "list", "watch", "delete")}
 expected.add(("", "pods/log", "get"))
 assert permissions == expected, "Role must grant exactly the documented workload/log permissions"
@@ -108,6 +110,12 @@ denied += [("", "pods/ephemeralcontainers", "patch"), ("", "services/proxy", "ge
            ("", "nodes/proxy", "get"), ("", "namespaces", "create")]
 denied += [(rbac, k, v) for k in ("roles", "rolebindings", "clusterroles", "clusterrolebindings")
            for v in ("create", "update", "patch", "delete", "bind", "escalate")]
+denied += [(g, r, v) for g, r in (("", "persistentvolumeclaims"), ("apps", "statefulsets"),
+                                  ("", "persistentvolumes"))
+           for v in ("delete", "deletecollection")]
+denied += [("", "persistentvolumes", v) for v in ("create", "update", "patch")]
+denied += [(g, r, "deletecollection") for rule in role["rules"]
+           for g in rule["apiGroups"] for r in rule["resources"]]
 for check in denied:
     assert not allowed_by_role(*check), f"Role must deny {check}"
 PY
@@ -143,6 +151,9 @@ grep -q 'access verification failed' "$scratch/refused-output"
 grep -q 'auth can-i create pods --subresource=exec -n kube-system' "$AGENT_TEST_CALLS"
 grep -q 'auth can-i create pods --subresource=portforward -n econ-graph' "$AGENT_TEST_CALLS"
 grep -q 'auth can-i create serviceaccounts --subresource=token -n kube-system' "$AGENT_TEST_CALLS"
+grep -q 'auth can-i delete persistentvolumeclaims -n econ-graph' "$AGENT_TEST_CALLS"
+grep -q 'auth can-i deletecollection statefulsets.apps -n kube-system' "$AGENT_TEST_CALLS"
+grep -q 'auth can-i delete persistentvolumes' "$AGENT_TEST_CALLS"
 if grep -Eq 'auth can-i [a-z]+ [a-z.]+/' "$AGENT_TEST_CALLS"; then
     echo 'a permission check names a subresource as TYPE/NAME' >&2; exit 1
 fi

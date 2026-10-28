@@ -86,8 +86,14 @@ metadata:
   namespace: ${namespace}
 rules:
 - apiGroups: [""]
-  resources: ["services", "configmaps", "persistentvolumeclaims", "events"]
+  resources: ["services", "configmaps", "events"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Nothing automated deletes data: no delete on volume claims or StatefulSets,
+# and no deletecollection anywhere. PersistentVolumes are cluster-scoped and
+# out of reach of this namespaced Role.
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
 # Pods only through their controllers: no bare pod create, update or patch.
 - apiGroups: [""]
   resources: ["pods"]
@@ -96,8 +102,11 @@ rules:
   resources: ["pods/log"]
   verbs: ["get"]
 - apiGroups: ["apps"]
-  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  resources: ["deployments", "replicasets", "daemonsets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
 - apiGroups: ["batch"]
   resources: ["jobs", "cronjobs"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -209,6 +218,10 @@ while IFS= read -r ns; do
     expect_permission no get services --subresource=proxy -n "$ns"
     expect_permission no create serviceaccounts --subresource=token -n "$ns"
     expect_permission no impersonate serviceaccounts -n "$ns"
+    for verb in delete deletecollection; do
+        expect_permission no "$verb" persistentvolumeclaims -n "$ns"
+        expect_permission no "$verb" statefulsets.apps -n "$ns"
+    done
     for kind in roles rolebindings; do
         for verb in create update patch delete; do
             expect_permission no "$verb" "$kind.rbac.authorization.k8s.io" -n "$ns"
@@ -227,6 +240,8 @@ done
 expect_permission no bind clusterroles.rbac.authorization.k8s.io
 expect_permission no escalate clusterroles.rbac.authorization.k8s.io
 expect_permission no get nodes --subresource=proxy
+expect_permission no delete persistentvolumes
+expect_permission no deletecollection persistentvolumes
 expect_permission no create certificatesigningrequests.certificates.k8s.io
 [ ! -L "$output_dir/bin" ] || { echo 'error: output bin directory is a symlink' >&2; exit 1; }
 mkdir -p "$output_dir/bin"

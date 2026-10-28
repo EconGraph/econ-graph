@@ -5,15 +5,17 @@ Agent tools use a short-lived ServiceAccount kubeconfig through
 namespace, delete (restart) pods and read pod logs, but its Role grants no access
 to Secrets, RBAC, ServiceAccount tokens, bare pod creation or changes, pod exec,
 attach or port-forward, service proxying, nodes, namespaces or cluster-scoped
-resources.
+resources. Nothing automated deletes data, so the Role cannot delete
+PersistentVolumeClaims or StatefulSets, has no `deletecollection` on any
+resource, and, being namespaced, cannot reach PersistentVolumes.
 Use this launcher as the default entry point for every agent session that needs
 Kubernetes access. Existing sessions keep their credentials until restarted.
 
 This reduces accidental direct access to Secrets; it is **not a confidentiality
 boundary**. An identity that can deploy arbitrary workloads can mount Secrets or
 run a pod under another ServiceAccount. It can also expose a database through a
-NodePort Service, loosen NetworkPolicies, and delete PersistentVolumeClaims and
-StatefulSets, so it does not protect data either. Logs and ConfigMaps can also contain
+NodePort Service, loosen NetworkPolicies, and run a workload that mounts a
+database's volume claim and changes its files, so it does not protect data either. Logs and ConfigMaps can also contain
 sensitive data. A process running as the operator's Unix user can read that user's
 admin kubeconfig and plaintext backups. Access to the rootful Docker socket can
 recover kind's admin credentials or mount host files. Environment flags and script
@@ -49,7 +51,8 @@ only namespaced RBAC and a private local kubeconfig. Before publishing the confi
 it uses the issued token to check pod and pod-log access and reject direct Secret,
 ServiceAccount token, bare pod creation, pod exec/attach/port-forward, ephemeral
 container, service and node proxy, impersonation, RBAC write and RBAC escalation
-grants across existing namespaces. An operator must be able to list namespaces for
+grants, and delete or deletecollection on volume claims, StatefulSets and
+PersistentVolumes, across existing namespaces. An operator must be able to list namespaces for
 that check. A failed check leaves no new kubeconfig; inspect existing bindings
 before retrying. It requests a token lifetime of one hour and refuses a token the
 API server issued for longer. Re-run bootstrap to renew it. `--namespace`,
