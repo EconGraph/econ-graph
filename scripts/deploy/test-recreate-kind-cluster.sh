@@ -8,11 +8,14 @@
 #     cluster's kubeconfig in ~/.cache/econgraph; ~/.kube/config and $KUBECONFIG
 #     are never written, and no current context is switched;
 #   - --if-missing keeps an existing cluster and changes nothing;
-#   - before deleting it shows the cluster; on a cluster marked production (or
-#     whose marker can't be read) only the kube-system UID prefix, typed or
+#   - before deleting it shows the cluster; on a cluster with a production
+#     marker (any role other than exactly `none`, whatever its case or UID) or
+#     whose marker can't be read, only the kube-system UID prefix, typed or
 #     given as --confirm-production, answers; a wrong prefix is refused on any
 #     cluster; otherwise the cluster name typed at a terminal, or --yes;
 #     without a terminal and without --yes it refuses;
+#   - cluster_role_marker_guards_delete (lib/cluster-role.sh), the marker test
+#     the script uses;
 #   - an unidentifiable cluster (no kube-system UID) or a missing host mount
 #     is refused; --dry-run changes nothing.
 #
@@ -78,7 +81,7 @@ EOF
 
 # docker: the reads inside the control plane, and the kubectl copy.
 # FAKE_UID: the kube-system UID. FAKE_MARKED set: a production marker made on
-# this cluster; FAKE_MARKER_OTHER set: one made on another cluster;
+# this cluster; FAKE_MARKER: what the marker reads as ("ROLE UID");
 # FAKE_MARKER_FAILS set: the marker can't be read. FAKE_EXEC_FAILS set: nothing
 # can be read (the API server doesn't answer).
 cat >"$WORK/bin/docker" <<EOF
@@ -93,7 +96,7 @@ case "\$*" in
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKER_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKED:-}" ] || printf '%s' "production \$uid"
-        [ -z "\${FAKE_MARKER_OTHER:-}" ] || printf '%s' "production uid-other-cluster"
+        [ -z "\${FAKE_MARKER:-}" ] || printf '%s' "\$FAKE_MARKER"
         exit 0 ;;
     "cp -q -L econ-graph-control-plane:/usr/bin/kubectl "*)
         printf '%s\n' '#!/bin/sh' 'echo "KUBECONFIG=\${KUBECONFIG:-} \$*" >>"$KUBE_CALLS"' >"\$5"
@@ -267,14 +270,34 @@ reset
 out="$(FAKE_MARKED=1 recreate --confirm-production uid-kind)"; rc=$?
 expect_recreate "a production cluster with --confirm-production uid-kind"
 
-# 7. A marker that can't be read counts as production; a marker made on another
-# cluster doesn't; a wrong prefix is refused on an unmarked cluster too.
+# 7. A marker that can't be read, or any role other than exactly `none` (made
+# on another cluster, without a UID, another case, another role), takes the
+# prefix; --yes alone is refused.
+for marker in FAILS "production uid-other-cluster" "production" "Production uid-kind-cluster" \
+    "None uid-kind-cluster" "NONE" "staging uid-kind-cluster"; do
+    reset
+    if [ "$marker" = FAILS ]; then
+        out="$(FAKE_MARKER_FAILS=1 recreate --yes)"; rc=$?
+        name="an unreadable marker"
+    else
+        out="$(FAKE_MARKER="$marker" recreate --yes)"; rc=$?
+        name="the marker '$marker'"
+    fi
+    expect_refusal "$name with --yes" "needs --confirm-production"
+    grep -q "treated as production" <<<"$out" || fail "$name is not shown as treated as production"
+done
 reset
-out="$(FAKE_MARKER_FAILS=1 recreate --yes)"; rc=$?
-expect_refusal "an unreadable marker with --yes" "needs --confirm-production"
-reset
-out="$(FAKE_MARKER_OTHER=1 recreate --yes)"; rc=$?
-expect_recreate "a marker made on another cluster, with --yes"
+out="$(FAKE_MARKER="Production uid-kind-cluster" recreate --confirm-production uid-kind)"; rc=$?
+expect_recreate "the marker 'Production' with --confirm-production uid-kind"
+# role=none (with or without a UID) is not production: --yes deletes.
+for marker in "none" "none uid-kind-cluster"; do
+    reset
+    out="$(FAKE_MARKER="$marker" recreate --yes)"; rc=$?
+    expect_recreate "the marker '$marker' with --yes"
+    grep -qE "production +not production \(role=none\)" <<<"$out" ||
+        fail "the marker '$marker' is not shown as not production"
+done
+# A wrong prefix is refused on an unmarked cluster too.
 reset
 out="$(recreate --yes --confirm-production uid-othe)"; rc=$?
 expect_refusal "an unmarked cluster with the wrong --confirm-production" "does not match"
@@ -344,6 +367,17 @@ if [ "$rc" -eq 2 ] && [ ! -s "$CALLS" ]; then
 else
     fail "--dryrun (exit $rc) did not stop at the argument: $out"
 fi
+
+# 14. The marker test the script uses (lib/cluster-role.sh).
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+for marker in "production uid-a" "production" "Production uid-a" "staging uid-a" " uid-a" "None uid-a" "NONE"; do
+    cluster_role_marker_guards_delete "$marker" || fail "cluster_role_marker_guards_delete '$marker' is false"
+done
+for marker in "" " " "none" "none uid-a"; do
+    if cluster_role_marker_guards_delete "$marker"; then fail "cluster_role_marker_guards_delete '$marker' is true"; fi
+done
+echo "ok   cluster_role_marker_guards_delete: any role but exactly none guards the delete"
 
 if [ "$failed" -ne 0 ]; then
     echo "recreate-kind-cluster checks failed"
