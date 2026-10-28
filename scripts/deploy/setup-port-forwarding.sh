@@ -30,9 +30,14 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
     exit 1
 fi
 
-# Set kubectl context
-echo "🔧 Setting kubectl context..."
-kubectl config use-context kind-econ-graph
+# The kind kubectl's own kubeconfig: switch it to the kind cluster's context. An
+# explicit KUBECTL keeps its kubeconfig's current context, as it chose it.
+if [ -n "${KUBECTL:-}" ]; then
+    echo "🔧 Using the current context of ${KUBECTL}: $(kubectl config current-context 2>/dev/null || echo '(none)')"
+else
+    echo "🔧 Setting kubectl context..."
+    kubectl config use-context kind-econ-graph
+fi
 
 # Check if services exist
 echo "🔍 Checking if services are available..."

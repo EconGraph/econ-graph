@@ -272,6 +272,15 @@ expect "setup-port-forwarding.sh with KUBECTL" nonzero "Cannot connect to Kubern
 if [ -s "$LOGS/pinned-kind.log" ] || [ -s "$LOGS/docker.log" ]; then
     fail "setup-port-forwarding.sh with KUBECTL: still ran kind or docker"
 fi
+# Past the cluster check, an explicit KUBECTL keeps its current context: no switch to
+# kind-econ-graph. Stopped at the service check, before any port forward (or pkill).
+run env KUBECTL="$CACHE/bin/kubectl" KUBECONFIG="$CACHE/kubeconfig-econ-graph" \
+    FAKE_FAIL="get service grafana-service" "$DEPLOY/setup-port-forwarding.sh"
+expect "setup-port-forwarding.sh with KUBECTL, past the cluster check" nonzero \
+    "Grafana service not found" "get service grafana-service"
+if grep -qF " config use-context" "$LOGS/kind-kubectl.log"; then
+    fail "setup-port-forwarding.sh with KUBECTL: switched the context of its kubeconfig"
+fi
 
 # --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
 # No kind copies (a HOME without the cache): the gateway and Postgres backup scripts stop
