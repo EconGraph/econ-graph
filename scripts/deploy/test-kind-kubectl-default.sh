@@ -283,6 +283,26 @@ if grep -qF " config use-context" "$LOGS/kind-kubectl.log"; then
     fail "setup-port-forwarding.sh with KUBECTL: switched the context of its kubeconfig"
 fi
 
+# --- the release-image scripts' pin (ri_pin_context, lib/release-images.sh) ------------
+# test-release-images.sh names its stub kubectl with KUBECTL; this is the path without
+# it, as verify-release-images.sh takes it (cluster-role.sh, then release-images.sh): the
+# kind kubectl and kubeconfig, on kind-<cluster>.
+run bash -c 'RI_SCRIPT=test; source "$1/lib/cluster-role.sh"; source "$1/lib/release-images.sh"; ri_pin_context econ-graph' \
+    _ "$DEPLOY"
+if [ "$rc" -ne 0 ] || [ -s "$LOGS/plain.log" ] || [ ! -s "$LOGS/kind-kubectl.log" ] ||
+    grep -vqF "$CACHE/bin/kubectl KUBECONFIG=$CACHE/kubeconfig-econ-graph --context kind-econ-graph " "$LOGS/kind-kubectl.log"; then
+    fail "ri_pin_context without KUBECTL: exit $rc, $(cat "$LOGS/plain.log" "$LOGS/kind-kubectl.log")"
+else
+    echo "ok   ri_pin_context without KUBECTL uses the kind kubectl on kind-econ-graph"
+fi
+run env HOME="$WORK/empty-home" bash -c \
+    'RI_SCRIPT=test; source "$1/lib/cluster-role.sh"; source "$1/lib/release-images.sh"; ri_pin_context econ-graph' _ "$DEPLOY"
+if [ "$rc" -eq 0 ] || [ -s "$LOGS/plain.log" ] || ! grep -qF "or set KUBECTL (and KUBECONFIG)" <<<"$out"; then
+    fail "ri_pin_context without KUBECTL or the kind kubectl: exit $rc, $(cat "$LOGS/plain.log")"
+else
+    echo "ok   ri_pin_context without KUBECTL or the kind kubectl stops"
+fi
+
 # --- cluster_role_default_kubectl: never plain kubectl ---------------------------------
 # No kind copies (a HOME without the cache): the gateway and Postgres backup scripts stop
 # before any kubectl.
