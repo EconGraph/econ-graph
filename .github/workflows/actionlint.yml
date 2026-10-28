@@ -14,6 +14,7 @@ on:
       - 'ci/scripts/test_crawler_secrets.py'
       - 'ci/scripts/check-required-jobs.sh'
       - 'ci/scripts/test-check-required-jobs.sh'
+      - 'scripts/github/**'
   # Every PR and merge group, without a path filter: Lint workflows is a
   # required check (docs/development/MERGE_QUEUE.md), and a filtered-out
   # workflow never reports one. The job takes about a minute.
@@ -76,6 +77,13 @@ jobs:
     # The result jobs of the required workflows (ci-core.yml, release-e2e.yml)
     - name: Check the required-jobs gate
       run: ci/scripts/test-check-required-jobs.sh
+
+    # scripts/github/apply-rulesets.sh, which applies the merge-queue rulesets,
+    # against a stub gh: nothing reaches GitHub.
+    - name: Check the ruleset script
+      run: |
+        shellcheck scripts/github/apply-rulesets.sh scripts/github/test-apply-rulesets.sh
+        scripts/github/test-apply-rulesets.sh
 
     - name: Run actionlint
       run: |

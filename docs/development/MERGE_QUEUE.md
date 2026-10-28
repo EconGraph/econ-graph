@@ -30,7 +30,9 @@ plus Admin Frontend Tests) and Release E2E always runs. The result jobs use
 
 A new required workflow needs the same three things: a `merge_group:` trigger,
 no trigger-level path filter on `pull_request`, and a result job with
-`if: always()` that needs every other job. Add its check to the rulesets below.
+`if: always()` that needs every other job. Add its check to
+[merge-queue-rules.json](../../scripts/github/merge-queue-rules.json) and run
+[apply-rulesets.sh](../../scripts/github/apply-rulesets.sh) (below).
 
 ## Landing a PR
 
@@ -88,11 +90,21 @@ fix through the queue is the normal way.
 
 ## Branch protection settings
 
-These are repository settings; a maintainer applies them. They add rules to
-the existing ruleset `main only by pr` (id 8429203) and create one for the
-release branches. Both keep the live pull-request rule exactly as it is
-(including `require_extra_approval_for_unattributed_changes` and its
-`dismissal_restriction`), and add:
+These are repository settings; a maintainer applies them with
+[apply-rulesets.sh](../../scripts/github/apply-rulesets.sh):
+
+```sh
+scripts/github/apply-rulesets.sh --dry-run   # print the before/after diff of each ruleset
+scripts/github/apply-rulesets.sh             # the same, then apply after a y at the prompt
+```
+
+It needs `gh`, logged in as a repository admin, and `jq`. It adds rules to the
+existing ruleset `main only by pr` (id 8429203) and creates one for the
+release branches, `release branches by pr`. Both keep the live pull-request
+rule exactly as it is (including
+`require_extra_approval_for_unattributed_changes` and its
+`dismissal_restriction`), and add the rules in
+[merge-queue-rules.json](../../scripts/github/merge-queue-rules.json):
 
 - `deletion`: the branch can't be deleted;
 - the required checks, all from GitHub Actions (integration id 15368);
@@ -103,81 +115,29 @@ therefore bypass the queue, merging a PR directly ("Merge without waiting for
 requirements to be met"), or `gh pr merge --admin`, and push to the branch
 without the queue's checks. Everyone else lands through the queue.
 
-The commands read the live ruleset with `gh api` and add only the new rules
-with `jq`, so nothing the live ruleset sets is lost; running them again
-replaces the added rules rather than duplicating them. Check the output file
-before the `PUT` or `POST`. They need `gh` and `jq`.
+The script reads the live rulesets with `gh api` and merges by rule type, so
+nothing a live ruleset sets is lost:
 
-### main
-
-Save the new rules as `main-new-rules.json`:
-
-```json
-[
-  { "type": "deletion" },
-  {
-    "type": "required_status_checks",
-    "parameters": {
-      "strict_required_status_checks_policy": false,
-      "do_not_enforce_on_create": false,
-      "required_status_checks": [
-        { "context": "Core CI Result", "integration_id": 15368 },
-        { "context": "Release E2E Result", "integration_id": 15368 },
-        { "context": "Markdown lint and links", "integration_id": 15368 },
-        { "context": "Feature Flags Check", "integration_id": 15368 },
-        { "context": "Lint workflows", "integration_id": 15368 }
-      ]
-    }
-  },
-  {
-    "type": "merge_queue",
-    "parameters": {
-      "merge_method": "SQUASH",
-      "grouping_strategy": "ALLGREEN",
-      "max_entries_to_build": 5,
-      "min_entries_to_merge": 1,
-      "max_entries_to_merge": 5,
-      "min_entries_to_merge_wait_minutes": 5,
-      "check_response_timeout_minutes": 120
-    }
-  }
-]
-```
-
-and apply them:
-
-```sh
-gh api repos/EconGraph/econ-graph/rulesets/8429203 |
-  jq --slurpfile new main-new-rules.json '{name, target, enforcement, conditions, bypass_actors,
-      rules: ([.rules[] | select(.type as $t | [$new[0][].type] | index($t) | not)] + $new[0])}' \
-  >main-ruleset.json
-gh api -X PUT repos/EconGraph/econ-graph/rulesets/8429203 --input main-ruleset.json
-```
-
-### release/*
+- a live rule of a type the file doesn't list stays as it is;
+- a live rule of a type it lists keeps every parameter, and the file's values
+  are set over it; a required check that is live but not in the file stays
+  required;
+- removing a rule or a check is done by hand, in the repository settings.
 
 The release ruleset copies the main ruleset's live `non_fast_forward` and
 `pull_request` rules and `bypass_actors`, for `refs/heads/release/*`. Its
 required checks leave out `Lint workflows`: `release/v4.0` has no Actionlint
 workflow, and a required check that no workflow reports keeps every PR
-waiting. Save its new rules as `release-new-rules.json` (the main rules
-without that check):
+waiting. The script finds it by name and target, so a re-run updates it
+rather than creating another.
 
-```sh
-jq '(.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
-      map(select(.context != "Lint workflows"))' main-new-rules.json >release-new-rules.json
-```
-
-and create it:
-
-```sh
-gh api repos/EconGraph/econ-graph/rulesets/8429203 |
-  jq --slurpfile new release-new-rules.json '{name: "release branches by pr", target, enforcement,
-      bypass_actors, conditions: {ref_name: {include: ["refs/heads/release/*"], exclude: []}},
-      rules: ([.rules[] | select(.type == "non_fast_forward" or .type == "pull_request")] + $new[0])}' \
-  >release-ruleset.json
-gh api -X POST repos/EconGraph/econ-graph/rulesets --input release-ruleset.json
-```
+Before writing, the script refuses when the account has no admin rights or
+the main ruleset is missing or not the expected one (another id, name, target
+or branch condition, or without its pull-request rule). After writing, it
+re-reads both rulesets and fails unless they match. When they already match,
+it prints "already applied" and writes nothing. `--yes` skips the prompt.
+[test-apply-rulesets.sh](../../scripts/github/test-apply-rulesets.sh) checks
+it against a stub `gh`, in the Lint workflows job.
 
 Apply each ruleset only once the branches it covers have these workflows: the
 queue runs the workflows of the branch it merges into.
