@@ -84,8 +84,13 @@ case "$method $path" in
     *) echo "stub gh: unexpected $method $path" >&2; exit 64 ;;
 esac
 STUB
-chmod +x "$WORK/bin/gh"
+chmod +x "$WORK/bin/gh" || exit 1
 export PATH="$WORK/bin:$PATH"
+# Never fall through to a real, logged-in gh: the --yes cases write rulesets.
+if [ "$(command -v gh)" != "$WORK/bin/gh" ]; then
+    echo "FAIL the stub gh is not the gh on PATH" >&2
+    exit 1
+fi
 
 # The live main ruleset as GitHub returns it (read-only fields included).
 live_main='{

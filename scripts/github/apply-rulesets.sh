@@ -164,11 +164,14 @@ main_problem="$(jq -r --argjson id "$MAIN_ID" --arg name "$MAIN_NAME" --arg repo
 gh api --paginate "repos/${REPO}/rulesets?includes_parents=false" >"$work/list-pages.json" 2>"$work/err" ||
     die "can't list the rulesets of ${REPO}: $(cat "$work/err")"
 jq -s 'map(if type == "array" then . else [.] end) | add // []' "$work/list-pages.json" >"$work/list.json"
-mapfile -t release_ids < <(jq -r --arg name "$RELEASE_NAME" --argjson main "$MAIN_ID" \
-    '.[] | select(.name == $name and .target == "branch" and .id != $main) | .id' "$work/list.json")
-[ "${#release_ids[@]}" -le 1 ] ||
-    die "${#release_ids[@]} rulesets are named \"${RELEASE_NAME}\" (ids ${release_ids[*]}); keep one and re-run"
-release_id="${release_ids[0]:-}"
+# No arrays or mapfile: macOS ships bash 3.2.
+release_ids="$(jq -r --arg name "$RELEASE_NAME" --argjson main "$MAIN_ID" \
+    '[.[] | select(.name == $name and .target == "branch" and .id != $main) | .id] | map(tostring) | join(" ")' \
+    "$work/list.json")"
+release_count="$(wc -w <<<"$release_ids" | tr -d ' ')"
+[ "$release_count" -le 1 ] ||
+    die "${release_count} rulesets are named \"${RELEASE_NAME}\" (ids ${release_ids}); keep one and re-run"
+release_id="$release_ids"
 if [ -n "$release_id" ]; then
     gh api "repos/${REPO}/rulesets/${release_id}" >"$work/release-live.json" 2>"$work/err" ||
         die "can't read the release ruleset ${release_id}: $(cat "$work/err")"
