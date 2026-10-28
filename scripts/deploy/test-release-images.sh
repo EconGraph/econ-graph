@@ -15,13 +15,19 @@
 #   - the crawler-migrate Job: its manifest must name the crawler-worker image
 #     exactly as deployment/crawler-worker's does, or load and rollback refuse
 #     before changing anything; the load and the rollback move the name the
-#     Job runs on every node; verify checks the Job's pods that started
-#     (succeeded, failed or running) against the loaded image, fails on one
-#     that ran another image or when they can't be listed, skips one whose
-#     container never started, and reports a Job with no pod as unchecked
+#     Job runs on every node; verify checks the current Job's pods (by its
+#     controller-uid, never an earlier run's) that started (succeeded, failed
+#     or running) against the loaded image, fails on one that ran another
+#     image or when the Job or its pods can't be read, records one whose
+#     container never started or that is terminating as unchecked and lists it
+#     in the summary, and reports no Job, or a Job with no pod, as unchecked
 #     rather than failing;
 #   - rollback refuses when the manifests now name another tag than the one
-#     the load moved;
+#     the load moved, and so does a second load of the same tag, before
+#     anything changes; both read local= from v4.0-format records too, where
+#     only the image= lines carry it;
+#   - --cluster: an exported KIND_CLUSTER or ECONGRAPH_SCRATCH_STORAGE does not
+#     stop load or rollback;
 #   - --dry-run pulls, tags, loads, restarts and writes nothing;
 #   - load refuses before anything reaches the nodes on: a revision label that
 #     isn't the commit or is missing, a pulled image without the registry's
@@ -260,8 +266,12 @@ STUB
 #   STUB_NO_PODS=<deployment>           its only pod is Pending
 #   STUB_MIXED=<deployment>             before any restart, its pods run two images
 #   STUB_JOB_LIST_FAILS=1               listing the crawler-migrate pods fails
-# The crawler-migrate Job's pods are the lines of $STUB_STATE/job-pods
-# (pod|phase|deletionTimestamp|imageID); none when it doesn't exist.
+#   STUB_JOB_GET_FAILS=1                reading job/crawler-migrate fails
+# job/crawler-migrate exists when $STUB_STATE/job-uid does, with that uid. Its
+# pods (batch.kubernetes.io/controller-uid=<uid>) are the lines of
+# $STUB_STATE/job-pods (pod|phase|deletionTimestamp|imageID). Lines of
+# $STUB_STATE/job-pods-stale are pods an earlier run of the Job left: they
+# carry app=crawler-migrate but another controller-uid.
 cat >"$tmp/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -277,9 +287,18 @@ case "$*" in
   "get nodes -o jsonpath="*) echo "$NODES" ;;
   "get namespace kube-system -o jsonpath="*) echo "11111111-2222-3333-4444-555555555555" ;;
   "get configmap econgraph-cluster-role --ignore-not-found -o jsonpath="*) ;;
+  "get job crawler-migrate --ignore-not-found -o jsonpath={.metadata.uid}")
+    [ "${STUB_JOB_GET_FAILS:-0}" != 1 ] || { echo "error: the server is unavailable" >&2; exit 1; }
+    [ ! -f "$STUB_STATE/job-uid" ] || cat "$STUB_STATE/job-uid" ;;
+  "get pods -l batch.kubernetes.io/controller-uid="*" -o jsonpath="*)
+    [ "${STUB_JOB_LIST_FAILS:-0}" != 1 ] || { echo "error: the server is unavailable" >&2; exit 1; }
+    uid="${4#batch.kubernetes.io/controller-uid=}"
+    if [ -f "$STUB_STATE/job-uid" ] && [ "$uid" = "$(cat "$STUB_STATE/job-uid")" ] && [ -f "$STUB_STATE/job-pods" ]; then
+      cat "$STUB_STATE/job-pods"
+    fi ;;
   "get pods -l app=crawler-migrate -o jsonpath="*)
     [ "${STUB_JOB_LIST_FAILS:-0}" != 1 ] || { echo "error: the server is unavailable" >&2; exit 1; }
-    [ ! -f "$STUB_STATE/job-pods" ] || cat "$STUB_STATE/job-pods" ;;
+    cat "$STUB_STATE/job-pods" "$STUB_STATE/job-pods-stale" 2>/dev/null || true ;;
   "rollout restart deployment/"*)
     d="${3#deployment/}"
     cp "$STUB_STATE/running-$d" "$STUB_STATE/previous-$d"
@@ -350,9 +369,12 @@ reset() {
 # What deploy.sh leaves of the crawler-migrate Job: one pod that failed and one
 # that succeeded, both on what the nodes' crawler-worker name points at now, and
 # one whose container never started.
+job_uid="0a1b2c3d-0000-4000-8000-000000000001"
+job_exists() { echo "$job_uid" >"$STUB_STATE/job-uid"; }
 job_ran() {
   local id
   id="$(node_get econ-graph-worker "$(local_ref crawler-worker)")"
+  job_exists
   {
     echo "crawler-migrate-a|Failed||docker.io/library/econ-graph-crawler-worker@$id"
     echo "crawler-migrate-b|Succeeded||$id"
@@ -470,8 +492,10 @@ grep -qF "ok job/crawler-migrate crawler-migrate-a Failed docker.io/library/econ
   fail "verify did not check the failed crawler-migrate pod: $(cat "$tmp/out")"
 grep -qF "ok job/crawler-migrate crawler-migrate-b Succeeded $(id_of crawler-worker)" "$records/verified.txt" ||
   fail "verify did not record the succeeded crawler-migrate pod"
-grep -qF "crawler-migrate-c: Pending, its container never started, not checked" "$tmp/out" ||
-  fail "verify did not list the crawler-migrate pod that never started"
+grep -qF "unchecked job/crawler-migrate crawler-migrate-c Pending: its container never started" "$records/verified.txt" ||
+  fail "verify did not record the crawler-migrate pod that never started as unchecked: $(cat "$records/verified.txt")"
+sed -n '/^Not checked:$/,$p' "$tmp/out" | grep -qF "unchecked job/crawler-migrate crawler-migrate-c Pending: its container never started" ||
+  fail "verify's summary did not list the crawler-migrate pod that never started: $(cat "$tmp/out")"
 grep -q 'rollout restart.*crawler-migrate\|delete job' "$STUB_LOG" && fail "verify restarted or deleted the crawler-migrate Job"
 for d in econ-graph-backend crawler-worker econ-graph-frontend; do
   grep -qxF "kubectl --context kind-econ-graph -n econ-graph rollout restart deployment/$d" "$STUB_LOG" || fail "verify did not restart deployment/$d"
@@ -499,32 +523,74 @@ grep -q 'rollout restart' "$STUB_LOG" && fail "verify --dry-run restarted a Depl
 grep -q 'MISMATCH econ-graph-backend' "$tmp/out" || fail "verify --dry-run did not report the old backend pod"
 
 # === verify and the crawler-migrate Job
-# No pod (skipped, or deleted a day after it finished): reported, not a failure.
+# No Job (skipped, or deleted a day after it finished): reported, not a failure.
 reset
 load_ok
 clear_log
-if ! run "$verify" --tag "$TAG"; then fail "verify failed with no crawler-migrate pod: $(cat "$tmp/out")"; fi
-grep -qF "unchecked job/crawler-migrate: no pod" "$tmp/out" || fail "verify did not say the Job went unchecked: $(cat "$tmp/out")"
-grep -qF "unchecked job/crawler-migrate: no pod" "$records/verified.txt" || fail "verify did not record the unchecked Job"
-grep -qxF "kubectl --context kind-econ-graph -n econ-graph get pods -l app=crawler-migrate -o jsonpath={range .items[*]}{.metadata.name}{\"|\"}{.status.phase}{\"|\"}{.metadata.deletionTimestamp}{\"|\"}{range .status.containerStatuses[?(@.name==\"crawler-migrate\")]}{.imageID}{end}{\"\\n\"}{end}" "$STUB_LOG" ||
-  fail "verify did not read the crawler-migrate container's imageID: $(grep crawler-migrate "$STUB_LOG")"
+if ! run "$verify" --tag "$TAG"; then fail "verify failed with no crawler-migrate Job: $(cat "$tmp/out")"; fi
+grep -qF "unchecked job/crawler-migrate: no Job" "$tmp/out" || fail "verify did not say the Job went unchecked: $(cat "$tmp/out")"
+grep -qF "unchecked job/crawler-migrate: no Job" "$records/verified.txt" || fail "verify did not record the unchecked Job"
+grep -q 'get pods -l batch.kubernetes.io/controller-uid=' "$STUB_LOG" && fail "verify listed Job pods without a Job"
+# A Job with no pod: reported, not a failure; the pods are read by the Job's controller-uid.
+reset
+load_ok
+job_exists
+clear_log
+if ! run "$verify" --tag "$TAG"; then fail "verify failed with a crawler-migrate Job without pods: $(cat "$tmp/out")"; fi
+grep -qF "unchecked job/crawler-migrate: the Job (uid $job_uid) has no pod" "$records/verified.txt" ||
+  fail "verify did not record the Job without pods as unchecked: $(cat "$tmp/out")"
+grep -qxF "kubectl --context kind-econ-graph -n econ-graph get pods -l batch.kubernetes.io/controller-uid=$job_uid -o jsonpath={range .items[*]}{.metadata.name}{\"|\"}{.status.phase}{\"|\"}{.metadata.deletionTimestamp}{\"|\"}{range .status.containerStatuses[?(@.name==\"crawler-migrate\")]}{.imageID}{end}{\"\\n\"}{end}" "$STUB_LOG" ||
+  fail "verify did not read the crawler-migrate container's imageID by the Job's controller-uid: $(grep crawler-migrate "$STUB_LOG")"
 # A Job pod that ran the image production ran before (deploy.sh not run after the load): fails.
 reset
 load_ok
+job_exists
 echo "crawler-migrate-x|Succeeded||docker.io/library/econ-graph-crawler-worker@$old_crawler" >"$STUB_STATE/job-pods"
 expect_fail "MISMATCH job/crawler-migrate crawler-migrate-x Succeeded ran" "$verify" --tag "$TAG"
 grep -qx 'result=FAILED' "$records/verified.txt" || fail "verify did not record the crawler-migrate pod on another image"
-# A terminating Job pod on another image is listed, not checked.
+# A pod an earlier run of the Job left (same app label, another controller-uid) is not this run's.
+reset
+load_ok
+job_ran
+echo "crawler-migrate-stale|Failed||docker.io/library/econ-graph-crawler-worker@$old_crawler" >"$STUB_STATE/job-pods-stale"
+run "$verify" --tag "$TAG" || fail "verify checked a pod of an earlier crawler-migrate Job: $(cat "$tmp/out")"
+grep -q 'crawler-migrate-stale' "$tmp/out" && fail "verify listed a pod of an earlier crawler-migrate Job"
+# A terminating Job pod on another image is recorded as unchecked, and shown in the summary.
 reset
 load_ok
 job_ran
 echo "crawler-migrate-old|Succeeded|2026-10-25T00:00:00Z|$old_crawler" >>"$STUB_STATE/job-pods"
 run "$verify" --tag "$TAG" || fail "verify failed on a terminating crawler-migrate pod: $(cat "$tmp/out")"
-grep -qF "crawler-migrate-old: terminating, not checked" "$tmp/out" || fail "verify did not skip the terminating crawler-migrate pod"
-# The Job's pods can't be listed: fails.
+grep -qF "unchecked job/crawler-migrate crawler-migrate-old Succeeded: terminating" "$records/verified.txt" ||
+  fail "verify did not record the terminating crawler-migrate pod as unchecked"
+sed -n '/^Not checked:$/,$p' "$tmp/out" | grep -qF "unchecked job/crawler-migrate crawler-migrate-old Succeeded: terminating" ||
+  fail "verify's summary did not list the terminating crawler-migrate pod: $(cat "$tmp/out")"
+# Only pods that never started (ErrImageNeverPull): passes, but each is recorded and shown.
 reset
 load_ok
+job_exists
+printf '%s\n' "crawler-migrate-p|Pending||" "crawler-migrate-q|Pending||" >"$STUB_STATE/job-pods"
+run "$verify" --tag "$TAG" || fail "verify failed on crawler-migrate pods that never started: $(cat "$tmp/out")"
+[ "$(grep -c '^unchecked job/crawler-migrate crawler-migrate-[pq] Pending: its container never started$' "$records/verified.txt")" = 2 ] ||
+  fail "verify did not record both crawler-migrate pods that never started: $(cat "$records/verified.txt")"
+[ "$(sed -n '/^Not checked:$/,$p' "$tmp/out" | grep -c 'crawler-migrate-[pq] Pending: its container never started')" = 2 ] ||
+  fail "verify's summary did not list both crawler-migrate pods that never started: $(cat "$tmp/out")"
+# The unchecked pods are shown when another check fails, too.
+reset
+load_ok
+job_ran
+expect_fail "MISMATCH crawler-worker crawler-worker-new2" env STUB_WRONG_DEPLOYMENT=crawler-worker "$verify" --tag "$TAG"
+sed -n '/^Not checked:$/,$p' "$tmp/out" | grep -qF "crawler-migrate-c Pending: its container never started" ||
+  fail "a failing verify did not list what it left unchecked: $(cat "$tmp/out")"
+# The Job, or its pods, can't be read: fails.
+reset
+load_ok
+job_ran
 expect_fail "MISMATCH job/crawler-migrate: could not list its pods" env STUB_JOB_LIST_FAILS=1 "$verify" --tag "$TAG"
+reset
+load_ok
+job_ran
+expect_fail "MISMATCH job/crawler-migrate: could not read the Job" env STUB_JOB_GET_FAILS=1 "$verify" --tag "$TAG"
 
 # === the pinned kind
 # Without it, load stops before anything changes; the kind on PATH is never used to load.
@@ -585,6 +651,57 @@ clear_log
 expect_fail "but the manifests now run econ-graph-backend:${STUB_LOCAL_TAG}-next" "$tmp/repo/scripts/deploy/rollback-release-images.sh" --to "pre-$TAG"
 node_changes >/dev/null && fail "rollback changed something after the manifests moved"
 [ -e "$records/rollback.txt" ] && fail "rollback after the manifests moved wrote a record"
+
+# === a second load of the tag after the manifests moved to another tag: refused in step 3,
+# before anything changes (it would move a second name, and rollback would then refuse).
+moved_load="$tmp/repo/scripts/deploy/load-release-images.sh"
+moved_rollback="$tmp/repo/scripts/deploy/rollback-release-images.sh"
+reset
+load_ok
+clear_log
+expect_fail "moved econ-graph-backend:${STUB_LOCAL_TAG} for backend, but the manifests now run econ-graph-backend:${STUB_LOCAL_TAG}-next" "$moved_load" --tag "$TAG"
+nothing_changed "a load of the tag after the manifests moved"
+[ "$(grep -c '^loaded_at=' "$records/images.txt")" = 1 ] || fail "a refused load after the manifests moved appended a record"
+for node in "${nodes[@]}"; do
+  [ -z "$(node_get "$node" "docker.io/library/econ-graph-backend:${STUB_LOCAL_TAG}-next")" ] ||
+    fail "a refused load after the manifests moved put the new name on $node"
+done
+expect_fail "but the manifests now run econ-graph-backend:${STUB_LOCAL_TAG}-next" "$moved_load" --tag "$TAG" --dry-run
+
+# === a load record in the v4.0 format: local= only on the image= lines, not on before=
+legacy_record() {
+  sed -i -E '/^before=/ s/ local=[^ ]*//' "$records/images.txt"
+  grep -q '^before=.* local=' "$records/images.txt" && fail "the legacy record still has local= on a before= line"
+  grep -q '^image=backend .* local=' "$records/images.txt" || fail "the legacy record has no local= on its image= lines"
+}
+reset
+load_ok
+legacy_record
+clear_log
+run "$rollback" --to "pre-$TAG" --dry-run || fail "rollback --dry-run with a v4.0 record failed: $(cat "$tmp/out")"
+grep -qF "$(pre backend) = $old_backend -> $(local_ref backend)" "$tmp/out" || fail "rollback with a v4.0 record did not plan the backend: $(cat "$tmp/out")"
+run "$load" --tag "$TAG" --dry-run || fail "load --dry-run of a tag with a v4.0 record failed: $(cat "$tmp/out")"
+clear_log
+expect_fail "the load of ${TAG} moved econ-graph-backend:${STUB_LOCAL_TAG}, but the manifests now run econ-graph-backend:${STUB_LOCAL_TAG}-next" "$moved_rollback" --to "pre-$TAG"
+node_changes >/dev/null && fail "rollback changed something with a v4.0 record after the manifests moved"
+[ -e "$records/rollback.txt" ] && fail "rollback with a v4.0 record after the manifests moved wrote a record"
+expect_fail "but the manifests now run econ-graph-backend:${STUB_LOCAL_TAG}-next" "$moved_load" --tag "$TAG"
+nothing_changed "a load with a v4.0 record after the manifests moved"
+
+# === --cluster: an exported KIND_CLUSTER or ECONGRAPH_SCRATCH_STORAGE (for the host-storage
+# scripts) does not stop load or rollback; without --cluster, lib/kind-env.sh's check stands.
+reset
+run env KIND_CLUSTER=econ-graph-scratch "$load" --tag "$TAG" --cluster econ-graph --dry-run ||
+  fail "load --cluster stopped on an exported KIND_CLUSTER: $(cat "$tmp/out")"
+run env ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" "$load" --tag "$TAG" --cluster econ-graph --dry-run ||
+  fail "load --cluster stopped on an exported ECONGRAPH_SCRATCH_STORAGE: $(cat "$tmp/out")"
+expect_fail "needs ECONGRAPH_SCRATCH_STORAGE" env KIND_CLUSTER=econ-graph-scratch "$load" --tag "$TAG" --dry-run
+load_ok
+run env KIND_CLUSTER=econ-graph-scratch "$rollback" --to "pre-$TAG" --cluster econ-graph --dry-run ||
+  fail "rollback --cluster stopped on an exported KIND_CLUSTER: $(cat "$tmp/out")"
+run env ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" "$rollback" --to "pre-$TAG" --cluster econ-graph --dry-run ||
+  fail "rollback --cluster stopped on an exported ECONGRAPH_SCRATCH_STORAGE: $(cat "$tmp/out")"
+expect_fail "needs ECONGRAPH_SCRATCH_STORAGE" env KIND_CLUSTER=econ-graph-scratch "$rollback" --to "pre-$TAG" --dry-run
 
 # === load refusals: nothing reaches the nodes, nothing is recorded
 refuses() {

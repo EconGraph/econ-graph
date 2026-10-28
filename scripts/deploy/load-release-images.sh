@@ -36,7 +36,9 @@
 #      pods use now (with none running, the one the manifests' name points at on
 #      the nodes). When an earlier load of the same tag is on record, its first
 #      record's choice wins, so a run after verify (or after a partial load)
-#      keeps the same image. Stop before changing anything if the pods of one
+#      keeps the same image. Stop before changing anything if an earlier load
+#      of the same tag moved another name (its record's local=) than the
+#      manifests run now, if the pods of one
 #      Deployment run different images, if any node already has a pre-<tag>
 #      copy of another image, or if any node has neither the copy nor the image
 #      to copy (unless --allow-missing-nodes).
@@ -84,15 +86,12 @@ set -euo pipefail
 
 RI_SCRIPT="load-release-images"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=scripts/deploy/lib/kind-env.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
-# shellcheck source=scripts/deploy/lib/release-images.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/release-images.sh"
 
 TAG=""
 DRY_RUN=false
 ALLOW_MISSING=false
 CLUSTER="econ-graph"
+CLUSTER_GIVEN=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag)
@@ -100,13 +99,25 @@ while [ $# -gt 0 ]; do
             TAG="$2"; shift 2 ;;
         --cluster)
             [ $# -ge 2 ] || { echo "${RI_SCRIPT}: error: --cluster needs a value" >&2; exit 2; }
-            CLUSTER="$2"; shift 2 ;;
+            CLUSTER="$2"; CLUSTER_GIVEN=true; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         --allow-missing-nodes) ALLOW_MISSING=true; shift ;;
         -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
         *) echo "${RI_SCRIPT}: error: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# --cluster names the cluster. KIND_CLUSTER and ECONGRAPH_SCRATCH_STORAGE pick
+# the cluster and host storage of the host-storage scripts, which this one does
+# not use; kind-env.sh stops on some pairs of them, so they are dropped when
+# --cluster is given. Without --cluster, kind-env.sh's checks still apply.
+if [ "$CLUSTER_GIVEN" = true ]; then
+    unset KIND_CLUSTER ECONGRAPH_SCRATCH_STORAGE
+fi
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+# shellcheck source=scripts/deploy/lib/release-images.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/release-images.sh"
 [ -n "$TAG" ] || { echo "${RI_SCRIPT}: error: --tag is required" >&2; exit 2; }
 ri_check_tag "$TAG"
 ri_need_jq
@@ -160,6 +171,13 @@ before_lines=""
 missing_nodes=""
 for name in "${RI_NAMES[@]}"; do
     pin="$(ri_rollback_ref "$name" "$TAG")"
+    # An earlier load of TAG moved the name its manifests ran then (local=). A
+    # load under another name would move that one too, and rollback, which
+    # points back one name per image, would then refuse from either checkout.
+    recorded_local="$(ri_recorded_locals "$name" "$TAG")"
+    if [ -n "$recorded_local" ] && [ "$recorded_local" != "${LOCAL[$name]}" ]; then
+        ri_die "the load record for ${TAG} moved $(paste -sd, <<<"$recorded_local") for ${name}, but the manifests now run ${LOCAL[$name]}; loading under a second name would leave rollback unable to point either back. Load from the checkout whose manifests run $(paste -sd, <<<"$recorded_local"), or roll back first and load the new manifests under a new rc tag. Refusing before anything changes"
+    fi
     running="$(ri_running_image_ids "$name")" || ri_die "could not list the pods of deployment/${RI_DEPLOYMENT[$name]}"
     if [ "$(grep -c . <<<"$running")" -gt 1 ]; then
         ri_die "the running pods of deployment/${RI_DEPLOYMENT[$name]} use different images ($(paste -sd, <<<"$running")); let that rollout finish first"

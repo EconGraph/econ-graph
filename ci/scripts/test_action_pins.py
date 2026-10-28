@@ -14,7 +14,9 @@ class ActionPinsTest(unittest.TestCase):
         for reference in ("actions/checkout@v7", "owner/repo@main", "owner/repo@1234567",
                           "docker://alpine:latest", "${{ inputs.action }}", ""):
             with self.subTest(reference=reference):
-                document = {"jobs": {"build": {"steps": [{"uses": reference}]}}}
+                document = {"jobs": {"build": {"steps": [
+                    {"uses": reference, "with": {"persist-credentials": False}}
+                ]}}}
                 self.assertEqual(len(check_document(document, "fixture")), 1)
 
     def test_accepts_commit_digest_and_local_actions(self):
@@ -33,6 +35,8 @@ class ActionPinsTest(unittest.TestCase):
     steps:
       - 'uses': >-
           actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: |
           # uses: this is shell content, not an action
           echo fine
@@ -45,6 +49,37 @@ class ActionPinsTest(unittest.TestCase):
         """Fail closed when a uses value is not a nonempty string."""
         for value in (None, 123, [], {}):
             self.assertTrue(check_document({"uses": value}, "fixture"))
+
+    def test_checkout_requires_literal_false(self):
+        """Missing, enabled, malformed and computed inputs cannot persist tokens."""
+        for inputs in (None, {}, {"persist-credentials": True},
+                       {"persist-credentials": "false"}, {"persist-credentials": 0},
+                       {"persist-credentials": "${{ inputs.persist }}"}, False, []):
+            with self.subTest(inputs=inputs):
+                document = {"uses": "actions/checkout@" + "a" * 40, "with": inputs}
+                errors = check_document(document, "fixture")
+                self.assertEqual(len(errors), 1)
+                self.assertIn("fixture.with.persist-credentials", errors[0])
+
+    def test_checkout_policy_covers_versions_case_and_composites(self):
+        """Check every checkout, including nested composite-action steps."""
+        for path in ("actions/checkout", "Actions/Checkout", "actions/checkout/.",
+                     "actions/checkout/", "actions/checkout/./", "actions/checkout/sub/.."):
+            reference = path + "@" + "a" * 40
+            with self.subTest(reference=reference):
+                document = yaml.safe_load(f'''runs:
+  using: composite
+  steps:
+    - uses: {reference}
+      with:
+        fetch-depth: 0
+    - uses: {reference}
+      with:
+        persist-credentials: false
+''')
+                errors = check_document(document, "fixture")
+                self.assertEqual(len(errors), 1)
+                self.assertIn("fixture.runs.steps[0].with.persist-credentials", errors[0])
 
 
 

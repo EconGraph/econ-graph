@@ -89,6 +89,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
     - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
       id: filter
       # Protected-branch pushes run the ordinary suite without path filtering.
@@ -198,6 +200,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -229,6 +232,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
 
     - name: Install promtool
       run: |
@@ -339,6 +344,11 @@ jobs:
         shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
         scripts/deploy/test-release-deploy.sh
 
+    # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
+    # identity printed first, and the resume hint keeping the run's options, against stubs.
+    - name: Check the full-history re-fetch script
+      run: scripts/deploy/test-refetch-full-history.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
@@ -352,6 +362,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
@@ -434,6 +445,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -543,6 +555,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -613,6 +626,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -967,6 +981,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1102,6 +1117,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1156,6 +1172,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1198,6 +1215,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Check dev/QA Keycloak data is not deployed to k8s
@@ -1271,6 +1289,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1338,6 +1357,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1447,6 +1467,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1494,6 +1515,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
@@ -1524,6 +1546,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
@@ -1580,6 +1603,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Load CI port configuration
@@ -1728,6 +1752,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -1931,6 +1956,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
@@ -2128,6 +2154,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     # Plain docker build on the runner's daemon, not buildx with the GHA cache:
@@ -2181,6 +2208,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx

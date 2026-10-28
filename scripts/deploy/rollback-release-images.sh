@@ -57,16 +57,13 @@ set -euo pipefail
 
 RI_SCRIPT="rollback-release-images"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=scripts/deploy/lib/kind-env.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
-# shellcheck source=scripts/deploy/lib/release-images.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/release-images.sh"
 
 TO=""
 DRY_RUN=false
 RESTART=true
 ALLOW_MISSING=false
 CLUSTER="econ-graph"
+CLUSTER_GIVEN=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --to)
@@ -74,7 +71,7 @@ while [ $# -gt 0 ]; do
             TO="$2"; shift 2 ;;
         --cluster)
             [ $# -ge 2 ] || { echo "${RI_SCRIPT}: error: --cluster needs a value" >&2; exit 2; }
-            CLUSTER="$2"; shift 2 ;;
+            CLUSTER="$2"; CLUSTER_GIVEN=true; shift 2 ;;
         --no-restart) RESTART=false; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         --allow-missing-nodes) ALLOW_MISSING=true; shift ;;
@@ -82,6 +79,18 @@ while [ $# -gt 0 ]; do
         *) echo "${RI_SCRIPT}: error: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# --cluster names the cluster. KIND_CLUSTER and ECONGRAPH_SCRATCH_STORAGE pick
+# the cluster and host storage of the host-storage scripts, which this one does
+# not use; kind-env.sh stops on some pairs of them, so they are dropped when
+# --cluster is given. Without --cluster, kind-env.sh's checks still apply.
+if [ "$CLUSTER_GIVEN" = true ]; then
+    unset KIND_CLUSTER ECONGRAPH_SCRATCH_STORAGE
+fi
+# shellcheck source=scripts/deploy/lib/kind-env.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
+# shellcheck source=scripts/deploy/lib/release-images.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/release-images.sh"
 [ -n "$TO" ] || { echo "${RI_SCRIPT}: error: --to is required" >&2; exit 2; }
 [[ "$TO" == pre-* ]] || ri_die "'${TO}' is not a rollback name (pre-vX.Y.Z-rc.N)"
 TAG="${TO#pre-}"
