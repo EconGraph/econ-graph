@@ -2,7 +2,7 @@
 
 All notable changes to EconGraph are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases are tagged `vX.Y.Z`; see
-[the release process](docs/development/RELEASE_PROCESS.md) for how a train reaches a tag.
+[the release process](docs/development/RELEASE_PROCESS.md) for how a release reaches a tag.
 
 ## [4.0.0] - 2026-10-27
 
@@ -118,8 +118,12 @@ https://econgraph.com. A database created from a tag before v4.0.0 can't be upgr
   quoted or punctuated one-word search (`"gdp"`, `GDP.`) as the word itself.
 - A chart offers only the transformations its series supports, and series reads transform the
   latest revisions by default.
+- GraphQL schema changes an API client must handle: `AuditLogType.userId` is now nullable (was
+  `ID!`) and is null once the user is deleted, while `userName` is kept and the new
+  `userDeleted: Boolean!` field says so; and `SeriesFrequency` has a new `SEMI_ANNUAL` value.
 - Annotations are refused on an unknown series or an out-of-range date or value, annotation and
-  comment length is capped, and a retried annotation create stores one annotation.
+  comment length is capped. An annotation create that carries a client-chosen
+  `idempotencyKey` stores one annotation however often it is retried.
 - The explorer's results grid is even, and its CSV and JSON exports include each series'
   source id. Signing out returns to the page you were on.
 - An admin can't suspend or delete their own account, so the last active admin can't be
@@ -141,7 +145,10 @@ https://econgraph.com. A database created from a tag before v4.0.0 can't be upgr
 - Database and other server-side error details are no longer sent to GraphQL clients; they
   get "Internal server error".
 - Oversize `/graphql` request bodies are refused, and a malformed body gets a 400 JSON error.
-- Grafana and the operational endpoints are no longer reachable through the public ingress.
+- Grafana is no longer reachable through the public ingress, and only `/graphql`, `/api`,
+  `/auth`, `/playground` and `/health` reach the backend through it, so `/metrics` is not
+  public.
+- The admin crawler status and queue statistics queries require `admin.system:read`.
 - rustls, rustls-webpki and webpki-root-certs are updated past the October 2026 advisories,
   and the frontend and admin-frontend npm dependencies past their open advisories.
 
