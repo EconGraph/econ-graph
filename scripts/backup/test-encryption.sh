@@ -321,6 +321,13 @@ fi
 grep -q 'appeared before' "$scratch/raced.log" || die "no rename race message: $(cat "$scratch/raced.log")"
 [[ "$(ls -A "$scratch/raced")" == planted ]] || die 'the output that appeared was changed'
 [[ ! -e "$scratch/raced.partial/VERIFIED" ]] || die 'left VERIFIED on an unpublished bundle'
+# The hash stage runs isolated (python3 -I): a hashlib.py in the caller's
+# working directory is never imported.
+mkdir "$scratch/hostile-cwd"
+printf 'open(%s, "w").close()\nraise SystemExit(3)\n' "'$scratch/hostile-imported'" > "$scratch/hostile-cwd/hashlib.py"
+(cd "$scratch/hostile-cwd" && backup_seal_dir "$payload" "$scratch/sealed-from-hostile-cwd") ||
+    die 'sealing failed from a directory with a hashlib.py'
+[[ ! -e "$scratch/hostile-imported" ]] || die 'the hash stage imported a module from the working directory'
 # The throwaway key is only ever written to tmpfs.
 if (BACKUP_PLAINTEXT_ROOT="$scratch"; backup_seal_dir "$payload" "$scratch/key-on-disk") 2>"$scratch/key-on-disk.log"; then
     die 'wrote the throwaway key to disk'
