@@ -150,15 +150,17 @@ pub(crate) async fn resolve(
     })?;
     let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
     // A dataset in a catalog the caller can't read gets the same answer as an unknown one.
-    if let Some(dataset) = econ_graph_core::models::Dataset::find_by_id(pool, dataset_id).await? {
-        if !super::catalogs::allowed_sources(ctx)
+    let dataset = econ_graph_core::models::Dataset::find_by_id(pool, dataset_id).await?;
+    let readable = match dataset {
+        Some(dataset) => super::catalogs::allowed_sources(ctx)
             .await?
-            .contains(&dataset.source_id)
-        {
-            return Err(to_graphql_error(
-                econ_graph_services::services::cross_section_service::dataset_not_found(dataset_id),
-            ));
-        }
+            .contains(&dataset.source_id),
+        None => true,
+    };
+    if !readable {
+        return Err(to_graphql_error(
+            econ_graph_services::services::cross_section_service::dataset_not_found(dataset_id),
+        ));
     }
     let mut conn = pool.get().await.map_err(|e| {
         tracing::error!("crossSection: database pool: {e}");
