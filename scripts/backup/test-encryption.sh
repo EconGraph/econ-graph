@@ -329,6 +329,19 @@ printf 'open(%s, "w").close()\nraise SystemExit(3)\n' "'$scratch/hostile-importe
 (cd "$scratch/hostile-cwd" && backup_seal_dir "$payload" "$scratch/sealed-from-hostile-cwd") ||
     die 'sealing failed from a directory with a hashlib.py'
 [[ ! -e "$scratch/hostile-imported" ]] || die 'the hash stage imported a module from the working directory'
+# A failed key setup leaves no .partial directory that would block the next run.
+mkdir "$scratch/mktemp-fails"
+cat > "$scratch/mktemp-fails/mktemp" <<EOF
+#!/bin/bash
+case "\$*" in *econgraph-verify-key*) echo "stub mktemp: refusing" >&2; exit 1 ;; esac
+exec $(command -v mktemp) "\$@"
+EOF
+chmod +x "$scratch/mktemp-fails/mktemp"
+if (PATH="$scratch/mktemp-fails:$PATH"; backup_seal_dir "$payload" "$scratch/no-key") 2>"$scratch/no-key.log"; then
+    die 'sealed without a throwaway key'
+fi
+grep -q 'stub mktemp: refusing' "$scratch/no-key.log" || die "the key mktemp was never reached: $(cat "$scratch/no-key.log")"
+[[ ! -e "$scratch/no-key" && ! -e "$scratch/no-key.partial" ]] || die 'a failed key setup left a .partial directory behind'
 # The throwaway key is only ever written to tmpfs.
 if (BACKUP_PLAINTEXT_ROOT="$scratch"; backup_seal_dir "$payload" "$scratch/key-on-disk") 2>"$scratch/key-on-disk.log"; then
     die 'wrote the throwaway key to disk'
@@ -563,4 +576,38 @@ printf 'not-a-checksum  backup.tar.age\n' > "$scratch/bad-checksum/SHA256SUMS"
 expect_open_refused bad-checksum 'invalid ciphertext checksum record'
 copy_bundle disk-staging
 expect_open_refused disk-staging 'plaintext staging must be tmpfs' "$scratch"
+# open-backup.sh decrypts into the writers' tmpfs, so it holds their shared
+# lock: with another holder it says whom it waits for and refuses after the
+# timeout, before decrypting or running anything.
+open_lock="$BACKUP_PLAINTEXT_ROOT/.econgraph-backup-$(id -u).lock"
+printf 'pid=1 command=dump-databases.sh\n' > "$open_lock"
+flock -o "$open_lock" sleep 30 &
+holder=$!
+until ! flock -n "$open_lock" true; do sleep 0.1; done
+staged_before="$(find "$BACKUP_PLAINTEXT_ROOT" -maxdepth 1 -name 'econgraph-backup.*' | sort)"
+if (export BACKUP_LOCK_TIMEOUT=1; operator_open "$scratch/open-locked.log" "$scratch/bundle" touch "$scratch/ran-locked"); then
+    die 'open-backup.sh opened a bundle while another writer held the staging lock'
+fi
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$scratch/open-locked.log" ||
+    die "open-backup.sh did not say whom it waits for: $(cat "$scratch/open-locked.log")"
+[[ ! -e "$scratch/ran-locked" ]] || die 'open-backup.sh ran its command without the staging lock'
+[[ "$(find "$BACKUP_PLAINTEXT_ROOT" -maxdepth 1 -name 'econgraph-backup.*' | sort)" == "$staged_before" ]] ||
+    die 'open-backup.sh staged plaintext without the staging lock'
+# The command runs holding the lock, and a backup it starts reuses it.
+cat > "$scratch/nested-writer" <<EOF
+#!/bin/bash
+set -euo pipefail
+die() { echo "error: \$*" >&2; exit 1; }
+source "$root/scripts/backup/encryption.sh"
+if flock -n "$open_lock" true; then echo 'lock free while opened'; exit 1; fi
+BACKUP_LOCK_NONBLOCK=true backup_staging_lock
+echo reused
+EOF
+chmod +x "$scratch/nested-writer"
+operator_open "$scratch/open-nested.log" "$scratch/bundle" "$scratch/nested-writer" ||
+    die "a backup inside open-backup.sh could not reuse its lock: $(cat "$scratch/open-nested.log")"
+grep -q reused "$scratch/open-nested.log" || die "nested writer did not run: $(cat "$scratch/open-nested.log")"
+flock -n "$open_lock" true || die 'open-backup.sh kept the staging lock after its command exited'
 echo 'encrypted backup tests passed'

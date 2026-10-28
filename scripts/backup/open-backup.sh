@@ -24,6 +24,11 @@ actual="$(sha256sum "$bundle/backup.tar.age")"
 [[ "${actual%% *}" == "$expected" ]] || die "ciphertext checksum mismatch"
 BACKUP_PLAINTEXT_ROOT="${BACKUP_PLAINTEXT_ROOT:-/dev/shm}"
 [[ "$(stat -f -c %T -- "$BACKUP_PLAINTEXT_ROOT")" == tmpfs ]] || die "plaintext staging must be tmpfs"
+# The decrypted payload uses the same tmpfs as the backup writers: hold their
+# shared lock (saying whom it waits for, up to BACKUP_LOCK_TIMEOUT) until the
+# command exits. The command inherits it, so a backup it takes reuses it.
+backup_staging_lock
+export BACKUP_STAGING_LOCK_FD
 scratch="$(backup_plaintext_dir)"
 trap 'rm -rf -- "$scratch"' EXIT
 read -r -p 'Path to your age identity (kept outside agent access): ' identity </dev/tty
