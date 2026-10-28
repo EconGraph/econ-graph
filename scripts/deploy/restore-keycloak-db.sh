@@ -168,6 +168,11 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# The safety backup stages plaintext in the shared tmpfs: take that lock
+# while Keycloak still runs, so waiting for (or timing out on) another writer
+# never leaves it stopped. The backup inherits the lock and reuses it.
+backup_staging_lock
+export BACKUP_STAGING_LOCK_FD
 kdb_stop_keycloak
 "$PROJECT_ROOT/scripts/deploy/backup-keycloak-db.sh" --context "$CONTEXT"
 

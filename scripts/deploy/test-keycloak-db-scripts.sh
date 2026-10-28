@@ -344,6 +344,20 @@ wait "$holder" 2>/dev/null || true
 grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$tmp/out" ||
   fail "backup did not say whom it waits for: $(cat "$tmp/out")"
 if grep -q 'scale deployment/keycloak' "$STUB_LOG"; then fail "backup stopped Keycloak before it had the staging lock"; fi
+# A restore takes the same lock before it stops Keycloak (its safety backup
+# then reuses it), so a held lock never leaves Keycloak stopped.
+printf 'pid=1 command=dump-databases.sh\n' >"$staging_lock"
+flock -o "$staging_lock" sleep 30 &
+holder=$!
+until ! flock -n "$staging_lock" true; do sleep 0.1; done
+run env BACKUP_LOCK_TIMEOUT=1 "$restore" "$dir" --yes
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+[ "$status" != 0 ] || fail "restore went ahead while another writer held the staging lock"
+grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$tmp/out" ||
+  fail "restore did not say whom it waits for: $(cat "$tmp/out")"
+if grep -q 'scale deployment/keycloak' "$STUB_LOG"; then fail "restore stopped Keycloak before it had the staging lock"; fi
+[ -z "$(touched_keycloak)" ] || fail "restore touched keycloak without the staging lock: $(touched_keycloak)"
 
 # The staging trap is in place before the staging exists: a failure right after
 # it is created (here: making its payload directory) leaves no plaintext behind.
