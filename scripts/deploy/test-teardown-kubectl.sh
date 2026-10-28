@@ -90,6 +90,10 @@ cat >"$WORK/bin/age" <<'EOF'
 #!/bin/sh
 cat >/dev/null
 EOF
+cat >"$WORK/bin/age-keygen" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
 chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
 # The scripts run kind from its pinned path (lib/kind-version.sh); the stub stands in there too.
 mkdir -p "$WORK/home/.local/share/econgraph/bin"

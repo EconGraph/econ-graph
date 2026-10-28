@@ -72,8 +72,12 @@ cleanup() { docker rm -f -v "${name}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 log "drill: restoring ${dump} into throwaway container ${name} (${PG_IMAGE})"
+# The restored databases are plaintext production data: keep the server's
+# data directory (PGDATA is under /var/lib/postgresql) in RAM, never in a
+# Docker volume on disk.
 docker run -d --rm --name "${name}" \
     -e POSTGRES_PASSWORD="${password}" \
+    --tmpfs /var/lib/postgresql \
     -p 127.0.0.1::5432 \
     -v "${dump_dir}:/dumps:ro" \
     "${PG_IMAGE}" >/dev/null

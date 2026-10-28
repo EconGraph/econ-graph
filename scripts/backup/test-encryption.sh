@@ -2,13 +2,19 @@
 # Exercise public-key backup publication and hostile-archive handling with a
 # fresh test identity. No cluster, production data, identity or network is used.
 # The following negative cases intentionally isolate configuration in subshells.
-# shellcheck disable=SC2030,SC2031
+# shellcheck disable=SC2030,SC2031,SC2016 # SC2016: stub bodies expand when they run
 set -euo pipefail
 umask 077
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 scratch="$(mktemp -d)"
-trap 'rm -rf -- "$scratch" "${payload:-}"' EXIT
+# All plaintext staging and throwaway keys of this test go to a private tmpfs
+# directory, so what it leaves behind is told apart from any other backup.
+export BACKUP_PLAINTEXT_ROOT
+BACKUP_PLAINTEXT_ROOT="$(mktemp -d /dev/shm/econgraph-encryption-test.XXXXXXXX)"
+trap 'rm -rf -- "$scratch" "${payload:-}" "$BACKUP_PLAINTEXT_ROOT"' EXIT
 die() { echo "error: $*" >&2; exit 1; }
+# The refusal cases below use $scratch as on-disk plaintext staging.
+[[ "$(stat -f -c %T -- "$scratch")" != tmpfs ]] || die "run with TMPDIR on a disk filesystem, not tmpfs"
 # shellcheck source=scripts/backup/encryption.sh
 source "$root/scripts/backup/encryption.sh"
 command -v age-keygen >/dev/null || die "test requires age and age-keygen"
@@ -239,4 +245,262 @@ if "$root/scripts/backup/open-backup.sh" "$scratch/bundle" -- true ignored </dev
     die 'allowed unattended decryption'
 fi
 grep -q 'operator terminal' "$scratch/refused"
+
+# --- the throwaway-key decrypt check -------------------------------------------
+# A sealed bundle is encrypted to the configured recipient and to a throwaway
+# key, and the throwaway key is gone afterwards.
+[[ "$(grep -ac '^-> X25519 ' "$scratch/bundle/backup.tar.age")" == 2 ]] || die 'bundle is not encrypted to the throwaway check key too'
+if compgen -G "${BACKUP_PLAINTEXT_ROOT}/econgraph-verify-key.*" >/dev/null; then die 'left the throwaway key behind'; fi
+real_age="$(command -v age)"
+# fake_age NAME BODY: an age that runs BODY when encrypting (-o given) and the
+# real age otherwise, so the preflight and the decrypt check use real age.
+fake_age() {
+    mkdir -p "$scratch/$1"
+    cat > "$scratch/$1/age" <<EOF
+#!/bin/bash
+set -euo pipefail
+real="$real_age"
+case " \$* " in
+    *' -o '*) $2 ;;
+    *) exec "\$real" "\$@" ;;
+esac
+EOF
+    chmod +x "$scratch/$1/age"
+}
+# expect_unsealed NAME MESSAGE: sealing with that age must fail, publish
+# nothing, leave no VERIFIED marker and say MESSAGE.
+expect_unsealed() {
+    if (PATH="$scratch/$1:$PATH"; backup_seal_dir "$payload" "$scratch/sealed-$1") 2>"$scratch/$1.log"; then
+        die "sealed a bundle with the $1 encryptor"
+    fi
+    [[ ! -e "$scratch/sealed-$1" && ! -e "$scratch/sealed-$1.partial/VERIFIED" ]] || die "$1: published or marked VERIFIED"
+    grep -q "$2" "$scratch/$1.log" || { cat "$scratch/$1.log" >&2; die "$1: expected '$2'"; }
+    if compgen -G "${BACKUP_PLAINTEXT_ROOT}/econgraph-verify-key.*" >/dev/null; then die "$1: left the throwaway key behind"; fi
+}
+# Sealing without a recipient fails at once (it neither hangs nor publishes).
+if (unset BACKUP_AGE_RECIPIENT; export -f backup_seal_dir die; timeout 30 bash -c 'backup_seal_dir "$1" "$2"' _ "$payload" "$scratch/no-recipient") 2>/dev/null; then
+    die 'sealed without a recipient'
+fi
+[[ ! -e "$scratch/no-recipient" && ! -e "$scratch/no-recipient.partial" ]] || die 'wrote a bundle without a recipient'
+# Ciphertext that age wrote "successfully" but that does not decrypt.
+fake_age corrupt '"$real" "$@"; out="${*: -1}"; [[ "${*: -2:1}" == -o ]]; printf "\\xff" | dd of="$out" bs=1 seek=300 conv=notrunc status=none'
+expect_unsealed corrupt 'does not decrypt'
+# Ciphertext encrypted only to the configured recipient (the published file
+# was not made by this run's encryption, or the check key was dropped).
+fake_age recipient-only 'args=(); prev=""; for a in "$@"; do if [[ $prev == -r && $a != "$BACKUP_AGE_RECIPIENT" ]]; then unset "args[-1]"; prev=""; continue; fi; args+=("$a"); prev="$a"; done; exec "$real" "${args[@]}"'
+expect_unsealed recipient-only 'does not decrypt'
+# Ciphertext that decrypts, but to a different stream than was encrypted.
+fake_age truncated '{ head -c 512; cat >/dev/null; } | "$real" "$@"'
+expect_unsealed truncated 'different stream'
+# Everything is flushed to disk before VERIFIED and before publication, and
+# the publishing rename is flushed too; a failed flush publishes nothing.
+mkdir "$scratch/sync-bin"
+cat > "$scratch/sync-bin/sync" <<EOF
+#!/bin/bash
+for f in "\$@"; do
+    [[ "\$f" == -- ]] && continue
+    state=unverified
+    [[ -e "$scratch/synced.partial/VERIFIED" ]] && state=verified
+    [[ -e "$scratch/synced" ]] && state=published
+    printf '%s %s\n' "\$state" "\$f" >> "$scratch/sync.log"
+done
+[[ -z "\${FAIL_SYNC:-}" || " \$* " != *" \$FAIL_SYNC "* ]] || exit 1
+exec /usr/bin/env -u FAIL_SYNC PATH="${PATH}" sync "\$@"
+EOF
+chmod +x "$scratch/sync-bin/sync"
+(PATH="$scratch/sync-bin:$PATH"; backup_seal_dir "$payload" "$scratch/synced")
+grep -qx "unverified $scratch/synced.partial/backup.tar.age" "$scratch/sync.log" || die 'ciphertext not flushed before VERIFIED'
+grep -qx "verified $scratch/synced.partial/SHA256SUMS" "$scratch/sync.log" || die 'checksum not flushed before publication'
+grep -qx "verified $scratch/synced.partial/VERIFIED" "$scratch/sync.log" || die 'VERIFIED not flushed before publication'
+grep -qx "verified $scratch/synced.partial" "$scratch/sync.log" || die 'bundle directory not flushed before publication'
+grep -qx "published $scratch" "$scratch/sync.log" || die 'publishing rename not flushed'
+# FAIL_SYNC names the one path whose flush fails.
+for failing in backup.tar.age VERIFIED; do
+    if (PATH="$scratch/sync-bin:$PATH"; export FAIL_SYNC="$scratch/sync-failed-$failing.partial/$failing"
+        backup_seal_dir "$payload" "$scratch/sync-failed-$failing") 2>/dev/null; then
+        die "ignored a failed flush of $failing"
+    fi
+    [[ ! -e "$scratch/sync-failed-$failing" && ! -e "$scratch/sync-failed-$failing.partial/VERIFIED" ]] ||
+        die "published after a failed flush of $failing"
+done
+# A failed flush of the rename is reported, although the bundle is in place.
+if (PATH="$scratch/sync-bin:$PATH"; export FAIL_SYNC="$scratch"; backup_seal_dir "$payload" "$scratch/sync-failed-rename") 2>/dev/null; then
+    die 'ignored a failed flush of the rename'
+fi
+# backup_databases must stop at a failed seal even when its caller has errexit
+# off, and must not hand the staging to in-process consumers.
+fake_age seal-fails 'exit 42'
+if (
+    trap - EXIT
+    PATH="$scratch/seal-fails:$PATH"
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
+    if backup_databases "$scratch/seal-fails-out"; then exit 0; fi
+    [[ -z "${BACKUP_ACTIVE_DIR:-}" ]] || exit 0
+    exit 1
+) >"$scratch/seal-fails-db.log" 2>&1; then
+    die 'backup_databases ignored a failed seal'
+fi
+[[ ! -e "$scratch/seal-fails-out" ]] || die 'backup_databases published after a failed seal'
+
+# --- refusals before any dump -----------------------------------------------------
+# backup_databases checks the recipient and tmpfs staging before it dumps.
+for refusal in recipient staging; do
+    if (
+        trap - EXIT
+        # shellcheck source=scripts/deploy/lib/kind-env.sh
+        source "$root/scripts/deploy/lib/kind-env.sh"
+        backup_databases_plain() { touch "$scratch/dumped-$refusal"; mkdir -p "$1"; }
+        export ECONGRAPH_CONFIG_DIR="$scratch/missing"
+        if [[ "$refusal" == recipient ]]; then unset BACKUP_AGE_RECIPIENT; else export BACKUP_PLAINTEXT_ROOT="$scratch"; fi
+        backup_databases "$scratch/refused-$refusal"
+    ) >"$scratch/refused-$refusal.log" 2>&1; then
+        die "backup_databases accepted a missing $refusal"
+    fi
+    [[ ! -e "$scratch/dumped-$refusal" && ! -e "$scratch/refused-$refusal" ]] || die "backup_databases dumped without $refusal"
+done
+grep -q 'set BACKUP_AGE_RECIPIENT' "$scratch/refused-recipient.log" || die 'no recipient refusal message'
+grep -q 'must be tmpfs' "$scratch/refused-staging.log" || die 'no tmpfs refusal message'
+
+# --- the backup lock ------------------------------------------------------------------
+# A second writer into the same root fails (non-blocking) or waits (blocking)
+# while another holds the lock, before it checks or writes anything.
+mkdir "$scratch/locked-root"
+lock_writer() {
+    (
+        trap - EXIT
+        # shellcheck source=scripts/deploy/lib/kind-env.sh
+        source "$root/scripts/deploy/lib/kind-env.sh"
+        backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
+        BACKUP_ROOT="$scratch/locked-root"
+        backup_databases "$scratch/locked-root/$1"
+    )
+}
+# -o: the lock belongs to flock itself, so killing it releases the lock.
+flock -o "$scratch/locked-root/.lock" sleep 30 &
+holder=$!
+for _ in $(seq 50); do
+    if ! flock -n "$scratch/locked-root/.lock" true; then break; fi
+    sleep 0.1
+done
+if BACKUP_LOCK_NONBLOCK=true lock_writer nonblocking >"$scratch/lock-nonblocking.log" 2>&1; then
+    die 'a non-blocking writer ran while another held the lock'
+fi
+grep -q 'another host dump is running' "$scratch/lock-nonblocking.log" || die 'no lock refusal message'
+[[ ! -e "$scratch/locked-root/nonblocking" && ! -e "$scratch/locked-root/nonblocking.partial" ]] || die 'a refused writer wrote'
+lock_writer blocking >"$scratch/lock-blocking.log" 2>&1 &
+waiter=$!
+sleep 2
+[[ ! -e "$scratch/locked-root/blocking" && ! -e "$scratch/locked-root/blocking.partial" ]] || die 'a blocking writer did not wait for the lock'
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+wait "$waiter" || die 'a blocking writer failed after the lock was released'
+[[ -f "$scratch/locked-root/blocking/VERIFIED" ]] || die 'a blocking writer did not publish after the lock was released'
+# The lock is released once the bundle is published, while the caller (a
+# migration that goes on to recreate the cluster) is still running.
+(
+    trap - EXIT
+    # shellcheck source=scripts/deploy/lib/kind-env.sh
+    source "$root/scripts/deploy/lib/kind-env.sh"
+    backup_databases_plain() { mkdir -p "$1"; printf 'PGDMP synthetic dump' > "$1/econ_graph.dump"; }
+    BACKUP_ROOT="$scratch/locked-root"
+    backup_databases "$scratch/locked-root/released" >/dev/null
+    flock -n "$scratch/locked-root/.lock" true
+) || die 'the lock is still held after the bundle was published'
+
+# --- consumers of an unopened bundle ----------------------------------------------------
+if (backup_source_dir "$scratch/bundle") >/dev/null 2>"$scratch/source-dir.log"; then
+    die 'backup_source_dir handed out an unopened encrypted bundle'
+fi
+grep -q 'open-backup.sh' "$scratch/source-dir.log" || die 'backup_source_dir did not name open-backup.sh'
+[[ "$(backup_source_dir "$scratch/canonical-opened")" == "$scratch/canonical-opened" ]] || die 'backup_source_dir refused a plaintext directory'
+
+# --- unpack-backup.py drains the stream ----------------------------------------------------
+# It must read the decrypted stream to its end, so age authenticates the last
+# chunk before the consumer runs; a reader that stops early breaks the pipe.
+mkdir "$scratch/drained"
+(cd "$payload" && { tar -cf - econ_graph.dump; head -c 4194304 /dev/zero; }) |
+    python3 "$root/scripts/backup/unpack-backup.py" "$scratch/drained" || die 'unpack-backup.py stopped before the end of the stream'
+cmp "$payload/econ_graph.dump" "$scratch/drained/econ_graph.dump"
+
+# --- open-backup.sh -------------------------------------------------------------------------
+# operator_open LOG BUNDLE COMMAND...: open-backup.sh on a pseudo terminal that
+# answers the identity prompt with this test's identity. Returns its status.
+operator_open() {
+    local log="$1"
+    shift
+    python3 - "$root" "$scratch/identity" "$log" "$@" <<'PYOPEN'
+import errno
+import os
+import pty
+import select
+import sys
+import time
+root, identity, log, bundle, *command = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    script = root + '/scripts/backup/open-backup.sh'
+    os.execv(script, [script, bundle, '--'] + command)
+output = bytearray()
+sent = False
+deadline = time.monotonic() + 20
+while time.monotonic() < deadline:
+    if select.select([fd], [], [], 1)[0]:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                break
+            raise
+        if not chunk:
+            break
+        output.extend(chunk)
+        if not sent and b'identity' in output:
+            os.write(fd, (identity + '\n').encode())
+            sent = True
+else:
+    os.kill(pid, 9)
+    raise AssertionError('operator recovery timed out')
+os.close(fd)
+_, status = os.waitpid(pid, 0)
+open(log, 'wb').write(output)
+sys.exit(os.waitstatus_to_exitcode(status))
+PYOPEN
+}
+# copy_bundle NAME: a copy of the verified test bundle to break on purpose.
+copy_bundle() { cp -a "$scratch/bundle" "$scratch/$1"; }
+# The decrypted payload is removed when the command exits, also on failure.
+for outcome in true false; do
+    if operator_open "$scratch/open-$outcome.log" "$scratch/bundle" bash -c 'printf %s "$1" > "$2"; [[ -f "$1/econ_graph.dump" ]] && '"$outcome" _ @BACKUP@ "$scratch/opened-path-$outcome"; then
+        [[ "$outcome" == true ]] || die 'open-backup.sh hid a failed command'
+    else
+        [[ "$outcome" == false ]] || die "open-backup.sh failed: $(cat "$scratch/open-$outcome.log")"
+    fi
+    opened="$(cat "$scratch/opened-path-$outcome")"
+    [[ "$opened" == "${BACKUP_PLAINTEXT_ROOT}"/econgraph-backup.* ]] || die "open-backup.sh staged outside tmpfs: $opened"
+    [[ ! -e "$opened" ]] || die "open-backup.sh left decrypted plaintext in $opened"
+done
+# expect_open_refused NAME MESSAGE [STAGING]: open-backup.sh on bundle NAME
+# (staging plaintext in STAGING) refuses with MESSAGE before it decrypts or
+# runs anything.
+expect_open_refused() {
+    local name="$1" message="$2" staging="${3:-$BACKUP_PLAINTEXT_ROOT}"
+    if (export BACKUP_PLAINTEXT_ROOT="$staging"; operator_open "$scratch/open-$name.log" "$scratch/$name" touch "$scratch/ran-$name"); then
+        die "open-backup.sh opened the $name bundle"
+    fi
+    grep -q "$message" "$scratch/open-$name.log" || die "open-backup.sh $name: expected '$message', got $(cat "$scratch/open-$name.log")"
+    [[ ! -e "$scratch/ran-$name" ]] || die "open-backup.sh ran a command on the $name bundle"
+}
+copy_bundle unverified
+rm "$scratch/unverified/VERIFIED"
+expect_open_refused unverified 'not a verified encrypted bundle'
+copy_bundle tampered
+printf '\0' | dd of="$scratch/tampered/backup.tar.age" bs=1 seek=400 conv=notrunc status=none
+expect_open_refused tampered 'ciphertext checksum mismatch'
+copy_bundle bad-checksum
+printf 'not-a-checksum  backup.tar.age\n' > "$scratch/bad-checksum/SHA256SUMS"
+expect_open_refused bad-checksum 'invalid ciphertext checksum record'
+copy_bundle disk-staging
+expect_open_refused disk-staging 'plaintext staging must be tmpfs' "$scratch"
 echo 'encrypted backup tests passed'

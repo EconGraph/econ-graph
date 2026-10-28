@@ -8,7 +8,10 @@ import tempfile
 import time
 import uuid
 
-DOCKER = ['docker', '--host=unix:///var/run/docker.sock']
+# The daemon to test against: DOCKER_HOST (e.g. a rootless socket), else the
+# system daemon. Passed explicitly, because kind-env.sh re-exports DOCKER_HOST.
+DOCKER_HOST = os.environ.get('DOCKER_HOST') or 'unix:///var/run/docker.sock'
+DOCKER = ['docker', '--host=' + DOCKER_HOST]
 HELPER = Path(__file__).resolve().parents[1] / 'deploy/lib/kind-env.sh'
 
 
@@ -82,13 +85,13 @@ k() {
                 ;;
             *) return 96 ;;
         esac
-        docker --host=unix:///var/run/docker.sock exec "$SNAPSHOT_TEST_CONTAINER" \
+        docker --host="$SNAPSHOT_TEST_DOCKER_HOST" exec "$SNAPSHOT_TEST_CONTAINER" \
             psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d "$db" -c "$statement" >/dev/null
     fi
     if $input; then
-        docker --host=unix:///var/run/docker.sock exec -i "$SNAPSHOT_TEST_CONTAINER" "$tool" "$@"
+        docker --host="$SNAPSHOT_TEST_DOCKER_HOST" exec -i "$SNAPSHOT_TEST_CONTAINER" "$tool" "$@"
     else
-        docker --host=unix:///var/run/docker.sock exec "$SNAPSHOT_TEST_CONTAINER" "$tool" "$@"
+        docker --host="$SNAPSHOT_TEST_DOCKER_HOST" exec "$SNAPSHOT_TEST_CONTAINER" "$tool" "$@"
     fi
 }
 for db in econ_graph econ_graph_app keycloak; do
@@ -97,6 +100,7 @@ done
 ''')
     environment = dict(os.environ, SNAPSHOT_TEST_HELPER=str(HELPER),
                        SNAPSHOT_TEST_CONTAINER=container, SNAPSHOT_TEST_ROOT=str(root),
+                       SNAPSHOT_TEST_DOCKER_HOST=DOCKER_HOST, ECONGRAPH_DOCKER_HOST=DOCKER_HOST,
                        KIND_CLUSTER='econ-graph', ECONGRAPH_SCRATCH_STORAGE='')
     command(['bash', str(driver)], env=environment, timeout=90)
     policies = {
