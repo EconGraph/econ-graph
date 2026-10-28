@@ -9,11 +9,11 @@
 #
 #   --if-missing   create the cluster only when there is none; when it exists,
 #                  exit 0 and change nothing
-#   --yes, -y      delete an existing cluster that is not marked production
+#   --yes, -y      delete an existing cluster without a production marker
 #                  without asking
 #   --confirm-production UID-PREFIX
-#                  delete an existing cluster marked production (or whose
-#                  marker can't be read): the first 8 characters of its
+#                  delete an existing cluster with a production marker (or
+#                  whose marker can't be read): the first 8 characters of its
 #                  kube-system UID, as shown. --yes alone does not do it, and a
 #                  prefix that doesn't match is refused on any cluster.
 #   --dry-run      show the cluster and the commands; change nothing
@@ -22,9 +22,11 @@
 # backup volume, Grafana's data, the Secrets). Before deleting an existing
 # cluster the script shows it (nodes, kube-system UID, production marker), read
 # inside its control-plane container on the daemon kind deletes it from, then:
-#   - marked production (scripts/deploy/mark-production-cluster.sh), or the
-#     marker can't be read: the UID prefix, typed at a terminal or given with
-#     --confirm-production, as for teardown.sh;
+#   - a production marker, or a marker that can't be read: the UID prefix,
+#     typed at a terminal or given with --confirm-production, as for
+#     teardown.sh. Any ConfigMap kube-system/econgraph-cluster-role whose role
+#     is not exactly `none` counts, whatever its case or kube-system-uid: one
+#     made on another cluster, one without a UID, `Production`, `None`;
 #   - otherwise: the cluster name typed at a terminal, or --yes. Without a
 #     terminal and without --yes it refuses.
 # A cluster whose kube-system UID can't be read (its API server doesn't answer)
@@ -57,7 +59,7 @@ while [ $# -gt 0 ]; do
             ;;
         --confirm-production=*) CONFIRM_PRODUCTION="${1#*=}" ;;
         --dry-run|-n) DRY_RUN="true" ;;
-        -h|--help) sed -n '3,40p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,42p' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
     shift
@@ -138,24 +140,28 @@ if [ "${exists}" = "true" ]; then
             "(its API server may not answer), so the cluster can't be identified; nothing was changed." \
             "Inspect it: docker exec ${CONTROL_PLANE} journalctl -u kubelet"
     fi
-    # The marker as cluster_is_marked_production (lib/cluster-role.sh) reads
-    # it: production only with role=production and this cluster's UID; one
-    # that can't be read is treated as production.
-    production="false"
+    # Production for this delete: a marker that can't be read, or any marker
+    # with a role other than `none`, whatever its case or UID
+    # (cluster_role_marker_guards_delete in lib/cluster-role.sh). A stale,
+    # copied or mistyped production marker still takes the UID prefix.
+    production="true"
     if marker="$(in_node -n "${CLUSTER_ROLE_NAMESPACE}" get configmap "${CLUSTER_ROLE_CONFIGMAP}" \
         --ignore-not-found -o 'jsonpath={.data.role}{" "}{.data.kube-system-uid}')"; then
         read -r role marker_uid <<<"$marker" || true
         if [ "${role:-}" = "production" ] && [ "${marker_uid:-}" = "${uid}" ]; then
-            production="true"
             role_text="marked production: this is the cluster serving econgraph.com"
-        elif [ -z "${role:-}" ] && [ -z "${marker_uid:-}" ]; then
-            role_text="not production (no ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP})"
+        elif cluster_role_marker_guards_delete "$marker"; then
+            role_text="the marker says role=${role:-(none)}, kube-system-uid=${marker_uid:-(missing)}; treated as production"
         else
-            role_text="not production (the marker says role=${role:-none}, UID ${marker_uid:-missing}; made on another cluster or not production)"
+            production="false"
+            if [ -z "${role:-}" ]; then
+                role_text="not production (no ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP})"
+            else
+                role_text="not production (role=${role})"
+            fi
         fi
     else
-        production="true"
-        role_text="could not read ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP}; treated as production for the confirmation"
+        role_text="could not read ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP}; treated as production"
     fi
     code="${uid:0:8}"
     echo "  DOCKER_HOST     ${DOCKER_HOST}"

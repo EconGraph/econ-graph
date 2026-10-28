@@ -119,8 +119,11 @@ daemon.
    rootful daemon, writing its kubeconfig only to
    `~/.cache/econgraph/kubeconfig-econ-graph`. With `--if-missing` it keeps an
    existing `econ-graph` cluster; otherwise it shows that cluster and deletes
-   it only after a confirmation (on a cluster marked production, the
-   kube-system UID prefix, as for `teardown.sh`). It refuses to start unless
+   it only after a confirmation (on a cluster with a production marker, the
+   kube-system UID prefix, as for `teardown.sh`). For this delete, any
+   `kube-system/econgraph-cluster-role` marker whose role is not exactly
+   `none`, or one that can't be read, counts as production, whatever its case
+   or `kube-system-uid`. It refuses to start unless
    both subvolumes are mounted. Docker would otherwise create a missing
    bind-mount source as an empty root-owned directory.
 3. Create the data directories, then deploy:

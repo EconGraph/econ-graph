@@ -241,3 +241,16 @@ cluster_is_marked_production() {
         return 1
     fi
 }
+
+# For a script about to destroy a cluster (recreate-kind-cluster.sh): whether
+# the marker text $1, "ROLE UID" as cluster_role_marker prints it, calls for the
+# kube-system UID prefix before the delete. True for any marker with a role
+# other than `none`, whatever its case or UID: a mistyped, copied or stale
+# production marker still asks. Deliberately broader than
+# cluster_is_marked_production, which decides whether a cluster may run the
+# tunnel and so counts only an exact marker made on this cluster.
+cluster_role_marker_guards_delete() {
+    local role
+    read -r role _ <<<"${1:-}" || true
+    [ -n "${role}" ] && [ "${role}" != none ]
+}
