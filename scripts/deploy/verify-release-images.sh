@@ -27,13 +27,16 @@
 #      container must be the image ID the nodes reported after the load. Any
 #      other image, or no running pod, fails.
 #   3. The crawler-migrate Job, which deploy.sh reran on the crawler-worker
-#      image: every pod it left whose container started (running, succeeded or
-#      failed) must have run the loaded crawler-worker image. It is not
-#      restarted. A pod whose container never started, or that is being
-#      deleted, is listed, not checked. When the Job has no pod (deploy.sh skips
-#      it in a namespace without a data database, and Kubernetes deletes it a
-#      day after it finishes) that is reported as unchecked, not as a failure;
-#      run this soon after deploy.sh to have it checked.
+#      image: every pod the current Job left (selected by the Job's
+#      batch.kubernetes.io/controller-uid, so never a pod of an earlier run)
+#      whose container started (running, succeeded or failed) must have run the
+#      loaded crawler-worker image. It is not restarted. A pod whose container
+#      never started (Pending, ErrImageNeverPull, in an init container), or that
+#      is being deleted, is recorded as unchecked. So is a missing Job, or one
+#      with no pod (deploy.sh skips it in a namespace without a data database,
+#      and Kubernetes deletes it a day after it finishes): unchecked, not a
+#      failure. The summary lists everything unchecked; run this soon after
+#      deploy.sh to have the Job checked.
 #   4. Append the result to ~/econgraph-releases/<tag>/verified.txt.
 #
 # Every kubectl call goes through kc (lib/cluster-role.sh) on the pinned
@@ -124,10 +127,15 @@ result=$([ "$failed" = true ] && echo FAILED || echo ok)
 ${RI_REPORT}"
 fi
 
+# Everything recorded as unchecked, after the result either way.
+print_unchecked() {
+    grep -q '^unchecked ' <<<"$RI_REPORT" || return 0
+    echo "Not checked:"
+    grep '^unchecked ' <<<"$RI_REPORT" | awk '{ print "  " $0 }'
+}
 if [ "$failed" = true ]; then
+    print_unchecked
     ri_die "some pods do not run the images loaded for ${TAG}"
 fi
 echo "Every running backend, crawler-worker and frontend pod, and every crawler-migrate pod that started, runs ${TAG} (${commit})."
-if grep -q '^unchecked ' <<<"$RI_REPORT"; then
-    grep '^unchecked ' <<<"$RI_REPORT" | sed 's/^/  /'
-fi
+print_unchecked

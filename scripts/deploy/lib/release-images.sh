@@ -46,7 +46,7 @@ declare -A RI_MANIFEST=(
 # runs the crawler-worker image under the same name as deployment/crawler-worker.
 # deploy.sh deletes and reruns it on every deploy, so a deploy after a load runs
 # the loaded image; nothing here starts it. verify-release-images.sh checks the
-# pods it left (ri_check_job_pods).
+# pods the current Job left (ri_check_job_pods).
 declare -A RI_JOB=(
     [crawler-worker]=crawler-migrate
 )
@@ -299,21 +299,36 @@ ri_check_pods() {
     return "$status"
 }
 
-# Check the pods the Job of image $1 (RI_JOB) left, if the image has a Job,
-# against image ID or digest $2 (or $3). They ran for the last deploy.sh: a pod
-# whose container started (running, or finished either way) must have run that
-# image. A pod whose container never started, or that is being deleted, is
-# listed, not checked. No pod at all is not a failure: deploy.sh skips the Job
-# in a namespace without a data database, and Kubernetes deletes a finished
-# Job, with its pods, a day later (ttlSecondsAfterFinished). Prints a line per
-# pod and appends the result to RI_REPORT. Returns 1 on any other image, 2 when
-# the pods can't be listed.
+# Check the pods the current Job of image $1 (RI_JOB) left, if the image has a
+# Job, against image ID or digest $2 (or $3). They ran for the last deploy.sh: a
+# pod whose container started (running, or finished either way) must have run
+# that image. The pods are selected by the Job's own
+# batch.kubernetes.io/controller-uid, so a pod that an earlier run of the Job
+# left behind is never taken for this run's. A pod whose container never
+# started (Pending, ErrImageNeverPull, still in an init container), or that is
+# being deleted, is recorded as unchecked. No Job, or a Job with no pod, is
+# recorded as unchecked too, not as a failure: deploy.sh skips the Job in a
+# namespace without a data database, and Kubernetes deletes a finished Job,
+# with its pods, a day later (ttlSecondsAfterFinished). Prints a line per pod
+# and appends the result to RI_REPORT. Returns 1 on any other image, 2 when the
+# Job or its pods can't be read.
 ri_check_job_pods() {
     local name="$1" want="$2" want_alt="${3:-}" job="${RI_JOB[$1]:-}"
-    local jsonpath lines pod phase deleting image_id got line seen=0 status=0
+    local jsonpath lines uid pod phase deleting image_id got line seen=0 status=0
     [ -n "$job" ] || return 0
+    uid="$(kc -n "$RI_NAMESPACE" get job "$job" --ignore-not-found -o 'jsonpath={.metadata.uid}')" || {
+        echo "  MISMATCH job/${job}: could not read the Job"
+        RI_REPORT+="MISMATCH job/${job} could not read the Job"$'\n'
+        return 2
+    }
+    if [ -z "$uid" ]; then
+        line="unchecked job/${job}: no Job (deploy.sh skips it without a data database, and Kubernetes deletes it a day after it finishes)"
+        echo "  ${line}"
+        RI_REPORT+="${line}"$'\n'
+        return 0
+    fi
     jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"|"}{.metadata.deletionTimestamp}{"|"}{range .status.containerStatuses[?(@.name=="'"${RI_JOB_CONTAINER[$name]}"'")]}{.imageID}{end}{"\n"}{end}'
-    lines="$(kc -n "$RI_NAMESPACE" get pods -l "app=${job}" -o "jsonpath=${jsonpath}")" || {
+    lines="$(kc -n "$RI_NAMESPACE" get pods -l "batch.kubernetes.io/controller-uid=${uid}" -o "jsonpath=${jsonpath}")" || {
         echo "  MISMATCH job/${job}: could not list its pods"
         RI_REPORT+="MISMATCH job/${job} could not list its pods"$'\n'
         return 2
@@ -322,25 +337,23 @@ ri_check_job_pods() {
         [ -n "$pod" ] || continue
         seen=$((seen + 1))
         if [ -n "$deleting" ]; then
-            echo "  ${pod}: terminating, not checked"
-            continue
-        fi
-        if [ -z "$image_id" ]; then
-            echo "  ${pod}: ${phase}, its container never started, not checked"
-            continue
-        fi
-        got="$(ri_image_digest "$image_id")"
-        if [ -n "$got" ] && { [ "$got" = "$want" ] || [ "$got" = "$want_alt" ]; }; then
-            line="ok job/${job} ${pod} ${phase} ${image_id}"
+            line="unchecked job/${job} ${pod} ${phase}: terminating"
+        elif [ -z "$image_id" ]; then
+            line="unchecked job/${job} ${pod} ${phase}: its container never started"
         else
-            line="MISMATCH job/${job} ${pod} ${phase} ran '${image_id}', expected ${want}"
-            status=1
+            got="$(ri_image_digest "$image_id")"
+            if [ -n "$got" ] && { [ "$got" = "$want" ] || [ "$got" = "$want_alt" ]; }; then
+                line="ok job/${job} ${pod} ${phase} ${image_id}"
+            else
+                line="MISMATCH job/${job} ${pod} ${phase} ran '${image_id}', expected ${want}"
+                status=1
+            fi
         fi
         echo "  ${line}"
         RI_REPORT+="${line}"$'\n'
     done <<<"$lines"
     if [ "$seen" -eq 0 ]; then
-        line="unchecked job/${job}: no pod (deploy.sh skips it without a data database, and Kubernetes deletes it a day after it finishes)"
+        line="unchecked job/${job}: the Job (uid ${uid}) has no pod"
         echo "  ${line}"
         RI_REPORT+="${line}"$'\n'
     fi
