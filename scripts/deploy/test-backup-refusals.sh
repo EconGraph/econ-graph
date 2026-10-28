@@ -123,6 +123,8 @@ chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
 mkdir -p "$WORK/home/.local/share/econgraph/bin"
 cp "$WORK/bin/kind" "$WORK/home/.local/share/econgraph/bin/kind-v0.33.0"
 printf 'kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\n' >"$WORK/kind-config.yaml"
+printf 'MemTotal: 1048576 kB\nMemAvailable: 1024 kB\n' >"$WORK/meminfo"
+staging_lock="$RAM/.econgraph-backup-$(id -u).lock"
 
 # run_script SCRIPT ARGS...: SCRIPT with the stubs first on PATH, no kube config
 # and stdin not a terminal. RECIPIENT, STAGING, CLUSTER and SCRATCH_STORAGE
@@ -138,6 +140,7 @@ run_script() {
         ${SCRATCH_STORAGE:+ECONGRAPH_SCRATCH_STORAGE="$SCRATCH_STORAGE"} \
         ${RECIPIENT:+BACKUP_AGE_RECIPIENT="$RECIPIENT"} \
         ${STAGING:+BACKUP_PLAINTEXT_ROOT="$STAGING"} \
+        ${MEMINFO:+BACKUP_MEMINFO="$MEMINFO"} ${LOCK_TIMEOUT:+BACKUP_LOCK_TIMEOUT="$LOCK_TIMEOUT"} \
         PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
         "$PROJECT_ROOT/scripts/deploy/$script" "$@" </dev/null 2>&1
 }
@@ -154,6 +157,7 @@ expect() {
     shift 3
     reset
     out="$(run_script "$@")"; rc=$?
+    last_out="$out"
     if [ "$rc" -ne 0 ] && grep -q -- "$message" <<<"$out"; then
         echo "ok   $name"
     else
@@ -220,6 +224,20 @@ for mode in forward rollback; do
         'may need .* MiB of private tmpfs staging; nothing was stopped' ' scale |pg_dump' migrate-to-host-storage.sh "${args[@]}"
     RECIPIENT="$good_recipient" STAGING="$RAM" FAKE_DB_SIZE=unknown expect "migrate $mode refuses an unreadable database size before stopping writers" \
         "invalid size 'unknown'" ' scale |pg_dump' migrate-to-host-storage.sh "${args[@]}"
+    # The tmpfs limit can exceed the memory that is actually available.
+    RECIPIENT="$good_recipient" STAGING="$RAM" MEMINFO="$WORK/meminfo" expect "migrate $mode refuses when MemAvailable is too small, before stopping writers" \
+        'the smaller of its free space and MemAvailable' ' scale |pg_dump' migrate-to-host-storage.sh "${args[@]}"
+    # Another writer is staging plaintext: say whom it waits for, then refuse
+    # after the timeout, before stopping writers.
+    printf 'pid=1 command=dump-databases.sh\n' >"$staging_lock"
+    flock -o "$staging_lock" sleep 30 &
+    holder=$!
+    until ! flock -n "$staging_lock" true; do sleep 0.1; done
+    RECIPIENT="$good_recipient" STAGING="$RAM" LOCK_TIMEOUT=1 expect "migrate $mode waits for another plaintext-staging writer, then refuses before stopping writers" \
+        'still holds .* after 1s' ' scale |pg_dump' migrate-to-host-storage.sh "${args[@]}"
+    grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' <<<"$last_out" ||
+        fail "migrate $mode did not say whom it waits for: $last_out"
+    kill "$holder"; wait "$holder" 2>/dev/null
 done
 unset CLUSTER SCRATCH_STORAGE
 

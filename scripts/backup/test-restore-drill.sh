@@ -14,9 +14,11 @@ mkdir -p "$work/bin" "$work/home" "$work/backups/20260101T000000Z" "$work/plain"
 cat >"$work/bin/docker" <<EOF
 #!/bin/bash
 printf '%s\n' "\$*" >>"$work/docker.log"
-case "\$1" in
-    info) echo "28.0.0 /var/lib/docker [name=seccomp]" ;;
-    run) exit 1 ;;
+case "\$*" in
+    info*) echo "28.0.0 /var/lib/docker [name=seccomp]" ;;
+    run*) exit 1 ;;
+    *Volumes*) printf '%b\\n' "\${FAKE_VOLUMES:-/var/lib/postgresql}" ;;
+    *Env*) echo PATH=/usr/bin; echo "PGDATA=\${FAKE_PGDATA-/var/lib/postgresql/18/docker}" ;;
 esac
 exit 0
 EOF
@@ -24,7 +26,7 @@ chmod +x "$work/bin/docker"
 failed=0
 fail() { echo "FAIL $*"; failed=1; }
 drill() {
-    env -i HOME="$work/home" PATH="$work/bin:/usr/bin:/bin" BACKUP_ROOT="$work/backups" \
+    env -i HOME="$work/home" ${FAKE_VOLUMES+FAKE_VOLUMES="$FAKE_VOLUMES"} ${FAKE_PGDATA+FAKE_PGDATA="$FAKE_PGDATA"} PATH="$work/bin:/usr/bin:/bin" BACKUP_ROOT="$work/backups" \
         ECONGRAPH_CONFIG_DIR="$work/no-config" ECONGRAPH_STATE_DIR="$work/state" \
         "$root/scripts/backup/restore-drill.sh" "$@" 2>&1
 }
@@ -57,6 +59,24 @@ else
         fail "the drill mounts something other than the dump directory read-only: $run_args"
     grep -q -- '--mount' <<<"$run_args" && fail "the drill adds a mount: $run_args"
 fi
+
+# An image that declares another VOLUME gets a tmpfs there too, so Docker
+# makes no anonymous volume on disk.
+: >"$work/docker.log"
+FAKE_VOLUMES='/var/lib/postgresql\n/var/lib/postgresql/data' FAKE_PGDATA=/var/lib/postgresql/data \
+    drill "$work/plain/econ_graph.dump" >"$work/volumes.log" || true
+run_args="$(grep '^run ' "$work/docker.log" || true)"
+grep -q -- '--tmpfs /var/lib/postgresql/data\( \|$\)' <<<"$run_args" ||
+    fail "the drill left a declared VOLUME off tmpfs: ${run_args:-no container: $(cat "$work/volumes.log")}"
+# PGDATA outside every tmpfs, or unknown: refuse before starting anything.
+for pgdata in /srv/pgdata ''; do
+    : >"$work/docker.log"
+    if out="$(FAKE_PGDATA="$pgdata" drill "$work/plain/econ_graph.dump")"; then
+        fail "the drill ran with PGDATA '$pgdata'"
+    fi
+    grep -q 'is not under a tmpfs mount' <<<"$out" || fail "no refusal for PGDATA '$pgdata': $out"
+    grep -q '^run' "$work/docker.log" && fail "the drill started a container with PGDATA '$pgdata'"
+done
 
 if [[ "$failed" -ne 0 ]]; then
     echo "restore drill checks failed"
