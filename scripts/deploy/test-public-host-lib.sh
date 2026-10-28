@@ -99,6 +99,8 @@ case "$*" in
   *"get secret cloudflare-tunnel"*)
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  # deploy.sh checks the anonymous reader's key before applying anything (base64, fake).
+  *"get secret econ-graph-keycloak"*"anonymous-client-secret"*) printf 'ZmFrZS1hbm9ueW1vdXMtc2VjcmV0' ;;
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
