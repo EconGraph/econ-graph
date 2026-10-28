@@ -104,11 +104,11 @@ esac
 STUB
 chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED"
 
-# The tree: release-deploy.sh and lib/ as they are, the steps as stubs that
+# The tree: release-deploy.sh, render-public-host.py and lib/ as they are, the steps as stubs that
 # record their name, arguments and environment, and fail when STUB_FAIL names them.
 TREE="$WORK/tree"
 mkdir -p "$TREE/scripts/deploy"
-cp "$PROJECT_ROOT/scripts/deploy/release-deploy.sh" "$TREE/scripts/deploy/"
+cp "$PROJECT_ROOT/scripts/deploy/release-deploy.sh" "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$TREE/scripts/deploy/"
 cp -r "$PROJECT_ROOT/scripts/deploy/lib" "$TREE/scripts/deploy/lib"
 for step in load-release-images backup-postgres-now backup-keycloak-db precheck-db-migration deploy verify-release-images; do
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
@@ -286,6 +286,23 @@ run env STUB_MARKER=fails "$RELEASE_DEPLOY" --tag "$TAG" --yes
 refused "a marker that can't be read" "treated as not production"
 run env PUBLIC_HOST= "$RELEASE_DEPLOY" --tag "$TAG" --yes
 refused "an environment PUBLIC_HOST that differs from the config" "the config decides"
+printf 'PUBLIC_HOST=econgraph.com\r\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "a CRLF deploy config" "carriage return"
+echo "PUBLIC_HOST=econgraph.com # the public site" >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "a PUBLIC_HOST with a trailing comment" "is not a public DNS name"
+echo "PUBLIC_HOST=localhost" >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "a PUBLIC_HOST that is not a public DNS name" "is not a public DNS name"
+echo "PUBLIC_HOST=\"econgraph.com\"" >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" --yes
+if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST=econgraph.com " "$LOGS/steps.log"; then
+    echo "ok   a quoted PUBLIC_HOST is unquoted"
+else
+    fail "a quoted PUBLIC_HOST: exit $rc, $(cat "$LOGS/steps.log")"
+fi
+echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 run env PUBLIC_HOST=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" --yes
 [ "$rc" -eq 0 ] && [ "$(steps)" = "$ALL" ] || fail "an environment PUBLIC_HOST equal to the config: exit $rc, steps '$(steps)'"
 rm -f "$CONFIG"
