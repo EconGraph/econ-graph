@@ -32,23 +32,49 @@ kc() {
     fi
 }
 
-# For a script run by hand (mark-production-cluster.sh, create-secrets.sh): when
-# none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT is set, use the kind
-# cluster's own kubectl and kubeconfig if copies are kept in
-# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph).
-# Plain kubectl may be another cluster's: the microk8s snap wrapper ignores
-# ~/.kube/config. Says what it chose, that an exported KUBECONFIG kept it from
-# looking, or which of the two files is missing. An explicit KUBECTL or
-# KUBECONFIG, or a context pinned by the calling script (deploy.sh), always wins.
+# For a script run by hand (create-secrets.sh, the backup scripts): choose the
+# kubectl, exported as KUBECTL, and say which. Never plain `kubectl` from PATH:
+# on the production host that is the MicroK8s snap wrapper, another cluster,
+# and it ignores KUBECONFIG. The kind cluster's own copies live in
+# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph),
+# copied out of the cluster as the error below says.
+#
+#   - KUBECTL set: kept as it is. (deploy.sh exports its KUBECTL with the
+#     context it pins, so scripts it runs keep both.)
+#   - KUBECONFIG set: the kind kubectl binary with that KUBECONFIG; fails when
+#     there is no kind kubectl (set KUBECTL as well).
+#   - neither: the kind kubectl and its kubeconfig; fails, naming the missing
+#     file, when either is missing.
+#
+# A pinned CLUSTER_ROLE_CONTEXT without KUBECTL is kept, and the kubectl is
+# still chosen as above: the context names a cluster, not the kubectl to reach
+# it with.
+#
+# A failure prints how to go on and returns 1, having changed nothing.
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
-    if [ -n "${KUBECTL:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
+    # The kind cluster runs on the rootful daemon, whatever DOCKER_HOST the
+    # shell has (it may be the rootless one), so the commands name it.
+    local fix="copy the kind cluster's kubectl and kubeconfig there from the rootful Docker daemon it runs on:
+  mkdir -p ${dir}/bin
+  DOCKER_HOST=unix:///var/run/docker.sock docker cp -L econ-graph-control-plane:/usr/bin/kubectl ${bin}
+  DOCKER_HOST=unix:///var/run/docker.sock kind get kubeconfig --name econ-graph > ${config}
+or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
+    if [ -n "${KUBECTL:-}" ]; then
         return 0
     fi
     if [ -n "${KUBECONFIG:-}" ]; then
-        echo "KUBECONFIG is set (${KUBECONFIG}): using kubectl with it, not the kind cluster's" \
-            "kubectl in ${dir} (unset KUBECONFIG to use that one)" >&2
+        if [ ! -x "$bin" ]; then
+            echo "error: KUBECONFIG is set (${KUBECONFIG}) but KUBECTL is not, and there is no kind" \
+                "kubectl at ${bin}; plain kubectl may ignore KUBECONFIG (the MicroK8s wrapper does)." \
+                "Set KUBECTL too, or ${fix}" >&2
+            return 1
+        fi
+        KUBECTL="$bin"
+        export KUBECTL KUBECONFIG
+        echo "Using the kind cluster's kubectl ${KUBECTL} with KUBECONFIG=${KUBECONFIG}" \
+            "(from the environment; set KUBECTL to choose another kubectl)" >&2
         return 0
     fi
     if [ -x "$bin" ] && [ -s "$config" ]; then
@@ -57,10 +83,49 @@ cluster_role_default_kubectl() {
         export KUBECTL KUBECONFIG
         echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
             "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
-    elif [ -x "$bin" ]; then
-        echo "warning: found ${bin} but not ${config}: using plain kubectl" >&2
+        return 0
+    fi
+    local missing="${bin} and ${config}"
+    if [ -x "$bin" ]; then
+        missing="$config"
     elif [ -s "$config" ]; then
-        echo "warning: found ${config} but not ${bin}: using plain kubectl" >&2
+        missing="$bin"
+    fi
+    echo "error: no KUBECTL is set and the kind cluster's kubectl is not kept here (no ${missing});" \
+        "plain kubectl may be another cluster's. ${fix^}" >&2
+    return 1
+}
+
+# The Docker daemon the kind cluster runs on: the rootful system daemon
+# (docs/deployment/HOST_STORAGE.md), as for the release-image scripts
+# (lib/release-images.sh). The operator's shell may export DOCKER_HOST=<rootless
+# socket> for everyday use, so that variable is deliberately not the override;
+# ECONGRAPH_DOCKER_HOST is. Exports DOCKER_HOST, so kind, docker and every script
+# run from here use the same daemon, and says which one it chose.
+cluster_role_kind_docker_host() {
+    local chosen="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
+    if [ -n "${DOCKER_HOST:-}" ] && [ "$DOCKER_HOST" != "$chosen" ]; then
+        echo "Docker daemon of the kind cluster: ${chosen}, not DOCKER_HOST=${DOCKER_HOST}" \
+            "(set ECONGRAPH_DOCKER_HOST to choose another)" >&2
+    else
+        echo "Docker daemon of the kind cluster: ${chosen} (set ECONGRAPH_DOCKER_HOST to choose another)" >&2
+    fi
+    export DOCKER_HOST="$chosen"
+    unset DOCKER_CONTEXT
+}
+
+# Run kind as the repo keeps it, like ri_kind in lib/release-images.sh: ${KIND},
+# else the copy kept next to the kind cluster's kubectl
+# (${XDG_CACHE_HOME:-~/.cache}/econgraph/bin/kind), else kind on PATH. Call
+# cluster_role_kind_docker_host first.
+cluster_role_kind() {
+    local cached="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph/bin/kind"
+    if [ -n "${KIND:-}" ]; then
+        command "$KIND" "$@"
+    elif [ -x "$cached" ]; then
+        command "$cached" "$@"
+    else
+        command kind "$@"
     fi
 }
 

@@ -267,7 +267,10 @@ source "$tmp/bin/stub-common"
 
 # A scratch HOME and TMPDIR, and only the stubs for the four tools.
 export PATH="$tmp/bin:$PATH"
-unset KUBECTL KUBECONFIG CLUSTER_ROLE_CONTEXT KIND XDG_CACHE_HOME ECONGRAPH_RELEASES_DIR DOCKER_CONTEXT
+unset KUBECONFIG CLUSTER_ROLE_CONTEXT KIND XDG_CACHE_HOME ECONGRAPH_RELEASES_DIR DOCKER_CONTEXT
+# The stub kubectl, chosen explicitly: without KUBECTL the scripts take the kind
+# cluster's copies from ~/.cache/econgraph and never plain kubectl from PATH.
+export KUBECTL="$tmp/bin/kubectl"
 export DOCKER_HOST="unix:///run/user/1000/docker.sock"
 
 old_backend="sha256:$(rep 9)"

@@ -8,15 +8,34 @@ set -e
 echo "🔗 Setting up port forwarding for EconGraph services..."
 echo ""
 
+# kubectl is KUBECTL, with its KUBECONFIG. With neither set, the kind cluster's
+# own kubectl and kubeconfig kept in ~/.cache/econgraph
+# (cluster_role_default_kubectl in lib/cluster-role.sh): on the production host
+# plain `kubectl` is the MicroK8s snap wrapper.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cluster-role.sh"
+unset CLUSTER_ROLE_CONTEXT
+# A KUBECTL or KUBECONFIG from the environment chose the cluster: keep its
+# current context below.
+CHOSEN="${KUBECTL:-}${KUBECONFIG:-}"
+cluster_role_default_kubectl || exit 1
+export KUBECTL="${KUBECTL:-kubectl}"
+kubectl() { command "$KUBECTL" "$@"; }
+
 # Check if kubectl is available and cluster is accessible
 if ! kubectl cluster-info >/dev/null 2>&1; then
     echo "❌ Cannot connect to Kubernetes cluster. Please ensure kubectl is configured."
     exit 1
 fi
 
-# Set kubectl context
-echo "🔧 Setting kubectl context..."
-kubectl config use-context kind-econ-graph
+# The kind cluster's kubeconfig: switch it to the kind cluster's context. A
+# KUBECTL or KUBECONFIG from the environment keeps its current context.
+if [ -n "$CHOSEN" ]; then
+    echo "🔧 Using the current context of ${KUBECTL}: $(kubectl config current-context 2>/dev/null || echo '(none)')"
+else
+    echo "🔧 Setting kubectl context..."
+    kubectl config use-context kind-econ-graph
+fi
 
 # Check if services exist
 echo "🔍 Checking if services are available..."

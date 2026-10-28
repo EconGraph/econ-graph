@@ -277,6 +277,16 @@ jobs:
         shellcheck -x scripts/deploy/teardown.sh scripts/deploy/test-teardown-kubectl.sh
         scripts/deploy/test-teardown-kubectl.sh
 
+    # With none of KUBECTL, KUBECONFIG and DOCKER_HOST set, deploy.sh, the
+    # Keycloak backup, teardown and the other deploy helpers reach the kind
+    # cluster's own kubectl, and kind and docker on the rootful Docker daemon,
+    # never plain kubectl or kind (all stubs here).
+    - name: Check that the deploy scripts default to the kind cluster's kubectl
+      run: |
+        shellcheck -x scripts/deploy/lib/cluster-role.sh scripts/deploy/lib/keycloak-db.sh \
+          scripts/deploy/test-kind-kubectl-default.sh
+        scripts/deploy/test-kind-kubectl-default.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh

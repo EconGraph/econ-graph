@@ -91,7 +91,7 @@ die() {
 # One kubectl and one context for every call (kc), without changing the current context:
 # plain kubectl may reach another cluster (the microk8s snap wrapper ignores ~/.kube/config).
 unset CLUSTER_ROLE_CONTEXT
-cluster_role_default_kubectl
+cluster_role_default_kubectl || exit 1
 KUBECTL="${KUBECTL:-kubectl}"
 command -v "$KUBECTL" >/dev/null 2>&1 || die "$KUBECTL not found"
 contexts="$(command "$KUBECTL" config get-contexts -o name)" || die "could not list the contexts of $KUBECTL"
