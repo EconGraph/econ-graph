@@ -277,6 +277,15 @@ jobs:
         shellcheck -x scripts/deploy/teardown.sh scripts/deploy/test-teardown-kubectl.sh
         scripts/deploy/test-teardown-kubectl.sh
 
+    # recreate-kind-cluster.sh runs kind on the rootful daemon with the cached
+    # kubeconfig (never ~/.kube/config), keeps an existing cluster with
+    # --if-missing, and deletes one only after showing it and a confirmation
+    # (the UID prefix on production); all stubs here.
+    - name: Check that recreate-kind-cluster confirms before deleting
+      run: |
+        shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
+        scripts/deploy/test-recreate-kind-cluster.sh
+
     # With none of KUBECTL, KUBECONFIG and DOCKER_HOST set, deploy.sh, the
     # Keycloak backup, teardown and the other deploy helpers reach the kind
     # cluster's own kubectl, and kind and docker on the rootful Docker daemon,

@@ -115,10 +115,14 @@ daemon.
    its nodes hold (the backup volume, Grafana's data), so that is left to
    `teardown.sh`, which asks first, or an explicit
    `kind delete cluster --name econ-graph`.
-   `scripts/deploy/recreate-kind-cluster.sh` uses the same config; it deletes
-   any existing `econ-graph` cluster first, and refuses to start unless both
-   subvolumes are mounted. Docker would otherwise create a missing bind-mount
-   source as an empty root-owned directory.
+   `scripts/deploy/recreate-kind-cluster.sh` uses the same config, on the
+   rootful daemon, writing its kubeconfig only to
+   `~/.cache/econgraph/kubeconfig-econ-graph`. With `--if-missing` it keeps an
+   existing `econ-graph` cluster; otherwise it shows that cluster and deletes
+   it only after a confirmation (on a cluster marked production, the
+   kube-system UID prefix, as for `teardown.sh`). It refuses to start unless
+   both subvolumes are mounted. Docker would otherwise create a missing
+   bind-mount source as an empty root-owned directory.
 3. Create the data directories, then deploy:
 
    ```bash
