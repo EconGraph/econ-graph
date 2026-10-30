@@ -107,6 +107,9 @@ on_exit() {
     if [ -n "$staging" ]; then
         rm -rf -- "$staging"
     fi
+    if [ "$status" -ne 0 ]; then
+        echo "${KDB_SCRIPT}: failed; no verified backup was saved in ${dest}" >&2
+    fi
     exit "$status"
 }
 trap on_exit EXIT
