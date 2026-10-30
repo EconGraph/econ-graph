@@ -37,6 +37,13 @@
 #                                                    the last discovery skipped because the source
 #                                                    no longer lists them
 #
+# Units metrics, also served by crawler-worker (econ-graph-metrics CrawlerUnitsMetrics), counted
+# when a fetched series is stored:
+#   crawler_units_unrecognised_total{source}         counter; units texts the parser doesn't know
+#   crawler_units_mismatch_total{source}             counter; texts that disagree with the source's
+#                                                    structured units
+#   crawler_units_agree_total{source}                counter; texts that agree with them
+#
 # How QA forces each coverage alert: docs/monitoring/crawler-coverage-runbook.md.
 #
 # Scraping: crawler-worker serves GET /metrics on :9102 (CRAWLER_METRICS_ADDR), and its pod
@@ -257,6 +264,22 @@ data:
           annotations:
             summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
             description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
+
+      # Units checks, recorded when a fetched series is stored (econ-graph-crawler src/units.rs):
+      # the units text is parsed and compared with the units the source's structured fields
+      # state. A mismatch means the stored text and the values may describe different scales,
+      # currencies or index bases. The counters are process-local and start at 0 for each pod;
+      # `increase` over 1d keeps the alert firing for a day after a mismatch, which is longer
+      # than a crawl cycle, so a repeat keeps it up.
+      - name: crawler.units
+        rules:
+        - alert: CrawlerUnitsMismatch
+          expr: sum by (source) (increase(crawler_units_mismatch_total{kubernetes_namespace="econ-graph"}[1d])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.source }} units text disagrees with its structured units'
+            description: In the last day about {{ $value | printf "%.0f" }} {{ $labels.source }} series had a units text that parses but disagrees with the units the source's structured fields state (kind, currency, scale or index base). The structured units were stored. The crawler-worker log has one error line per series ("units text disagrees with the source's structured units") with the series id, the text and both units.
 
       - name: crawler.discovery
         rules:

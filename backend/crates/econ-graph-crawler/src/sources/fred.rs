@@ -286,6 +286,7 @@ impl FredAdapter {
                 units: non_empty(s.units),
                 frequency: non_empty(s.frequency),
                 seasonal_adjustment: non_empty(s.seasonal_adjustment),
+                ..NewSeriesMetadataLite::default()
             },
             non_empty(s.last_updated),
         ))

@@ -1194,6 +1194,16 @@ mod tests {
             .collect()
     }
 
+    /// The data versions this binary embeds after the data baseline that release/v4.0 does not
+    /// ship, oldest first: what the data set still applies to a release/v4.0 database.
+    fn data_versions_missing_from_release_v4_0() -> Vec<String> {
+        embedded_versions(&[MigrationSet::Data])
+            .into_iter()
+            .filter(|v| v.as_str() > DATA_BASELINE_VERSION)
+            .filter(|v| !RELEASE_V4_0_DATA_MIGRATIONS.iter().any(|(r, _)| r == v))
+            .collect()
+    }
+
     /// Bring a reference schema forward by running only pending app incrementals.
     /// Its app tables already exist, so neither run nor record the split app baseline:
     /// this independently checks the production baseline-recording path's result.
@@ -1271,6 +1281,7 @@ mod tests {
         let (_reference, mut reference_conn) =
             single_baseline_database("single_baseline_reference").await;
         apply_release_v4_0_migrations(&mut reference_conn, true);
+        apply_pending_data_migrations(&mut reference_conn);
         apply_pending_app_incrementals(&mut reference_conn);
         let expected_schema = schema_signature(&mut reference_conn);
 
@@ -1295,33 +1306,37 @@ mod tests {
     }
 
     /// A release/v4.0 database (the single baseline plus both release migrations, applied and
-    /// recorded), one set at a time as a deploy applies them: the data set has nothing pending
-    /// and applies nothing, since 20261025000100 is recorded under the same version; the app set
-    /// records the app baseline without running it and applies only the app migrations
-    /// release/v4.0 lacks, never a data migration. The schema matches a reference built from the
-    /// same release database by running only those app migrations.
+    /// recorded), one set at a time as a deploy applies them: the data set has only the data
+    /// migrations release/v4.0 does not ship pending and applies exactly those, never
+    /// 20261025000100, which is recorded under the same version; the app set records the app
+    /// baseline without running it and applies only the app migrations release/v4.0 lacks, never
+    /// a data migration. The schema matches a reference built from the same release database by
+    /// running only those later migrations.
     #[tokio::test]
     #[serial_test::serial]
-    async fn a_release_v4_0_database_has_no_data_migration_pending() {
+    async fn a_release_v4_0_database_has_only_later_data_migrations_pending() {
         let (db, mut conn) = single_baseline_database("release_v4_0").await;
         apply_release_v4_0_migrations(&mut conn, true);
         let (_reference, mut reference_conn) =
             single_baseline_database("release_v4_0_reference").await;
         apply_release_v4_0_migrations(&mut reference_conn, true);
+        apply_pending_data_migrations(&mut reference_conn);
         apply_pending_app_incrementals(&mut reference_conn);
         let expected_schema = schema_signature(&mut reference_conn);
 
+        let later_data = data_versions_missing_from_release_v4_0();
+        assert!(!later_data.contains(&OBSERVATION_NUMERIC_VERSION.to_string()));
         assert_eq!(
             pending_migration_versions(&db.url, MigrationSet::Data)
                 .await
                 .expect("should read the pending data migrations"),
-            Vec::<String>::new()
+            later_data
         );
         assert_eq!(
             run_migration_set(&db.url, MigrationSet::Data)
                 .await
-                .expect("the data set should be current"),
-            Vec::<String>::new()
+                .expect("the data set should apply its later migrations"),
+            later_data
         );
 
         let applied = run_migration_set(&db.url, MigrationSet::App)
@@ -1338,9 +1353,10 @@ mod tests {
     }
 
     /// A release candidate from before ECO-501 (the single baseline plus the release app
-    /// migration only): the data set lists 20261025000100 as pending and applies exactly it;
-    /// the app set, applied first, never applies or records it. The schema ends up as the
-    /// release/v4.0 database's plus the app migrations release/v4.0 lacks.
+    /// migration only): the data set lists 20261025000100, then the data migrations
+    /// release/v4.0 does not ship, as pending and applies exactly those; the app set, applied
+    /// first, never applies or records them. The schema ends up as the release/v4.0
+    /// database's plus the migrations release/v4.0 lacks.
     #[tokio::test]
     #[serial_test::serial]
     async fn the_data_set_applies_the_observation_numeric_migration_to_an_older_release() {
@@ -1349,14 +1365,18 @@ mod tests {
         let (_reference, mut reference_conn) =
             single_baseline_database("pre_eco_501_reference").await;
         apply_release_v4_0_migrations(&mut reference_conn, true);
+        apply_pending_data_migrations(&mut reference_conn);
         apply_pending_app_incrementals(&mut reference_conn);
         let expected_schema = schema_signature(&mut reference_conn);
+        let pending_data: Vec<String> = std::iter::once(OBSERVATION_NUMERIC_VERSION.to_string())
+            .chain(data_versions_missing_from_release_v4_0())
+            .collect();
 
         assert_eq!(
             pending_migration_versions(&db.url, MigrationSet::Data)
                 .await
                 .expect("should read the pending data migrations"),
-            [OBSERVATION_NUMERIC_VERSION]
+            pending_data
         );
         assert!(!pending_migration_versions(&db.url, MigrationSet::App)
             .await
@@ -1372,15 +1392,15 @@ mod tests {
             pending_migration_versions(&db.url, MigrationSet::Data)
                 .await
                 .expect("should read the pending data migrations"),
-            [OBSERVATION_NUMERIC_VERSION],
-            "applying the app set leaves the data migration pending"
+            pending_data,
+            "applying the app set leaves the data migrations pending"
         );
 
         assert_eq!(
             run_migration_set(&db.url, MigrationSet::Data)
                 .await
                 .expect("the data set should apply"),
-            [OBSERVATION_NUMERIC_VERSION]
+            pending_data
         );
         assert_eq!(
             recorded_versions(&mut conn),
@@ -1425,7 +1445,10 @@ mod tests {
         }
 
         let newest_data = minimum_schema_version(MigrationSet::Data).expect("embedded versions");
-        assert_eq!(newest_data, OBSERVATION_NUMERIC_VERSION);
+        assert_eq!(
+            Some(&newest_data),
+            embedded_versions(&[MigrationSet::Data]).last()
+        );
         conn.batch_execute(&format!(
             "DELETE FROM __diesel_schema_migrations WHERE version = '{newest_data}'"
         ))

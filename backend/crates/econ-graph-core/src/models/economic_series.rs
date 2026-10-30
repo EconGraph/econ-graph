@@ -38,6 +38,16 @@ pub struct EconomicSeries {
     pub dimensions: SeriesDimensions,
     /// Overrides the dataset's default measure; `None` uses the dataset's.
     pub default_measure: Option<String>,
+    /// Where `units` came from: `structured`, `parsed_from_text` or `unknown` (no units). See
+    /// `econ_graph_crawler::units::UnitsSource`.
+    pub units_source: String,
+    /// The source's units text exactly as received. `None` on a row whose units no fetch has
+    /// written since the column was added; `units` then holds the source's text.
+    pub units_raw: Option<String>,
+    /// The units in the crawler's vocabulary (`econ_graph_crawler::units::Unit`, as JSON), as
+    /// the last fetch stored them. `None` when that fetch did not recognise them or no fetch has
+    /// written them.
+    pub units_parsed: Option<serde_json::Value>,
 }
 
 /// New economic series for insertion

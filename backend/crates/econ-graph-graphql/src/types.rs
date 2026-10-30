@@ -21,6 +21,9 @@ use crate::graphql::datasets::{
     label_dimensions, load_dataset, load_series_dataset_fields, DatasetType, SeriesDatasetFields,
     SeriesDimensionType,
 };
+use crate::graphql::units::{
+    load_series_units_fields, ParsedUnitType, SeriesUnitsFields, UnitsSourceType,
+};
 use crate::imports::*;
 
 /// GraphQL representation of an economic series
@@ -42,6 +45,8 @@ pub struct EconomicSeriesType {
     pub updated_at: DateTime<Utc>,
     /// Dataset columns when the source row carried them; `None` loads them on demand.
     pub dataset_fields: Option<SeriesDatasetFields>,
+    /// Units columns when the source row carried them; `None` loads them on demand.
+    pub units_fields: Option<SeriesUnitsFields>,
 }
 
 impl EconomicSeriesType {
@@ -67,6 +72,17 @@ impl EconomicSeriesType {
             None => None,
         };
         Ok((fields, dataset))
+    }
+
+    /// The series' units columns, from the row it was built from or loaded by id.
+    async fn load_units_fields(&self, ctx: &Context<'_>) -> Result<SeriesUnitsFields> {
+        if let Some(fields) = &self.units_fields {
+            return Ok(fields.clone());
+        }
+        let series_id = Uuid::parse_str(&self.id)?;
+        Ok(load_series_units_fields(ctx, series_id)
+            .await?
+            .unwrap_or_default())
     }
 }
 
@@ -94,6 +110,28 @@ impl EconomicSeriesType {
 
     async fn units(&self) -> &Option<String> {
         &self.units
+    }
+
+    /// Where `units` came from.
+    async fn units_source(&self, ctx: &Context<'_>) -> Result<UnitsSourceType> {
+        let fields = self.load_units_fields(ctx).await?;
+        Ok(UnitsSourceType::from_db(&fields.units_source))
+    }
+
+    /// The source's units text exactly as received, which `units` may reword (BEA's drops the
+    /// "Millions of" that its values were already multiplied by). `units` when the raw text is
+    /// not stored.
+    async fn units_raw(&self, ctx: &Context<'_>) -> Result<Option<String>> {
+        let fields = self.load_units_fields(ctx).await?;
+        Ok(fields.units_raw.or_else(|| self.units.clone()))
+    }
+
+    /// The units in a fixed vocabulary: kind, currency, scale of the values and index base.
+    /// Null when the series has no units or the crawler does not recognise them; it never
+    /// guesses.
+    async fn parsed_unit(&self, ctx: &Context<'_>) -> Result<Option<ParsedUnitType>> {
+        let fields = self.load_units_fields(ctx).await?;
+        Ok(fields.parsed_unit(self.units.as_deref()))
     }
 
     async fn frequency(&self) -> &str {
@@ -333,6 +371,11 @@ impl From<EconomicSeries> for EconomicSeriesType {
             created_at: series.created_at,
             updated_at: series.updated_at,
             dataset_fields,
+            units_fields: Some(SeriesUnitsFields {
+                units_source: series.units_source,
+                units_raw: series.units_raw,
+                units_parsed: series.units_parsed,
+            }),
         }
     }
 }
@@ -356,6 +399,7 @@ impl From<search::SeriesSearchResult> for EconomicSeriesType {
             created_at: chrono::Utc::now(), // Not available in search result
             updated_at: chrono::Utc::now(), // Not available in search result
             dataset_fields: None,           // Loaded on demand
+            units_fields: None,             // Loaded on demand
         }
     }
 }

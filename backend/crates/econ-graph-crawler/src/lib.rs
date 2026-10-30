@@ -40,6 +40,7 @@
 //! - [`coverage`]: per-source data coverage and freshness ([`coverage::crawl_coverage`])
 //! - [`cli`]: the `crawler` operator CLI (enqueue, discover, refetch, status, coverage, sources, fetch)
 //! - [`refetch`]: forced full-history re-fetches (`refetch_series` jobs) and their progress
+//! - [`units`]: the units vocabulary, its strict parser, and where a series' units came from
 //! - [`value`]: exact parsing and size limits for observation values
 //! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
@@ -83,6 +84,7 @@ pub mod sources;
 pub mod status;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
+pub mod units;
 pub mod value;
 pub mod worker;
 

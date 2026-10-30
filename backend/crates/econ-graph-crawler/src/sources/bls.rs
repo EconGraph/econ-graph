@@ -1383,6 +1383,7 @@ fn build_series(
             units: c.measure_data_type,
             frequency: frequency.map(str::to_string),
             seasonal_adjustment: c.seasonality.or_else(id_seasonality),
+            ..NewSeriesMetadataLite::default()
         },
         None => NewSeriesMetadataLite {
             title: String::new(),
@@ -1390,6 +1391,7 @@ fn build_series(
             units: None,
             frequency: frequency.map(str::to_string),
             seasonal_adjustment: id_seasonality(),
+            ..NewSeriesMetadataLite::default()
         },
     };
     let metadata = (metadata != NewSeriesMetadataLite::default()).then_some(metadata);

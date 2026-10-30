@@ -621,3 +621,130 @@ async fn series_dataset_fields_loader_runs_one_query_per_batch() {
         })
     );
 }
+
+/// Sets a series' units columns directly, as the crawler stores them.
+async fn set_units(
+    pool: &DatabasePool,
+    id: Uuid,
+    units: Option<&str>,
+    source: &str,
+    raw: Option<&str>,
+    parsed: Option<Value>,
+) {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::schema::economic_series::dsl;
+    let mut conn = pool.get().await.unwrap();
+    diesel::update(dsl::economic_series.filter(dsl::id.eq(id)))
+        .set((
+            dsl::units.eq(units),
+            dsl::units_source.eq(source),
+            dsl::units_raw.eq(raw),
+            dsl::units_parsed.eq(parsed),
+        ))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+}
+
+/// `unitsSource`, `unitsRaw` and `parsedUnit` from a series row and from a search result,
+/// which loads the units columns by id.
+#[tokio::test]
+async fn series_units_fields_resolve_from_the_row_and_for_search_results() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let bea = new_series(&pool, source.id, "units_bea", None).await;
+    set_units(
+        &pool,
+        bea.id,
+        Some("Current dollars"),
+        "structured",
+        Some("Millions of current dollars"),
+        Some(json!({"kind": "currency", "scale": "units"})),
+    )
+    .await;
+    let older = new_series(&pool, source.id, "units_older", None).await;
+    set_units(
+        &pool,
+        older.id,
+        Some("Index 2017=100"),
+        "structured",
+        None,
+        None,
+    )
+    .await;
+    let none = new_series(&pool, source.id, "units_none", None).await;
+
+    let fields = "units unitsSource unitsRaw \
+                  parsedUnit { kind currencyCode scale indexBase priceReferenceYear }";
+    let data = execute(
+        &pool,
+        &format!(
+            r#"{{ a: series(id: "{}") {{ {fields} }} b: series(id: "{}") {{ {fields} }}
+                 c: series(id: "{}") {{ {fields} }} }}"#,
+            bea.id, older.id, none.id
+        ),
+    )
+    .await;
+    assert_eq!(
+        data["a"],
+        json!({
+            "units": "Current dollars",
+            "unitsSource": "STRUCTURED",
+            "unitsRaw": "Millions of current dollars",
+            "parsedUnit": {"kind": "CURRENCY", "currencyCode": null, "scale": "UNITS",
+                           "indexBase": null, "priceReferenceYear": null}
+        })
+    );
+    // No stored raw text or parsed unit: the stored text, parsed now.
+    assert_eq!(data["b"]["unitsRaw"], "Index 2017=100");
+    assert_eq!(
+        data["b"]["parsedUnit"],
+        json!({"kind": "INDEX", "currencyCode": null, "scale": "UNITS",
+               "indexBase": "2017=100", "priceReferenceYear": null})
+    );
+    assert_eq!(
+        data["c"],
+        json!({"units": null, "unitsSource": "UNKNOWN", "unitsRaw": null, "parsedUnit": null})
+    );
+
+    let result = SeriesSearchResult {
+        id: bea.id,
+        title: bea.title,
+        description: None,
+        external_id: bea.external_id,
+        source_id: bea.source_id,
+        frequency: bea.frequency,
+        units: Some("Current dollars".into()),
+        start_date: None,
+        end_date: None,
+        last_updated: None,
+        is_active: true,
+        rank: 1.0,
+        similarity_score: 1.0,
+    };
+    let context = SchemaResources {
+        data_loaders: Some(Arc::new(DataLoaders::new(
+            econ_graph_core::database::DataPool(pool.clone()),
+        ))),
+    };
+    let schema = Schema::build(
+        SearchLikeQuery {
+            results: vec![result],
+        },
+        EmptyMutation,
+        EmptySubscription,
+    )
+    .data(context)
+    .data(econ_graph_core::database::DataPool(pool.clone()))
+    .finish();
+    let response = schema
+        .execute("{ found { unitsSource unitsRaw parsedUnit { scale } } }")
+        .await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    assert_eq!(
+        response.data.into_json().unwrap()["found"][0],
+        json!({"unitsSource": "STRUCTURED", "unitsRaw": "Millions of current dollars",
+               "parsedUnit": {"scale": "UNITS"}})
+    );
+}

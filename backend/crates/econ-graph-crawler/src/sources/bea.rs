@@ -138,6 +138,7 @@ use crate::reference::{data_dir, DATA_DIR_ENV};
 use crate::reference_file::{download_seed_entries, seed_migration_sql};
 use crate::reference_file::{labels_only, refresh_code_list_with, CodeList};
 use crate::source::SourceId;
+use crate::units::{Scale, StructuredUnit};
 use crate::value::{check_observation_value, parse_observation_value};
 use econ_graph_core::error::AppError;
 
@@ -1341,8 +1342,11 @@ fn nipa_metadata(
             row.line_number
         )),
         units: units(row.metric_name.as_deref(), row.cl_unit.as_deref(), mult),
+        units_raw: unit_text(row.metric_name.as_deref(), row.cl_unit.as_deref()).map(Into::into),
+        structured_unit: Some(Box::new(scaled_values())),
         frequency: Some(frequency.label().into()),
         seasonal_adjustment: nipa_seasonal_adjustment(frequency, row),
+        ..NewSeriesMetadataLite::default()
     })
 }
 
@@ -1384,8 +1388,11 @@ fn regional_series(
         title: regional_title(title, line_desc, first.geo_name.as_deref().unwrap_or(geo)),
         description: Some(regional_description(table_name, line, geo)),
         units: units(None, first.cl_unit.as_deref(), mult),
+        units_raw: unit_text(None, first.cl_unit.as_deref()).map(Into::into),
+        structured_unit: Some(Box::new(scaled_values())),
         frequency: Some(Frequency::Annual.label().into()),
         seasonal_adjustment: None,
+        ..NewSeriesMetadataLite::default()
     };
     let points = points(
         rows.iter()
@@ -1469,14 +1476,28 @@ fn parse_value(raw: &str, mult: u32) -> Result<Option<BigDecimal>, CrawlError> {
     Ok(Some(scaled))
 }
 
+/// BEA's units text as given: `CL_UNIT`, or `METRIC_NAME` when `CL_UNIT` is `Level` or absent.
+fn unit_text<'a>(metric_name: Option<&'a str>, cl_unit: Option<&'a str>) -> Option<&'a str> {
+    match cl_unit.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) if !u.eq_ignore_ascii_case("level") => Some(u),
+        _ => metric_name.map(str::trim).filter(|m| !m.is_empty()),
+    }
+}
+
+/// What BEA's structured fields say about a stored series: [`parse_value`] multiplies every
+/// value by `10^UNIT_MULT`, so the values are in base units (dollars, not millions of dollars),
+/// whatever the text says.
+fn scaled_values() -> StructuredUnit {
+    StructuredUnit {
+        scale: Some(Scale::Units),
+        ..StructuredUnit::default()
+    }
+}
+
 /// The units of a scaled value: `CL_UNIT`, or `METRIC_NAME` when `CL_UNIT` is `Level`, with a
 /// `Thousands of` / `Millions of` / `Billions of` prefix that `mult` already applied removed.
 fn units(metric_name: Option<&str>, cl_unit: Option<&str>, mult: u32) -> Option<String> {
-    let cl_unit = cl_unit.map(str::trim).filter(|u| !u.is_empty());
-    let base = match cl_unit {
-        Some(u) if !u.eq_ignore_ascii_case("level") => u,
-        _ => metric_name.map(str::trim).filter(|m| !m.is_empty())?,
-    };
+    let base = unit_text(metric_name, cl_unit)?;
     let prefix = match mult {
         3 => "thousands of ",
         6 => "millions of ",
@@ -2372,6 +2393,66 @@ mod tests {
         assert_eq!(
             title("20"),
             "Goods, line 20 (GDP, current dollars, quarterly)"
+        );
+    }
+
+    /// The `Data` rows of a recorded `GetData` body.
+    fn data_rows<R: serde::de::DeserializeOwned>(body: &str) -> Vec<R> {
+        let v: serde_json::Value = serde_json::from_str(body).unwrap();
+        serde_json::from_value(v["BEAAPI"]["Results"]["Data"].clone()).unwrap()
+    }
+
+    /// Every recorded row's stored units text parses, and agrees with the scale of its values:
+    /// `units` drops the scale `UNIT_MULT` applied, so the text describes base units.
+    /// `units_raw` keeps BEA's own wording.
+    #[test]
+    fn stored_units_agree_with_the_scaled_values() {
+        use crate::units::{check_text, TextCheck, UnitsContext};
+
+        let mut metas = Vec::new();
+        for (table, frequency, body) in NIPA_FIXTURES {
+            let frequency = match *frequency {
+                "A" => Frequency::Annual,
+                "Q" => Frequency::Quarterly,
+                _ => Frequency::Monthly,
+            };
+            for row in data_rows::<NipaRow>(body) {
+                metas.push(nipa_metadata(table, "t", frequency, &row, false).unwrap());
+            }
+        }
+        let regional = data_rows::<RegionalRow>(REGIONAL_LINE1);
+        let refs: Vec<&RegionalRow> = regional.iter().take(1).collect();
+        let fetched = regional_series(
+            "SAGDP2",
+            "t",
+            "All industry total",
+            "1",
+            "06000",
+            &refs,
+            regional_dimensions("SAGDP2", "1", "06000"),
+        )
+        .unwrap();
+        metas.push(fetched.metadata.unwrap());
+        assert!(metas.len() > 100, "{}", metas.len());
+
+        for meta in &metas {
+            let text = meta.units.as_deref().unwrap();
+            let structured = meta.structured_unit.as_deref().unwrap();
+            assert_eq!(structured, &scaled_values());
+            assert!(
+                matches!(
+                    check_text(text, Some(structured), &UnitsContext::default()),
+                    TextCheck::Agrees(_)
+                ),
+                "{text:?}"
+            );
+            assert!(meta.units_raw.is_some(), "{text:?}");
+        }
+        let regional = metas.last().unwrap();
+        assert_eq!(regional.units.as_deref(), Some("Current dollars"));
+        assert_eq!(
+            regional.units_raw.as_deref(),
+            Some("Millions of current dollars")
         );
     }
 

@@ -18,6 +18,7 @@
 //! - All DataLoaders must have comprehensive documentation
 
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
+use crate::graphql::units::{SeriesUnitsBatcher, SeriesUnitsFields};
 use crate::imports::*;
 use crate::types::LatestObservationType;
 use dataloader::cached::Loader;
@@ -400,6 +401,8 @@ pub struct DataLoaders {
     /// Non-caching, so series moving between datasets show on the next request.
     pub series_dataset_fields_loader:
         NonCachedLoader<Uuid, Option<SeriesDatasetFields>, SeriesDatasetFieldsBatcher>,
+    /// Non-caching, so a crawl's new units show on the next request.
+    pub series_units_loader: NonCachedLoader<Uuid, Option<SeriesUnitsFields>, SeriesUnitsBatcher>,
     /// A non-caching data source loader for [`crate::graphql::datasets::DatasetType::source`].
     /// `data_source_loader` above is cached for the schema's lifetime, so a dataset's source
     /// resolver uses this one to keep faith with the "next request sees the edit" promise the
@@ -435,6 +438,8 @@ impl DataLoaders {
         let series_dataset_fields_loader =
             NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
                 .with_max_batch_size(2000);
+        let series_units_loader = NonCachedLoader::new(SeriesUnitsBatcher { pool: pool.clone() })
+            .with_max_batch_size(2000);
         // Sources publish only a handful of datasets each, so a page of `datasets { source }`
         // won't approach the default batch size; raised anyway for consistency with the loaders
         // above.
@@ -451,6 +456,7 @@ impl DataLoaders {
             series_count_loader,
             dataset_loader,
             series_dataset_fields_loader,
+            series_units_loader,
             dataset_source_loader,
             latest_observation_loader,
         }

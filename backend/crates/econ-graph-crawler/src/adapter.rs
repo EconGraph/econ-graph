@@ -19,6 +19,7 @@ use crate::http::{HttpFetcher, Validators};
 use crate::policy::SourcePolicy;
 use crate::reference_file::{self, CodeList};
 use crate::source::SourceId;
+use crate::units::{StructuredUnit, UnitsSource};
 
 /// API keys for sources that use them. `Debug` redacts the values.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -102,8 +103,21 @@ pub struct NewSeriesMetadataLite {
     pub title: String,
     /// Longer description / notes.
     pub description: Option<String>,
-    /// Units of measure, as the source states them.
+    /// Units of measure, as the source states them, describing the values as stored.
     pub units: Option<String>,
+    /// Where `units` came from. The default, [`UnitsSource::Structured`], is a field of the
+    /// source's own that holds units. Persisting stores [`UnitsSource::Unknown`] when there are
+    /// no units.
+    pub units_source: UnitsSource,
+    /// The source's units text exactly as received, when `units` rewords it (BEA drops the
+    /// scale that `UNIT_MULT` applied) or was parsed out of it. `None` means `units` is that
+    /// text.
+    pub units_raw: Option<String>,
+    /// What the source's structured fields state about the stored values' units, beyond the
+    /// text (BEA: the scale, since values are multiplied by `10^UNIT_MULT`). Compared with the
+    /// parsed `units`, and preferred to it, when the series is stored (see
+    /// [`units::check_and_record`](crate::units::check_and_record)).
+    pub structured_unit: Option<Box<StructuredUnit>>,
     /// Observation frequency, as the source states it (e.g. `"Monthly"`).
     pub frequency: Option<String>,
     /// Seasonal adjustment, as the source states it (e.g. `"Seasonally Adjusted"`).
