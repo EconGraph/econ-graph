@@ -46,7 +46,6 @@ pub const PUBLIC_WITHOUT_NOTICE: &[SourceId] = &[
     SourceId::Snb,
     SourceId::UnStats,
     SourceId::Ilo,
-    SourceId::Wto,
 ];
 
 /// The notice for `source`, if it has one.
