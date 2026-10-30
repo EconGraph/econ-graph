@@ -40,11 +40,14 @@
 //! commit is itself conditional on `finalizing -> complete`, so a re-run of a finalize job (after
 //! a lost lease) commits nothing twice.
 //!
-//! **Supersede.** Starting a run marks every older run of the source that is not final
-//! `superseded` and cancels its queued chunk and finalize jobs. A chunk or finalize job of a
-//! superseded run that is already in flight finds its run no longer `running` (or
-//! `finalizing`) when it commits, and discards its result. At most one run per source is not
-//! final (a partial unique index).
+//! **Supersede.** Starting a run marks every older `enumerating` or `running` run of the source
+//! `superseded` and cancels its queued chunk jobs. A chunk of a superseded run that is already in
+//! flight finds its run no longer `running` when it commits, and discards its result. A
+//! `finalizing` run has every chunk stored, so it is never superseded: a `discover_catalog` job
+//! that finds one starts no run. Only the job's current claim can start a run (the claim row is
+//! locked in the same transaction), so a worker whose lease expired cannot supersede the run of
+//! the worker that re-claimed the job. At most one run per source is not final (a partial
+//! unique index).
 //!
 //! **Restarts.** Runs keep no state outside the database. A worker that dies mid-chunk leaves
 //! the chunk job `processing`; `release_stuck` returns it to the queue and another worker runs
@@ -85,8 +88,8 @@ pub struct ChunkedDiscovery {
     /// take a few minutes at the source's rate limit, well inside the worker's `stuck_after`.
     pub units_per_chunk: usize,
     /// A fingerprint of the adapter's catalog selection (its configured lists or rules), if it
-    /// has one. It is recorded when a run starts; a run whose adapter reports a different
-    /// fingerprint at finalize fails rather than commit a catalog listed under other rules.
+    /// has one. It is recorded when a run starts; a chunk or finalize job whose adapter reports a
+    /// different fingerprint fails the run rather than commit a catalog listed under other rules.
     pub selection_fingerprint: Option<String>,
 }
 
