@@ -148,3 +148,138 @@ The Job signs in as the admin from the Secret's `admin-username` / `admin-passwo
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
 realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --all-containers`.
+
+## Catalog access, including anonymous visitors
+
+Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
+`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
+canonical data-source names to these capabilities; adding a source requires its role and mapping.
+Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
+So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
+`updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
+caller can't read; `createAnnotation` answers as for a missing series. Lookups by id or external id
+(`series`, `seriesExists`, `seriesCatalog`, `seriesByExternalId`) return null or `false`, as for a
+missing series, so none of them reveals what an unreadable catalog contains.
+MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
+
+The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
+the `econgraph-anonymous` service account inherit it, so it may hold only `econ-graph-api`
+`catalog.*:read` roles: a deploy stops, before importing anything, while it holds any other
+composite (the error names each one to remove). For the same reason no `catalog.*:read` role
+may itself be a composite, at any depth: a role nested under one would reach every account. A
+deploy stops while one is, live or in the realm file. Remove a catalog read role from
+`catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
+Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
+`catalog-public` from the anonymous service account and assign its permitted catalog roles
+individually instead. Use group/composite grants for signed-in exceptions as usual.
+
+Visitors receive no token and no service-account identity. The backend obtains a client-credentials
+token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
+anonymous data requests. It never turns those roles into account, annotation, or staff privileges.
+Signed-in callers use only their own token's roles, even if anonymous visitors have broader access.
+
+Configure the backend with:
+
+| Setting | Purpose |
+|---|---|
+| `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` | Existing token verification settings |
+| `OIDC_ANONYMOUS_TOKEN_URL` | Reachable HTTPS token endpoint, or loopback HTTP for local development |
+| `OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP` | Explicit `true` allows private-network HTTP credential transport; enabled only for the internal Compose/Kubernetes Keycloak service |
+| `OIDC_ANONYMOUS_CLIENT_ID` | Defaults to `econgraph-anonymous` |
+| `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
+| `ANONYMOUS_GRANTS_STALE_MAX_SECS` | Seconds (0 to 86400, default 0) that the last fetched anonymous grants may still be used after they expire, only while renewal is failing; see below |
+
+Missing anonymous configuration grants no anonymous data access, including when sign-in is off.
+Partial configuration fails startup. Keycloak omits the roles claim for a reader with no grants;
+that is an empty grant set. Signed-in token verification remains strict.
+
+Anonymous grants are renewed by one background task per backend process, never by a request:
+requests read the current grant set from memory and never wait for Keycloak. The task fetches at
+startup (until it succeeds, anonymous visitors have no catalog access), then again when three
+quarters of each grant set's lifetime has passed, and every ten seconds while renewal fails. A
+grant set lasts no longer than its token's absolute expiry, `expires_in`, or five minutes,
+whichever is shortest.
+
+A change in Keycloak reaches anonymous visitors at the backend's next renewal, not at once: with
+five-minute grants, up to about 225 seconds later (three quarters of 300 seconds). The renewal
+replaces the grant set entirely, so a revocation, or a narrower grant, applies from that moment.
+Disabling the anonymous client, or rotating its secret, also takes effect at the next renewal:
+Keycloak's refusal then drops the grants instead of keeping them, whatever the stale setting
+below. To make a revocation take effect immediately, make it in Keycloak, then restart the
+backend. A new process serves no anonymous catalog data until its first fetch succeeds, so once
+the rollout finishes, every backend serves the revoked grant set:
+
+```bash
+kubectl -n econ-graph rollout restart deployment/econ-graph-backend
+```
+
+During a Keycloak outage (no answer, a timeout, or a server error), unexpired grants stay in use.
+What happens after they expire depends on `ANONYMOUS_GRANTS_STALE_MAX_SECS`:
+
+- `0`, the default, fails closed: anonymous visitors lose catalog access when the grants expire.
+- Above `0`, the last successfully fetched grants stay in use for at most that many seconds past
+  their expiry, only while renewal keeps failing, and the backend logs a warning on every failed
+  renewal while it serves them. The first successful renewal replaces them, so a revocation made
+  during the outage takes effect as soon as Keycloak answers again.
+
+A stale window delays only revocations that can't be fetched; it never extends grants past a
+successful renewal. A refusal from Keycloak is not an outage, so it never opens the window.
+
+The backend reports renewal on `/metrics` (`anonymous_grant_renewals_total{outcome}`,
+`anonymous_grant_renewal_consecutive_failures`, `anonymous_catalog_grants`,
+`anonymous_grants_serving_stale`, `anonymous_grant_refresh_task_running`), and
+`k8s/monitoring/prometheus-rules-auth.yaml` alerts after six failed renewals in a row, after ten
+minutes with no anonymous grants, and when the renewal task stops.
+
+User role removals take effect when existing five-minute access tokens expire, plus the
+verifier's 30-second clock tolerance. No permission check calls Keycloak.
+
+Docker Compose uses a development-only client secret. Kubernetes provisions a random credential
+through `scripts/deploy/create-secrets.sh`, preserving it across deployments, and supplies the
+same Secret key (`econ-graph-keycloak/anonymous-client-secret`) to the backend, Keycloak and realm
+import Job. Set `KEYCLOAK_ANONYMOUS_CLIENT_SECRET` to supply a managed credential instead.
+`scripts/deploy/deploy.sh` stops before applying anything when that Secret exists without the
+`anonymous-client-secret` key; run `scripts/deploy/create-secrets.sh` (it keeps every existing
+value and adds the key), then deploy again.
+Existing Compose realms need the normal development realm reset. Kubernetes reapplies structural
+configuration on deployment, but `preserve-catalog-grants.py` snapshots catalog policy first.
+Existing catalog-public grants, catalog edges on managed composites, anonymous-reader mappings,
+reader scope restrictions and enabled states survive reapply, including empty sets. Defaults seed
+only the first feature rollout. The render step records which policy resources originally needed
+bootstrap, so an interrupted first import can retry without freezing partial empty mappings. A
+finalizer marks initialization only after config-cli succeeds; deleting a policy role or reader
+cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
+from signed-in default roles, which would otherwise bypass anonymous-only restrictions.
+
+Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
+separate admin API operations, so preservation is best effort under concurrent administrator edits;
+avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
+modified. Role definitions and non-catalog structural settings remain configuration as code.
+
+### Separate and shared data planes
+
+For requests to the same GraphQL endpoint, the browser sends the signed-in user's token.
+A separate `VITE_DATA_GRAPHQL_URL` stays anonymous by default, preserving branch environments
+that share a data plane with a different Keycloak realm. These reads use the **data plane's
+anonymous catalog grants**, rather than that branch user's roles. Set the frontend build option
+`VITE_DATA_GRAPHQL_AUTH=true` only when that data plane trusts the same issuer and audience;
+then signed-in catalog roles apply there. A denied or invalid token is never retried anonymously
+except for the existing explicit suspended-account public-read behavior.
+
+An app-only backend checks an annotation's series through `DATA_GRAPHQL_URL`, asking
+`seriesCatalog(id)` before creating the annotation or showing it, its comments, or writes to it.
+The data plane answers null for a series it doesn't have or won't let this request read; this
+backend then applies its own caller's catalog grants to the catalog name. If the data plane can't
+answer, these annotation requests fail with `DATA_PLANE_UNAVAILABLE` rather than skip the check.
+This preflight likewise uses anonymous grants by default. For a trusted data plane, set
+`DATA_GRAPHQL_FORWARD_AUTHORIZATION=true` so the preflight can read a catalog granted to the
+signed-in caller even when anonymous access is disabled. Forwarding requires HTTPS by default.
+For a deliberately trusted private HTTP hop, also set `DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION=true`;
+that exception sends the bearer token in plaintext and must not be used for public network targets.
+Requests follow no redirects and tokens are not logged. Cross-realm gateways must continue to strip credentials; a trusted route must
+preserve them. Catalog authorization does not replace that gateway trust configuration.
+
+For a local sign-in-off server, clear `OIDC_ISSUER`, `OIDC_ANONYMOUS_TOKEN_URL` and
+`OIDC_ANONYMOUS_CLIENT_SECRET` together. Empty anonymous settings count as absent. This starts
+the server without Keycloak and denies catalog reads, while keeping health and other public
+non-data routes available.

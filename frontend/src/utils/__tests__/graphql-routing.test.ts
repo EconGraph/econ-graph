@@ -1,8 +1,9 @@
 /**
  * Where `executeGraphQL` sends each operation, and with which token (ECO-427).
  *
- * Data operations go to `VITE_DATA_GRAPHQL_URL` (falling back to the GraphQL URL) and never
- * carry `Authorization`. App, admin, unnamed and unclassified operations, and every mutation,
+ * Data operations go to `VITE_DATA_GRAPHQL_URL` (falling back to the GraphQL URL).
+ * Trusted data backends receive the signed-in token; cross-realm shared planes stay anonymous.
+ * App, admin, unnamed and unclassified operations, and every mutation,
  * go to the GraphQL URL with the signed-in user's token. The endpoints are read when
  * `utils/graphql.ts` loads, so each case stubs the environment and imports it afresh.
  */
@@ -142,10 +143,11 @@ let fetchSpy: MockInstance<typeof fetch>;
  * @param dataUrl - `VITE_DATA_GRAPHQL_URL`, or undefined to leave it unset.
  * @returns The freshly loaded `executeGraphQL`.
  */
-async function loadWith(dataUrl: string | undefined) {
+async function loadWith(dataUrl: string | undefined, trustedData = true) {
   vi.resetModules();
   vi.stubEnv('VITE_GRAPHQL_URL', '');
   vi.stubEnv('VITE_DATA_GRAPHQL_URL', dataUrl ?? '');
+  vi.stubEnv('VITE_DATA_GRAPHQL_AUTH', trustedData ? 'true' : '');
   const { setAccessTokenProvider } = await import('../../auth/accessToken');
   setAccessTokenProvider(async () => TOKEN);
   const { executeGraphQL } = await import('../graphql');
@@ -166,7 +168,12 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   fetchSpy = vi
     .spyOn(globalThis, 'fetch')
-    .mockImplementation(async () => ({ ok: true, json: async () => ({ data: {} }) }) as unknown as Awaited<ReturnType<typeof fetch>>);
+    .mockImplementation(
+      async () =>
+        ({ ok: true, json: async () => ({ data: {} }) }) as unknown as Awaited<
+          ReturnType<typeof fetch>
+        >
+    );
 });
 
 afterEach(() => {
@@ -177,20 +184,20 @@ afterEach(() => {
 
 describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
   it.each(SHIPPED_DATA_OPERATIONS)(
-    '%s goes to /data/graphql with no Authorization header',
+    '%s goes to /data/graphql with the bearer token',
     async (_name, query) => {
       const executeGraphQL = await loadWith('/data/graphql');
       await executeGraphQL({ query, variables: {} });
-      expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
+      expect(sent()).toEqual({ url: '/data/graphql', authorization: `Bearer ${TOKEN}` });
     }
   );
 
   it.each(SHIPPED_DATA_OPERATIONS)(
-    '%s with its operationName goes to /data/graphql with no Authorization header',
+    '%s with its operationName goes to /data/graphql with the bearer token',
     async (name, query) => {
       const executeGraphQL = await loadWith('/data/graphql');
       await executeGraphQL({ query, operationName: name });
-      expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
+      expect(sent()).toEqual({ url: '/data/graphql', authorization: `Bearer ${TOKEN}` });
     }
   );
 
@@ -200,18 +207,21 @@ describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
     expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
   });
 
-  it.each(NOT_DATA_REQUESTS)('%s goes to /graphql with the bearer token', async (_name, request) => {
-    const executeGraphQL = await loadWith('/data/graphql');
-    await executeGraphQL(request);
-    expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
-  });
-
-  it.each(TRICKY_DATA_REQUESTS)(
-    'a data query with %s goes to /data/graphql with no Authorization header',
+  it.each(NOT_DATA_REQUESTS)(
+    '%s goes to /graphql with the bearer token',
     async (_name, request) => {
       const executeGraphQL = await loadWith('/data/graphql');
       await executeGraphQL(request);
-      expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
+      expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
+    }
+  );
+
+  it.each(TRICKY_DATA_REQUESTS)(
+    'a data query with %s goes to /data/graphql with the bearer token',
+    async (_name, request) => {
+      const executeGraphQL = await loadWith('/data/graphql');
+      await executeGraphQL(request);
+      expect(sent()).toEqual({ url: '/data/graphql', authorization: `Bearer ${TOKEN}` });
     }
   );
 
@@ -224,23 +234,76 @@ describe('with VITE_DATA_GRAPHQL_URL=/data/graphql, signed in', () => {
     }
   );
 
-  it('does not ask for a token for a data operation', async () => {
+  it('sends signed-out data reads without a token', async () => {
+    const executeGraphQL = await loadWith('/data/graphql');
+    const { setAccessTokenProvider } = await import('../../auth/accessToken');
+    setAccessTokenProvider(async () => null);
+    await executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL });
+    expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
+  });
+
+  it('keeps a separate data backend suspension from disabling app mutations', async () => {
+    const executeGraphQL = await loadWith('/data/graphql');
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'suspended', extensions: { code: 'ACCOUNT_SUSPENDED' } }] }), { status: 403 }));
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    await executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL });
+    const { isAccountSuspended } = await import('../../auth/accessToken');
+    expect(isAccountSuspended()).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((fetchSpy.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBeUndefined();
+    await executeGraphQL({ query: 'mutation UpdateAnnotation { __typename }' });
+    expect((fetchSpy.mock.calls[2][1]?.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('does not retry a catalog denial with anonymous permissions', async () => {
+    const executeGraphQL = await loadWith('/data/graphql');
+    fetchSpy.mockImplementation(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            errors: [
+              { message: 'Insufficient catalog permissions', extensions: { code: 'FORBIDDEN' } },
+            ],
+          }),
+        }) as Response
+    );
+    await expect(executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL })).rejects.toThrow(
+      'Insufficient catalog permissions'
+    );
+    expect(sent()).toEqual({ url: '/data/graphql', authorization: `Bearer ${TOKEN}` });
+  });
+
+  it('obtains the caller token for a data operation', async () => {
     const executeGraphQL = await loadWith('/data/graphql');
     const { setAccessTokenProvider } = await import('../../auth/accessToken');
     const provider = vi.fn(async () => TOKEN);
     setAccessTokenProvider(provider);
     await executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL });
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('with a shared data plane using a different realm', () => {
+  it('preserves anonymous routing without obtaining or exposing the user token', async () => {
+    const executeGraphQL = await loadWith('/data/graphql', false);
+    const { setAccessTokenProvider } = await import('../../auth/accessToken');
+    const provider = vi.fn(async () => TOKEN);
+    setAccessTokenProvider(provider);
+    await executeGraphQL({ query: QUERIES.GET_SERIES_DETAIL });
+    expect(sent()).toEqual({ url: '/data/graphql', authorization: undefined });
     expect(provider).not.toHaveBeenCalled();
   });
 });
 
 describe('with VITE_DATA_GRAPHQL_URL unset, signed in', () => {
   it.each(SHIPPED_DATA_OPERATIONS)(
-    '%s goes to /graphql as before, with no Authorization header',
+    '%s goes to /graphql as before, with the bearer token',
     async (_name, query) => {
       const executeGraphQL = await loadWith(undefined);
       await executeGraphQL({ query });
-      expect(sent()).toEqual({ url: '/graphql', authorization: undefined });
+      expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
     }
   );
 
@@ -250,11 +313,14 @@ describe('with VITE_DATA_GRAPHQL_URL unset, signed in', () => {
     expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
   });
 
-  it.each(NOT_DATA_REQUESTS)('%s goes to /graphql with the bearer token', async (_name, request) => {
-    const executeGraphQL = await loadWith(undefined);
-    await executeGraphQL(request);
-    expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
-  });
+  it.each(NOT_DATA_REQUESTS)(
+    '%s goes to /graphql with the bearer token',
+    async (_name, request) => {
+      const executeGraphQL = await loadWith(undefined);
+      await executeGraphQL(request);
+      expect(sent()).toEqual({ url: '/graphql', authorization: `Bearer ${TOKEN}` });
+    }
+  );
 
   it('sends data operations to VITE_GRAPHQL_URL when only that is set', async () => {
     vi.resetModules();

@@ -28,12 +28,19 @@
 #
 # Usage:
 #   scripts/deploy/migrate-to-host-storage.sh [--dry-run] [--yes] [--resume-from DIR]
+#       [--confirm-production UID-PREFIX]
 #   scripts/deploy/migrate-to-host-storage.sh --rollback [--ref REF] [--resume-from DIR] [--dry-run] [--yes]
+#       [--confirm-production UID-PREFIX]
 #
 # --dry-run runs every check and prints every step without changing anything.
 # A dry run may create a temporary directory under $TMPDIR (a copy of the
 # cluster's kubectl and kubeconfig), removed on exit; it changes nothing else.
-# --yes answers the confirmation prompts (downtime, cluster delete).
+# --yes answers the confirmation prompts (downtime, cluster delete), except
+# the one recreate-kind-cluster.sh asks before it deletes a cluster with a
+# production marker (or one whose marker can't be read): the first 8
+# characters of the kube-system UID, given as --confirm-production or typed
+# at a terminal. It is asked before the downtime starts; without either, the
+# script stops there.
 
 set -euo pipefail
 
@@ -44,6 +51,7 @@ source "${PROJECT_ROOT}/scripts/deploy/lib/kind-env.sh"
 MODE="forward"
 REF="origin/release/v4.0"
 RESUME_FROM=""
+CONFIRM_PRODUCTION=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run|-n) DRY_RUN="true"; shift ;;
@@ -51,7 +59,10 @@ while [ $# -gt 0 ]; do
         --resume-from) RESUME_FROM="$2"; shift 2 ;;
         --rollback) MODE="rollback"; shift ;;
         --ref) REF="$2"; shift 2 ;;
-        -h|--help) sed -n '3,38p' "$0"; exit 0 ;;
+        --confirm-production)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "--confirm-production needs a UID prefix (see --help)" >&2; exit 2; }
+            CONFIRM_PRODUCTION="$2"; shift 2 ;;
+        -h|--help) awk 'NR < 3 { next } /^#/ { print; next } { exit }' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -65,6 +76,9 @@ WRITERS=(deployment/crawler-worker deployment/econ-graph-backend deployment/keyc
 
 common_flags=()
 [ "${DRY_RUN}" = "true" ] && common_flags+=(--dry-run)
+# Passed only to recreate-kind-cluster.sh, which checks it against the cluster.
+recreate_flags=()
+[ -n "${CONFIRM_PRODUCTION}" ] && recreate_flags+=(--confirm-production "${CONFIRM_PRODUCTION}")
 
 for tool in docker yq git mountpoint findmnt; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool not found"
@@ -126,6 +140,44 @@ note_production() {
             die "could not tell whether kind cluster '${KIND_CLUSTER}' is production: ${CLUSTER_ROLE_REASON}. Nothing was deleted."
             ;;
     esac
+}
+
+# recreate-kind-cluster.sh asks for the kube-system UID prefix before deleting
+# a cluster with a production marker (any role other than `none`) or one whose
+# marker can't be read, and --yes does not answer it. Get it here, before any
+# confirmation that starts the downtime: from --confirm-production, which must
+# match this cluster, or typed at a terminal; without either, stop. It is then
+# passed on as --confirm-production, so recreate-kind-cluster.sh, which checks
+# it against the cluster again, asks nothing once the writers are stopped.
+# Call after ensure_kind_kubectl and note_production.
+require_recreate_confirmation() {
+    local uid marker answer
+    [ "${DRY_RUN}" != "true" ] || return 0
+    # The kind kubectl on its own context, as kind_cluster_is_production asks.
+    local -x KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+    local -x CLUSTER_ROLE_CONTEXT="kind-${KIND_CLUSTER}"
+    if [ -z "${CONFIRM_PRODUCTION}" ]; then
+        marker="$(cluster_role_marker)" || marker="unreadable"
+        if [ "${WAS_PRODUCTION}" != "true" ] && ! cluster_role_marker_guards_delete "$marker"; then
+            return 0
+        fi
+    fi
+    uid="$(kube_system_uid)" ||
+        die "could not read the kube-system UID of kind cluster '${KIND_CLUSTER}'; nothing was changed"
+    if [ -n "${CONFIRM_PRODUCTION}" ]; then
+        [ "${CONFIRM_PRODUCTION}" = "${uid:0:8}" ] ||
+            die "--confirm-production ${CONFIRM_PRODUCTION} does not match kind cluster '${KIND_CLUSTER}' (kube-system UID ${uid}); nothing was changed"
+        return 0
+    fi
+    [ -t 0 ] ||
+        die "kind cluster '${KIND_CLUSTER}' has a production marker (or it can't be read): recreating it needs the first 8 characters of its kube-system UID, and there is no terminal to type them on. Pass --confirm-production UID-PREFIX. Nothing was changed."
+    echo "!!! kind cluster '${KIND_CLUSTER}' (kube-system UID ${uid}) has a production marker, or it can't be read."
+    echo "    It is deleted and recreated after the downtime starts; --yes does not answer this."
+    echo "Type the first 8 characters of the kube-system UID above to go on:"
+    read -r answer || answer=""
+    [ "${answer}" = "${uid:0:8}" ] || die "confirmation did not match; nothing was changed"
+    CONFIRM_PRODUCTION="${answer}"
+    recreate_flags=(--confirm-production "${answer}")
 }
 
 remember_production() {
@@ -329,6 +381,7 @@ forward() {
             "data_points=$(count_rows econ_graph 'select count(*) from data_points')"
         check_local_images
         note_production
+        require_recreate_confirmation
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
         backup_encryption_preflight
         backup_check_tmpfs_space
@@ -336,14 +389,14 @@ forward() {
         remember_backup "$(new_backup_dir)"
         remember_production
         backup_databases "${BACKUP_DIR}"
-        recreate_cluster --yes --no-backup "${common_flags[@]}"
+        recreate_cluster --yes --no-backup "${recreate_flags[@]}" "${common_flags[@]}"
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no backup to resume from; pass --resume-from ~/econgraph-backups/<ts>"
         [ -s "$(backup_source_dir "$BACKUP_DIR")/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
         log "Resuming with backup ${BACKUP_DIR}"
         if [ "$cluster" = "absent" ]; then
-            recreate_cluster --yes --no-backup "${common_flags[@]}"
+            recreate_cluster --yes --no-backup "${recreate_flags[@]}" "${common_flags[@]}"
         fi
     fi
 
@@ -386,6 +439,7 @@ rollback() {
     elif kind_cluster_exists && db_has_data; then
         check_local_images
         note_production
+        require_recreate_confirmation
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
         backup_encryption_preflight
         backup_check_tmpfs_space
@@ -419,10 +473,10 @@ rollback() {
         confirm "About to DELETE kind cluster '${KIND_CLUSTER}' for the rollback."
     fi
     if [ "$config_from_ref" = "true" ]; then
-        recreate_cluster --yes --no-backup \
+        recreate_cluster --yes --no-backup "${recreate_flags[@]}" \
             --config <(git -C "${PROJECT_ROOT}" show "${REF}:terraform/k8s/kind-config.yaml") "${common_flags[@]}"
     else
-        recreate_cluster --yes --no-backup --config "$config" "${common_flags[@]}"
+        recreate_cluster --yes --no-backup "${recreate_flags[@]}" --config "$config" "${common_flags[@]}"
     fi
     if [ "${DRY_RUN}" != "true" ]; then use_kind_kubectl; fi
     mark_if_was_production

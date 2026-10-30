@@ -1336,6 +1336,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "warp",
 ]
@@ -1514,6 +1515,7 @@ dependencies = [
  "diesel",
  "diesel-async",
  "diesel_migrations",
+ "econ-graph-auth",
  "econ-graph-core",
  "econ-graph-graphql",
  "econ-graph-services",
@@ -3672,6 +3674,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

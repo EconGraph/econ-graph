@@ -5,6 +5,7 @@ use econ_graph_auth::testkit::{SigningKey, TestIssuer};
 use econ_graph_auth::OidcVerifier;
 use econ_graph_core::AppPool;
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
+use econ_graph_services::services::series_check::DataPlaneClient;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,12 +17,43 @@ fn routes(
     pool: AppPool,
     verifier: Arc<OidcVerifier>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    routes_with_data_plane(pool, verifier, None)
+}
+
+/// As [`routes`], with annotations' series checked through `data_plane`.
+fn routes_with_data_plane(
+    pool: AppPool,
+    verifier: Arc<OidcVerifier>,
+    data_plane: Option<Arc<DataPlaneClient>>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let databases = Databases {
         app: pool,
         data: None,
     };
     let schema = create_schema_with_data(databases.app.clone(), None, ());
-    build_routes(databases, None, schema, Some(verifier), &[], false)
+    build_routes(databases, data_plane, schema, Some(verifier), &[], false)
+}
+
+/// A stand-in data plane that places every series in the FRED catalog.
+fn fred_data_plane() -> Arc<DataPlaneClient> {
+    let answer = warp::post().map(|| {
+        warp::reply::json(&json!({"data": {
+            "seriesCatalog": "Federal Reserve Economic Data (FRED)",
+            "seriesExists": true,
+        }}))
+    });
+    let (addr, server) = warp::serve(answer).bind_ephemeral(([127, 0, 0, 1], 0));
+    tokio::spawn(server);
+    Arc::new(
+        DataPlaneClient::new(&econ_graph_core::config::DataGraphqlConfig {
+            forward_authorization: false,
+            allow_insecure_authorization: false,
+            url: format!("http://{addr}/data/graphql"),
+            host: None,
+            timeout: Duration::from_secs(5),
+        })
+        .unwrap(),
+    )
 }
 
 /// Send a bearer-authenticated GraphQL POST and decode its HTTP status and JSON body.
@@ -121,12 +153,20 @@ async fn rotation_and_provider_outage_preserve_annotation_boundaries() {
     };
     let issuer = TestIssuer::start().await;
     let sub = Uuid::new_v4();
-    let claims = issuer.claims(sub, &["annotation:create", "annotation:delete"]);
+    let claims = issuer.claims(
+        sub,
+        &[
+            "annotation:create",
+            "annotation:delete",
+            "catalog.fred:read",
+        ],
+    );
     let valid = issuer.sign(&claims);
     let unknown = SigningKey::generate("missing").sign(&claims);
     let interval = Duration::from_millis(250);
     let verifier = Arc::new(issuer.verifier().with_min_refresh_interval(interval));
-    let live = routes(pool.clone(), verifier.clone());
+    let data_plane = fred_data_plane();
+    let live = routes_with_data_plane(pool.clone(), verifier.clone(), Some(data_plane.clone()));
     let series = Uuid::new_v4();
     let create = format!(
         r#"mutation {{ createAnnotation(input: {{ seriesId: "{series}", annotationDate: "2024-01-01", title: "private", content: "secret", annotationType: "note", isPublic: false }}) {{ id }} }}"#
@@ -169,9 +209,10 @@ async fn rotation_and_provider_outage_preserve_annotation_boundaries() {
         }
     }
     // A verifier with no keys reaches an actual outage and falls back anonymously.
-    let outage = routes(
+    let outage = routes_with_data_plane(
         pool,
         Arc::new(issuer.verifier().with_min_refresh_interval(interval)),
+        Some(data_plane),
     );
     issuer.stop().await;
     for _ in 0..3 {
