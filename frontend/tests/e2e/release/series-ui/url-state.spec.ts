@@ -4,6 +4,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { DEPLOYED } from '../env';
 import { SEEDED_WDI } from '../fixtures';
 
 // ECO-732: the explorer's sort and page and the map's indicator weren't in the URL, so Back
@@ -56,6 +57,7 @@ test('the explorer keeps its sort through a series and back, and on reload', asy
 });
 
 test('the map keeps its indicator through a country and back, and on reload', async ({ page }) => {
+  test.skip(DEPLOYED, "uses the seeded indicators and countries, not a deployed build's");
   const population = SEEDED_WDI.indicators.find(i => i.code === 'SP.POP.TOTL')!;
   const indicator = page.getByRole('combobox', { name: 'Indicator' });
   const legend = page.getByTestId('map-legend');

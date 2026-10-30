@@ -27,7 +27,8 @@ const rateSeries = Array.from({ length: 45 }, (_, i) => {
     id: `rate-${n}`,
     title: `Rate ${n}`,
     sourceId: 'fred',
-    frequency: 'Monthly',
+    // A spelling the backend's frequency filter doesn't know, on the second browse page
+    frequency: n >= '30' && n <= '33' ? 'Weekly, Ending Friday' : 'Monthly',
     lastUpdated: '2024-01-15T00:00:00Z',
   };
 });
@@ -222,12 +223,32 @@ describe('the explorer keeps its page and sort in the URL (ECO-732)', () => {
     const user = userEvent.setup();
     renderAt('/explore?source=fred&sort=lastUpdated');
     expect(await screen.findByText('1–20 of 45 series, by title')).toBeInTheDocument();
+    await waitFor(() => expect(currentUrl().search).toBe('?source=fred'));
 
     await user.click(screen.getByRole('button', { name: 'Advanced Search' }));
     const sort = screen.getByRole('combobox', { name: 'Sort By' });
     expect(sort).toHaveTextContent('Title');
     expect(sort).toHaveAttribute('aria-disabled', 'true');
     expect(shownTitles()[0]).toBe('Rate 01');
+  });
+
+  test('typing a new search starts again at page 1, and drops the page from the URL', async () => {
+    const user = userEvent.setup();
+    renderAt('/explore?q=rate&page=3');
+    await waitFor(() => expect(shownTitles()[0]).toBe('Rate 05'));
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 's');
+
+    await waitFor(() => expect(currentUrl().search).toBe('?q=rates'));
+    await waitFor(() => expect(shownTitles()[0]).toBe('Rate 45'));
+  });
+
+  test('browsing with a frequency the backend does not know lists the first 100 and pages them here', async () => {
+    renderAt('/explore?source=fred&frequency=Weekly%2C+Ending+Friday');
+
+    expect(await screen.findByText('4 matching series of 45, by title')).toBeInTheDocument();
+    expect(lastBrowse()).toEqual({ limit: 100, offset: 0 });
+    expect(shownTitles()).toEqual(['Rate 30', 'Rate 31', 'Rate 32', 'Rate 33']);
   });
 });
 

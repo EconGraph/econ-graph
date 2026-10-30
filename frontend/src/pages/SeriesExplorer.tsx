@@ -267,14 +267,17 @@ const SeriesExplorer: React.FC = () => {
   // that source has instead of an empty page. Only a source the backend
   // listed counts, so an unknown name in the URL still asks for a search; a frequency alone
   // isn't browsed, as it would sort the whole catalog. The backend pages through the source
-  // in title order, so every series in it can be reached.
+  // in title order, so every series in it can be reached. A frequency the backend doesn't know
+  // is filtered here instead, which a page at a time would leave mostly empty pages, so then
+  // the first SEARCH_LIMIT series are listed and paged here, as a search's are.
   const browsing = debouncedQuery.length < 2 && Boolean(activeSource) && !waitingForSources;
-  const browseOffset = (currentPage - 1) * PAGE_SIZE;
+  const pagedByBackend = browsing && (!selectedFrequency || Boolean(backendFrequency));
+  const browseOffset = pagedByBackend ? (currentPage - 1) * PAGE_SIZE : 0;
   const browseResult = useSeriesBrowse(
     {
       sourceId: activeSource || undefined,
       frequency: backendFrequency,
-      limit: PAGE_SIZE,
+      limit: pagedByBackend ? PAGE_SIZE : SEARCH_LIMIT,
       offset: browseOffset,
     },
     browsing
@@ -344,18 +347,18 @@ const SeriesExplorer: React.FC = () => {
 
   // Pagination. A search's results are paged here; a browse is paged by the backend, which
   // returns just this page.
-  const totalPages = Math.ceil((browsing ? browseTotal : filteredSeries.length) / PAGE_SIZE);
+  const totalPages = Math.ceil((pagedByBackend ? browseTotal : filteredSeries.length) / PAGE_SIZE);
   const lastPage = Math.max(totalPages, 1);
   const page = Math.min(currentPage, lastPage);
   const startIndex = (page - 1) * PAGE_SIZE;
-  const paginatedSeries = browsing
+  const paginatedSeries = pagedByBackend
     ? filteredSeries
     : filteredSeries.slice(startIndex, startIndex + PAGE_SIZE);
 
   // A page past the last (an old link, a refetch with fewer results, or a viewer who can read
-  // fewer series than whoever shared the link) moves to the last page once the results are in.
-  // A browse then fetches that page, so until then the results show as loading. Adjusted
-  // during render, like the form's sync with the URL above.
+  // fewer series than whoever shared the link) moves to the last page once the results are in,
+  // and a browse then fetches that page. Adjusted during render, like the form's sync with the
+  // URL above.
   const resultsSettled = Boolean(activeResult?.data) && !activeResult?.isFetching;
   const pastLastPage = resultsSettled && currentPage > lastPage;
   if (pastLastPage) setCurrentPage(lastPage);
@@ -372,7 +375,8 @@ const SeriesExplorer: React.FC = () => {
     if (searchQuery) params.set('q', searchQuery);
     if (selectedSource) params.set('source', selectedSource);
     if (selectedFrequency) params.set('frequency', selectedFrequency);
-    if (sortBy !== 'relevance') params.set('sort', sortBy);
+    // A browse is always by title, so a sort isn't written while browsing
+    if (sortBy !== 'relevance' && !browsing) params.set('sort', sortBy);
     if (currentPage > 1) params.set('page', String(currentPage));
     if (params.toString() === searchParams.toString()) return;
     setSearchParams(params, { replace: true, state: { explorerForm: true } });
@@ -381,6 +385,7 @@ const SeriesExplorer: React.FC = () => {
     selectedSource,
     selectedFrequency,
     sortBy,
+    browsing,
     currentPage,
     searchParams,
     setSearchParams,
@@ -741,7 +746,7 @@ const SeriesExplorer: React.FC = () => {
       )}
 
       {/* Result count */}
-      {searchResults && hasQuery && !showLoading && !pastLastPage && !searchError && (
+      {searchResults && hasQuery && !showLoading && !searchError && (
         <Alert severity='info' sx={{ mb: 3 }}>
           {browsing
             ? browseMessage(filteredSeries.length, searchResults.length, browseOffset, browseTotal)
@@ -754,7 +759,7 @@ const SeriesExplorer: React.FC = () => {
       )}
 
       {/* Results */}
-      {showLoading || pastLastPage ? (
+      {showLoading ? (
         <Grid container spacing={3}>
           {Array.from({ length: 8 }).map((_, index) => (
             <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
