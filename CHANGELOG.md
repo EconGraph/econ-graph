@@ -121,6 +121,48 @@ All notable changes to EconGraph are documented here. The format follows
   (including an empty string) fails with a `BAD_USER_INPUT` error naming the argument, instead
   of being ignored and returning every source's series (ECO-509).
 
+## [4.0.1] - 2026-10-30
+
+Sign-in on https://econgraph.com, the explorer's source links and the privacy policy on phones
+work again, and the deploy scripts reach only the kind cluster.
+
+### Changed
+
+- The deploy scripts never fall back to a plain `kubectl`. Without `KUBECTL` they use the kind
+  cluster's kubectl kept in `~/.cache/econgraph`, with an exported `KUBECONFIG` or else the kind
+  kubeconfig kept there, and say which; when a copy is missing they stop and say how to get it.
+  `deploy.sh`, `teardown.sh`, `recreate-kind-cluster.sh`, `apply-host-storage.sh` and
+  `build-images.sh` run `kind` and `docker` on the rootful Docker daemon
+  (`unix:///var/run/docker.sock`, or `ECONGRAPH_DOCKER_HOST`) whatever `DOCKER_HOST` is set to
+  (ECO-702).
+- `scripts/deploy/recreate-kind-cluster.sh` shows the cluster (nodes, `kube-system` UID and
+  production marker) and asks before deleting it: the cluster name typed at a terminal, or
+  `--yes`. A cluster with a production marker whose role is anything but `none`, or whose
+  marker can't be read, needs the first 8 characters of its `kube-system` UID, typed or given as
+  `--confirm-production`. It never writes `~/.kube/config` or switches its current context, and
+  gains `--if-missing` and `--dry-run` (ECO-719, ECO-721).
+- `scripts/release/tag.sh` tags patch releases: for `X.Y.Z` with `Z` greater than 0 it requires
+  `train-N` on origin with its commit an ancestor of `HEAD`, and pushes only `vX.Y.Z`.
+
+### Fixed
+
+- Sign-in shows on https://econgraph.com. Release and CI frontend images were built with an
+  empty OpenID Connect issuer, which hides sign-in; image builds now default it to
+  `/idp/realms/econ-graph` (a `VITE_OIDC_ISSUER` repository variable or build argument still
+  overrides it), and an image build with an empty issuer fails unless
+  `VITE_OIDC_SIGN_IN_DISABLED=true` is also passed (ECO-728).
+- The explorer follows a link to another `/explore` URL: the sidebar's FRED Data link from a
+  search shows FRED's series with the Source filter set, and back and forward restore each
+  entry's search, source and frequency (ECO-511).
+- The navigation drawer has a Privacy Policy item, so the privacy policy can be reached on a
+  phone, where the header hides its Privacy button (ECO-730).
+
+### Security
+
+- admin-frontend's seroval moves from 1.6.8 to 1.7.5 (GHSA-f86p-h4j2-7qgj, GHSA-9wx9-5pv9-3349),
+  the backend's zstd to 0.14.3 (RUSTSEC-2026-0391, RUSTSEC-2026-0398, RUSTSEC-2026-0403,
+  RUSTSEC-2026-0410) and the frontend's qs to 6.16.2 (GHSA-6pq8-jhm2-2vcw).
+
 ## [4.0.0] - 2026-10-27
 
 Real data from six public sources behind a site whose pages work, served publicly at

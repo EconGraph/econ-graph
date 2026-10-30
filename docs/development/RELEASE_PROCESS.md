@@ -98,6 +98,17 @@ check for the specified train number. A flag due for removal blocks tagging. It 
 `vX.Y.Z` and `train-N` Git tags on the checked-out commit and pushes both atomically. The
 `train-N` marker records the shipped train for flag expiry checks.
 
+A patch release (`vX.Y.Z` with `Z` greater than 0) is tagged the same way, from the same release
+branch, with the train number the branch shipped as. For example, to tag `v4.0.1` on train 1:
+
+```sh
+scripts/release/tag.sh 4.0.1 1
+```
+
+The script refuses a patch release unless `train-N` already exists on `origin` and its commit is
+an ancestor of the checked-out commit, so the patch is on the branch that train shipped from. It
+creates and pushes only the `vX.Y.Z` tag; `train-N` stays on the train's first release.
+
 The script does not check image publication. The final version tag triggers Release Images,
 which requires existing `sha-<full-commit-SHA>` images for that commit and fails if any is
 missing. It resolves all three digests before applying version image tags, reusing the tested
