@@ -18,21 +18,30 @@ Inputs:
                                   how long the command may run (default 2400).
 
 Run it in a quiet window, with the crawler in static mode (CRAWLER_SCHEDULER=false; see
-docs/monitoring/crawler-coverage-runbook.md). Before each reading the data plane must be
-quiet: crawler-worker scaled to 0 or with CRAWLER_SCHEDULER=false set as a plain value on
-its deployment (one from a ConfigMap or Secret can't be read here and counts as on), and no
-crawl_queue job
-pending, processing, retrying or locked by a worker. When it isn't, before or after the
-command, the scenario ends inconclusive (a skip whose reason starts "inconclusive:"),
-neither a pass nor a failure, saying what to wait for.
+docs/monitoring/crawler-coverage-runbook.md). Before and after each reading the data plane
+must be quiet:
+  - every running crawler-worker pod has its scheduler off (--scheduler in its args, else
+    CRAWLER_SCHEDULER in its env, any value the worker reads as off; a value from a ConfigMap
+    or Secret can't be read here and counts as on) and is ready, not still starting;
+  - crawl_queue has no job pending, processing, retrying or locked by a worker.
+The pods are read, not the deployment, so one left over from before a `set env` counts.
+When the data plane isn't quiet, the scenario ends inconclusive (a skip whose reason starts
+"inconclusive:"), neither a pass nor a failure, saying what to wait for.
 
 Each reading lists the base tables of the data database's public schema (except
 __diesel_schema_migrations) and, per table, its row count and a checksum: the sum of a hash
 of each whole row, so a changed value counts as well as an added or removed row.
 Order-independent, so it streams through tables with millions of rows. After the command,
 the kubectl is picked again (a kind cluster recreate changes it) and the data database's
-StatefulSet must finish rolling out; then one check per table, plus one that the set of
-tables is the same. The data database is only read.
+StatefulSet must finish rolling out. Then one check per table, plus one that the set of
+tables is the same, except:
+  - crawl_queue is not compared: it is the worker's own queue, whose finished jobs older
+    than 14 days the worker purges at startup and hourly, also in static mode;
+  - when the redeploy restarted crawler-worker and the only tables that changed are
+    datasets and reference_file_cache, which a starting worker writes even in static mode
+    (its build's dataset definitions, and reference data whose source changed), the
+    scenario ends inconclusive. A change to any other table fails.
+The data database is only read.
 """
 
 import os
@@ -78,35 +87,59 @@ def reading():
 ACTIVE_JOBS = """
 SELECT count(*) FROM crawl_queue
 WHERE status IN ('pending', 'processing', 'retrying') OR locked_by IS NOT NULL"""
+# The values the worker's --scheduler / CRAWLER_SCHEDULER parser (clap's BoolishValueParser)
+# reads as off.
+OFF = {'false', 'f', 'no', 'n', 'off', '0'}
+# The worker's own queue, not crawled data: it purges finished jobs older than 14 days at
+# startup and hourly, also in static mode.
+NOT_COMPARED = {'crawl_queue'}
+# What a starting worker writes even in static mode: the dataset definitions of its build,
+# and reference data whose source changed (conditional GETs).
+STARTUP_WRITES = {'datasets', 'reference_file_cache'}
+
+
+def scheduler_off(container):
+    """Whether the container runs the worker with its scheduler off: --scheduler in its
+    args wins over CRAWLER_SCHEDULER in its env; a value from a ConfigMap or Secret can't be
+    read here and counts as on."""
+    args = [str(a) for a in container.get('args') or []]
+    for i, arg in enumerate(args):
+        if arg.startswith('--scheduler='):
+            return arg.partition('=')[2].strip().lower() in OFF
+        if arg == '--scheduler' and i + 1 < len(args):
+            return args[i + 1].strip().lower() in OFF
+    env = {e.get('name'): e.get('value') for e in container.get('env') or []}
+    return (env.get('CRAWLER_SCHEDULER') or '').strip().lower() in OFF
 
 
 def quiet(when):
-    """Record that the data plane is quiet; end the scenario inconclusive when it isn't."""
-    workers = kube.items('deployments', '-n', NAMESPACE, '-l', 'app=crawler-worker')
-    scheduling = []
-    for worker in workers:
-        spec = worker.get('spec') or {}
-        if spec.get('replicas', 1) == 0:
-            continue
-        env = {e.get('name'): e.get('value') for c in spec['template']['spec']['containers']
-               for e in c.get('env') or []}
-        if (env.get('CRAWLER_SCHEDULER') or '').strip().lower() != 'false':
-            scheduling.append(worker['metadata']['name'])
+    """Record that the data plane is quiet, and return the uids of the worker pods; end the
+    scenario inconclusive when it isn't. The running pods are read, not the deployment, so
+    a pod left from before a `set env` still counts."""
+    pods = kube.items('pods', '-n', NAMESPACE, '-l', 'app=crawler-worker')
+    why = []
+    scheduling = [p['metadata']['name'] for p in pods
+                  if not all(scheduler_off(c) for c in p['spec']['containers'])]
+    if scheduling:
+        why.append(f'{", ".join(scheduling)} runs with its scheduler on; set CRAWLER_SCHEDULER=false '
+                   '(docs/monitoring/crawler-coverage-runbook.md)')
+    starting = [p['metadata']['name'] for p in pods if not all(
+        s.get('ready') for s in (p.get('status') or {}).get('containerStatuses') or [{}])]
+    if starting:
+        why.append(f'{", ".join(starting)} is still starting; wait for its rollout')
     jobs = int(kube.psql(NAMESPACE, POD, CONTAINER, DATABASE, ACTIVE_JOBS)[0][0])
-    if scheduling or jobs:
-        why = []
-        if scheduling:
-            why.append(f'{", ".join(scheduling)} runs with its scheduler on; set CRAWLER_SCHEDULER=false '
-                       '(docs/monitoring/crawler-coverage-runbook.md)')
-        if jobs:
-            why.append(f'crawl_queue has {jobs} pending, processing, retrying or locked jobs; wait for it to drain')
+    if jobs:
+        why.append(f'crawl_queue has {jobs} pending, processing, retrying or locked jobs; wait for it to drain')
+    if why:
         skip(f'inconclusive: the crawler is active {when}: {"; ".join(why)}. Run it again in a quiet window')
-    check(f'quiet {when}', True, 'crawler in static mode or stopped, crawl_queue drained')
+    check(f'quiet {when}', True, f'{len(pods)} crawler-worker pods, scheduler off; crawl_queue drained')
+    return {p['metadata']['uid'] for p in pods}
 
 
 try:
-    quiet('before the redeploy')
+    workers_before = quiet('before the first reading')
     before = reading()
+    quiet('after the first reading')
     check('before', True, f'{len(before)} tables, {sum(r for r, _ in before.values())} rows',
           tables={name: rows for name, (rows, _) in before.items()})
 except KubeError as error:
@@ -125,15 +158,24 @@ kube = Kube()
 try:
     # Unlike waiting on the pod, this also waits while the pod is still being recreated.
     kube.run('rollout', 'status', '-n', NAMESPACE, 'statefulset/postgresql', '--timeout=600s', timeout=660)
-    quiet('after the redeploy')
+    quiet('before the second reading')
     after = reading()
+    workers_after = quiet('after the second reading')
 except KubeError as error:
     fail('after', str(error))
+
+compared = sorted((set(before) & set(after)) - NOT_COMPARED)
+changed = {name for name in compared if before[name] != after[name]}
+restarted = bool(workers_after - workers_before)
+if changed and restarted and changed <= STARTUP_WRITES:
+    skip(f'inconclusive: only {", ".join(sorted(changed))} changed, which a starting crawler-worker writes '
+         'even in static mode, and the redeploy restarted it. Run it again for a build with the same '
+         'dataset definitions, when upstream reference data has not changed')
 
 check('same tables', set(before) == set(after),
       'the same tables' if set(before) == set(after) else
       f'missing {sorted(set(before) - set(after))}, new {sorted(set(after) - set(before))}')
-for name in sorted(set(before) & set(after)):
+for name in compared:
     (rows_before, sum_before), (rows_after, sum_after) = before[name], after[name]
     check(f'{name} unchanged', rows_before == rows_after and sum_before == sum_after,
           f'rows {rows_before} -> {rows_after}, checksum '
