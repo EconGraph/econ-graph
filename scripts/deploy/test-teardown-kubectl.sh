@@ -6,7 +6,11 @@
 #
 #   - teardown.sh --dry-run, and with --include-data-plane --delete-cluster;
 #   - the refusals that stop before anything is deleted (no terminal; a
-#     current context other than kind-econ-graph).
+#     current context other than kind-econ-graph);
+#   - the backup comes before anything is patched or deleted: a teardown
+#     writes the dumps and counts.env to ECONGRAPH_BACKUP_ROOT first, and a
+#     failed dump, or a postgresql-0 that isn't running without --no-backup,
+#     stops it with nothing patched or deleted.
 #
 # Runs offline against stubs, never a cluster: a plain `kubectl` first on PATH
 # that records any call and fails; `docker` and `kind` stubs that pretend a kind
@@ -36,11 +40,14 @@ EOF
 # The fake kind kubectl that docker cp hands out. FAKE_CURRENT_CONTEXT, when
 # set, is what it reports as the current context after use-context;
 # FAKE_PRODUCTION=true makes the cluster carry a production marker for its own
-# kube-system UID; FAKE_PHASE is every pod's phase (default Running).
+# kube-system UID; FAKE_PHASE is every pod's phase (default Running);
+# FAKE_DUMP_FAILS set makes pg_dump fail. pg_dump prints a stub archive and
+# psql a count, so a backup can complete.
 CLUSTER_UID="11111111-2222-3333-4444-555555555555"
 cat >"$WORK/kind-kubectl" <<EOF
 #!/bin/sh
-echo "\$*" >>"$KIND_CALLS"
+# One line per call (the Secret go-template argument spans several lines).
+echo "\$*" | tr '\\n' ' ' >>"$KIND_CALLS"; echo >>"$KIND_CALLS"
 case " \$* " in
     *" version "*) exit 0 ;;
     *" config use-context "*) exit 0 ;;
@@ -51,6 +58,9 @@ case " \$* " in
         [ "\${FAKE_PRODUCTION:-false}" = true ] && echo "production $CLUSTER_UID"
         exit 0 ;;
     *"{.status.phase}"*) echo "\${FAKE_PHASE:-Running}"; exit 0 ;;
+    *" pg_dump "*) [ -z "\${FAKE_DUMP_FAILS:-}" ] || exit 1; echo "PGDMP stub archive"; exit 0 ;;
+    *"to_regclass"*) echo t; exit 0 ;;
+    *" psql "*) echo 7; exit 0 ;;
     *" -o name"*) echo "persistentvolumeclaim/stub"; exit 0 ;;
     *"{.spec.volumeName}"*) echo pv-stub; exit 0 ;;
     *"persistentVolumeReclaimPolicy"*) echo Retain; exit 0 ;;
@@ -246,6 +256,45 @@ else
 fi
 check "teardown.sh --yes on a production cluster"
 grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed or dumped something before refusing --yes on production"
+
+# The backup comes first: a teardown dumps the databases into
+# ECONGRAPH_BACKUP_ROOT before it patches or deletes anything.
+reset
+rm -rf "$WORK/backups"
+out="$(teardown --yes)"; rc=$?
+backup_dir="$(find "$WORK/backups" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+first_dump="$(grep -n ' pg_dump ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
+first_change="$(grep -nE ' (delete|patch) ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
+if [ "$rc" -eq 0 ] && grep -q "App plane removed" <<<"$out" && [ -n "$backup_dir" ] &&
+    [ -s "$backup_dir/econ_graph.dump" ] && grep -q '^SERIES_COUNT=7$' "$backup_dir/counts.env" 2>/dev/null &&
+    [ -n "$first_dump" ] && [ -n "$first_change" ] && [ "$first_dump" -lt "$first_change" ]; then
+    echo "ok   teardown.sh --yes dumps the databases and counts.env before it patches or deletes anything"
+else
+    fail "teardown.sh --yes did not back up first (exit $rc, first pg_dump at call ${first_dump:-none}, first patch/delete at ${first_change:-none}):"
+    printf '     %s\n' "$out"
+fi
+check "teardown.sh --yes with a backup"
+
+reset
+rm -rf "$WORK/backups"
+out="$(FAKE_DUMP_FAILS=1 teardown --yes)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "pg_dump econ_graph from postgresql-0" <<<"$out" &&
+    ! grep -qE -- ' (delete|patch) ' "$KIND_CALLS"; then
+    echo "ok   teardown.sh stops, with nothing patched or deleted, when the dump fails"
+else
+    fail "teardown.sh with a failing pg_dump (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh with a failing pg_dump"
+
+reset
+out="$(FAKE_PHASE=Pending teardown --yes)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "no backup can be taken first; nothing was changed" <<<"$out" &&
+    ! grep -qE -- ' (delete|patch) ' "$KIND_CALLS"; then
+    echo "ok   teardown.sh refuses without --no-backup when postgresql-0 is not running"
+else
+    fail "teardown.sh with postgresql-0 not running (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh with postgresql-0 not running"
 
 if [ "$failed" -ne 0 ]; then
     echo "teardown kubectl checks failed"

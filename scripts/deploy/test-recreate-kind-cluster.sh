@@ -19,7 +19,9 @@
 #     be read takes the UID prefix;
 #   - every check runs before the backup, the delete and the create; the backup
 #     still runs before the delete unless --no-backup;
-#   - --dry-run deletes and creates nothing.
+#   - --dry-run deletes and creates nothing;
+#   - a host directory the kind config bind-mounts that is not a mount point
+#     stops the run before any backup, delete or create.
 #
 # Runs offline against stubs, never a cluster or a Docker daemon: a plain
 # `kubectl` and `kind` first on PATH that record any call and fail; the pinned
@@ -28,8 +30,9 @@
 # calls. The stub `kind create cluster` records the call and then stops the
 # run, so nothing after it (the gateway install) runs. HOME, XDG_CACHE_HOME,
 # XDG_DATA_HOME, TMPDIR and ECONGRAPH_BACKUP_ROOT all point into a scratch
-# directory, and the kind config used has no host mounts or ports. The
-# terminal cases run the script under a pseudo-terminal (python3's pty module).
+# directory, and the kind configs used publish no ports and bind-mount at
+# most a scratch directory. The terminal cases run the script under a
+# pseudo-terminal (python3's pty module).
 #
 # Usage: scripts/deploy/test-recreate-kind-cluster.sh
 
@@ -366,7 +369,30 @@ else
     fail "--confirm-production without a prefix (exit $rc): $out"
 fi
 
-# 10. The marker test the script uses (lib/cluster-role.sh).
+# 10. A kind config that bind-mounts a host directory that is not a mount
+# point: refused before anything is backed up, deleted or created, on a
+# production cluster with its UID prefix and on an unmarked one with --yes.
+UNMOUNTED="$WORK/not-a-mount"
+mkdir -p "$UNMOUNTED"
+MOUNT_CONFIG="$WORK/kind-config-mounts.yaml"
+printf '%s\n' 'kind: Cluster' 'apiVersion: kind.x-k8s.io/v1alpha4' 'nodes:' '- role: control-plane' \
+    '- role: worker' '  extraMounts:' "  - hostPath: \"$UNMOUNTED\"" '    containerPath: /data' >"$MOUNT_CONFIG"
+reset
+out="$(FAKE_MARKER="production uid-kind-cluster" recreate --config "$MOUNT_CONFIG" --confirm-production uid-kind)"; rc=$?
+expect_refusal "a production cluster whose bind-mounted host directory is not mounted" "$UNMOUNTED is not mounted"
+reset
+out="$(recreate --config "$MOUNT_CONFIG" --yes)"; rc=$?
+expect_refusal "an unmarked cluster whose bind-mounted host directory is not mounted" "$UNMOUNTED is not mounted"
+reset
+out="$(FAKE_NO_CLUSTER=1 recreate --config "$MOUNT_CONFIG")"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q -- "$UNMOUNTED is not mounted" <<<"$out" && ! created; then
+    echo "ok   without a cluster, an unmounted bind-mounted host directory stops the create"
+else
+    fail "without a cluster and an unmounted host directory (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "without a cluster and an unmounted host directory"
+
+# 11. The marker test the script uses (lib/cluster-role.sh).
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
 for marker in "production uid-a" "production" "Production uid-a" "staging uid-a" " uid-a" "None uid-a" "NONE"; do
