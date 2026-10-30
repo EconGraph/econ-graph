@@ -158,7 +158,7 @@ class ConversionRehearsal(unittest.TestCase):
         self.args = SimpleNamespace(source_service='conversion_source', app_service='conversion_app', source_map=self.mapping,
                                     backup_dir=self.backup_root / ('backup-' + self.number), dry_run=False,
                                     writers_stopped=True, drop_source_app=False, previous_evidence=None,
-                                    restore_source_app=None)
+                                    restore_source_app=None, init_app_schema=None)
         self.phrase = f'DROP APP TABLES FROM {self.source_db}'
 
     def run_conversion(self):
@@ -490,6 +490,47 @@ class ConversionRehearsal(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'does not match its recorded checksum'):
             self.restore(tampered)
         self.assertIsNone(self.app_count('conversion_source'))
+
+
+    def test_initializes_an_empty_app_database_as_the_app_role(self):
+        """An empty app database gets the app schema, owned by the app role, only with the copy."""
+        empty = 'empty_' + self.number
+        with psycopg.connect(self.admin, autocommit=True) as admin:
+            if not admin.execute("SELECT 1 FROM pg_roles WHERE rolname='econgraph'").fetchone():
+                admin.execute('CREATE ROLE econgraph LOGIN')
+            admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(empty)))
+        with self.services.open('a') as services:
+            services.write(f'[conversion_empty]\nhost=127.0.0.1\nport={self.port}\nuser=postgres\ndbname={empty}\n')
+        with psycopg.connect(service='conversion_empty') as db:
+            # As app-postgres-init.yaml does.
+            db.execute(sql.SQL('GRANT ALL PRIVILEGES ON DATABASE {} TO econgraph').format(sql.Identifier(empty)))
+            db.execute('ALTER SCHEMA public OWNER TO econgraph')
+        self.args.app_service = 'conversion_empty'
+        with self.assertRaisesRegex(RuntimeError, 'Target table inventory is not exactly the app schema'):
+            self.run_conversion()
+        self.args.init_app_schema = 'econgraph'
+        self.args.dry_run = True
+        self.run_conversion()
+        with psycopg.connect(service='conversion_empty') as db:
+            self.assertEqual(conversion.tables(db), set())
+        self.args.dry_run = False
+        self.run_conversion()
+        with psycopg.connect(service='conversion_empty') as db:
+            owners = {r[0] for r in db.execute("SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname='public'")}
+            self.assertEqual(owners, {'econgraph'})
+            self.assertEqual(conversion.versions(db), conversion.inventory('app')[2])
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 1)
+        evidence = json.loads((self.args.backup_dir / 'evidence.json').read_text())
+        self.assertTrue(evidence['app_schema_initialized'])
+        self.args.app_service = 'conversion_app'
+        self.args.init_app_schema = 'no_such_role'
+        with psycopg.connect(self.admin, autocommit=True) as admin:
+            admin.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(empty)))
+            admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(empty)))
+        self.args.app_service = 'conversion_empty'
+        self.args.backup_dir = self.backup_root / ('role-' + self.number)
+        with self.assertRaisesRegex(RuntimeError, 'Role no_such_role does not exist'):
+            self.run_conversion()
 
 
 if __name__ == '__main__':

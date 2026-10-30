@@ -235,6 +235,28 @@ def only_seed_templates(target, app_tables, baseline):
     require(empty or not difference, 'Target annotation templates differ from baseline seeds')
 
 
+def init_app_schema(target, role):
+    """Apply every checked-in app migration to an empty app database as ROLE, in the open transaction.
+
+    This is what the backend does at startup, as the same role, so the tables have the owner
+    the backend expects; it lets the copy land before any backend serves the app database.
+    """
+    from psycopg import sql
+    require(query(target, 'SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)),
+            f'Role {role} does not exist in the app database')
+    target.execute(sql.SQL('SET LOCAL ROLE {}').format(sql.Identifier(role)))
+    target.execute('SET LOCAL search_path=public')
+    target.execute('CREATE TABLE public.__diesel_schema_migrations (version VARCHAR(50) PRIMARY KEY NOT NULL, '
+                   'run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)')
+    for migration in sorted((ROOT / 'backend/migrations/app').iterdir()):
+        if migration.is_dir():
+            target.execute((migration / 'up.sql').read_text())
+            target.execute('INSERT INTO public.__diesel_schema_migrations(version) VALUES (%s)',
+                           (migration.name.split('_', 1)[0].replace('-', ''),))
+    target.execute('RESET ROLE')
+    target.execute('SET LOCAL search_path=pg_catalog,public')
+
+
 def convert(args):
     """Run a maintenance conversion with locked, verified copy and explicit cleanup."""
     import psycopg
@@ -261,6 +283,11 @@ def convert(args):
         identity = 'SELECT system_identifier::text, current_database() FROM pg_control_system()'
         source_identity, target_identity = query(source, identity)[0], query(target, identity)[0]
         require(source_identity != target_identity, 'Source and target are the same database')
+        initialized = False
+        if args.init_app_schema and not tables(target):
+            # Rolled back with a dry run or a failure; committed only together with the verified copy.
+            init_app_schema(target, args.init_app_schema)
+            initialized = True
         source_tables, target_tables = tables(source), tables(target)
         require(not query(target, "SELECT 1 FROM pg_class WHERE relkind='S' AND relnamespace='public'::regnamespace"),
                 'Target has sequences: this UUID-based conversion requires operator review for sequence state')
@@ -284,6 +311,7 @@ def convert(args):
         data_before = fingerprints(source, data_tables)
         target_before = fingerprints(target, app_tables)
         report = {'series': series, 'data_before': data_before, 'app_before': target_before, 'dry_run': args.dry_run,
+                  'app_schema_initialized': initialized,
                   'source_identity': list(source_identity), 'target_identity': list(target_identity)}
         if not source_app:
             require(not (set(app_enums) & {r[0] for r in query(source, "SELECT typname FROM pg_type WHERE typnamespace='public'::regnamespace")}),
@@ -490,6 +518,9 @@ def main():
     parser.add_argument('--previous-evidence', type=Path,
                         help='evidence.json of an earlier verified run: verifies an already converted source, '
                         'or allows replacing that run\'s app copy after it went stale')
+    parser.add_argument('--init-app-schema', metavar='ROLE',
+                        help='If the app database has no tables, apply the checked-in app migrations as ROLE '
+                        '(the backend\'s role) in the same transaction as the copy')
     parser.add_argument('--writers-stopped', action='store_true', help='Operator confirms every app and crawler writer is stopped')
     parser.add_argument('--drop-source-app', action='store_true', help='After copy verification, ask for typed source cleanup confirmation')
     parser.add_argument('--restore-source-app', type=Path, metavar='BACKUP_DIR',

@@ -40,8 +40,10 @@
 #      password file from the Secrets econ-graph-postgres and econ-graph-app-postgres
 #      into a private temporary directory, removed on exit. Passwords are never printed.
 #   5. Run split-app-data.py with pg_dump/pg_restore from a ${PG_IMAGE} container:
-#      its dry run, then the copy (a new verified backup under the backup root), then,
-#      with --drop-source-app, the removal; or the rollback with --restore-source-app.
+#      its dry run, then the copy (a new verified backup under the backup root; an empty
+#      app database first gets the app schema as the backend's role econgraph, in the
+#      same transaction), then, with --drop-source-app, the removal; or the rollback
+#      with --restore-source-app.
 #
 # The run holds database locks for the length of each step; writers are stopped first.
 # Nothing under the backup root is ever deleted.
@@ -169,7 +171,9 @@ done
 if [ -n "$RESTORE" ]; then
     ARGS=(--source-service conversion_source --restore-source-app "$RESTORE" --writers-stopped)
 else
-    ARGS=(--source-service conversion_source --app-service conversion_app --source-map "$SOURCE_MAP")
+    # econgraph: the role the backend applies the app migrations as (app-postgres-init.yaml).
+    ARGS=(--source-service conversion_source --app-service conversion_app --source-map "$SOURCE_MAP"
+        --init-app-schema econgraph)
     [ -z "$PREVIOUS" ] || ARGS+=(--previous-evidence "$PREVIOUS")
 fi
 
