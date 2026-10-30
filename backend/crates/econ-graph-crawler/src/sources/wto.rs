@@ -9,7 +9,7 @@
 //!
 //! The API is served through the WTO API portal (<https://apiportal.wto.org>) and refuses every
 //! request without a subscription key (HTTP 401). The key is `WTO_API_KEY`
-//! ([`ApiKeys::wto`]) and is sent as the `subscription-key` query parameter, which
+//! ([`ApiKeys::wto`](crate::adapter::ApiKeys::wto)) and is sent as the `subscription-key` query parameter, which
 //! [`HttpFetcher`](crate::http::HttpFetcher) redacts from logs and errors. Without it, discovery
 //! and fetching fail with `Auth` ("WTO_API_KEY not set") before any request; the crawler worker
 //! does not get that far, because it leaves the source out of its registry while the key is
