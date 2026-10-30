@@ -31,7 +31,7 @@ test.describe('release smoke', () => {
   });
 
   test('the recession indicator is reachable by its external id', async ({ request }) => {
-    // Recession shading looks USREC up this way, not by search.
+    // A direct lookup by source name and external id, not by search.
     const { sourceName, externalId } = SEEDED.fredUsrec;
     const response = await request.post('/graphql', {
       data: {
@@ -43,10 +43,11 @@ test.describe('release smoke', () => {
     expect(response.ok()).toBe(true);
     const body = await response.json();
     expect(body.errors).toBeUndefined();
-    // The seed always loads it. A deployed build may not have crawled it yet: skip, not fail.
+    // The seed always loads it. On a deployed build, null means it hasn't been crawled yet or
+    // sits in a catalog anonymous readers can't see: skip, not fail.
     test.skip(
       DEPLOYED && body.data.seriesByExternalId === null,
-      `${externalId} is not in the deployed catalog yet (the FRED crawler has not fetched it)`
+      `${externalId} not found on the deployed build: not crawled yet, or not visible to anonymous readers`
     );
     expect(body.data.seriesByExternalId).toEqual({ externalId });
   });

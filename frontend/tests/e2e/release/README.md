@@ -159,7 +159,8 @@ it does not verify the deployed data or sign-in.
 - `smoke.spec.ts`: the home page loads, the seeded series are reachable through
   the frontend's `/graphql` proxy, and explore search finds one. It also looks up
   the recession indicator (`USREC`) with `seriesByExternalId`. Against a deployed
-  build, that check is skipped while the catalog doesn't have `USREC` yet.
+  build, that check is skipped when the lookup finds nothing: `USREC` may not be
+  crawled yet, or may not be visible to anonymous readers.
 - `journey.spec.ts`: exit criterion 5's cross-area journey in one
   browser session. Search for GDP, open it, check the chart's newest point,
   apply every transformation and check the value it shows, download the CSV and

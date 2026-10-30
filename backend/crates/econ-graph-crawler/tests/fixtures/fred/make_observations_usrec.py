@@ -3,7 +3,7 @@
 # Licensed under the Microsoft Reference Source License (MS-RSL).
 # See LICENSE file for complete terms and conditions.
 """Writes observations_usrec_e2e.json, the FRED recession indicator (USREC) the release
-end-to-end stack is seeded with, for the recession-shading specs.
+end-to-end stack is seeded with.
 
 The file has FRED's documented `/fred/series/observations` shape
 (https://fred.stlouisfed.org/docs/api/fred/series_observations.html). It is built here rather
