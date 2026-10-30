@@ -796,7 +796,7 @@ async fn world_trade_organization_series_need_their_catalog_role() {
     let pool = econ_graph_core::database::create_pool(&db.url)
         .await
         .unwrap();
-    let fred = DataSource::find_by_name(&pool, &DataSource::fred().name)
+    let bea = DataSource::find_by_name(&pool, &DataSource::bea().name)
         .await
         .unwrap()
         .unwrap();
@@ -807,11 +807,11 @@ async fn world_trade_organization_series_need_their_catalog_role() {
         Some(source) => source,
         None => DataSource::create(&pool, DataSource::wto()).await.unwrap(),
     };
-    let (fred_series, _) = seed(&pool, fred.clone(), "FRED").await;
+    let (bea_series, _) = seed(&pool, bea.clone(), "BEA").await;
     let (wto_series, _) = seed(&pool, wto.clone(), "WTO").await;
 
     let defaults = realm_default_anonymous_roles();
-    assert!(defaults.contains(&Role::CatalogFredRead));
+    assert!(defaults.contains(&Role::CatalogBeaRead));
     assert!(!defaults.contains(&Role::CatalogWorldTradeOrganizationRead));
     let mut granted = defaults.clone();
     granted.push(Role::CatalogWorldTradeOrganizationRead);
@@ -847,16 +847,16 @@ async fn world_trade_organization_series_need_their_catalog_role() {
         let data = result.data.into_json().unwrap();
         let sources = ids(&data["dataSources"]);
         assert!(!sources.contains(&wto.id.to_string()), "{who}");
-        assert!(sources.contains(&fred.id.to_string()), "{who}");
+        assert!(sources.contains(&bea.id.to_string()), "{who}");
         assert_eq!(
             ids(&data["seriesList"]["nodes"]),
-            [fred_series.to_string()],
+            [bea_series.to_string()],
             "{who}"
         );
         assert_eq!(data["searchSeries"]["totalCount"], 1, "{who}");
         assert_eq!(
             ids(&data["searchSeries"]["series"]),
-            [fred_series.to_string()],
+            [bea_series.to_string()],
             "{who}"
         );
         assert!(

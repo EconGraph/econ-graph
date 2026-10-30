@@ -1,7 +1,8 @@
 //! Catalogs that are off by default: their read role is defined in the realm file, but neither
 //! signed-in users (through the `catalog-public` composite) nor anonymous visitors (through the
 //! `econgraph-anonymous` client's scope mapping) receive it. Only users or groups an operator
-//! grants the role can read the catalog. Every other catalog stays public by default.
+//! grants the role can read the catalog. The catalogs that are public by default are granted to
+//! signed-in users and anonymous visitors alike.
 
 use std::collections::BTreeSet;
 
@@ -81,22 +82,29 @@ fn world_trade_organization_catalog_is_restricted_by_default() {
     );
 }
 
+/// Restricting the WTO leaves the public defaults alone: the realm file's catalog-public set and
+/// the anonymous scope hold the same catalog reads, none restricted, and the restriction did not
+/// take others with it (BEA and BLS stay public).
 #[test]
-fn every_other_catalog_is_public_by_default() {
+fn restricting_a_catalog_leaves_the_public_defaults_alone() {
     let realm = realm();
     let (public, anonymous) = (catalog_public(&realm), anonymous_scope(&realm));
-    for role in Role::all().iter().filter(|r| r.is_catalog()) {
-        let name = role.as_str();
-        if RESTRICTED_BY_DEFAULT.contains(role) {
-            continue;
-        }
+    assert_eq!(public, anonymous, "signed-in and anonymous defaults differ");
+    for name in &public {
+        let role: Role = name
+            .parse()
+            .unwrap_or_else(|_| panic!("{name} is not a role"));
+        assert!(role.is_catalog(), "{name} is not a catalog read");
         assert!(
-            public.contains(name),
-            "{name} is missing from catalog-public"
+            !RESTRICTED_BY_DEFAULT.contains(&role),
+            "{name} is restricted"
         );
+    }
+    for role in [Role::CatalogBeaRead, Role::CatalogBlsRead] {
         assert!(
-            anonymous.contains(name),
-            "{name} is missing from the anonymous scope"
+            public.contains(role.as_str()),
+            "{} is not public",
+            role.as_str()
         );
     }
 }

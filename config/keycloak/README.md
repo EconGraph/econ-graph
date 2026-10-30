@@ -169,16 +169,16 @@ composite (the error names each one to remove). For the same reason no `catalog.
 may itself be a composite, at any depth: a role nested under one would reach every account. A
 deploy stops while one is, live or in the realm file. Remove a catalog read role from
 `catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
-Explicit grants to other groups or users still apply.
+Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
+`catalog-public` from the anonymous service account and assign its permitted catalog roles
+individually instead. Use group/composite grants for signed-in exceptions as usual.
 
-One catalog is restricted by default: `catalog.world_trade_organization:read` (World Trade
+The WTO catalog is restricted by default: `catalog.world_trade_organization:read` (World Trade
 Organization) is defined but is in neither `catalog-public` nor the anonymous client's scope, so
 only users or groups granted it can read WTO series. To open it up, grant the role to a user or
 group, or add it to `catalog-public` (and the anonymous scope) to make it public.
-`backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks the realm file keeps it
-that way, and every other catalog public. To restrict just anonymous access, remove
-`catalog-public` from the anonymous service account and assign its permitted catalog roles
-individually instead. Use group/composite grants for signed-in exceptions as usual.
+`backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks that the realm file
+keeps it that way.
 
 Visitors receive no token and no service-account identity. The backend obtains a client-credentials
 token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
