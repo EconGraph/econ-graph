@@ -36,9 +36,7 @@ source "$kind_lib"
 backup_encryption_preflight
 check_docker_daemon
 ensure_kind_kubectl
-if [[ "$DRY_RUN" != true ]]; then
-    mkdir -p "$BACKUP_ROOT"
-    exec 9>"$BACKUP_ROOT/.lock"
-    flock -n 9 || die "another host dump is running"
-fi
+# backup_databases takes the shared plaintext-staging lock; the timer fails
+# rather than wait for another writer.
+BACKUP_LOCK_NONBLOCK=true
 backup_databases "$(new_backup_dir)"

@@ -5,6 +5,8 @@
 **Scope**: Complete security analysis of EconGraph platform including Frontend, Backend, K8s, MCP, Chart API, and Terraform  
 **Status**: CRITICAL ISSUES IDENTIFIED - IMMEDIATE ACTION REQUIRED
 
+This historical report preserves the assessment recorded on 2025-01-27, including its findings, severity ratings, recommendations, and remediation deadlines. Its urgency statements refer to that assessment date; they do not establish the platform’s current security posture.
+
 ## Executive Summary
 
 This comprehensive security assessment reveals **CRITICAL** security vulnerabilities across all platform components including the React frontend stack. The most severe issues include hardcoded database passwords, missing network policies, unauthenticated MCP server access, vulnerable npm packages, and insecure frontend authentication that could lead to complete system compromise.
@@ -634,82 +636,70 @@ localStorage.setItem('auth_token', authData.token);
 
 ## Component-Specific Security Analysis
 
+This component index groups the original assessment’s observations without assigning separate severity ratings. The recorded ratings remain in the [numbered findings](#critical-security-issues-immediate-action-required), and the [risk summary](#risk-level-summary) retains their aggregate counts. Observations without a numbered counterpart have no additional severity rating here.
+
 ### Frontend Security Issues
 
-#### Critical Issues
-1. **Vulnerable NPM Package** - Axios vulnerability in admin frontend
-2. **Insecure Token Storage** - JWT tokens in localStorage
-3. **Missing CSP** - No Content Security Policy
-
-#### High Priority Issues
-1. **Basic Input Validation** - Limited client-side validation
-2. **Missing Security Headers** - Incomplete security header implementation
-3. **No XSS Protection** - Limited XSS prevention measures
-
-#### Medium Priority Issues
-1. **Build Security** - No build integrity verification
-2. **Dependency Management** - No automated vulnerability scanning
-3. **Error Handling** - Detailed error messages exposed
+- **Vulnerable NPM Package** - Axios vulnerability in admin frontend
+- **Insecure Token Storage** - JWT tokens in localStorage
+- **Missing CSP** - No Content Security Policy
+- **Basic Input Validation** - Limited client-side validation
+- **Missing Security Headers** - Incomplete security header implementation
+- **No XSS Protection** - Limited XSS prevention measures
+- **Build Security** - No build integrity verification
+- **Dependency Management** - No automated vulnerability scanning
+- **Error Handling** - Detailed error messages exposed
 
 ### Backend Security Issues
 
-#### Critical Issues
-1. **Hardcoded Secrets** - Default JWT secrets and OAuth credentials
-2. **Missing Input Validation** - Limited GraphQL and REST validation
-3. **Insecure CORS** - Overly permissive CORS configuration
-
-#### High Priority Issues
-1. **Weak JWT Implementation** - No token blacklisting or refresh tokens
-2. **Inadequate Logging** - Insufficient security event logging
-3. **Missing Rate Limiting** - No API rate limiting
+- **Hardcoded Secrets** - Default JWT secrets and OAuth credentials
+- **Missing Input Validation** - Limited GraphQL and REST validation
+- **Insecure CORS** - Overly permissive CORS configuration
+- **Weak JWT Implementation** - No token blacklisting or refresh tokens
+- **Inadequate Logging** - Insufficient security event logging
+- **Missing Rate Limiting** - No API rate limiting
 
 ### Kubernetes Security Issues
 
-#### Critical Issues
-1. **Hardcoded Database Password** - PostgreSQL password exposed
-2. **Missing Network Policies** - No network segmentation
-3. **Insufficient Security Contexts** - Most deployments lack security contexts
-
-#### High Priority Issues
-1. **Missing RBAC** - Inadequate role-based access control
-2. **No Pod Security Standards** - Missing pod security policies
-3. **Insecure Ingress** - Overly permissive CORS and missing security headers
+- **Hardcoded Database Password** - PostgreSQL password exposed
+- **Missing Network Policies** - No network segmentation
+- **Insufficient Security Contexts** - Most deployments lack security contexts
+- **Missing RBAC** - Inadequate role-based access control
+- **No Pod Security Standards** - Missing pod security policies
+- **Insecure Ingress** - Overly permissive CORS and missing security headers
 
 ### MCP Server Security Issues
 
-#### Critical Issues
-1. **No Authentication** - MCP server accepts unauthenticated requests
-2. **No Authorization** - No access control or permission checking
-3. **No Rate Limiting** - Vulnerable to DoS attacks
-
-#### High Priority Issues
-1. **No Input Validation** - Limited validation of MCP requests
-2. **No Logging** - Insufficient security event logging
-3. **No Error Handling** - Detailed error messages may leak information
+- **No Authentication** - MCP server accepts unauthenticated requests
+- **No Authorization** - No access control or permission checking
+- **No Rate Limiting** - Vulnerable to DoS attacks
+- **No Input Validation** - Limited validation of MCP requests
+- **No Logging** - Insufficient security event logging
+- **No Error Handling** - Detailed error messages may leak information
 
 ### Chart API Service Security Issues
 
-#### Critical Issues
-1. **Weak Authentication** - Relies only on IP whitelisting and headers
-2. **No Encryption** - No TLS for internal service communication
-3. **Insecure Headers** - Custom headers can be easily spoofed
-
-#### High Priority Issues
-1. **No Rate Limiting** - Vulnerable to abuse
-2. **No Input Validation** - Limited validation of chart requests
-3. **No Audit Logging** - Missing security event logging
+- **Weak Authentication** - Relies only on IP whitelisting and headers
+- **No Encryption** - No TLS for internal service communication
+- **Insecure Headers** - Custom headers can be easily spoofed
+- **Rate Limiting** - Originally described as absent and vulnerable to abuse; see the [historical evidence limitation](#historical-evidence-limitation-chart-api-rate-limiting)
+- **No Input Validation** - Limited validation of chart requests
+- **No Audit Logging** - Missing security event logging
 
 ### Terraform Security Issues
 
-#### Critical Issues
-1. **Insecure State Management** - No state encryption or remote storage
-2. **Hardcoded Values** - Sensitive values in configuration files
-3. **Missing Variable Validation** - No input validation
+- **Insecure State Management** - No state encryption or remote storage
+- **Hardcoded Values** - Sensitive values in configuration files
+- **Missing Variable Validation** - No input validation
+- **No Secret Management** - Secrets stored in plain text
+- **Missing Security Scanning** - No security validation of configurations
+- **Inadequate Access Controls** - No state access controls
 
-#### High Priority Issues
-1. **No Secret Management** - Secrets stored in plain text
-2. **Missing Security Scanning** - No security validation of configurations
-3. **Inadequate Access Controls** - No state access controls
+### Historical Evidence Limitation: Chart API Rate Limiting
+
+The original assessment makes conflicting claims about Chart API rate limiting: the [component recap](#chart-api-service-security-issues) described it as absent, the [positive findings](#well-implemented-security-controls) reported it as implemented, and the [component recommendations](#chart-api-security) called for adding it. None identifies a different endpoint, deployment, or assessment time that would explain the conflict.
+
+The [archived security findings report](../archive/projects/SECURITY_FINDINGS_REPORT.md#architecture-specific-security-considerations) records Chart API network restrictions and security headers but does not establish rate-limiting coverage. These historical records do not resolve whether rate limiting was absent, present, or incomplete on the assessment date. The three statements are retained as attributed assessment claims, without treating either claim as verified or inferring a coverage gap from current code.
 
 ## Positive Security Findings
 
@@ -725,7 +715,7 @@ localStorage.setItem('auth_token', authData.token);
 8. **Security Context**: Some Kubernetes security contexts properly configured
 9. **Health Checks**: Proper health check implementations
 10. **Resource Limits**: Some Kubernetes resource limits properly configured
-11. **Rate Limiting**: Chart API service has rate limiting implemented
+11. **Rate Limiting**: The original assessment reported Chart API rate limiting as implemented; see the [historical evidence limitation](#historical-evidence-limitation-chart-api-rate-limiting)
 12. **Security Headers**: Some security headers implemented in admin interface
 13. **Internal Network Security**: Chart API service restricts access to internal networks
 14. **Terraform Secrets**: Some secrets properly marked as sensitive in Terraform
@@ -805,7 +795,7 @@ localStorage.setItem('auth_token', authData.token);
 - Implement proper authentication
 - Add mutual TLS
 - Implement request signing
-- Add rate limiting
+- Add rate limiting (original recommendation; see the [historical evidence limitation](#historical-evidence-limitation-chart-api-rate-limiting))
 - Implement logging
 - Add monitoring
 

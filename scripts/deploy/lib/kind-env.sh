@@ -7,6 +7,12 @@
 # Callers set DRY_RUN=true|false and ASSUME_YES=true|false before using run()
 # or confirm().
 
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/agent-access.sh"
+if econgraph_agent_session; then
+    export ECONGRAPH_AGENT_SESSION=1
+fi
+
 # The Docker daemon the kind cluster runs on: the rootful system daemon
 # (data on ext4). kind can't start under rootless Docker on this host, whose
 # data root is on btrfs (kind then bind-mounts /dev/mapper into the nodes).
@@ -257,6 +263,18 @@ use_kind_kubectl() {
 # use_kind_kubectl, but return non-zero instead of exiting when the cluster is
 # missing or its API server doesn't answer (e.g. expired certificates).
 try_use_kind_kubectl() {
+    if [ "${ECONGRAPH_AGENT_SESSION:-}" = 1 ]; then
+        # Never mint cluster-admin credentials from Docker in a restricted session.
+        local agent_dir="${ECONGRAPH_KUBE_DIR:-}"
+        [ -n "$agent_dir" ] && [ -x "$agent_dir/bin/kubectl" ] &&
+            [ "${KUBECONFIG:-}" = "$agent_dir/kubeconfig-${KIND_CLUSTER}" ] || {
+            warn "restricted kubeconfig missing; ask the operator to renew it"
+            return 1
+        }
+        "$agent_dir/bin/kubectl" --kubeconfig "$KUBECONFIG" \
+            auth can-i get pods -n "${NAMESPACE}" --request-timeout=15s >/dev/null 2>&1
+        return
+    fi
     kind_cluster_exists || {
         warn "kind cluster '${KIND_CLUSTER}' not found on ${DOCKER_HOST}"
         return 1
@@ -308,6 +326,10 @@ ensure_kind_kubectl() {
 
 # ensure_kind_kubectl, but return non-zero instead of exiting.
 ensure_kind_kubectl_quietly() {
+    if [ "${ECONGRAPH_AGENT_SESSION:-}" = 1 ]; then
+        try_use_kind_kubectl
+        return
+    fi
     local dir="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}"
     if [ "${KUBECONFIG:-}" = "${dir}/kubeconfig-${KIND_CLUSTER}" ] &&
         [ "$(command -v kubectl)" = "${dir}/bin/kubectl" ] && [ -x "${dir}/bin/kubectl" ]; then
@@ -419,6 +441,13 @@ backup_encryption_lib="$(dirname "${BASH_SOURCE[0]}")/../../backup/encryption.sh
 # shellcheck source=scripts/backup/encryption.sh
 source "$backup_encryption_lib"
 
+# backup_databases OUTPUT: the encrypted recovery bundle every destructive
+# script takes first. Every writer staging plaintext in BACKUP_PLAINTEXT_ROOT
+# is serialized by backup_staging_lock (scripts/backup/encryption.sh),
+# whatever its destination root, taken before the destination is checked (or
+# earlier, by backup_check_tmpfs_space) and released once the bundle is
+# published (a failed attempt keeps it until the caller exits).
+# BACKUP_LOCK_NONBLOCK=true fails instead of waiting (the nightly timer).
 backup_databases() {
     local output="$1" scratch cleanup
     umask 077
@@ -428,8 +457,9 @@ backup_databases() {
         echo "+ encrypt the verified dumps, counts and Secrets into $output/backup.tar.age"
         return
     fi
+    backup_staging_lock
     [[ ! -e "$output" && ! -e "${output}.partial" ]] || die "$output already exists"
-    scratch="$(backup_plaintext_dir)"
+    scratch="$(backup_plaintext_dir)" || die "could not create private tmpfs staging"
     # This is only disposable RAM staging, never a backup directory.
     printf -v cleanup 'rm -rf -- %q' "$scratch"
     add_exit_cleanup "$cleanup"
@@ -442,7 +472,45 @@ backup_databases() {
     backup_seal_dir "$scratch/payload" "$output" || return
     BACKUP_ACTIVE_OUTPUT="$output"
     BACKUP_ACTIVE_DIR="$scratch/payload"
+    backup_staging_unlock
     log "Encrypted backup complete: $output (no identity used)"
+}
+
+# Check, before any downtime, that the private tmpfs staging has room for the
+# dumps backup_databases will write there: at least the on-disk size of every
+# running database (a custom-format dump is compressed and leaves out indexes,
+# so it is smaller) plus 64 MiB for counts and Secrets. Room is the smaller of
+# the tmpfs's free space and the memory available to fill it (MemAvailable).
+# Call after backup_encryption_preflight, which picks BACKUP_PLAINTEXT_ROOT.
+# Outside a dry run it first takes backup_staging_lock, which backup_databases
+# then keeps, so no other writer can use the room between the check and the
+# backup.
+backup_check_tmpfs_space() {
+    local spec pod container user db size need=$((64 * 1024 * 1024)) free mem
+    [[ "${DRY_RUN}" == true ]] || backup_staging_lock
+    for spec in "postgresql-0 postgresql postgres econ_graph" \
+        "app-postgres-0 postgres postgres econ_graph_app" \
+        "keycloak-postgres-0 postgres keycloak keycloak"; do
+        read -r pod container user db <<<"$spec"
+        pod_running "$pod" || continue
+        size="$(k exec "$pod" -c "$container" -- psql -X -qAt -v ON_ERROR_STOP=1 -U "$user" -d "$db" \
+            -c 'select pg_database_size(current_database())')" ||
+            die "could not measure database $db for the tmpfs staging check; nothing was stopped"
+        [[ "$size" =~ ^[0-9]+$ ]] || die "invalid size '$size' for database $db; nothing was stopped"
+        need=$((need + size))
+    done
+    free="$(df -B1 --output=avail -- "${BACKUP_PLAINTEXT_ROOT}" | tail -n 1 | tr -d '[:space:]')" ||
+        die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
+    [[ "$free" =~ ^[0-9]+$ ]] || die "could not read the free space of ${BACKUP_PLAINTEXT_ROOT}; nothing was stopped"
+    # tmpfs size limits are usually larger than the memory actually free.
+    mem="$(awk '$1 == "MemAvailable:" { printf "%.0f\n", $2 * 1024 }' "${BACKUP_MEMINFO:-/proc/meminfo}")" ||
+        die "could not read MemAvailable; nothing was stopped"
+    [[ "$mem" =~ ^[0-9]+$ ]] || die "could not read MemAvailable; nothing was stopped"
+    ((mem >= free)) || free="$mem"
+    if ((free < need)); then
+        die "${BACKUP_PLAINTEXT_ROOT} has $((free / 1048576)) MiB free (the smaller of its free space and MemAvailable), but the backup may need $((need / 1048576)) MiB of private tmpfs staging; nothing was stopped. Enlarge it (sudo mount -o remount,size=... ${BACKUP_PLAINTEXT_ROOT}) or point BACKUP_PLAINTEXT_ROOT at a larger tmpfs"
+    fi
+    echo "  tmpfs staging: $((free / 1048576)) MiB free in ${BACKUP_PLAINTEXT_ROOT}, at most $((need / 1048576)) MiB needed"
 }
 
 # pg_dump the data, app and Keycloak databases, verify the archives, record

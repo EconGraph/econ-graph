@@ -260,7 +260,7 @@ nor its data PVC exists. A stopped or unreachable deployed database fails the
 backup. The payload includes `counts.env`, `MANIFEST` and the cluster Secrets
 needed to recover the databases with their original credentials.
 
-Install `age` on the host. Set **only the public recipient** in
+Install `age` (with `age-keygen`) on the host. Set **only the public recipient** in
 `~/.config/econgraph/backup.env` (or the environment):
 
 ```sh
@@ -270,8 +270,17 @@ BACKUP_AGE_RECIPIENT=age1... # the maintainer's actual public recipient
 Keep the private identity outside agent access and off this host if possible.
 No private identity is installed in a timer or backup configuration. Missing
 or invalid recipient, missing age, or unavailable tmpfs staging fails closed:
-there is no plaintext fallback. Deployment scripts that stop writers before
-backing up check encryption prerequisites before downtime.
+there is no plaintext fallback. Teardown, cluster recreation and the
+host-storage migration check these before they dump, stop or delete anything.
+The migration, which stops the writers before its backup, also checks before
+the downtime that the tmpfs staging has room for the on-disk size of every
+running database plus 64 MiB, taking the smaller of the tmpfs's free space and
+`MemAvailable`.
+
+`backup_recipient_proven` in `scripts/backup/encryption.sh` is the hook for
+proving that the maintainer holds the recipient's private identity; it
+currently accepts every well-formed recipient, so a backup proves that its
+ciphertext decrypts, not that the maintainer's key can decrypt it.
 
 The persistent output is:
 
@@ -279,12 +288,26 @@ The persistent output is:
 ~/econgraph-backups/<YYYYMMDDTHHMMSSZ>/
   backup.tar.age  # encrypted dumps, counts, MANIFEST and Secrets together
   SHA256SUMS      # checksum of the ciphertext
-  VERIFIED        # timestamp: payload read-back and encryption succeeded
+  VERIFIED        # timestamp: payload read-back and the decrypt check passed
 ```
 
-Publication uses an exclusive `.partial` directory and a final rename only
-after all writes succeed. Failed ciphertext remains `.partial` without a
-`VERIFIED` marker. Existing backups are never overwritten, deleted or
+The payload is encrypted to the public recipient and to a throwaway age key
+generated in the tmpfs staging. The published `backup.tar.age` is decrypted
+with the throwaway key and the decrypted tar stream must hash the same as the
+stream that was encrypted; the throwaway key is then destroyed, so it cannot
+open the bundle later. A payload file that tar cannot read fails the seal
+(each pipeline stage's status is checked). Publication uses an exclusive `.partial` directory, an
+fsync of the ciphertext, checksum, marker and directory, and a final rename
+(itself fsynced) only after all writes and the decrypt check succeed. Failed
+ciphertext remains `.partial` without a `VERIFIED` marker, also when the
+output appears before the rename. Every writer that stages plaintext in the
+same tmpfs (`BACKUP_PLAINTEXT_ROOT`), whatever its destination root, holds one
+lock there (`.econgraph-backup-<uid>.lock`); the migration takes it before its
+room check and keeps it through its backup. The nightly timer fails rather
+than wait; the deployment scripts say which writer holds it and wait up to
+`BACKUP_LOCK_TIMEOUT` seconds (default 3600), then refuse. `open-backup.sh`
+holds the same lock while its command runs, since it decrypts into the same
+tmpfs; a backup that command takes reuses the lock it inherited. Existing backups are never overwritten, deleted or
 converted automatically. The files are 0600 and directories 0700.
 `--target-dir` or `BACKUP_ROOT` selects the nightly output root; the default
 uses `/srv/econgraph-backups/dumps` when available, otherwise
@@ -327,9 +350,16 @@ synthetic identity and transport stubs. The concurrent-write regression
 (`python3 scripts/backup/test-snapshot-counts.py`) starts one isolated
 `postgres:18` container, inserts rows after each snapshot export, restores all
 three archives, and checks that metadata and restored rows agree while the
-live fixture has newer rows. It also checks that exporter sessions are closed.
-CI runs both; the real PostgreSQL check adds a scratch-container image pull
-and fixture run. Neither test uses a live cluster, backup or maintainer key.
+live fixture has newer rows. It also checks that exporter sessions are closed;
+it uses the daemon in `DOCKER_HOST` (for example the rootless one), else the
+system daemon. `scripts/deploy/test-backup-refusals.sh` runs teardown,
+recreation and both migration directions against stubs and checks that each
+refuses without a recipient, with disk staging, and (the migration) with too
+little tmpfs, before any dump or downtime. `scripts/backup/test-restore-drill.sh`
+checks the drill's encrypted-bundle guard and tmpfs data directory with a
+Docker stub. CI runs all four; the real PostgreSQL check adds a
+scratch-container image pull and fixture run. None of them uses a live
+cluster, backup or maintainer key.
 
 ## Restore drill
 
@@ -353,7 +383,9 @@ private key it cannot restore an encrypted backup. Run the drill manually
 at least weekly; the existing freshness check still reports overdue drills.
 An unattended invocation fails clearly and records no false restore PASS.
 
-The drill starts `postgres:18` on a random localhost port, restores `econ_graph`
+The drill starts `postgres:18` on a random localhost port, with a tmpfs at
+every `VOLUME` the image declares, and refuses an image whose `PGDATA` is not
+under one, so the restored plaintext never reaches a disk volume. It restores `econ_graph`
 (and `econ_graph_app` and `keycloak` from the same directory), and checks: `economic_series`,
 `data_points` and `data_sources` are non-empty, no data point references a
 missing series, no data point lacks a date, the Diesel migration table is

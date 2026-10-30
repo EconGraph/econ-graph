@@ -1,0 +1,506 @@
+# Example branch overlay. deploy-branch.sh renders the actual branch identity and images.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+- extras.yaml
+patches:
+- target:
+    kind: ConfigMap
+    name: econ-graph-config
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /data\n  value:\n    BACKEND_PORT: '9876'\n    FRONTEND_PORT:\
+    \ '3000'\n    ADMIN_FRONTEND_PORT: '3001'\n    DATABASE_PORT: '5432'\n    RUST_LOG:\
+    \ info\n    CORS_ORIGIN: http://example-50d858e098.localhost\n    CHART_API_SERVICE_URL:\
+    \ ''\n    NODE_ENV: development\n"
+- target:
+    kind: Deployment
+    name: econ-graph-backend
+    version: v1
+    group: apps
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    replicas: 1\n    selector:\n     \
+    \ matchLabels:\n        app: econ-graph-backend\n    template:\n      metadata:\n\
+    \        labels:\n          app: econ-graph-backend\n          component: backend\n\
+    \      spec:\n        initContainers:\n        - name: wait-for-postgres\n   \
+    \       image: busybox:1.38\n          command:\n          - sh\n          - -c\n\
+    \          args:\n          - \"echo \\\"Waiting for PostgreSQL to be ready...\\\
+    \"\\nuntil nc -z app-postgres-service\\\n            \\ 5432; do\\n  echo \\\"\
+    PostgreSQL is unavailable - sleeping\\\"\\n  sleep 2\\n\\\n            done\\\
+    necho \\\"PostgreSQL is ready!\\\"\\n\"\n          resources:\n            requests:\n\
+    \              memory: 16Mi\n              cpu: 10m\n            limits:\n   \
+    \           memory: 32Mi\n              cpu: 50m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation:\
+    \ false\n            readOnlyRootFilesystem: true\n            capabilities:\n\
+    \              drop:\n              - ALL\n            seccompProfile:\n     \
+    \         type: RuntimeDefault\n        containers:\n        - name: backend\n\
+    \          image: econ-graph-backend:branch-example\n          imagePullPolicy:\
+    \ IfNotPresent\n          ports:\n          - containerPort: 9876\n          \
+    \  name: http\n          env:\n          - name: BACKEND_PORT\n            valueFrom:\n\
+    \              configMapKeyRef:\n                name: econ-graph-config\n   \
+    \             key: BACKEND_PORT\n          - name: FRONTEND_PORT\n           \
+    \ valueFrom:\n              configMapKeyRef:\n                name: econ-graph-config\n\
+    \                key: FRONTEND_PORT\n          - name: APP_DATABASE_URL\n    \
+    \        valueFrom:\n              secretKeyRef:\n                name: econ-graph-secrets\n\
+    \                key: app-database-url\n          - name: RUST_LOG\n         \
+    \   valueFrom:\n              configMapKeyRef:\n                name: econ-graph-config\n\
+    \                key: RUST_LOG\n          - name: REFERENCE_DATA_DIR\n       \
+    \     value: /app/reference\n          - name: CRAWLER_DATA_DIR\n            value:\
+    \ /app/data\n          - name: CORS_ALLOWED_ORIGINS\n            valueFrom:\n\
+    \              configMapKeyRef:\n                name: econ-graph-config\n   \
+    \             key: CORS_ORIGIN\n          - name: OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP\n\
+    \            value: 'true'\n          - name: OIDC_ANONYMOUS_TOKEN_URL\n     \
+    \       value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token\n\
+    \          - name: OIDC_ANONYMOUS_CLIENT_SECRET\n            valueFrom:\n    \
+    \          secretKeyRef:\n                name: econ-graph-keycloak\n        \
+    \        key: anonymous-client-secret\n          - name: ANONYMOUS_GRANTS_STALE_MAX_SECS\n\
+    \            value: '0'\n          - name: OIDC_AUDIENCE\n            value: econ-graph-api\n\
+    \          - name: OIDC_JWKS_URL\n            value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs\n\
+    \          - name: OIDC_REQUIRED\n            value: 'true'\n          - name:\
+    \ OIDC_ISSUER\n            value: http://example-50d858e098.localhost/idp/realms/econ-graph\n\
+    \          - name: DATA_GRAPHQL_URL\n            value: http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql\n\
+    \          - name: DATA_GRAPHQL_HOST\n            value: example-50d858e098.localhost\n\
+    \          resources:\n            requests:\n              memory: 256Mi\n  \
+    \            cpu: 100m\n            limits:\n              memory: 512Mi\n   \
+    \           cpu: 500m\n          startupProbe:\n            httpGet:\n       \
+    \       path: /readyz\n              port: 9876\n            initialDelaySeconds:\
+    \ 10\n            periodSeconds: 5\n            timeoutSeconds: 3\n          \
+    \  failureThreshold: 30\n          livenessProbe:\n            httpGet:\n    \
+    \          path: /livez\n              port: 9876\n            initialDelaySeconds:\
+    \ 30\n            periodSeconds: 10\n            timeoutSeconds: 3\n         \
+    \   failureThreshold: 3\n          readinessProbe:\n            httpGet:\n   \
+    \           path: /readyz\n              port: 9876\n            initialDelaySeconds:\
+    \ 15\n            periodSeconds: 5\n            timeoutSeconds: 3\n          \
+    \  failureThreshold: 3\n          securityContext:\n            runAsNonRoot:\
+    \ true\n            runAsUser: 1000\n            allowPrivilegeEscalation: false\n\
+    \            readOnlyRootFilesystem: true\n            capabilities:\n       \
+    \       drop:\n              - ALL\n            seccompProfile:\n            \
+    \  type: RuntimeDefault\n        securityContext:\n          fsGroup: 1000\n \
+    \         seccompProfile:\n            type: RuntimeDefault\n        restartPolicy:\
+    \ Always\n        automountServiceAccountToken: false\n"
+- target:
+    kind: Service
+    name: econ-graph-backend-service
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    type: ClusterIP\n    ports:\n    -\
+    \ port: 9876\n      targetPort: 9876\n      protocol: TCP\n      name: http\n\
+    \    selector:\n      app: econ-graph-backend\n"
+- target:
+    kind: Deployment
+    name: econ-graph-frontend
+    version: v1
+    group: apps
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    replicas: 1\n    selector:\n     \
+    \ matchLabels:\n        app: econ-graph-frontend\n    template:\n      metadata:\n\
+    \        labels:\n          app: econ-graph-frontend\n          component: frontend\n\
+    \      spec:\n        containers:\n        - name: frontend\n          image:\
+    \ econ-graph-frontend:branch-example\n          imagePullPolicy: IfNotPresent\n\
+    \          ports:\n          - containerPort: 3000\n            name: http\n \
+    \         env: []\n          resources:\n            requests:\n             \
+    \ memory: 128Mi\n              cpu: 50m\n            limits:\n              memory:\
+    \ 256Mi\n              cpu: 200m\n          livenessProbe:\n            httpGet:\n\
+    \              path: /\n              port: 3000\n            initialDelaySeconds:\
+    \ 30\n            periodSeconds: 10\n          readinessProbe:\n            httpGet:\n\
+    \              path: /\n              port: 3000\n            initialDelaySeconds:\
+    \ 5\n            periodSeconds: 5\n          volumeMounts:\n          - name:\
+    \ nginx-cache\n            mountPath: /var/cache/nginx\n          - name: nginx-run\n\
+    \            mountPath: /var/run\n          securityContext:\n            runAsNonRoot:\
+    \ true\n            runAsUser: 1000\n            allowPrivilegeEscalation: false\n\
+    \            readOnlyRootFilesystem: true\n            capabilities:\n       \
+    \       drop:\n              - ALL\n            seccompProfile:\n            \
+    \  type: RuntimeDefault\n        securityContext:\n          fsGroup: 1000\n \
+    \         seccompProfile:\n            type: RuntimeDefault\n        volumes:\n\
+    \        - name: nginx-cache\n          emptyDir: {}\n        - name: nginx-run\n\
+    \          emptyDir: {}\n        restartPolicy: Always\n        automountServiceAccountToken:\
+    \ false\n"
+- target:
+    kind: Service
+    name: econ-graph-frontend-service
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    type: ClusterIP\n    ports:\n    -\
+    \ port: 3000\n      targetPort: 3000\n      protocol: TCP\n      name: http\n\
+    \    selector:\n      app: econ-graph-frontend\n"
+- target:
+    kind: ConfigMap
+    name: app-postgres-init
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
+- target:
+    kind: Service
+    name: app-postgres-service
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
+- target:
+    kind: StatefulSet
+    name: app-postgres
+    version: v1
+    group: apps
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    serviceName: app-postgres-service\n\
+    \    replicas: 1\n    selector:\n      matchLabels:\n        app: app-postgres\n\
+    \    template:\n      metadata:\n        labels:\n          app: app-postgres\n\
+    \          version: '18'\n      spec:\n        initContainers:\n        - name:\
+    \ init-data-dir\n          image: postgres:18\n          command:\n          -\
+    \ sh\n          - -ec\n          - \"root=\\\"$1\\\"; pgdata=\\\"$2\\\"\\n# The\
+    \ host directory starts out owned by\\\n            \\ the operator account. Postgres\
+    \ runs\\n# as 999 and has to create PGDATA\\\n            \\ inside it, so hand\
+    \ the volume root over.\\nchown 999:999 \\\"$root\\\"\\n\\\n            chmod\
+    \ 0700 \\\"$root\\\"\\n# A data directory restored by a copy that didn't\\\n \
+    \           \\ keep ownership (anything\\n# but 999:999) would stop Postgres starting;\\\
+    \n            \\ fix it once.\\nif [ -e \\\"$pgdata\\\" ] && [ \\\"$(stat -c %u:%g\
+    \ \\\"$pgdata\\\"\\\n            )\\\" != \\\"999:999\\\" ]; then\\n  echo \\\"\
+    fixing ownership of $pgdata\\\"\\n \\\n            \\ chown -R 999:999 \\\"$pgdata\\\
+    \"\\nfi\\nstat -c '%n %u:%g %a' \\\"$root\\\"\\n\"\n          - init-data-dir\n\
+    \          - /data\n          - /data/pgdata\n          volumeMounts:\n      \
+    \    - name: app-postgres-data\n            mountPath: /data\n          securityContext:\n\
+    \            runAsUser: 0\n            runAsNonRoot: false\n            allowPrivilegeEscalation:\
+    \ false\n            readOnlyRootFilesystem: true\n            capabilities:\n\
+    \              drop:\n              - ALL\n              add:\n              -\
+    \ CHOWN\n              - FOWNER\n              - DAC_READ_SEARCH\n           \
+    \ seccompProfile:\n              type: RuntimeDefault\n        containers:\n \
+    \       - name: postgres\n          image: postgres:18\n          ports:\n   \
+    \       - containerPort: 5432\n            name: postgres\n          env:\n  \
+    \        - name: POSTGRES_DB\n            value: econ_graph_app\n          - name:\
+    \ POSTGRES_USER\n            value: postgres\n          - name: POSTGRES_PASSWORD\n\
+    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-app-postgres\n\
+    \                key: postgres-password\n          - name: APP_DB_PASSWORD\n \
+    \           valueFrom:\n              secretKeyRef:\n                name: econ-graph-app-postgres\n\
+    \                key: app-password\n          - name: PGDATA\n            value:\
+    \ /data/pgdata\n          volumeMounts:\n          - name: app-postgres-data\n\
+    \            mountPath: /data\n          - name: app-postgres-init\n         \
+    \   mountPath: /docker-entrypoint-initdb.d\n          resources:\n           \
+    \ requests:\n              memory: 256Mi\n              cpu: 100m\n          \
+    \  limits:\n              memory: 1Gi\n              cpu: 500m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 999\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n          livenessProbe:\n\
+    \            exec:\n              command:\n              - pg_isready\n     \
+    \         - -U\n              - postgres\n              - -d\n              -\
+    \ econ_graph_app\n            initialDelaySeconds: 30\n            periodSeconds:\
+    \ 10\n            timeoutSeconds: 5\n            failureThreshold: 3\n       \
+    \   readinessProbe:\n            exec:\n              command:\n             \
+    \ - pg_isready\n              - -U\n              - postgres\n              -\
+    \ -d\n              - econ_graph_app\n            initialDelaySeconds: 5\n   \
+    \         periodSeconds: 5\n            timeoutSeconds: 3\n            failureThreshold:\
+    \ 3\n        volumes:\n        - name: app-postgres-init\n          configMap:\n\
+    \            name: app-postgres-init\n            defaultMode: 365\n        securityContext:\n\
+    \          fsGroup: 999\n        automountServiceAccountToken: false\n    volumeClaimTemplates:\n\
+    \    - metadata:\n        name: app-postgres-data\n      spec:\n        accessModes:\n\
+    \        - ReadWriteOnce\n        storageClassName: standard\n        resources:\n\
+    \          requests:\n            storage: 2Gi\n"
+- target:
+    kind: Service
+    name: keycloak-postgres-service
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
+- target:
+    kind: StatefulSet
+    name: keycloak-postgres
+    version: v1
+    group: apps
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    serviceName: keycloak-postgres-service\n\
+    \    replicas: 1\n    selector:\n      matchLabels:\n        app: keycloak-postgres\n\
+    \    template:\n      metadata:\n        labels:\n          app: keycloak-postgres\n\
+    \          version: '18'\n      spec:\n        initContainers:\n        - name:\
+    \ init-data-dir\n          image: postgres:18\n          command:\n          -\
+    \ sh\n          - -ec\n          - \"root=\\\"$1\\\"; pgdata=\\\"$2\\\"\\n# The\
+    \ host directory starts out owned by\\\n            \\ the operator account. Postgres\
+    \ runs\\n# as 999 and has to create PGDATA\\\n            \\ inside it, so hand\
+    \ the volume root over.\\nchown 999:999 \\\"$root\\\"\\n\\\n            chmod\
+    \ 0700 \\\"$root\\\"\\n# A data directory restored by a copy that didn't\\\n \
+    \           \\ keep ownership (anything\\n# but 999:999) would stop Postgres starting;\\\
+    \n            \\ fix it once.\\nif [ -e \\\"$pgdata\\\" ] && [ \\\"$(stat -c %u:%g\
+    \ \\\"$pgdata\\\"\\\n            )\\\" != \\\"999:999\\\" ]; then\\n  echo \\\"\
+    fixing ownership of $pgdata\\\"\\n \\\n            \\ chown -R 999:999 \\\"$pgdata\\\
+    \"\\nfi\\nstat -c '%n %u:%g %a' \\\"$root\\\"\\n\"\n          - init-data-dir\n\
+    \          - /var/lib/postgresql\n          - /var/lib/postgresql/18/docker\n\
+    \          volumeMounts:\n          - name: keycloak-postgres-data\n         \
+    \   mountPath: /var/lib/postgresql\n          securityContext:\n            runAsUser:\
+    \ 0\n            runAsNonRoot: false\n            allowPrivilegeEscalation: false\n\
+    \            readOnlyRootFilesystem: true\n            capabilities:\n       \
+    \       drop:\n              - ALL\n              add:\n              - CHOWN\n\
+    \              - FOWNER\n              - DAC_READ_SEARCH\n            seccompProfile:\n\
+    \              type: RuntimeDefault\n        containers:\n        - name: postgres\n\
+    \          image: postgres:18\n          ports:\n          - containerPort: 5432\n\
+    \            name: postgres\n          env:\n          - name: POSTGRES_DB\n \
+    \           value: keycloak\n          - name: POSTGRES_USER\n            value:\
+    \ keycloak\n          - name: POSTGRES_PASSWORD\n            valueFrom:\n    \
+    \          secretKeyRef:\n                name: econ-graph-keycloak\n        \
+    \        key: db-password\n          volumeMounts:\n          - name: keycloak-postgres-data\n\
+    \            mountPath: /var/lib/postgresql\n          resources:\n          \
+    \  requests:\n              memory: 256Mi\n              cpu: 100m\n         \
+    \   limits:\n              memory: 512Mi\n              cpu: 500m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 999\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n          livenessProbe:\n\
+    \            exec:\n              command:\n              - pg_isready\n     \
+    \         - -U\n              - keycloak\n              - -d\n              -\
+    \ keycloak\n            initialDelaySeconds: 30\n            periodSeconds: 10\n\
+    \            timeoutSeconds: 5\n            failureThreshold: 3\n          readinessProbe:\n\
+    \            exec:\n              command:\n              - pg_isready\n     \
+    \         - -U\n              - keycloak\n              - -d\n              -\
+    \ keycloak\n            initialDelaySeconds: 5\n            periodSeconds: 5\n\
+    \            timeoutSeconds: 3\n            failureThreshold: 3\n        securityContext:\n\
+    \          fsGroup: 999\n        automountServiceAccountToken: false\n    volumeClaimTemplates:\n\
+    \    - metadata:\n        name: keycloak-postgres-data\n      spec:\n        accessModes:\n\
+    \        - ReadWriteOnce\n        storageClassName: standard\n        resources:\n\
+    \          requests:\n            storage: 2Gi\n"
+- target:
+    kind: Service
+    name: keycloak-service
+    version: v1
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
+- target:
+    kind: Deployment
+    name: keycloak
+    version: v1
+    group: apps
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    replicas: 1\n    strategy:\n     \
+    \ type: Recreate\n    selector:\n      matchLabels:\n        app: keycloak\n \
+    \   template:\n      metadata:\n        labels:\n          app: keycloak\n   \
+    \       component: auth\n      spec:\n        containers:\n        - name: keycloak\n\
+    \          image: quay.io/keycloak/keycloak:26.8.1\n          command:\n     \
+    \     - /bin/bash\n          - -c\n          args:\n          - 'if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
+    \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
+    \ fi\n\n            exec /opt/keycloak/bin/kc.sh start\n\n            '\n    \
+    \      env:\n          - name: KC_BOOTSTRAP_ADMIN_USERNAME\n            valueFrom:\n\
+    \              secretKeyRef:\n                name: econ-graph-keycloak\n    \
+    \            key: admin-username\n          - name: KC_BOOTSTRAP_ADMIN_PASSWORD\n\
+    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: admin-password\n          - name: KC_DB\n            value:\
+    \ postgres\n          - name: KC_DB_URL\n            value: jdbc:postgresql://keycloak-postgres-service:5432/keycloak\n\
+    \          - name: KC_DB_USERNAME\n            value: keycloak\n          - name:\
+    \ KC_DB_PASSWORD\n            valueFrom:\n              secretKeyRef:\n      \
+    \          name: econ-graph-keycloak\n                key: db-password\n     \
+    \     - name: KC_HOSTNAME_ADMIN\n            value: http://localhost:18080/idp\n\
+    \          - name: KC_HTTP_RELATIVE_PATH\n            value: /idp\n          -\
+    \ name: KC_HTTP_ENABLED\n            value: 'true'\n          - name: KC_PROXY_HEADERS\n\
+    \            value: xforwarded\n          - name: KC_HEALTH_ENABLED\n        \
+    \    value: 'true'\n          - name: KC_ANONYMOUS_CLIENT_SECRET\n           \
+    \ valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: anonymous-client-secret\n          - name: KC_HOSTNAME\n\
+    \            value: http://example-50d858e098.localhost/idp\n          - name:\
+    \ KC_WEB_BASE_URL\n            value: http://example-50d858e098.localhost\n  \
+    \        - name: KC_WEB_E2E_BASE_URL\n            value: http://example-50d858e098.localhost\n\
+    \          ports:\n          - containerPort: 8080\n            name: http\n \
+    \         - containerPort: 9000\n            name: management\n          resources:\n\
+    \            requests:\n              memory: 512Mi\n              cpu: 250m\n\
+    \            limits:\n              memory: 1Gi\n              cpu: 1000m\n  \
+    \        startupProbe:\n            httpGet:\n              path: /idp/health/started\n\
+    \              port: management\n            periodSeconds: 5\n            timeoutSeconds:\
+    \ 3\n            failureThreshold: 180\n          livenessProbe:\n           \
+    \ httpGet:\n              path: /idp/health/live\n              port: management\n\
+    \            periodSeconds: 10\n            timeoutSeconds: 3\n            failureThreshold:\
+    \ 3\n          readinessProbe:\n            httpGet:\n              path: /idp/health/ready\n\
+    \              port: management\n            periodSeconds: 5\n            timeoutSeconds:\
+    \ 3\n            failureThreshold: 3\n          securityContext:\n           \
+    \ runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n        securityContext:\n\
+    \          seccompProfile:\n            type: RuntimeDefault\n        automountServiceAccountToken:\
+    \ false\n"
+- target:
+    kind: Job
+    name: keycloak-realm-import
+    version: v1
+    group: batch
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    backoffLimit: 1\n    ttlSecondsAfterFinished:\
+    \ 86400\n    template:\n      metadata:\n        labels:\n          app: keycloak-realm-import\n\
+    \          component: auth\n      spec:\n        restartPolicy: Never\n      \
+    \  automountServiceAccountToken: false\n        initContainers:\n        - name:\
+    \ render-realm\n          image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5\n\
+    \          command:\n          - /bin/bash\n          - -c\n          args:\n\
+    \          - 'set -euo pipefail\n\n            if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
+    \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
+    \ fi\n\n            bash /config/render-realm.sh /config/econ-graph-realm.json\
+    \ > /rendered/realm-template.json\n\n            python /config/preserve-catalog-grants.py\
+    \ /rendered/realm-template.json\n            > /rendered/econ-graph-realm.json\n\
+    \n            '\n          env:\n          - name: KEYCLOAK_URL\n            value:\
+    \ http://keycloak-service:8080/idp\n          - name: KEYCLOAK_USER\n        \
+    \    valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: admin-username\n          - name: KEYCLOAK_PASSWORD\n  \
+    \          valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: admin-password\n          - name: KC_ANONYMOUS_CLIENT_SECRET\n\
+    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
+    \                key: anonymous-client-secret\n          - name: KC_WEB_BASE_URL\n\
+    \            value: http://example-50d858e098.localhost\n          - name: KC_WEB_E2E_BASE_URL\n\
+    \            value: http://example-50d858e098.localhost\n          volumeMounts:\n\
+    \          - name: realm\n            mountPath: /config\n            readOnly:\
+    \ true\n          - name: rendered\n            mountPath: /rendered\n       \
+    \   resources:\n            requests:\n              memory: 64Mi\n          \
+    \    cpu: 50m\n            limits:\n              memory: 128Mi\n            \
+    \  cpu: 250m\n          securityContext:\n            runAsNonRoot: true\n   \
+    \         runAsUser: 1000\n            allowPrivilegeEscalation: false\n     \
+    \       capabilities:\n              drop:\n              - ALL\n            seccompProfile:\n\
+    \              type: RuntimeDefault\n        - name: keycloak-config-cli\n   \
+    \       image: adorsys/keycloak-config-cli:6.5.1-26.5.5\n          env:\n    \
+    \      - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
+    \          - name: KEYCLOAK_USER\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-username\n\
+    \          - name: KEYCLOAK_PASSWORD\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-password\n\
+    \          - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED\n            value: 'true'\n\
+    \          - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT\n            value: 600s\n\
+    \          - name: IMPORT_BEHAVIORS_REMOVEDEFAULTROLEFROMUSER\n            value:\
+    \ 'true'\n          - name: IMPORT_FILES_LOCATIONS\n            value: /rendered/econ-graph-realm.json\n\
+    \          volumeMounts:\n          - name: rendered\n            mountPath: /rendered\n\
+    \            readOnly: true\n          resources:\n            requests:\n   \
+    \           memory: 256Mi\n              cpu: 100m\n            limits:\n    \
+    \          memory: 512Mi\n              cpu: 500m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 65534\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n        containers:\n\
+    \        - name: finalize-catalog-policy\n          image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5\n\
+    \          command:\n          - python\n          - /config/preserve-catalog-grants.py\n\
+    \          - --complete\n          - /rendered/econ-graph-realm.json\n       \
+    \   env:\n          - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
+    \          - name: KEYCLOAK_USER\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-username\n\
+    \          - name: KEYCLOAK_PASSWORD\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-password\n\
+    \          volumeMounts:\n          - name: realm\n            mountPath: /config\n\
+    \            readOnly: true\n          - name: rendered\n            mountPath:\
+    \ /rendered\n            readOnly: true\n          resources:\n            requests:\n\
+    \              memory: 64Mi\n              cpu: 50m\n            limits:\n   \
+    \           memory: 128Mi\n              cpu: 250m\n          securityContext:\n\
+    \            runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation:\
+    \ false\n            capabilities:\n              drop:\n              - ALL\n\
+    \            seccompProfile:\n              type: RuntimeDefault\n        volumes:\n\
+    \        - name: realm\n          configMap:\n            name: keycloak-realm\n\
+    \        - name: rendered\n          emptyDir: {}\n        securityContext:\n\
+    \          seccompProfile:\n            type: RuntimeDefault\n"
+- target:
+    kind: HTTPRoute
+    name: econ-graph-frontend
+    version: v1
+    group: gateway.networking.k8s.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    parentRefs:\n    - name: econ-graph-gateway\n\
+    \      namespace: econ-graph-gateway\n      sectionName: http\n    hostnames:\n\
+    \    - example-50d858e098.localhost\n    rules:\n    - matches:\n      - path:\n\
+    \          type: PathPrefix\n          value: /\n      - path:\n          type:\
+    \ Exact\n          value: /auth/callback\n      filters:\n      - type: RequestHeaderModifier\n\
+    \        requestHeaderModifier:\n          set:\n          - name: X-Forwarded-For\n\
+    \            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n      - type:\
+    \ ResponseHeaderModifier\n        responseHeaderModifier:\n          set:\n  \
+    \        - name: X-Frame-Options\n            value: DENY\n          - name: X-Content-Type-Options\n\
+    \            value: nosniff\n          - name: X-XSS-Protection\n            value:\
+    \ 1; mode=block\n          - name: Referrer-Policy\n            value: strict-origin-when-cross-origin\n\
+    \          - name: Permissions-Policy\n            value: geolocation=(), microphone=(),\
+    \ camera=()\n          - name: Strict-Transport-Security\n            value: max-age=31536000;\
+    \ includeSubDomains; preload\n          - name: Content-Security-Policy\n    \
+    \        value: 'default-src ''self''; script-src ''self'' ''unsafe-inline'' ''unsafe-eval''\n\
+    \              https://unpkg.com; style-src ''self'' ''unsafe-inline'' https://fonts.googleapis.com;\n\
+    \              font-src ''self'' https://fonts.gstatic.com; img-src ''self'' data:\n\
+    \              https:; connect-src ''self'' wss:; frame-ancestors ''none'';'\n\
+    \      backendRefs:\n      - name: econ-graph-frontend-service\n        port:\
+    \ 3000\n    - matches:\n      - path:\n          type: Exact\n          value:\
+    \ /silent-callback.html\n      filters:\n      - type: RequestHeaderModifier\n\
+    \        requestHeaderModifier:\n          set:\n          - name: X-Forwarded-For\n\
+    \            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n      - type:\
+    \ ResponseHeaderModifier\n        responseHeaderModifier:\n          set:\n  \
+    \        - name: X-Frame-Options\n            value: SAMEORIGIN\n          - name:\
+    \ X-Content-Type-Options\n            value: nosniff\n          - name: X-XSS-Protection\n\
+    \            value: 1; mode=block\n          - name: Referrer-Policy\n       \
+    \     value: strict-origin-when-cross-origin\n          - name: Permissions-Policy\n\
+    \            value: geolocation=(), microphone=(), camera=()\n          - name:\
+    \ Strict-Transport-Security\n            value: max-age=31536000; includeSubDomains;\
+    \ preload\n          - name: Content-Security-Policy\n            value: 'default-src\
+    \ ''self''; script-src ''self'' ''unsafe-inline'' ''unsafe-eval''\n          \
+    \    https://unpkg.com; style-src ''self'' ''unsafe-inline'' https://fonts.googleapis.com;\n\
+    \              font-src ''self'' https://fonts.gstatic.com; img-src ''self'' data:\n\
+    \              https:; connect-src ''self'' wss:; frame-ancestors ''self'';'\n\
+    \      backendRefs:\n      - name: econ-graph-frontend-service\n        port:\
+    \ 3000\n"
+- target:
+    kind: HTTPRoute
+    name: econ-graph-backend
+    version: v1
+    group: gateway.networking.k8s.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    parentRefs:\n    - name: econ-graph-gateway\n\
+    \      namespace: econ-graph-gateway\n      sectionName: http\n    hostnames:\n\
+    \    - example-50d858e098.localhost\n    rules:\n    - matches:\n      - path:\n\
+    \          type: PathPrefix\n          value: /api\n      - path:\n          type:\
+    \ PathPrefix\n          value: /auth\n      - path:\n          type: PathPrefix\n\
+    \          value: /health\n      filters:\n      - type: RequestHeaderModifier\n\
+    \        requestHeaderModifier:\n          set:\n          - name: X-Forwarded-For\n\
+    \            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n      - type:\
+    \ ResponseHeaderModifier\n        responseHeaderModifier:\n          set:\n  \
+    \        - name: X-Content-Type-Options\n            value: nosniff\n        \
+    \  - name: X-Frame-Options\n            value: DENY\n          - name: Strict-Transport-Security\n\
+    \            value: max-age=31536000; includeSubDomains; preload\n      timeouts:\n\
+    \        request: 30s\n      backendRefs:\n      - name: econ-graph-backend-service\n\
+    \        port: 9876\n"
+- target:
+    kind: HTTPRoute
+    name: econ-graph-graphql
+    version: v1
+    group: gateway.networking.k8s.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    parentRefs:\n    - name: econ-graph-gateway\n\
+    \      namespace: econ-graph-gateway\n      sectionName: http\n    hostnames:\n\
+    \    - example-50d858e098.localhost\n    rules:\n    - matches:\n      - path:\n\
+    \          type: PathPrefix\n          value: /graphql\n      filters:\n     \
+    \ - type: RequestHeaderModifier\n        requestHeaderModifier:\n          set:\n\
+    \          - name: X-Forwarded-For\n            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n\
+    \      - type: ResponseHeaderModifier\n        responseHeaderModifier:\n     \
+    \     set:\n          - name: X-Content-Type-Options\n            value: nosniff\n\
+    \          - name: X-Frame-Options\n            value: DENY\n          - name:\
+    \ Strict-Transport-Security\n            value: max-age=31536000; includeSubDomains;\
+    \ preload\n      timeouts:\n        request: 30s\n      backendRefs:\n      -\
+    \ name: econ-graph-backend-service\n        port: 9876\n"
+- target:
+    kind: HTTPRoute
+    name: econ-graph-data-graphql
+    version: v1
+    group: gateway.networking.k8s.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    parentRefs:\n    - name: econ-graph-gateway\n\
+    \      namespace: econ-graph-gateway\n      sectionName: http\n    hostnames:\n\
+    \    - example-50d858e098.localhost\n    rules:\n    - matches:\n      - path:\n\
+    \          type: PathPrefix\n          value: /data/graphql\n      filters:\n\
+    \      - type: URLRewrite\n        urlRewrite:\n          path:\n            type:\
+    \ ReplacePrefixMatch\n            replacePrefixMatch: /graphql\n      - type:\
+    \ RequestHeaderModifier\n        requestHeaderModifier:\n          set:\n    \
+    \      - name: X-Forwarded-For\n            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n\
+    \          remove:\n          - Authorization\n          - Cookie\n      - type:\
+    \ ResponseHeaderModifier\n        responseHeaderModifier:\n          set:\n  \
+    \        - name: X-Content-Type-Options\n            value: nosniff\n        \
+    \  - name: X-Frame-Options\n            value: DENY\n          - name: Strict-Transport-Security\n\
+    \            value: max-age=31536000; includeSubDomains; preload\n      timeouts:\n\
+    \        request: 30s\n      backendRefs:\n      - name: econ-graph-backend-service\n\
+    \        port: 9876\n        namespace: econ-graph\n"
+- target:
+    kind: HTTPRoute
+    name: econ-graph-idp
+    version: v1
+    group: gateway.networking.k8s.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n\
+    - op: replace\n  path: /spec\n  value:\n    parentRefs:\n    - name: econ-graph-gateway\n\
+    \      namespace: econ-graph-gateway\n      sectionName: http\n    hostnames:\n\
+    \    - example-50d858e098.localhost\n    rules:\n    - matches:\n      - path:\n\
+    \          type: PathPrefix\n          value: /idp/realms/econ-graph\n      -\
+    \ path:\n          type: PathPrefix\n          value: /idp/resources\n      filters:\n\
+    \      - type: RequestHeaderModifier\n        requestHeaderModifier:\n       \
+    \   set:\n          - name: X-Forwarded-For\n            value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'\n\
+    \      backendRefs:\n      - name: keycloak-service\n        port: 8080\n"
+- target:
+    kind: BackendTrafficPolicy
+    name: econ-graph-graphql-ratelimit
+    version: v1alpha1
+    group: gateway.envoyproxy.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
+- target:
+    kind: BackendTrafficPolicy
+    name: econ-graph-data-graphql-ratelimit
+    version: v1alpha1
+    group: gateway.envoyproxy.io
+  patch: "- op: add\n  path: /metadata/namespace\n  value: econ-graph-br-example-50d858e098\n"
