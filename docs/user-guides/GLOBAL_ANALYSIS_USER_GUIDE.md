@@ -29,8 +29,13 @@ are available in the table.
 
 ## Map controls
 
-- **Zoom in**, **Zoom out** and **Reset zoom** buttons sit on the map, with the current zoom
-  level. You can also zoom with the scroll wheel and pan by dragging.
+- **Zoom in**, **Zoom out** and **Reset view** buttons sit on the map, with the current zoom
+  level. Reset restores both orientation and zoom. Zoom with the scroll wheel or pinch.
+- Drag left or right to move around the world, including across the map seam. On
+  Orthographic, drag in any direction to spin the globe and reveal the other hemisphere.
+  On a zoomed flat map, vertical dragging moves the viewport up or down.
+- Focus the map to use Left/Right arrows to rotate, Up/Down arrows to tilt Orthographic,
+  **+**/**−** to zoom and **Home** to reset.
 - **Projection**: Equal Earth (the default), Natural Earth, Mercator or Orthographic. Equal Earth preserves relative land areas, making continent and country sizes comparable. Shapes and distances can still be distorted. Natural Earth balances distortions but does not preserve area.
 - **Color scheme**: Viridis (the default), Blues, Reds or Greens. The lightest part of
   Blues, Reds and Greens is omitted so low values remain distinct from the background.
@@ -50,10 +55,10 @@ and it includes countries that have no shape on the map, such as Kosovo.
 
 ## Messages
 
-| Message | Meaning |
-| --- | --- |
-| Couldn't load the list of indicators. | The indicator list request failed. Use **Retry** |
+| Message                                                                       | Meaning                                                             |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Couldn't load the list of indicators.                                         | The indicator list request failed. Use **Retry**                    |
 | World Development Indicators haven't been loaded yet, so the map has no data. | The crawler hasn't loaded the World Bank dataset in this deployment |
-| Couldn't load *indicator*. | The values for the chosen indicator failed to load. Use **Retry** |
-| No country has a value for *indicator* yet. | The indicator is in the list but has no observations yet |
-| Failed to load world map data | The map outlines failed to load. Use **Reload** |
+| Couldn't load _indicator_.                                                    | The values for the chosen indicator failed to load. Use **Retry**   |
+| No country has a value for _indicator_ yet.                                   | The indicator is in the list but has no observations yet            |
+| Failed to load world map data                                                 | The map outlines failed to load. Use **Reload**                     |

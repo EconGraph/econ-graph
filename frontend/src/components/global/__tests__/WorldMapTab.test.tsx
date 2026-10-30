@@ -523,7 +523,7 @@ describe('WorldMapTab', () => {
 
     expect(screen.getByText('100%')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reset view' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(await screen.findByText('150%')).toBeInTheDocument();
@@ -531,7 +531,7 @@ describe('WorldMapTab', () => {
       'scale(1.5)'
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset zoom' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset view' }));
     expect(await screen.findByText('100%')).toBeInTheDocument();
   });
 });

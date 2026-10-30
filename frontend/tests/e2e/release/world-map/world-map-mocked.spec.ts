@@ -192,7 +192,7 @@ test.describe('World map (mocked)', () => {
     await expect(map).toContainText('150%');
     await expect(page.locator('.map-container')).toHaveAttribute('transform', /scale\(1\.5\)/);
 
-    await page.getByRole('button', { name: 'Reset zoom' }).click();
+    await page.getByRole('button', { name: 'Reset view' }).click();
     await expect(map).toContainText('100%');
   });
 
