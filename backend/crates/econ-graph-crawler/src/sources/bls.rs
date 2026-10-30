@@ -8,8 +8,9 @@
 //!
 //! Which series to crawl is curated: `bls_series.csv` in the crawler data directory
 //! ([`crate::reference::bls_series`], read at runtime) lists their ids (headline CPI-U, CES
-//! payrolls and earnings, CPS labor force measures, and LAUS state unemployment rates and labor
-//! force). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
+//! payrolls and earnings, CPS labor force measures, LAUS state unemployment rates and labor
+//! force, JOLTS openings and turnover, PPI final demand and commodity indexes, and import/export
+//! price indexes). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
 //! `la.series`, `ln.series`, `jt.series`, `wp.series`, `ei.series` under
 //! [`DEFAULT_DOWNLOAD_URL`], see [`SERIES_FILES`]) gives the title, the frequency (from the latest
 //! period, `end_period`) and, for CPI and import/export prices, the index base. `jt.series` has no
@@ -61,13 +62,15 @@
 //!
 //! # Request budget
 //!
-//! BLS allows 500 requests a day with a key and 25 without. For the shipped list (291 series,
+//! BLS allows 500 requests a day with a key and 25 without. For the shipped list (425 series,
 //! all monthly), with full batches:
-//! - With a key: 6 requests for the first 20-year fetch, and 6 for each weekly refresh
-//!   (the 5-year revision lookback fits one window). Even one request per series (291) fits.
-//! - Without a key: 12 batches of 25, so 24 requests for the first fetch (two 10-year windows)
-//!   and 12 for each refresh. That leaves no headroom on the first day: a retry, a partial
-//!   batch or a manual CLI fetch goes over, and the excess waits as `RateLimited`. Set a key.
+//! - With a key: 9 batches of 50, so 9 requests for the first 20-year fetch and 9 for each
+//!   refresh (the 5-year revision lookback fits one window). Refreshing every series every day
+//!   would still be 9 requests, and even one request per series (425) fits.
+//! - Without a key: 17 batches of 25, so 17 requests for each refresh, but 34 for the first
+//!   fetch (two 10-year windows). The first fetch therefore spans two days: a request BLS
+//!   refuses for the daily threshold is `RateLimited` until the daily count resets
+//!   ([`until_daily_reset`]), so its series wait for the next day. Set a key.
 //!
 //! A batch's `since` is its earliest series', so one series with no stored points (a row added
 //! later, or an id that keeps failing) turns its whole batch into a full 20-year fetch: two
@@ -80,8 +83,10 @@
 //! # Errors
 //!
 //! BLS answers HTTP 200 even on failure, with `status` and `message` in the body:
-//! - a message about the daily threshold / "exceeded" (request not processed) -> `RateLimited { retry_after: None }`
-//!   for the whole batch
+//! - BLS's daily threshold message (request not processed) -> `RateLimited` for the whole
+//!   batch, with `retry_after` until BLS's daily count resets (see [`until_daily_reset`]), so
+//!   the worker doesn't keep spending requests BLS will refuse; any other message about a
+//!   threshold or "exceeded" -> `RateLimited { retry_after: None }` (the policy's backoff)
 //! - "Series does not exist for Series X" -> `NotFound` for series X only; the rest of the batch
 //!   is kept. On an older window, after X returned data from newer ones, it only marks the end
 //!   of X's history and the data is kept
@@ -1195,6 +1200,33 @@ fn no_data_series_id(message: &str) -> Option<&str> {
         .find(|s| !s.is_empty())
 }
 
+/// BLS's wording for a request refused because the day's requests are used up ("Request could not
+/// be serviced, as the daily threshold for total number of requests allocated to the user has
+/// been reached."), lowercased. Only this waits for [`until_daily_reset`]; other rate limits
+/// retry on the policy's backoff.
+const DAILY_THRESHOLD: &str = "daily threshold";
+
+/// Hour (UTC) at or after which BLS's daily request count has reset. BLS counts requests per day
+/// in US Eastern time; 05:00 UTC is midnight EST and 01:00 EDT, so it is never early.
+const DAILY_RESET_HOUR_UTC: u32 = 5;
+
+/// Time from `now` until the next [`DAILY_RESET_HOUR_UTC`]: how long a request refused for the
+/// daily threshold waits. Without it the worker would retry after the policy's short backoff and
+/// keep sending requests BLS refuses until the count resets.
+fn until_daily_reset(now: chrono::DateTime<Utc>) -> std::time::Duration {
+    let today = now
+        .date_naive()
+        .and_hms_opt(DAILY_RESET_HOUR_UTC, 0, 0)
+        .expect("valid time")
+        .and_utc();
+    let next = if now < today {
+        today
+    } else {
+        today + chrono::Duration::days(1)
+    };
+    (next - now).to_std().unwrap_or_default()
+}
+
 /// Maps a BLS body `status` + `message` to a whole-request error, or `Ok` if the request was
 /// processed. `ids` are the series in the request; errors name the first one and a count.
 ///
@@ -1227,6 +1259,11 @@ fn check_status(
     }
     let joined = scrub(&other.join("; "), key);
     let lower = joined.to_ascii_lowercase();
+    if lower.contains(DAILY_THRESHOLD) {
+        return Err(CrawlError::RateLimited {
+            retry_after: Some(until_daily_reset(Utc::now())),
+        });
+    }
     if lower.contains("threshold") || lower.contains("exceeded") {
         return Err(CrawlError::RateLimited { retry_after: None });
     }
@@ -1977,17 +2014,16 @@ mod tests {
             )
             .is_ok());
         }
-        assert_eq!(
-            check_status(
-                "REQUEST_NOT_PROCESSED",
-                &msgs(&["daily threshold reached"]),
-                &["X"],
-                k
-            )
-            .unwrap_err()
-            .retry_after(),
-            None
-        );
+        // A threshold refusal waits for BLS's daily reset, at most a day away.
+        assert!(check_status(
+            "REQUEST_NOT_PROCESSED",
+            &msgs(&["daily threshold reached"]),
+            &["X"],
+            k
+        )
+        .unwrap_err()
+        .retry_after()
+        .is_some_and(|d| d <= std::time::Duration::from_secs(24 * 3600)));
     }
 
     #[tokio::test]
@@ -2099,6 +2135,58 @@ mod tests {
         );
     }
 
+    /// A refused request waits until 05:00 UTC (midnight EST), today's if it is still ahead,
+    /// else tomorrow's.
+    #[test]
+    fn daily_threshold_waits_for_the_reset() {
+        let at = |h, m| {
+            NaiveDate::from_ymd_opt(2026, 10, 30)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap()
+                .and_utc()
+        };
+        let hours = |d: std::time::Duration| d.as_secs() / 3600;
+        assert_eq!(until_daily_reset(at(4, 0)).as_secs(), 3600);
+        assert_eq!(hours(until_daily_reset(at(5, 0))), 24);
+        assert_eq!(hours(until_daily_reset(at(15, 0))), 14);
+        assert_eq!(until_daily_reset(at(23, 30)).as_secs(), 5 * 3600 + 1800);
+        let err = check_status(
+            "REQUEST_NOT_PROCESSED",
+            &["The daily threshold has been reached".to_string()],
+            &["X"],
+            None,
+        )
+        .unwrap_err();
+        let CrawlError::RateLimited {
+            retry_after: Some(wait),
+        } = err
+        else {
+            panic!("{err:?}");
+        };
+        assert!(
+            wait <= std::time::Duration::from_secs(24 * 3600),
+            "{wait:?}"
+        );
+
+        // Any other rate limit retries on the policy's backoff, not a day later.
+        for message in [
+            "User sekrit has exceeded the number of requests allowed",
+            "Rate threshold exceeded, slow down",
+        ] {
+            assert_eq!(
+                check_status(
+                    "REQUEST_NOT_PROCESSED",
+                    &[message.to_string()],
+                    &["X"],
+                    None
+                ),
+                Err(CrawlError::RateLimited { retry_after: None }),
+                "{message}"
+            );
+        }
+    }
+
     #[test]
     fn seasonal_adjustment_from_id_prefixes() {
         for (id, want) in [
@@ -2144,7 +2232,15 @@ mod tests {
         let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
         let ids = vec!["CUUR0000SA0".to_string()];
         let err = adapter.fetch_batch(&ctx, &ids, None).await.unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -2306,7 +2402,15 @@ mod tests {
             .fetch_series(&test_ctx(), "CUUR0000SA0", None)
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -2608,8 +2712,10 @@ mod tests {
     }
 
     /// Discovery describes the curated series from the stored series file rows: BLS's titles,
-    /// frequency from `end_period`, and units from the index base (CU), a stored dimension
-    /// label (CE, LA) or nowhere (LN). It makes no request. A series without a row is left out.
+    /// frequency from `end_period`, and units from the index base (CU, EI), a stored dimension
+    /// label (CE, LA, JT) or nowhere (LN, WP). JOLTS titles join stored code labels, and a JOLTS
+    /// series is left out until those labels are stored. It makes no request. A series without a
+    /// row is left out.
     #[tokio::test]
     async fn discover_lists_curated_series_from_stored_series_files() {
         let Some(db) = bls_db("econgraph_bls_discover_series_files").await else {
@@ -2666,17 +2772,52 @@ mod tests {
             "discover made a request"
         );
         let ids: BTreeSet<&str> = found.iter().map(|d| d.external_id.as_str()).collect();
-        // CUURS49ASA0 isn't curated.
+        // CUURS49ASA0 and JTU000000000000000JOR aren't curated; the curated JOLTS series have no
+        // stored code labels for their titles yet.
+        let mut expected = BTreeSet::from([
+            "CUSR0000SA0",
+            "CUUR0000SA0",
+            "CES0000000001",
+            "LNS14000000",
+            "LASST060000000000003",
+            "WPSFD4",
+            "WPU01",
+            "WPU00000000",
+            "EIUIR",
+            "EIUCOCHNTOT",
+        ]);
+        assert_eq!(ids, expected);
+
+        // The JOLTS code files (refresh_code_file) stand in; seasonal is in the dataset file.
+        for (dimension, code, label) in [
+            ("data_element", "JO", "Job openings"),
+            ("rate_level", "R", "Rate"),
+            ("rate_level", "L", "Level - In Thousands"),
+            ("industry", "000000", "Total nonfarm"),
+            ("state", "00", "Total US"),
+            ("area", "00000", "All areas"),
+            ("size_class", "00", "All size classes"),
+        ] {
+            crate::persist::merge_dataset_dimension_codes(
+                &db.pool,
+                SourceId::Bls,
+                "JT",
+                dimension,
+                &[(code.to_string(), label.to_string())],
+            )
+            .await
+            .unwrap();
+        }
+        let found = adapter.discover(&ctx).await.unwrap();
+        let ids: BTreeSet<&str> = found.iter().map(|d| d.external_id.as_str()).collect();
+        expected.extend(["JTS000000000000000JOL", "JTS000000000000000JOR"]);
+        assert_eq!(ids, expected);
         assert_eq!(
-            ids,
-            BTreeSet::from([
-                "CUSR0000SA0",
-                "CUUR0000SA0",
-                "CES0000000001",
-                "LNS14000000",
-                "LASST060000000000003"
-            ])
+            mock.received_requests().await.len(),
+            fetched,
+            "discover made a request"
         );
+
         let by_id = |id: &str| found.iter().find(|d| d.external_id == id).unwrap();
         let cpi = by_id("CUUR0000SA0");
         assert_eq!(
@@ -2700,6 +2841,30 @@ mod tests {
         let ln = by_id("LNS14000000");
         assert_eq!(ln.title, "(Seas) Unemployment Rate");
         assert_eq!(ln.units, None);
+        let jt = by_id("JTS000000000000000JOR");
+        assert_eq!(
+            jt.title,
+            "Job openings, Rate, Total nonfarm, Total US, All areas, All size classes, \
+             Seasonally adjusted"
+        );
+        assert_eq!(jt.units.as_deref(), Some("Rate"));
+        assert_eq!(jt.frequency.as_deref(), Some("Monthly"));
+        assert_eq!(jt.dataset.code, "JT");
+        assert_eq!(
+            by_id("JTS000000000000000JOL").units.as_deref(),
+            Some("Level - In Thousands")
+        );
+        let ppi = by_id("WPSFD4");
+        assert_eq!(
+            ppi.title,
+            "PPI Commodity data for Final demand, seasonally adjusted"
+        );
+        assert_eq!(ppi.units, None);
+        assert_eq!(ppi.dataset.code, "WP");
+        assert_eq!(by_id("WPU01").dataset.dimensions.0["item"], "");
+        let mpi = by_id("EIUCOCHNTOT");
+        assert_eq!(mpi.units.as_deref(), Some("Index December 2003=100"));
+        assert_eq!(mpi.dataset.code, "EI");
 
         // ln.series also labels LN's series_code dimension.
         let codes =
@@ -2814,6 +2979,9 @@ mod tests {
             ("/cu/cu.series", CU_SERIES),
             ("/ce/ce.series", CE_SERIES),
             ("/ln/ln.series", LN_SERIES),
+            ("/jt/jt.series", JT_SERIES),
+            ("/wp/wp.series", WP_SERIES),
+            ("/ei/ei.series", EI_SERIES),
         ] {
             mock.mount(&Route::get(path), Reply::text(body)).await;
         }
@@ -2829,7 +2997,15 @@ mod tests {
             errors[0].contains(&adapter.series_file_url("LA")),
             "{errors:?}"
         );
-        for (survey, stored) in [("CU", true), ("CE", true), ("LN", true), ("LA", false)] {
+        for (survey, stored) in [
+            ("CU", true),
+            ("CE", true),
+            ("LN", true),
+            ("LA", false),
+            ("JT", true),
+            ("WP", true),
+            ("EI", true),
+        ] {
             let cache = crate::persist::reference_file_cache(
                 &db.pool,
                 SourceId::Bls,
@@ -3042,24 +3218,10 @@ mod tests {
     /// Request budget stated in the module docs, for the shipped list.
     #[test]
     fn shipped_list_fits_daily_quotas() {
+        const KEYED_PER_DAY: usize = 500;
+        const KEYLESS_PER_DAY: usize = 25;
         let n = bls_series().unwrap().len();
         let requests = |per_request: usize, windows: usize| n.div_ceil(per_request) * windows;
-        let keyed_first = requests(
-            MAX_SERIES_WITH_KEY,
-            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITH_KEY).len(),
-        );
-        let keyless_first = requests(
-            MAX_SERIES_WITHOUT_KEY,
-            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITHOUT_KEY).len(),
-        );
-        assert!(
-            keyed_first <= 500 && n <= 500,
-            "keyed: {keyed_first} requests, {n} series"
-        );
-        assert!(
-            keyless_first <= 25,
-            "keyless first fetch: {keyless_first} requests"
-        );
         // A refresh (the policy's own revision lookback) is one window with or without a key.
         let lookback_years = (SourcePolicy::default_for(SourceId::Bls)
             .revision_lookback
@@ -3073,6 +3235,107 @@ mod tests {
                 1,
                 "span {span}, lookback {lookback_years}y"
             );
+        }
+
+        // With a key: the first fetch plus a refresh of every series fit one day, so a daily
+        // keyed refresh fits too, as does one request per series.
+        let keyed_first = requests(
+            MAX_SERIES_WITH_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITH_KEY).len(),
+        );
+        let keyed_refresh = requests(MAX_SERIES_WITH_KEY, 1);
+        assert!(
+            keyed_first + keyed_refresh <= KEYED_PER_DAY && n <= KEYED_PER_DAY,
+            "keyed: first fetch {keyed_first} + daily refresh {keyed_refresh} requests, {n} series"
+        );
+
+        // Without a key: a refresh fits one day, and the first fetch finishes within two.
+        let keyless_first = requests(
+            MAX_SERIES_WITHOUT_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITHOUT_KEY).len(),
+        );
+        let keyless_refresh = requests(MAX_SERIES_WITHOUT_KEY, 1);
+        assert!(
+            keyless_refresh <= KEYLESS_PER_DAY,
+            "keyless refresh: {keyless_refresh} requests"
+        );
+        assert!(
+            keyless_first <= 2 * KEYLESS_PER_DAY,
+            "keyless first fetch: {keyless_first} requests"
+        );
+    }
+
+    /// The shipped JOLTS, PPI and import/export price ids land in their survey datasets, not
+    /// `other`, split into the codes BLS's own series file gives them (the recorded files under
+    /// `tests/fixtures/bls/layouts`).
+    #[test]
+    fn shipped_jt_wp_ei_series_have_their_survey_datasets() {
+        let shipped = bls_series().unwrap();
+        // Survey, recorded file, and each dimension's column in it (EI's file has no item
+        // column; its item is checked by reassembling the id).
+        type Columns = &'static [(&'static str, &'static str)];
+        let surveys: [(&str, &str, Columns); 3] = [
+            (
+                "JT",
+                include_str!("../../tests/fixtures/bls/layouts/jt.series"),
+                &[
+                    ("seasonal", "seasonal"),
+                    ("industry", "industry_code"),
+                    ("state", "state_code"),
+                    ("area", "area_code"),
+                    ("size_class", "sizeclass_code"),
+                    ("data_element", "dataelement_code"),
+                    ("rate_level", "ratelevel_code"),
+                ],
+            ),
+            (
+                "WP",
+                include_str!("../../tests/fixtures/bls/layouts/wp.series"),
+                &[
+                    ("seasonal", "seasonal"),
+                    ("group", "group_code"),
+                    ("item", "item_code"),
+                ],
+            ),
+            (
+                "EI",
+                include_str!("../../tests/fixtures/bls/layouts/ei.series"),
+                &[("seasonal", "seasonal"), ("index", "index_code")],
+            ),
+        ];
+        for (survey, file, columns) in surveys {
+            let rows = recorded_rows(file);
+            let ids: Vec<&str> = shipped
+                .iter()
+                .map(|s| s.id.as_str())
+                .filter(|id| id.starts_with(survey))
+                .collect();
+            assert!(!ids.is_empty(), "no {survey} series shipped");
+            for id in ids {
+                let ds = dataset_of(id);
+                assert_eq!(ds.code, survey, "{id}");
+                let row = rows
+                    .iter()
+                    .find(|r| r["series_id"] == id)
+                    .unwrap_or_else(|| panic!("{id} is not in BLS's {survey} series file"));
+                for (dim, col) in columns {
+                    // `-` is wp.series' item for a group index, whose id has no item.
+                    let want = match row[col] {
+                        "-" => "",
+                        v => v,
+                    };
+                    assert_eq!(ds.dimensions.0[*dim], want, "{id} {dim}");
+                }
+                let rebuilt: String = SERIES_ID_LAYOUTS
+                    .iter()
+                    .find(|(p, _)| *p == survey)
+                    .unwrap()
+                    .1
+                    .iter()
+                    .map(|(dim, _)| ds.dimensions.0[*dim].as_str())
+                    .collect();
+                assert_eq!(format!("{survey}{rebuilt}"), id);
+            }
         }
     }
 
@@ -3468,7 +3731,15 @@ mod tests {
             .fetch_batch(&test_ctx(), &ids, None)
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -3583,10 +3854,15 @@ mod tests {
         assert_eq!(out.len(), 60);
         assert!(out["S24"].is_ok());
         for id in ["S25", "S49", "S50", "S59"] {
-            assert_eq!(
-                out[id],
-                Err(CrawlError::RateLimited { retry_after: None }),
-                "{id}"
+            assert!(
+                matches!(
+                    out[id],
+                    Err(CrawlError::RateLimited {
+                        retry_after: Some(_)
+                    })
+                ),
+                "{id}: {:?}",
+                out[id]
             );
         }
         assert_eq!(mock.received_requests().await.len(), 2);
@@ -3598,7 +3874,15 @@ mod tests {
             .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
         assert_eq!(mock.received_requests().await.len(), 1);
     }
 
