@@ -27,7 +27,8 @@
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
-#   - scripts/deploy/set-crawler-keys.sh --facebook (and --google) refuses before it asks
+#   - scripts/deploy/set-crawler-keys.sh --facebook refuses (Facebook sign-in is disabled)
+#     before any prompt or kubectl call; --google refuses before it asks
 #     for anything when the cluster's realm ConfigMap is not this checkout's, and renders
 #     the realm-import Job for the public host the cluster serves; it refuses a cluster
 #     marked production that serves none, and a PUBLIC_HOST (environment or deploy
@@ -605,33 +606,43 @@ if [ "$have_script" = true ]; then
   grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
   grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
-  # Facebook mode writes only its optional IdP keys and reapplies the realm,
-  # without asking for crawler credentials or starting the crawler.
-  run_keys 'STUB_MARKER=none' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
-    fail "set-crawler-keys --facebook failed: $(cat "$out")"
-  grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp-client-id=.*--from-file=facebook-idp-client-secret=' "$log" ||
-    fail "Facebook IdP keys were not written"
-  grep -q 'rollout restart deployment/keycloak' "$log" || fail "Facebook mode did not restart Keycloak"
-  grep -q 'delete job keycloak-realm-import' "$log" || fail "Facebook mode did not reapply the realm"
-  grep -q 'stdin: .*name: keycloak-realm-import' "$log" || fail "Facebook mode did not apply the realm-import Job"
-  grep -q 'stdin: .*https://' "$log" && fail "Facebook mode rendered a public host on a cluster without one"
-  grep -q 'crawler-worker' "$log" && fail "Facebook mode touched the crawler"
-  grep -q 'FRED_API_KEY:' "$out" && fail "Facebook mode prompted for crawler credentials"
+  # Facebook sign-in is disabled: --facebook refuses before any prompt, cluster call
+  # or write, with --dry-run too.
+  for args in --facebook '--facebook --dry-run'; do
+    if run_keys 'STUB_MARKER=none' "$args" $'facebook-test-app\nfacebook-test-secret\n'; then
+      fail "set-crawler-keys $args: did not refuse"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "set-crawler-keys $args: no refusal shown: $(cat "$out")"
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys $args: prompted"
+    [ -s "$log" ] && fail "set-crawler-keys $args: called kubectl: $(cat "$log")"
+  done
+  # Google mode (crawler keys left blank) writes its IdP keys and reapplies the realm.
+  google_args='--google --no-start-crawler'
+  google_input=$'\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
+  run_keys 'STUB_MARKER=none' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed: $(cat "$out")"
+  grep -q 'create secret generic econ-graph-keycloak .*--from-file=google-idp-client-id=.*--from-file=google-idp-client-secret=' "$log" ||
+    fail "Google IdP keys were not written"
+  grep -q 'rollout restart deployment/keycloak' "$log" || fail "Google mode did not restart Keycloak"
+  grep -q 'delete job keycloak-realm-import' "$log" || fail "Google mode did not reapply the realm"
+  grep -q 'stdin: .*name: keycloak-realm-import' "$log" || fail "Google mode did not apply the realm-import Job"
+  grep -q 'stdin: .*https://' "$log" && fail "Google mode rendered a public host on a cluster without one"
+  grep -q 'crawler-worker' "$log" && fail "Google mode with --no-start-crawler touched the crawler"
   # On a cluster serving a public host, the Job is rendered for it as deploy.sh renders
   # it, so the realm keeps the public redirect URIs and web origins.
-  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
-    fail "set-crawler-keys --facebook failed with a public host: $(cat "$out")"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed with a public host: $(cat "$out")"
   grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
-    fail "Facebook mode did not render the realm import for the public host"
+    fail "Google mode did not render the realm import for the public host"
   # A realm ConfigMap older than this checkout: refused before the prompt, nothing written.
   for realm in stale missing; do
-    if run_keys "STUB_MARKER=none STUB_REALM=$realm" --facebook $'facebook-test-app\nfacebook-test-secret\n'; then
-      fail "set-crawler-keys --facebook: accepted a $realm realm ConfigMap"
+    if run_keys "STUB_MARKER=none STUB_REALM=$realm" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted a $realm realm ConfigMap"
     fi
-    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --facebook: prompted with a $realm realm ConfigMap"
-    grep -q 'deploy.sh' "$out" || fail "set-crawler-keys --facebook: the $realm realm refusal is not shown: $(cat "$out")"
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with a $realm realm ConfigMap"
+    grep -q 'deploy.sh' "$out" || fail "set-crawler-keys --google: the $realm realm refusal is not shown: $(cat "$out")"
     grep -Eq 'create secret|apply|rollout|delete job' "$log" &&
-      fail "set-crawler-keys --facebook: changed the cluster with a $realm realm ConfigMap"
+      fail "set-crawler-keys --google: changed the cluster with a $realm realm ConfigMap"
   done
   # A dry run reports the refusal and exits non-zero too.
   run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' &&
@@ -641,15 +652,15 @@ if [ "$have_script" = true ]; then
   grep -q 'release-deploy.sh' "$out" ||
     fail "set-crawler-keys: the stale realm refusal does not point to release-deploy.sh"
 
-  # keys_refused NAME SETTINGS PATTERN: --facebook refused before the prompt, nothing changed.
+  # keys_refused NAME SETTINGS PATTERN: --google refused before the prompt, nothing changed.
   keys_refused() {
-    if run_keys "$2" --facebook $'facebook-test-app\nfacebook-test-secret\n'; then
-      fail "set-crawler-keys --facebook: accepted $1"
+    if run_keys "$2" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted $1"
     fi
-    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --facebook: prompted with $1"
-    grep -q "$3" "$out" || fail "set-crawler-keys --facebook: $1 refused without '$3': $(cat "$out")"
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with $1"
+    grep -q "$3" "$out" || fail "set-crawler-keys --google: $1 refused without '$3': $(cat "$out")"
     if grep -Eq 'create secret|apply|rollout|delete job' "$log"; then
-      fail "set-crawler-keys --facebook: changed the cluster with $1"
+      fail "set-crawler-keys --google: changed the cluster with $1"
     fi
   }
   # Marked production but serving no public host (routes gone after a recreate or a
@@ -663,10 +674,10 @@ if [ "$have_script" = true ]; then
     "PUBLIC_HOST='econ-graph.com' is set"
   # An explicit PUBLIC_HOST naming the served host (in any case) is accepted.
   keys_env=(PUBLIC_HOST=EconGraph.com)
-  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
-    fail "set-crawler-keys --facebook: refused an explicit PUBLIC_HOST matching the served host: $(cat "$out")"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused an explicit PUBLIC_HOST matching the served host: $(cat "$out")"
   grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
-    fail "set-crawler-keys --facebook: did not render the realm import for the explicit, served host"
+    fail "set-crawler-keys --google: did not render the realm import for the explicit, served host"
   keys_env=()
   # The host's deploy config, read as release-deploy.sh reads it.
   mkdir -p "$(dirname "$keys_deploy_env")"
@@ -674,8 +685,8 @@ if [ "$have_script" = true ]; then
   keys_refused 'a deploy config differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
     'says PUBLIC_HOST=econ-graph.com'
   echo 'PUBLIC_HOST="econgraph.com"' >"$keys_deploy_env"
-  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
-    fail "set-crawler-keys --facebook: refused a deploy config matching the served host: $(cat "$out")"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused a deploy config matching the served host: $(cat "$out")"
   keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
     'says PUBLIC_HOST=econgraph.com'
   rm -f "$keys_deploy_env"

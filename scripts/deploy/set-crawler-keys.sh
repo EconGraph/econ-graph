@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Enter crawler API keys, or optional Google/Facebook sign-in credentials,
+# Enter crawler API keys, or the optional Google sign-in credentials,
 # into the kind cluster's Secrets without the values ever appearing on screen,
 # in shell history, in process arguments, or in an AI agent's context.
 #
@@ -8,9 +8,9 @@
 #   scripts/deploy/set-crawler-keys.sh [--google] [--no-start-crawler] [--dry-run]
 #   scripts/deploy/set-crawler-keys.sh --tunnel [--dry-run]
 #   scripts/deploy/set-crawler-keys.sh --facebook [--dry-run]
-# --facebook asks only for the Facebook IdP client and reapplies the realm.
-# Use a separate Meta app for each non-production environment; never copy
-# production credentials to dev/test clusters.
+# --facebook refuses: Facebook sign-in is disabled
+# (https://linear.app/econgraph/issue/ECO-470). It stops before any prompt,
+# cluster call or write, and exits non-zero, with --dry-run too.
 #
 # --tunnel asks only for the Cloudflare Tunnel token (Secret cloudflare-tunnel,
 # key token; ECO-457), the one the dashboard shows for the tunnel's connector:
@@ -31,9 +31,8 @@
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
 # restarted and the keycloak-realm-import Job is run again (as deploy.sh
 # does), since that Job is what puts the Google client into the realm.
-# --facebook does the same for Facebook, without prompting for crawler keys.
-# The Job applies the realm in the cluster's keycloak-realm ConfigMap, so in
-# both modes the script first checks that this ConfigMap holds this checkout's
+# The Job applies the realm in the cluster's keycloak-realm ConfigMap, so the
+# script first checks that this ConfigMap holds this checkout's
 # realm files (config/keycloak/econ-graph-realm.json and the two helpers
 # scripts/deploy/deploy.sh puts next to it); if it does not, the script stops
 # before asking for anything, since the import could succeed without the
@@ -93,6 +92,13 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Facebook sign-in is disabled: refuse before anything else, a dry run included.
+if [ "$FACEBOOK" = true ]; then
+    echo "error: Facebook sign-in is disabled until its email rules are built" \
+        "(https://linear.app/econgraph/issue/ECO-470); nothing was asked for, read or written" >&2
+    exit 1
+fi
 
 # Refuse before selecting an operator config, reading credentials or prompting.
 # shellcheck source=scripts/deploy/lib/agent-access.sh

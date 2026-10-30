@@ -146,6 +146,15 @@ redeploy — as long as the roles they're mapped to stay in the file. A realm ro
 client or mapper removed from the file is removed from the cluster on the next
 deploy, taking any user's mapping to that role with it.
 
+A maintainer enters the Google client with hidden input with
+`scripts/deploy/set-crawler-keys.sh --google`, which then restarts Keycloak and reruns
+the Job. Before asking for anything it checks that the cluster's `keycloak-realm`
+ConfigMap holds this checkout's realm files, so run it from a checkout of the commit
+the cluster runs (for production, the release tag). It renders the Job for the public
+host the cluster serves, and refuses a production cluster that serves none, or a
+`PUBLIC_HOST` (in the environment or `~/.config/econgraph/deploy.env`) that differs
+from it.
+
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
@@ -153,45 +162,27 @@ realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --
 
 ## Facebook sign-in
 
-The optional `facebook` provider uses the same first-broker-login and account-linking
-flow as Google, requests only `email` and `public_profile`, and stores no upstream
-token. Facebook emails are not trusted as verified: Keycloak handles profile
-completion and existing-account verification through its default first-broker-login
-flow, rather than automatically linking by email. Without both credentials the
-provider stays disabled and no Facebook button appears.
-Kubernetes reads `facebook-idp-client-id` and `facebook-idp-client-secret` from
-`econ-graph-keycloak`; a maintainer enters them with hidden input:
+Facebook sign-in is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)).
+The realm declares an optional `facebook` provider that uses the same
+first-broker-login and account-linking flow as Google, requests only `email` and
+`public_profile`, and stores no upstream token. Facebook emails are not trusted as
+verified: Keycloak handles profile completion and existing-account verification through
+its default first-broker-login flow, rather than automatically linking by email. The
+realm import enables the provider only when `econ-graph-keycloak` holds both
+`facebook-idp-client-id` and `facebook-idp-client-secret`; without them no Facebook
+button appears.
 
-```bash
-scripts/deploy/set-crawler-keys.sh --facebook
-```
+`scripts/deploy/set-crawler-keys.sh --facebook` refuses before any prompt, cluster call
+or write, and exits non-zero, with `--dry-run` too. Local compose does not forward
+Facebook credentials.
 
-This mode updates only the Facebook credentials, restarts Keycloak, and reapplies
-the realm. It does not start or restart the crawler. Blank input keeps the existing
-value. Before asking for anything it checks that the cluster's `keycloak-realm`
-ConfigMap holds this checkout's realm files, so run it from a checkout of the commit
-the cluster runs (for production, the release tag). It renders the realm import for
-the public host the cluster serves, and refuses a production cluster that serves none
-or a `PUBLIC_HOST` (in the environment or `~/.config/econgraph/deploy.env`) that
-differs from it. `--google` does the same for the Google client.
-
-Follow the [Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook).
-Configure Facebook Login on the Meta app with domain `econgraph.com` and redirect URI
-`https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`.
-Use `https://econgraph.com/privacy` for the privacy policy and
-`https://econgraph.com/privacy#account-deletion` for data-deletion instructions.
+The privacy policy at `https://econgraph.com/privacy` covers either provider, and
+`https://econgraph.com/privacy#account-deletion` gives the data-deletion instructions a
+Meta app links to. A Meta app for this realm uses domain `econgraph.com` and redirect
+URI `https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`
+([Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook)).
 There is no Facebook deletion callback: the instructions explain how to request
 account deletion. The backend serves no `/auth/*` routes; sign-in goes through Keycloak.
-
-Each non-production environment must use its own Meta app or leave Facebook
-unconfigured. Never copy production credentials or its Secret into a development
-or test cluster. Local compose does not forward Facebook credentials.
-
-After configuring the app and credentials, manually confirm that the Facebook
-button appears, a first login and an existing-account link succeed, and sign-out
-returns to the app. Include accounts that withhold email and verify that linking
-to an existing email requires proof of ownership. This requires the maintainer's Meta app access and a real
-Facebook account; rendering tests cannot verify Meta's configuration or approval.
 
 ### Disabling Facebook sign-in
 
@@ -214,10 +205,10 @@ scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-
 k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
 ```
 
-Without both keys the realm import disables the `facebook` provider and the
-Facebook button disappears. Accounts whose only sign-in is Facebook can then no
-longer sign in; their data stays in place. A later deploy keeps the provider
-disabled until the keys are entered again.
+Use this on a cluster whose Secret holds either key. Without both keys the realm
+import disables the `facebook` provider and the Facebook button disappears. Accounts
+whose only sign-in is Facebook can then no longer sign in; their data stays in place.
+A later deploy keeps the provider disabled while the keys are absent.
 
 ## Catalog access, including anonymous visitors
 

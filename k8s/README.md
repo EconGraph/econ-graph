@@ -369,13 +369,11 @@ Add `--via-cloudflare` to go through Cloudflare the way a visitor does. The Prom
 **Google sign-in** needs `https://econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
 as an authorized redirect URI of the Google OAuth client (ECO-13).
 
-**Facebook sign-in** is optional. A maintainer runs
-`scripts/deploy/set-crawler-keys.sh --facebook` in their own terminal to enter the
-Meta app ID and secret with hidden input. The script restarts Keycloak and reapplies
-the realm without touching the crawler. Both credentials are required for the
-Facebook button to appear. [Meta app setup and the sign-in check](../config/keycloak/README.md#facebook-sign-in)
-include the redirect URI, privacy and deletion instructions URLs. Use separate Meta
-apps for development/test, or leave Facebook absent; never copy production credentials.
+**Facebook sign-in** is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)):
+`scripts/deploy/set-crawler-keys.sh --facebook` refuses, and the realm's `facebook`
+provider stays off while `econ-graph-keycloak` lacks its two keys. See
+[Facebook sign-in](../config/keycloak/README.md#facebook-sign-in) for the provider, the
+Meta app URLs and how to remove keys a cluster still holds.
 
 ### Production marker
 
