@@ -8,14 +8,6 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Added
 
-- The crawler has a live Bank of Canada adapter. It reads Valet (no key) for a curated list of
-  17 series: the policy rate, CORRA, the prime rate, five exchange rates against the Canadian
-  dollar, four benchmark bond yields, the three core inflation measures, and M2 and M2++,
-  with titles, units and frequencies taken from Valet. Bank of Canada is no longer a
-  development-only static catalog, and its catalog read role is `catalog.bank_of_canada:read`.
-  See `docs/data-sources/boc.md`. The data migration
-  `2026-10-30-160000_boc_data_source_matches_valet_adapter` updates an existing Bank of Canada
-  `data_sources` row to the new description and a `rate_limit_per_minute` of 60.
 - The frontend can send data operations (series, search, data sources, the dashboard cards and
   the world map) to a separate GraphQL URL, `VITE_DATA_GRAPHQL_URL`, and never sends them a
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the
