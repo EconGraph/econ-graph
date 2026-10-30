@@ -150,6 +150,9 @@ class ConversionRehearsal(unittest.TestCase):
             db.execute('ALTER TABLE user_data_source_preferences ADD FOREIGN KEY(data_source_id) REFERENCES data_sources(id) ON DELETE CASCADE')
             db.execute('ALTER TABLE financial_annotations ADD FOREIGN KEY(statement_id) REFERENCES financial_statements(id) ON DELETE CASCADE')
             db.execute('ALTER TABLE financial_annotations ADD FOREIGN KEY(line_item_id) REFERENCES financial_line_items(id) ON DELETE CASCADE')
+            db.execute("COMMENT ON TABLE users IS 'synthetic comment'")
+            db.execute("COMMENT ON COLUMN users.email IS 'synthetic column comment'")
+            db.execute('GRANT SELECT ON users TO pg_monitor')
             self.before = conversion.fingerprints(db, conversion.inventory('data')[0])
             self.app_before = conversion.fingerprints(db, conversion.inventory('app')[0])
             self.versions_before = conversion.versions(db)
@@ -182,6 +185,11 @@ class ConversionRehearsal(unittest.TestCase):
             if table not in conversion.tables(db):
                 return None
             return db.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(table))).fetchone()[0]
+
+    def schema(self):
+        """The source's schema as pg_dump prints it: tables, types, indexes, triggers, comments, grants."""
+        return subprocess.run(['pg_dump', '--schema-only', '--restrict-key=rehearsal', '--dbname', 'service=conversion_source'],
+                              check=True, capture_output=True, text=True).stdout
 
     def restore(self, backup):
         """Run the rollback mode quietly."""
@@ -444,9 +452,11 @@ class ConversionRehearsal(unittest.TestCase):
 
     def test_rollback_restores_the_source_app_tables(self):
         """Convert, remove, roll back: the source app tables, enums and history are as before."""
+        schema_before = self.schema()
         cleanup = self.copy_and_drop()
         self.assertIsNone(self.app_count('conversion_source'))
         record = self.restore(cleanup)
+        self.assertEqual(self.schema(), schema_before)
         with psycopg.connect(service='conversion_source') as db:
             self.assertEqual(conversion.fingerprints(db, conversion.inventory('app')[0]), self.app_before)
             self.assertEqual(conversion.fingerprints(db, conversion.inventory('data')[0]), self.before)
@@ -530,6 +540,79 @@ class ConversionRehearsal(unittest.TestCase):
         self.args.app_service = 'conversion_empty'
         self.args.backup_dir = self.backup_root / ('role-' + self.number)
         with self.assertRaisesRegex(RuntimeError, 'Role no_such_role does not exist'):
+            self.run_conversion()
+
+
+    def test_failure_after_the_removal_commits_still_allows_rollback(self):
+        """Evidence marked pending before the commit lets a rollback follow a later failure."""
+        self.run_conversion()
+        save = conversion.save_evidence
+        def full_disk(directory, report):
+            if report.get('source_app_removed') is True:
+                raise OSError('synthetic full disk')
+            return save(directory, report)
+        self.args.backup_dir = self.backup_root / ('cleanup-' + self.number)
+        self.args.drop_source_app = True
+        with patch.object(conversion, 'save_evidence', side_effect=full_disk), \
+                patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value=self.phrase):
+            with self.assertRaises(OSError):
+                self.run_conversion()
+        self.assertIsNone(self.app_count('conversion_source'))
+        evidence = json.loads((self.args.backup_dir / 'evidence.json').read_text())
+        self.assertEqual(evidence['source_app_removed'], 'pending')
+        self.restore(self.args.backup_dir)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(conversion.fingerprints(db, conversion.inventory('app')[0]), self.app_before)
+            self.assertEqual(conversion.versions(db), self.versions_before)
+
+    def test_rollback_refuses_a_different_checkout(self):
+        """Tables, enums and versions to restore come from the evidence and must match the checkout."""
+        cleanup = self.copy_and_drop()
+        inventory = conversion.inventory
+        def extra_table(plane):
+            tables, enums, versions, baseline = inventory(plane)
+            return (tables + ['added_later'], enums, versions, baseline) if plane == 'app' else (tables, enums, versions, baseline)
+        with patch.object(conversion, 'inventory', side_effect=extra_table):
+            with self.assertRaisesRegex(RuntimeError, 'differ from this checkout'):
+                self.restore(cleanup)
+        def extra_version(plane):
+            tables, enums, versions, baseline = inventory(plane)
+            return (tables, enums, versions | {'20990101000000'}, baseline) if plane == 'app' else (tables, enums, versions, baseline)
+        with patch.object(conversion, 'inventory', side_effect=extra_version):
+            with self.assertRaisesRegex(RuntimeError, 'differ from this checkout'):
+                self.restore(cleanup)
+        self.assertIsNone(self.app_count('conversion_source'))
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(conversion.versions(db), conversion.inventory('data')[2])
+
+    def test_rollback_undoes_a_restore_that_does_not_match_the_evidence(self):
+        """A dump whose content differs from the recorded fingerprints leaves the source as it was."""
+        cleanup = self.copy_and_drop()
+        evidence = json.loads((cleanup / 'evidence.json').read_text())
+        mismatch = self.backup_root / ('mismatch-' + self.number)
+        mismatch.mkdir()
+        for name in ('combined.dump', 'SHA256SUMS'):
+            (mismatch / name).write_bytes((cleanup / name).read_bytes())
+        evidence['source_app']['users'] = {'rows': 2, 'sha256': '0' * 64}
+        (mismatch / 'evidence.json').write_text(json.dumps(evidence))
+        with self.assertRaisesRegex(RuntimeError, 'the restore was undone'):
+            self.restore(mismatch)
+        self.assertIsNone(self.app_count('conversion_source'))
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(conversion.versions(db), conversion.inventory('data')[2])
+            enums = {r[0] for r in db.execute("SELECT typname FROM pg_type WHERE typnamespace='public'::regnamespace")}
+            self.assertFalse(set(conversion.inventory('app')[1]) & enums)
+        # The genuine evidence still restores.
+        self.restore(cleanup)
+        self.assertEqual(self.app_count('conversion_source'), 1)
+
+    def test_conversion_requires_the_source_app_history_of_this_checkout(self):
+        """A source missing an app migration this checkout has is a different release: refused."""
+        app_only = sorted(conversion.inventory('app')[2] - conversion.inventory('data')[2])
+        with psycopg.connect(service='conversion_source') as db:
+            db.execute('DELETE FROM __diesel_schema_migrations WHERE version=%s', (app_only[-1],))
+        self.args.dry_run = True
+        with self.assertRaisesRegex(RuntimeError, 'lacks versions in this checkout'):
             self.run_conversion()
 
 

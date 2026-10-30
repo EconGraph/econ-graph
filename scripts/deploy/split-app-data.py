@@ -303,6 +303,10 @@ def convert(args):
         require(versions(source) <= app_versions | data_versions, 'Source has migration versions unknown to this checkout')
         require(tables(source) == source_tables and tables(target) == target_tables, 'Table inventory changed during locking')
         if source_app:
+            # The deployed release must be this checkout: a rollback records these versions as applied.
+            require((app_versions - data_versions) <= versions(source),
+                    'Source app migration history lacks versions in this checkout; '
+                    'run the conversion from the checkout of the deployed release')
             for name in app_tables:
                 require(columns(source, name) == columns(target, name), f'Column inventory differs for {name}')
         series = stable_ids(source, mapping)
@@ -365,17 +369,22 @@ def convert(args):
         # Commit the verified app copy first. Source locks remain held until the final commit.
         target.commit()
         if args.drop_source_app:
-            report['removed_versions'] = sorted(app_versions - data_versions)
             phrase = f'DROP APP TABLES FROM {query(source, "SELECT current_database()")[0][0]}'
             require(sys.stdin.isatty(), 'Source drop requires typed confirmation on a terminal; copy is retained')
             require(input(f'Type {phrase!r}: ') == phrase, 'Confirmation did not match; source is unchanged')
             source.execute(sql.SQL('DROP TABLE {}').format(identifiers(app_tables)))
             for enum in app_enums:
                 source.execute(sql.SQL('DROP TYPE {}').format(sql.Identifier('public', enum)))
-            source.execute('DELETE FROM public.__diesel_schema_migrations WHERE version = ANY(%s)',
-                           (report['removed_versions'],))
+            deleted = query(source, 'DELETE FROM public.__diesel_schema_migrations WHERE version = ANY(%s) '
+                            'RETURNING version', (sorted(app_versions - data_versions),))
+            report['removed_versions'] = sorted(r[0] for r in deleted)
+            report['removed_enums'] = sorted(app_enums)
             require(fingerprints(source, data_tables) == data_before, 'Data table content changed during cleanup')
             require(stable_ids(source, mapping) == series, 'Series IDs changed during cleanup')
+            # Recorded before the commit: if anything fails after it, the evidence still says a
+            # removal may have happened, and the rollback accepts it once the tables are gone.
+            report['source_app_removed'] = 'pending'
+            save_evidence(args.backup_dir, report)
             source.commit()
             report['source_app_removed'] = True
         else:
@@ -433,9 +442,15 @@ def restore_source_app(args):
     require(args.writers_stopped, 'Stop all app/crawler writers and pass --writers-stopped before restoring')
     backup = args.restore_source_app
     evidence = json.loads((backup / 'evidence.json').read_text())
-    require(evidence.get('copy_verified') is True and evidence.get('source_app_removed') is True
-            and evidence.get('removed_versions'),
+    require(evidence.get('copy_verified') is True and evidence.get('source_app_removed') in (True, 'pending')
+            and evidence.get('removed_versions') and evidence.get('removed_enums'),
             f'{backup} is not the backup of a run that removed the source app tables')
+    # What the removal removed, not what this checkout knows, decides what comes back; they must agree.
+    require(set(evidence['source_app']) == set(app_tables)
+            and set(evidence['removed_versions']) == app_versions - data_versions
+            and set(evidence['removed_enums']) == set(app_enums),
+            'The removed app tables, enum types or migration versions differ from this checkout; '
+            'run the rollback from the checkout of the release that was converted')
     dump = backup / 'combined.dump'
     with dump.open('rb') as archive:
         digest = hashlib.file_digest(archive, 'sha256').hexdigest()
@@ -456,6 +471,7 @@ def restore_source_app(args):
                 'The source is not the database this backup was taken from')
         require(tables(source) - set(app_tables) == set(data_tables) | metadata, 'Source has unknown or missing tables')
         present, enums = inspect(source)
+    restored = False
     if not present and not enums:
         require(versions_of(args.source_service) == data_versions,
                 'Source migration history is not the converted data history; operator investigation required')
@@ -474,6 +490,7 @@ def restore_source_app(args):
         run_logged(['pg_restore', '--single-transaction', '--exit-on-error', '--no-password',
                     '--use-list', str(record / 'restore.list'), '--dbname', f'service={args.source_service}',
                     str(dump)], log, stdout=subprocess.DEVNULL)
+        restored = True
     else:
         # A previous rollback restored the tables but stopped before recording the versions.
         require(present == set(app_tables) and enums == set(app_enums),
@@ -486,10 +503,18 @@ def restore_source_app(args):
         source.execute("SET LOCAL datestyle='ISO, YMD'")
         source.execute("SET LOCAL intervalstyle='postgres'")
         source.execute("SET LOCAL bytea_output='hex'")
-        source.execute(sql.SQL('LOCK TABLE {} IN SHARE MODE').format(identifiers(sorted(app_tables) + sorted(metadata))))
+        source.execute(sql.SQL('LOCK TABLE {} IN ACCESS EXCLUSIVE MODE').format(
+            identifiers(sorted(app_tables) + sorted(metadata))))
         require(inspect(source) == (set(app_tables), set(app_enums)), 'Restored app schema is incomplete')
-        require(fingerprints(source, app_tables) == evidence['source_app'],
-                'Restored app tables do not match the pre-conversion fingerprints; nothing recorded')
+        if fingerprints(source, app_tables) != evidence['source_app']:
+            if restored:
+                # Undo this run's restore so the source is as it was before the rollback.
+                source.execute(sql.SQL('DROP TABLE {}').format(identifiers(app_tables)))
+                for enum in app_enums:
+                    source.execute(sql.SQL('DROP TYPE {}').format(sql.Identifier('public', enum)))
+                source.commit()
+            raise RuntimeError('Restored app tables do not match the fingerprints recorded before the removal; '
+                               + ('the restore was undone' if restored else 'nothing recorded'))
         source.execute('INSERT INTO public.__diesel_schema_migrations(version) SELECT unnest(%s::text[]) '
                        'ON CONFLICT DO NOTHING', (evidence['removed_versions'],))
         require(versions(source) == expected_versions, 'Source migration history does not match the backup')
