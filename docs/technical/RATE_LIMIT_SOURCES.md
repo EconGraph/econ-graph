@@ -118,7 +118,7 @@ that changes once a day.
 The [Bank of Canada adapter](../../backend/crates/econ-graph-crawler/src/sources/boc.rs)
 makes one request per curated series for discovery and one per series per refresh. The
 crawler's 1 request/second with one request in flight is an application choice, not a
-provider-approved rate. See the [Bank of Canada guide](../data-sources/boc.md#terms-of-use-and-request-rate).
+provider-approved rate. See the [Bank of Canada guide](../data-sources/boc.md#request-rate).
 
 ## Source-row metadata and catalog entries
 

@@ -158,6 +158,13 @@ role and mapping. A new catalog role spells the source out (`catalog.bank_of_can
 an acronym). The crawler's `catalog_roles` test fails when a source's name has no role, a
 catalog role is missing from `catalog-public`, or a role in `catalog-public` is missing from the
 `econgraph-anonymous` scope mapping, apart from the exceptions it lists.
+
+Some catalogs are restricted by default: their role is defined but is in neither
+`catalog-public` nor the `econgraph-anonymous` scope mapping, so no one reads them until an
+operator grants the role. Today that is `catalog.bank_of_canada:read` (Bank of Canada). Grant
+it to a user or a group like any client role, or add it to `catalog-public` to open it to every
+signed-in user; anonymous visitors then also need it in the `econgraph-anonymous` client's
+scope mapping.
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
 So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
 `updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the

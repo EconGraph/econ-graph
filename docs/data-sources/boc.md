@@ -128,29 +128,25 @@ a dataset with no dimensions: a Valet name is an opaque key, kept as the externa
 | Attributes | None |
 | Shape | Long; one value per series and observation date |
 
-## Terms of use and request rate
+## Access
 
-Valet's responses link the Bank of Canada's [terms of use](https://www.bankofcanada.ca/terms/),
-which the [Valet documentation](https://www.bankofcanada.ca/valet/docs) also points to. The
-terms permit using, copying, distributing and transmitting the site's content on these
-conditions:
+Bank of Canada series are restricted by default. Their catalog role,
+`catalog.bank_of_canada:read`, is defined in the
+[realm file](../../config/keycloak/econ-graph-realm.json) but is not in `catalog-public` or in
+the anonymous reader's scope mapping, so neither signed-in users nor anonymous visitors see
+the source, its series or their counts until an operator grants the role. An operator grants it
+to a user or a group, or adds it to `catalog-public` (and, for anonymous visitors, to the
+`econgraph-anonymous` scope mapping); see the
+[Keycloak guide](../../config/keycloak/README.md#catalog-access-including-anonymous-visitors).
 
-- the Bank of Canada is attributed as the source, with an indication if changes were made
-  (EconGraph lists it among its data sources and stores values unchanged);
-- due diligence is exercised in reproducing the content accurately;
-- content provided through paid services, or in documents for sale, must come with a notice
-  that it is available free of charge on the Bank's website.
+## Request rate
 
-The exceptions are bank note images, the Bank's logo and wordmark, and third-party content,
-which is why the list holds only series the Bank produces. The terms also state that Bank of
-Canada exchange rates are released for statistical and analytical purposes only.
-
-The terms forbid circumventing the Bank's limits on the number or frequency of requests,
-including retrieval through Valet, and access that could overburden the site. Neither the
-terms, the Valet documentation nor the [Valet how-to guide](https://www.bankofcanada.ca/valet-api-how-to/)
-gives a numeric limit; the guide asks clients to start slowly, wait before retrying a failed
-request, and cache data that changes once a day. The site's `robots.txt` disallows only
-`/wp-admin/`.
+The Bank of Canada's [terms of use](https://www.bankofcanada.ca/terms/), which govern Valet,
+forbid circumventing the Bank's limits on the number or frequency of requests, and access that
+could overburden the site. Neither the terms, the Valet documentation nor the
+[Valet how-to guide](https://www.bankofcanada.ca/valet-api-how-to/) gives a numeric limit; the
+guide asks clients to start slowly, wait before retrying a failed request, and cache data that
+changes once a day. The site's `robots.txt` disallows only `/wp-admin/`.
 
 The crawler's Bank of Canada policy is 1 request/second with a burst of 1 and one request in
 flight ([`policy.rs`](../../backend/crates/econ-graph-crawler/src/policy.rs)). The source's

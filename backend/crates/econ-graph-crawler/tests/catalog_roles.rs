@@ -3,7 +3,7 @@
 // See LICENSE file for complete terms and conditions.
 
 //! Every data source the crawler can write is readable through a catalog role, and every
-//! catalog role is granted by default.
+//! catalog role is granted by default unless it is listed here as restricted.
 //!
 //! The API serves a source's series only to a caller holding the role
 //! `Role::for_catalog(data_sources.name)` returns, and that function matches on the exact name
@@ -11,7 +11,8 @@
 //! catalog role missing from the realm file's `catalog-public` composite is readable by no
 //! signed-in or anonymous reader unless an operator grants it; and one missing from the
 //! `econgraph-anonymous` client's scope mapping never reaches the anonymous reader's token even
-//! though `catalog-public` grants it. All three fail silently, so they are checked here.
+//! though `catalog-public` grants it. All three fail silently, so they are checked here, and a
+//! role left out of either on purpose must be listed below.
 
 use std::collections::BTreeSet;
 
@@ -23,12 +24,17 @@ use econ_graph_crawler::source::SourceId;
 /// series catalog.
 const SOURCES_WITHOUT_A_CATALOG_ROLE: &[SourceId] = &[SourceId::Sec];
 
-/// Catalog roles deliberately left out of the default `catalog-public` grant. None today.
-const CATALOG_ROLES_NOT_PUBLIC: &[Role] = &[];
+/// Catalog roles deliberately left out of the default `catalog-public` grant.
+const CATALOG_ROLES_NOT_PUBLIC: &[Role] = &[
+    // Restricted by default; granted explicitly.
+    Role::CatalogBankOfCanadaRead,
+];
 
-/// Roles in `catalog-public` deliberately kept out of the anonymous reader's scope mapping, so
-/// only signed-in users get them by default. None today.
-const PUBLIC_ROLES_NOT_ANONYMOUS: &[Role] = &[];
+/// Catalog roles deliberately left out of the anonymous reader's scope mapping.
+const CATALOG_ROLES_NOT_ANONYMOUS: &[Role] = &[
+    // Restricted by default; granted explicitly.
+    Role::CatalogBankOfCanadaRead,
+];
 
 const REALM: &str = include_str!("../../../../config/keycloak/econ-graph-realm.json");
 
@@ -113,32 +119,60 @@ fn check_holds(held: &BTreeSet<String>, want: &[Role], except: &[Role], what: &s
     }
 }
 
-#[test]
-fn every_public_catalog_role_is_in_the_anonymous_scope_mapping() {
-    let realm = realm();
-    let public: Vec<Role> = catalog_public(&realm)
+fn catalog_roles() -> Vec<Role> {
+    Role::ALL
         .iter()
-        .map(|name| name.parse().expect("catalog-public holds catalog roles"))
-        .collect();
+        .copied()
+        .filter(|role| role.is_catalog())
+        .collect()
+}
+
+/// The `econ-graph-api` client roles the realm file defines.
+fn defined_roles(realm: &serde_json::Value) -> BTreeSet<String> {
+    realm["roles"]["client"]["econ-graph-api"]
+        .as_array()
+        .expect("econ-graph-api client roles")
+        .iter()
+        .map(|role| role["name"].as_str().expect("role name").to_string())
+        .collect()
+}
+
+#[test]
+fn every_catalog_role_but_the_listed_ones_is_in_the_anonymous_scope_mapping() {
     check_holds(
-        &anonymous_scope(&realm),
-        &public,
-        PUBLIC_ROLES_NOT_ANONYMOUS,
+        &anonymous_scope(&realm()),
+        &catalog_roles(),
+        CATALOG_ROLES_NOT_ANONYMOUS,
         "the econgraph-anonymous scope mapping",
     );
 }
 
 #[test]
-fn every_catalog_role_is_in_catalog_public() {
-    let catalog: Vec<Role> = Role::ALL
-        .iter()
-        .copied()
-        .filter(|role| role.is_catalog())
-        .collect();
+fn every_catalog_role_but_the_listed_ones_is_in_catalog_public() {
     check_holds(
         &catalog_public(&realm()),
-        &catalog,
+        &catalog_roles(),
         CATALOG_ROLES_NOT_PUBLIC,
         "catalog-public",
+    );
+}
+
+/// The Bank of Canada catalog is defined but restricted by default: an operator grants it to a
+/// user, a group or `catalog-public`.
+#[test]
+fn bank_of_canada_is_defined_but_not_granted_by_default() {
+    let realm = realm();
+    let role = Role::CatalogBankOfCanadaRead.as_str();
+    assert!(
+        defined_roles(&realm).contains(role),
+        "{role} is not defined"
+    );
+    assert!(
+        !catalog_public(&realm).contains(role),
+        "{role} is in catalog-public"
+    );
+    assert!(
+        !anonymous_scope(&realm).contains(role),
+        "{role} is in the econgraph-anonymous scope mapping"
     );
 }
