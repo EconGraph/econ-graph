@@ -4,9 +4,10 @@
 #   - a Job that completes: its logs, exit 0;
 #   - a Job that fails: its logs and exit 1 at once, not after the timeout;
 #   - a Job still running at --timeout: not stopped, and the "still running" line
-#     release-deploy.sh reads;
-#   - a running Job of the CronJob (scheduled or ad hoc): no second Job is created;
-#     other running Jobs don't count;
+#     release-deploy.sh reads; a Job that is gone, or can't be read five times in a
+#     row, ends the wait at once without that line;
+#   - an unfinished Job of the CronJob (scheduled or ad hoc, also between a failed pod
+#     and its retry): no second Job is created; finished and other Jobs don't count;
 #   - --timeout and BACKUP_WAIT_TIMEOUT: positive whole seconds only;
 #   - --dry-run creates nothing.
 #
@@ -19,8 +20,9 @@ W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
 # The stub: context kind-econ-graph, the Jobs in STUB_JOBS (lines of name<TAB>owner<TAB>
-# active), and the new Job's conditions as STUB_STATE says: complete, failed, running,
-# or "complete-after N" (running for N looks). Every call is logged.
+# true conditions, each followed by a space), and the new Job's conditions as STUB_STATE
+# says: complete, failed, running, gone (NotFound), error (any other failure), or
+# "complete-after N" (running for N looks). Every call is logged.
 cat >"$W/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$STUB_LOG"
@@ -40,6 +42,8 @@ case "$*" in
             complete) echo Complete ;;
             failed) echo Failed ;;
             running) ;;
+            gone) echo 'Error from server (NotFound): jobs.batch "x" not found' >&2; exit 1 ;;
+            error) echo 'The connection to the server 127.0.0.1:6443 was refused' >&2; exit 1 ;;
             complete-after*) [ "$looks" -le "${STUB_STATE#complete-after }" ] || echo Complete ;;
         esac ;;
     "logs "*) echo "[backup] Backup OK: 3 tables, 1MB in /backups/x.dump" ;;
@@ -103,6 +107,21 @@ else
     bad "a Job still running at the timeout: exit $rc"
 fi
 
+run STUB_STATE=gone -- --timeout 600
+if [ "$rc" -eq 1 ] && has "is gone" && ! has "still running" && [ "$(looks)" -eq 1 ]; then
+    ok "a Job deleted while it ran ends the wait at once, not as still running"
+else
+    bad "a Job that is gone: exit $rc, $(looks) looks"
+fi
+
+run STUB_STATE=error -- --timeout 600
+if [ "$rc" -eq 1 ] && has "could not read" && has "connection to the server" && ! has "still running" &&
+    [ "$(looks)" -eq 5 ]; then
+    ok "a Job that can't be read five times in a row ends the wait, not as still running"
+else
+    bad "a Job that can't be read: exit $rc, $(looks) looks"
+fi
+
 run STUB_STATE=running BACKUP_WAIT_TIMEOUT=1 --
 if [ "$rc" -eq 1 ] && has "still running after 1s"; then
     ok "BACKUP_WAIT_TIMEOUT sets the wait"
@@ -110,25 +129,28 @@ else
     bad "BACKUP_WAIT_TIMEOUT=1: exit $rc"
 fi
 
-for jobs in 'postgres-backup-29384756\tpostgres-backup\t1\n' 'postgres-backup-manual-17\t\t1\n'; do
+# Scheduled (owned by the CronJob), ad hoc by name, and one between a failed pod and its
+# retry, or one that will fail but hasn't yet (FailureTarget only).
+for jobs in 'postgres-backup-29384756\tpostgres-backup\t\n' 'postgres-backup-manual-17\t\t\n' \
+    'postgres-backup-29384757\tpostgres-backup\tFailureTarget \n'; do
     run STUB_JOBS="$jobs" --
     name="$(printf '%b' "$jobs" | cut -f1)"
     if [ "$rc" -eq 1 ] && ! created && has "job/${name} from cronjob/postgres-backup is running" &&
         has "backup-postgres-now: still running: job/${name}"; then
-        ok "a running backup Job (${name}): no second Job is created"
+        ok "an unfinished backup Job (${name}): no second Job is created"
     else
         bad "a running backup Job (${name}): exit $rc, created: $(created && echo yes || echo no)"
     fi
 done
 
-run STUB_JOBS='postgres-backup-29384756\tpostgres-backup\t\ncrawler-migrate-1\t\t1\nkeycloak-db-backup-1\tkeycloak-db-backup\t1\n' --
+run STUB_JOBS='postgres-backup-29384756\tpostgres-backup\tComplete \npostgres-backup-manual-3\t\tFailureTarget Failed \ncrawler-migrate-1\t\t\nkeycloak-db-backup-1\tkeycloak-db-backup\t\n' --
 if [ "$rc" -eq 0 ] && created; then
-    ok "finished backup Jobs and other running Jobs don't stop a backup"
+    ok "completed or failed backup Jobs and other unfinished Jobs don't stop a backup"
 else
     bad "finished or unrelated Jobs: exit $rc"
 fi
 
-run STUB_JOBS='postgres-backup-1\tpostgres-backup\t1\n' -- --dry-run
+run STUB_JOBS='postgres-backup-1\tpostgres-backup\t\n' -- --dry-run
 if [ "$rc" -eq 0 ] && ! created && has "job/postgres-backup-1 is running, so no backup would be started"; then
     ok "--dry-run with a backup running: says so, creates nothing"
 else

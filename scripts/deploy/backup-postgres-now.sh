@@ -64,12 +64,13 @@ still_running() {
     exit 1
 }
 
-# A running Job of the CronJob, by its owner or its name: two backups at once would
-# dump the same databases side by side.
+# A Job of the CronJob, by its owner or its name, that has neither completed nor
+# failed: two backups at once would dump the same databases side by side. Unfinished
+# rather than with active pods, so a Job between a failed pod and its retry counts.
 jobs="$(kc get jobs -n "${NAMESPACE}" \
-    -o 'jsonpath={range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].name}{"\t"}{.status.active}{"\n"}{end}')" ||
+    -o 'jsonpath={range .items[*]}{.metadata.name}{"\t"}{.metadata.ownerReferences[0].name}{"\t"}{range .status.conditions[?(@.status=="True")]}{.type}{" "}{end}{"\n"}{end}')" ||
     { echo "could not list the Jobs in ${NAMESPACE}, to check no backup is running. Nothing was started." >&2; exit 1; }
-running="$(awk -F'\t' '($2 == "postgres-backup" || $1 ~ /^postgres-backup-/) && $3 + 0 > 0 { print $1; exit }' <<<"${jobs}")"
+running="$(awk -F'\t' '($2 == "postgres-backup" || $1 ~ /^postgres-backup-/) && $3 !~ /(^| )(Complete|Failed) / { print $1; exit }' <<<"${jobs}")"
 
 if [ "${DRY_RUN}" = "true" ]; then
     if [ -n "${running}" ]; then
@@ -91,11 +92,27 @@ kc create job "${JOB_NAME}" --from=cronjob/postgres-backup -n "${NAMESPACE}"
 # Until the Job completes or fails, or the timeout: `kubectl wait` for Complete alone
 # would sit out the whole timeout on a Job that failed.
 echo "⏳ Waiting up to ${TIMEOUT}s for it to complete..."
+# A Job that is gone, or a cluster that can't be read five times in a row, ends the
+# wait at once: neither is "still running".
 deadline=$((SECONDS + TIMEOUT))
 conditions=""
+errors=0
 while :; do
-    conditions="$(kc get "job/${JOB_NAME}" -n "${NAMESPACE}" \
-        -o 'jsonpath={range .status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' 2>/dev/null || true)"
+    if conditions="$(kc get "job/${JOB_NAME}" -n "${NAMESPACE}" \
+        -o 'jsonpath={range .status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' 2>&1)"; then
+        errors=0
+    elif grep -q NotFound <<<"${conditions}"; then
+        echo "❌ job/${JOB_NAME} is gone (deleted while it ran?); no backup is known to have completed."
+        exit 1
+    else
+        errors=$((errors + 1))
+        if [ "${errors}" -ge 5 ]; then
+            echo "❌ could not read job/${JOB_NAME} five times in a row; it was not stopped:"
+            printf '   %s\n' "${conditions}"
+            exit 1
+        fi
+        conditions=""
+    fi
     if grep -qx -e Complete -e Failed <<<"${conditions}" || [ "${SECONDS}" -ge "${deadline}" ]; then
         break
     fi

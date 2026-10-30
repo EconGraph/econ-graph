@@ -464,21 +464,25 @@ for step in backup-postgres-now load-release-images backup-keycloak-db verify-re
 done
 
 # From the load on, the new images may be on the nodes: a backend pod that restarts
-# migrates the app database, so the restore advice is printed, and nothing claims the
-# databases are unchanged. Before the load, nothing is migrated.
+# migrates econ_graph_app, and only it, before deploy.sh runs. So a failure before
+# deploy.sh names that database and how to check, never says the databases are
+# unchanged, and reports nothing to restore. Before the load, there is no such advice.
 for step in load-release-images backup-keycloak-db precheck-db-migration; do
-    run env STUB_FAIL="$step" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-    if ! has "migrates the app database when it starts" || ! has "restore them from the last backups"; then
-        fail "failing $step: no restore advice for a backend that migrates the app database on restart"
-    elif has "The databases are unchanged"; then
-        fail "failing $step: says the databases are unchanged, with the new backend image on the nodes"
+    run env STUB_FAIL="$step" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
+    if ! has "Only econ_graph_app can have changed" || ! has "get pods -l app=econ-graph-backend" ||
+        ! grep -qE '^  /.*/econ_graph_app-[^/]*\.dump$' <<<"$out"; then
+        fail "failing $step: does not say only econ_graph_app can have changed, how to check, or its dump"
+    elif has "The databases are unchanged" || has "restore them from the last backups"; then
+        fail "failing $step: says the databases are unchanged, or advises restoring them all"
+    elif grep -q '^restore_backup=' "$WORK/report"; then
+        fail "failing $step: reports a backup to restore when there may be nothing to restore"
     else
-        echo "ok   failing $step: restore advice, since a restarted backend migrates the app database"
+        echo "ok   failing $step: only econ_graph_app, after a backend restart, nothing reported to restore"
     fi
 done
 run env STUB_FAIL=backup-postgres-now "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-if has "restore them from the last backups"; then
-    fail "failing backup-postgres-now: restore advice before any new image could migrate anything"
+if has "Only econ_graph_app can have changed" || has "restore them from the last backups"; then
+    fail "failing backup-postgres-now: restore advice before any new image is on the nodes"
 fi
 
 # Keycloak: stopped by the keycloak step, applied again by deploy.sh.
