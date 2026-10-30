@@ -105,15 +105,17 @@ test.describe('Geographic map dragging on the seeded backend', () => {
     await expect(country(page, 156)).toHaveAttribute('d', initial!);
     expect(crossSections).toBe(requests);
 
-    // Mercator uses the same direct geographic drag, including at whole-world zoom.
-    await projection(page, 'Mercator');
-    const mercator = await country(page, 156).getAttribute('d');
-    await drag(page);
-    await expect(country(page, 156)).not.toHaveAttribute('d', mercator!);
-    await expect(page.locator('.map-container')).toHaveAttribute(
-      'transform',
-      'translate(0,0) scale(1)'
-    );
+    // All flat projections use the same direct movement at whole-world zoom.
+    for (const name of ['Mercator', 'Equal Earth']) {
+      await projection(page, name);
+      const before = await country(page, 156).getAttribute('d');
+      await drag(page);
+      await expect(country(page, 156)).not.toHaveAttribute('d', before!);
+      await expect(page.locator('.map-container')).toHaveAttribute(
+        'transform',
+        'translate(0,0) scale(1)'
+      );
+    }
   });
 
   test('spins the hidden hemisphere into view and preserves country interactions', async ({
