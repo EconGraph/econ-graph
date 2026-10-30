@@ -1838,3 +1838,248 @@ async fn a_new_release_appends_only_the_values_it_changes() {
 
     db.drop().await;
 }
+
+/// A World Bank series `wdi/NY.GDP.PCAP.CD.USA` carrying `points` as `(date, value)` at
+/// `revision_date`, every one marked an original release as the adapter does.
+fn wdi_usa(revision_date: NaiveDate, points: &[(NaiveDate, &str)]) -> FetchedSeries {
+    FetchedSeries {
+        metadata: None,
+        points: points
+            .iter()
+            .map(|(date, value)| FetchedPoint {
+                date: *date,
+                value: Some(BigDecimal::from_str(value).unwrap()),
+                revision_date,
+                is_original_release: true,
+            })
+            .collect(),
+        dataset: SeriesDataset::new("wdi", [("indicator", "NY.GDP.PCAP.CD"), ("area", "USA")]),
+        validators: None,
+    }
+}
+
+const USA: &str = "wdi/NY.GDP.PCAP.CD.USA";
+
+fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, m, d).unwrap()
+}
+
+fn stored(date: NaiveDate, revision_date: NaiveDate, value: &str, original: bool) -> StoredRow {
+    StoredRow {
+        date,
+        revision_date,
+        value: Some(BigDecimal::from_str(value).unwrap()),
+        is_original_release: original,
+    }
+}
+
+async fn persist_usa(
+    pool: &econ_graph_core::DatabasePool,
+    f: &FetchedSeries,
+) -> persist::SeriesWrite {
+    persist::persist_series(pool, SourceId::WorldBank, USA, f)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_release_read_again_with_a_different_value_updates_its_own_row() {
+    let Some(db) = validator_db("econgraph_wb_release_reread").await else {
+        return;
+    };
+    let (r1, r2) = (ymd(2026, 7, 1), ymd(2026, 10, 15));
+    let y = date(2023, 1);
+    persist_usa(&db.pool, &wdi_usa(r1, &[(y, "100.5")])).await;
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "101.5")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (1, 1));
+
+    // R2 read again with another value (a parser fix, or the World Bank correcting a release
+    // in place): R2's own row is updated and stays a revision; nothing is appended.
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "101.75")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (1, 0));
+    assert_eq!(
+        stored_rows(&db.pool, USA).await,
+        vec![stored(y, r1, "100.5", true), stored(y, r2, "101.75", false)]
+    );
+
+    // The same for a date whose only row is R1's original release.
+    let w = persist_usa(&db.pool, &wdi_usa(r1, &[(y, "100.25")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (1, 0));
+    assert_eq!(
+        stored_rows(&db.pool, USA).await,
+        vec![
+            stored(y, r1, "100.25", true),
+            stored(y, r2, "101.75", false)
+        ]
+    );
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_value_that_differs_only_in_scale_is_unchanged() {
+    let Some(db) = validator_db("econgraph_wb_release_scale").await else {
+        return;
+    };
+    let (r1, r2) = (ymd(2026, 7, 1), ymd(2026, 10, 15));
+    let y = date(2023, 1);
+    persist_usa(&db.pool, &wdi_usa(r1, &[(y, "1.00")])).await;
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "1.0")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (0, 0));
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "1")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (0, 0));
+    // The stored row keeps the scale it was first published with.
+    let rows = stored_rows(&db.pool, USA).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].value.as_ref().unwrap().to_string(), "1.00");
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn the_comparison_spans_lookup_chunks() {
+    let Some(db) = validator_db("econgraph_wb_release_chunks").await else {
+        return;
+    };
+    let (r1, r2) = (ymd(2026, 7, 1), ymd(2026, 10, 15));
+    let n = persist::INSERT_CHUNK * 2 + 500;
+    let dates: Vec<NaiveDate> = (0..n)
+        .map(|i| ymd(1900, 1, 1) + chrono::Days::new(i as u64))
+        .collect();
+    let values: Vec<String> = (0..n).map(|i| format!("{i}.5")).collect();
+    let release = |rev, changed: &[usize]| {
+        let points: Vec<(NaiveDate, &str)> = dates
+            .iter()
+            .zip(&values)
+            .map(|(d, v)| (*d, v.as_str()))
+            .collect();
+        let mut f = wdi_usa(rev, &points);
+        for &i in changed {
+            f.points[i].value = Some(BigDecimal::from_str("-1").unwrap());
+        }
+        f
+    };
+    let w = persist_usa(&db.pool, &release(r1, &[])).await;
+    assert_eq!((w.points_upserted, w.points_new), (n, n));
+
+    // One changed value in each chunk of the lookup, and one on each side of a chunk boundary.
+    let chunk = persist::INSERT_CHUNK;
+    let changed = [3, chunk - 1, chunk, chunk + 7, n - 1];
+    let w = persist_usa(&db.pool, &release(r2, &changed)).await;
+    assert_eq!(
+        (w.points_upserted, w.points_new),
+        (changed.len(), changed.len())
+    );
+    let appended: Vec<StoredRow> = stored_rows(&db.pool, USA)
+        .await
+        .into_iter()
+        .filter(|r| r.revision_date == r2)
+        .collect();
+    assert_eq!(
+        appended,
+        changed
+            .iter()
+            .map(|&i| stored(dates[i], r2, "-1", false))
+            .collect::<Vec<_>>()
+    );
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn legacy_dates_with_several_original_releases_compare_with_the_newest() {
+    let Some(db) = validator_db("econgraph_wb_release_legacy").await else {
+        return;
+    };
+    let (r0, r1, r2, r3) = (
+        ymd(2025, 12, 16),
+        ymd(2026, 7, 1),
+        ymd(2026, 10, 15),
+        ymd(2026, 12, 16),
+    );
+    let y = date(2023, 1);
+    // Rows as stored before releases were compared: every release wrote every date again, each
+    // one marked an original release.
+    let first = persist_usa(&db.pool, &wdi_usa(r0, &[(y, "10")])).await;
+    let mut conn = db.pool.get().await.unwrap();
+    diesel_async::RunQueryDsl::execute(
+        diesel::sql_query(
+            "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
+             VALUES ($1, $2, 10, $3, TRUE), ($1, $2, 11, $4, TRUE)",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(first.series_id)
+        .bind::<diesel::sql_types::Date, _>(y)
+        .bind::<diesel::sql_types::Date, _>(ymd(2026, 2, 1))
+        .bind::<diesel::sql_types::Date, _>(r1),
+        &mut conn,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let legacy = vec![
+        stored(y, r0, "10", true),
+        stored(y, ymd(2026, 2, 1), "10", true),
+        stored(y, r1, "11", true),
+    ];
+    assert_eq!(stored_rows(&db.pool, USA).await, legacy);
+
+    // Equal to the newest row (R1's 11, not R0's 10): nothing is written.
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "11")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (0, 0));
+    // Back to an older value: it differs from the newest row, so it is a revision.
+    let w = persist_usa(&db.pool, &wdi_usa(r3, &[(y, "10")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (1, 1));
+    let mut expected = legacy;
+    expected.push(stored(y, r3, "10", false));
+    assert_eq!(stored_rows(&db.pool, USA).await, expected);
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn concurrent_persists_of_one_series_are_serialised() {
+    use diesel_async::AsyncConnection;
+    let Some(db) = validator_db("econgraph_wb_release_concurrent").await else {
+        return;
+    };
+    let (r1, r2) = (ymd(2026, 7, 1), ymd(2026, 10, 15));
+    let (old, new) = (date(2023, 1), date(2024, 1));
+    persist_usa(&db.pool, &wdi_usa(r1, &[(old, "5")])).await;
+
+    // A persists R2 (adding 2024) and holds its transaction open. B persists the same R2 on
+    // another connection. Without the series row lock both would see no 2024 row and both
+    // would write it as an original release; with it, B waits and then finds A's row.
+    let (a_wrote_tx, a_wrote_rx) = tokio::sync::oneshot::channel::<()>();
+    let (commit_tx, commit_rx) = tokio::sync::oneshot::channel::<()>();
+    let pool_a = db.pool.clone();
+    let release = wdi_usa(r2, &[(old, "5"), (new, "7")]);
+    let release_a = release.clone();
+    let a = tokio::spawn(async move {
+        let mut conn = pool_a.get().await.unwrap();
+        conn.transaction::<_, econ_graph_core::error::AppError, _>(async |conn| {
+            let w =
+                persist::persist_series_conn(conn, SourceId::WorldBank, USA, &release_a).await?;
+            a_wrote_tx.send(()).unwrap();
+            commit_rx.await.unwrap();
+            Ok(w)
+        })
+        .await
+        .unwrap()
+    });
+    a_wrote_rx.await.unwrap();
+    let pool_b = db.pool.clone();
+    let b = tokio::spawn(async move { persist_usa(&pool_b, &release).await });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!b.is_finished(), "B must wait for A's transaction");
+    commit_tx.send(()).unwrap();
+    let wa = a.await.unwrap();
+    let wb = b.await.unwrap();
+    assert_eq!((wa.points_upserted, wa.points_new), (1, 1));
+    assert_eq!((wb.points_upserted, wb.points_new), (0, 0));
+    assert_eq!(
+        stored_rows(&db.pool, USA).await,
+        vec![stored(old, r1, "5", true), stored(new, r2, "7", true)]
+    );
+
+    db.drop().await;
+}

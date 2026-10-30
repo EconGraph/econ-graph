@@ -906,7 +906,10 @@ struct PriorPoint {
 /// then `id`):
 ///
 /// - No such row: the point is written as the date's original release
-///   (`is_original_release = true`).
+///   (`is_original_release = true`). This holds even when the date has rows at later
+///   `revision_date`s: a fetch whose `lastupdated` is older than what is stored (a stale response,
+///   or a release the World Bank withdrew) labels such a date an original release at its own,
+///   earlier vintage, which is when that value was first published as far as the fetch shows.
 /// - A row at the same `revision_date` (the same vintage read again): the point keeps that row's
 ///   `is_original_release`, so the upsert updates the row in place if the value differs.
 /// - An older row with the same value: nothing is written; reads at or after the new vintage
@@ -918,6 +921,13 @@ struct PriorPoint {
 /// vintages of one date writes each one that differs from what is stored; two points for the
 /// same date and `revision_date` keep the last. One indexed lookup per
 /// [`INSERT_CHUNK`] points, inside the caller's transaction.
+///
+/// The caller must hold the series' `economic_series` row lock, so that two concurrent persists
+/// of one series can't both compare against the same stored rows (and, say, both write a new
+/// date as its original release). [`persist_series_conn`] takes it with its upsert of that row,
+/// which runs first and holds the lock until the transaction ends; a second persist of the
+/// series waits at its own upsert, and its comparison (a later statement at READ COMMITTED)
+/// then sees the first one's rows.
 async fn keep_changed_points(
     conn: &mut AsyncPgConnection,
     series_id: Uuid,
@@ -1111,6 +1121,8 @@ pub(crate) async fn persist_series_conn(
     set_series_validators_conn(conn, series_id, fetched.validators.as_ref()).await?;
 
     let points: Vec<&FetchedPoint> = unique.values().copied().collect();
+    // The series upsert above holds the row lock that keep_changed_points relies on: keep it
+    // first in this transaction.
     let changed;
     let points: Vec<&FetchedPoint> = if appends_only_changed_values(source) {
         changed = keep_changed_points(conn, series_id, &points).await?;
