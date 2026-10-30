@@ -147,12 +147,12 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
             aria-label='open drawer'
             edge='start'
             onClick={onMenuClick}
-            sx={{ mr: 2, display: { sm: 'none' } }}
+            sx={{ mr: 1, display: { sm: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
 
-          {/* Application title and logo */}
+          {/* Application title and logo, a little smaller on a phone to leave the search room */}
           <Box
             sx={{
               display: 'flex',
@@ -165,12 +165,13 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
             }}
             onClick={handleLogoClick}
           >
-            <TrendingUpIcon sx={{ mr: 1 }} />
+            <TrendingUpIcon sx={{ mr: { xs: 0.5, sm: 1 } }} />
             <Typography
               variant='h6'
               noWrap
               component='div'
               sx={{
+                fontSize: { xs: '1.0625rem', sm: '1.25rem' },
                 fontWeight: 600,
                 letterSpacing: '0.5px',
               }}
