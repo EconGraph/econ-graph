@@ -142,16 +142,18 @@ pub fn validate_catalog_rules() -> Result<(), CrawlError> {
     load_catalog_rules().map(|_| ())
 }
 
-fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
+/// The catalog rules in [`CATALOG_RULES_FILE`].
+pub(crate) fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
     let path = data_dir().join(CATALOG_RULES_FILE);
     let text = std::fs::read_to_string(&path)
         .map_err(|e| CrawlError::Permanent(format!("reading {}: {e}", path.display())))?;
     FredCatalogRules::parse(&text)
 }
 
+/// Parsed `catalog_selection/fred.toml`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct FredCatalogRules {
+pub(crate) struct FredCatalogRules {
     /// Operational guards do not change the selected catalog scope.
     #[serde(skip_serializing)]
     max_series: usize,
@@ -183,10 +185,15 @@ struct FredCatalogRule {
     id_prefix: Option<String>,
     #[serde(default)]
     frequencies: Vec<String>,
+    /// How many catalog rows this rule is meant to match at most. Discovery doesn't enforce it
+    /// (`max_series` bounds the whole selection); `crawler check-selection` reports a rule that
+    /// matches more as over-broad. Like the other limits, it isn't part of the fingerprint.
+    #[serde(default, skip_serializing)]
+    max_matches: Option<usize>,
 }
 
 impl FredCatalogRules {
-    fn parse(text: &str) -> Result<Self, CrawlError> {
+    pub(crate) fn parse(text: &str) -> Result<Self, CrawlError> {
         let rules: Self = toml::from_str(text)
             .map_err(|e| CrawlError::Permanent(format!("FRED catalog rules: {e}")))?;
         if rules.max_series == 0
@@ -213,6 +220,7 @@ impl FredCatalogRules {
                     .as_ref()
                     .is_some_and(|s| s.trim().is_empty())
                 || rule.id_prefix.as_ref().is_some_and(|s| s.trim().is_empty())
+                || rule.max_matches == Some(0)
                 || rule.frequencies.iter().any(|f| {
                     !matches!(
                         f.as_str(),
@@ -273,7 +281,56 @@ impl FredCatalogRules {
     }
 }
 
+impl FredCatalogRules {
+    /// The bound on selected series.
+    pub(crate) fn max_series(&self) -> usize {
+        self.max_series
+    }
+
+    /// The bound on catalog rows inspected.
+    pub(crate) fn max_catalog_series(&self) -> usize {
+        self.max_catalog_series
+    }
+
+    /// The explicit include overrides.
+    pub(crate) fn include(&self) -> &[String] {
+        &self.include
+    }
+
+    /// Include overrides kept as known-retired probes.
+    pub(crate) fn expected_missing(&self) -> &[String] {
+        &self.expected_missing
+    }
+
+    /// Each rule, described for a report, with its `max_matches`.
+    pub(crate) fn rule_summaries(&self) -> Vec<(String, Option<usize>)> {
+        self.rules
+            .iter()
+            .map(|rule| (rule.describe(), rule.max_matches))
+            .collect()
+    }
+}
+
 impl FredCatalogRule {
+    /// `release_id=53 title~"gross domestic product" frequencies=Quarterly,Annual`.
+    fn describe(&self) -> String {
+        let mut out = match (self.release_id, self.category_id) {
+            (Some(id), _) => format!("release_id={id}"),
+            (None, Some(id)) => format!("category_id={id}"),
+            (None, None) => String::new(),
+        };
+        if let Some(title) = &self.title_contains {
+            out.push_str(&format!(" title~{title:?}"));
+        }
+        if let Some(prefix) = &self.id_prefix {
+            out.push_str(&format!(" id_prefix={prefix}"));
+        }
+        if !self.frequencies.is_empty() {
+            out.push_str(&format!(" frequencies={}", self.frequencies.join(",")));
+        }
+        out
+    }
+
     fn matches(&self, series: &CatalogSeries) -> bool {
         self.title_contains.as_ref().is_none_or(|needle| {
             series
@@ -305,6 +362,13 @@ fn validate_catalog_id(id: &str) -> Result<(), CrawlError> {
     Ok(())
 }
 
+const CATALOG_VOLUME_GUARD: &str = "FRED catalog volume guard";
+
+/// Whether `error` is the catalog volume guard stopping a selection that grew past a limit.
+pub(crate) fn is_catalog_volume_guard(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.starts_with(CATALOG_VOLUME_GUARD))
+}
+
 fn catalog_volume_error(what: &str, count: usize, limit: usize) -> CrawlError {
     econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
         .guard_rejections_total
@@ -317,7 +381,7 @@ fn catalog_volume_error(what: &str, count: usize, limit: usize) -> CrawlError {
         "FRED catalog volume guard stopped discovery"
     );
     CrawlError::Permanent(format!(
-        "FRED catalog volume guard: {what} {count} exceeds {limit}; \
+        "{CATALOG_VOLUME_GUARD}: {what} {count} exceeds {limit}; \
         review selection rules before retrying"
     ))
 }
@@ -419,6 +483,18 @@ fn is_copyright_restricted(notes: Option<&str>) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// A complete catalog selection ([`FredAdapter::select_catalog`]).
+#[derive(Debug)]
+pub(crate) struct CatalogSelection {
+    /// The selected series, as `discover` returns them.
+    pub found: Vec<DiscoveredSeries>,
+    /// Rows each rule matched (exclusions applied), in rule order. A series several rules match
+    /// counts for each.
+    pub rule_matches: Vec<usize>,
+    /// Catalog rows inspected, across every rule.
+    pub scanned: usize,
+}
+
 /// FRED adapter. See the module docs for endpoints and error mapping.
 #[derive(Debug, Clone)]
 pub struct FredAdapter {
@@ -456,9 +532,23 @@ impl FredAdapter {
         ctx: &CrawlCtx,
         rules: &FredCatalogRules,
     ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        Ok(self.select_catalog(ctx, rules).await?.found)
+    }
+
+    /// [`discover_catalog`](Self::discover_catalog), also saying how many rows each rule
+    /// matched and how many catalog rows were inspected (for `crawler check-selection`). Reads
+    /// and writes no database; the catalog facts it records are read back with
+    /// [`catalog_lifecycle`](SourceAdapter::catalog_lifecycle) and
+    /// [`curated_missing`](SourceAdapter::curated_missing).
+    pub(crate) async fn select_catalog(
+        &self,
+        ctx: &CrawlCtx,
+        rules: &FredCatalogRules,
+    ) -> Result<CatalogSelection, CrawlError> {
         let api_key = self.api_key(ctx)?;
         let mut selected = BTreeMap::new();
         let mut scanned = 0;
+        let mut rule_matches = Vec::with_capacity(rules.rules.len());
         // Pin the realtime date for every page of this catalog walk. Count/order validation
         // below also refuses common forms of a catalog changing during pagination.
         let realtime = chrono::Utc::now().date_naive().to_string();
@@ -467,10 +557,12 @@ impl FredAdapter {
                 .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
                 .await?;
             scanned += rows.len();
+            let mut matched = 0;
             for row in rows {
                 if !rule.matches(&row) || rules.exclude.contains(&row.id) {
                     continue;
                 }
+                matched += 1;
                 if selected
                     .get(&row.id)
                     .is_some_and(|previous| previous != &row.metadata)
@@ -489,6 +581,7 @@ impl FredAdapter {
                     ));
                 }
             }
+            rule_matches.push(matched);
         }
         let mut facts = CatalogLifecycle::default();
         for id in &rules.include {
@@ -559,7 +652,11 @@ impl FredAdapter {
             .collect();
         *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((rules.fingerprint(), facts));
-        Ok(found)
+        Ok(CatalogSelection {
+            found,
+            rule_matches,
+            scanned,
+        })
     }
 
     async fn catalog_rows(

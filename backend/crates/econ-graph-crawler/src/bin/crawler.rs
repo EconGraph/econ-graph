@@ -3,10 +3,10 @@
 // See LICENSE file for complete terms and conditions.
 
 //! `crawler`: enqueue crawl jobs, inspect the queue, list sources, run one fetch for debugging,
-//! or apply the data migrations. See [`econ_graph_crawler::cli`].
+//! check catalog selections against the live sources, or apply the data migrations. See [`econ_graph_crawler::cli`].
 
 use clap::Parser;
-use econ_graph_crawler::cli::Cli;
+use econ_graph_crawler::cli::{Cli, ExitStatus};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -21,9 +21,16 @@ async fn main() -> std::process::ExitCode {
 
     match Cli::parse().run().await {
         Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(e) => {
-            tracing::error!("{e:#}");
-            std::process::ExitCode::FAILURE
-        }
+        Err(e) => match e.downcast_ref::<ExitStatus>() {
+            // The command printed its output; it only sets the exit status.
+            Some(status) => {
+                tracing::warn!("{status}");
+                std::process::ExitCode::from(status.code)
+            }
+            None => {
+                tracing::error!("{e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        },
     }
 }

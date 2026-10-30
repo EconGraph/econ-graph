@@ -171,6 +171,13 @@ impl BeaDataset {
             BeaDataset::Regional => REGIONAL_DATASET,
         }
     }
+
+    /// The dataset whose [`code`](Self::code) is `code`.
+    pub fn from_code(code: &str) -> Option<Self> {
+        [BeaDataset::Nipa, BeaDataset::Regional]
+            .into_iter()
+            .find(|d| d.code() == code)
+    }
 }
 
 /// A BEA `Frequency` code.
@@ -496,15 +503,18 @@ impl BeaAdapter {
         Ok(())
     }
 
-    fn selection(&self) -> Result<&BeaSelection, CrawlError> {
+    /// The selection rules: the ones given with [`with_selection`](Self::with_selection), else
+    /// `catalog_selection/bea.toml`.
+    pub(crate) fn selection(&self) -> Result<&BeaSelection, CrawlError> {
         match self.selection.as_ref() {
             Some(selection) => Ok(selection),
             None => bea_rules(),
         }
     }
 
+    /// Uses `selection` instead of `catalog_selection/bea.toml`.
     #[cfg(test)]
-    fn with_selection(mut self, selection: BeaSelection) -> Self {
+    pub(crate) fn with_selection(mut self, selection: BeaSelection) -> Self {
         self.selection = Some(selection);
         self
     }
@@ -725,6 +735,29 @@ impl BeaAdapter {
         Ok(found)
     }
 
+    /// The series one selected table publishes now: `GetData` per frequency for a NIPA table,
+    /// its line codes and areas for a Regional one (see [Discovery](self#discovery)). `title`
+    /// is the table's current upstream title. Reads and writes no database.
+    pub(crate) async fn discover_table(
+        &self,
+        ctx: &CrawlCtx,
+        table: &BeaTable,
+        title: &str,
+    ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        let key = self.api_key(ctx)?;
+        let code = table.dataset.code();
+        let def = crate::reference::datasets(SourceId::Bea)?
+            .iter()
+            .find(|d| d.code == code)
+            .ok_or_else(|| {
+                CrawlError::Permanent(format!("BEA dataset {code} has no definition"))
+            })?;
+        match table.dataset {
+            BeaDataset::Nipa => self.discover_nipa(ctx, key, def, table, title).await,
+            BeaDataset::Regional => self.discover_regional(ctx, key, def, table, title).await,
+        }
+    }
+
     /// Fetches one batch group (ids sharing a [`SeriesKey::batch_key`]). `titles` is this
     /// crawl's title map for the group's dataset (NIPA or Regional), from
     /// [`table_titles`](Self::table_titles).
@@ -915,15 +948,8 @@ impl SourceAdapter for BeaAdapter {
     }
 
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let key = self.api_key(ctx)?;
+        self.api_key(ctx)?;
         let rules = self.selection()?;
-        let defs = crate::reference::datasets(SourceId::Bea)?;
-        let def = |code: &str| {
-            defs.iter().find(|d| d.code == code).ok_or_else(|| {
-                CrawlError::Permanent(format!("BEA dataset {code} has no definition"))
-            })
-        };
-        let (nipa, regional) = (def(NIPA_DATASET)?, def(REGIONAL_DATASET)?);
         let mut current_catalogs = HashMap::new();
         for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
             let listed = self.listed_tables(dataset).await.ok_or_else(|| CrawlError::Transient(format!(
@@ -946,13 +972,7 @@ impl SourceAdapter for BeaAdapter {
         let mut found = Vec::new();
         for table in &tables {
             let title = &current_catalogs[&table.dataset][&table.table_name];
-            let series = match table.dataset {
-                BeaDataset::Nipa => self.discover_nipa(ctx, key, nipa, table, title).await,
-                BeaDataset::Regional => {
-                    self.discover_regional(ctx, key, regional, table, title)
-                        .await
-                }
-            }?;
+            let series = self.discover_table(ctx, table, title).await?;
             rules.check_series_count(found.len().saturating_add(series.len()))?;
             found.extend(series);
         }
@@ -1021,11 +1041,7 @@ impl SourceAdapter for BeaAdapter {
         }
         let mut errors = Vec::new();
         for list in &lists {
-            let dataset = if list.dataset == NIPA_DATASET {
-                BeaDataset::Nipa
-            } else {
-                BeaDataset::Regional
-            };
+            let dataset = BeaDataset::from_code(list.dataset).unwrap_or(BeaDataset::Regional);
             if let Err(e) = self.refresh_table_titles(ctx, list, dataset).await {
                 errors.push(format!("{}: {e}", dataset.api_name()));
             }

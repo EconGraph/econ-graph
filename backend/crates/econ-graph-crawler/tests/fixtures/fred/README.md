@@ -39,3 +39,10 @@ and each page contains revised dates. The [fixture generator](make_observations_
 writes the observations file and documents its shape; edit and rerun the generator rather
 than editing the JSON. The rows omit `realtime_end`, which the adapter does not read, to keep
 the file small.
+
+`release_series_53.json` uses the documented
+[`/fred/release/series` response format](https://fred.stlouisfed.org/docs/api/fred/release_series.html)
+for one catalog page of release 53 (Gross Domestic Product), in `series_id` order. It is
+synthetic: three series that a `title_contains = "gross domestic product"` rule matches (one of
+them titled `(DISCONTINUED)`) and one that it does not. The `crawler check-selection` tests
+(`src/check_selection/tests.rs`) read it.

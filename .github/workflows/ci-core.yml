@@ -403,6 +403,13 @@ jobs:
     - name: Check the full-history re-fetch script
       run: scripts/deploy/test-refetch-full-history.sh
 
+    # The selection check Job: --namespace required, the crawler-worker image and optional key
+    # refs, cleanup before and after, and the check's exit status, against stubs.
+    - name: Check the selection check script
+      run: |
+        shellcheck -x scripts/deploy/check-selection.sh scripts/deploy/test-check-selection.sh
+        scripts/deploy/test-check-selection.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

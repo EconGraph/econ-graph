@@ -36,6 +36,11 @@ pub struct SourcePolicy {
     /// default for every source) fetches one series per job. Every job's lease starts when the
     /// batch is claimed, so the worker's `stuck_after` must cover a whole batch.
     pub max_batch: usize,
+    /// Most requests the source accepts per day, when it publishes such a limit (BLS: 500 a
+    /// day with a registration key, 25 without). `None` when it publishes none. The worker
+    /// doesn't enforce it; `crawler check-selection` compares a refresh's estimated requests
+    /// against it.
+    pub daily_quota: Option<u32>,
 }
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -61,6 +66,7 @@ impl SourcePolicy {
             needs_api_key: false,
             revision_lookback: DAY * 365,
             max_batch: 1,
+            daily_quota: None,
         };
         match source {
             SourceId::Fred => SourcePolicy {
@@ -75,6 +81,8 @@ impl SourcePolicy {
                 requests_per_second: 25.0 / 60.0,
                 max_concurrency: 1,
                 revision_lookback: DAY * 5 * 365,
+                // The keyless limit; `sources::bls::policy` raises it when a key is set.
+                daily_quota: Some(25),
                 ..base
             },
             SourceId::Bea => SourcePolicy {
@@ -186,6 +194,15 @@ mod tests {
         assert!(SourcePolicy::default_for(SourceId::Bea).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Census).needs_api_key);
         assert!(!SourcePolicy::default_for(SourceId::Bls).needs_api_key);
+    }
+
+    #[test]
+    fn only_bls_has_a_daily_quota() {
+        for id in SourceId::ALL {
+            let quota = SourcePolicy::default_for(id).daily_quota;
+            // BLS's keyless limit; `sources::bls::policy(true)` raises it.
+            assert_eq!(quota, (id == SourceId::Bls).then_some(25), "{id}");
+        }
     }
 
     #[test]

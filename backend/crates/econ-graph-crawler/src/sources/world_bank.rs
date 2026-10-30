@@ -222,6 +222,12 @@ impl WorldBankAdapter {
         }
     }
 
+    /// The indicator's own metadata URL, `{base}/indicator/{id}?format=json` (one of
+    /// [`code_lists`](SourceAdapter::code_lists)).
+    pub(crate) fn indicator_url(&self, id: &str) -> String {
+        format!("{}/indicator/{id}?format=json", self.base_url)
+    }
+
     /// Every row of `indicator` for every area, following pages.
     async fn fetch_indicator(
         &self,
@@ -620,7 +626,7 @@ impl SourceAdapter for WorldBankAdapter {
         };
         let indicators = indicators.iter().map(|indicator| {
             let id = indicator.id.clone();
-            let url = format!("{}/indicator/{id}?format=json", self.base_url);
+            let url = self.indicator_url(&id);
             let parse: ParseCodes = Arc::new(move |body: &str| {
                 let value: Value = serde_json::from_str(body)
                     .map_err(|e| CrawlError::Parse(format!("World Bank indicator {id}: {e}")))?;
@@ -1049,6 +1055,30 @@ pub fn classify_world_bank_message(what: &str, messages: &Value) -> CrawlError {
     } else {
         CrawlError::Permanent(msg)
     }
+}
+
+/// The World Bank's source id for the World Development Indicators. An indicator the World Bank
+/// moves out of WDI (for example to source 57, "WDI Database Archives") is no longer updated.
+pub const WDI_SOURCE_ID: &str = "2";
+
+/// The `source` (id and name) an `/indicator/{id}?format=json` response gives indicator `id`.
+/// `NotFound` when the World Bank doesn't know the indicator (its error message 120 or 175, see
+/// [`classify_world_bank_message`]).
+pub(crate) fn indicator_source(id: &str, body: &str) -> Result<(String, String), CrawlError> {
+    let value: Value = serde_json::from_str(body)
+        .map_err(|e| CrawlError::Parse(format!("World Bank indicator {id}: {e}")))?;
+    let (_, items) = parse_list(&format!("/indicator/{id}"), value)?;
+    let row = items.first().ok_or_else(|| {
+        CrawlError::NotFound(format!("World Bank indicator {id}: response has no rows"))
+    })?;
+    let field = |key: &str| {
+        row.get("source")
+            .and_then(|s| s.get(key))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    Ok((field("id"), field("value")))
 }
 
 /// Observation frequency, from the form of the row's date.

@@ -364,8 +364,9 @@ pub async fn download_seed_entries(
     Ok(out)
 }
 
-/// One list's `ETag` and codes, sorted by code.
-async fn download_seed_codes(
+/// One list's `ETag` and codes, sorted by code, downloaded unconditionally; reads and writes no
+/// database (`record-reference-seeds` and `check-selection` run without one).
+pub(crate) async fn download_seed_codes(
     http: &HttpFetcher,
     source: SourceId,
     list: &CodeList,

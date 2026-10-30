@@ -17,6 +17,7 @@
 //! crawler sources
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
+//! crawler check-selection [--source FRED[,BEA,...]] [--json]   # no database needed
 //! crawler migrate  [--dry-run]   # apply the data migrations
 //! crawler confirm-successor --source FRED --series OLD --successor NEW
 //! ```
@@ -30,6 +31,11 @@
 //!
 //! `record-reference-seeds` downloads a source's code lists and writes them, with the `ETag`s
 //! they were served with, as a seed migration for new databases (see [`crate::reference_file`]).
+//!
+//! `check-selection` checks curated lists and catalog selection rules against the live upstream
+//! catalogs, read-only and without a database (see [`crate::check_selection`]). It exits 0 when
+//! every checked source is clean, 1 when any has a problem, 2 when a check could not finish and
+//! 3 when the rest are clean but a source was skipped for a missing API key.
 //!
 //! Diagnostics go through `tracing` (stderr, `RUST_LOG`); stdout carries only the command's output.
 
@@ -200,6 +206,21 @@ pub enum Command {
         #[arg(long)]
         skip_failed: bool,
     },
+    /// Check curated series lists and catalog selection rules against each source's live
+    /// upstream catalog: entries missing upstream, discontinued or copyright-restricted, rules
+    /// that match nothing or more than their max_matches, selections past their limits, and the
+    /// requests a refresh needs against the source's rate and daily quota. Read-only; needs no
+    /// database. Exit status: 0 clean, 1 problems, 2 a check failed, 3 a source was skipped
+    /// because its API key isn't set (and nothing worse).
+    CheckSelection {
+        /// Comma-separated sources to check, e.g. FRED,BEA. Default: FRED, BEA, BLS,
+        /// WORLD_BANK, CENSUS and FHFA.
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        source: Vec<SourceId>,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Apply the pending data migrations (backend/migrations/data) and print each version
     /// applied, one per line. Never touches the app migrations.
     Migrate {
@@ -320,6 +341,64 @@ fn clean_series(series: &[String]) -> Vec<String> {
     out
 }
 
+/// A command that printed its output and must end with a nonzero exit status other than 1
+/// (`check-selection`). The `crawler` binary exits with `code`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExitStatus {
+    /// The process exit status.
+    pub code: u8,
+    /// What it means, for the log.
+    pub message: String,
+}
+
+impl std::fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (exit status {})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for ExitStatus {}
+
+/// The sources `check-selection --source` names, de-duplicated in report order, or every
+/// checked source when it names none.
+pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceId>> {
+    use crate::check_selection::CHECKED_SOURCES;
+    if let Some(bad) = named.iter().find(|s| !CHECKED_SOURCES.contains(s)) {
+        bail!("{bad} has no curated list or selection rules to check; checked sources: {CHECKED_SOURCES:?}");
+    }
+    Ok(CHECKED_SOURCES
+        .into_iter()
+        .filter(|s| named.is_empty() || named.contains(s))
+        .collect())
+}
+
+/// `check-selection`'s output, and the [`ExitStatus`] to end with unless every source is clean.
+pub fn check_selection_output(
+    report: &crate::check_selection::SelectionReport,
+    json: bool,
+) -> anyhow::Result<(String, Option<ExitStatus>)> {
+    use crate::check_selection::{EXIT_CLEAN, EXIT_FAILED, EXIT_PROBLEMS};
+    let out = if json {
+        format!("{}\n", serde_json::to_string_pretty(report)?)
+    } else {
+        report.to_text()
+    };
+    let code = report.exit_code();
+    let message = match code {
+        EXIT_CLEAN => return Ok((out, None)),
+        EXIT_PROBLEMS => "check-selection found problems",
+        EXIT_FAILED => "check-selection could not check every source",
+        _ => "check-selection skipped a source whose API key is not set",
+    };
+    Ok((
+        out,
+        Some(ExitStatus {
+            code,
+            message: message.to_string(),
+        }),
+    ))
+}
+
 impl Cli {
     /// Runs the command, writing its output to stdout.
     pub async fn run(self) -> anyhow::Result<()> {
@@ -332,6 +411,24 @@ impl Cli {
     pub async fn execute(self) -> anyhow::Result<String> {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
+        }
+        if let Command::CheckSelection { source, json } = &self.command {
+            let sources = check_selection_sources(source)?;
+            let checker = crate::check_selection::Checker::live(
+                build_http(&default_registry())?,
+                ApiKeys::from_env(),
+                Utc::now().date_naive(),
+            );
+            let report = checker.check(&sources).await;
+            let (out, status) = check_selection_output(&report, *json)?;
+            return match status {
+                None => Ok(out),
+                Some(status) => {
+                    // Print the report first, so the exit status comes with the findings.
+                    print!("{out}");
+                    Err(status.into())
+                }
+            };
         }
         if let Command::RecordReferenceSeeds {
             source,
@@ -507,7 +604,10 @@ impl Cli {
                     "confirmed successor for {source} {series}: {successor}; histories unchanged\n"
                 ))
             }
-            Command::Sources | Command::RecordReferenceSeeds { .. } | Command::Migrate { .. } => {
+            Command::Sources
+            | Command::RecordReferenceSeeds { .. }
+            | Command::CheckSelection { .. }
+            | Command::Migrate { .. } => {
                 unreachable!("handled above")
             }
         }
@@ -935,6 +1035,77 @@ mod tests {
         let mut full = vec!["crawler", "--database-url", "postgres://x"];
         full.extend_from_slice(args);
         Cli::try_parse_from(full)
+    }
+
+    #[test]
+    fn check_selection_parses_sources_and_json() {
+        assert_eq!(
+            parse(&["check-selection"]).unwrap().command,
+            Command::CheckSelection {
+                source: vec![],
+                json: false
+            }
+        );
+        assert_eq!(
+            parse(&["check-selection", "--source", "BEA,FRED", "--json"])
+                .unwrap()
+                .command,
+            Command::CheckSelection {
+                source: vec![SourceId::Bea, SourceId::Fred],
+                json: true
+            }
+        );
+        assert!(parse(&["check-selection", "--source", "NOPE"]).is_err());
+        // No database URL is needed to parse it (or to run it).
+        assert!(Cli::try_parse_from(["crawler", "check-selection"]).is_ok());
+    }
+
+    #[test]
+    fn check_selection_sources_default_to_every_checked_source_in_report_order() {
+        use crate::check_selection::CHECKED_SOURCES;
+        assert_eq!(check_selection_sources(&[]).unwrap(), CHECKED_SOURCES);
+        assert_eq!(
+            check_selection_sources(&[SourceId::Fhfa, SourceId::Fred, SourceId::Fred]).unwrap(),
+            [SourceId::Fred, SourceId::Fhfa]
+        );
+        let err = check_selection_sources(&[SourceId::Sec]).unwrap_err();
+        assert!(err.to_string().contains("no curated list"), "{err}");
+    }
+
+    #[test]
+    fn check_selection_output_sets_the_exit_status() {
+        use crate::check_selection::{SelectionReport, EXIT_SKIPPED};
+        let clean = SelectionReport { sources: vec![] };
+        let (out, status) = check_selection_output(&clean, true).unwrap();
+        assert_eq!(status, None);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&out).unwrap(),
+            serde_json::json!({"sources": []})
+        );
+        let skipped = SelectionReport {
+            sources: vec![skipped_check()],
+        };
+        let (_, status) = check_selection_output(&skipped, false).unwrap();
+        let status = status.unwrap();
+        assert_eq!(status.code, EXIT_SKIPPED);
+        let err: anyhow::Error = status.into();
+        assert_eq!(err.downcast_ref::<ExitStatus>().unwrap().code, EXIT_SKIPPED);
+    }
+
+    fn skipped_check() -> crate::check_selection::SourceCheck {
+        crate::check_selection::SourceCheck {
+            source: SourceId::Fred,
+            status: crate::check_selection::CheckStatus::Skipped,
+            skipped: Some("no API key".into()),
+            error: None,
+            curated: None,
+            selected: None,
+            rules: vec![],
+            bounds: vec![],
+            problems: vec![],
+            notices: vec![],
+            refresh: None,
+        }
     }
 
     #[test]
