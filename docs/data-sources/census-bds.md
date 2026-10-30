@@ -12,8 +12,18 @@ page is also an `Auth` error. Background:
 ## What we fetch today
 
 Discovery requests `GET /data/timeseries/bds/variables.json` and `geography.json`.
-It filters variable names and labels by keyword (`is_economic_variable`), then crosses
-those variables with the supported `us` and `state` levels listed in the geography
+Only measures become series (`is_economic_variable`). A variable must have a numeric
+`predicateType` (`int` or `float`), and its name or label must match a keyword such as
+`estab`, `firm`, `job` or `rate`. The numeric type leaves out:
+
+- the classification codes (`EAGE`, `FAGE`, `EMPSZES`, `EMPSZFI`, `EMPSZESI`,
+  `EMPSZFII`, `NAICS`, ...), whose `predicateType` is `string`. They are dimensions
+  to group by, and a single-series request returns the code itself, 1, every year;
+- the geography and predicate variables (`for`, `in`, `time`, `GEO_ID`, `STATE`, ...)
+  and `YEAR`.
+
+The keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. Discovery then
+crosses the measures with the supported `us` and `state` levels listed in the geography
 metadata. This produces one series per variable nationally and one per variable per
 state and DC. When the metadata lists `state`, discovery downloads the Census Bureau's
 [FIPS reference file](https://www2.census.gov/geo/docs/reference/state.txt) to obtain
@@ -36,7 +46,7 @@ one returns `Permanent` when the required key is configured.
 Fetching requests `GET /data/timeseries/bds?get={VARIABLE},YEAR&for=us:*` (or
 `state:{FIPS}`), with `key=` on each API request. Each request retrieves all years
 for one variable and geography. The adapter keeps `YEAR` as January 1 and the value,
-and assigns "Count" as the units for every series. It does not request county,
+and assigns "Count" as the units for every series, rates included. It does not request county,
 metro or CBSA series, or breakdowns by industry, firm age or firm size.
 
 ## Samples and fixtures
@@ -62,14 +72,23 @@ uses the same response shape with placeholder establishment counts for Californi
 ```
 
 The trimmed [`variables.json` fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/census/variables.json)
-contains these entries; it does not reproduce the full public metadata:
+holds a subset of the public metadata. Discovery selects six of its variables:
+`ESTAB`, `ESTABS_ENTRY_RATE` (`float`), `FIRM`, `JOB_CREATION`,
+`JOB_CREATION_CONTINUERS` and `JOB_DESTRUCTION_CONTINUERS`. It leaves out:
+
+- the `string` classification codes `EAGE`, `FAGE`, `EMPSZES`, `EMPSZFI` and `NAICS`;
+- `CBSA`, which has no `predicateType`;
+- the predicate-only `for` and `in`;
+- `YEAR`, which is an `int` in this fixture but matches no keyword.
+
+Abridged:
 
 ```json
 {"variables": {
+  "EAGE": {"label": "Establishment age code", "predicateType": "string", "attributes": "EAGE_LABEL"},
   "ESTAB": {"label": "Number of establishments", "predicateType": "int"},
-  "FIRM": {"label": "Number of firms", "predicateType": "int"},
-  "JOB_CREATION": {"label": "Number of jobs created from expanding and opening establishments during the last 12 months", "predicateType": "int"},
-  "NAICS": {"label": "2017 NAICS code", "predicateType": "string"},
+  "ESTABS_ENTRY_RATE": {"label": "Rate of establishments born during the last 12 months", "predicateType": "float", "attributes": "ESTABS_ENTRY_RATE_F"},
+  "JOB_CREATION_CONTINUERS": {"label": "Number of jobs created from expanding establishments during the last 12 months", "predicateType": "int", "attributes": "JOB_CREATION_CONTINUERS_F"},
   "YEAR": {"label": "Year", "predicateType": "int"}
 }}
 ```

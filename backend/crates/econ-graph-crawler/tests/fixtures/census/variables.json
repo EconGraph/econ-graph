@@ -16,12 +16,61 @@
       "limit": 0,
       "predicateOnly": true
     },
+    "CBSA": {
+      "label": "Metropolitan/Micropolitan Statistical Area",
+      "group": "N/A",
+      "limit": 0
+    },
+    "EAGE": {
+      "label": "Establishment age code",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023",
+      "required": "default displayed",
+      "predicateType": "string",
+      "group": "BDSEAGEIESIZE,BDSEAGE,BDSEAGEESIZE",
+      "limit": 0,
+      "attributes": "EAGE_LABEL"
+    },
+    "EMPSZES": {
+      "label": "Employment size of establishments code",
+      "concept": "Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023",
+      "required": "default displayed",
+      "predicateType": "string",
+      "group": "BDSEAGEESIZE,BDSESIZE",
+      "limit": 0,
+      "attributes": "EMPSZES_LABEL"
+    },
+    "EMPSZFI": {
+      "label": "Employment size of firms code",
+      "concept": "Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023",
+      "required": "default displayed",
+      "predicateType": "string",
+      "group": "BDSFAGEFSIZE,BDSFSIZE",
+      "limit": 0,
+      "attributes": "EMPSZFI_LABEL"
+    },
     "ESTAB": {
       "label": "Number of establishments",
       "concept": "Business Dynamics Statistics",
       "predicateType": "int",
       "group": "N/A",
       "limit": 0
+    },
+    "ESTABS_ENTRY_RATE": {
+      "label": "Rate of establishments born during the last 12 months",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "predicateType": "float",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
+      "limit": 0,
+      "attributes": "ESTABS_ENTRY_RATE_F"
+    },
+    "FAGE": {
+      "label": "Firm age code",
+      "concept": "Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "required": "default displayed",
+      "predicateType": "string",
+      "group": "BDSFAGEFSIZE,BDSFAGEIFSIZE,BDSFAGE",
+      "limit": 0,
+      "attributes": "FAGE_LABEL"
     },
     "FIRM": {
       "label": "Number of firms",
@@ -36,6 +85,22 @@
       "predicateType": "int",
       "group": "N/A",
       "limit": 0
+    },
+    "JOB_CREATION_CONTINUERS": {
+      "label": "Number of jobs created from expanding establishments during the last 12 months",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "predicateType": "int",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
+      "limit": 0,
+      "attributes": "JOB_CREATION_CONTINUERS_F"
+    },
+    "JOB_DESTRUCTION_CONTINUERS": {
+      "label": "Number of jobs lost from contracting establishments during the last 12 months",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "predicateType": "int",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
+      "limit": 0,
+      "attributes": "JOB_DESTRUCTION_CONTINUERS_F"
     },
     "NAICS": {
       "label": "2017 NAICS code",
