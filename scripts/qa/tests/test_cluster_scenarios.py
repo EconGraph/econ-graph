@@ -56,15 +56,20 @@ if args[0] == 'get':
     print(json.dumps({'items': items}))
 elif args[0] == 'exec':
     namespace, pod, sql = option('-n'), args[3], args[-1]
+    expected = {'postgresql-0': ('postgresql', 'econ_graph'), 'app-postgres-0': ('postgres', 'econ_graph_app')}
+    if (option('-c'), option('-d'), option('-U')) != (*expected.get(pod, ('?', '?')), 'postgres'):
+        sys.exit(f'no container {option("-c")} with database {option("-d")} in pod {pod}')
     for ns, needle, answer in state.get('sql', []):
         if ns == namespace and needle in sql:
+            if answer == 'ERROR':
+                sys.exit(f'error: pod {pod} is not running')
             if answer == 'COUNT_IDS':
                 answer = str(len(re.findall(r"'[^']*'", sql.partition(' IN ')[2])))
             print(answer.replace('|', '\x1f'))
             break
     else:
         sys.exit(f'stub has no answer for {namespace}/{pod}: {sql[:80]}')
-elif args[0] == 'wait':
+elif args[0] == 'rollout':
     pass
 else:
     sys.exit(f'stub cannot {args[0]}')
@@ -145,17 +150,21 @@ class GatewayRoutesOnlyTest(ClusterScenarioTest):
         self.assertEqual(code, 0, result)
 
     def test_each_leftover_fails(self):
-        cases = {
-            'no Ingress': {'ingress': [meta('old', 'econ-graph')]},
-            'no IngressClass': {'ingressclass': [meta('nginx')]},
-            'no ingress-nginx': {'pods': [meta('controller', 'kube-system',
-                                               {'app.kubernetes.io/name': 'ingress-nginx'})]},
-            'only HTTPRoutes': {'grpcroutes': [meta('rpc', 'econ-graph')]},
-            'HTTPRoutes accepted': {'httproutes': [accepted_route('frontend'),
-                                                   accepted_route('detached', ok='False')]},
-        }
-        for failing, change in cases.items():
-            with self.subTest(failing):
+        nginx = {'app.kubernetes.io/name': 'ingress-nginx'}
+        cases = [
+            ('no Ingress', {'ingress': [meta('old', 'econ-graph')]}),
+            ('no IngressClass', {'ingressclass': [meta('nginx')]}),
+            ('no ingress-nginx', {'pods': [meta('controller', 'kube-system', nginx)]}),
+            ('no ingress-nginx', {'validatingwebhookconfigurations': [meta('ingress-nginx-admission')]}),
+            ('no ingress-nginx', {'clusterroles': [meta('nginx', labels={'app.kubernetes.io/part-of':
+                                                                          'ingress-nginx'})]}),
+            ('no ingress-nginx', {'deployments': [meta('ingress-nginx-controller', 'web')]}),
+            ('only HTTPRoutes', {'grpcroutes': [meta('rpc', 'econ-graph')]}),
+            ('HTTPRoutes accepted', {'httproutes': [accepted_route('frontend'),
+                                                    accepted_route('detached', ok='False')]}),
+        ]
+        for failing, change in cases:
+            with self.subTest(failing, change=next(iter(change))):
                 self.set_state(**self.clean(**change))
                 code, result, checks = self.run_scenario('gateway-routes-only')
                 self.assertEqual(code, 1, result)
@@ -214,17 +223,19 @@ COUNTS_SQL = 'UNION ALL'
 
 
 class DataSurvivesRedeployTest(ClusterScenarioTest):
-    def data_state(self, counts, crawler_ready=0):
+    def data_state(self, counts, crawler_replicas=0):
+        # spec.replicas, not ready ones: a starting or crash-looping worker still counts.
         return {'resources': {'deployments': [meta('crawler-worker', 'econ-graph', {'app': 'crawler-worker'},
-                                                   status={'readyReplicas': crawler_ready})]},
-                'sql': [['econ-graph', TABLES_SQL, 'data_points|t\neconomic_series|t\ncountries|f'],
+                                                   spec={'replicas': crawler_replicas},
+                                                   status={'readyReplicas': 0})]},
+                'sql': [['econ-graph', TABLES_SQL, 'data_points\neconomic_series\ncountries'],
                         ['econ-graph', COUNTS_SQL, counts]]}
 
     BEFORE = 'data_points|1000|123456\neconomic_series|10|987\ncountries|3|55'
 
-    def redeploy_to(self, counts):
+    def redeploy_to(self, counts, crawler_replicas=0):
         after = self.dir / 'after.json'
-        after.write_text(json.dumps(self.data_state(counts)))
+        after.write_text(json.dumps(self.data_state(counts, crawler_replicas)))
         return {'QA_DATA_REDEPLOY_COMMAND': f'echo redeployed >> "{self.dir}/redeploy.log"; '
                                             f'cp "{after}" "{self.state}"'}
 
@@ -232,7 +243,8 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
         self.set_state(**self.data_state(self.BEFORE))
         code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(self.BEFORE))
         self.assertEqual(code, 0, result)
-        self.assertEqual(checks, {'crawler paused': True, 'before': True, 'redeploy': True, 'same tables': True,
+        self.assertEqual(checks, {'crawler stopped': True, 'before': True, 'redeploy': True,
+                                  'crawler still stopped': True, 'same tables': True,
                                   'countries unchanged': True, 'data_points unchanged': True,
                                   'economic_series unchanged': True})
         self.assertEqual((self.dir / 'redeploy.log').read_text(), 'redeployed\n')
@@ -241,9 +253,10 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
         sql = [json.loads(line)[-1] for line in self.log.read_text().splitlines() if '"exec"' in line]
         counts = [s for s in sql if COUNTS_SQL in s]
         self.assertEqual(len(counts), 2)
-        # The id for tables that have one, the whole row for one that doesn't.
-        self.assertIn('hashtextextended("data_points".id::text, 0)', counts[0])
-        self.assertIn('hashtextextended("countries"::text, 0)', counts[0])
+        # The whole row, so a changed value shows, not only an added or removed id.
+        for table in ('data_points', 'economic_series', 'countries'):
+            self.assertIn(f'hashtextextended("{table}"::text, 0)', counts[0])
+        self.assertNotIn('.id::text', counts[0])
         self.assert_only_the_context()
 
     def test_a_changed_count_or_checksum_or_table_fails(self):
@@ -257,11 +270,19 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
                 self.assertEqual(code, 1, result)
                 self.assertEqual({k for k, ok in checks.items() if not ok}, failing)
 
+    def test_a_redeploy_that_starts_the_crawler_fails(self):
+        self.set_state(**self.data_state(self.BEFORE))
+        code, result, checks = self.run_scenario('data-survives-redeploy',
+                                                 extra=self.redeploy_to(self.BEFORE, crawler_replicas=1))
+        self.assertEqual(code, 1)
+        self.assertFalse(checks['crawler still stopped'])
+        self.assertNotIn('same tables', checks)
+
     def test_a_running_crawler_fails_before_the_redeploy(self):
-        self.set_state(**self.data_state(self.BEFORE, crawler_ready=1))
+        self.set_state(**self.data_state(self.BEFORE, crawler_replicas=1))
         code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(self.BEFORE))
         self.assertEqual(code, 1)
-        self.assertEqual(checks, {'crawler paused': False})
+        self.assertEqual(checks, {'crawler stopped': False})
         self.assertFalse((self.dir / 'redeploy.log').exists())
         code, result, checks = self.run_scenario('data-survives-redeploy', extra=dict(
             self.redeploy_to(self.BEFORE), QA_DATA_ALLOW_RUNNING_CRAWLER='1'))
@@ -285,11 +306,34 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
         self.assertEqual(code, 2)
 
 
+class BranchSite(StubSite):
+    """The stub site, able to answer /graphql's search differently from /data/graphql's, and
+    to lose the response of a create it carried out."""
+
+    def __init__(self, own_series_id=None, lose_create=False):
+        super().__init__()
+        self.own_series_id, self.lose_create = own_series_id, lose_create
+
+    def post(self, h):
+        self.path = h.path
+        super().post(h)
+
+    def graphql(self, request, user):
+        answer = super().graphql(request, user)
+        if 'searchSeries' in request['query'] and self.path == '/graphql' and self.own_series_id:
+            answer['data']['searchSeries']['series'][0]['id'] = self.own_series_id
+        if 'createAnnotation' in request['query'] and self.lose_create:
+            return {'errors': [{'message': 'upstream connect error'}]}
+        return answer
+
+
+ANNOTATIONS_SQL = 'FROM chart_annotations a WHERE a.title'
+
+
 class BranchIsolationTest(ClusterScenarioTest):
     BRANCH = 'eg-br-feature'
 
-    def branch_state(self, production='0|0', other='0|0', annotation='u-1', users='1', mode='primary',
-                     own_data=False):
+    def branch_state(self, production='', other='', stored='a0|u-1|t', mode='primary', own_data=False):
         branch_labels = {'econgraph.io/env': 'branch', 'econgraph.io/data-mode': mode}
         return {
             'resources': {
@@ -301,10 +345,9 @@ class BranchIsolationTest(ClusterScenarioTest):
             },
             'sql': [
                 ['econ-graph', 'FROM economic_series', 'COUNT_IDS'],
-                [self.BRANCH, 'SELECT user_id FROM chart_annotations', annotation],
-                [self.BRANCH, 'FROM users', f'1|{users}'],
-                ['econ-graph', 'FROM users', production],
-                ['eg-br-other', 'FROM users', other],
+                [self.BRANCH, ANNOTATIONS_SQL, stored],
+                ['econ-graph', ANNOTATIONS_SQL, production],
+                ['eg-br-other', ANNOTATIONS_SQL, other],
             ]}
 
     def run_branch(self, site, **extra):
@@ -312,12 +355,16 @@ class BranchIsolationTest(ClusterScenarioTest):
         env.update(extra)
         return self.run_scenario('branch-isolation', site.base, 'lab', env)
 
+    def failing(self, checks):
+        return {k for k, ok in checks.items() if ok is False}
+
     def test_isolated_branch_passes_and_cleans_up(self):
         self.set_state(**self.branch_state())
-        with StubSite() as site:
+        with BranchSite() as site:
             code, result, checks = self.run_branch(site)
         self.assertEqual(code, 0, result)
-        self.assertEqual(checks, {'branch namespace': True, 'real data': True, 'sign in': True,
+        self.assertEqual(checks, {'branch namespace': True, 'real data': True,
+                                  'branch backend reads the data plane': True, 'sign in': True,
                                   'stored in the branch': True, 'not in production': True,
                                   'not in eg-br-other': True, 'clean up': True})
         self.assertEqual(site.annotations, {})
@@ -326,48 +373,79 @@ class BranchIsolationTest(ClusterScenarioTest):
         self.assertIn(f"'{SERIES_ID}'", sql)
         self.assert_only_the_context()
 
-    def test_rows_in_production_or_another_branch_fail(self):
-        for where, change, failing in (('production', {'production': '1|1'}, 'not in production'),
-                                       ('other branch', {'other': '0|1'}, 'not in eg-br-other')):
+    def test_an_annotation_in_production_or_another_branch_fails(self):
+        for where, change, failing in (('production', {'production': 'a0|u-9|t'}, 'not in production'),
+                                       ('other branch', {'other': 'a0|u-9|t'}, 'not in eg-br-other')):
             with self.subTest(where):
                 self.set_state(**self.branch_state(**change))
-                with StubSite() as site:
+                with BranchSite() as site:
                     code, result, checks = self.run_branch(site)
                 self.assertEqual(code, 1, result)
-                self.assertEqual({k for k, ok in checks.items() if not ok}, {failing})
+                self.assertEqual(self.failing(checks), {failing})
                 self.assertEqual(site.annotations, {})
 
-    def test_an_annotation_missing_from_the_branch_fails(self):
-        self.set_state(**self.branch_state(annotation=''))
-        with StubSite() as site:
+    def test_an_annotation_or_its_user_missing_from_the_branch_fails(self):
+        for label, stored in (('no annotation', ''), ('no user', 'a0|u-1|f'), ('two', 'a0|u-1|t\na1|u-1|t')):
+            with self.subTest(label):
+                self.set_state(**self.branch_state(stored=stored))
+                with BranchSite() as site:
+                    code, _, checks = self.run_branch(site)
+                self.assertEqual(code, 1)
+                self.assertEqual(self.failing(checks), {'stored in the branch'})
+                self.assertEqual(site.annotations, {})
+
+    def test_another_branch_that_cannot_be_read_is_skipped_not_failed(self):
+        self.set_state(**self.branch_state(other='ERROR'))
+        with BranchSite() as site:
+            code, result, checks = self.run_branch(site)
+        self.assertEqual(code, 0, result)
+        self.assertIsNone(checks['not in eg-br-other'])
+
+    def test_production_that_cannot_be_read_fails(self):
+        self.set_state(**self.branch_state(production='ERROR'))
+        with BranchSite() as site:
             code, _, checks = self.run_branch(site)
         self.assertEqual(code, 1)
-        self.assertFalse(checks['stored in the branch'])
+        self.assertEqual(self.failing(checks), {'branch app database'})
+        self.assertEqual(site.annotations, {})
+
+    def test_a_lost_create_response_is_still_cleaned_up(self):
+        self.set_state(**self.branch_state())
+        with BranchSite(lose_create=True) as site:
+            code, _, checks = self.run_branch(site)
+        self.assertEqual(code, 1)
         self.assertTrue(checks['clean up'])
         self.assertEqual(site.annotations, {})
+
+    def test_a_branch_backend_that_answers_differently_fails(self):
+        self.set_state(**self.branch_state())
+        with BranchSite(own_series_id='22222222-2222-2222-2222-222222222222') as site:
+            code, _, checks = self.run_branch(site)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failing(checks), {'branch backend reads the data plane'})
 
     def test_a_branch_with_its_own_data_fails(self):
         for label, state in (('local mode', self.branch_state(mode='local')),
                              ('own Postgres', self.branch_state(own_data=True))):
             with self.subTest(label):
                 self.set_state(**state)
-                with StubSite() as site:
+                with BranchSite() as site:
                     code, _, checks = self.run_branch(site)
                 self.assertEqual(code, 1)
-                self.assertFalse(checks['branch namespace'])
+                self.assertEqual(self.failing(checks), {'branch namespace'})
 
     def test_series_missing_from_the_primary_fail(self):
         state = self.branch_state()
         state['sql'][0][2] = '0'
         self.set_state(**state)
-        with StubSite() as site:
+        with BranchSite() as site:
             code, _, checks = self.run_branch(site)
         self.assertEqual(code, 1)
-        self.assertEqual({k for k, ok in checks.items() if not ok}, {'real data'})
+        self.assertEqual(self.failing(checks), {'real data'})
 
     def test_refuses_an_unlabelled_or_primary_namespace(self):
         self.set_state(**self.branch_state())
-        with StubSite() as site:
+        with BranchSite() as site:
             for namespace, reason in (('econ-graph', 'primary namespace'), ('eg-br-nope', 'not a namespace')):
                 with self.subTest(namespace):
                     code, result, _ = self.run_branch(site, QA_BRANCH_NAMESPACE=namespace)

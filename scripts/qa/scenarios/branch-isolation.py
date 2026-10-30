@@ -2,7 +2,7 @@
 # qa-scenario: branch-isolation
 # qa-mutates: yes
 # qa-profiles: lab
-# qa-timeout: 600
+# qa-timeout: 900
 # qa-description: A branch namespace shows the shared data plane's series and keeps its users and annotations in its own app database (v4.1.0 exit criterion 1).
 """A branch environment reads the primary data plane and writes only its own app database.
 
@@ -22,20 +22,30 @@ Checks:
                        Postgres of its own.
   real data            an anonymous /data/graphql search on the branch finds series, and every
                        series it returned is a row of the primary data database.
+  branch backend reads the data plane
+                       the same search through the branch's own backend (/graphql) returns
+                       the same series. (The branch's /data/graphql route goes to the
+                       primary's backend, so this is the check that the branch's backend
+                       reaches the data plane.)
   sign in              as the QA account, through the branch's realm.
-  stored in the branch the annotation it creates, and the user it belongs to, are rows of
-                       the branch's app database (econ_graph_app in its app-postgres-0).
-  not in production    neither is in production's app database.
-  not in <namespace>   neither is in any other branch's app database.
-The annotation is private, titled "QA scenario <uuid>", and deleted at the end, also when a
-check fails. The databases are only read.
+  stored in the branch the annotation it creates is a row of the branch's app database
+                       (econ_graph_app in its app-postgres-0), and so is the user it belongs
+                       to.
+  not in production    the annotation is not in production's app database.
+  not in <namespace>   nor in any other branch's app database. A branch whose app database
+                       can't be read is recorded as skipped, not failed.
+The annotation's user_id references users in the same database, so an annotation found only
+in the branch puts its user there too; user ids are generated per database, so they are
+not compared across databases. The annotation is private, titled "QA scenario <uuid>", and
+deleted at the end, also when a check fails or the create's response is lost. The
+databases are only read.
 """
 
 import os
 import uuid
 
 from qa import (GraphQLError, Kube, KubeError, check, data_or_raise, fail, finish, graphql,
-                signed_in_token, skip, sql_literal)
+                signed_in_token, skip, skip_check, sql_literal)
 
 BRANCH = os.environ.get('QA_BRANCH_NAMESPACE', '').strip()
 DATA_NAMESPACE = os.environ.get('QA_DATA_NAMESPACE', 'econ-graph')
@@ -80,20 +90,30 @@ try:
 except (GraphQLError, OSError, KeyError, TypeError, ValueError, IndexError, KubeError) as error:
     fail('real data', str(error))
 
+try:
+    own = data_or_raise(*graphql('/graphql', SEARCH, {'q': QUERY}), 'searchSeries on /graphql')['searchSeries']['series']
+    same = [s['id'] for s in own] == [s['id'] for s in found]
+    check('branch backend reads the data plane', same,
+          f'/graphql and /data/graphql found the same {len(found)} series' if same
+          else f'/graphql found {[s["id"] for s in own]}, /data/graphql {[s["id"] for s in found]}')
+except (GraphQLError, OSError, KeyError, TypeError) as error:
+    check('branch backend reads the data plane', False, str(error))
+
 token = signed_in_token()
 
 
-def app_rows(namespace, title, user_id):
-    """(annotations titled `title`, users with id `user_id`) in `namespace`'s app database."""
-    rows = kube.psql(namespace, *APP,
-                     f'SELECT (SELECT count(*) FROM chart_annotations WHERE title = {sql_literal(title)}), '
-                     f'(SELECT count(*) FROM users WHERE id::text = {sql_literal(user_id)})')
-    return int(rows[0][0]), int(rows[0][1])
+def annotations_titled(namespace, title):
+    """(id, user_id, whether that user is a row there) of each annotation titled `title`."""
+    return kube.psql(namespace, *APP,
+                     'SELECT a.id, a.user_id, EXISTS (SELECT 1 FROM users u WHERE u.id = a.user_id) '
+                     f'FROM chart_annotations a WHERE a.title = {sql_literal(title)}')
 
 
 title = f'QA scenario {uuid.uuid4()}'
 created = None
+attempted = False
 try:
+    attempted = True
     series = found[0]
     created = data_or_raise(*graphql('/graphql', CREATE, {'input': {
         'seriesId': series['id'], 'annotationDate': '2020-01-01',
@@ -101,26 +121,34 @@ try:
         'annotationType': 'note', 'isPublic': False, 'idempotencyKey': str(uuid.uuid4())}},
         token=token), 'createAnnotation')['createAnnotation']['id']
 
-    stored = kube.psql(BRANCH, *APP, f'SELECT user_id FROM chart_annotations WHERE title = {sql_literal(title)}')
-    user_id = stored[0][0] if len(stored) == 1 else ''
-    users = app_rows(BRANCH, title, user_id)[1] if user_id else 0
-    check('stored in the branch', len(stored) == 1 and users == 1,
-          f'{len(stored)} annotation(s) and {users} user(s) in {BRANCH}', user_id=user_id)
+    stored = annotations_titled(BRANCH, title)
+    check('stored in the branch', len(stored) == 1 and stored[0][2] == 't',
+          f'{len(stored)} annotation(s) in {BRANCH}'
+          + (f', its user {"is" if stored[0][2] == "t" else "is NOT"} there' if stored else ''))
 
-    # Without the user's id, the user check below would pass vacuously; the annotation's
-    # title still identifies it everywhere.
-    for other in [DATA_NAMESPACE] + [n['metadata']['name'] for n in kube.items(
-            'namespaces', '-l', 'econgraph.io/env=branch') if n['metadata']['name'] != BRANCH]:
-        # Production's app database must be there to check; a branch may run without one.
-        if other != DATA_NAMESPACE and not kube.items('pods', '-n', other, '--field-selector',
-                                                      'metadata.name=app-postgres-0'):
+    found_in = annotations_titled(DATA_NAMESPACE, title)
+    check('not in production', not found_in, f'{len(found_in)} annotation(s) in {DATA_NAMESPACE}')
+    for other in [n['metadata']['name'] for n in kube.items('namespaces', '-l', 'econgraph.io/env=branch')
+                  if n['metadata']['name'] != BRANCH]:
+        if not kube.items('pods', '-n', other, '--field-selector', 'metadata.name=app-postgres-0'):
             continue
-        annotations, users = app_rows(other, title, user_id)
-        check('not in production' if other == DATA_NAMESPACE else f'not in {other}',
-              annotations == 0 and users == 0, f'{annotations} annotation(s) and {users} user(s) in {other}')
+        try:
+            found_in = annotations_titled(other, title)
+        except KubeError as error:
+            # Another branch that is broken is that branch's problem, not this one's.
+            skip_check(f'not in {other}', f'its app database could not be read: {error}')
+            continue
+        check(f'not in {other}', not found_in, f'{len(found_in)} annotation(s) in {other}')
 except (GraphQLError, OSError, KeyError, TypeError, ValueError, IndexError, KubeError) as error:
     check('branch app database', False, str(error))
 finally:
+    if attempted and not created:
+        # The create may have succeeded with its response lost: find it by its title.
+        try:
+            leftover = annotations_titled(BRANCH, title)
+            created = leftover[0][0] if leftover else None
+        except KubeError as error:
+            check('clean up', False, f'could not look for an annotation titled {title}: {error}')
     if created:
         try:
             removed = data_or_raise(*graphql('/graphql', DELETE, {'id': created}, token=token),

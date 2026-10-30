@@ -2,8 +2,8 @@
 # qa-scenario: data-survives-redeploy
 # qa-mutates: yes
 # qa-profiles: lab
-# qa-timeout: 5400
-# qa-description: Record every data-database table's row count and id checksum, run the redeploy, and require them unchanged (v4.1.0 exit criterion 2).
+# qa-timeout: 7200
+# qa-description: Record every data-database table's row count and row checksum, run the redeploy, and require them unchanged (v4.1.0 exit criterion 2).
 """The data database's rows survive a redeploy or an app-database recreate. Labs only.
 
 Inputs:
@@ -16,15 +16,20 @@ Inputs:
                                   database is econ_graph in pod postgresql-0.
   QA_DATA_REDEPLOY_TIMEOUT_SECONDS
                                   how long the command may run (default 2400).
-  QA_DATA_ALLOW_RUNNING_CRAWLER   1 to go on while crawler-worker has ready replicas. Otherwise
-                                  that fails first: a crawl changes the rows being compared.
+  QA_DATA_ALLOW_RUNNING_CRAWLER   1 to go on while crawler-worker is scaled above 0, before
+                                  or after the command. Otherwise that fails: a crawl changes
+                                  the rows being compared. A redeploy that starts the crawler
+                                  (deploy.sh sets it to 1 replica) therefore fails unless the
+                                  command scales it back to 0 itself, and a crawl in between
+                                  can still show as a change.
 
 Each reading lists the base tables of the data database's public schema (except
 __diesel_schema_migrations) and, per table, its row count and a checksum: the sum of a hash
-of each row's id, or of the whole row for a table without an id column. Order-independent,
-so it streams through tables with millions of rows. After the command, the data database's
-pod must be Ready again (the kubectl is picked again first, as a kind cluster recreate
-changes it); then one check per table, plus one that the set of tables is the same. The data database is only read.
+of each whole row, so a changed value counts as well as an added or removed row.
+Order-independent, so it streams through tables with millions of rows. After the command,
+the kubectl is picked again (a kind cluster recreate changes it) and the data database's
+StatefulSet must finish rolling out; then one check per table, plus one that the set of
+tables is the same. The data database is only read.
 """
 
 import os
@@ -46,9 +51,7 @@ if not COMMAND:
 kube = Kube()
 
 TABLES = """
-SELECT t.table_name, EXISTS (SELECT 1 FROM information_schema.columns c
-                             WHERE c.table_schema = 'public' AND c.table_name = t.table_name
-                               AND c.column_name = 'id')
+SELECT t.table_name
 FROM information_schema.tables t
 WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
   AND t.table_name <> '__diesel_schema_migrations'
@@ -61,24 +64,29 @@ def reading():
     if not tables:
         raise KubeError(f'{DATABASE} in {NAMESPACE}/{POD} has no tables')
     parts = []
-    for name, has_id in tables:
+    for (name,) in tables:
         ident = '"' + name.replace('"', '""') + '"'
-        hashed = f'{ident}.id::text' if has_id == 't' else f'{ident}::text'
         parts.append(f'SELECT {sql_literal(name)}, count(*), '
-                     f'coalesce(sum(hashtextextended({hashed}, 0)::numeric), 0) FROM {ident}')
+                     f'coalesce(sum(hashtextextended({ident}::text, 0)::numeric), 0) FROM {ident}')
     rows = kube.psql(NAMESPACE, POD, CONTAINER, DATABASE, '\nUNION ALL\n'.join(parts) + ';',
                      timeout=READ_TIMEOUT)
     return {name: (int(count), checksum) for name, count, checksum in rows}
 
 
-try:
+def crawler_stopped(name, when):
+    """Record whether crawler-worker is scaled to 0 (its spec, so a starting or crash-looping
+    worker counts as running); end the scenario when it isn't and that isn't allowed."""
     workers = kube.items('deployments', '-n', NAMESPACE, '-l', 'app=crawler-worker')
-    ready = sum((d.get('status') or {}).get('readyReplicas') or 0 for d in workers)
-    if ready and not ALLOW_CRAWLER:
-        fail('crawler paused', f'crawler-worker has {ready} ready replicas in {NAMESPACE}; scale it to 0 '
-             'for an exact comparison, or set QA_DATA_ALLOW_RUNNING_CRAWLER=1')
-    check('crawler paused', True, f'{ready} ready crawler-worker replicas'
-          + (' (allowed by QA_DATA_ALLOW_RUNNING_CRAWLER)' if ready else ''))
+    replicas = sum((d.get('spec') or {}).get('replicas', 1) for d in workers)
+    if replicas and not ALLOW_CRAWLER:
+        fail(name, f'crawler-worker is scaled to {replicas} in {NAMESPACE} {when}; it must be 0 for an '
+             'exact comparison (or set QA_DATA_ALLOW_RUNNING_CRAWLER=1)')
+    check(name, True, f'crawler-worker scaled to {replicas} {when}'
+          + (' (allowed by QA_DATA_ALLOW_RUNNING_CRAWLER)' if replicas else ''))
+
+
+try:
+    crawler_stopped('crawler stopped', 'before the redeploy')
     before = reading()
     check('before', True, f'{len(before)} tables, {sum(r for r, _ in before.values())} rows',
           tables={name: rows for name, (rows, _) in before.items()})
@@ -96,7 +104,9 @@ check('redeploy', True, 'QA_DATA_REDEPLOY_COMMAND exited 0')
 # A recreated kind cluster has a new kubeconfig: pick the kubectl again.
 kube = Kube()
 try:
-    kube.run('wait', '-n', NAMESPACE, '--for=condition=Ready', f'pod/{POD}', '--timeout=600s', timeout=660)
+    # Unlike waiting on the pod, this also waits while the pod is still being recreated.
+    kube.run('rollout', 'status', '-n', NAMESPACE, 'statefulset/postgresql', '--timeout=600s', timeout=660)
+    crawler_stopped('crawler still stopped', 'after the redeploy')
     after = reading()
 except KubeError as error:
     fail('after', str(error))

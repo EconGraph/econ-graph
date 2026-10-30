@@ -11,8 +11,11 @@ Inputs: QA_KUBE_CONTEXT, the kind context (e.g. kind-econ-graph); skipped withou
 Checks, across all namespaces:
   no Ingress           `get ingress -A` lists nothing.
   no IngressClass      no IngressClass is left.
-  no ingress-nginx     no ingress-nginx namespace, and no pod labelled
-                       app.kubernetes.io/name=ingress-nginx.
+  no ingress-nginx     nothing of ingress-nginx's: no namespace, deployment, daemonset,
+                       service or pod labelled app.kubernetes.io/name=ingress-nginx or
+                       named like it, and no such ClusterRole, ClusterRoleBinding or
+                       admission webhook configuration (the cluster-scoped leftovers of
+                       deleting only its namespace).
   only HTTPRoutes      no GRPCRoute, TLSRoute, TCPRoute or UDPRoute (a type the cluster
                        doesn't have counts as none).
   HTTPRoutes accepted  at least one HTTPRoute, and every parent of every HTTPRoute reports
@@ -28,6 +31,15 @@ def names(items):
     return [f'{i["metadata"].get("namespace", "")}/{i["metadata"]["name"]}'.lstrip('/') for i in items]
 
 
+NAMESPACED = {'deployments', 'daemonsets', 'services', 'pods'}
+
+
+def is_ingress_nginx(item):
+    labels = item['metadata'].get('labels') or {}
+    return 'ingress-nginx' in item['metadata']['name'] or 'ingress-nginx' in (
+        labels.get('app.kubernetes.io/name'), labels.get('app.kubernetes.io/part-of'))
+
+
 def none_left(name, items, what):
     found = names(items)
     check(name, not found, f'none in {kube.context}' if not found
@@ -37,9 +49,13 @@ def none_left(name, items, what):
 try:
     none_left('no Ingress', kube.items('ingress', '-A'), 'Ingress objects')
     none_left('no IngressClass', kube.items('ingressclass'), 'IngressClasses')
-    leftovers = [n for n in kube.items('namespaces') if n['metadata']['name'] == 'ingress-nginx']
-    leftovers += kube.items('pods', '-A', '-l', 'app.kubernetes.io/name=ingress-nginx')
-    none_left('no ingress-nginx', leftovers, 'ingress-nginx namespaces or pods')
+    leftovers = []
+    for kind in ('namespaces', 'deployments', 'daemonsets', 'services', 'pods', 'clusterroles',
+                 'clusterrolebindings', 'validatingwebhookconfigurations', 'mutatingwebhookconfigurations'):
+        items = kube.items(kind, '-A') if kind in NAMESPACED else kube.items(kind)
+        leftovers += [f'{kind}:{name}' for item, name in zip(items, names(items)) if is_ingress_nginx(item)]
+    check('no ingress-nginx', not leftovers, f'none in {kube.context}' if not leftovers
+          else f'{len(leftovers)} left: {", ".join(leftovers[:5])}', found=leftovers[:20])
 
     others = []
     for kind in ('grpcroutes', 'tlsroutes', 'tcproutes', 'udproutes'):

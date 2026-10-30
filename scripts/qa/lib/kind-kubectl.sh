@@ -6,7 +6,8 @@
 # CONTEXT is kind-<cluster>, e.g. kind-econ-graph. Through scripts/deploy/lib/kind-env.sh
 # (never plain kubectl from PATH), prints two lines: the kubectl to run and the KUBECONFIG
 # to run it with. The caller passes --context CONTEXT on every call. Reads nothing from
-# the cluster beyond `kubectl version`; exits 1, saying why, when it cannot be reached.
+# the cluster beyond `kubectl version`, which it always runs; exits 1, saying why, when the
+# cluster cannot be reached.
 set -euo pipefail
 
 context="${1:-}"
@@ -23,5 +24,12 @@ ensure_kind_kubectl_quietly || {
     echo "error: cannot reach kind cluster '${KIND_CLUSTER}' on ${DOCKER_HOST}" >&2
     exit 1
 }
-command -v kubectl
+# The kubectl kind-env.sh chose, not whatever is first on PATH (in an agent session it does
+# not change PATH).
+kubectl="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+if ! "$kubectl" --kubeconfig "${KUBECONFIG}" --context "$context" version --request-timeout=15s >/dev/null 2>&1; then
+    echo "error: the API server of '${context}' does not answer" >&2
+    exit 1
+fi
+echo "$kubectl"
 echo "${KUBECONFIG}"
