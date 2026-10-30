@@ -50,7 +50,8 @@
 # Nothing under the backup root is ever deleted. Run it inside tmux or screen: a dropped
 # connection is handled, but the typed confirmation needs the terminal.
 #
-# Environment: PYTHON (default python3), PG_IMAGE (default postgres:18),
+# Environment: PYTHON (default python3), PG_IMAGE (default postgres:18), DB_CHECK_TIMEOUT
+# (seconds for the exit-time check of econ_graph, default 60; unknown keeps the backend at 0),
 # ECONGRAPH_BACKUP_ROOT, and lib/kind-env.sh's ECONGRAPH_DOCKER_HOST.
 
 set -euo pipefail
@@ -90,6 +91,7 @@ BACKUP_ROOT="$(realpath -m "${BACKUP_ROOT}")"
 export ECONGRAPH_BACKUP_ROOT="${BACKUP_ROOT}"
 PYTHON="${PYTHON:-python3}"
 PG_IMAGE="${PG_IMAGE:-postgres:18}"
+DB_CHECK_TIMEOUT="${DB_CHECK_TIMEOUT:-60}"
 CONTEXT="kind-${KIND_CLUSTER}"
 WRITER_DEPLOYMENTS=(econ-graph-backend crawler-worker)
 WRITER_CRONJOBS=(postgres-backup)
@@ -223,8 +225,11 @@ WORK="" PF_PIDS=() KEEP_BACKEND_STOPPED=false STOPPED=false
 # Whether econ_graph still holds the app tables. Anything but a clear yes counts as no, so a
 # backend is never started on the combined database once its app tables may be gone (it
 # would create new, empty ones).
+# Bounded with SIGKILL: cleanup ignores TERM, and its children inherit that, so a hanging
+# exec must be killed outright.
 source_has_app_tables() {
-    [ "$(kctl exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph -Atc \
+    [ "$(timeout -s KILL "${DB_CHECK_TIMEOUT}" kubectl --context "${CONTEXT}" -n "${NAMESPACE}" exec postgresql-0 \
+        -c postgresql -- psql -U postgres -d econ_graph -Atc \
         "select to_regclass('public.users') is not null" 2>/dev/null)" = t ]
 }
 
@@ -238,22 +243,27 @@ cleanup() {
     [ -z "$WORK" ] || rm -rf "$WORK"
     [ "$STOPPED" = true ] || exit "$status"
     declare -A result
-    if [ "$KEEP_BACKEND_STOPPED" = true ]; then
-        restart_backend=false why="$NEXT_STEP"
-    elif ! source_has_app_tables; then
-        restart_backend=false
-        why="econ_graph no longer holds the app tables (or could not be checked). Do not start the backend on it: roll back with --restore-source-app <the removal's backup directory>, or switch it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/deploy.sh (docs/deployment/APP_DATA_CONVERSION.md)"
-    fi
+    # The CronJob and the crawler first: they do not depend on where the app tables are.
     for c in "${CRONJOBS_PRESENT[@]}"; do
         kctl patch cronjob "$c" --type=merge -p "{\"spec\":{\"suspend\":${SUSPENDED[$c]}}}" >/dev/null 2>&1
         result[cronjob/$c]=$?
     done
     for d in "${WRITER_DEPLOYMENTS[@]}"; do
-        [ -n "${REPLICAS[$d]}" ] || continue
-        [ "$d" != econ-graph-backend ] || [ "$restart_backend" = true ] || continue
+        [ -n "${REPLICAS[$d]}" ] && [ "$d" != econ-graph-backend ] || continue
         kctl scale deployment "$d" --replicas="${REPLICAS[$d]}" >/dev/null 2>&1
         result[deployment/$d]=$?
     done
+    # The backend only when econ_graph certainly still holds the app tables.
+    if [ "$KEEP_BACKEND_STOPPED" = true ]; then
+        restart_backend=false why="$NEXT_STEP"
+    elif ! source_has_app_tables; then
+        restart_backend=false
+        why="econ_graph no longer holds the app tables, or that could not be checked within ${DB_CHECK_TIMEOUT}s. Check before starting the backend on it: if the tables are gone, roll back with --restore-source-app <the removal's backup directory>, or start it on the app database with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/deploy.sh (docs/deployment/APP_DATA_CONVERSION.md)"
+    fi
+    if [ -n "${REPLICAS[econ-graph-backend]}" ] && [ "$restart_backend" = true ]; then
+        kctl scale deployment econ-graph-backend --replicas="${REPLICAS[econ-graph-backend]}" >/dev/null 2>&1
+        result[deployment/econ-graph-backend]=$?
+    fi
     for c in "${CRONJOBS_PRESENT[@]}"; do
         if [ "${result[cronjob/$c]}" = 0 ]; then
             echo "  cronjob/$c back to suspend=${SUSPENDED[$c]}" || true

@@ -75,9 +75,12 @@
 #   - APP_DATABASE=separate points app-database-url at the app database;
 #     APP_DATABASE=shared points it at the data database (one database holding
 #     both, as in a cluster deployed before the app database existed). Unset,
-#     the cluster's current choice is kept, and a new Secret gets separate.
-#     Switching an existing cluster to separate is part of moving the app rows
-#     into the app database; the script only rewrites the URL.
+#     the cluster's current choice is kept, and a cluster without
+#     econ-graph-secrets gets separate; an existing Secret without the key needs
+#     APP_DATABASE. Moving the URL to the app database while the data database
+#     still holds the app tables, or back to the data database once the tables
+#     are only in the app database, is refused (lib/app-database-guard.sh,
+#     docs/deployment/APP_DATA_CONVERSION.md); the script only rewrites the URL.
 #   - Likewise, if grafana-admin/admin-password would be generated but a
 #     Grafana volume (PVC grafana-storage-grafana-*) exists, the script stops
 #     unless GRAFANA_ADMIN_PASSWORD is given (and set in Grafana) or
@@ -521,30 +524,51 @@ guard_db_volume econ-graph-postgres postgresql-data-postgresql-
 guard_db_volume econ-graph-app-postgres app-postgres-data-app-postgres-
 
 # --- app database guard ----------------------------------------------------
-# Which database app-database-url names: APP_DATABASE if given, else what the
-# cluster's current URL names, else (a new Secret) the app database.
-app_database="${APP_DATABASE-}"
-app_database_how="from APP_DATABASE"
-if [[ -z "$app_database" ]]; then
-    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
-    if [[ -z "$current_app_url" ]]; then
-        app_database=separate
-        app_database_how="new"
-    elif [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
-        app_database=separate
-        app_database_how="kept"
+# Which database app-database-url names. What the cluster's current URL names is
+# kept, and so is an APP_DATABASE equal to it. A Secret that exists without the
+# key comes from a release before the app database existed: its app records are
+# in the data database, so APP_DATABASE must say which one to use. Only a
+# cluster without econ-graph-secrets at all is a new install and gets separate.
+current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
+current_app_database=""
+if [[ -n "$current_app_url" ]]; then
+    if [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
+        current_app_database=separate
     else
-        app_database=shared
-        app_database_how="kept"
+        current_app_database=shared
     fi
 fi
-# Moving app-database-url to the app database while the data database still
-# holds the app tables would serve the backend an app database without its
-# accounts (lib/app-database-guard.sh). Checked before any Secret is written.
-if [[ "$app_database" == separate && "$app_database_how" != kept ]]; then
+app_database="${APP_DATABASE-}"
+if [[ -n "$app_database" ]]; then
+    if [[ "$app_database" == "$current_app_database" ]]; then
+        app_database_how="kept"
+    else
+        app_database_how="from APP_DATABASE"
+    fi
+elif [[ -n "$current_app_database" ]]; then
+    app_database="$current_app_database"
+    app_database_how="kept"
+elif ! secret_exists econ-graph-secrets; then
+    app_database=separate
+    app_database_how="new"
+else
+    die "econ-graph-secrets has no app-database-url: the cluster was deployed before" \
+        "the app database existed, so its app records are in the data database. Set" \
+        "APP_DATABASE=shared until docs/deployment/APP_DATA_CONVERSION.md has moved them" \
+        "(APP_DATABASE=separate afterwards); nothing more was written"
+fi
+# Moving app-database-url to a database that does not hold the app records would
+# serve the backend no accounts, and the backend would create empty app tables
+# there (lib/app-database-guard.sh). Checked before any Secret is written; a
+# value that is kept needs no check.
+if [[ "$app_database_how" != kept ]]; then
     # shellcheck source=scripts/deploy/lib/app-database-guard.sh
     source "$(dirname "${BASH_SOURCE[0]}")/lib/app-database-guard.sh"
-    require_app_tables_moved
+    if [[ "$app_database" == separate ]]; then
+        require_app_tables_moved
+    else
+        require_app_tables_not_moved
+    fi
 fi
 
 # --- Grafana volume guard ---------------------------------------------------

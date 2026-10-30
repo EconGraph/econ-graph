@@ -616,5 +616,31 @@ class ConversionRehearsal(unittest.TestCase):
             self.run_conversion()
 
 
+    def test_rollback_never_drops_app_tables_it_did_not_restore(self):
+        """A removal that failed before its commit leaves pending evidence; the tables stay put."""
+        self.run_conversion()
+        save = conversion.save_evidence
+        def fail_before_commit(directory, report):
+            save(directory, report)
+            if report.get('source_app_removed') == 'pending':
+                raise OSError('synthetic failure before the commit')
+        self.args.backup_dir = self.backup_root / ('cleanup-' + self.number)
+        self.args.drop_source_app = True
+        with patch.object(conversion, 'save_evidence', side_effect=fail_before_commit), \
+                patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value=self.phrase):
+            with self.assertRaises(OSError):
+                self.run_conversion()
+        evidence = json.loads((self.args.backup_dir / 'evidence.json').read_text())
+        self.assertEqual(evidence['source_app_removed'], 'pending')
+        # The removal never committed: the source still has its app tables, now changed.
+        with psycopg.connect(service='conversion_source') as db:
+            db.execute("UPDATE users SET name='Changed after the failed removal'")
+        with self.assertRaisesRegex(RuntimeError, 'nothing recorded'):
+            self.restore(self.args.backup_dir)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(db.execute('SELECT name FROM users').fetchone()[0], 'Changed after the failed removal')
+            self.assertEqual(conversion.versions(db), self.versions_before)
+
+
 if __name__ == '__main__':
     unittest.main()

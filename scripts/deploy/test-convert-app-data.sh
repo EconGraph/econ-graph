@@ -72,7 +72,8 @@ STUB
 #   STUB_ACTIVE_JOBS=NAME    a Job is running
 #   STUB_BACKUP_FAILS=1      pg_dump in backup-kind-databases.sh fails
 #   STUB_SCALE_FAILS=NAME    scaling deployment NAME to 0 fails
-#   STUB_SOURCE_USERS=f      econ_graph no longer holds public.users
+#   STUB_SOURCE_USERS=f      econ_graph no longer holds public.users (fails, junk, hang:
+#                            the check fails, answers nonsense, or never returns)
 #   STUB_RESTORE_PATCH_FAILS=1  un-suspending the CronJob fails
 cat >"$STUB_KUBECTL" <<'STUB'
 #!/usr/bin/env bash
@@ -106,7 +107,8 @@ case "$*" in
   # backup-kind-databases.sh
   "exec "*" -- pg_dump -Fc "*) [ "${STUB_BACKUP_FAILS:-0}" != 1 ] || exit 1; printf 'PGDMP stub' ;;
   "exec -i "*" -- pg_restore -f /dev/null") cat >/dev/null ;;
-  "exec postgresql-0 -c postgresql -- psql "*"to_regclass"*) echo "${STUB_SOURCE_USERS:-t}" ;;
+  "exec postgresql-0 -c postgresql -- psql "*"to_regclass"*)
+    case "${STUB_SOURCE_USERS:-t}" in fails) exit 1 ;; hang) exec sleep 300 ;; *) echo "${STUB_SOURCE_USERS:-t}" ;; esac ;;
   "exec "*" -- psql "*"to_regclass"*) echo t ;;
   "exec "*" -- psql "*) echo 3 ;;
   "get secret "*" -o name --ignore-not-found") ;;
@@ -313,6 +315,20 @@ STUB_RESTORE_PATCH_FAILS=1 STUB_PY_FAIL=--writers-stopped convert --cluster kg-t
 has "scale deployment econ-graph-backend --replicas=2" "failed CronJob restore: backend not put back"
 has "scale deployment crawler-worker --replicas=1" "failed CronJob restore: crawler not put back"
 grep -q "could not restore cronjob/postgres-backup" "$tmp/out" || fail "failed CronJob restore not reported"
+
+# The exit-time check of econ_graph failing, answering nonsense or hanging keeps the backend
+# stopped and does not hold up the rest of the cleanup.
+for answer in fails junk hang; do
+  reset
+  start=$SECONDS
+  DB_CHECK_TIMEOUT=2 STUB_SOURCE_USERS=$answer STUB_PY_FAIL=--writers-stopped \
+    convert --cluster kg-test --source-map "$map" && fail "$answer check: failed copy reported success"
+  [ $((SECONDS - start)) -lt 30 ] || fail "$answer check: cleanup took $((SECONDS - start))s"
+  never "scale deployment econ-graph-backend --replicas=2" "$answer check: backend restarted without a clear answer"
+  has "scale deployment crawler-worker --replicas=1" "$answer check: crawler not put back"
+  has "patch cronjob postgres-backup --type=merge -p \{\"spec\":\{\"suspend\":false\}\}" "$answer check: CronJob not put back"
+  grep -q "could not be checked within 2s" "$tmp/out" || fail "$answer check: no explanation"
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failure(s)"
