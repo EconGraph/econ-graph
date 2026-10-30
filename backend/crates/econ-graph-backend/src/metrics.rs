@@ -281,9 +281,104 @@ fn sync_audit_write_failures() {
     }
 }
 
+/// The verifier whose anonymous catalog grant renewal `/metrics` reports, set at startup when
+/// anonymous grants are configured. Without it, none of those metrics is exported.
+static ANONYMOUS_GRANTS: once_cell::sync::OnceCell<Arc<econ_graph_auth::OidcVerifier>> =
+    once_cell::sync::OnceCell::new();
+
+/// Report `verifier`'s anonymous grant renewal on `/metrics` (alert rules:
+/// k8s/monitoring/prometheus-rules-auth.yaml).
+pub fn watch_anonymous_grants(verifier: Arc<econ_graph_auth::OidcVerifier>) {
+    let _ = ANONYMOUS_GRANTS.set(verifier);
+}
+
+/// Anonymous grant renewal metrics, registered on first use.
+struct AnonymousGrantMetrics {
+    renewals: IntCounterVec,
+    consecutive_failures: IntGauge,
+    grants: IntGauge,
+    serving_stale: IntGauge,
+    task_running: IntGauge,
+}
+
+static ANONYMOUS_GRANT_METRICS: once_cell::sync::Lazy<AnonymousGrantMetrics> =
+    once_cell::sync::Lazy::new(|| {
+        let renewals = IntCounterVec::new(
+            Opts::new(
+                "anonymous_grant_renewals_total",
+                "Anonymous catalog grant renewals, by outcome (success, outage, refused)",
+            ),
+            &["outcome"],
+        )
+        .expect("valid metric");
+        let gauge = |name: &str, help: &str| {
+            let gauge = IntGauge::new(name, help).expect("valid metric");
+            REGISTRY
+                .register(Box::new(gauge.clone()))
+                .expect("anonymous grant gauges register once");
+            gauge
+        };
+        REGISTRY
+            .register(Box::new(renewals.clone()))
+            .expect("anonymous_grant_renewals_total registers once");
+        AnonymousGrantMetrics {
+            renewals,
+            consecutive_failures: gauge(
+                "anonymous_grant_renewal_consecutive_failures",
+                "Failed anonymous catalog grant renewals since the last success",
+            ),
+            grants: gauge(
+                "anonymous_catalog_grants",
+                "Catalog read roles anonymous visitors hold right now",
+            ),
+            serving_stale: gauge(
+                "anonymous_grants_serving_stale",
+                "1 while expired anonymous grants are served during a Keycloak outage",
+            ),
+            task_running: gauge(
+                "anonymous_grant_refresh_task_running",
+                "1 while the background task renewing anonymous grants is running",
+            ),
+        }
+    });
+
+/// Bring the anonymous grant metrics up to the verifier's current renewal counters.
+fn sync_anonymous_grants() {
+    let Some(stats) = ANONYMOUS_GRANTS
+        .get()
+        .and_then(|verifier| verifier.anonymous_renewal_stats())
+    else {
+        return;
+    };
+    static SYNC: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = SYNC
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let metrics = &*ANONYMOUS_GRANT_METRICS;
+    for (outcome, total) in [
+        ("success", stats.successes),
+        ("outage", stats.outages),
+        ("refused", stats.refusals),
+    ] {
+        let counter = metrics.renewals.with_label_values(&[outcome]);
+        let seen = counter.get();
+        if total > seen {
+            counter.inc_by(total - seen);
+        }
+    }
+    let as_gauge = |value: u64| i64::try_from(value).unwrap_or(i64::MAX);
+    metrics
+        .consecutive_failures
+        .set(as_gauge(stats.consecutive_failures));
+    metrics.grants.set(as_gauge(stats.current_grants));
+    metrics.serving_stale.set(i64::from(stats.serving_stale));
+    metrics.task_running.set(i64::from(stats.task_running));
+}
+
 /// Generate Prometheus metrics output
 pub fn generate_metrics() -> anyhow::Result<String> {
     sync_audit_write_failures();
+    sync_anonymous_grants();
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     encoder
@@ -678,5 +773,47 @@ mod tests {
         // We can't easily test the exact content without more complex setup,
         // but we can verify it doesn't panic
         assert!(response.into_response().status().is_success());
+    }
+
+    /// `/metrics` reports anonymous grant renewal from the watched verifier: outcomes, the
+    /// grants held now, and whether the refresh task runs.
+    #[tokio::test]
+    #[serial]
+    async fn anonymous_grant_renewal_is_exported() {
+        use warp::Filter as _;
+        let issuer = econ_graph_auth::testkit::TestIssuer::start().await;
+        let token = issuer.mint_token(uuid::Uuid::new_v4(), &["catalog.fred:read"]);
+        let tokens = warp::post().map(move || {
+            warp::reply::json(&serde_json::json!({"access_token": token, "expires_in": 300}))
+        });
+        let (addr, server) = warp::serve(tokens).bind_ephemeral(([127, 0, 0, 1], 0));
+        let server = tokio::spawn(server);
+        let verifier = Arc::new(issuer.verifier().with_anonymous(
+            econ_graph_auth::anonymous::AnonymousConfig {
+                token_url: format!("http://{addr}/token"),
+                client_id: "econgraph-anonymous".into(),
+                client_secret: "test-only".into(),
+                stale_max: Duration::ZERO,
+            },
+        ));
+        watch_anonymous_grants(Arc::clone(&verifier));
+        verifier.renew_anonymous_grants().await;
+        let text = generate_metrics().unwrap();
+        for line in [
+            "anonymous_grant_renewals_total{outcome=\"success\"} 1",
+            "anonymous_catalog_grants 1",
+            "anonymous_grant_renewal_consecutive_failures 0",
+            "anonymous_grants_serving_stale 0",
+            "anonymous_grant_refresh_task_running 0",
+        ] {
+            assert!(text.lines().any(|l| l == line), "missing {line}:\n{text}");
+        }
+        let refresh = verifier.spawn_anonymous_refresh().unwrap();
+        assert!(generate_metrics()
+            .unwrap()
+            .lines()
+            .any(|l| l == "anonymous_grant_refresh_task_running 1"));
+        refresh.abort();
+        server.abort();
     }
 }

@@ -64,6 +64,8 @@ export const webServer: PlaywrightTestConfig['webServer'] = [
       // The dev realm from docker-compose.release-e2e.yml's keycloak service.
       OIDC_ISSUER,
       OIDC_AUDIENCE: 'econ-graph-api',
+      OIDC_ANONYMOUS_TOKEN_URL: `${OIDC_ISSUER}/protocol/openid-connect/token`,
+      OIDC_ANONYMOUS_CLIENT_SECRET: 'anonymous-dev-only',
       RUST_LOG: process.env.RUST_LOG ?? 'warn',
     },
   },

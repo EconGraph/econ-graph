@@ -24,3 +24,6 @@ pub mod testkit;
 pub use bearer::{authenticate, BearerError, Caller};
 pub use oidc::{OidcConfig, OidcConfigError, OidcVerifier, VerifiedToken, VerifyError};
 pub use roles::{authorize, role_list, Forbidden, Principal, Role, UnknownRole};
+
+/// Keycloak-managed catalog permissions for callers without a user identity.
+pub mod anonymous;

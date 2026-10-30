@@ -51,8 +51,8 @@ results are absent.
 
 | Operation | Access and visibility |
 | --- | --- |
-| `annotationsForSeries` | Public annotations, plus the signed-in caller's own private annotations. The deprecated `userId` argument is ignored; it cannot select another viewer. |
-| `commentsForAnnotation` | Comments are readable only when the parent annotation is public or belongs to the caller. |
+| `annotationsForSeries` | Public annotations, plus the signed-in caller's own private annotations. The deprecated `userId` argument is ignored; it cannot select another viewer. Empty when the caller can't read the series' catalog, as for an unknown series. |
+| `commentsForAnnotation` | Comments are readable only when the parent annotation is public or belongs to the caller, and the caller can read its series' catalog; otherwise the annotation is reported as not found. |
 | `chartCollaborators` | Requires sign-in. Only the chart's collaborators see the list; other callers receive an empty list. |
 | `user` | Requires sign-in. Reading the caller's own record is allowed; reading another user's requires `admin.users:read`. |
 | `users` | Requires `admin.users:read`. |
@@ -68,9 +68,9 @@ do not bypass private-annotation visibility.
 
 | Operation | Additional requirements |
 | --- | --- |
-| `createAnnotation` | `annotation:create`; the caller becomes the author. New annotations are private unless `isPublic: true` is requested. |
-| `updateAnnotation` | `annotation:create` and authorship. |
-| `addComment` | `annotation:comment` and visibility of the annotation. A chart annotation also requires an `admin` role on that chart. |
+| `createAnnotation` | `annotation:create` and read access to the series' catalog (a series the caller can't read gets the same error as a missing one); the caller becomes the author. New annotations are private unless `isPublic: true` is requested. |
+| `updateAnnotation` | `annotation:create`, authorship, and read access to the series' catalog. |
+| `addComment` | `annotation:comment`, visibility of the annotation, and read access to its series' catalog. A chart annotation also requires an `admin` role on that chart. |
 | `shareChart` | `chart:share` and an existing `admin` role on the chart. |
 | `deleteAnnotation` | Authorship, or an `admin` role on the annotation's chart if the annotation is public. Another author's private annotation remains inaccessible. |
 | `triggerCrawl` | `admin.crawlers:manage`; returns the number of jobs enqueued, not completed observations. |
@@ -124,7 +124,9 @@ without observations. `seriesByExternalId(sourceName: ..., externalId: ...)` res
 a source's native series ID; use the exact source name returned by `dataSources`
 (for example, `Federal Reserve Economic Data (FRED)` with external ID `GDP`).
 It returns null when no such series exists. `seriesExists(id: ...)` checks existence
-even when there are no observations.
+even when there are no observations, and `seriesCatalog(id: ...)` returns the series' data
+source name. All four answer a series in a catalog the caller can't read exactly as a missing
+one: null, or `false`.
 
 ### Read a series and recent observations
 

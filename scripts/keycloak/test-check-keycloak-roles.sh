@@ -13,8 +13,8 @@ failures=0
 
 # expect <exit code> <realm fixture> <text the output must contain>
 expect() {
-  local want="$1" realm="$2" text="$3" output status=0
-  output="$("$check" --realm "${fixtures}/${realm}" --roles-file "$catalog" 2>&1)" || status=$?
+  local want="$1" realm="$2" text="$3" roles_file="${4:-$catalog}" output status=0
+  output="$("$check" --realm "${fixtures}/${realm}" --roles-file "$roles_file" 2>&1)" || status=$?
   if [ "$status" -ne "$want" ] || ! grep -qF -- "$text" <<<"$output"; then
     echo "FAIL ${realm}: want exit ${want} and output containing '${text}', got exit ${status}:"
     echo "$output"
@@ -33,6 +33,8 @@ expect 1 realm-admin-incomplete.json "composite 'admin' does not grant 'admin.us
 expect 1 realm-user-has-staff-role.json "composite 'user' grants staff role 'admin.users:read'"
 expect 1 realm-default-has-staff-role.json "composite 'default-roles-econ-graph' grants staff role 'admin.users:read'"
 expect 2 does-not-exist.json "error:"
+expect 0 realm-catalog-revoked.json "4 roles match" "${fixtures}/catalog-with-data.txt"
+expect 1 realm-catalog-admin-incomplete.json "composite 'admin' does not grant 'admin.users:read'" "${fixtures}/catalog-with-data.txt"
 
 if [ "$failures" -ne 0 ]; then
   echo "${failures} fixture test(s) failed"

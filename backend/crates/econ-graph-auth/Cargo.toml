@@ -34,7 +34,7 @@ chrono.workspace = true
 uuid.workspace = true
 
 # HTTP client
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 
 # Test identity provider (the `testkit` feature)
 aws-lc-rs = { version = "1.15", optional = true }
@@ -51,6 +51,8 @@ base64 = "0.22"
 warp.workspace = true
 diesel-async.workspace = true
 serial_test.workspace = true
+# Captures what the anonymous refresh task logs when it stops.
+tracing-subscriber.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true

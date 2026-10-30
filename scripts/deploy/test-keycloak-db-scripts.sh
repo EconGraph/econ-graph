@@ -80,11 +80,13 @@ export STUB_KUBECTL="$stub"
 export PATH="$tmp/bin:$PATH"
 
 # Stub docker and kind for lib/kind-env.sh: `docker cp` of the node's kubectl copies the
-# stub kubectl, `kind get kubeconfig` prints a placeholder; anything else fails.
+# stub kubectl, `docker info` names a rootful daemon, `kind get kubeconfig` prints a
+# placeholder; anything else fails.
 cat >"$tmp/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 echo "docker $*" >>"$STUB_LOG"
 case "$*" in
+  "info --format "*) echo "29.0.0 /var/lib/docker [name=seccomp]" ;;
   "cp -q -L "*"-control-plane:/usr/bin/kubectl "*) cp "$STUB_KUBECTL" "${*: -1}" ;;
   *) echo "stub docker: unexpected call: $*" >&2; exit 1 ;;
 esac
