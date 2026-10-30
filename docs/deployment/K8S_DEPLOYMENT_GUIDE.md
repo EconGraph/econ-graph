@@ -91,8 +91,9 @@ done
 `VITE_OIDC_ISSUER` defaults to the path `/idp/realms/econ-graph`, which the app
 resolves against its own origin at runtime, so one image serves `http://localhost`
 and the public host (`PUBLIC_HOST`, see the Public site section of `k8s/README.md`)
-alike. Set a full URL only for a Keycloak on another origin; an empty value hides
-sign-in.
+alike. Set a full URL only for a Keycloak on another origin. The frontend build
+fails on an empty issuer unless `--build-arg VITE_OIDC_SIGN_IN_DISABLED=true` is
+also passed, which builds the image with sign-in hidden.
 Admin images are not built above. Review the admin manifests before applying the
 whole directory.
 
