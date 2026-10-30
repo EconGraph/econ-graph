@@ -21,6 +21,11 @@ fn info_route(indicator: &str) -> Route {
 
 /// The `/data` request for a listed indicator, with every parameter the adapter must send.
 fn data_route(indicator: &str) -> Route {
+    data_route_for(indicator, "all")
+}
+
+/// [`data_route`] for the economies `r` names.
+fn data_route_for(indicator: &str, r: &str) -> Route {
     let listed = reference::wto_indicators()
         .unwrap()
         .iter()
@@ -28,7 +33,7 @@ fn data_route(indicator: &str) -> Route {
         .unwrap();
     let mut route = Route::get("/data")
         .query("i", indicator)
-        .query("r", "all")
+        .query("r", r)
         .query("ps", "all")
         .query("fmt", "json")
         .query("mode", "full")
@@ -291,9 +296,96 @@ fn quota_exhaustion_is_rate_limited() {
         "HTTP 403: WTO GET ...: Out of call volume quota. Quota will be replenished in 00:10:00."
             .into(),
     ));
-    assert_eq!(e, CrawlError::RateLimited { retry_after: None });
+    let secs = |s| Some(std::time::Duration::from_secs(s));
+    assert_eq!(
+        e,
+        CrawlError::RateLimited {
+            retry_after: secs(600)
+        }
+    );
+    // Days, hours, minutes and seconds.
+    let e = classify(CrawlError::Auth(
+        "HTTP 403: Out of call volume quota. Quota will be replenished in 1.02:03:04.".into(),
+    ));
+    assert_eq!(
+        e,
+        CrawlError::RateLimited {
+            retry_after: secs(((24 + 2) * 60 + 3) * 60 + 4)
+        }
+    );
+    // No usable time: wait an hour. Almost replenished: at least a minute.
+    for message in [
+        "HTTP 403: Out of call volume quota.",
+        "HTTP 403: Out of call volume quota. Quota will be replenished in soon.",
+        "HTTP 403: Out of call volume quota. Quota will be replenished in 00:99:00.",
+    ] {
+        assert_eq!(
+            classify(CrawlError::Auth(message.into())),
+            CrawlError::RateLimited {
+                retry_after: secs(3600)
+            },
+            "{message}"
+        );
+    }
+    assert_eq!(
+        classify(CrawlError::Auth(
+            "HTTP 403: Out of call volume quota. Quota will be replenished in 00:00:05.".into()
+        )),
+        CrawlError::RateLimited {
+            retry_after: secs(60)
+        }
+    );
     let e = classify(CrawlError::Auth("HTTP 401: Access denied".into()));
     assert!(matches!(e, CrawlError::Auth(_)));
+}
+
+/// A `/data` body that echoes the key (here in a row value) never puts it into a parse error,
+/// which the worker logs and stores with the job.
+#[tokio::test]
+async fn parse_errors_from_the_data_body_never_carry_the_key() {
+    let mock = MockSource::start().await;
+    mock.mount(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS))
+        .await;
+    let body = format!(
+        r#"{{"Dataset": [{{"ReportingEconomyCode": "840", "Year": 2024, "PeriodCode": "A", "Value": "{TEST_API_KEY}"}}]}}"#
+    );
+    mock.mount(&data_route_for("ITS_MTV_AX", "840"), Reply::json_str(body))
+        .await;
+    let e = WtoAdapter::new(mock.base_url())
+        .fetch_series(&test_ctx(), "timeseries/ITS_MTV_AX.USA", None)
+        .await
+        .unwrap_err();
+    assert!(matches!(e, CrawlError::Parse(_)), "{e:?}");
+    assert!(e.to_string().contains("bad value"), "{e}");
+    assert!(!e.to_string().contains(TEST_API_KEY), "{e}");
+    assert!(e.to_string().contains("REDACTED"), "{e}");
+    // A row the parser rejects outright quotes nothing from it either.
+    let e = redact_key(
+        parse_rows(
+            "t",
+            &format!(r#"{{"Dataset": [{{"Year": ["{TEST_API_KEY}"]}}]}}"#),
+        )
+        .unwrap_err(),
+        TEST_API_KEY,
+    );
+    assert!(!e.to_string().contains(TEST_API_KEY), "{e}");
+}
+
+#[test]
+fn economy_codes_round_trip_to_areas() {
+    let areas = areas().unwrap();
+    for (key, code) in [
+        ("USA", "840"),
+        ("AFG", "004"),
+        ("WLD", "000"),
+        ("EUU", "918"),
+    ] {
+        let area = areas.by_key(key).unwrap();
+        assert_eq!(wto_economy_code(area).as_deref(), Some(code), "{key}");
+        assert_eq!(lookup(areas, code).unwrap().key, key);
+    }
+    // An aggregate the WTO adapter doesn't map has no code.
+    assert_eq!(wto_economy_code(areas.by_key("EMU").unwrap()), None);
 }
 
 #[test]
@@ -438,11 +530,18 @@ async fn an_indicator_code_the_api_rejects_is_unlisted() {
 #[tokio::test]
 async fn fetch_batch_serves_every_requested_economy_from_one_request() {
     let mock = MockSource::start().await;
-    // Once for the batch of five ids, once for the lone `fetch_series` at the end.
+    // Once for the batch of five ids (every economy), once for the lone `fetch_series` at the
+    // end (France only, by its WTO code).
     mock.mount_expect(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS), 2)
         .await;
-    mock.mount_expect(&data_route("ITS_MTV_AX"), Reply::json_str(DATA_EXPORTS), 2)
+    mock.mount_expect(&data_route("ITS_MTV_AX"), Reply::json_str(DATA_EXPORTS), 1)
         .await;
+    mock.mount_expect(
+        &data_route_for("ITS_MTV_AX", "250"),
+        Reply::json_str(DATA_EXPORTS),
+        1,
+    )
+    .await;
     let a = WtoAdapter::new(mock.base_url());
     let requested = ids(&[
         "timeseries/ITS_MTV_AX.USA",
@@ -497,7 +596,8 @@ async fn no_content_is_no_series() {
     let mock = MockSource::start().await;
     mock.mount(&info_route("TP_A_0010"), Reply::json_str(INFO_TARIFF))
         .await;
-    mock.mount(&data_route("TP_A_0010"), Reply::status(204))
+    // A lone series asks for its own economy (the United States, 840), not every one.
+    mock.mount(&data_route_for("TP_A_0010", "840"), Reply::status(204))
         .await;
     let e = WtoAdapter::new(mock.base_url())
         .fetch_series(&test_ctx(), "timeseries/TP_A_0010.USA", None)
@@ -537,7 +637,12 @@ async fn request_failures_fail_the_indicator_and_never_show_the_key() {
         .fetch_series(&test_ctx(), "timeseries/ITS_MTV_AX.USA", None)
         .await
         .unwrap_err();
-    assert_eq!(e, CrawlError::RateLimited { retry_after: None });
+    assert_eq!(
+        e,
+        CrawlError::RateLimited {
+            retry_after: Some(std::time::Duration::from_secs(59 * 60))
+        }
+    );
 }
 
 mod contract {

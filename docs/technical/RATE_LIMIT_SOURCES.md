@@ -97,11 +97,14 @@ The WTO Timeseries API's only subscription product on the
 [WTO API portal](https://apiportal.wto.org/products), "Standard" (free), allows 10 calls/second
 and at most 10,000 calls/hour per key, and 1 call/second for the time-series data endpoints
 (`/data` and `/data_count`). The crawler holds every WTO request to 1 request/second with no
-burst and one request at a time, which also keeps the hourly total at 3,600. The
+burst and one request at a time, which also keeps the hourly total at 3,600. These limits are
+per key and the crawler enforces its rate per worker process, so each deployment needs its own
+key. The
 [WTO adapter](../../backend/crates/econ-graph-crawler/src/sources/wto.rs) makes two requests per
 indicator for a discovery or a fetch batch, so a full crawl of its curated indicators takes a
 few dozen requests. The portal answers an exhausted quota with HTTP 403; the adapter treats a
-403 that mentions the quota as rate limiting rather than an authentication failure.
+403 that mentions the quota as rate limiting rather than an authentication failure, and retries
+after the replenishment time the message gives (an hour when it gives none).
 
 ### FHFA
 

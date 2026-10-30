@@ -43,12 +43,15 @@
 //!   `pc` and `p` when the list gives them: every reporting economy's full history in one
 //!   response, `{"Dataset": [row, ...]}`, or an empty `204` when nothing matches. It gets a
 //!   longer timeout than ordinary requests (`DATA_TIMEOUT`, see
-//!   [`HttpFetcher::get_text_slow`](crate::http::HttpFetcher::get_text_slow)).
+//!   [`HttpFetcher::get_text_slow`](crate::http::HttpFetcher::get_text_slow)). A fetch for a
+//!   single economy sends that economy's code as `r` instead of `all`.
 //!
 //! Discovery makes both requests for each listed indicator and lists every economy with at least
 //! one value; it is complete ([`SourceAdapter::discovery_is_complete`]), so series of an
 //! indicator or economy the WTO stops publishing are retired. Fetching is batched by indicator
 //! ([`SourceAdapter::batch_key`]): one pair of requests serves every economy of an indicator.
+//! A parse error quoting the `/data` body has the key removed (that body bypasses the HTTP
+//! layer's error scrubbing).
 //! Discovery also merges the indicators' names, units and descriptions, and the WTO's names for
 //! the two aggregates, into the dataset's dimension codes (best effort).
 //!
@@ -195,11 +198,14 @@ impl WtoAdapter {
         ctx: &CrawlCtx,
         key: &str,
         indicator: &WtoIndicator,
+        economy: Option<&str>,
     ) -> Result<Vec<Row>, CrawlError> {
         let max = MAX_ROWS.to_string();
         let mut query: Vec<(&str, &str)> = vec![
             ("i", &indicator.id),
-            ("r", "all"),
+            // One economy's code when the caller wants only that one (a lone series); otherwise
+            // every economy, which one request serves as cheaply as a few of them.
+            ("r", economy.unwrap_or("all")),
             ("ps", "all"),
             ("fmt", "json"),
             ("mode", "full"),
@@ -225,7 +231,9 @@ impl WtoAdapter {
             .await
             .map_err(classify)?;
         let what = format!("/data {}", indicator.id);
-        let rows = parse_rows(&what, &body)?;
+        // This body did not pass through the HTTP layer's error scrubbing, and a parse error
+        // quotes it: never let it carry the key into logs or stored job errors.
+        let rows = parse_rows(&what, &body).map_err(|e| redact_key(e, key))?;
         if rows.len() >= MAX_ROWS {
             return Err(CrawlError::Parse(format!(
                 "WTO {what}: {} rows fills the request's max={MAX_ROWS}; the series may be cut short",
@@ -307,7 +315,7 @@ impl SourceAdapter for WtoAdapter {
                 }
                 Err(e) => return Err(e),
             };
-            let rows = self.fetch_rows(ctx, key, indicator).await?;
+            let rows = self.fetch_rows(ctx, key, indicator, None).await?;
             for (area, series) in resolve(indicator, rows, areas)? {
                 let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
                 let meta = series_metadata(&info, indicator, area, &series);
@@ -404,9 +412,16 @@ impl SourceAdapter for WtoAdapter {
             }
         }
         for (indicator, ids) in wanted {
+            // A lone economy is asked for by its own code; several share one all-economy request.
+            let single = match ids.keys().collect::<Vec<_>>()[..] {
+                [area] => areas.by_key(area).and_then(wto_economy_code),
+                _ => None,
+            };
             let fetched = async {
                 let info = self.indicator_info(ctx, key, &indicator.id).await?;
-                let rows = self.fetch_rows(ctx, key, indicator).await?;
+                let rows = self
+                    .fetch_rows(ctx, key, indicator, single.as_deref())
+                    .await?;
                 Ok::<_, CrawlError>((info, resolve(indicator, rows, areas)?))
             }
             .await;
@@ -456,13 +471,66 @@ fn api_key(ctx: &CrawlCtx) -> Result<&str, CrawlError> {
 
 /// The API portal answers an exhausted call quota with `403` ("Out of call volume quota. Quota
 /// will be replenished in ..."): that is throttling, retried later, not a bad key.
+/// `e` with every occurrence of `key` in its message replaced.
+fn redact_key(e: CrawlError, key: &str) -> CrawlError {
+    if key.is_empty() {
+        return e;
+    }
+    let scrub = |m: String| m.replace(key, "REDACTED");
+    match e {
+        CrawlError::Transient(m) => CrawlError::Transient(scrub(m)),
+        CrawlError::NotFound(m) => CrawlError::NotFound(scrub(m)),
+        CrawlError::Auth(m) => CrawlError::Auth(scrub(m)),
+        CrawlError::Parse(m) => CrawlError::Parse(scrub(m)),
+        CrawlError::Permanent(m) => CrawlError::Permanent(scrub(m)),
+        CrawlError::Busy {
+            retry_after,
+            message,
+        } => CrawlError::Busy {
+            retry_after,
+            message: scrub(message),
+        },
+        e @ CrawlError::RateLimited { .. } => e,
+    }
+}
+
+/// The job is retried once the quota is replenished, as the message says (at least a minute
+/// later), or after [`QUOTA_RETRY_FLOOR`] when it doesn't say.
 fn classify(e: CrawlError) -> CrawlError {
     match e {
         CrawlError::Auth(m) if m.to_ascii_lowercase().contains("quota") => {
-            CrawlError::RateLimited { retry_after: None }
+            CrawlError::RateLimited {
+                retry_after: Some(quota_replenished_in(&m).map_or(QUOTA_RETRY_FLOOR, |d| {
+                    d.max(std::time::Duration::from_secs(60))
+                })),
+            }
         }
         e => e,
     }
+}
+
+/// How long to wait after an exhausted quota whose message gives no replenishment time.
+const QUOTA_RETRY_FLOOR: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// The wait in "Quota will be replenished in HH:MM:SS" (or `D.HH:MM:SS`), if the message has it.
+fn quota_replenished_in(message: &str) -> Option<std::time::Duration> {
+    const MARKER: &str = "replenished in ";
+    let start = message.find(MARKER)? + MARKER.len();
+    let text: String = message[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == ':' || *c == '.')
+        .collect();
+    let text = text.trim_end_matches('.');
+    let (days, clock) = match text.split_once('.') {
+        Some((d, rest)) => (d.parse::<u64>().ok()?, rest),
+        None => (0, text),
+    };
+    let parts: Vec<u64> = clock
+        .split(':')
+        .map(|p| p.parse().ok())
+        .collect::<Option<_>>()?;
+    let [h, m, s] = parts[..] else { return None };
+    (m < 60 && s < 60).then(|| std::time::Duration::from_secs(((days * 24 + h) * 60 + m) * 60 + s))
 }
 
 /// The `timeseries` definition from `datasets/wto.toml`.
@@ -744,6 +812,18 @@ fn lookup<'a>(areas: &'a Areas, economy: &str) -> Option<&'a Area> {
         .filter(|&n| n != 0)
         .and_then(|n| areas.by_iso_numeric(n))
         .filter(|a| a.kind == AreaKind::Country)
+}
+
+/// The WTO economy code of an area of the country table (the reverse of [`lookup`]): `000` or
+/// `918` for the two aggregates, a country's ISO numeric code written with three digits.
+fn wto_economy_code(area: &Area) -> Option<String> {
+    if let Some((code, _)) = AGGREGATES.iter().find(|(_, key)| *key == area.key) {
+        return Some((*code).to_string());
+    }
+    (area.kind == AreaKind::Country)
+        .then_some(area.iso_numeric)
+        .flatten()
+        .map(|n| format!("{n:03}"))
 }
 
 /// `rows` grouped by area of the country table, sorted by area key, keeping only rows of the

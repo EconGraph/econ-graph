@@ -16,9 +16,15 @@ HTTP layer redacts from logs and errors.
 While `WTO_API_KEY` is unset, the crawler worker leaves the WTO source out entirely: it runs no
 WTO discovery or refreshes and publishes no WTO coverage gauges, and logs one warning at
 startup, "source skipped: its API key is not set ...", with fields `source=WTO` and
-`env=WTO_API_KEY`. `crawler sources` reports the key as `WTO_API_KEY NOT SET (required)`. A WTO job enqueued by hand
-(`crawler discover --source WTO`, `crawler fetch --source WTO ...`) fails with an `Auth` error,
-"WTO_API_KEY not set", before any request.
+`env=WTO_API_KEY`. `crawler sources` reports the key as `WTO_API_KEY NOT SET (required)`. A WTO
+job enqueued by hand (`crawler discover --source WTO`) then fails permanently with "no adapter
+registered for WTO", since that worker has no WTO adapter. The CLI's in-process fetch
+(`crawler fetch --source WTO ...`) fails with an `Auth` error, "WTO_API_KEY not set", before any
+request.
+
+Each deployment needs its own subscription key. The API's limits apply per key, and the crawler
+enforces its 1 request/second per worker process: two deployments sharing a key would together
+exceed the data endpoint's limit.
 
 ### Getting and installing a key
 
@@ -59,7 +65,7 @@ on the time-series data endpoints (`/data`, `/data_count`). The crawler's
 to 1 request/second with no burst and one request at a time (at most 3,600 an hour). A discovery
 or fetch batch makes two requests per indicator. The portal answers an exhausted quota with HTTP
 403 ("Out of call volume quota"); the adapter treats such a 403 as rate limiting and the job
-is retried later. See [Rate limit sources](../technical/RATE_LIMIT_SOURCES.md#wto).
+is retried once the quota is replenished, as the message says (an hour when it doesn't say). See [Rate limit sources](../technical/RATE_LIMIT_SOURCES.md#wto).
 
 ## Coverage and requests
 
