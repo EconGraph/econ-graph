@@ -8,7 +8,8 @@
 #   - the refusals that stop before anything is deleted (no terminal; a
 #     current context other than kind-econ-graph);
 #   - the backup comes before anything is patched or deleted: a teardown
-#     writes the dumps and counts.env to ECONGRAPH_BACKUP_ROOT first, and a
+#     whose PVs need patching to Retain writes the dumps and counts.env to
+#     ECONGRAPH_BACKUP_ROOT before the first patch or delete, and a
 #     failed dump, or a postgresql-0 that isn't running without --no-backup,
 #     stops it with nothing patched or deleted.
 #
@@ -41,8 +42,10 @@ EOF
 # set, is what it reports as the current context after use-context;
 # FAKE_PRODUCTION=true makes the cluster carry a production marker for its own
 # kube-system UID; FAKE_PHASE is every pod's phase (default Running);
-# FAKE_DUMP_FAILS set makes pg_dump fail. pg_dump prints a stub archive and
-# psql a count, so a backup can complete.
+# FAKE_DUMP_FAILS set makes pg_dump fail; FAKE_RECLAIM is every PV's reclaim
+# policy (default Retain, so protect-postgres-pv.sh patches nothing; Delete makes
+# it patch). pg_dump prints a stub archive and psql a count, so a backup can
+# complete.
 CLUSTER_UID="11111111-2222-3333-4444-555555555555"
 cat >"$WORK/kind-kubectl" <<EOF
 #!/bin/sh
@@ -63,7 +66,8 @@ case " \$* " in
     *" psql "*) echo 7; exit 0 ;;
     *" -o name"*) echo "persistentvolumeclaim/stub"; exit 0 ;;
     *"{.spec.volumeName}"*) echo pv-stub; exit 0 ;;
-    *"persistentVolumeReclaimPolicy"*) echo Retain; exit 0 ;;
+    *" patch "*) exit 0 ;;
+    *"persistentVolumeReclaimPolicy"*) echo "\${FAKE_RECLAIM:-Retain}"; exit 0 ;;
 esac
 exit 0
 EOF
@@ -99,13 +103,22 @@ chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
 mkdir -p "$WORK/home/.local/share/econgraph/bin"
 cp "$WORK/bin/kind" "$WORK/home/.local/share/econgraph/bin/kind-v0.33.0"
 
-# teardown CMD-ARGS...: teardown.sh with the stubs first on PATH and no kube
-# config, stdin not a terminal. Prints its output; returns its exit status.
+# The environment teardown.sh runs in: the stubs first on PATH, no kube config,
+# and none of the caller's settings that would point it at another cluster,
+# Docker daemon or namespace, or relax the backup.
+TEARDOWN_ENV=(
+    -u KUBECONFIG -u KUBECTL -u KIND -u KIND_CLUSTER -u CLUSTER_ROLE_CONTEXT -u DOCKER_CONTEXT
+    -u KIND_EXPERIMENTAL_PROVIDER -u ECONGRAPH_DOCKER_HOST -u ECONGRAPH_AGENT_SESSION
+    -u ECONGRAPH_KUBE_DIR -u ECONGRAPH_SCRATCH_STORAGE -u DRY_RUN -u ASSUME_YES -u NAMESPACE
+    -u ALLOW_MISSING_APP_DUMP -u ALLOW_MISSING_KEYCLOAK_DUMP
+    HOME="$WORK/home" XDG_DATA_HOME="$WORK/home/.local/share" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp"
+    ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
+)
+
+# teardown CMD-ARGS...: teardown.sh in TEARDOWN_ENV, stdin not a terminal.
+# Prints its output; returns its exit status.
 teardown() {
-    env -u KUBECONFIG -u KUBECTL -u CLUSTER_ROLE_CONTEXT -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER \
-        HOME="$WORK/home" XDG_DATA_HOME="$WORK/home/.local/share" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp" \
-        ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
-        "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
+    env "${TEARDOWN_ENV[@]}" "$PROJECT_ROOT/scripts/deploy/teardown.sh" "$@" </dev/null 2>&1
 }
 
 failed=0
@@ -209,9 +222,7 @@ check "teardown.sh --dry-run on a production cluster"
 # wrong UID prefix, must abort with nothing deleted. Pods report Pending, so
 # no backup is attempted (--no-backup).
 reset
-out="$(printf 'econ-graph\nwrong\n' | env -u KUBECONFIG -u KUBECTL -u CLUSTER_ROLE_CONTEXT -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER \
-    FAKE_PRODUCTION=true FAKE_PHASE=Pending HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp" \
-    ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
+out="$(printf 'econ-graph\nwrong\n' | env "${TEARDOWN_ENV[@]}" FAKE_PRODUCTION=true FAKE_PHASE=Pending \
     script -qec "$PROJECT_ROOT/scripts/deploy/teardown.sh --no-backup" /dev/null 2>&1)"; rc=$?
 if [ "$rc" -ne 0 ] && grep -q "Type '${CLUSTER_UID:0:8}' to continue" <<<"$out" &&
     grep -q "aborted; nothing was deleted" <<<"$out"; then
@@ -258,19 +269,23 @@ check "teardown.sh --yes on a production cluster"
 grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed or dumped something before refusing --yes on production"
 
 # The backup comes first: a teardown dumps the databases into
-# ECONGRAPH_BACKUP_ROOT before it patches or deletes anything.
+# ECONGRAPH_BACKUP_ROOT before it patches or deletes anything. The PVs report
+# reclaim policy Delete, so protect-postgres-pv.sh patches them, and the first
+# patch has to come after the first dump too.
 reset
 rm -rf "$WORK/backups"
-out="$(teardown --yes)"; rc=$?
+out="$(FAKE_RECLAIM=Delete teardown --yes)"; rc=$?
 backup_dir="$(find "$WORK/backups" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
 first_dump="$(grep -n ' pg_dump ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
+first_patch="$(grep -n ' patch ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
 first_change="$(grep -nE ' (delete|patch) ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
 if [ "$rc" -eq 0 ] && grep -q "App plane removed" <<<"$out" && [ -n "$backup_dir" ] &&
     [ -s "$backup_dir/econ_graph.dump" ] && grep -q '^SERIES_COUNT=7$' "$backup_dir/counts.env" 2>/dev/null &&
-    [ -n "$first_dump" ] && [ -n "$first_change" ] && [ "$first_dump" -lt "$first_change" ]; then
-    echo "ok   teardown.sh --yes dumps the databases and counts.env before it patches or deletes anything"
+    [ -n "$first_dump" ] && [ -n "$first_patch" ] && [ -n "$first_change" ] &&
+    [ "$first_dump" -lt "$first_patch" ] && [ "$first_dump" -lt "$first_change" ]; then
+    echo "ok   teardown.sh --yes dumps the databases and counts.env before it patches a PV to Retain or deletes anything"
 else
-    fail "teardown.sh --yes did not back up first (exit $rc, first pg_dump at call ${first_dump:-none}, first patch/delete at ${first_change:-none}):"
+    fail "teardown.sh --yes did not back up first (exit $rc, first pg_dump at call ${first_dump:-none}, first patch at ${first_patch:-none}, first patch/delete at ${first_change:-none}):"
     printf '     %s\n' "$out"
 fi
 check "teardown.sh --yes with a backup"
