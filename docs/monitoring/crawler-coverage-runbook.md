@@ -122,11 +122,14 @@ suggests reviewing the rules. That gauge changes only when a complete catalog sn
 reconciled; between discoveries it keeps the last snapshot's count.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
 by a successful fetch. Only definite answers count: a FRED 400 "series does not exist" or an
-HTTP 404. Three in a row retire a series from fetching. A BEA response that successfully
-returns the whole table but omits one requested line or area is weaker evidence with its own
-counter: six in a row retire the series from fetching. This lets lines under tables the rules
-no longer select, and legacy BEA rows outside the rules, stop being fetched on every refresh.
-A FRED `/series` response with no series is a failed fetch and counts as neither. The
+HTTP 404. Three in a row retire a series from fetching. A BEA response that returns rows for
+the table but omits one requested line or area is weaker evidence (`crawl_status` `absent`)
+with its own counter: six in a row retire the series from fetching. Both back off ten refresh
+intervals between attempts, so an omitted line takes at least as long to retire as a
+NotFound. Only series the current accepted catalog does not list count omissions (lines under
+tables the rules no longer select, legacy BEA rows outside the rules); for a listed series
+the catalog alone decides. A BEA table returned with no rows at all, and a FRED `/series`
+response with no series, are transient failures and count as neither. The
 scheduler still probes a fetch-retired series once every 12 refresh intervals (a series with
 no stored history: at most once per queue retention), and a successful probe makes it active
 again. A complete catalog that lists the series again also makes it active and restarts both

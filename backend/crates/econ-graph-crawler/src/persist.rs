@@ -1407,7 +1407,8 @@ pub(crate) async fn deactivate_metadata_conn(
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
 /// on failure, sets `economic_series.crawl_status` to `'not_found'` (the error is
 /// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound), confirming the source doesn't
-/// have the series) or `'failed'` (anything else), with the error message.
+/// have the series), `'absent'` ([`CrawlError::Absent`](crate::error::CrawlError::Absent), a
+/// complete response omitted it) or `'failed'` (anything else), with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
     series_id: Uuid,
@@ -1457,10 +1458,11 @@ pub(crate) async fn record_attempt_conn(
         .execute(&mut *conn)
         .await?;
     if !attempt.success {
-        let status = if attempt.error_kind.as_deref() == Some("not_found") {
-            "not_found"
-        } else {
-            "failed"
+        // `absent` (a complete response omitted the series) backs off like `not_found`.
+        let status = match attempt.error_kind.as_deref() {
+            Some("not_found") => "not_found",
+            Some("absent") => "absent",
+            _ => "failed",
         };
         diesel::sql_query(
             "UPDATE economic_series es SET crawl_status = COALESCE( \

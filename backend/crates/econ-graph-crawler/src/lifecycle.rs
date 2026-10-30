@@ -810,7 +810,9 @@ pub(crate) async fn record_not_found_conn(
 
 /// Record that a successful, complete whole-table response omitted this series
 /// ([`CrawlError::Absent`](crate::CrawlError::Absent)). Weaker than NotFound, so it has its
-/// own counter and takes six in a row to retire the series from fetching.
+/// own counter and takes six in a row to retire the series from fetching. A series the
+/// current accepted catalog lists is never counted: the catalog alone decides whether it was
+/// removed, so a selected series cannot flip between fetch-retired and catalog-reactivated.
 pub(crate) async fn record_absent_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
@@ -818,6 +820,11 @@ pub(crate) async fn record_absent_conn(
 ) -> AppResult<Option<String>> {
     record_fetch_miss_conn(conn, source, external_id, FetchMiss::Absent).await
 }
+
+/// Consecutive confirmed NotFound fetches that retire a series from fetching.
+pub(crate) const NOT_FOUND_RETIRE_AFTER: i32 = 3;
+/// Consecutive Absent fetches that retire a series the accepted catalog does not list.
+pub(crate) const ABSENT_RETIRE_AFTER: i32 = 6;
 
 #[derive(Clone, Copy)]
 enum FetchMiss {
@@ -829,8 +836,19 @@ impl FetchMiss {
     /// Counter column and the consecutive misses that retire a series.
     fn counter(self) -> (&'static str, i32) {
         match self {
-            Self::NotFound => ("fetch_not_found_count", 3),
-            Self::Absent => ("fetch_absent_count", 6),
+            Self::NotFound => ("fetch_not_found_count", NOT_FOUND_RETIRE_AFTER),
+            Self::Absent => ("fetch_absent_count", ABSENT_RETIRE_AFTER),
+        }
+    }
+
+    /// Extra condition for counting this miss at all.
+    fn counts_when(self) -> &'static str {
+        match self {
+            Self::NotFound => "TRUE",
+            Self::Absent => {
+                "NOT (in_accepted_catalog AND scope_fingerprint IS NOT DISTINCT FROM \
+                 (SELECT fingerprint FROM catalog_lifecycle_scopes s WHERE s.source_id=$1))"
+            }
         }
     }
 }
@@ -852,15 +870,22 @@ async fn record_fetch_miss_conn(
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
     let (counter, threshold) = miss.counter();
     let retire = format!("{counter}+1>=$3 AND status='active'");
-    let change:Option<StatusChange> = diesel::sql_query(format!("UPDATE series_lifecycle SET \
+    let change: Option<StatusChange> = diesel::sql_query(format!(
+        "UPDATE series_lifecycle SET \
         {counter}=LEAST({counter}::bigint+1,2147483647)::integer, \
         status=CASE WHEN {retire} THEN 'retired' ELSE status END, \
         fetch_retired=CASE WHEN {retire} THEN TRUE ELSE fetch_retired END, \
         since=CASE WHEN {retire} THEN NOW() ELSE since END \
-        WHERE source_id=$1 AND external_id=$2 RETURNING CASE WHEN old.status<>status THEN status ELSE NULL END AS status"))
-        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id)
-        .bind::<diesel::sql_types::Integer,_>(threshold)
-        .get_result(&mut *conn).await.optional()?;
+        WHERE source_id=$1 AND external_id=$2 AND {counts} \
+        RETURNING CASE WHEN old.status<>status THEN status ELSE NULL END AS status",
+        counts = miss.counts_when()
+    ))
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .bind::<diesel::sql_types::Integer, _>(threshold)
+    .get_result(&mut *conn)
+    .await
+    .optional()?;
     diesel::sql_query(
         "UPDATE economic_series es SET crawl_status=l.status FROM series_lifecycle l \
         WHERE l.source_id=es.source_id AND l.external_id=es.external_id \

@@ -1690,3 +1690,81 @@ async fn catalog_reactivation_resets_fetch_miss_counters() {
     assert_eq!((state.status.as_str(), state.fetch_misses), ("active", 1));
     db.drop().await;
 }
+
+/// A success between omissions restarts the Absent streak: 3, success, 5 never retires.
+#[tokio::test]
+async fn a_successful_fetch_restarts_the_absent_streak() {
+    let Some(db) = fetch_counter_db("eco464_absent_streak").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let id = "intermittent";
+    persist::persist_discovered(pool, SourceId::Fred, &[counter_series(id)])
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        absent_miss(pool, id).await;
+    }
+    persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+        .await
+        .unwrap();
+    assert_eq!(absent_count(pool, id).await, 0);
+    for _ in 0..5 {
+        absent_miss(pool, id).await;
+    }
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (state.status.as_str(), state.fetch_retired),
+        ("active", false)
+    );
+    assert_eq!(absent_count(pool, id).await, 5);
+    db.drop().await;
+}
+
+/// A series the accepted catalog lists never accumulates Absent evidence, so a selected
+/// pair the catalog lists but GetData omits stays active instead of flipping between
+/// fetch-retired and catalog-reactivated. An unlisted series still counts.
+#[tokio::test]
+async fn absent_counts_only_for_series_the_accepted_catalog_does_not_list() {
+    let Some(db) = fetch_counter_db("eco464_absent_listed").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let listed = vec![counter_series("listed")];
+    persist::persist_discovered(
+        pool,
+        SourceId::Fred,
+        &[counter_series("listed"), counter_series("legacy")],
+    )
+    .await
+    .unwrap();
+    reconcile_at(pool, &listed, &CatalogLifecycle::default(), Utc::now()).await;
+    for _ in 0..ABSENT_RETIRE_AFTER {
+        absent_miss(pool, "listed").await;
+        absent_miss(pool, "legacy").await;
+    }
+    let state = fetch_evidence(pool, "listed").await;
+    assert_eq!(
+        (state.status.as_str(), state.fetch_retired),
+        ("active", false)
+    );
+    assert_eq!(absent_count(pool, "listed").await, 0);
+    let legacy = fetch_evidence(pool, "legacy").await;
+    assert_eq!(
+        (legacy.status.as_str(), legacy.fetch_retired),
+        ("retired", true)
+    );
+    db.drop().await;
+}
+
+/// Weaker evidence needs more misses and at least as long a wait between them, so Absent
+/// never fetch-retires a series sooner than NotFound would. Checked at compile time.
+const _: () = {
+    use crate::scheduler::{ABSENT_BACKOFF_FACTOR, NOT_FOUND_BACKOFF_FACTOR};
+    assert!(ABSENT_RETIRE_AFTER > NOT_FOUND_RETIRE_AFTER);
+    assert!(ABSENT_BACKOFF_FACTOR >= NOT_FOUND_BACKOFF_FACTOR);
+    assert!(
+        (ABSENT_RETIRE_AFTER as i64 - 1) * ABSENT_BACKOFF_FACTOR
+            > (NOT_FOUND_RETIRE_AFTER as i64 - 1) * NOT_FOUND_BACKOFF_FACTOR
+    );
+};

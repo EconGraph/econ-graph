@@ -139,7 +139,7 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL) AS with_data, \
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL \
                         AND COALESCE(es.last_crawled_at, '-infinity') \
-                            <= NOW() - (CASE WHEN es.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
+                            <= NOW() - {backoff} \
                                * make_interval(days => ({days}))) \
                         AS overdue, \
                     MIN(es.last_crawled_at) AS oldest_success \
@@ -162,6 +162,7 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
          ORDER BY src.code",
         days = frequency_days_sql("lower(btrim(es.frequency))"),
         census = SourceId::Census.as_str(),
+        backoff = crate::scheduler::failure_backoff_sql("es.crawl_status"),
     )
 });
 

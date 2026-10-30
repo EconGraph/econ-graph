@@ -59,13 +59,15 @@
 //! Every fetch asks for the whole history (`Year` `X` for NIPA, `ALL` for Regional) and ignores
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
-//! history is still one modest request. A requested series with no rows in an otherwise
-//! successful response is `Absent`, not `NotFound`: a response that omits one line or area
-//! is weaker evidence than an explicit "does not exist", and it isn't retried (each retry
-//! would request the whole table again). The scheduler tries the series again after its
-//! failure backoff. Complete catalog discovery decides whether a selected series was removed;
-//! for a series outside the selection rules, six consecutive `Absent` results retire it from
-//! fetching (see [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
+//! history is still one modest request. A response with no rows at all is `Transient`: BEA
+//! briefly serves empty tables around its updates, and that says nothing about any one line. A
+//! requested series with no rows in an otherwise non-empty response is `Absent`, not
+//! `NotFound`: omitting one line or area is weaker evidence than an explicit "does not exist".
+//! It isn't retried (each retry would request the whole table again); the scheduler tries again
+//! after the same long backoff as NotFound. For a series the current accepted catalog lists,
+//! `Absent` is not counted at all: catalog discovery alone decides whether it was removed. For
+//! an unlisted or legacy series, six consecutive `Absent` results retire it from fetching (see
+//! [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
 //!
 //! `DataValue` has thousands separators and is scaled by `10^UNIT_MULT`, so values are in base
 //! units (dollars, not millions of dollars). Units come from `CL_UNIT`, or `METRIC_NAME` when
@@ -783,6 +785,14 @@ impl BeaAdapter {
                 ],
             )
             .await?;
+        // An empty table says nothing about any one line (BEA briefly serves empty tables
+        // around its annual updates), so it fails the whole group as Transient, not Absent.
+        if rows.is_empty() {
+            return Err(CrawlError::Transient(format!(
+                "BEA {table_name} ({}): GetData returned no rows",
+                frequency.code()
+            )));
+        }
         let mut by_line: HashMap<&str, Vec<&NipaRow>> = HashMap::new();
         for row in &rows {
             by_line
@@ -871,6 +881,12 @@ impl BeaAdapter {
                 ],
             )
             .await?;
+        // As for NIPA: an empty response is not evidence about any one area.
+        if rows.is_empty() {
+            return Err(CrawlError::Transient(format!(
+                "BEA {table_name} line {line}: GetData returned no rows"
+            )));
+        }
         let mut by_geo: HashMap<&str, Vec<&RegionalRow>> = HashMap::new();
         for row in &rows {
             by_geo.entry(row.geo_fips.as_str()).or_default().push(row);
@@ -2374,6 +2390,33 @@ mod tests {
             "absent"
         );
         mock.server().verify().await;
+    }
+
+    /// An empty table (as BEA briefly serves around an annual update) is Transient for the
+    /// whole group, never Absent for each requested line or area.
+    #[tokio::test]
+    async fn fetch_batch_treats_an_empty_table_as_transient() {
+        const EMPTY: &str = r#"{"BEAAPI":{"Results":{"Data":[]}}}"#;
+        let mock = MockSource::start().await;
+        mock.mount(&nipa_route("T10105", "Q"), Reply::json_str(EMPTY))
+            .await;
+        mock.mount(&regional_data(), Reply::json_str(EMPTY)).await;
+        mock.mount(
+            &regional_params("LineCode"),
+            Reply::json_str(REGIONAL_LINES),
+        )
+        .await;
+        for ids in [
+            vec!["bea_nipa/T10105.1.Q", "bea_nipa/T10105.2.Q"],
+            vec!["bea_regional/SAGDP2.1.06000", "bea_regional/SAGDP2.1.01000"],
+        ] {
+            let ids: Vec<String> = ids.into_iter().map(String::from).collect();
+            let e = adapter(&mock)
+                .fetch_batch(&test_ctx(), &ids, None)
+                .await
+                .unwrap_err();
+            assert_eq!(e.kind(), "transient", "{e}");
+        }
     }
 
     #[tokio::test]

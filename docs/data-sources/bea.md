@@ -25,8 +25,10 @@ any request.
   selection rules. Three consecutive absences mark a retained series missing. A sudden loss
   above the disappearance threshold is held for operator review. A table that BEA still lists
   but the rules no longer select keeps its series' state. A fetch response that omits a
-  requested line or area is not catalog removal evidence; six such responses in a row stop
-  routine fetches of that series, which is then only probed occasionally. Histories remain public and
+  requested line or area is not catalog removal evidence. For a series the current catalog
+  does not list, six such responses in a row (ten refresh intervals apart) stop routine
+  fetches, and it is then only probed occasionally. A table returned with no rows is a
+  transient failure. Histories remain public and
   badged; candidate successors need human confirmation and values are never merged. See the
   [catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the

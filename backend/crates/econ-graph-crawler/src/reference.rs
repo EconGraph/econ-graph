@@ -36,9 +36,6 @@ pub const DATASETS_DIR: &str = "datasets";
 /// File name of the BLS series list in the data directory.
 pub const BLS_SERIES_FILE: &str = "bls_series.csv";
 
-/// File name of the curated FRED series list in the data directory.
-pub const FRED_SERIES_FILE: &str = "fred_series.csv";
-
 /// A BLS series the crawler discovers and fetches. Only the id is curated here: its title, units
 /// and frequency come from BLS (see [`crate::sources::bls`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,65 +227,6 @@ fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
     Ok(series)
 }
 
-/// The legacy curated FRED ids, retained as a reference for existing integrations.
-/// Discovery and worker startup use `catalog_selection/fred.toml` instead. This loader
-/// does not control which upstream catalogs are selected.
-///
-/// A missing or malformed legacy file is a `Permanent` error with its path.
-pub fn fred_series() -> Result<&'static [String], CrawlError> {
-    static SERIES: OnceLock<Result<Vec<String>, String>> = OnceLock::new();
-    SERIES
-        .get_or_init(|| load_fred_series(&data_dir().join(FRED_SERIES_FILE)))
-        .as_deref()
-        .map_err(|e| CrawlError::Permanent(e.clone()))
-}
-
-/// Reads, parses and checks a FRED series list.
-fn load_fred_series(path: &Path) -> Result<Vec<String>, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
-    parse_fred_series(&text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Parses `series_id` rows after a header line; blank lines and `#` comments are skipped.
-fn parse_fred_series(text: &str) -> Result<Vec<String>, String> {
-    let mut lines = text
-        .lines()
-        .enumerate()
-        .map(|(i, l)| (i + 1, l.trim()))
-        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
-    match lines.next() {
-        Some((_, "series_id")) => {}
-        Some((n, other)) => {
-            return Err(format!(
-                "line {n}: expected header series_id, got {other:?}"
-            ))
-        }
-        None => return Err("no header line".into()),
-    }
-    let mut ids = Vec::new();
-    let mut seen = HashSet::new();
-    for (n, id) in lines {
-        if id.is_empty()
-            || !id
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-        {
-            return Err(format!(
-                "line {n}: series id {id:?} is not uppercase alphanumeric"
-            ));
-        }
-        if !seen.insert(id.to_string()) {
-            return Err(format!("line {n}: duplicate series id {id:?}"));
-        }
-        ids.push(id.to_string());
-    }
-    if ids.is_empty() {
-        return Err("no series ids".into());
-    }
-    Ok(ids)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,63 +376,6 @@ mod tests {
         let e = load_datasets(Path::new("/nonexistent/fred.toml")).unwrap_err();
         assert!(
             e.contains("/nonexistent/fred.toml") && e.contains(DATA_DIR_ENV),
-            "{e}"
-        );
-    }
-
-    /// The shipped file parses, has no duplicates, and is sized like a curated headline list
-    /// (a few hundred series), not an unbounded catalog.
-    #[test]
-    fn shipped_fred_series_file_is_valid() {
-        let ids = load_fred_series(
-            &Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("data")
-                .join(FRED_SERIES_FILE),
-        )
-        .unwrap();
-        assert!(
-            ids.len() >= 100 && ids.len() <= 2000,
-            "expected a curated list of a few hundred to ~2000 ids, got {}",
-            ids.len()
-        );
-        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR", "USREC"] {
-            assert!(
-                ids.iter().any(|s| s == id),
-                "{id} missing from {}",
-                FRED_SERIES_FILE
-            );
-        }
-    }
-
-    /// Comments and blank lines are skipped.
-    #[test]
-    fn parses_fred_series_rows_after_header() {
-        let ids = parse_fred_series("# c\n\nseries_id\nGDP\nCPIAUCSL\n").unwrap();
-        assert_eq!(ids, ["GDP", "CPIAUCSL"]);
-    }
-
-    /// Malformed files are rejected with the offending line.
-    #[test]
-    fn rejects_malformed_fred_series_files() {
-        for (text, needle) in [
-            ("", "no header"),
-            ("id\n", "expected header"),
-            ("series_id\n", "no series ids"),
-            ("series_id\ngdp\n", "not uppercase alphanumeric"),
-            ("series_id\nGDP-1\n", "not uppercase alphanumeric"),
-            ("series_id\nGDP\nGDP\n", "duplicate"),
-        ] {
-            let e = parse_fred_series(text).unwrap_err();
-            assert!(e.contains(needle), "{text:?}: {e}");
-        }
-    }
-
-    /// A missing file names its path and the environment variable.
-    #[test]
-    fn missing_fred_series_file_names_path_and_env() {
-        let e = load_fred_series(Path::new("/nonexistent/fred_series.csv")).unwrap_err();
-        assert!(
-            e.contains("/nonexistent/fred_series.csv") && e.contains(DATA_DIR_ENV),
             "{e}"
         );
     }
