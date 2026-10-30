@@ -2534,6 +2534,12 @@ mod tests {
             1,
         )
         .await;
+        // USREC is an explicit override in catalog_selection/fred.toml, outside the GDP release.
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
         let found = FredAdapter::new(mock.base_url())
