@@ -22,7 +22,8 @@
 //! one numeric; the keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. A
 //! `predicateType` outside the known ones fails discovery, so that a renamed numeric type can't
 //! silently drop measures and retire their series. The measures are crossed with the geography
-//! levels that give single series (annual, units "Count"):
+//! levels that give single series (annual; units "Count" for `int` measures and "Percent" for
+//! the `float` rates, see [`NumericType::units`]):
 //! - `us`: one national series per variable;
 //! - `state`: one series per variable for each state and DC, from the Census Bureau's state
 //!   reference file ([`STATES_URL`], see [States](#states)).
@@ -400,7 +401,8 @@ impl SourceAdapter for CensusAdapter {
                         "Business Dynamics Statistics: {} for {area}",
                         var.label
                     )),
-                    units: Some("Count".into()),
+                    // `valid` holds only measures, which are numeric.
+                    units: var.numeric.map(|t| t.units().to_string()),
                     frequency: Some("Annual".into()),
                     data_url: None,
                     dataset,
@@ -657,15 +659,32 @@ fn parse_bds_rows(
 struct BdsVariable {
     name: String,
     label: String,
-    /// Whether the `predicateType` is numeric (`int` or `float`); see [`NUMERIC_TYPES`].
-    numeric: bool,
+    /// The numeric `predicateType`; `None` for any other type, or none.
+    numeric: Option<NumericType>,
     /// Whether `attributes` names a `*_LABEL` variable, as every classification code's does
     /// (`EAGE` has `EAGE_LABEL`); measures name a `*_F` flag instead.
     has_code_label: bool,
 }
 
 /// The `predicateType`s of BDS measures.
-const NUMERIC_TYPES: &[&str] = &["int", "float"];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NumericType {
+    /// `int`: counts (firms, establishments, employees, jobs).
+    Int,
+    /// `float`: every BDS `float` measure is a rate in percent, such as `ESTABS_ENTRY_RATE`
+    /// (10.608 for 2023).
+    Float,
+}
+
+impl NumericType {
+    /// The units a series of this type is stored with.
+    fn units(self) -> &'static str {
+        match self {
+            NumericType::Int => "Count",
+            NumericType::Float => "Percent",
+        }
+    }
+}
 
 /// The other `predicateType`s `variables.json` uses: codes, labels and `YEAR` (`string`) and the
 /// API's predicates (`for`, `in`, `time`, `ucgid`). Any type in neither list fails the parse, so
@@ -704,9 +723,10 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                 .to_string();
             // Geography variables such as `CBSA` have no `predicateType`.
             let numeric = match obj.get("predicateType") {
-                None => false,
-                Some(Value::String(t)) if NUMERIC_TYPES.contains(&t.as_str()) => true,
-                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => false,
+                None => None,
+                Some(Value::String(t)) if t == "int" => Some(NumericType::Int),
+                Some(Value::String(t)) if t == "float" => Some(NumericType::Float),
+                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => None,
                 Some(t) => {
                     return Err(CrawlError::Parse(format!(
                         "Census variables.json: {name:?} has an unknown 'predicateType' {t}"
@@ -784,7 +804,7 @@ fn is_economic_variable(var: &BdsVariable) -> bool {
         "employment",
         "establishment",
     ];
-    if !var.numeric || var.has_code_label {
+    if var.numeric.is_none() || var.has_code_label {
         return false;
     }
     let name = var.name.to_lowercase();
@@ -812,6 +832,8 @@ mod tests {
         "JOB_DESTRUCTION_CONTINUERS",
     ];
     const ESTAB_US: &str = include_str!("../../tests/fixtures/census/bds_estab_us.json");
+    const ESTABS_ENTRY_RATE_US: &str =
+        include_str!("../../tests/fixtures/census/bds_estabs_entry_rate_us.json");
     const ESTAB_STATE_06: &str =
         include_str!("../../tests/fixtures/census/bds_estab_state_06.json");
     const STATES: &str = include_str!("../../tests/fixtures/census/state.txt");
@@ -899,7 +921,7 @@ mod tests {
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "ESTAB");
         assert_eq!(vars[0].label, "Number of establishments");
-        assert!(vars[0].numeric);
+        assert_eq!(vars[0].numeric, Some(NumericType::Int));
         assert!(!vars[0].has_code_label);
     }
 
@@ -908,7 +930,7 @@ mod tests {
     fn parse_variables_accepts_missing_predicate_type() {
         let body = serde_json::json!({"variables": {"CBSA": {"label": "Metro area"}}});
         let vars = parse_variables(&body).unwrap();
-        assert!(!vars[0].numeric);
+        assert_eq!(vars[0].numeric, None);
     }
 
     /// An unknown or non-string `predicateType`, or non-string `attributes`, fails discovery
@@ -957,9 +979,9 @@ mod tests {
             numeric,
             has_code_label,
         };
-        assert!(is_economic_variable(&var(true, false)));
-        assert!(!is_economic_variable(&var(true, true)));
-        assert!(!is_economic_variable(&var(false, false)));
+        assert!(is_economic_variable(&var(Some(NumericType::Int), false)));
+        assert!(!is_economic_variable(&var(Some(NumericType::Int), true)));
+        assert!(!is_economic_variable(&var(None, false)));
     }
 
     /// Same reasoning as `parse_variables_rejects_non_object_entry`, for `geography.json`.
@@ -1057,6 +1079,8 @@ mod tests {
         let estab_us = by_id("bds/national..ESTAB");
         assert_eq!(estab_us.title, "Number of establishments - United States");
         assert_eq!(estab_us.units.as_deref(), Some("Count"));
+        let entry_rate_ca = by_id("bds/state.06.ESTABS_ENTRY_RATE");
+        assert_eq!(entry_rate_ca.units.as_deref(), Some("Percent"));
         assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
         let estab_ca = by_id("bds/state.06.ESTAB");
         assert_eq!(estab_ca.title, "Number of establishments - California");
@@ -1156,6 +1180,56 @@ mod tests {
             .points
             .iter()
             .all(|p| p.revision_date == p.date && p.is_original_release));
+        mock.server().verify().await;
+    }
+
+    /// Counts are stored as "Count" and the `float` rates as "Percent", from `predicateType`:
+    /// the rates are percents (`bds_estabs_entry_rate_us.json`: 10.608 for 2023), not fractions.
+    #[test]
+    fn units_follow_the_predicate_type() {
+        let vars = parse_variables(&serde_json::from_str(VARIABLES).unwrap()).unwrap();
+        let units = |name: &str| {
+            vars.iter()
+                .find(|v| v.name == name)
+                .and_then(|v| v.numeric)
+                .map(NumericType::units)
+        };
+        assert_eq!(units("ESTAB"), Some("Count"));
+        assert_eq!(units("JOB_CREATION_CONTINUERS"), Some("Count"));
+        assert_eq!(units("ESTABS_ENTRY_RATE"), Some("Percent"));
+        assert_eq!(units("EAGE"), None);
+    }
+
+    /// A rate's values are percents, stored as published.
+    #[tokio::test]
+    async fn fetch_parses_a_rate_in_percent() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/timeseries/bds")
+                .query("get", "ESTABS_ENTRY_RATE,YEAR")
+                .query("for", "us:*"),
+            Reply::json_str(ESTABS_ENTRY_RATE_US),
+            1,
+        )
+        .await;
+        let s = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTABS_ENTRY_RATE", None)
+            .await
+            .unwrap();
+        let got: Vec<(NaiveDate, Option<String>)> = s
+            .points
+            .iter()
+            .map(|p| (p.date, p.value.as_ref().map(ToString::to_string)))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (d("2021-01-01"), Some("10.845".into())),
+                (d("2022-01-01"), Some("11.651".into())),
+                (d("2023-01-01"), Some("10.608".into())),
+            ]
+        );
         mock.server().verify().await;
     }
 

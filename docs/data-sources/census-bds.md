@@ -58,8 +58,13 @@ one returns `Permanent` when the required key is configured.
 
 Fetching requests `GET /data/timeseries/bds?get={VARIABLE},YEAR&for=us:*` (or
 `state:{FIPS}`), with `key=` on each API request. Each request retrieves all years
-for one variable and geography. The adapter keeps `YEAR` as January 1 and the value,
-and assigns "Count" as the units for every series. It does not request county,
+for one variable and geography. The adapter keeps `YEAR` as January 1 and the value.
+Units come from the variable's `predicateType`: `int` measures (firms, establishments,
+employees, jobs) are "Count", and `float` measures, which are all rates such as
+`ESTABS_ENTRY_RATE`, are "Percent". The rates are published as percents (10.608 for 2023),
+not fractions. Discovery sets the units, and a series' next fetch copies them to the
+stored series, so a changed unit reaches existing series without a migration. It does
+not request county,
 metro or CBSA series, or breakdowns by industry, firm age or firm size.
 
 ## Samples and fixtures
