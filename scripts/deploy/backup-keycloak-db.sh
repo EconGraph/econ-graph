@@ -28,8 +28,11 @@
 #   3. Restore the dump into a scratch database in the same Postgres
 #      (keycloak_verify_<time>), compare its row counts with the live ones,
 #      then drop the scratch database.
-#   4. Only then mark the directory VERIFIED and print its path. A failed run
-#      keeps what it wrote as <UTC time>.failed.
+#   4. Only then encrypt the verified payload to backup.tar.age using the
+#      public BACKUP_AGE_RECIPIENT, publish it with SHA256SUMS and VERIFIED,
+#      and print its path. Plaintext stays in private tmpfs until exit.
+#      Encryption prerequisites are checked before Keycloak is stopped.
+#      Existing backups are never removed; failed ciphertext stays .partial.
 #
 # Each run adds a new directory; nothing is ever deleted.
 #
@@ -63,6 +66,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+backup_encryption_preflight
 kdb_use_context "$CONTEXT"
 kdb_check_pod
 replicas="$(kdb_keycloak_replicas)"
@@ -75,7 +79,7 @@ if [ "$DRY_RUN" = true ]; then
     echo "${KDB_SCRIPT}: dry run on context ${CONTEXT}, nothing changed:"
     echo "  would scale deployment/${KDB_DEPLOYMENT} in ${KDB_NAMESPACE} from ${replicas} to 0 and leave it there"
     echo "  Keycloak image now: ${image}; cluster (kube-system UID): ${cluster_uid}"
-    echo "  would dump database ${KDB_DATABASE} from ${KDB_POD} to ${dest}/${KDB_DATABASE}.dump"
+    echo "  would dump database ${KDB_DATABASE} from ${KDB_POD} into private tmpfs, then encrypt ${dest}/backup.tar.age"
     echo "  would verify it by restoring into keycloak_verify_${stamp,,} there and comparing row counts"
     exit 0
 fi
@@ -89,9 +93,9 @@ while [ -e "$dest" ] || [ -e "${dest}.partial" ] || [ -e "${dest}.failed" ]; do
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     dest="${KDB_BACKUP_ROOT}/${stamp}"
 done
-work="${dest}.partial"
-mkdir "$work"
 
+# The trap is set before the staging exists, so no failure can leave it behind.
+staging=""
 scratch_db=""
 on_exit() {
     local status=$?
@@ -99,13 +103,22 @@ on_exit() {
         kdb_drop_scratch "$scratch_db" ||
             echo "${KDB_SCRIPT}: warning: could not drop the scratch database ${scratch_db}" >&2
     fi
-    if [ "$status" -ne 0 ] && [ -d "$work" ]; then
-        mv "$work" "${dest}.failed"
-        echo "${KDB_SCRIPT}: failed; what was written is in ${dest}.failed" >&2
+    # Only disposable plaintext staging is removed, never any saved backup.
+    if [ -n "$staging" ]; then
+        rm -rf -- "$staging"
+    fi
+    if [ "$status" -ne 0 ]; then
+        echo "${KDB_SCRIPT}: failed; no verified backup was saved in ${dest}" >&2
     fi
     exit "$status"
 }
 trap on_exit EXIT
+# One plaintext-staging writer at a time (with the host dumps), before
+# Keycloak is stopped.
+backup_staging_lock
+staging="$(backup_plaintext_dir)"
+work="$staging/payload"
+mkdir "$work"
 
 kdb_stop_keycloak
 
@@ -130,7 +143,7 @@ scratch_db=""
     echo "tables=$(wc -l <"${work}/counts.tsv")"
     echo "verified=restored into a scratch database with equal row counts"
 } >"${work}/VERIFIED"
-mv "$work" "$dest"
-echo "${KDB_SCRIPT}: verified dump in ${dest}"
+backup_seal_dir "$work" "$dest"
+echo "${KDB_SCRIPT}: verified encrypted bundle in ${dest}"
 echo "${KDB_SCRIPT}: copy that directory to a second location, off this disk"
 echo "${KDB_SCRIPT}: deployment/${KDB_DEPLOYMENT} is at 0 replicas; scripts/deploy/deploy.sh starts it again"

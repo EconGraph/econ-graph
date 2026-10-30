@@ -24,6 +24,7 @@ chmod +x "${tmp}/bin/restic"
 
 export ECONGRAPH_CONFIG_DIR="${tmp}/config"
 export BACKUP_ROOT="${tmp}/dumps"
+export KEYCLOAK_BACKUP_ROOT="${tmp}/upgrade-dumps"
 export STUB_LOG="${tmp}/restic.log"
 export PATH="${tmp}/bin:${PATH}"
 
@@ -64,6 +65,31 @@ if [[ "$(cat "${STUB_LOG}")" != "--verbose ls latest" ]]; then
     echo "FAIL offsite-restic.sh restic --verbose ls latest: restic got '$(cat "${STUB_LOG}")'"
     failures=$((failures + 1))
 fi
+
+# Both encrypted host and Keycloak-upgrade bundles are selected, including
+# when their roots differ. Incomplete upgrade payloads are left out.
+mkdir -p "$BACKUP_ROOT/nightly" "$KEYCLOAK_BACKUP_ROOT/upgrade" "$KEYCLOAK_BACKUP_ROOT/incomplete"
+touch "$BACKUP_ROOT/nightly/VERIFIED" "$KEYCLOAK_BACKUP_ROOT/upgrade/VERIFIED"
+expect 0 "" backup
+for expected in "$BACKUP_ROOT/nightly" "$KEYCLOAK_BACKUP_ROOT/upgrade"; do
+    if ! grep -qF "$expected" "$STUB_LOG"; then
+        echo "FAIL offsite backup omitted $expected"
+        failures=$((failures + 1))
+    fi
+done
+if grep -qF "$KEYCLOAK_BACKUP_ROOT/incomplete" "$STUB_LOG"; then
+    echo "FAIL offsite backup included an incomplete upgrade payload"
+    failures=$((failures + 1))
+fi
+
+# An explicitly configured missing root must not silently omit upgrade backups.
+KEYCLOAK_BACKUP_ROOT="$tmp/missing-upgrade-root" expect 1 "configured Keycloak backup root is missing" backup
+# The absent default root remains optional on a host without upgrade backups.
+env -u KEYCLOAK_BACKUP_ROOT ECONGRAPH_BACKUP_ROOT="$tmp/unused-default" "$script" backup >/dev/null
+# Failed enumeration of the nightly root must not produce a partial success.
+mv "$BACKUP_ROOT" "$BACKUP_ROOT.saved"
+expect 1 "could not enumerate all configured backup roots" backup
+mv "$BACKUP_ROOT.saved" "$BACKUP_ROOT"
 
 if [[ "${failures}" -ne 0 ]]; then
     echo "${failures} offsite-restic test(s) failed"

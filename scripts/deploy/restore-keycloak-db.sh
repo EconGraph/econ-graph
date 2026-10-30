@@ -9,6 +9,10 @@
 #   scripts/deploy/restore-keycloak-db.sh DUMP_DIR [--dry-run] [--yes]
 #       [--allow-other-cluster] [--context CONTEXT]
 #
+# Encrypted bundles prompt for the maintainer's identity path at a terminal
+# before contacting the cluster; their plaintext is disposable tmpfs only.
+# A legacy plaintext verified directory remains supported.
+#
 #   DUMP_DIR               a directory under ~/econgraph-backups/keycloak/ (or
 #                          ${ECONGRAPH_BACKUP_ROOT}/keycloak, or
 #                          KEYCLOAK_BACKUP_ROOT) with a VERIFIED marker
@@ -68,6 +72,7 @@ LIST=false
 ALLOW_OTHER_CLUSTER=false
 CONTEXT="$KDB_DEFAULT_CONTEXT"
 DUMP_DIR=""
+original_args=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
@@ -91,6 +96,13 @@ if [ "$LIST" = true ]; then
 fi
 
 [ -n "$DUMP_DIR" ] || { echo "${KDB_SCRIPT}: error: give the dump directory (--list shows them)" >&2; exit 2; }
+if [[ -f "$DUMP_DIR/backup.tar.age" ]]; then
+    opened_args=()
+    for arg in "${original_args[@]}"; do
+        if [[ "$arg" == "$DUMP_DIR" ]]; then opened_args+=("@BACKUP@"); else opened_args+=("$arg"); fi
+    done
+    exec "$PROJECT_ROOT/scripts/backup/open-backup.sh" "$DUMP_DIR" -- "$0" "${opened_args[@]}"
+fi
 dump="${DUMP_DIR}/${KDB_DATABASE}.dump"
 counts="${DUMP_DIR}/counts.tsv"
 [ -f "${DUMP_DIR}/VERIFIED" ] || die "${DUMP_DIR} has no VERIFIED marker; restore only a verified dump"
@@ -99,6 +111,11 @@ counts="${DUMP_DIR}/counts.tsv"
 verified_value() { sed -n "s/^$1=//p" "${DUMP_DIR}/VERIFIED"; }
 taken_with="$(verified_value keycloak_image)"
 dump_uid="$(verified_value cluster_uid)"
+
+# The restore takes an encrypted backup of the current database (with
+# backup-keycloak-db.sh) after stopping Keycloak; check that it can be made
+# before the cluster is touched.
+backup_encryption_preflight
 
 kdb_use_context "$CONTEXT"
 kdb_check_pod
@@ -151,6 +168,11 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# The safety backup stages plaintext in the shared tmpfs: take that lock
+# while Keycloak still runs, so waiting for (or timing out on) another writer
+# never leaves it stopped. The backup inherits the lock and reuses it.
+backup_staging_lock
+export BACKUP_STAGING_LOCK_FD
 kdb_stop_keycloak
 "$PROJECT_ROOT/scripts/deploy/backup-keycloak-db.sh" --context "$CONTEXT"
 

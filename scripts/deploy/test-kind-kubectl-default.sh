@@ -29,12 +29,19 @@ set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Private tmpfs staging, so the Keycloak backup gets past its encryption preflight.
+RAM="$(mktemp -d /dev/shm/econgraph-kind-kubectl-test.XXXXXXXX)"
+trap 'rm -rf "$WORK" "$RAM"' EXIT
 HOME_DIR="$WORK/home"
 CACHE="$HOME_DIR/.cache/econgraph"
 LOGS="$WORK/logs"
 ROOTFUL="unix:///var/run/docker.sock"
 mkdir -p "$WORK/bin" "$WORK/tmp" "$WORK/source" "$LOGS" "$CACHE/bin" "$HOME_DIR/.local/share/econgraph/bin" || exit 1
+
+# age: the Keycloak backup stops at its stubbed pg_dump before it encrypts
+# anything; encryption itself is tested in scripts/backup/test-encryption.sh.
+printf '#!/bin/sh\ncat >/dev/null\n' >"$WORK/bin/age"
+printf '#!/bin/sh\nexit 0\n' >"$WORK/bin/age-keygen"
 
 # Plain kubectl and kind: any call is a failure of the test.
 for tool in kubectl kind; do
@@ -149,6 +156,8 @@ run() {
         -u KIND_FALLBACK_WARNED -u DRY_RUN \
         HOME="$HOME_DIR" TMPDIR="$WORK/tmp" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
         ECONGRAPH_BACKUP_ROOT="$WORK/backups" KEYCLOAK_BACKUP_ROOT="$WORK/backups/keycloak" \
+        ECONGRAPH_CONFIG_DIR="$WORK/no-config" BACKUP_PLAINTEXT_ROOT="$RAM" \
+        BACKUP_AGE_RECIPIENT="age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq" \
         TEST_LOGS="$LOGS" TEST_SOURCE="$WORK/source" \
         "$@" </dev/null 2>&1)"
     rc=$?
@@ -225,7 +234,7 @@ grep -qF " config get-contexts -o name" "$LOGS/kind-kubectl.log" ||
 
 # A real run copies the node's kubectl into the cache, then stops at the dump.
 run env FAKE_FAIL=pg_dump "$DEPLOY/backup-keycloak-db.sh"
-expect "backup-keycloak-db.sh" nonzero "failed; what was written is in" \
+expect "backup-keycloak-db.sh" nonzero "failed; no verified backup was saved in" \
     "--context kind-econ-graph -n econ-graph exec -i keycloak-postgres-0 -c postgres -- pg_dump"
 expect_rootful "backup-keycloak-db.sh"
 grep -qF "cp -q -L econ-graph-control-plane:/usr/bin/kubectl $CACHE/bin/kubectl.new" "$LOGS/docker.log" ||

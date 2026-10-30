@@ -127,7 +127,7 @@ automatically.
 | daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
 | at least weekly, interactively | `open-backup.sh` followed by `restore-drill.sh`: decrypt and restore a bundle into a throwaway Postgres 18 | operator | manual; no private identity is installed for a timer |
 | before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
-| before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: Keycloak scaled to 0, `pg_dump -Fc` of `keycloak` into `~/econgraph-backups/keycloak/<UTC stamp>/`, verified by a restore into a scratch database with equal row counts. `scripts/deploy/restore-keycloak-db.sh` restores it as a fresh database swapped in by rename, the only way to downgrade Keycloak; `restore-dump.sh`'s `--clean` would leave the newer version's tables behind. These dumps are on the data disk, not the backup pool, and `offsite-restic.sh` doesn't ship them: copy each one off the disk by hand. See the [v4.0.0 QA plan](../release/v4.0.0-qa.md) | operator | by hand |
+| before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: Keycloak scaled to 0, `pg_dump -Fc` of `keycloak` into `~/econgraph-backups/keycloak/<UTC stamp>/`, verified by a restore into a scratch database with equal row counts. `scripts/deploy/restore-keycloak-db.sh` restores it as a fresh database swapped in by rename, the only way to downgrade Keycloak; `restore-dump.sh`'s `--clean` would leave the newer version's tables behind. These encrypted bundles are on the data disk, not the backup pool; `offsite-restic.sh` includes their verified directories alongside nightly bundles once off-site storage is configured. See the [v4.0.0 QA plan](../release/v4.0.0-qa.md) | operator | by hand |
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
@@ -340,9 +340,13 @@ copies using `backup_seal_dir` from `scripts/backup/encryption.sh` after
 what to do with the originals. Never delete originals automatically.
 
 This encrypts **host logical backup bundles**. Live database files, btrfs
-snapshots, the independent in-cluster backup CronJob/PVC, and the special
-Keycloak-upgrade backup format remain separate copies with their existing
-protection. In particular, these changes do not claim those copies are
+snapshots, and the independent in-cluster backup CronJob/PVC remain separate copies
+with their existing protection. The Keycloak-upgrade writer also encrypts its
+special restore-tested payload with the same public recipient and the same
+throwaway-key decrypt check and shares the plaintext-staging lock with the host
+writers. `restore-keycloak-db.sh` takes that lock before it stops Keycloak (its
+safety backup reuses it) and checks that its safety
+backup can be encrypted before it contacts the cluster or stops Keycloak. In particular, these changes do not claim those copies are
 public-key encrypted; the in-cluster backup work must be integrated separately.
 
 The encryption suite (`scripts/backup/test-encryption.sh`) uses a disposable
@@ -449,6 +453,12 @@ Backblaze B2, S3-compatible storage, a restic REST server):
 3. `scripts/backup/offsite-restic.sh init`, then `... backup`, then
    `... check`.
 4. Re-run `scripts/backup/install-user-units.sh` to enable the daily timer.
+
+Verified Keycloak-upgrade bundle directories under `KEYCLOAK_BACKUP_ROOT`
+(default `${ECONGRAPH_BACKUP_ROOT:-$HOME/econgraph-backups}/keycloak`) are included
+alongside verified nightly directories, even when the nightly root is on a
+different disk. Recovery prompts for an identity path before contacting the
+cluster, and legacy plaintext verified directories remain supported.
 
 Only verified dump directories are uploaded, and nothing is ever forgotten
 or pruned from the repository: `offsite-restic.sh` has no `forget` or

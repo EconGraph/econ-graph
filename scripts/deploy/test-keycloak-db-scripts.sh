@@ -8,8 +8,13 @@
 #   - a backup scales Keycloak to 0, dumps, restores into a scratch database in one
 #     transaction stopping at the first error, compares row counts, drops the scratch
 #     database, and leaves a VERIFIED directory (0700, files 0600) that names the Keycloak
-#     image and the cluster's kube-system UID; a count mismatch fails, keeps <time>.failed
-#     without VERIFIED, and still drops the scratch database;
+#     image and the cluster's kube-system UID, encrypted and decrypt-checked with a
+#     throwaway key; a count mismatch fails without VERIFIED or plaintext and still drops
+#     the scratch database; ciphertext that does not decrypt is never published; a failure
+#     right after the tmpfs staging is made leaves none behind;
+#   - a backup waits for (then refuses) another plaintext-staging writer before stopping
+#     Keycloak; a restore without a public recipient or with disk staging stops before any kubectl
+#     call; an encrypted bundle restores in full at a (pseudo) terminal;
 #   - an unknown context or a pod that isn't ready stops before anything is changed;
 #   - a restore needs a VERIFIED dump from the same cluster (or --allow-other-cluster),
 #     refuses without a terminal unless --yes, and with --yes takes a verified dump first,
@@ -39,12 +44,35 @@ fail() {
 }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+ram="$(mktemp -d /dev/shm/econgraph-keycloak-test.XXXXXXXX)"
+trap 'rm -rf "$tmp" "$ram"' EXIT
+age-keygen -o "$tmp/identity" 2>/dev/null
+BACKUP_AGE_RECIPIENT="$(age-keygen -y "$tmp/identity")"
+export BACKUP_AGE_RECIPIENT
+export BACKUP_PLAINTEXT_ROOT="$ram"
+# Nothing here should wait on the staging lock: a wait fails fast.
+export BACKUP_LOCK_TIMEOUT=5
+# On-disk plaintext staging for the refusal cases: it must really not be tmpfs.
+disk_staging="$tmp/disk-staging"
+mkdir "$disk_staging"
+if [ "$(stat -f -c %T "$disk_staging")" = tmpfs ]; then
+  echo "run with TMPDIR on a disk filesystem, not tmpfs" >&2
+  exit 1
+fi
+# These are synthetic test identities and dumps, never operator credentials.
+open_test_bundle() {
+    local out
+    out="$(mktemp -d "$ram/opened.XXXXXXXX")"
+    age -d -i "$tmp/identity" "$1/backup.tar.age" |
+        python3 scripts/backup/unpack-backup.py "$out"
+    printf '%s\n' "$out"
+}
 stub="$tmp/kubectl"
 export STUB_LOG="$tmp/log"
 
 mkdir -p "$tmp/home" "$tmp/tmpdir" "$tmp/bin"
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" TMPDIR="$tmp/tmpdir"
+export ECONGRAPH_CONFIG_DIR="$tmp/no-config"
 export ECONGRAPH_BACKUP_ROOT="$tmp/econgraph-backups" KEYCLOAK_BACKUP_ROOT="$tmp/backups"
 export ECONGRAPH_DOCKER_HOST="unix://$tmp/no-docker.sock"
 unset KUBECONFIG KUBECTL KIND_CLUSTER NAMESPACE ECONGRAPH_SCRATCH_STORAGE ECONGRAPH_KUBE_DIR
@@ -155,6 +183,11 @@ run "$backup" --dry-run
 [ -z "$(writes)" ] || fail "backup --dry-run changed something: $(writes)"
 [ ! -e "$tmp/backups" ] || fail "backup --dry-run wrote $tmp/backups"
 
+# Encryption setup fails before any context access or downtime.
+run env -u BACKUP_AGE_RECIPIENT "$backup"
+[ "$status" != 0 ] || fail "backup without a public recipient succeeded"
+[ ! -s "$STUB_LOG" ] || fail "backup without encryption setup contacted the cluster"
+
 # Unknown context, pod not ready.
 run "$backup" --context kind-missing
 [ "$status" != 0 ] || fail "backup on an unknown context succeeded"
@@ -171,6 +204,11 @@ if [ -z "$dir" ]; then
   fail "backup left no directory: $(ls -la "$tmp/backups" 2>&1)"
 else
   [ -f "$dir/VERIFIED" ] || fail "backup has no VERIFIED marker"
+  [ -f "$dir/backup.tar.age" ] || fail "backup is not encrypted"
+  # Encrypted to the recipient and to the throwaway key it was decrypt-checked with.
+  [ "$(grep -ac '^-> X25519 ' "$dir/backup.tar.age")" = 2 ] || fail "backup was not decrypt-checked with a throwaway key"
+  [ ! -f "$dir/keycloak.dump" ] || fail "backup persisted plaintext"
+  dir="$(open_test_bundle "$dir")"
   grep -qx 'keycloak_image=quay.io/keycloak/keycloak:26.7.4' "$dir/VERIFIED" || fail "VERIFIED does not name the image"
   grep -qx 'cluster_uid=uid-this-cluster' "$dir/VERIFIED" || fail "VERIFIED does not name the cluster"
   [ "$(stat -c %a "$dir")" = 700 ] || fail "dump directory mode is $(stat -c %a "$dir")"
@@ -193,14 +231,41 @@ rm -rf "$tmp/backups"
 STUB_MISMATCH=1 run "$backup"
 [ "$status" != 0 ] || fail "backup with mismatched row counts succeeded"
 [ -z "$(find "$tmp/backups" -name VERIFIED)" ] || fail "a mismatched backup was marked VERIFIED"
-[ -n "$(find "$tmp/backups" -maxdepth 1 -name '*.failed')" ] || fail "a mismatched backup left no .failed directory"
+[ -z "$(find "$tmp/backups" -name '*.dump')" ] || fail "a mismatched backup persisted plaintext"
 grep -q -- '-- dropdb -U keycloak --if-exists keycloak_verify_' "$STUB_LOG" || fail "a failed backup left the scratch database"
 [ -z "$(touched_keycloak)" ] || fail "a failed backup touched keycloak: $(touched_keycloak)"
+
+# Ciphertext that age wrote "successfully" but that does not decrypt is never
+# published as VERIFIED.
+rm -rf "$tmp/backups"
+mkdir -p "$tmp/corrupt-age"
+cat >"$tmp/corrupt-age/age" <<STUB
+#!/usr/bin/env bash
+set -euo pipefail
+case " \$* " in
+  *' -o '*)
+    $(command -v age) "\$@"
+    [ "\${*: -2:1}" = -o ]
+    printf '\377' | dd of="\${*: -1}" bs=1 seek=300 conv=notrunc status=none ;;
+  *) exec $(command -v age) "\$@" ;;
+esac
+STUB
+chmod +x "$tmp/corrupt-age/age"
+run env PATH="$tmp/corrupt-age:$PATH" "$backup"
+[ "$status" != 0 ] || fail "backup with ciphertext that does not decrypt succeeded"
+grep -q 'does not decrypt' "$tmp/out" || fail "backup with bad ciphertext did not say why: $(cat "$tmp/out")"
+[ -z "$(find "$tmp/backups" -name VERIFIED)" ] || fail "ciphertext that does not decrypt was marked VERIFIED"
+[ -z "$(find "$tmp/backups" -mindepth 1 -maxdepth 1 -name '*Z')" ] || fail "ciphertext that does not decrypt was published"
 
 # Restore.
 rm -rf "$tmp/backups"
 run "$backup"
 dir="$(find "$tmp/backups" -mindepth 1 -maxdepth 1 -type d -name '*Z' | head -n 1)"
+encrypted_dir="$dir"
+run "$restore" "$encrypted_dir" --yes
+[ "$status" != 0 ] || fail "encrypted restore without operator terminal succeeded"
+[ ! -s "$STUB_LOG" ] || fail "encrypted unattended restore contacted cluster"
+dir="$(open_test_bundle "$dir")"
 mkdir -p "$tmp/unverified"
 cp "$dir/keycloak.dump" "$dir/counts.tsv" "$tmp/unverified/"
 run "$restore" "$tmp/unverified" --yes
@@ -242,8 +307,9 @@ STUB_RESTORE_MISMATCH=1 run "$restore" "$dir" --yes
 grep -q -- '-- dropdb -U keycloak --if-exists keycloak_restore_' "$STUB_LOG" ||
   fail "restore with mismatched row counts left its restore database"
 
-# A good restore.
-run "$restore" "$dir" --yes
+# A good restore. Its safety backup must reuse the restore's staging lock rather
+# wait for it: a short timeout makes a wait fail fast.
+run env BACKUP_LOCK_TIMEOUT=5 "$restore" "$dir" --yes
 [ "$status" = 0 ] || fail "restore --yes exits $status: $(cat "$tmp/out")"
 # The stub always reports 1 replica, so the backup inside the restore scales again: uniq.
 order="$(grep -oE 'scale deployment|-- pg_dump|-- createdb -U keycloak -O keycloak keycloak_restore_[^ ]*|-d keycloak_restore_[^ ]* --no-owner --exit-on-error --single-transaction$|RENAME TO keycloak_pre_restore_' "$STUB_LOG" |
@@ -257,6 +323,114 @@ if grep -q 'DROP DATABASE\|^REFUSED' "$STUB_LOG"; then fail "restore dropped a d
 grep -q 'keycloak_pre_restore_' "$tmp/out" || fail "restore does not print the kept previous database"
 [ -z "$(unpinned)" ] || fail "kubectl calls without the context: $(unpinned)"
 [ "$(find "$tmp/backups" -name VERIFIED | wc -l)" -ge 2 ] || fail "restore did not take a verified dump first"
+
+# A restore checks that its safety backup can be encrypted before it reaches the
+# cluster, so it never stops Keycloak and then dies.
+run env -u BACKUP_AGE_RECIPIENT "$restore" "$dir" --yes
+[ "$status" != 0 ] || fail "restore without a public recipient succeeded"
+grep -q 'set BACKUP_AGE_RECIPIENT' "$tmp/out" || fail "restore without a recipient did not say why: $(cat "$tmp/out")"
+[ ! -s "$STUB_LOG" ] || fail "restore without a recipient contacted the cluster: $(cat "$STUB_LOG")"
+run env BACKUP_PLAINTEXT_ROOT="$disk_staging" "$restore" "$dir" --yes
+[ "$status" != 0 ] || fail "restore with disk staging succeeded"
+grep -q 'must be tmpfs' "$tmp/out" || fail "restore with disk staging did not say why: $(cat "$tmp/out")"
+[ ! -s "$STUB_LOG" ] || fail "restore with disk staging contacted the cluster: $(cat "$STUB_LOG")"
+
+# Another writer is staging plaintext in the same tmpfs: the backup says whom it
+# waits for and, after BACKUP_LOCK_TIMEOUT, refuses before stopping Keycloak.
+staging_lock="$ram/.econgraph-backup-$(id -u).lock"
+printf 'pid=1 command=dump-databases.sh\n' >"$staging_lock"
+flock -o "$staging_lock" sleep 30 &
+holder=$!
+until ! flock -n "$staging_lock" true; do sleep 0.1; done
+run env BACKUP_LOCK_TIMEOUT=1 "$backup"
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+[ "$status" != 0 ] || fail "backup went ahead while another writer held the staging lock"
+grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$tmp/out" ||
+  fail "backup did not say whom it waits for: $(cat "$tmp/out")"
+if grep -q 'scale deployment/keycloak' "$STUB_LOG"; then fail "backup stopped Keycloak before it had the staging lock"; fi
+# A restore takes the same lock before it stops Keycloak (its safety backup
+# then reuses it), so a held lock never leaves Keycloak stopped.
+printf 'pid=1 command=dump-databases.sh\n' >"$staging_lock"
+flock -o "$staging_lock" sleep 30 &
+holder=$!
+until ! flock -n "$staging_lock" true; do sleep 0.1; done
+run env BACKUP_LOCK_TIMEOUT=1 "$restore" "$dir" --yes
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+[ "$status" != 0 ] || fail "restore went ahead while another writer held the staging lock"
+grep -q 'Waiting up to 1s for another backup .*command=dump-databases.sh' "$tmp/out" ||
+  fail "restore did not say whom it waits for: $(cat "$tmp/out")"
+if grep -q 'scale deployment/keycloak' "$STUB_LOG"; then fail "restore stopped Keycloak before it had the staging lock"; fi
+[ -z "$(touched_keycloak)" ] || fail "restore touched keycloak without the staging lock: $(touched_keycloak)"
+
+# The staging trap is in place before the staging exists: a failure right after
+# it is created (here: making its payload directory) leaves no plaintext behind.
+mkdir -p "$tmp/mkdir-fails"
+cat >"$tmp/mkdir-fails/mkdir" <<STUB
+#!/usr/bin/env bash
+case "\${*: -1}" in */payload) echo "stub mkdir: refusing \$*" >&2; exit 1 ;; esac
+exec $(command -v mkdir) "\$@"
+STUB
+chmod +x "$tmp/mkdir-fails/mkdir"
+run env PATH="$tmp/mkdir-fails:$PATH" "$backup"
+[ "$status" != 0 ] || fail "backup succeeded although its payload directory could not be made"
+grep -q 'stub mkdir: refusing' "$tmp/out" || fail "the payload mkdir was never reached: $(cat "$tmp/out")"
+if compgen -G "$ram/econgraph-backup.*" >/dev/null; then
+  fail "a failed backup left plaintext staging: $(ls "$ram")"
+fi
+
+# A full restore of an encrypted bundle at an operator terminal: open-backup.sh
+# asks for the identity, the restore runs on the opened copy (taking its own
+# encrypted safety backup first), and the opened plaintext is removed after.
+run_operator() { # run_operator SCRIPT ARGS..., on a pseudo terminal that gives the test identity
+  : >"$STUB_LOG"
+  status=0
+  KUBECTL="$stub" python3 - "$tmp/identity" "$tmp/out" "$@" <<'PYOPEN' || status=$?
+import errno, os, pty, select, sys, time
+identity, log, *command = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(command[0], command)
+output = bytearray()
+sent = False
+deadline = time.monotonic() + 60
+while time.monotonic() < deadline:
+    if select.select([fd], [], [], 1)[0]:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                break
+            raise
+        if not chunk:
+            break
+        output.extend(chunk)
+        if not sent and b'identity' in output:
+            os.write(fd, (identity + '\n').encode())
+            sent = True
+else:
+    os.kill(pid, 9)
+    raise AssertionError('operator restore timed out')
+os.close(fd)
+_, wait_status = os.waitpid(pid, 0)
+open(log, 'wb').write(output)
+sys.exit(os.waitstatus_to_exitcode(wait_status))
+PYOPEN
+}
+verified_before="$(find "$tmp/backups" -name VERIFIED | wc -l)"
+run_operator "$restore" "$encrypted_dir" --yes
+[ "$status" = 0 ] || fail "encrypted restore at a terminal exits $status: $(cat "$tmp/out")"
+grep -q "restored from $ram/econgraph-backup\." "$tmp/out" || fail "the encrypted restore did not run on the opened copy: $(cat "$tmp/out")"
+order="$(grep -oE 'scale deployment|-- pg_dump|-- createdb -U keycloak -O keycloak keycloak_restore_[^ ]*|-d keycloak_restore_[^ ]* --no-owner --exit-on-error --single-transaction$|RENAME TO keycloak_pre_restore_' "$STUB_LOG" |
+  sed 's/keycloak_restore_[^ ]*/R/' | uniq | tr '\n' ,)"
+[ "$order" = "scale deployment,-- pg_dump,-- createdb -U keycloak -O keycloak R,-d R --no-owner --exit-on-error --single-transaction,RENAME TO keycloak_pre_restore_," ] ||
+  fail "encrypted restore steps in the wrong order: $order"
+[ "$(find "$tmp/backups" -name VERIFIED | wc -l)" -gt "$verified_before" ] || fail "the encrypted restore took no safety backup"
+[ -z "$(find "$tmp/backups" -name '*.dump')" ] || fail "the encrypted restore persisted plaintext"
+if compgen -G "$ram/econgraph-backup.*" >/dev/null; then
+  fail "the encrypted restore left opened plaintext: $(ls "$ram")"
+fi
 
 # Without KUBECTL: the kind cluster's kubectl and kubeconfig (lib/kind-env.sh). A dry run
 # caches nothing in XDG_CACHE_HOME and leaves no temporary copy behind.
