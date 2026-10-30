@@ -83,9 +83,10 @@
 //! # Errors
 //!
 //! BLS answers HTTP 200 even on failure, with `status` and `message` in the body:
-//! - a message about the daily threshold / "exceeded" (request not processed) -> `RateLimited`
-//!   for the whole batch, with `retry_after` until BLS's daily count resets (see
-//!   [`until_daily_reset`]), so the worker doesn't keep spending requests BLS will refuse
+//! - BLS's daily threshold message (request not processed) -> `RateLimited` for the whole
+//!   batch, with `retry_after` until BLS's daily count resets (see [`until_daily_reset`]), so
+//!   the worker doesn't keep spending requests BLS will refuse; any other message about a
+//!   threshold or "exceeded" -> `RateLimited { retry_after: None }` (the policy's backoff)
 //! - "Series does not exist for Series X" -> `NotFound` for series X only; the rest of the batch
 //!   is kept. On an older window, after X returned data from newer ones, it only marks the end
 //!   of X's history and the data is kept
@@ -1199,6 +1200,12 @@ fn no_data_series_id(message: &str) -> Option<&str> {
         .find(|s| !s.is_empty())
 }
 
+/// BLS's wording for a request refused because the day's requests are used up ("Request could not
+/// be serviced, as the daily threshold for total number of requests allocated to the user has
+/// been reached."), lowercased. Only this waits for [`until_daily_reset`]; other rate limits
+/// retry on the policy's backoff.
+const DAILY_THRESHOLD: &str = "daily threshold";
+
 /// Hour (UTC) at or after which BLS's daily request count has reset. BLS counts requests per day
 /// in US Eastern time; 05:00 UTC is midnight EST and 01:00 EDT, so it is never early.
 const DAILY_RESET_HOUR_UTC: u32 = 5;
@@ -1252,10 +1259,13 @@ fn check_status(
     }
     let joined = scrub(&other.join("; "), key);
     let lower = joined.to_ascii_lowercase();
-    if lower.contains("threshold") || lower.contains("exceeded") {
+    if lower.contains(DAILY_THRESHOLD) {
         return Err(CrawlError::RateLimited {
             retry_after: Some(until_daily_reset(Utc::now())),
         });
+    }
+    if lower.contains("threshold") || lower.contains("exceeded") {
+        return Err(CrawlError::RateLimited { retry_after: None });
     }
     let key_problem = [
         "invalid",
@@ -2158,6 +2168,23 @@ mod tests {
             wait <= std::time::Duration::from_secs(24 * 3600),
             "{wait:?}"
         );
+
+        // Any other rate limit retries on the policy's backoff, not a day later.
+        for message in [
+            "User sekrit has exceeded the number of requests allowed",
+            "Rate threshold exceeded, slow down",
+        ] {
+            assert_eq!(
+                check_status(
+                    "REQUEST_NOT_PROCESSED",
+                    &[message.to_string()],
+                    &["X"],
+                    None
+                ),
+                Err(CrawlError::RateLimited { retry_after: None }),
+                "{message}"
+            );
+        }
     }
 
     #[test]
@@ -3239,11 +3266,45 @@ mod tests {
     }
 
     /// The shipped JOLTS, PPI and import/export price ids land in their survey datasets, not
-    /// `other`.
+    /// `other`, split into the codes BLS's own series file gives them (the recorded files under
+    /// `tests/fixtures/bls/layouts`).
     #[test]
     fn shipped_jt_wp_ei_series_have_their_survey_datasets() {
         let shipped = bls_series().unwrap();
-        for survey in ["JT", "WP", "EI"] {
+        // Survey, recorded file, and each dimension's column in it (EI's file has no item
+        // column; its item is checked by reassembling the id).
+        type Columns = &'static [(&'static str, &'static str)];
+        let surveys: [(&str, &str, Columns); 3] = [
+            (
+                "JT",
+                include_str!("../../tests/fixtures/bls/layouts/jt.series"),
+                &[
+                    ("seasonal", "seasonal"),
+                    ("industry", "industry_code"),
+                    ("state", "state_code"),
+                    ("area", "area_code"),
+                    ("size_class", "sizeclass_code"),
+                    ("data_element", "dataelement_code"),
+                    ("rate_level", "ratelevel_code"),
+                ],
+            ),
+            (
+                "WP",
+                include_str!("../../tests/fixtures/bls/layouts/wp.series"),
+                &[
+                    ("seasonal", "seasonal"),
+                    ("group", "group_code"),
+                    ("item", "item_code"),
+                ],
+            ),
+            (
+                "EI",
+                include_str!("../../tests/fixtures/bls/layouts/ei.series"),
+                &[("seasonal", "seasonal"), ("index", "index_code")],
+            ),
+        ];
+        for (survey, file, columns) in surveys {
+            let rows = recorded_rows(file);
             let ids: Vec<&str> = shipped
                 .iter()
                 .map(|s| s.id.as_str())
@@ -3251,7 +3312,29 @@ mod tests {
                 .collect();
             assert!(!ids.is_empty(), "no {survey} series shipped");
             for id in ids {
-                assert_eq!(dataset_of(id).code, survey, "{id}");
+                let ds = dataset_of(id);
+                assert_eq!(ds.code, survey, "{id}");
+                let row = rows
+                    .iter()
+                    .find(|r| r["series_id"] == id)
+                    .unwrap_or_else(|| panic!("{id} is not in BLS's {survey} series file"));
+                for (dim, col) in columns {
+                    // `-` is wp.series' item for a group index, whose id has no item.
+                    let want = match row[col] {
+                        "-" => "",
+                        v => v,
+                    };
+                    assert_eq!(ds.dimensions.0[*dim], want, "{id} {dim}");
+                }
+                let rebuilt: String = SERIES_ID_LAYOUTS
+                    .iter()
+                    .find(|(p, _)| *p == survey)
+                    .unwrap()
+                    .1
+                    .iter()
+                    .map(|(dim, _)| ds.dimensions.0[*dim].as_str())
+                    .collect();
+                assert_eq!(format!("{survey}{rebuilt}"), id);
             }
         }
     }
