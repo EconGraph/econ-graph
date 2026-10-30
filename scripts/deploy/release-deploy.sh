@@ -335,7 +335,15 @@ case "$marker" in
         fi ;;
     1)
         [ "$configured" = false ] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host" ;;
+            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host"
+        # Without a configured PUBLIC_HOST, deploy.sh gets an empty one and removes any
+        # public routes: its own refusal covers only an unset PUBLIC_HOST. A cluster that
+        # serves a public host now is the production cluster without its marker and its
+        # config, so refuse here, before any step, rather than take the site down.
+        served="$(public_host_in_cluster)" ||
+            die "could not read which public host ${CONTEXT} serves now; without PUBLIC_HOST configured, a deploy would remove its public routes"
+        [ -z "$served" ] ||
+            die "${CONTEXT} serves https://${served} now, but ${CLUSTER_ROLE_REASON} and ${DEPLOY_ENV} configures no PUBLIC_HOST: a deploy would remove its public routes. If it is the production cluster, mark it (scripts/deploy/mark-production-cluster.sh) and add PUBLIC_HOST=${served} to ${DEPLOY_ENV}." ;;
     *) die "${CLUSTER_ROLE_REASON}" ;;
 esac
 # --confirm-production names one cluster: refuse it for any other, marked or not.
@@ -569,7 +577,8 @@ explain_restore() {
     run="${chosen%%$'\t'*}"
     date="$(cut -f2 <<<"$chosen")"
     echo
-    echo "If the data migrations (the crawler-migrate Job) ran, or Keycloak started on a new"
+    echo "If the data migrations (the crawler-migrate Job) ran, a backend pod restarted on the"
+    echo "new image (it migrates the app database when it starts), or Keycloak started on a new"
     echo "version, the databases are migrated: restore them from the last backups taken before"
     echo "${RC_TAG} was first deployed on this cluster:"
     if [ -n "$chosen" ]; then
@@ -620,8 +629,8 @@ explain_failure() {
     case "$failed" in
         backup)
             if [ -n "$BACKUP_STILL_RUNNING" ]; then
-                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running: it timed out here, but was"
-                echo "not stopped. Wait for it to finish:"
+                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running (it outlasted the wait here, or"
+                echo "was already running when this run started), and was not stopped. Wait for it to finish:"
                 echo "  ${kubectl_hint} wait --for=condition=complete ${BACKUP_STILL_RUNNING} --timeout=3600s"
                 echo "and only then run this command again: a run starts another backup Job, which"
                 echo "would run beside this one. Nothing else was changed."
@@ -645,7 +654,8 @@ explain_failure() {
             echo "Fix the cause and run this command again, or go back with:" ;;
         keycloak)
             echo "The new images are loaded on the nodes under the names the manifests run;"
-            echo "running pods keep the old ones until they restart. The databases are unchanged."
+            echo "running pods keep the old ones until they restart. This run migrated nothing, but a"
+            echo "backend pod that restarts on the new image migrates the app database (see below)."
             echo "Fix the Keycloak backup and run this command again, or go back with:" ;;
         precheck)
             echo "The new images are loaded, the backups are taken, and the crawler worker"
@@ -667,7 +677,9 @@ explain_failure() {
     esac
     echo "  scripts/deploy/rollback-release-images.sh --to pre-${RC_TAG}${cluster_arg} --dry-run   # then without --dry-run"
     case "$failed" in
-        deploy | verify) [ -n "$NOT_STARTED" ] || explain_restore ;;
+        # From the load on, the new images may be on the nodes: a backend pod that
+        # restarts runs the new one, which migrates the app database.
+        load | keycloak | precheck | deploy | verify) explain_restore ;;
     esac
     case "$failed" in
         keycloak | precheck | deploy)
