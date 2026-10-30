@@ -62,9 +62,12 @@ for one variable and geography. The adapter keeps `YEAR` as January 1 and the va
 Units come from the variable's `predicateType`: `int` measures (firms, establishments,
 employees, jobs) are "Count", and `float` measures, which are all rates such as
 `ESTABS_ENTRY_RATE`, are "Percent". The rates are published as percents (10.608 for 2023),
-not fractions. Discovery sets the units, and a series' next fetch copies them to the
-stored series, so a changed unit reaches existing series without a migration. It does
-not request county,
+not fractions. Discovery fails if a `float` isn't named as a rate ("Rate of …" or `_RATE`)
+or a rate isn't a `float`, rather than guess its unit. Discovery sets the units, and the
+first fetch of a series after that discovery copies them to the stored series, so a
+changed unit reaches existing series without a migration.
+
+It does not request county,
 metro or CBSA series, or breakdowns by industry, firm age or firm size.
 
 ## Samples and fixtures

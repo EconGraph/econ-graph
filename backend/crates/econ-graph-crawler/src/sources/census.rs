@@ -743,6 +743,20 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                     )))
                 }
             };
+            // Every `float` measure is a rate and every rate a `float`, which is what makes
+            // `NumericType::units` right; fail rather than mislabel a variable that breaks it.
+            let named_rate = name.ends_with("_RATE")
+                || name.contains("_RATE_")
+                || label.to_lowercase().starts_with("rate of");
+            if !has_code_label
+                && numeric.is_some()
+                && (numeric == Some(NumericType::Float)) != named_rate
+            {
+                return Err(CrawlError::Parse(format!(
+                    "Census variables.json: {name:?} is a {numeric:?} but {} named as a rate",
+                    if named_rate { "is" } else { "isn't" }
+                )));
+            }
             Ok(BdsVariable {
                 name: name.clone(),
                 label,
@@ -1079,9 +1093,9 @@ mod tests {
         let estab_us = by_id("bds/national..ESTAB");
         assert_eq!(estab_us.title, "Number of establishments - United States");
         assert_eq!(estab_us.units.as_deref(), Some("Count"));
+        assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
         let entry_rate_ca = by_id("bds/state.06.ESTABS_ENTRY_RATE");
         assert_eq!(entry_rate_ca.units.as_deref(), Some("Percent"));
-        assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
         let estab_ca = by_id("bds/state.06.ESTAB");
         assert_eq!(estab_ca.title, "Number of establishments - California");
         assert_eq!(
@@ -1200,9 +1214,118 @@ mod tests {
         assert_eq!(units("EAGE"), None);
     }
 
-    /// A rate's values are percents, stored as published.
+    /// A `float` that isn't named as a rate, or a rate that isn't a `float`, fails the parse
+    /// rather than getting the wrong units.
+    #[test]
+    fn parse_variables_rejects_rates_and_floats_that_disagree() {
+        for (name, label, t) in [
+            ("AVG_EMP", "Average employment", "float"),
+            ("ENTRY_RATE", "Rate of entry", "int"),
+            ("CHURN", "Rate of churn", "int"),
+        ] {
+            let body =
+                serde_json::json!({"variables": {name: {"label": label, "predicateType": t}}});
+            assert!(
+                matches!(parse_variables(&body), Err(CrawlError::Parse(_))),
+                "{name} {t}"
+            );
+        }
+        // Codes are left to the code rule, whatever their names.
+        let body = serde_json::json!({"variables": {"EMPSZES": {
+            "label": "Employment size code", "predicateType": "float",
+            "attributes": "EMPSZES_LABEL"}}});
+        assert!(parse_variables(&body).is_ok());
+    }
+
+    /// A stored "Count" on a rate series becomes "Percent" through the normal crawl: discovery
+    /// writes the new units, and the next fetch (which carries no metadata) copies them.
     #[tokio::test]
-    async fn fetch_parses_a_rate_in_percent() {
+    async fn rediscovered_units_replace_stored_ones_on_the_next_fetch() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_census_rate_units",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Census,
+                &[BDS_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/census.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds").query("get", "ESTABS_ENTRY_RATE,YEAR"),
+            Reply::json_str(ESTABS_ENTRY_RATE_US),
+        )
+        .await;
+        let adapter = adapter(&mock).await;
+        let id = "bds/national..ESTABS_ENTRY_RATE";
+        let (_, dataset) = series_key(Area::National, "ESTABS_ENTRY_RATE").unwrap();
+        let discovered = |units: &str| DiscoveredSeries {
+            external_id: id.into(),
+            title: "Rate of establishments born during the last 12 months - United States".into(),
+            description: None,
+            units: Some(units.into()),
+            frequency: Some("Annual".into()),
+            data_url: None,
+            dataset: dataset.clone(),
+        };
+        let stored_units = || async {
+            #[derive(diesel::QueryableByName)]
+            struct Row {
+                #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+                units: Option<String>,
+            }
+            use diesel_async::RunQueryDsl;
+            let mut conn = db.pool.get().await.unwrap();
+            diesel::sql_query("SELECT units FROM economic_series WHERE external_id = $1")
+                .bind::<diesel::sql_types::Text, _>(id)
+                .get_result::<Row>(&mut conn)
+                .await
+                .unwrap()
+                .units
+        };
+
+        // As stored before: discovered and fetched as "Count".
+        crate::persist::persist_discovered(&db.pool, SourceId::Census, &[discovered("Count")])
+            .await
+            .unwrap();
+        let fetched = adapter.fetch_series(&test_ctx(), id, None).await.unwrap();
+        assert_eq!(fetched.metadata, None);
+        crate::persist::persist_series(&db.pool, SourceId::Census, id, &fetched)
+            .await
+            .unwrap();
+        assert_eq!(stored_units().await.as_deref(), Some("Count"));
+
+        // Rediscovered as "Percent": the next fetch takes the new units.
+        crate::persist::persist_discovered(&db.pool, SourceId::Census, &[discovered("Percent")])
+            .await
+            .unwrap();
+        let fetched = adapter.fetch_series(&test_ctx(), id, None).await.unwrap();
+        crate::persist::persist_series(&db.pool, SourceId::Census, id, &fetched)
+            .await
+            .unwrap();
+        assert_eq!(stored_units().await.as_deref(), Some("Percent"));
+    }
+
+    /// A rate's values pass through as published: percents, such as 10.608, not fractions.
+    #[tokio::test]
+    async fn fetch_keeps_rate_values_as_published_percents() {
         let mock = MockSource::start().await;
         mock.mount_expect(
             &Route::get("/timeseries/bds")
