@@ -161,9 +161,11 @@ chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED
 # their name, arguments and environment, print what the real ones print that
 # release-deploy.sh reads, and fail when STUB_FAIL names them.
 TREE="$WORK/tree"
-mkdir -p "$TREE/scripts/deploy" "$TREE/k8s/manifests/keycloak"
+mkdir -p "$TREE/scripts/deploy" "$TREE/scripts/backup" "$TREE/k8s/manifests/keycloak"
 cp "$PROJECT_ROOT/scripts/deploy/release-deploy.sh" "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$TREE/scripts/deploy/"
 cp -r "$PROJECT_ROOT/scripts/deploy/lib" "$TREE/scripts/deploy/lib"
+# lib/kind-env.sh sources the backup encryption helpers.
+cp "$PROJECT_ROOT/scripts/backup/encryption.sh" "$TREE/scripts/backup/"
 cp "$PROJECT_ROOT/k8s/manifests/crawler-worker.yaml" "$TREE/k8s/manifests/"
 cp "$PROJECT_ROOT/k8s/manifests/keycloak/deployment.yaml" "$TREE/k8s/manifests/keycloak/"
 for step in load-release-images backup-postgres-now backup-keycloak-db precheck-db-migration deploy verify-release-images; do
