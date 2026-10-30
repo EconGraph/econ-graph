@@ -18,7 +18,7 @@ analysis tools.
 ### 📊 **Core Capabilities**
 
 - **Global data access**: Explore series from FRED, BLS, Census, World Bank, BEA,
-  and FHFA through a unified interface.
+  FHFA and the Bank of Canada through a unified interface.
 - **Interactive visualization**: Inspect time series with hover tooltips and custom
   date ranges. Tooltips include revision dates when available.
 - **Data transformations**: Compare year-over-year (YoY), quarter-over-quarter

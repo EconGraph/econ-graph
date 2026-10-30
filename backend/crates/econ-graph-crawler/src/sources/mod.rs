@@ -15,6 +15,7 @@ use crate::adapter::AdapterRegistry;
 // Adapter modules (one per source) are declared here.
 pub mod bea;
 pub mod bls;
+pub mod boc;
 pub mod census;
 pub mod fhfa;
 pub mod fred;
@@ -33,6 +34,7 @@ pub fn default_registry() -> AdapterRegistry {
     registry.register(std::sync::Arc::new(census::CensusAdapter::default()));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::default()));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
+    registry.register(std::sync::Arc::new(boc::BocAdapter::default()));
     // Development only: hardcoded catalogs without live integrations.
     #[cfg(flag_static_catalogs)]
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
@@ -61,6 +63,7 @@ pub fn registry_at(base_url: &str) -> AdapterRegistry {
     ));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(boc::BocAdapter::new(base_url)));
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
         registry.register(std::sync::Arc::new(adapter));
     }
@@ -87,6 +90,7 @@ mod tests {
                 SourceId::Bea,
                 SourceId::Census,
                 SourceId::WorldBank,
+                SourceId::Boc,
                 SourceId::Fhfa,
             ]
         );

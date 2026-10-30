@@ -1,6 +1,6 @@
 //! ECO-392 regression: on a freshly migrated database, every source the release build registers
-//! (`FRED`, `BLS`, `CENSUS`, `BEA`, `WORLD_BANK`, `FHFA`; see `sources::default_registry`) must be
-//! due for crawling and counted by coverage. The consolidated baseline migration seeded World
+//! (`FRED`, `BLS`, `CENSUS`, `BEA`, `WORLD_BANK`, `FHFA`, `BOC`; see
+//! `sources::default_registry`) must be due for crawling and counted by coverage. The consolidated baseline migration seeded World
 //! Bank and BEA as `is_enabled = false` behind an admin-approval step that v4.0 doesn't ship
 //! (the admin frontend is out of scope) -- Census was seeded disabled the same way but the same
 //! migration re-enables it further down. The scheduler's due and discovery queries, and the
@@ -78,7 +78,7 @@ async fn fresh_migration_enables_every_release_source() {
 
     // The flag the scheduler's due/discovery queries and crawl_coverage filter on, straight from
     // the just-migrated `data_sources` rows (BEA and World Bank come from the baseline migration;
-    // FHFA has no seed row and is created here by `data_source_id`'s template fallback).
+    // FHFA and BOC have no seed row and are created here by `data_source_id`'s template fallback).
     let mut enabled = Vec::with_capacity(release_sources.len());
     for &source in &release_sources {
         let source_id = data_source_id(&db.pool, source).await.unwrap();

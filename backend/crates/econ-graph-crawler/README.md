@@ -83,7 +83,7 @@ progress reporting, see the [re-fetch guide](../../../docs/technical/OBSERVATION
 
 ## Development-only static catalogs
 
-Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
+Nine hardcoded catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
 the `static_catalogs` build flag; see [feature flags](../../../config/flags/README.md).
 They are on in the `dev` flag profile used by local Cargo builds and tests, and off in the
 `release` flag profile used by the Dockerfile and deployments. Cargo's `--release` option

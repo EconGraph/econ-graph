@@ -77,7 +77,7 @@ All data collection goes through the Postgres `crawl_queue`: jobs are enqueued (
 `triggerCrawl`, or `crawler enqueue|discover`), and `crawler-worker` drains the queue.
 
 **Key Features:**
-- One source adapter per provider (FRED, BLS, BEA, Census, World Bank, FHFA)
+- One source adapter per provider (FRED, BLS, BEA, Census, World Bank, FHFA, Bank of Canada)
 - Shared `HttpFetcher`: per-source rate limits and concurrency, timeouts, retries honouring `Retry-After`
 - Queue worker with retry/fail by error kind and per-source pause
 - `crawler discover|enqueue|status|sources|fetch` operator CLI

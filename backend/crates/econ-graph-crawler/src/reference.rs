@@ -10,8 +10,8 @@
 //! `CRAWLER_DATA_DIR` to it.
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
-//! worker checks them at startup ([`bls_series`], [`fred_series`], [`wdi_indicators`]) rather
-//! than on its first job.
+//! worker checks them at startup ([`bls_series`], [`fred_series`], [`boc_series`],
+//! [`wdi_indicators`]) rather than on its first job.
 //!
 //! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
 //! through [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load).
@@ -38,6 +38,9 @@ pub const BLS_SERIES_FILE: &str = "bls_series.csv";
 
 /// File name of the curated FRED series list in the data directory.
 pub const FRED_SERIES_FILE: &str = "fred_series.csv";
+
+/// File name of the curated Bank of Canada Valet series list in the data directory.
+pub const BOC_SERIES_FILE: &str = "boc_series.csv";
 
 /// A BLS series the crawler discovers and fetches. Only the id is curated here: its title, units
 /// and frequency come from BLS (see [`crate::sources::bls`]).
@@ -290,9 +293,118 @@ fn parse_fred_series(text: &str) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
+/// The curated Bank of Canada Valet series names from `boc_series.csv` in [`data_dir`], read on
+/// first use and cached. Only the names are curated: each series' title, description, unit and
+/// frequency come from Valet (see [`crate::sources::boc`]).
+///
+/// A missing or malformed file is a `Permanent` error, with the path in the message.
+pub fn boc_series() -> Result<&'static [String], CrawlError> {
+    static SERIES: OnceLock<Result<Vec<String>, String>> = OnceLock::new();
+    SERIES
+        .get_or_init(|| load_boc_series(&data_dir().join(BOC_SERIES_FILE)))
+        .as_deref()
+        .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+/// Reads, parses and checks a Bank of Canada series list.
+fn load_boc_series(path: &Path) -> Result<Vec<String>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
+    parse_boc_series(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Whether `name` can be a Valet series name: 1 to 100 ASCII letters, digits, `.`, `_` and `-`.
+/// Every name in Valet's series list fits, and such a name is safe as a URL path segment.
+pub fn is_valet_series_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Parses `series_id` rows after a header line; blank lines and `#` comments are skipped.
+fn parse_boc_series(text: &str) -> Result<Vec<String>, String> {
+    let mut lines = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l.trim()))
+        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
+    match lines.next() {
+        Some((_, "series_id")) => {}
+        Some((n, other)) => {
+            return Err(format!(
+                "line {n}: expected header series_id, got {other:?}"
+            ))
+        }
+        None => return Err("no header line".into()),
+    }
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    for (n, id) in lines {
+        if !is_valet_series_name(id) {
+            return Err(format!(
+                "line {n}: series id {id:?} is not a Valet series name"
+            ));
+        }
+        if !seen.insert(id.to_string()) {
+            return Err(format!("line {n}: duplicate series id {id:?}"));
+        }
+        ids.push(id.to_string());
+    }
+    if ids.is_empty() {
+        return Err("no series ids".into());
+    }
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped Bank of Canada list parses and is a short headline list.
+    #[test]
+    fn shipped_boc_series_file_is_valid() {
+        let ids = load_boc_series(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("data")
+                .join(BOC_SERIES_FILE),
+        )
+        .unwrap();
+        assert!((10..=50).contains(&ids.len()), "{} ids", ids.len());
+        for id in ["V39079", "AVG.INTWO", "FXUSDCAD", "BD.CDN.10YR.DQ.YLD"] {
+            assert!(ids.iter().any(|s| s == id), "{id} missing");
+        }
+    }
+
+    /// Comments, blank lines and surrounding spaces are skipped; malformed lists are rejected
+    /// with the offending line.
+    #[test]
+    fn parses_and_checks_boc_series_files() {
+        let ok =
+            parse_boc_series("# c\n\nseries_id\nV39079\n BD.CDN.2YR.DQ.YLD \nCPI_TRIM\n").unwrap();
+        assert_eq!(ok, ["V39079", "BD.CDN.2YR.DQ.YLD", "CPI_TRIM"]);
+        for (text, needle) in [
+            ("", "no header"),
+            ("id\n", "expected header"),
+            ("series_id\n", "no series ids"),
+            (
+                "series_id\nFX/USD\n",
+                "line 2: series id \"FX/USD\" is not a Valet",
+            ),
+            ("series_id\nFX USD\n", "not a Valet series name"),
+            ("series_id\nFXUSDCAD,x\n", "not a Valet series name"),
+            ("series_id\nFXUSDCAD\nFXUSDCAD\n", "duplicate"),
+        ] {
+            let e = parse_boc_series(text).unwrap_err();
+            assert!(e.contains(needle), "{text:?}: {e}");
+        }
+        let e = load_boc_series(Path::new("/nonexistent/boc_series.csv")).unwrap_err();
+        assert!(
+            e.contains("/nonexistent/boc_series.csv") && e.contains(DATA_DIR_ENV),
+            "{e}"
+        );
+    }
 
     /// The shipped indicator list parses and holds the curated set (about 50).
     #[test]

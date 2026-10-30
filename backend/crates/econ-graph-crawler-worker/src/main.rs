@@ -144,13 +144,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let registry = default_registry();
     // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
-    // their first job (BLS reads `bls_series`; FRED reads `fred_series`).
+    // their first job (BLS reads `bls_series`; FRED reads `fred_series`; BOC reads `boc_series`).
     let bls_series = econ_graph_crawler::reference::bls_series()?;
     let fred_series = econ_graph_crawler::reference::fred_series()?;
+    let boc_series = econ_graph_crawler::reference::boc_series()?;
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         bls_series = bls_series.len(),
         fred_series = fred_series.len(),
+        boc_series = boc_series.len(),
         "reference data loaded"
     );
     // Shared reference data ($REFERENCE_DATA_DIR), e.g. the country table.

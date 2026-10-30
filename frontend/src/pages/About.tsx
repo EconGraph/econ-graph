@@ -73,6 +73,7 @@ const About: React.FC = () => {
     'Federal Housing Finance Agency (FHFA)',
     'Bureau of Economic Analysis (BEA)',
     'World Bank World Development Indicators (WDI)',
+    'Bank of Canada (Valet)',
   ];
 
   return (

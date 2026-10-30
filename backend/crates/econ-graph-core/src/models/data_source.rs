@@ -611,6 +611,7 @@ mod _inline_tests {
             DataSource::bea(),
             DataSource::world_bank(),
             DataSource::fhfa(),
+            DataSource::boc(),
         ] {
             assert!(source.is_visible, "{}: not visible", source.name);
             assert!(source.is_enabled, "{}: not enabled", source.name);
