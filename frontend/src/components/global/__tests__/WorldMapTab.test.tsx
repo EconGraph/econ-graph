@@ -5,6 +5,9 @@
  */
 
 import React from 'react';
+import { geoEqualEarth, geoPath } from 'd3-geo';
+import { feature } from 'topojson-client';
+import { loadWorldAtlas } from '../worldAtlas';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -126,6 +129,22 @@ const waitForColors = () =>
   }, WAIT);
 
 describe('WorldMapTab', () => {
+  it('starts with Equal Earth geometry and retains explicit projection choices', async () => {
+    renderTab();
+    await waitForColors();
+    const atlas = await loadWorldAtlas();
+    const germany = feature(atlas, atlas.objects.countries).features.find(country => Number(country.id) === 276)!;
+    const expectedPath = geoPath(geoEqualEarth().fitSize([960, 500], { type: 'Sphere' }))(germany);
+    expect(screen.getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Equal Earth');
+    expect(countryPath('276')).toHaveAttribute('d', expectedPath);
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Projection' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Natural Earth' }));
+    await waitFor(() => expect(countryPath('276')).not.toHaveAttribute('d', expectedPath));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    expect(screen.getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Natural Earth');
+  });
+
   it('offers the dataset indicators and starts on GDP per capita', async () => {
     renderTab();
     await waitForColors();
