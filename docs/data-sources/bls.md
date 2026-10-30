@@ -63,8 +63,9 @@ BLS allows 500 requests a day with a key and 25 without. With a key, the curated
 9 requests (9 batches of 50) for the first 20-year fetch and 9 for each refresh, whose
 5-year revision lookback fits one window. Without a key it is 17 batches of 25: 17
 requests for each refresh, but 34 for the first fetch (two 10-year windows), so the first
-fetch spans two days: requests past the daily limit fail as rate-limited and the worker
-retries them later with backoff. Set a key.
+fetch spans two days: a request BLS refuses for the daily limit is rate-limited and its
+series wait until 05:00 UTC (midnight Eastern standard time, when BLS's daily count has
+reset) instead of retrying sooner. Set a key.
 
 With a key, the response's `catalog` supplies the title, survey name, units
 (`measure_data_type`) and seasonality. Frequency comes from the observation periods.

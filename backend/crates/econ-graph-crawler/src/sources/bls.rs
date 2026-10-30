@@ -68,9 +68,9 @@
 //!   refresh (the 5-year revision lookback fits one window). Refreshing every series every day
 //!   would still be 9 requests, and even one request per series (425) fits.
 //! - Without a key: 17 batches of 25, so 17 requests for each refresh, but 34 for the first
-//!   fetch (two 10-year windows). The first fetch therefore spans two days: the requests past
-//!   the daily limit fail as `RateLimited` and the worker retries them later with backoff. Set
-//!   a key.
+//!   fetch (two 10-year windows). The first fetch therefore spans two days: a request BLS
+//!   refuses for the daily threshold is `RateLimited` until the daily count resets
+//!   ([`until_daily_reset`]), so its series wait for the next day. Set a key.
 //!
 //! A batch's `since` is its earliest series', so one series with no stored points (a row added
 //! later, or an id that keeps failing) turns its whole batch into a full 20-year fetch: two
@@ -83,8 +83,9 @@
 //! # Errors
 //!
 //! BLS answers HTTP 200 even on failure, with `status` and `message` in the body:
-//! - a message about the daily threshold / "exceeded" (request not processed) -> `RateLimited { retry_after: None }`
-//!   for the whole batch
+//! - a message about the daily threshold / "exceeded" (request not processed) -> `RateLimited`
+//!   for the whole batch, with `retry_after` until BLS's daily count resets (see
+//!   [`until_daily_reset`]), so the worker doesn't keep spending requests BLS will refuse
 //! - "Series does not exist for Series X" -> `NotFound` for series X only; the rest of the batch
 //!   is kept. On an older window, after X returned data from newer ones, it only marks the end
 //!   of X's history and the data is kept
@@ -1136,6 +1137,27 @@ fn no_data_series_id(message: &str) -> Option<&str> {
         .find(|s| !s.is_empty())
 }
 
+/// Hour (UTC) at or after which BLS's daily request count has reset. BLS counts requests per day
+/// in US Eastern time; 05:00 UTC is midnight EST and 01:00 EDT, so it is never early.
+const DAILY_RESET_HOUR_UTC: u32 = 5;
+
+/// Time from `now` until the next [`DAILY_RESET_HOUR_UTC`]: how long a request refused for the
+/// daily threshold waits. Without it the worker would retry after the policy's short backoff and
+/// keep sending requests BLS refuses until the count resets.
+fn until_daily_reset(now: chrono::DateTime<Utc>) -> std::time::Duration {
+    let today = now
+        .date_naive()
+        .and_hms_opt(DAILY_RESET_HOUR_UTC, 0, 0)
+        .expect("valid time")
+        .and_utc();
+    let next = if now < today {
+        today
+    } else {
+        today + chrono::Duration::days(1)
+    };
+    (next - now).to_std().unwrap_or_default()
+}
+
 /// Maps a BLS body `status` + `message` to a whole-request error, or `Ok` if the request was
 /// processed. `ids` are the series in the request; errors name the first one and a count.
 ///
@@ -1169,7 +1191,9 @@ fn check_status(
     let joined = scrub(&other.join("; "), key);
     let lower = joined.to_ascii_lowercase();
     if lower.contains("threshold") || lower.contains("exceeded") {
-        return Err(CrawlError::RateLimited { retry_after: None });
+        return Err(CrawlError::RateLimited {
+            retry_after: Some(until_daily_reset(Utc::now())),
+        });
     }
     let key_problem = [
         "invalid",
@@ -1918,17 +1942,16 @@ mod tests {
             )
             .is_ok());
         }
-        assert_eq!(
-            check_status(
-                "REQUEST_NOT_PROCESSED",
-                &msgs(&["daily threshold reached"]),
-                &["X"],
-                k
-            )
-            .unwrap_err()
-            .retry_after(),
-            None
-        );
+        // A threshold refusal waits for BLS's daily reset, at most a day away.
+        assert!(check_status(
+            "REQUEST_NOT_PROCESSED",
+            &msgs(&["daily threshold reached"]),
+            &["X"],
+            k
+        )
+        .unwrap_err()
+        .retry_after()
+        .is_some_and(|d| d <= std::time::Duration::from_secs(24 * 3600)));
     }
 
     #[tokio::test]
@@ -2040,6 +2063,41 @@ mod tests {
         );
     }
 
+    /// A refused request waits until 05:00 UTC (midnight EST), today's if it is still ahead,
+    /// else tomorrow's.
+    #[test]
+    fn daily_threshold_waits_for_the_reset() {
+        let at = |h, m| {
+            NaiveDate::from_ymd_opt(2026, 10, 30)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap()
+                .and_utc()
+        };
+        let hours = |d: std::time::Duration| d.as_secs() / 3600;
+        assert_eq!(until_daily_reset(at(4, 0)).as_secs(), 3600);
+        assert_eq!(hours(until_daily_reset(at(5, 0))), 24);
+        assert_eq!(hours(until_daily_reset(at(15, 0))), 14);
+        assert_eq!(until_daily_reset(at(23, 30)).as_secs(), 5 * 3600 + 1800);
+        let err = check_status(
+            "REQUEST_NOT_PROCESSED",
+            &["The daily threshold has been reached".to_string()],
+            &["X"],
+            None,
+        )
+        .unwrap_err();
+        let CrawlError::RateLimited {
+            retry_after: Some(wait),
+        } = err
+        else {
+            panic!("{err:?}");
+        };
+        assert!(
+            wait <= std::time::Duration::from_secs(24 * 3600),
+            "{wait:?}"
+        );
+    }
+
     #[test]
     fn seasonal_adjustment_from_id_prefixes() {
         for (id, want) in [
@@ -2085,7 +2143,15 @@ mod tests {
         let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
         let ids = vec!["CUUR0000SA0".to_string()];
         let err = adapter.fetch_batch(&ctx, &ids, None).await.unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -2247,7 +2313,15 @@ mod tests {
             .fetch_series(&test_ctx(), "CUUR0000SA0", None)
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -3424,7 +3498,15 @@ mod tests {
             .fetch_batch(&test_ctx(), &ids, None)
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -3539,10 +3621,15 @@ mod tests {
         assert_eq!(out.len(), 60);
         assert!(out["S24"].is_ok());
         for id in ["S25", "S49", "S50", "S59"] {
-            assert_eq!(
-                out[id],
-                Err(CrawlError::RateLimited { retry_after: None }),
-                "{id}"
+            assert!(
+                matches!(
+                    out[id],
+                    Err(CrawlError::RateLimited {
+                        retry_after: Some(_)
+                    })
+                ),
+                "{id}: {:?}",
+                out[id]
             );
         }
         assert_eq!(mock.received_requests().await.len(), 2);
@@ -3554,7 +3641,15 @@ mod tests {
             .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
             .await
             .unwrap_err();
-        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert!(
+            matches!(
+                err,
+                CrawlError::RateLimited {
+                    retry_after: Some(_)
+                }
+            ),
+            "{err:?}"
+        );
         assert_eq!(mock.received_requests().await.len(), 1);
     }
 
