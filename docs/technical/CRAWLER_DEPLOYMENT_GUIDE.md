@@ -57,7 +57,9 @@ Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
 does not run migrations. Before applying it, `deploy.sh` runs the Job `crawler-migrate`
 (`k8s/manifests/crawler-migrate-job.yaml`, `/app/crawler migrate` from the same image), which
-applies the data migrations and must complete; see
+applies the data migrations and must complete. When any data migration is pending, `deploy.sh`
+first stops the running worker (`precheck-db-migration.sh --stop-crawler`), so it doesn't write
+while they run; see
 [database migrations](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate).
 
 Configuration (flags or environment):

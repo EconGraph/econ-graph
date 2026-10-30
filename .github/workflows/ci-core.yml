@@ -384,9 +384,12 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
     - name: Check the pre-deploy database check
-      run: scripts/deploy/test-precheck-db-migration.sh
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-precheck-db-migration.sh
+        scripts/deploy/test-data-migrations.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
