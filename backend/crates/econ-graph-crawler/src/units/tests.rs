@@ -305,7 +305,7 @@ fn valet_phrases() {
         ],
     );
     let cad = UnitsContext {
-        dollars: Some("CAD"),
+        bare_currency: Some("CAD"),
     };
     assert_eq!(
         parse_with("Month-end, Millions of dollars", &cad),
@@ -316,6 +316,98 @@ fn valet_phrases() {
         parse_with("Millions of US dollars", &cad),
         Some(money(Some("USD"), Scale::Millions))
     );
+}
+
+/// The adapter's currency fills in a bare currency word.
+#[test]
+fn context_names_a_bare_currency() {
+    let usd = UnitsContext::US_DOLLARS;
+    for (text, expected) in [
+        ("Billions of Dollars", money(Some("USD"), Scale::Billions)),
+        ("Current Dollars", money(Some("USD"), Scale::Units)),
+        ("Dollar", money(Some("USD"), Scale::Units)),
+        ("$", money(Some("USD"), Scale::Units)),
+        ("Millions of $", money(Some("USD"), Scale::Millions)),
+        (
+            "Billions of Chained 2017 Dollars",
+            constant(Some("USD"), Scale::Billions, Some(2017)),
+        ),
+        ("Chained Dollars", constant(Some("USD"), Scale::Units, None)),
+    ] {
+        assert_eq!(parse_with(text, &usd), Some(expected), "{text:?}");
+    }
+}
+
+/// Text that names its currency keeps it, whatever the context says.
+#[test]
+fn named_currency_overrides_the_context() {
+    let usd = UnitsContext::US_DOLLARS;
+    for (text, code) in [
+        ("Millions of Canadian dollars", "CAD"),
+        ("Millions of US dollars", "USD"),
+        ("current US$", "USD"),
+        ("Millions of euro", "EUR"),
+        ("Millions of euros", "EUR"),
+        ("Trillions of yen", "JPY"),
+        ("Billions of Swiss francs", "CHF"),
+    ] {
+        assert_eq!(
+            parse_with(text, &usd).unwrap().currency.as_deref(),
+            Some(code),
+            "{text:?}"
+        );
+    }
+    let cad = UnitsContext {
+        bare_currency: Some("CAD"),
+    };
+    assert_eq!(
+        parse_with("constant 2015 US$", &cad)
+            .unwrap()
+            .currency
+            .as_deref(),
+        Some("USD")
+    );
+    // "national currency" names no currency, and isn't a bare currency word either.
+    assert_eq!(
+        parse_with("Millions of national currency", &usd),
+        Some(money(None, Scale::Millions))
+    );
+}
+
+/// Without a context, a bare currency word has no code.
+#[test]
+fn no_context_leaves_a_bare_currency_without_a_code() {
+    for text in [
+        "Billions of Dollars",
+        "Current dollars",
+        "$",
+        "Chained Dollars",
+    ] {
+        let unit = parse_with(text, &UnitsContext::NONE).unwrap();
+        assert_eq!(unit.currency, None, "{text:?}");
+        assert_eq!(parse(text), Some(unit), "{text:?}");
+    }
+}
+
+/// The context never gives a currency to a unit of another kind, nor makes text parse.
+#[test]
+fn context_ignores_other_kinds() {
+    let usd = UnitsContext::US_DOLLARS;
+    for text in [
+        "Percent",
+        "Index 2017=100",
+        "Thousands of Persons",
+        "Percent change, annual rate",
+        "Years",
+        "per 1000 people",
+    ] {
+        let unit = parse_with(text, &usd).unwrap();
+        assert_eq!(unit.currency, None, "{text:?}");
+        assert_eq!(parse(text), Some(unit), "{text:?}");
+    }
+    for text in ["Rate", "Dollars per Hour", "Bil. of $", "+1 or 0", "Level"] {
+        assert_eq!(parse_with(text, &usd), None, "{text:?}");
+    }
 }
 
 /// Only case and whitespace are normalised.
@@ -374,6 +466,19 @@ fn unknown_phrases() {
         "Month-end",
         "Month-end, Rate",
         "Dollars, Month-end",
+        // A two-digit end year that would mean a century or more: not a guess to make.
+        "Index 2010-09=100",
+        "Index 2010-10=100",
+        "Index 1950-40=100",
+        // Not a year a source means.
+        "Index 0000=100",
+        "Index 0999=100",
+        "Index 0000-01=100",
+        // A share of something not listed.
+        "Percent of change",
+        "% of GDP growth",
+        "Percent of 1982 value",
+        "% of something",
     ] {
         assert_eq!(parse(text), None, "{text:?}");
     }
@@ -386,6 +491,8 @@ fn index_bases_are_canonical() {
         ("Index Jan 1995=100", "January 1995=100"),
         ("Index Jan. 1995 = 100", "January 1995=100"),
         ("Index 1999-00=100", "1999-2000=100"),
+        ("Index 1995-04=100", "1995-2004=100"),
+        ("Index 2009-10=100", "2009-2010=100"),
         ("Index 2015=1", "2015=1"),
         ("Index 2015=0100", "2015=100"),
     ] {
@@ -553,34 +660,29 @@ fn check_and_record_counts_by_source() {
     };
     let (unrecognised, mismatch, agree) = counts();
     let structured = base_units();
+    let record = |series: &str, text: Option<&str>, structured: Option<&StructuredUnit>| {
+        check_and_record(
+            SourceId::Census,
+            series,
+            text,
+            structured,
+            &UnitsContext::NONE,
+        )
+    };
 
-    let stored = check_and_record(SourceId::Census, "a", Some("Count"), Some(&structured));
+    let stored = record("a", Some("Count"), Some(&structured));
     assert_eq!(stored, Some(unit(UnitKind::Count, Scale::Units)));
     assert!(counts().2 > agree);
 
-    let stored = check_and_record(
-        SourceId::Census,
-        "b",
-        Some("Thousands of Persons"),
-        Some(&structured),
-    );
+    let stored = record("b", Some("Thousands of Persons"), Some(&structured));
     assert_eq!(stored, Some(unit(UnitKind::Count, Scale::Units)));
     assert!(counts().1 > mismatch);
 
-    assert_eq!(
-        check_and_record(SourceId::Census, "c", Some("Level"), Some(&structured)),
-        None
-    );
-    assert_eq!(
-        check_and_record(SourceId::Census, "d", Some("+1 or 0"), None),
-        None
-    );
+    assert_eq!(record("c", Some("Level"), Some(&structured)), None);
+    assert_eq!(record("d", Some("+1 or 0"), None), None);
     assert!(counts().0 >= unrecognised + 2);
 
     // No text: nothing to check or count.
-    assert_eq!(check_and_record(SourceId::Census, "e", None, None), None);
-    assert_eq!(
-        check_and_record(SourceId::Census, "e", Some("  "), None),
-        None
-    );
+    assert_eq!(record("e", None, None), None);
+    assert_eq!(record("e", Some("  "), None), None);
 }

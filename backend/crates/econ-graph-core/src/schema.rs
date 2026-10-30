@@ -423,7 +423,7 @@ diesel::table! {
         #[max_length = 100]
         default_measure -> Nullable<Varchar>,
         #[max_length = 20]
-        units_source -> Varchar,
+        units_source -> Nullable<Varchar>,
         units_raw -> Nullable<Text>,
         units_parsed -> Nullable<Jsonb>,
     }

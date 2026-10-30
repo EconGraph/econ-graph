@@ -1030,12 +1030,16 @@ async fn upsert_points(
 ///   fetch response carries no metadata (Census BDS) rely on that row. A new row with neither
 ///   gets `external_id` as its title and [`UNKNOWN_FREQUENCY`]. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
-/// - Units: when `fetched.metadata` has `units` or `units_raw`, it sets all of `units`,
-///   `units_source` (its `units_source`, or `unknown` without `units`), `units_raw` (its
-///   `units_raw`, else `units`) and `units_parsed`, the unit that
-///   [`units::check_and_record`] returns after checking the text against the metadata's
-///   `structured_unit`. Units taken from the `series_metadata` row are `structured`, with that
-///   text as `units_raw` and no `units_parsed`. Otherwise all four stay as stored.
+/// - Units: `units` comes from the fetch, else the `series_metadata` row, else stays as stored,
+///   like the other fields, and `units_source`, `units_raw` and `units_parsed` always describe
+///   the `units` kept. Units from the fetch take its `units_source`, its `units_raw` (else the
+///   units text) and `units_parsed`, the unit [`units::check_and_record`] returns after checking
+///   the text against the metadata's `structured_unit`. Units from the `series_metadata` row
+///   are `structured`, with that text as `units_raw` and no `units_parsed`. Stored units keep
+///   their columns. A series with no units anywhere is `unknown`, keeping the fetch's
+///   `units_raw` if it gave one (text the units could not be parsed out of). The check runs
+///   before the transaction commits, so a persist that rolls back and is retried counts and
+///   logs it again: the counts are at least once per stored fetch.
 /// - Validators: `fetched.validators` replaces the series' `series_fetch_validators` row (`None`
 ///   deletes it), in the same transaction as the points ([`stored_fetch_state`] reads it back).
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
@@ -1074,8 +1078,8 @@ pub(crate) async fn persist_series_conn(
     let title = meta.and_then(|m| clip_opt(Some(&m.title), 500));
     let description = meta.and_then(|m| clip_opt(m.description.as_deref(), 2000));
     let units = meta.and_then(|m| clip_opt(m.units.as_deref(), 100));
-    // The fetch states units when it gives either the units or the text they came from; it then
-    // replaces all four units columns. Otherwise they come from discovery or stay as stored.
+    // The fetch states units when it gives either the units or the text they came from. Its
+    // units win; its text alone is kept only for a series with no units anywhere.
     let units_raw = meta.and_then(|m| clip_opt(m.units_raw.as_deref(), MAX_UNITS_RAW));
     let units_claim = meta.filter(|_| units.is_some() || units_raw.is_some());
     let units_source = units_claim.map(|m| match &units {
@@ -1089,6 +1093,7 @@ pub(crate) async fn persist_series_conn(
             external_id,
             units.as_deref(),
             m.structured_unit.as_deref(),
+            &m.units_context,
         )
         .map(|u| serde_json::to_value(u).expect("a Unit serialises")),
         None => None,
@@ -1120,30 +1125,38 @@ pub(crate) async fn persist_series_conn(
                      units_source, units_raw, units_parsed) \
                  SELECT $9, $1, $2, COALESCE($3, (SELECT title FROM discovered), $2), \
                      COALESCE($4, (SELECT description FROM discovered)), \
-                     CASE WHEN $12::text IS NULL THEN (SELECT units FROM discovered) ELSE $5 END, \
+                     COALESCE($5, (SELECT units FROM discovered)), \
                      COALESCE($6, (SELECT frequency FROM discovered), $7), $8, TRUE, NOW(), \
                      NOW(), NOW(), 'success', NULL, $10, $11, \
-                     CASE WHEN $12::text IS NOT NULL THEN $12 \
+                     CASE WHEN $5::text IS NOT NULL THEN $12 \
                          WHEN (SELECT units FROM discovered) IS NOT NULL THEN 'structured' \
                          ELSE 'unknown' END, \
-                     CASE WHEN $12::text IS NULL THEN (SELECT units FROM discovered) ELSE $13 END, \
-                     $14 \
+                     CASE WHEN $5::text IS NOT NULL THEN $13 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL \
+                             THEN (SELECT units FROM discovered) \
+                         ELSE $13 END, \
+                     CASE WHEN $5::text IS NOT NULL THEN $14 END \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, (SELECT title FROM discovered), economic_series.title), \
                      description = COALESCE($4, (SELECT description FROM discovered), \
                          economic_series.description), \
-                     units = CASE WHEN $12::text IS NOT NULL THEN $5 \
-                         ELSE COALESCE((SELECT units FROM discovered), economic_series.units) END, \
-                     units_source = CASE WHEN $12::text IS NOT NULL THEN $12 \
+                     units = COALESCE($5, (SELECT units FROM discovered), economic_series.units), \
+                     units_source = CASE WHEN $5::text IS NOT NULL THEN $12 \
                          WHEN (SELECT units FROM discovered) IS NOT NULL THEN 'structured' \
+                         WHEN economic_series.units IS NOT NULL THEN economic_series.units_source \
+                         WHEN $12::text IS NOT NULL THEN 'unknown' \
                          ELSE economic_series.units_source END, \
-                     units_raw = CASE WHEN $12::text IS NOT NULL THEN $13 \
+                     units_raw = CASE WHEN $5::text IS NOT NULL THEN $13 \
                          WHEN (SELECT units FROM discovered) IS NOT NULL \
                              THEN (SELECT units FROM discovered) \
+                         WHEN economic_series.units IS NOT NULL THEN economic_series.units_raw \
+                         WHEN $12::text IS NOT NULL THEN $13 \
                          ELSE economic_series.units_raw END, \
-                     units_parsed = CASE WHEN $12::text IS NOT NULL THEN $14 \
+                     units_parsed = CASE WHEN $5::text IS NOT NULL THEN $14 \
                          WHEN (SELECT units FROM discovered) IS NOT NULL THEN NULL \
-                         ELSE economic_series.units_parsed END, \
+                         WHEN economic_series.units IS NOT NULL \
+                             THEN economic_series.units_parsed \
+                         END, \
                      frequency = COALESCE($6, (SELECT frequency FROM discovered), \
                          economic_series.frequency), \
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \

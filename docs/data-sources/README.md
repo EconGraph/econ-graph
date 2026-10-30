@@ -97,14 +97,17 @@ its `"."` missing-value marker becomes `NULL`.
 Each series stores its units three ways on `economic_series`:
 
 - `units`: the text shown with the series, describing the values as stored.
-- `units_raw`: the source's units text exactly as received. It differs from `units` only for
+- `units_raw`: the source's units text exactly as received, or NULL when it was not recorded
+  (rows no fetch has written since the column was added). It differs from `units` only for
   BEA, whose `units` drops the `Millions of` (or other scale) that `UNIT_MULT` already
   multiplied into the values.
 - `units_source`: `structured` when the units come from a field of the source's own that
   holds them (FRED's `units`, BLS's catalog and code files, BEA's `CL_UNIT` and
   `METRIC_NAME`, the World Bank, Census and FHFA units that the adapters set from their
   curated lists), `parsed_from_text` when the crawler parsed them out of free text such as a
-  description, and `unknown` when the series has no units. Every current adapter's units are
+  description, and `unknown` when the series has no units. NULL on a row no writer has set it
+  on; readers then derive it: `unknown` when `units` is missing or only whitespace, else
+  `structured`. Every current adapter's units are
   `structured`.
 
 `units_parsed` holds the units in a fixed vocabulary (the
@@ -114,14 +117,20 @@ years), the scale of the stored values (units, thousands, millions, billions, tr
 where stated, an ISO 4217 currency code, an index base such as `2017=100`, and the price
 reference year of a constant-price amount. The parser recognises only listed phrases,
 normalising case and whitespace and nothing else; anything ambiguous or unlisted (`Rate`,
-`Level`, `Percent or rate`, `+1 or 0`, `Mt CO2e`) is left unparsed. A bare `dollars` has no
-currency code. GraphQL exposes these as `unitsSource`, `unitsRaw` and `parsedUnit`; for a
-series whose `units_parsed` is not stored, `parsedUnit` parses `units`.
+`Level`, `Percent or rate`, `+1 or 0`, `Mt CO2e`) is left unparsed. A bare currency word
+(`dollars`, `$`) gets the currency its adapter states for the source: US dollars for FRED,
+BEA and BLS. The World Bank's units name their currency (`current US$`), and Census, FHFA and
+the static catalogs state none. Text that names a currency (`Canadian dollars`, `euro`)
+always keeps it, and other kinds never get a currency. GraphQL exposes these as
+`unitsSource`, `unitsRaw` and `parsedUnit`. For a series whose `units_parsed` is not stored,
+`parsedUnit` parses `units` with no source currency, so a bare `dollars` there has no code.
 
 When a fetched series is stored, the crawler parses its units text and, where the adapter
 also states units from structured fields (BEA: values are in base units, since they are
 multiplied by `10^UNIT_MULT`), compares the two. The structured units win in `units_parsed`,
-and the check never changes the stored text or values. It counts by source in
+and the check never changes the stored text or values. A fetch that gives no units keeps the
+stored ones. It counts by source (at least once per stored fetch: a retried persist counts
+again) in
 `crawler_units_unrecognised_total`, `crawler_units_mismatch_total` and
 `crawler_units_agree_total`, and logs one line per series: `error` for a mismatch or for
 unparsed text next to structured units, `debug` for other unparsed text. The

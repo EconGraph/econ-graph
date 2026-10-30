@@ -138,7 +138,7 @@ use crate::reference::{data_dir, DATA_DIR_ENV};
 use crate::reference_file::{download_seed_entries, seed_migration_sql};
 use crate::reference_file::{labels_only, refresh_code_list_with, CodeList};
 use crate::source::SourceId;
-use crate::units::{Scale, StructuredUnit};
+use crate::units::{Scale, StructuredUnit, UnitsContext};
 use crate::value::{check_observation_value, parse_observation_value};
 use econ_graph_core::error::AppError;
 
@@ -1344,6 +1344,7 @@ fn nipa_metadata(
         units: units(row.metric_name.as_deref(), row.cl_unit.as_deref(), mult),
         units_raw: unit_text(row.metric_name.as_deref(), row.cl_unit.as_deref()).map(Into::into),
         structured_unit: Some(Box::new(scaled_values())),
+        units_context: UnitsContext::US_DOLLARS,
         frequency: Some(frequency.label().into()),
         seasonal_adjustment: nipa_seasonal_adjustment(frequency, row),
         ..NewSeriesMetadataLite::default()
@@ -1390,6 +1391,7 @@ fn regional_series(
         units: units(None, first.cl_unit.as_deref(), mult),
         units_raw: unit_text(None, first.cl_unit.as_deref()).map(Into::into),
         structured_unit: Some(Box::new(scaled_values())),
+        units_context: UnitsContext::US_DOLLARS,
         frequency: Some(Frequency::Annual.label().into()),
         seasonal_adjustment: None,
         ..NewSeriesMetadataLite::default()

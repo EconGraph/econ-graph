@@ -19,7 +19,7 @@ use crate::http::{HttpFetcher, Validators};
 use crate::policy::SourcePolicy;
 use crate::reference_file::{self, CodeList};
 use crate::source::SourceId;
-use crate::units::{StructuredUnit, UnitsSource};
+use crate::units::{StructuredUnit, UnitsContext, UnitsSource};
 
 /// API keys for sources that use them. `Debug` redacts the values.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -118,6 +118,10 @@ pub struct NewSeriesMetadataLite {
     /// parsed `units`, and preferred to it, when the series is stored (see
     /// [`units::check_and_record`](crate::units::check_and_record)).
     pub structured_unit: Option<Box<StructuredUnit>>,
+    /// What the parser may assume about this source's units texts: the currency a bare
+    /// `dollars` or `$` means ([`UnitsContext::US_DOLLARS`] for FRED, BEA and BLS). Text that
+    /// names its currency ignores it.
+    pub units_context: UnitsContext,
     /// Observation frequency, as the source states it (e.g. `"Monthly"`).
     pub frequency: Option<String>,
     /// Seasonal adjustment, as the source states it (e.g. `"Seasonally Adjusted"`).

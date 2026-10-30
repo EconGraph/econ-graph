@@ -39,10 +39,12 @@ pub struct EconomicSeries {
     /// Overrides the dataset's default measure; `None` uses the dataset's.
     pub default_measure: Option<String>,
     /// Where `units` came from: `structured`, `parsed_from_text` or `unknown` (no units). See
-    /// `econ_graph_crawler::units::UnitsSource`.
-    pub units_source: String,
-    /// The source's units text exactly as received. `None` on a row whose units no fetch has
-    /// written since the column was added; `units` then holds the source's text.
+    /// `econ_graph_crawler::units::UnitsSource`. `None` on a row no writer has set it on; read
+    /// it through [`EconomicSeries::units_source_or_derived`].
+    pub units_source: Option<String>,
+    /// The source's units text exactly as received. `None` when it was not recorded; `units`
+    /// may then be reworded (BEA's drops the scale its values were multiplied by), so it is not
+    /// a substitute.
     pub units_raw: Option<String>,
     /// The units in the crawler's vocabulary (`econ_graph_crawler::units::Unit`, as JSON), as
     /// the last fetch stored them. `None` when that fetch did not recognise them or no fetch has
@@ -83,6 +85,21 @@ pub struct NewEconomicSeries {
     #[serde(default)]
     #[validate(length(min = 1, max = 100))]
     pub default_measure: Option<String>,
+    /// Where `units` came from (see [`EconomicSeries::units_source`]). `None` lets
+    /// [`EconomicSeries::create`] derive it from `units`.
+    #[serde(default)]
+    pub units_source: Option<String>,
+}
+
+/// The `units_source` of a series whose writer did not set one: `unknown` when `units` is
+/// missing or only whitespace (any Unicode whitespace, as Rust's `trim` sees it), else
+/// `structured`.
+pub fn derived_units_source(units: Option<&str>) -> &'static str {
+    if units.is_some_and(|u| !u.trim().is_empty()) {
+        "structured"
+    } else {
+        "unknown"
+    }
 }
 
 /// Economic series update model
@@ -230,6 +247,7 @@ impl Default for NewEconomicSeries {
             dataset_id: Uuid::nil(),
             dimensions: SeriesDimensions::default(),
             default_measure: None,
+            units_source: None,
         }
     }
 }
@@ -251,6 +269,13 @@ impl Default for UpdateEconomicSeries {
 }
 
 impl EconomicSeries {
+    /// `units_source`, or for a row no writer has set it on, [`derived_units_source`].
+    pub fn units_source_or_derived(&self) -> &str {
+        self.units_source
+            .as_deref()
+            .unwrap_or_else(|| derived_units_source(self.units.as_deref()))
+    }
+
     /// Find all economic series
     pub async fn find_all(
         pool: &crate::database::DatabasePool,
@@ -317,8 +342,13 @@ impl EconomicSeries {
             ))
         })?;
 
+        let mut new_series = new_series.clone();
+        if new_series.units_source.is_none() {
+            new_series.units_source =
+                Some(derived_units_source(new_series.units.as_deref()).to_string());
+        }
         let series = diesel::insert_into(dsl::economic_series)
-            .values(new_series)
+            .values(&new_series)
             .returning(Self::as_select())
             .get_result::<Self>(&mut conn)
             .await?;

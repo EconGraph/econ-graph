@@ -112,18 +112,19 @@ impl EconomicSeriesType {
         &self.units
     }
 
-    /// Where `units` came from.
+    /// Where `units` came from. For a series whose source was never recorded: UNKNOWN when it
+    /// has no units, else STRUCTURED.
     async fn units_source(&self, ctx: &Context<'_>) -> Result<UnitsSourceType> {
         let fields = self.load_units_fields(ctx).await?;
-        Ok(UnitsSourceType::from_db(&fields.units_source))
+        Ok(fields.source(self.units.as_deref()))
     }
 
     /// The source's units text exactly as received, which `units` may reword (BEA's drops the
-    /// "Millions of" that its values were already multiplied by). `units` when the raw text is
-    /// not stored.
+    /// "Millions of" that its values were already multiplied by). Null when it was not
+    /// recorded.
     async fn units_raw(&self, ctx: &Context<'_>) -> Result<Option<String>> {
         let fields = self.load_units_fields(ctx).await?;
-        Ok(fields.units_raw.or_else(|| self.units.clone()))
+        Ok(fields.units_raw)
     }
 
     /// The units in a fixed vocabulary: kind, currency, scale of the values and index base.

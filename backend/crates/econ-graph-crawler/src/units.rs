@@ -15,8 +15,13 @@
 //! nothing else, and returns `None` for anything it does not recognise, including phrases that
 //! are ambiguous (`Rate`, `Percent or rate`, `Level`), units outside the vocabulary (`Mt CO2e`,
 //! `+1 or 0`), and a scale on a kind that cannot have one (`Millions of percent`). It never
-//! guesses. `Dollars` alone is a currency with no code unless the caller's [`UnitsContext`]
-//! names one: FRED, BEA and the Bank of Canada all just say `dollars`.
+//! guesses.
+//!
+//! A bare currency word (`dollars`, `dollar`, `$`) names no currency, and FRED, BEA and the
+//! Bank of Canada all just say `dollars`. The adapter, which knows its source, passes that
+//! currency in a [`UnitsContext`]; without one the unit is a currency with no code. The context
+//! applies only to a bare currency word: text that names a currency (`Canadian dollars`,
+//! `US$`, `euro`) always keeps it, and a unit of another kind never gets a currency.
 //!
 //! A phrase is `[qualifier, ][scale of ]body[, scale]`:
 //!
@@ -26,13 +31,14 @@
 //!   Without one, the scale is [`Scale::Units`].
 //! - body, by kind:
 //!   - currency: an optional price basis (`current`, `constant 2015`, `chained`,
-//!     `chained 2017`, `chained (2017)`) and a currency (`dollars`, `US dollars`, `U.S. dollars`,
+//!     `chained 2017`, `chained (2017)`) and a currency (`dollars`, `$`, `US dollars`, `U.S. dollars`,
 //!     `US$`, `Canadian dollars`, `euro`, `yen`, `Swiss francs`, `pounds sterling`,
 //!     `national currency`). `constant` and `chained` make it
 //!     [`UnitKind::ConstantPriceCurrency`].
 //!   - count: `count`, `number`, `persons`, `people`, `employees`, `all employees`.
 //!   - percent: `percent`, `%`, `percent per annum`, `% per year`, `unemployment rate`, and
-//!     `percent of ...` / `% of ...` (a share of something).
+//!     `percent of X` / `% of X` for a listed whole X (`GDP`, `population`, `labor force`,
+//!     ...: the World Bank's shares).
 //!   - percent change: `percent change`, `% change`, `percent change, annual rate`,
 //!     `percent change at annual rate`, `percent change from year ago`.
 //!   - percentage points: `percentage points`.
@@ -247,9 +253,22 @@ impl UnitsSource {
 /// What the parser may assume about a source's texts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UnitsContext {
-    /// ISO 4217 code that a bare `dollars` means for this source (`"CAD"` for the Bank of
-    /// Canada). `None` leaves such a currency without a code.
-    pub dollars: Option<&'static str>,
+    /// ISO 4217 code that a bare currency word (`dollars`, `dollar`, `$`) means for this source
+    /// (`"USD"` for FRED, `"CAD"` for the Bank of Canada). `None` leaves such a currency without
+    /// a code. Text that names its currency ignores it.
+    pub bare_currency: Option<&'static str>,
+}
+
+impl UnitsContext {
+    /// No assumptions: a bare `dollars` has no currency code.
+    pub const NONE: Self = Self {
+        bare_currency: None,
+    };
+
+    /// A source whose bare `dollars` are US dollars (FRED, BEA, BLS).
+    pub const US_DOLLARS: Self = Self {
+        bare_currency: Some("USD"),
+    };
 }
 
 /// Parses a units phrase into the vocabulary, with no assumptions about the source. See the
@@ -313,6 +332,42 @@ const PERCENT_CHANGE: &[&str] = &[
     "percent change at annual rate",
     "percent change from year ago",
 ];
+/// The wholes a `% of ...` / `percent of ...` share is recognised of (the World Bank's).
+const SHARE_OF: &[&str] = &[
+    "gdp",
+    "gni",
+    "adults",
+    "available freshwater",
+    "children ages 12-23 months",
+    "children under 5",
+    "current health expenditure",
+    "energy use",
+    "government expenditure",
+    "internal resources",
+    "labor force",
+    "labor force ages 15-24",
+    "land area",
+    "manufactured exports",
+    "merchandise exports",
+    "merchandise imports",
+    "output",
+    "people ages 15+",
+    "people ages 15-24",
+    "population",
+    "population ages 15+",
+    "population ages 15-49",
+    "population ages 20-79",
+    "population ages 25+",
+    "primary school age",
+    "relevant age group",
+    "rural population",
+    "territorial waters",
+    "total electricity production",
+    "total final energy consumption",
+    "total territorial area",
+    "urban population",
+    "youth population",
+];
 const PERCENTAGE_POINTS: &[&str] = &["percentage points", "percentage point"];
 const COUNT: &[&str] = &[
     "count",
@@ -362,11 +417,11 @@ fn parse_body(body: &str, scale: Scale, ctx: &UnitsContext) -> Option<Unit> {
             return Some(Unit::new(kind, scale));
         }
     }
-    // A share of something: "% of GDP", "percent of total electricity production".
-    if ["% of ", "percent of "]
-        .iter()
-        .any(|p| body.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))
-    {
+    // A share of a listed whole: "% of GDP", "percent of total electricity production".
+    if ["% of ", "percent of "].iter().any(|p| {
+        body.strip_prefix(p)
+            .is_some_and(|rest| SHARE_OF.contains(&rest))
+    }) {
         return Some(Unit::new(UnitKind::Percent, scale));
     }
     if INDEX_NAMES.contains(&body) {
@@ -402,7 +457,7 @@ fn currency(body: &str, scale: Scale, ctx: &UnitsContext) -> Option<Unit> {
         (UnitKind::Currency, None, body)
     };
     let code = match name {
-        "dollars" | "dollar" => ctx.dollars,
+        "dollars" | "dollar" | "$" => ctx.bare_currency,
         _ => CURRENCIES.iter().find(|(n, _)| *n == name)?.1,
     };
     let mut unit = Unit::new(kind, scale);
@@ -411,14 +466,18 @@ fn currency(body: &str, scale: Scale, ctx: &UnitsContext) -> Option<Unit> {
     Some(unit)
 }
 
-/// A four-digit year.
+/// A four-digit year from 1000 on (`0000` and `0999` are not years a source means).
 fn year_of(s: &str) -> Option<i32> {
-    if s.len() == 4 && s.bytes().all(|b| b.is_ascii_digit()) {
+    if s.len() == 4 && s.bytes().all(|b| b.is_ascii_digit()) && !s.starts_with('0') {
         s.parse().ok()
     } else {
         None
     }
 }
+
+/// Longest span, in years, a two-digit end year may cross a century boundary for
+/// (`1995-04` is 1995-2004).
+const MAX_CENTURY_SPAN: i32 = 10;
 
 const MONTHS: [&str; 12] = [
     "january",
@@ -436,7 +495,8 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// An index base, `period=value`, in canonical form. `period` is a year (`2017`), a span of
-/// years (`1982-84`, `1982-1984`, `2011-12`: the second year after the first), a month and year
+/// years (`1982-84`, `1982-1984`, `2011-12`: the second year after the first; a two-digit end
+/// crosses a century only within [`MAX_CENTURY_SPAN`] years, as in `1999-00`), a month and year
 /// (`January 1991`, `Jan 1991`) or a quarter (`1991Q1`); `value` is a positive whole number.
 fn index_base(s: &str) -> Option<String> {
     let (period, value) = s.split_once('=')?;
@@ -466,8 +526,12 @@ fn base_period(p: &str) -> Option<String> {
                 let y = first - first % 100 + second.parse::<i32>().ok()?;
                 if y > first {
                     y
-                } else {
+                } else if y + 100 - first <= MAX_CENTURY_SPAN {
+                    // A short span across a century: 1999-00 is 1999-2000.
                     y + 100
+                } else {
+                    // 2010-09 is not 2010-2109.
+                    return None;
                 }
             }
             _ => return None,
@@ -618,15 +682,16 @@ pub fn init_metrics() {
 const LOGGED_TEXT_CHARS: usize = 200;
 
 /// Checks a fetched series' units `text` against the vocabulary and the source's `structured`
-/// units, logs and counts the outcome by source (see
-/// [Checking source text](self#checking-source-text)), and returns the unit to store
-/// ([`stored_unit`]). The check never changes what is stored. Logs only the source, the
-/// series' external id and units, never a URL or a key.
+/// units, parsing with what the adapter knows about its texts (`ctx`). Logs and counts the
+/// outcome by source (see [Checking source text](self#checking-source-text)), and returns the
+/// unit to store ([`stored_unit`]). The check never changes what is stored. Logs only the
+/// source, the series' external id and units, never a URL or a key.
 pub fn check_and_record(
     source: SourceId,
     external_id: &str,
     text: Option<&str>,
     structured: Option<&StructuredUnit>,
+    ctx: &UnitsContext,
 ) -> Option<Unit> {
     let Some(text) = text.map(str::trim).filter(|t| !t.is_empty()) else {
         return stored_unit(None, structured);
@@ -634,7 +699,7 @@ pub fn check_and_record(
     let quoted: String = text.chars().take(LOGGED_TEXT_CHARS).collect();
     let label = [source.as_str()];
     let metrics = &*CRAWLER_UNITS_METRICS;
-    let outcome = check_text(text, structured, &UnitsContext::default());
+    let outcome = check_text(text, structured, ctx);
     match (&outcome, structured) {
         (TextCheck::Unrecognised, Some(s)) => {
             metrics.unrecognised_total.with_label_values(&label).inc();

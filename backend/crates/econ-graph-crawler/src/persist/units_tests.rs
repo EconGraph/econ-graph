@@ -5,7 +5,7 @@ use super::*;
 use crate::adapter::NewSeriesMetadataLite;
 use crate::dataset::{parse_dataset_file, DatasetCatalog};
 use crate::persist::stable_id_tests::{database_url, FreshDb};
-use crate::units::{Scale, StructuredUnit};
+use crate::units::{Scale, StructuredUnit, UnitsContext};
 
 const WDI: &str = r#"
 [[dataset]]
@@ -40,7 +40,7 @@ fn meta(units: Option<&str>) -> NewSeriesMetadataLite {
 
 type UnitsRow = (
     Option<String>,
-    String,
+    Option<String>,
     Option<String>,
     Option<serde_json::Value>,
 );
@@ -91,9 +91,27 @@ async fn persist_series_records_units_provenance() {
         units_row(&db.pool, "a").await,
         (
             Some("current US$".into()),
-            "structured".into(),
+            Some("structured".into()),
             Some("current US$".into()),
             Some(serde_json::json!({"kind": "currency", "currency": "USD", "scale": "units"})),
+        )
+    );
+
+    // The adapter's currency names a bare "Dollars" in the parsed unit; the text is unchanged.
+    let fred_like = NewSeriesMetadataLite {
+        units_context: UnitsContext::US_DOLLARS,
+        ..meta(Some("Billions of Dollars"))
+    };
+    persist_series(&db.pool, wb, "f", &series("GBR", Some(fred_like)))
+        .await
+        .unwrap();
+    assert_eq!(
+        units_row(&db.pool, "f").await,
+        (
+            Some("Billions of Dollars".into()),
+            Some("structured".into()),
+            Some("Billions of Dollars".into()),
+            Some(serde_json::json!({"kind": "currency", "currency": "USD", "scale": "billions"})),
         )
     );
 
@@ -110,7 +128,7 @@ async fn persist_series_records_units_provenance() {
         units_row(&db.pool, "b").await,
         (
             Some("Mt CO2e".into()),
-            "structured".into(),
+            Some("structured".into()),
             Some("Mt CO2e".into()),
             None
         )
@@ -134,7 +152,7 @@ async fn persist_series_records_units_provenance() {
         units_row(&db.pool, "c").await,
         (
             Some("Thousands of current dollars".into()),
-            "structured".into(),
+            Some("structured".into()),
             Some("Millions of current dollars".into()),
             Some(serde_json::json!({"kind": "currency", "scale": "units"})),
         )
@@ -146,23 +164,31 @@ async fn persist_series_records_units_provenance() {
         .unwrap();
     assert_eq!(
         units_row(&db.pool, "d").await,
-        (None, "unknown".into(), None, None)
+        (None, Some("unknown".into()), None, None)
     );
 
-    // Only the text the units would come from, and it gave none: unknown, the text kept.
-    let unparsed = NewSeriesMetadataLite {
+    // Only the text the units would come from, and it gave none. Stored units are kept, with
+    // their own source, text and parsed unit.
+    let unparsed = || NewSeriesMetadataLite {
         units_raw: Some("Month-end, levels".into()),
         units_source: UnitsSource::ParsedFromText,
         ..meta(None)
     };
-    persist_series(&db.pool, wb, "a", &series("USA", Some(unparsed)))
+    let before = units_row(&db.pool, "a").await;
+    persist_series(&db.pool, wb, "a", &series("USA", Some(unparsed())))
+        .await
+        .unwrap();
+    assert_eq!(units_row(&db.pool, "a").await, before);
+    assert_eq!(before.0.as_deref(), Some("current US$"));
+    // A series with no units anywhere is unknown, and keeps the text.
+    persist_series(&db.pool, wb, "d", &series("FRA", Some(unparsed())))
         .await
         .unwrap();
     assert_eq!(
-        units_row(&db.pool, "a").await,
+        units_row(&db.pool, "d").await,
         (
             None,
-            "unknown".into(),
+            Some("unknown".into()),
             Some("Month-end, levels".into()),
             None
         )
@@ -203,7 +229,7 @@ async fn persist_series_records_units_provenance() {
         units_row(&db.pool, "e").await,
         (
             Some("persons".into()),
-            "structured".into(),
+            Some("structured".into()),
             Some("persons".into()),
             None
         )

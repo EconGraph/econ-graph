@@ -27,7 +27,7 @@ tests:
               source: BEA
             exp_annotations:
               summary: BEA units text disagrees with its structured units
-              description: In the last day about 1 BEA series had a units text that parses but disagrees with the units the source's structured fields state (kind, currency, scale or index base). The structured units were stored. The crawler-worker log has one error line per series ("units text disagrees with the source's structured units") with the series id, the text and both units.
+              description: In the last day about 1 BEA stored series fetches had a units text that parses but disagrees with the units the source's structured fields state (kind, currency, scale or index base). The structured units were stored. The crawler-worker log has one error line per series ("units text disagrees with the source's structured units") with the series id, the text and both units. A persist that rolls back and is retried counts and logs again, so the count is at least the number of mismatching fetches.
       - eval_time: 30h
         alertname: CrawlerUnitsMismatch
         exp_alerts: []

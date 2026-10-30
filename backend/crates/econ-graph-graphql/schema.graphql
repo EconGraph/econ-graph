@@ -616,13 +616,14 @@ type EconomicSeriesType {
 	description: String
 	units: String
 	"""
-	Where `units` came from.
+	Where `units` came from. For a series whose source was never recorded: UNKNOWN when it
+	has no units, else STRUCTURED.
 	"""
 	unitsSource: UnitsSource!
 	"""
 	The source's units text exactly as received, which `units` may reword (BEA's drops the
-	"Millions of" that its values were already multiplied by). `units` when the raw text is
-	not stored.
+	"Millions of" that its values were already multiplied by). Null when it was not
+	recorded.
 	"""
 	unitsRaw: String
 	"""

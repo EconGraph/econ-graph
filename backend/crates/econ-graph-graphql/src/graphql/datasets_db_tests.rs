@@ -7,6 +7,7 @@
 use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
 use crate::graphql::schema::{create_schema, SchemaResources};
+use crate::graphql::units::SeriesUnitsBatcher;
 use crate::types::EconomicSeriesType;
 use async_graphql::{EmptyMutation, EmptySubscription, Request, Schema};
 use dataloader::non_cached::Loader;
@@ -696,8 +697,8 @@ async fn series_units_fields_resolve_from_the_row_and_for_search_results() {
                            "indexBase": null, "priceReferenceYear": null}
         })
     );
-    // No stored raw text or parsed unit: the stored text, parsed now.
-    assert_eq!(data["b"]["unitsRaw"], "Index 2017=100");
+    // No stored raw text or parsed unit: no raw text, and the stored text parsed now.
+    assert_eq!(data["b"]["unitsRaw"], Value::Null);
     assert_eq!(
         data["b"]["parsedUnit"],
         json!({"kind": "INDEX", "currencyCode": null, "scale": "UNITS",
@@ -747,4 +748,116 @@ async fn series_units_fields_resolve_from_the_row_and_for_search_results() {
         json!({"unitsSource": "STRUCTURED", "unitsRaw": "Millions of current dollars",
                "parsedUnit": {"scale": "UNITS"}})
     );
+}
+
+/// A row written before `units_source` existed has it NULL; reads derive it from `units`,
+/// treating Unicode whitespace as empty.
+#[tokio::test]
+async fn series_without_a_stored_units_source_derive_it() {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::schema::economic_series::dsl;
+
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let with_units = new_series(&pool, source.id, "legacy_units", None).await;
+    let blank = new_series(&pool, source.id, "legacy_blank", None).await;
+    let mut conn = pool.get().await.unwrap();
+    for (id, units) in [(with_units.id, "Percent"), (blank.id, "\u{a0}\t")] {
+        diesel::update(dsl::economic_series.filter(dsl::id.eq(id)))
+            .set((dsl::units.eq(units), dsl::units_source.eq(None::<String>)))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let data = execute(
+        &pool,
+        &format!(
+            r#"{{ a: series(id: "{}") {{ unitsSource unitsRaw parsedUnit {{ kind }} }}
+                 b: series(id: "{}") {{ unitsSource unitsRaw parsedUnit {{ kind }} }} }}"#,
+            with_units.id, blank.id
+        ),
+    )
+    .await;
+    assert_eq!(
+        data["a"],
+        json!({"unitsSource": "STRUCTURED", "unitsRaw": null, "parsedUnit": {"kind": "PERCENT"}})
+    );
+    assert_eq!(
+        data["b"],
+        json!({"unitsSource": "UNKNOWN", "unitsRaw": null, "parsedUnit": null})
+    );
+}
+
+/// `EconomicSeries::create` records `structured` for a series created with units, and
+/// `unknown` without.
+#[tokio::test]
+async fn create_records_the_units_source() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let plain = new_series(&pool, source.id, "create_no_units", None).await;
+    assert_eq!(plain.units_source.as_deref(), Some("unknown"));
+    let dataset_id = test_dataset_id(&mut pool.get().await.unwrap(), source.id).await;
+    let with_units = EconomicSeries::create(
+        &pool,
+        &NewEconomicSeries {
+            source_id: source.id,
+            external_id: "create_units".into(),
+            title: "t".into(),
+            units: Some("Percent".into()),
+            dataset_id,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(with_units.units_source.as_deref(), Some("structured"));
+}
+
+#[tokio::test]
+async fn series_units_loader_runs_one_query_per_batch() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let mut ids = Vec::new();
+    for name in ["units_batch_a", "units_batch_b", "units_batch_c"] {
+        let series = new_series(&pool, source.id, name, None).await;
+        set_units(
+            &pool,
+            series.id,
+            Some("Percent"),
+            "structured",
+            Some(name),
+            None,
+        )
+        .await;
+        ids.push(series.id);
+    }
+
+    let batches = Arc::new(AtomicUsize::new(0));
+    let loader = Loader::new(Counting {
+        inner: SeriesUnitsBatcher { pool: pool.clone() },
+        batches: batches.clone(),
+    });
+    let missing = Uuid::new_v4();
+    let keys: Vec<Uuid> = ids.iter().copied().chain([missing]).collect();
+    let results = futures::future::join_all(keys.iter().map(|&id| loader.try_load(id))).await;
+
+    assert_eq!(
+        batches.load(Ordering::SeqCst),
+        1,
+        "one batch for concurrent loads"
+    );
+    for (result, name) in results
+        .iter()
+        .zip(["units_batch_a", "units_batch_b", "units_batch_c"])
+    {
+        let fields = result
+            .as_ref()
+            .expect("key present")
+            .clone()
+            .expect("series found");
+        assert_eq!(fields.units_source.as_deref(), Some("structured"));
+        assert_eq!(fields.units_raw.as_deref(), Some(name));
+    }
+    assert_eq!(results[3].as_ref().expect("key present"), &None);
 }

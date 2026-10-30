@@ -133,8 +133,8 @@ impl From<Unit> for ParsedUnitType {
 /// A series' units columns, as stored.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SeriesUnitsFields {
-    /// `economic_series.units_source`.
-    pub units_source: String,
+    /// `economic_series.units_source`; `None` on a row no writer has set it on.
+    pub units_source: Option<String>,
     /// `economic_series.units_raw`.
     pub units_raw: Option<String>,
     /// `economic_series.units_parsed`.
@@ -142,11 +142,22 @@ pub struct SeriesUnitsFields {
 }
 
 impl SeriesUnitsFields {
-    /// The series' parsed unit: the stored one, else `units` parsed now (for rows whose units
-    /// came from discovery, or no fetch has written since the column was added). Null when the
-    /// series has no units or they are not in the vocabulary.
+    /// Where the series' `units` came from: the stored source, or for a row without one,
+    /// `Unknown` when `units` is missing or only whitespace and `Structured` otherwise.
+    pub fn source(&self, units: Option<&str>) -> UnitsSourceType {
+        UnitsSourceType::from_db(
+            self.units_source
+                .as_deref()
+                .unwrap_or_else(|| econ_graph_core::models::derived_units_source(units)),
+        )
+    }
+
+    /// The series' parsed unit: the stored one, else `units` parsed now with no source
+    /// currency (for rows whose units came from discovery, or that no fetch has written since
+    /// the column was added). Null when the series has no units or they are not in the
+    /// vocabulary.
     pub fn parsed_unit(&self, units: Option<&str>) -> Option<ParsedUnitType> {
-        if UnitsSourceType::from_db(&self.units_source) == UnitsSourceType::Unknown {
+        if self.source(units) == UnitsSourceType::Unknown {
             return None;
         }
         self.units_parsed
@@ -190,7 +201,12 @@ impl BatchFn<Uuid, Option<SeriesUnitsFields>> for SeriesUnitsBatcher {
                     dsl::units_raw,
                     dsl::units_parsed,
                 ))
-                .load::<(Uuid, String, Option<String>, Option<serde_json::Value>)>(&mut conn)
+                .load::<(
+                    Uuid,
+                    Option<String>,
+                    Option<String>,
+                    Option<serde_json::Value>,
+                )>(&mut conn)
                 .await
             {
                 Ok(rows) => rows,
@@ -239,7 +255,7 @@ mod tests {
 
     fn fields(source: &str, parsed: Option<serde_json::Value>) -> SeriesUnitsFields {
         SeriesUnitsFields {
-            units_source: source.into(),
+            units_source: Some(source.into()),
             units_raw: None,
             units_parsed: parsed,
         }
@@ -287,5 +303,34 @@ mod tests {
             UnitsSourceType::Unknown
         );
         assert_eq!(UnitsSourceType::from_db("other"), UnitsSourceType::Unknown);
+    }
+
+    /// A row without a stored source derives it from `units`, treating any Unicode whitespace
+    /// as empty.
+    #[test]
+    fn source_is_derived_for_rows_without_one() {
+        let legacy = SeriesUnitsFields::default();
+        assert_eq!(legacy.source(Some("Percent")), UnitsSourceType::Structured);
+        for blank in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("\t"),
+            Some("\u{a0}"),
+            Some("\u{2003}\n"),
+        ] {
+            assert_eq!(legacy.source(blank), UnitsSourceType::Unknown, "{blank:?}");
+            assert_eq!(legacy.parsed_unit(blank), None, "{blank:?}");
+        }
+        // A legacy row with units parses them now.
+        assert_eq!(
+            legacy.parsed_unit(Some("Percent")).unwrap().kind,
+            UnitKindType::Percent
+        );
+        // A stored source wins.
+        assert_eq!(
+            fields("parsed_from_text", None).source(None),
+            UnitsSourceType::ParsedFromText
+        );
     }
 }

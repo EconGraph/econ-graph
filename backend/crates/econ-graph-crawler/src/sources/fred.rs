@@ -122,6 +122,7 @@ use crate::http::Validators;
 use crate::persist;
 use crate::reference::fred_series;
 use crate::source::SourceId;
+use crate::units::UnitsContext;
 use crate::value::parse_observation_value;
 
 /// The real FRED API root.
@@ -286,6 +287,7 @@ impl FredAdapter {
                 units: non_empty(s.units),
                 frequency: non_empty(s.frequency),
                 seasonal_adjustment: non_empty(s.seasonal_adjustment),
+                units_context: UnitsContext::US_DOLLARS,
                 ..NewSeriesMetadataLite::default()
             },
             non_empty(s.last_updated),
