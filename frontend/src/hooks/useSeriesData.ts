@@ -32,13 +32,26 @@ export interface SeriesObservations {
   points: SeriesDataPoint[];
 }
 
+/** The citation and notice a source's terms require (GraphQL `SourceNotice`). */
+export interface SourceNotice {
+  /** Such as "Source: FHFA HPI®"; null when the terms prescribe none. */
+  citation: string | null;
+  /** The statement the terms require, such as a no-endorsement notice. */
+  notice: string;
+  /** The provider's terms of use. */
+  termsUrl: string;
+  /** Whether the date the data were retrieved from the source must be shown (BLS). */
+  retrievalDateRequired: boolean;
+}
+
 /** Series metadata as returned by the `series(id)` query. */
 export interface SeriesDetail {
   id: string;
   externalId: string;
   title: string;
   description: string | null;
-  source: { name: string } | null;
+  /** The source; `notice` is null for a source without one. */
+  source: { name: string; notice?: SourceNotice | null } | null;
   frequency: string;
   units: string | null;
   seasonalAdjustment: string | null;
@@ -110,6 +123,8 @@ export interface DataSource {
   seriesCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Null for a source without a notice. */
+  notice: SourceNotice | null;
 }
 
 export interface CrawlerStatus {
