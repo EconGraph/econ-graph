@@ -109,8 +109,9 @@ async fn discovery_skips_and_reports_unknown_names() {
     assert_eq!(adapter.curated_missing(), ["NOPE123", "FXEURCAD"]);
 }
 
-/// A server error fails discovery (retried by the queue) instead of returning a partial catalog
-/// the worker would retire series against; rate limits abort at once.
+/// A server error or rate limit fails discovery at once (retried by the queue) instead of
+/// returning a partial catalog the worker would retire series against, and the remaining names
+/// are not looked up.
 #[tokio::test]
 async fn discovery_fails_on_transient_and_rate_limit() {
     let mock = MockSource::start().await;
@@ -120,12 +121,28 @@ async fn discovery_fails_on_transient_and_rate_limit() {
         Reply::text("boom").with_status(500),
     )
     .await;
+    mount_series(&mock, "V41552801", SERIES_V41552801).await;
     let adapter = BocAdapter::new(mock.base_url());
     let err = adapter
-        .discover_names(&test_ctx(), &names(&["V39079", "FXUSDCAD"]))
+        .discover_names(&test_ctx(), &names(&["V39079", "FXUSDCAD", "V41552801"]))
         .await
         .unwrap_err();
     assert_eq!(err.kind(), "transient", "{err}");
+    // FXUSDCAD may have been retried in-process; the name after it was never requested.
+    let paths: Vec<String> = mock
+        .received_requests()
+        .await
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(
+        paths.iter().any(|p| p == "/series/FXUSDCAD/json"),
+        "{paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/series/V41552801/json"),
+        "{paths:?}"
+    );
 
     let mock = MockSource::start().await;
     mock.mount(
@@ -359,18 +376,48 @@ async fn malformed_observations_are_parse_errors() {
 async fn invalid_names_are_not_requested() {
     let mock = MockSource::start().await;
     let adapter = BocAdapter::new(mock.base_url());
-    for name in ["", "../lists/series", "FX USD", "A?b=c"] {
+    let bad = [
+        "",
+        ".",
+        "..",
+        "../lists/series",
+        "FX USD",
+        "A?b=c",
+        "bad/name",
+    ];
+    for name in bad {
         let err = adapter
             .fetch_series(&test_ctx(), name, None)
             .await
             .unwrap_err();
         assert_eq!(err.kind(), "not_found", "{name:?}: {err}");
     }
-    let found = adapter
-        .discover_names(&test_ctx(), &names(&["V39079", "bad/name"]))
-        .await;
-    assert!(found.is_err());
-    assert!(mock.received_requests().await.len() <= 1);
+    let err = adapter
+        .discover_names(&test_ctx(), &names(&bad))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), "not_found", "{err}");
+    assert_eq!(adapter.curated_missing(), Vec::<String>::new());
+    assert!(mock.received_requests().await.is_empty());
+}
+
+/// A value that isn't a decimal, such as an `NA` marker, fails the whole fetch with a `Parse`
+/// error naming the series, date and value; no partial series is returned (see the module docs).
+#[tokio::test]
+async fn non_numeric_value_fails_the_whole_fetch() {
+    let err = fetch_body(observations(json!([
+        {"d": "2026-01-01", "X1": {"v": "1.50"}},
+        {"d": "2026-01-02", "X1": {"v": "NA"}},
+        {"d": "2026-01-03", "X1": {"v": "1.60"}},
+    ])))
+    .await
+    .unwrap_err();
+    assert_eq!(err.kind(), "parse", "{err}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("X1") && msg.contains("2026-01-02") && msg.contains("\"NA\""),
+        "{msg}"
+    );
 }
 
 #[test]

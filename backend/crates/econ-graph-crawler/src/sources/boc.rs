@@ -24,9 +24,9 @@
 //! its first letter capitalised. No metadata is typed in by hand.
 //!
 //! Every series belongs to the one dimensionless dataset [`DATASET`] (`data/datasets/boc.toml`)
-//! and keeps its Valet name as its external id. A name with characters outside
-//! [`is_valet_series_name`] is `NotFound` without a request, so an id can't change the request
-//! path.
+//! and keeps its Valet name as its external id. A name that fails [`is_valet_series_name`]
+//! (other characters, or only dots, dashes and underscores) is `NotFound` without a request, so
+//! an id can't change the request path.
 //!
 //! # Observations
 //!
@@ -35,7 +35,11 @@
 //! series all use `YYYY-MM-DD` (monthly ones the first of the month), and any other date form is
 //! a `Parse` error. Values are strings parsed digit for digit
 //! ([`crate::value::parse_observation_value`]). An observation with no entry for the series, or
-//! an empty `v`, is stored as a missing value.
+//! an empty or null `v`, is stored as a missing value. Any other `v` that isn't a decimal (a
+//! marker such as `NA`, or a number sent as JSON rather than as a string) fails the whole fetch
+//! with a `Parse` error rather than being dropped or stored as missing: none of the listed series
+//! uses such markers, so one appearing means Valet changed its format, and a failed job surfaces
+//! that where a silently missing value would not.
 //!
 //! Valet publishes no vintages: points get `revision_date = date` and `is_original_release =
 //! true`, as for BLS and FHFA, so a revised value overwrites the stored one. Valet sends no
@@ -121,9 +125,11 @@ impl BocAdapter {
     }
 
     /// Looks up each of `names`. A name whose lookup fails with `NotFound`, `Parse` or `Permanent`
-    /// is skipped and reported by [`curated_missing`](SourceAdapter::curated_missing); `Auth` and
-    /// `RateLimited` abort at once. A `Transient` failure, or every name failing, fails the
-    /// discovery, so a partial catalog is never taken as complete.
+    /// is skipped and reported by [`curated_missing`](SourceAdapter::curated_missing). `Auth` and
+    /// any retryable failure (`RateLimited`, `Transient`, `Busy`) fail the discovery at once,
+    /// without looking up the remaining names: during an outage or throttling every later
+    /// lookup would fail too, and the queue retries the discovery later. Every name failing
+    /// fails it as well, so a partial catalog is never taken as complete.
     async fn discover_names(
         &self,
         ctx: &CrawlCtx,
@@ -132,23 +138,19 @@ impl BocAdapter {
         let mut found = Vec::with_capacity(names.len());
         let mut skipped = Vec::new();
         let mut last_err = None;
-        let mut first_transient = None;
         for name in names {
             match self.lookup(ctx, name).await {
                 Ok(series) => found.push(series),
-                Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => return Err(e),
+                Err(e) if e.is_retryable() || matches!(e, CrawlError::Auth(_)) => {
+                    tracing::warn!(series_id = %name, error = %e, "BOC discovery stopped");
+                    return Err(e);
+                }
                 Err(e) => {
                     tracing::warn!(series_id = %name, error = %e, "BOC series lookup failed; skipping");
-                    if first_transient.is_none() && e.is_retryable() {
-                        first_transient = Some(e.clone());
-                    }
                     skipped.push(name.clone());
                     last_err = Some(e);
                 }
             }
-        }
-        if let Some(e) = first_transient {
-            return Err(e);
         }
         if let (true, Some(e)) = (found.is_empty(), last_err) {
             return Err(e);

@@ -23,8 +23,9 @@ Only that group's free-text `description`, "Month-end, Millions of dollars", sta
 adapter does not parse prose into units, so M2 and M2++ are stored with empty units.
 
 A name Valet doesn't know (HTTP 404) or answers malformed is skipped and reported as a missing
-curated entry; the rest are still discovered. A rate limit or authentication failure stops the
-discovery, and a server error fails it so the queue retries it. The list is the adapter's
+curated entry; the rest are still discovered. A rate limit, server error or authentication
+failure stops the discovery at once, without looking up the remaining names, and the queue
+retries it later. The list is the adapter's
 whole catalog: once a discovery succeeds with no skipped names, a stored Bank of Canada series
 the list no longer names is marked inactive.
 
@@ -106,7 +107,9 @@ Each observation's `d` is its date. Daily and weekly series use the observation 
 series use the first of the month. The adapter accepts only `YYYY-MM-DD` dates and fails the
 fetch on any other form. Values are strings, stored digit for digit with their written scale
 (`0.008860` stays `0.008860`). An observation with no entry for the series, or an empty or
-null `v`, is stored as a missing value.
+null `v`, is stored as a missing value. Any other value that isn't a decimal, such as an `NA`
+marker, fails the whole fetch rather than being skipped: none of the listed series uses such
+markers, so one would mean Valet's format changed, and a failed job makes that visible.
 
 Valet publishes no vintages. The adapter stores points with `revision_date = date` and
 `is_original_release = true`, so a revised value within the refresh window overwrites the

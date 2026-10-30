@@ -313,11 +313,14 @@ fn load_boc_series(path: &Path) -> Result<Vec<String>, String> {
     parse_boc_series(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Whether `name` can be a Valet series name: 1 to 100 ASCII letters, digits, `.`, `_` and `-`.
-/// Every name in Valet's series list fits, and such a name is safe as a URL path segment.
+/// Whether `name` can be a Valet series name: at most 100 ASCII letters, digits, `.`, `_` and
+/// `-`, with at least one letter or digit. Every name in Valet's series list fits. Such a name
+/// is one URL path segment that needs no percent-encoding: it has no `/`, `?`, `#` or `%`, and
+/// requiring a letter or digit rules out the dot segments `.` and `..`, which a URL parser
+/// would resolve against the path (`/observations/../json` is `/json`).
 pub fn is_valet_series_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 100
+    name.len() <= 100
+        && name.bytes().any(|b| b.is_ascii_alphanumeric())
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
@@ -375,6 +378,44 @@ mod tests {
         for id in ["V39079", "AVG.INTWO", "FXUSDCAD", "BD.CDN.10YR.DQ.YLD"] {
             assert!(ids.iter().any(|s| s == id), "{id} missing");
         }
+    }
+
+    /// Valet names are accepted; anything that isn't one URL path segment free of dot segments
+    /// and reserved characters is not.
+    #[test]
+    fn valet_series_names() {
+        for ok in [
+            "V39079",
+            "AVG.INTWO",
+            "BD.CDN.10YR.DQ.YLD",
+            "CPI_TRIM",
+            "A-1",
+            "x",
+            ".V1",
+            "V1..",
+        ] {
+            assert!(is_valet_series_name(ok), "{ok:?}");
+        }
+        let long = "A".repeat(101);
+        for bad in [
+            "",
+            ".",
+            "..",
+            "...",
+            "._-",
+            "-",
+            "a/b",
+            "../json",
+            "a?b",
+            "a#b",
+            "a%2F",
+            "a b",
+            "é",
+            long.as_str(),
+        ] {
+            assert!(!is_valet_series_name(bad), "{bad:?}");
+        }
+        assert!(is_valet_series_name(&"A".repeat(100)));
     }
 
     /// Comments, blank lines and surrounding spaces are skipped; malformed lists are rejected
