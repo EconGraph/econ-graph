@@ -248,7 +248,12 @@ for d in "${WRITER_DEPLOYMENTS[@]}"; do
 done
 for d in "${WRITER_DEPLOYMENTS[@]}"; do
     [ -n "${REPLICAS[$d]}" ] || continue
-    kctl wait --for=delete pod -l "app=$d" --timeout=300s >/dev/null
+    for _ in $(seq 1 150); do
+        pods="$(kctl get pods -l "app=$d" -o name)" || die "cannot list the pods of deployment/$d"
+        [ -n "$pods" ] || break
+        sleep 2
+    done
+    [ -z "$pods" ] || die "deployment/$d still has pods after 300s"
     echo "  deployment/$d stopped"
 done
 active="$(kctl get jobs -o jsonpath='{range .items[?(@.status.active)]}{.metadata.name}{" "}{end}')"

@@ -93,7 +93,7 @@ case "$*" in
   "get cronjob postgres-backup -o jsonpath={.spec.suspend}") ;;
   "scale deployment "*" --replicas="*) ;;
   "patch cronjob postgres-backup --type=merge -p "*) ;;
-  "wait --for=delete pod -l app="*" --timeout=300s") ;;
+  "get pods -l app="*" -o name") ;;
   "port-forward --address 127.0.0.1 pod/postgresql-0 :5432") echo "Forwarding from 127.0.0.1:15432 -> 5432"; exec sleep 300 ;;
   "port-forward --address 127.0.0.1 pod/app-postgres-0 :5432") echo "Forwarding from 127.0.0.1:15433 -> 5432"; exec sleep 300 ;;
   "get secret econ-graph-postgres -o jsonpath={.data.postgres-password}" | \

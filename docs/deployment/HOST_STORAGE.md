@@ -35,9 +35,10 @@ app plane (the app database and its sign-in) snapshots as one unit.
 
 A database created by the original combined baseline needs a separate
 [app/data conversion](APP_DATA_CONVERSION.md) to move existing app records.
-Deploying these StatefulSets alone does not perform that copy. The conversion
-first writes a verified plaintext dump of the combined database to a new
-directory under the backup root (`ECONGRAPH_BACKUP_ROOT`, default
+Deploying these StatefulSets alone does not perform that copy;
+`scripts/deploy/convert-app-data.sh` does, and also rolls it back. The
+conversion first writes a verified plaintext dump of the combined database to a
+new directory under the backup root (`ECONGRAPH_BACKUP_ROOT`, default
 `~/econgraph-backups`), mode 0700 with 0600 files, and never deletes it. Like
 the Keycloak and app dumps beside it, it holds sensitive records (users,
 sessions, annotations, audit history): keep it on this host and do not copy it
