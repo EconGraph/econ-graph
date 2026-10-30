@@ -440,6 +440,7 @@ class GuardTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, code, stdout=out)
         error = None
         with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', context]), \
+                patch.object(deploy, 'pinned_kind', return_value='/pinned/kind-v0.33.0'), \
                 patch.object(subprocess, 'run', side_effect=fake), patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             if typed is None:
                 try:
@@ -483,7 +484,7 @@ class GuardTests(unittest.TestCase):
         argv = ['up', 'one', '--backend-image', 'backend:branch-one', '--frontend-image', 'frontend:branch-one']
         error, calls, sent = self.cluster(argv, namespace={'metadata': self.owned()}, context='kind-scratch')
         self.assertIsNone(error)
-        load = ['kind', 'load', 'docker-image', '--name', 'scratch', 'backend:branch-one', 'frontend:branch-one']
+        load = ['/pinned/kind-v0.33.0', 'load', 'docker-image', '--name', 'scratch', 'backend:branch-one', 'frontend:branch-one']
         self.assertIn(load, calls)
         self.assertLess(calls.index(load), next(i for i, cmd in enumerate(calls) if 'apply' in cmd))
         for name in ['econ-graph-backend', 'econ-graph-frontend', 'branch-data-proxy']:
@@ -609,14 +610,15 @@ class GuardTests(unittest.TestCase):
     def test_kind_load_uses_build_daemon_and_includes_immutable_local_data(self):
         args = type('Args', (), {'context': 'kind-scratch', 'backend_image': 'backend:branch-one',
                                  'frontend_image': 'frontend:sha-' + 'a' * 40,
-                                 'local_data': True, 'data_image': 'worker:sha-' + 'b' * 40})()
+                                 'local_data': True, 'data_image': 'worker:sha-' + 'b' * 40,
+                                 'kind_binary': '/pinned/kind-v0.33.0'})()
         runs = []
         with patch.dict(os.environ, {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock', 'DOCKER_CONTEXT': 'unrelated-daemon',
                                       'ECONGRAPH_DOCKER_HOST': 'unix:///var/run/docker.sock'}), \
                 patch.object(subprocess, 'run', side_effect=lambda cmd, **kw: runs.append((cmd, kw))):
             deploy.load_local_images(args)
         (command, options), = runs
-        self.assertEqual(command, ['kind', 'load', 'docker-image', '--name', 'scratch',
+        self.assertEqual(command, ['/pinned/kind-v0.33.0', 'load', 'docker-image', '--name', 'scratch',
                                    args.backend_image, args.frontend_image, args.data_image])
         self.assertEqual(options['env']['DOCKER_HOST'], 'unix:///var/run/docker.sock')
         self.assertNotIn('DOCKER_CONTEXT', options['env'])
@@ -736,6 +738,10 @@ class SeedRestoreTests(unittest.TestCase):
                 deploy.seed_local(args, 'branch', k, lambda *a: None, lambda docs: None)
             restore = next(c for c in runs if 'pg_restore' in c and 'exec' in c)
             self.assertEqual(restore[:3], ['stub-kubectl', '--context', 'scratch'])
+            # Bootstrap extensions belong to postgres, so a restore running as
+            # econgraph must not try to change their SQL object comments. This
+            # flag does not omit rows from the product's comments tables.
+            self.assertIn('--no-comments', restore)
 
     def test_insufficient_node_space_stops_before_restore(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -850,6 +856,47 @@ done
             for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
                 env.pop(key, None)
             subprocess.run(command, check=True, timeout=30, env=env, capture_output=True, text=True)
+
+
+
+class PinnedKindTests(unittest.TestCase):
+    def test_pinned_binary_wins_over_old_path_kind_and_honors_xdg_data_home(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old = root/'old-bin'
+            old.mkdir()
+            marker = root/'old-kind-was-run'
+            (old/'kind').write_text('#!/bin/sh\ntouch "' + str(marker) + '"\necho "kind v0.30.0"\n')
+            (old/'kind').chmod(0o755)
+            binary = root/'xdg/econgraph/bin/kind-v0.33.0'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('#!/bin/sh\necho "kind v0.33.0 go1.26 linux/amd64"\n')
+            binary.chmod(0o755)
+            selected = deploy.pinned_kind({'HOME': str(root/'home'), 'XDG_DATA_HOME': str(root/'xdg'),
+                                           'PATH': str(old) + ':/usr/bin:/bin'})
+            self.assertEqual(selected, str(binary))
+            self.assertFalse(marker.exists())
+
+    def test_missing_or_old_pinned_binary_fails_with_install_instruction(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            env = {'HOME': str(root), 'PATH': '/usr/bin:/bin'}
+            with self.assertRaisesRegex(ValueError, 'install-kind.sh'):
+                deploy.pinned_kind(env)
+            binary = root/'.local/share/econgraph/bin/kind-v0.33.0'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('#!/bin/sh\necho "kind v0.30.0"\n')
+            binary.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, 'at least v0.33.0'):
+                deploy.pinned_kind(env)
+
+    def test_missing_pin_stops_before_any_cluster_command(self):
+        argv = ['deploy-branch.py', 'up', 'one', '--context', 'kind-scratch',
+                '--backend-image', 'backend:branch', '--frontend-image', 'frontend:branch']
+        with patch.object(sys, 'argv', argv), patch.object(deploy, 'pinned_kind', side_effect=ValueError('missing pin')), \
+                patch.object(subprocess, 'run', side_effect=AssertionError('cluster command before kind validation')):
+            with self.assertRaisesRegex(ValueError, 'missing pin'):
+                deploy.main()
 
 
 class KubectlChoiceTests(unittest.TestCase):

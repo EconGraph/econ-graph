@@ -94,6 +94,27 @@ def selected_docker_env(environ=os.environ):
     return selected
 
 
+def pinned_kind(environ=os.environ):
+    """Resolve the shared kind pin without sourcing production storage helpers."""
+    metadata = (renderer.ROOT/'scripts/deploy/lib/kind-version.sh').read_text()
+    version = re.search(r'^KIND_VERSION="(v\d+\.\d+\.\d+)"$', metadata, re.MULTILINE)
+    minimum = re.search(r'^KIND_MIN_VERSION="(v\d+\.\d+\.\d+)"$', metadata, re.MULTILINE)
+    if not version or not minimum:
+        raise ValueError('invalid shared kind version metadata; check scripts/deploy/lib/kind-version.sh')
+    data_home = Path(environ.get('XDG_DATA_HOME') or Path(environ.get('HOME', '~')).expanduser()/'.local/share')
+    binary = data_home/'econgraph/bin'/('kind-' + version[1])
+    advice = 'run scripts/deploy/install-kind.sh before deploying local images'
+    if not os.access(binary, os.X_OK):
+        raise ValueError(f'pinned kind {version[1]} is missing at {binary}; {advice}')
+    result = subprocess.run([str(binary), 'version'], capture_output=True, text=True,
+                            check=True, timeout=10, env=selected_docker_env(environ))
+    actual = re.search(r'\bkind v(\d+)\.(\d+)\.(\d+)\b', result.stdout)
+    wanted = tuple(map(int, minimum[1][1:].split('.')))
+    if not actual or tuple(map(int, actual.groups())) < wanted:
+        raise ValueError(f'pinned kind must report at least {minimum[1]}; {advice}')
+    return str(binary)
+
+
 def load_local_images(args):
     images = local_candidate_images(args)
     if not images:
@@ -102,7 +123,8 @@ def load_local_images(args):
     # kind cluster from current-context or silently load a different daemon.
     if not args.context.startswith('kind-') or len(args.context) <= len('kind-'):
         raise ValueError('local candidate images require an explicit kind-<cluster-name> context')
-    subprocess.run(['kind', 'load', 'docker-image', '--name', args.context[len('kind-'):], *images],
+    binary = getattr(args, 'kind_binary', None) or pinned_kind()
+    subprocess.run([binary, 'load', 'docker-image', '--name', args.context[len('kind-'):], *images],
                    check=True, timeout=900, env=selected_docker_env())
 
 
@@ -183,6 +205,10 @@ def main():
     if args.action == 'up' and local_candidate_images(args) and (
             not args.context.startswith('kind-') or len(args.context) <= len('kind-')):
         p.error('local candidate images require an explicit kind-<cluster-name> context')
+    if args.action == 'up' and local_candidate_images(args) and not args.dry_run:
+        # Check the required binary before creating a namespace or any other
+        # cluster mutation. An old PATH kind cannot load modern containerd.
+        args.kind_binary = pinned_kind()
     base = []
     def kubectl():
         # Chosen on first use: a dry run and build-frontend contact no cluster.
@@ -435,7 +461,7 @@ def seed_local(args, namespace, k, lookup, apply):
     # string or credentials are ever requested or copied.
     with dump.open('rb') as src:
         subprocess.run(args.kubectl() + ['-n', namespace, 'exec', '-i', 'postgresql-0', '--', 'pg_restore',
-                       '-U', 'postgres', '-d', 'econ_graph', '--no-owner', '--role=econgraph',
+                       '-U', 'postgres', '-d', 'econ_graph', '--no-owner', '--no-comments', '--role=econgraph',
                        '--exit-on-error', '--single-transaction'], stdin=src, check=True, timeout=900)
     apply([{'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': {'name': 'branch-data-seed', 'namespace': namespace},
             'data': {'sha256': digest}}])

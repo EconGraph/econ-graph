@@ -20,7 +20,12 @@ registry tags use `Always`.
 For local names, `up` requires an explicit `kind-<cluster-name>` context and
 reloads the backend/frontend and optional local-data images with
 `kind load docker-image` before applying workloads. This includes immutable
-local names. Loading uses the same `ECONGRAPH_DOCKER_HOST` selection as
+local names. The loader uses the installed pin from
+`scripts/deploy/lib/kind-version.sh`, under
+`${XDG_DATA_HOME:-$HOME/.local/share}/econgraph/bin`, and verifies its minimum
+version before changing the cluster. Run `scripts/deploy/install-kind.sh` if it
+is missing; an older `kind` on PATH is never used for image loading.
+Loading uses the same `ECONGRAPH_DOCKER_HOST` selection as
 `build-frontend` (default `unix:///var/run/docker.sock`); inherited rootless
 `DOCKER_HOST` does not select a different source daemon. Local images must
 already exist there. A failed load stops deployment. Every mutable candidate
@@ -52,6 +57,9 @@ hash from reviewed fixture evidence outside the bundle. `VERIFIED` and
 `SHA256SUMS` alone prove no provenance. The archive must contain only recognized
 data-plane tables. An existing seed marker must match; an unmarked nonempty
 database is never overwritten.
+Restore omits SQL object comments because bootstrap extensions belong to
+`postgres` and the restore runs as the unprivileged `econgraph` role. Product
+annotation and comment rows are table data and remain part of the restore.
 
 Seeds are bounded to 128 MiB compressed and 256 MiB expanded SQL. Before restore,
 the branch database filesystem must have at least 4 GiB free plus four times the
