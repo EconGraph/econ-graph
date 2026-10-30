@@ -3226,7 +3226,7 @@ mod tests {
         mock.mount(
             &table_titles_route("Regional"),
             Reply::json(serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
-                {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary"}
+                {"Key": "SAINC4", "Desc": "SAINC4 Personal income and employment by major component"}
             ]}}}))
             .header("ETag", "\"r1\""),
         )
