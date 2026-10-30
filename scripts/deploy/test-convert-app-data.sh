@@ -71,6 +71,8 @@ STUB
 #   STUB_SERVER=17.4         the servers' version (default 18.1)
 #   STUB_ACTIVE_JOBS=NAME    a Job is running
 #   STUB_BACKUP_FAILS=1      pg_dump in backup-kind-databases.sh fails
+#   STUB_SCALE_FAILS=NAME    scaling deployment NAME to 0 fails
+#   STUB_SOURCE_USERS=f      econ_graph no longer holds public.users
 cat >"$STUB_KUBECTL" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -91,6 +93,7 @@ case "$*" in
   "get deployment crawler-worker -o jsonpath={.spec.replicas} --ignore-not-found") printf 1 ;;
   "get cronjob postgres-backup -o name --ignore-not-found") echo cronjob.batch/postgres-backup ;;
   "get cronjob postgres-backup -o jsonpath={.spec.suspend}") ;;
+  "scale deployment ${STUB_SCALE_FAILS:-none} --replicas=0") exit 1 ;;
   "scale deployment "*" --replicas="*) ;;
   "patch cronjob postgres-backup --type=merge -p "*) ;;
   "get pods -l app="*" -o name") ;;
@@ -101,6 +104,7 @@ case "$*" in
   # backup-kind-databases.sh
   "exec "*" -- pg_dump -Fc "*) [ "${STUB_BACKUP_FAILS:-0}" != 1 ] || exit 1; printf 'PGDMP stub' ;;
   "exec -i "*" -- pg_restore -f /dev/null") cat >/dev/null ;;
+  "exec postgresql-0 -c postgresql -- psql "*"to_regclass"*) echo "${STUB_SOURCE_USERS:-t}" ;;
   "exec "*" -- psql "*"to_regclass"*) echo t ;;
   "exec "*" -- psql "*) echo 3 ;;
   "get secret "*" -o name --ignore-not-found") ;;
@@ -109,7 +113,8 @@ esac
 STUB
 
 # The stub conversion: records its arguments and checks the credentials it was given.
-#   STUB_PY_FAIL=WORD  exit 1 when an argument equals WORD
+#   STUB_PY_FAIL=WORD  exit 1 when an argument equals WORD (killing STUB_KILL_READER first)
+#   STUB_PY_SLEEP_ON=WORD  sleep 2s when an argument equals WORD (touching $STUB_LOG.sleeping)
 cat >"$PYTHON" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" != -c ] || exit 0
@@ -125,14 +130,25 @@ grep -qxF '127.0.0.1:15432:econ_graph:postgres:se\:cr\\et-value' "$PGPASSFILE" |
   echo "BAD pgpass" >>"$STUB_LOG"
 [ "$(command -v pg_dump)" = "$(dirname "$PGSERVICEFILE")/bin/pg_dump" ] && grep -qF '"postgres:18" pg_dump' "$(command -v pg_dump)" ||
   echo "BAD pg_dump shim" >>"$STUB_LOG"
-for a in "$@"; do [ "$a" != "${STUB_PY_FAIL:-}" ] || exit 1; done
+for a in "$@"; do
+  [ "$a" != "${STUB_PY_SLEEP_ON:-}" ] || { : >"$STUB_LOG.sleeping"; sleep 2; }
+  if [ "$a" = "${STUB_PY_FAIL:-}" ]; then
+    # Close the wrapper's output before it cleans up: its reader goes away.
+    [ -z "${STUB_KILL_READER:-}" ] || { kill "$STUB_KILL_READER"; sleep 0.3; }
+    exit 1
+  fi
+done
 STUB
 chmod +x "$tmp/bin/docker" "$tmp/bin/kind" "$STUB_KUBECTL" "$PYTHON"
 
 map="$tmp/source-map.json"
 echo '{}' >"$map"
 convert() { ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" scripts/deploy/convert-app-data.sh "$@" >"$tmp/out" 2>&1; }
-reset() { sleep 1; : >"$STUB_LOG"; unset STUB_MARKER STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT; }
+reset() {
+  sleep 1; : >"$STUB_LOG"; rm -f "$STUB_LOG.sleeping"
+  unset STUB_MARKER STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT STUB_SCALE_FAILS \
+    STUB_SOURCE_USERS STUB_KILL_READER STUB_PY_SLEEP_ON
+}
 never() { # never PATTERN WHAT: no log line matches PATTERN
   if grep -qE "$1" "$STUB_LOG"; then fail "$2"; grep -E "$1" "$STUB_LOG" | head -3; fi
 }
@@ -239,6 +255,54 @@ has "^python .*--restore-source-app $dir --writers-stopped$" "no rollback call"
 never "scale deployment econ-graph-backend --replicas=2" "backend restarted after the rollback"
 grep -q "APP_DATABASE=shared" "$tmp/out" || fail "no next step after the rollback"
 leftovers "rollback"
+
+# A failure after the source lost its app tables: the backend stays stopped, the rest comes back.
+reset
+STUB_PY_FAIL=--drop-source-app STUB_SOURCE_USERS=f convert --cluster kg-test --source-map "$map" --drop-source-app &&
+  fail "failed removal reported success"
+never "scale deployment econ-graph-backend --replicas=2" "backend restarted on a source without app tables"
+has "scale deployment crawler-worker --replicas=1" "crawler not put back"
+grep -q "no longer holds the app tables" "$tmp/out" || fail "no explanation for the stopped backend"
+grep -q "KIND_CLUSTER=kg-test APP_DATABASE=separate" "$tmp/out" || fail "the hint does not name the cluster"
+
+# Output that breaks during cleanup (a closed pipe) does not stop the writers coming back.
+reset
+mkfifo "$tmp/fifo"
+cat "$tmp/fifo" >"$tmp/out" &
+reader=$!
+status=0
+STUB_KILL_READER="$reader" STUB_PY_FAIL=--drop-source-app ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" \
+  scripts/deploy/convert-app-data.sh --cluster kg-test --source-map "$map" --drop-source-app >"$tmp/fifo" 2>&1 || status=$?
+wait "$reader" 2>/dev/null || true
+rm -f "$tmp/fifo"
+[ "$status" != 0 ] || fail "closed output: reported success"
+has "scale deployment econ-graph-backend --replicas=2" "closed output: backend not put back"
+has "scale deployment crawler-worker --replicas=1" "closed output: crawler not put back"
+has "patch cronjob postgres-backup --type=merge -p \{\"spec\":\{\"suspend\":false\}\}" "closed output: CronJob not put back"
+
+# A failure while stopping the writers puts back what was already stopped.
+reset
+STUB_SCALE_FAILS=crawler-worker convert --cluster kg-test --source-map "$map" && fail "failed scale reported success"
+has "scale deployment econ-graph-backend --replicas=0" "the backend was not stopped first"
+has "scale deployment econ-graph-backend --replicas=2" "failed stop: backend not put back"
+has "patch cronjob postgres-backup --type=merge -p \{\"spec\":\{\"suspend\":false\}\}" "failed stop: CronJob not put back"
+never "^python " "converted after a failed stop"
+leftovers "failed stop"
+
+# A hangup during the copy: writers come back, port-forwards and credentials go.
+reset
+status=0
+STUB_PY_SLEEP_ON=--writers-stopped ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" \
+  scripts/deploy/convert-app-data.sh --cluster kg-test --source-map "$map" >"$tmp/out" 2>&1 &
+pid=$!
+for _ in $(seq 1 100); do [ -e "$STUB_LOG.sleeping" ] && break; sleep 0.1; done
+[ -e "$STUB_LOG.sleeping" ] || fail "hangup: the copy never started"
+kill -HUP "$pid"
+wait "$pid" || status=$?
+[ "$status" != 0 ] || fail "hangup: reported success"
+has "scale deployment econ-graph-backend --replicas=2" "hangup: backend not put back"
+has "patch cronjob postgres-backup --type=merge -p \{\"spec\":\{\"suspend\":false\}\}" "hangup: CronJob not put back"
+leftovers "hangup"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failure(s)"

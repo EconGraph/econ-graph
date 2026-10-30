@@ -82,6 +82,9 @@ export KIND_CLUSTER="$CLUSTER"
 DRY_RUN="$DRY"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "${PROJECT_ROOT}/scripts/deploy/lib/kind-env.sh"
+# Resolved once: the same absolute path for the rollback check, the children and the
+# container mount (a relative or symlinked root would differ between them).
+BACKUP_ROOT="$(realpath -m "${BACKUP_ROOT}")"
 export ECONGRAPH_BACKUP_ROOT="${BACKUP_ROOT}"
 PYTHON="${PYTHON:-python3}"
 PG_IMAGE="${PG_IMAGE:-postgres:18}"
@@ -97,6 +100,7 @@ kctl() { kubectl --context "${CONTEXT}" -n "${NAMESPACE}" "$@"; }
 log "Cluster ${KIND_CLUSTER} (context ${CONTEXT}, namespace ${NAMESPACE})"
 check_docker_daemon
 ensure_kind_kubectl
+echo "  kubectl: $(command -v kubectl) --context ${CONTEXT}"
 if kind_cluster_is_production; then
     [ "$PRODUCTION" = true ] ||
         die "${KIND_CLUSTER} carries the production marker; pass --production to convert production"
@@ -145,7 +149,7 @@ if [ -n "$RESTORE" ]; then
         die "$RESTORE is not a conversion backup directory (no combined.dump and evidence.json)"
     RESTORE="$(realpath "$RESTORE")"
     case "$RESTORE" in
-        "$(realpath -m "${BACKUP_ROOT}")"/*) ;;
+        "${BACKUP_ROOT}"/*) ;;
         *) die "$RESTORE is not under the backup root ${BACKUP_ROOT}" ;;
     esac
 fi
@@ -181,13 +185,15 @@ if [ "$DRY" = true ]; then
     log "Dry run: nothing changed. A real run would:"
     echo "+ scripts/deploy/backup-kind-databases.sh   (data, app and Keycloak dumps and Secrets under ${BACKUP_ROOT})"
     for d in "${WRITER_DEPLOYMENTS[@]}"; do
-        [ -z "${REPLICAS[$d]}" ] || echo "+ kubectl --context ${CONTEXT} -n ${NAMESPACE} scale deployment/$d --replicas=0   (back to ${REPLICAS[$d]} on exit)"
+        [ -z "${REPLICAS[$d]}" ] || echo "+ kubectl --context ${CONTEXT} -n ${NAMESPACE} scale deployment/$d --replicas=0   (back to ${REPLICAS[$d]} on exit; see below for the backend)"
     done
     for c in "${CRONJOBS_PRESENT[@]}"; do
         echo "+ kubectl --context ${CONTEXT} -n ${NAMESPACE} patch cronjob/$c suspend=true   (back to ${SUSPENDED[$c]} on exit)"
     done
     echo "+ kubectl port-forward pod/postgresql-0 and pod/app-postgres-0 on 127.0.0.1"
     echo "+ write a 0600 libpq service and password file from Secrets econ-graph-postgres and econ-graph-app-postgres (temporary)"
+    echo "  On exit the backend is started again only if econ_graph still holds the app tables and"
+    echo "  no removal or rollback succeeded; otherwise it stays at 0 until its database setting changes."
     if [ -n "$RESTORE" ]; then
         echo "+ split-app-data.py ${ARGS[*]}"
         echo "  (the backend stays at 0 afterwards: point it back at the combined database first)"
@@ -211,31 +217,63 @@ log "Backing up every database and the Secrets first"
 # --- 3. stop the writers, put them back on exit ---------------------------------------
 
 WORK="" PF_PIDS=() KEEP_BACKEND_STOPPED=false STOPPED=false
+
+# Whether econ_graph still holds the app tables. Anything but a clear yes counts as no, so a
+# backend is never started on the combined database once its app tables may be gone (it
+# would create new, empty ones).
+source_has_app_tables() {
+    [ "$(kctl exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph -Atc \
+        "select to_regclass('public.users') is not null" 2>/dev/null)" = t ]
+}
+
+# Put the writers back. Nothing here may stop it: errors are ignored, signals and a closed
+# terminal or pipe too, and every change is made before anything is printed.
 cleanup() {
-    local status=$? d c
-    for pid in "${PF_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+    local status=$? d c restart_backend=true why="" pid
+    set +e
+    trap '' PIPE HUP INT TERM
+    for pid in "${PF_PIDS[@]}"; do kill "$pid" 2>/dev/null; done
     [ -z "$WORK" ] || rm -rf "$WORK"
-    if [ "$STOPPED" = true ]; then
-        for c in "${CRONJOBS_PRESENT[@]}"; do
-            kctl patch cronjob "$c" --type=merge -p "{\"spec\":{\"suspend\":${SUSPENDED[$c]}}}" >/dev/null ||
-                warn "could not restore cronjob/$c suspend=${SUSPENDED[$c]}"
-            echo "  cronjob/$c back to suspend=${SUSPENDED[$c]}"
-        done
-        for d in "${WRITER_DEPLOYMENTS[@]}"; do
-            [ -n "${REPLICAS[$d]}" ] || continue
-            if [ "$d" = econ-graph-backend ] && [ "$KEEP_BACKEND_STOPPED" = true ]; then
-                warn "deployment/$d stays at 0 replicas (was ${REPLICAS[$d]}): change its database settings first (docs/deployment/APP_DATA_CONVERSION.md)"
-                continue
-            fi
-            kctl scale deployment "$d" --replicas="${REPLICAS[$d]}" >/dev/null ||
-                warn "could not scale deployment/$d back to ${REPLICAS[$d]}"
-            echo "  deployment/$d back to ${REPLICAS[$d]} replicas"
-        done
+    [ "$STOPPED" = true ] || exit "$status"
+    declare -A result
+    if [ "$KEEP_BACKEND_STOPPED" = true ]; then
+        restart_backend=false why="$NEXT_STEP"
+    elif ! source_has_app_tables; then
+        restart_backend=false
+        why="econ_graph no longer holds the app tables (or could not be checked). Do not start the backend on it: roll back with --restore-source-app <the removal's backup directory>, or switch it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/deploy.sh (docs/deployment/APP_DATA_CONVERSION.md)"
     fi
+    for c in "${CRONJOBS_PRESENT[@]}"; do
+        kctl patch cronjob "$c" --type=merge -p "{\"spec\":{\"suspend\":${SUSPENDED[$c]}}}" >/dev/null 2>&1
+        result[cronjob/$c]=$?
+    done
+    for d in "${WRITER_DEPLOYMENTS[@]}"; do
+        [ -n "${REPLICAS[$d]}" ] || continue
+        [ "$d" != econ-graph-backend ] || [ "$restart_backend" = true ] || continue
+        kctl scale deployment "$d" --replicas="${REPLICAS[$d]}" >/dev/null 2>&1
+        result[deployment/$d]=$?
+    done
+    for c in "${CRONJOBS_PRESENT[@]}"; do
+        if [ "${result[cronjob/$c]}" = 0 ]; then
+            echo "  cronjob/$c back to suspend=${SUSPENDED[$c]}" || true
+        else
+            warn "could not restore cronjob/$c suspend=${SUSPENDED[$c]}; patch it by hand" || true
+        fi
+    done
+    for d in "${WRITER_DEPLOYMENTS[@]}"; do
+        [ -n "${REPLICAS[$d]}" ] || continue
+        if [ -z "${result[deployment/$d]+set}" ]; then
+            warn "deployment/$d stays at 0 replicas (was ${REPLICAS[$d]}): $why" || true
+        elif [ "${result[deployment/$d]}" = 0 ]; then
+            echo "  deployment/$d back to ${REPLICAS[$d]} replicas" || true
+        else
+            warn "could not scale deployment/$d back to ${REPLICAS[$d]}; scale it by hand" || true
+        fi
+    done
     exit "$status"
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP
+trap 'exit 141' PIPE
 
 log "Stopping the writers"
 STOPPED=true
@@ -317,11 +355,15 @@ export PATH="$WORK/bin:$PATH"
 # --- 5. the conversion ----------------------------------------------------------------
 
 SPLIT=("$PYTHON" "${PROJECT_ROOT}/scripts/deploy/split-app-data.py")
+NEXT_STEP=""
+PUBLIC_HINT=""
+[ "$PRODUCTION" = false ] || PUBLIC_HINT="PUBLIC_HOST=<the public host> "
 if [ -n "$RESTORE" ]; then
     log "Restoring the app tables into the combined database from $RESTORE"
     "${SPLIT[@]}" "${ARGS[@]}"
+    NEXT_STEP="the app tables are back in econ_graph; point the backend at it and start it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=shared ${PUBLIC_HINT}scripts/deploy/deploy.sh"
     KEEP_BACKEND_STOPPED=true
-    log "Done. Point the backend back at the combined database (APP_DATABASE=shared scripts/deploy/create-secrets.sh), then start it."
+    log "Done." || true
     exit 0
 fi
 log "Conversion dry run (locks both databases while it hashes them)"
@@ -331,6 +373,7 @@ log "Verified backup and copy"
 if [ "$DROP" = true ]; then
     log "Removing the app tables from the combined database (typed confirmation)"
     "${SPLIT[@]}" "${ARGS[@]}" --writers-stopped --drop-source-app
+    NEXT_STEP="the app tables are now only in econ_graph_app; point the backend at it and start it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate ${PUBLIC_HINT}scripts/deploy/deploy.sh. Until then the nightly CronJob dumps econ_graph only; nothing writes app rows while the backend is stopped"
     KEEP_BACKEND_STOPPED=true
-    log "Done. Point the backend at the app database (APP_DATABASE=separate scripts/deploy/create-secrets.sh), then start it."
+    log "Done." || true
 fi

@@ -520,6 +520,33 @@ guard_db_volume() {
 guard_db_volume econ-graph-postgres postgresql-data-postgresql-
 guard_db_volume econ-graph-app-postgres app-postgres-data-app-postgres-
 
+# --- app database guard ----------------------------------------------------
+# Which database app-database-url names: APP_DATABASE if given, else what the
+# cluster's current URL names, else (a new Secret) the app database.
+app_database="${APP_DATABASE-}"
+app_database_how="from APP_DATABASE"
+if [[ -z "$app_database" ]]; then
+    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
+    if [[ -z "$current_app_url" ]]; then
+        app_database=separate
+        app_database_how="new"
+    elif [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
+        app_database=separate
+        app_database_how="kept"
+    else
+        app_database=shared
+        app_database_how="kept"
+    fi
+fi
+# Moving app-database-url to the app database while the data database still
+# holds the app tables would serve the backend an app database without its
+# accounts (lib/app-database-guard.sh). Checked before any Secret is written.
+if [[ "$app_database" == separate && "$app_database_how" != kept ]]; then
+    # shellcheck source=scripts/deploy/lib/app-database-guard.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/app-database-guard.sh"
+    require_app_tables_moved
+fi
+
 # --- Grafana volume guard ---------------------------------------------------
 # Grafana reads GF_SECURITY_ADMIN_PASSWORD only when its volume is first
 # initialised. If the password would be generated now but Grafana already has
@@ -595,23 +622,6 @@ esac
 begin_secret econ-graph-secrets
 DATA_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DATA_DB_HOST}:${DB_PORT}/${DATA_DB_NAME}"
 SEPARATE_APP_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_DB_APP_PASSWORD")@${APP_DB_HOST}:${DB_PORT}/${APP_DB_NAME}"
-# Which database app-database-url names: APP_DATABASE if given, else what the
-# cluster's current URL names, else (a new Secret) the app database.
-app_database="${APP_DATABASE-}"
-app_database_how="from APP_DATABASE"
-if [[ -z "$app_database" ]]; then
-    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
-    if [[ -z "$current_app_url" ]]; then
-        app_database=separate
-        app_database_how="new"
-    elif [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
-        app_database=separate
-        app_database_how="kept"
-    else
-        app_database=shared
-        app_database_how="kept"
-    fi
-fi
 if [[ "$app_database" == separate ]]; then
     put app-database-url "$SEPARATE_APP_URL" "$APP_DB_NAME on $APP_DB_HOST, $app_database_how"
 else
