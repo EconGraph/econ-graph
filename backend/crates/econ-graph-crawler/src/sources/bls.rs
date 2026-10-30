@@ -8,8 +8,9 @@
 //!
 //! Which series to crawl is curated: `bls_series.csv` in the crawler data directory
 //! ([`crate::reference::bls_series`], read at runtime) lists their ids (headline CPI-U, CES
-//! payrolls and earnings, CPS labor force measures, and LAUS state unemployment rates and labor
-//! force). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
+//! payrolls and earnings, CPS labor force measures, LAUS state unemployment rates and labor
+//! force, JOLTS openings and turnover, PPI final demand and commodity indexes, and import/export
+//! price indexes). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
 //! `la.series`, `ln.series`, `jt.series`, `wp.series`, `ei.series` under
 //! [`DEFAULT_DOWNLOAD_URL`], see [`SERIES_FILES`]) gives the title, the frequency (from the latest
 //! period, `end_period`) and, for CPI and import/export prices, the index base. `jt.series` has no
@@ -61,13 +62,15 @@
 //!
 //! # Request budget
 //!
-//! BLS allows 500 requests a day with a key and 25 without. For the shipped list (291 series,
+//! BLS allows 500 requests a day with a key and 25 without. For the shipped list (425 series,
 //! all monthly), with full batches:
-//! - With a key: 6 requests for the first 20-year fetch, and 6 for each weekly refresh
-//!   (the 5-year revision lookback fits one window). Even one request per series (291) fits.
-//! - Without a key: 12 batches of 25, so 24 requests for the first fetch (two 10-year windows)
-//!   and 12 for each refresh. That leaves no headroom on the first day: a retry, a partial
-//!   batch or a manual CLI fetch goes over, and the excess waits as `RateLimited`. Set a key.
+//! - With a key: 9 batches of 50, so 9 requests for the first 20-year fetch and 9 for each
+//!   refresh (the 5-year revision lookback fits one window). Refreshing every series every day
+//!   would still be 9 requests, and even one request per series (425) fits.
+//! - Without a key: 17 batches of 25, so 17 requests for each refresh, but 34 for the first
+//!   fetch (two 10-year windows). The first fetch therefore spans two days: the requests past
+//!   the daily limit fail as `RateLimited` and the worker retries them later with backoff. Set
+//!   a key.
 //!
 //! A batch's `since` is its earliest series', so one series with no stored points (a row added
 //! later, or an id that keeps failing) turns its whole batch into a full 20-year fetch: two
@@ -2546,8 +2549,10 @@ mod tests {
     }
 
     /// Discovery describes the curated series from the stored series file rows: BLS's titles,
-    /// frequency from `end_period`, and units from the index base (CU), a stored dimension
-    /// label (CE, LA) or nowhere (LN). It makes no request. A series without a row is left out.
+    /// frequency from `end_period`, and units from the index base (CU, EI), a stored dimension
+    /// label (CE, LA, JT) or nowhere (LN, WP). JOLTS titles join stored code labels, and a JOLTS
+    /// series is left out until those labels are stored. It makes no request. A series without a
+    /// row is left out.
     #[tokio::test]
     async fn discover_lists_curated_series_from_stored_series_files() {
         let Some(db) = bls_db("econgraph_bls_discover_series_files").await else {
@@ -2604,17 +2609,52 @@ mod tests {
             "discover made a request"
         );
         let ids: BTreeSet<&str> = found.iter().map(|d| d.external_id.as_str()).collect();
-        // CUURS49ASA0 isn't curated.
+        // CUURS49ASA0 and JTU000000000000000JOR aren't curated; the curated JOLTS series have no
+        // stored code labels for their titles yet.
+        let mut expected = BTreeSet::from([
+            "CUSR0000SA0",
+            "CUUR0000SA0",
+            "CES0000000001",
+            "LNS14000000",
+            "LASST060000000000003",
+            "WPSFD4",
+            "WPU01",
+            "WPU00000000",
+            "EIUIR",
+            "EIUCOCHNTOT",
+        ]);
+        assert_eq!(ids, expected);
+
+        // The JOLTS code files (refresh_code_file) stand in; seasonal is in the dataset file.
+        for (dimension, code, label) in [
+            ("data_element", "JO", "Job openings"),
+            ("rate_level", "R", "Rate"),
+            ("rate_level", "L", "Level - In Thousands"),
+            ("industry", "000000", "Total nonfarm"),
+            ("state", "00", "Total US"),
+            ("area", "00000", "All areas"),
+            ("size_class", "00", "All size classes"),
+        ] {
+            crate::persist::merge_dataset_dimension_codes(
+                &db.pool,
+                SourceId::Bls,
+                "JT",
+                dimension,
+                &[(code.to_string(), label.to_string())],
+            )
+            .await
+            .unwrap();
+        }
+        let found = adapter.discover(&ctx).await.unwrap();
+        let ids: BTreeSet<&str> = found.iter().map(|d| d.external_id.as_str()).collect();
+        expected.extend(["JTS000000000000000JOL", "JTS000000000000000JOR"]);
+        assert_eq!(ids, expected);
         assert_eq!(
-            ids,
-            BTreeSet::from([
-                "CUSR0000SA0",
-                "CUUR0000SA0",
-                "CES0000000001",
-                "LNS14000000",
-                "LASST060000000000003"
-            ])
+            mock.received_requests().await.len(),
+            fetched,
+            "discover made a request"
         );
+
         let by_id = |id: &str| found.iter().find(|d| d.external_id == id).unwrap();
         let cpi = by_id("CUUR0000SA0");
         assert_eq!(
@@ -2638,6 +2678,30 @@ mod tests {
         let ln = by_id("LNS14000000");
         assert_eq!(ln.title, "(Seas) Unemployment Rate");
         assert_eq!(ln.units, None);
+        let jt = by_id("JTS000000000000000JOR");
+        assert_eq!(
+            jt.title,
+            "Job openings, Rate, Total nonfarm, Total US, All areas, All size classes, \
+             Seasonally adjusted"
+        );
+        assert_eq!(jt.units.as_deref(), Some("Rate"));
+        assert_eq!(jt.frequency.as_deref(), Some("Monthly"));
+        assert_eq!(jt.dataset.code, "JT");
+        assert_eq!(
+            by_id("JTS000000000000000JOL").units.as_deref(),
+            Some("Level - In Thousands")
+        );
+        let ppi = by_id("WPSFD4");
+        assert_eq!(
+            ppi.title,
+            "PPI Commodity data for Final demand, seasonally adjusted"
+        );
+        assert_eq!(ppi.units, None);
+        assert_eq!(ppi.dataset.code, "WP");
+        assert_eq!(by_id("WPU01").dataset.dimensions.0["item"], "");
+        let mpi = by_id("EIUCOCHNTOT");
+        assert_eq!(mpi.units.as_deref(), Some("Index December 2003=100"));
+        assert_eq!(mpi.dataset.code, "EI");
 
         // ln.series also labels LN's series_code dimension.
         let codes =
@@ -2752,6 +2816,9 @@ mod tests {
             ("/cu/cu.series", CU_SERIES),
             ("/ce/ce.series", CE_SERIES),
             ("/ln/ln.series", LN_SERIES),
+            ("/jt/jt.series", JT_SERIES),
+            ("/wp/wp.series", WP_SERIES),
+            ("/ei/ei.series", EI_SERIES),
         ] {
             mock.mount(&Route::get(path), Reply::text(body)).await;
         }
@@ -2767,7 +2834,15 @@ mod tests {
             errors[0].contains(&adapter.series_file_url("LA")),
             "{errors:?}"
         );
-        for (survey, stored) in [("CU", true), ("CE", true), ("LN", true), ("LA", false)] {
+        for (survey, stored) in [
+            ("CU", true),
+            ("CE", true),
+            ("LN", true),
+            ("LA", false),
+            ("JT", true),
+            ("WP", true),
+            ("EI", true),
+        ] {
             let cache = crate::persist::reference_file_cache(
                 &db.pool,
                 SourceId::Bls,
@@ -2980,24 +3055,10 @@ mod tests {
     /// Request budget stated in the module docs, for the shipped list.
     #[test]
     fn shipped_list_fits_daily_quotas() {
+        const KEYED_PER_DAY: usize = 500;
+        const KEYLESS_PER_DAY: usize = 25;
         let n = bls_series().unwrap().len();
         let requests = |per_request: usize, windows: usize| n.div_ceil(per_request) * windows;
-        let keyed_first = requests(
-            MAX_SERIES_WITH_KEY,
-            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITH_KEY).len(),
-        );
-        let keyless_first = requests(
-            MAX_SERIES_WITHOUT_KEY,
-            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITHOUT_KEY).len(),
-        );
-        assert!(
-            keyed_first <= 500 && n <= 500,
-            "keyed: {keyed_first} requests, {n} series"
-        );
-        assert!(
-            keyless_first <= 25,
-            "keyless first fetch: {keyless_first} requests"
-        );
         // A refresh (the policy's own revision lookback) is one window with or without a key.
         let lookback_years = (SourcePolicy::default_for(SourceId::Bls)
             .revision_lookback
@@ -3011,6 +3072,51 @@ mod tests {
                 1,
                 "span {span}, lookback {lookback_years}y"
             );
+        }
+
+        // With a key: the first fetch plus a refresh of every series fit one day, so a daily
+        // keyed refresh fits too, as does one request per series.
+        let keyed_first = requests(
+            MAX_SERIES_WITH_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITH_KEY).len(),
+        );
+        let keyed_refresh = requests(MAX_SERIES_WITH_KEY, 1);
+        assert!(
+            keyed_first + keyed_refresh <= KEYED_PER_DAY && n <= KEYED_PER_DAY,
+            "keyed: first fetch {keyed_first} + daily refresh {keyed_refresh} requests, {n} series"
+        );
+
+        // Without a key: a refresh fits one day, and the first fetch finishes within two.
+        let keyless_first = requests(
+            MAX_SERIES_WITHOUT_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITHOUT_KEY).len(),
+        );
+        let keyless_refresh = requests(MAX_SERIES_WITHOUT_KEY, 1);
+        assert!(
+            keyless_refresh <= KEYLESS_PER_DAY,
+            "keyless refresh: {keyless_refresh} requests"
+        );
+        assert!(
+            keyless_first <= 2 * KEYLESS_PER_DAY,
+            "keyless first fetch: {keyless_first} requests"
+        );
+    }
+
+    /// The shipped JOLTS, PPI and import/export price ids land in their survey datasets, not
+    /// `other`.
+    #[test]
+    fn shipped_jt_wp_ei_series_have_their_survey_datasets() {
+        let shipped = bls_series().unwrap();
+        for survey in ["JT", "WP", "EI"] {
+            let ids: Vec<&str> = shipped
+                .iter()
+                .map(|s| s.id.as_str())
+                .filter(|id| id.starts_with(survey))
+                .collect();
+            assert!(!ids.is_empty(), "no {survey} series shipped");
+            for id in ids {
+                assert_eq!(dataset_of(id).code, survey, "{id}");
+            }
         }
     }
 

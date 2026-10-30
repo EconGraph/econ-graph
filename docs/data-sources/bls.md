@@ -9,8 +9,11 @@ For historical API experiments, see [BLS API experimental findings](../technical
 ## Discovery and fetching
 
 The [curated list](../../backend/crates/econ-graph-crawler/data/bls_series.csv) selects
-291 series: headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN),
-and LAUS state unemployment rates and labor force (LA) for the states and DC. BLS's
+425 series: headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN),
+LAUS state unemployment rates and labor force (LA) for the states and DC, JOLTS job
+openings, hires, quits, layoffs and separations (JT) for total nonfarm and major
+industries, PPI final demand, intermediate demand and key commodity indexes (WP), and
+import/export price indexes by end use and by origin (EI). BLS's
 survey series files (`cu.series`, `ce.series`, `la.series`, `ln.series`, `jt.series`,
 `wp.series` and `ei.series`, under `https://download.bls.gov/pub/time.series/`) supply each
 series' title (`series_title`) and frequency (from its latest period, `end_period`).
@@ -55,6 +58,13 @@ Fetching uses `POST /timeseries/data/`, for example:
 The adapter adds `registrationkey` when `BLS_API_KEY` is set. It batches up to 50 series
 per request with a key or 25 without, splitting history into year windows of up to 20
 years with a key or 10 without, newest first.
+
+BLS allows 500 requests a day with a key and 25 without. With a key, the curated list is
+9 requests (9 batches of 50) for the first 20-year fetch and 9 for each refresh, whose
+5-year revision lookback fits one window. Without a key it is 17 batches of 25: 17
+requests for each refresh, but 34 for the first fetch (two 10-year windows), so the first
+fetch spans two days: requests past the daily limit fail as rate-limited and the worker
+retries them later with backoff. Set a key.
 
 With a key, the response's `catalog` supplies the title, survey name, units
 (`measure_data_type`) and seasonality. Frequency comes from the observation periods.
