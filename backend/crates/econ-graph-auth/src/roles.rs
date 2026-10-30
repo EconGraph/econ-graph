@@ -327,8 +327,7 @@ mod tests {
         assert!(serde_json::from_str::<Vec<Role>>(r#"["api:mcp","nope:nope"]"#).is_err());
     }
 
-    /// The WTO's catalog role spells the organization out; its retired acronym form
-    /// (renamed in Keycloak by scripts/keycloak/preserve-catalog-grants.py) is not a role.
+    /// The WTO's catalog role spells the organization out; the acronym form is not a role.
     #[test]
     fn world_trade_organization_catalog_role_is_spelled_out() {
         let role = Role::for_catalog("World Trade Organization (WTO)").unwrap();

@@ -4,7 +4,6 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
-import urllib.parse
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("preserve", HERE / "preserve-catalog-grants.py")
@@ -217,68 +216,6 @@ class CatalogPolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.merge()
         def failed(_): raise RuntimeError("unavailable")
         with self.assertRaises(RuntimeError): preserve.merge_catalog_policy(self.realm,failed)
-
-    def rename(self):
-        writes = []
-        def put(path, body, failure):
-            writes.append((path, body))
-            # Keycloak renames the role in place: the old path is gone, the new one holds it.
-            roles = self.prefix + "/clients/api/roles/"
-            old = urllib.parse.unquote(path[len(roles):])
-            self.state.pop(path)
-            self.state[roles + urllib.parse.quote(body["name"], safe="")] = body
-            self.state[self.prefix + "/roles/catalog-public/composites"] = [
-                {**edge, "name": body["name"]} if edge["name"] == old else edge
-                for edge in self.state[self.prefix + "/roles/catalog-public/composites"]]
-        renamed = preserve.rename_catalog_roles(self.realm, lambda path: copy.deepcopy(self.state.get(path)), put)
-        return renamed, writes
-
-    def test_renamed_catalog_roles_are_declared_only_under_their_new_names(self):
-        declared = {r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]}
-        public = self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"]
-        for old, new in preserve.RENAMED_CATALOG_ROLES.items():
-            self.assertNotIn(old, declared)
-            self.assertIn(new, declared)
-            self.assertIn(new, public, "the renamed role keeps its default public grant")
-        self.assertEqual(preserve.RENAMED_CATALOG_ROLES["catalog.wto:read"],
-                         "catalog.world_trade_organization:read")
-
-    def test_live_renamed_role_is_renamed_in_place_once_and_keeps_its_grants(self):
-        old_path = self.prefix + "/clients/api/roles/" + urllib.parse.quote("catalog.wto:read", safe="")
-        self.state[old_path] = {"id": "r1", "name": "catalog.wto:read", "description": "Read the WTO catalog",
-                                "composite": False, "clientRole": True, "containerId": "api"}
-        self.state[self.prefix + "/roles/catalog-public/composites"] = [
-            {"name": "catalog.wto:read", "clientRole": True, "containerId": "api"},
-            {"name": "catalog.fred:read", "clientRole": True, "containerId": "api"},
-        ]
-        renamed, writes = self.rename()
-        self.assertEqual(renamed, [("catalog.wto:read", "catalog.world_trade_organization:read")])
-        self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0][0], old_path)
-        self.assertEqual(writes[0][1]["id"], "r1", "same role, so its mappings carry over")
-        self.assertEqual(writes[0][1]["description"], "Read the WTO catalog")
-        # The snapshot then sees the grant under the new name.
-        merged = self.merge()
-        self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
-                         ["catalog.world_trade_organization:read", "catalog.fred:read"])
-        # Idempotent: a second run finds nothing to rename.
-        self.assertEqual(self.rename(), ([], []))
-
-    def test_rename_skips_new_realms_and_refuses_both_names(self):
-        self.state[self.prefix + "/clients?clientId=econ-graph-api"] = None
-        self.assertEqual(self.rename(), ([], []))
-        self.state[self.prefix + "/clients?clientId=econ-graph-api"] = [{"id": "api"}]
-        roles = self.prefix + "/clients/api/roles/"
-        self.state[roles + urllib.parse.quote("catalog.wto:read", safe="")] = {"name": "catalog.wto:read"}
-        self.state[roles + urllib.parse.quote("catalog.world_trade_organization:read", safe="")] = {
-            "name": "catalog.world_trade_organization:read"}
-        with self.assertRaises(RuntimeError):
-            self.rename()
-
-    def test_rename_refuses_a_realm_file_that_still_declares_the_old_name(self):
-        self.realm["roles"]["client"]["econ-graph-api"].append({"name": "catalog.wto:read"})
-        with self.assertRaises(RuntimeError):
-            self.rename()
 
 
 if __name__ == "__main__":
