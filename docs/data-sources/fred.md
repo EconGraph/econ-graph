@@ -10,8 +10,9 @@ Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the
 the [curated series list](../../backend/crates/econ-graph-crawler/data/fred_series.csv),
 covering GDP, employment, inflation, rates, the NBER recession indicator (`USREC`) and other
 headline measures. It excludes series whose `notes` match known copyright or
-reproduction-restriction phrases, such as those on Coinbase and S&P/Case-Shiller series. The curated list bounds discovery; the earlier
-`/series/search` crawl had no bound on how many series it could find.
+reproduction-restriction phrases, such as those on Coinbase and S&P/Case-Shiller series. The
+curated list bounds discovery; the earlier `/series/search` crawl had no bound on how many
+series it could find.
 
 Each fetch requests series metadata. When observations are needed, it lists vintage dates with
 `GET /fred/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=10000[&offset=...]`.
