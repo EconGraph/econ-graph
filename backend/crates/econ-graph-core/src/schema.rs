@@ -149,6 +149,8 @@ diesel::table! {
         source_id -> Uuid,
         fingerprint -> Text,
         last_refresh_at -> Timestamptz,
+        guarded_snapshot -> Nullable<Jsonb>,
+        guarded_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -722,6 +724,7 @@ diesel::table! {
         proposed_successor_id -> Nullable<Uuid>,
         successor_id -> Nullable<Uuid>,
         scope_fingerprint -> Text,
+        in_accepted_catalog -> Bool,
     }
 }
 

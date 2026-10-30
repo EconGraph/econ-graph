@@ -58,15 +58,6 @@ impl BeaRule {
         }
     }
 
-    /// Whether current table `name`, titled `title`, belongs to this rule's family.
-    fn matches(&self, name: &str, title: &str) -> bool {
-        name.starts_with(&self.prefix)
-            && self
-                .title_contains
-                .as_ref()
-                .is_none_or(|s| title.to_lowercase().contains(&s.to_lowercase()))
-    }
-
     /// `NIPA T10101* frequencies=A,Q`, for reports.
     pub fn describe(&self) -> String {
         let mut out = format!("{} {}*", self.dataset, self.prefix);
@@ -125,7 +116,7 @@ impl BeaSelection {
     ) -> Result<Vec<BeaTable>, CrawlError> {
         let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
         let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
-        for rule in &self.rule {
+        for (index, rule) in self.rule.iter().enumerate() {
             let dataset = rule.dataset();
             let catalog = catalogs.get(&dataset).ok_or_else(|| {
                 CrawlError::Transient(format!(
@@ -133,8 +124,17 @@ impl BeaSelection {
                     rule.dataset
                 ))
             })?;
+            let matched = catalog
+                .iter()
+                .filter(|(name, title)| rule.matches_table(name, title, &excluded))
+                .count();
+            record_rule_matches(
+                "BEA",
+                &format!("{index}:{}:{}", rule.dataset, rule.prefix),
+                matched,
+            );
             for (name, title) in catalog {
-                if !rule.matches(name, title) || excluded.contains(name.as_str()) {
+                if !rule.matches_table(name, title, &excluded) {
                     continue;
                 }
                 let frequencies = selected
@@ -177,6 +177,7 @@ impl BeaSelection {
         &self,
         catalogs: &HashMap<BeaDataset, HashMap<String, String>>,
     ) -> Vec<Vec<String>> {
+        let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
         self.rule
             .iter()
             .map(|rule| {
@@ -184,9 +185,7 @@ impl BeaSelection {
                     .get(&rule.dataset())
                     .into_iter()
                     .flatten()
-                    .filter(|(name, title)| {
-                        rule.matches(name, title) && !self.exclude.contains(*name)
-                    })
+                    .filter(|(name, title)| rule.matches_table(name, title, &excluded))
                     .map(|(name, _)| name.clone())
                     .collect();
                 names.sort_unstable();
@@ -223,6 +222,36 @@ impl BeaSelection {
         } else {
             Ok(())
         }
+    }
+}
+
+impl BeaRule {
+    fn matches_table(&self, name: &str, title: &str, excluded: &HashSet<&str>) -> bool {
+        name.starts_with(&self.prefix)
+            && !excluded.contains(name)
+            && self
+                .title_contains
+                .as_ref()
+                .is_none_or(|s| title.to_lowercase().contains(&s.to_lowercase()))
+    }
+}
+
+/// Publish how many catalog entries one selection rule matched, and warn when it matched
+/// none: a rule that quietly selects nothing (an upstream rename, a retitled table) would
+/// otherwise let its series age out with no alert while the other rules keep discovery
+/// working. `rule` is a bounded label naming the rule's position and catalog.
+pub(crate) fn record_rule_matches(source: &str, rule: &str, matched: usize) {
+    econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+        .rule_matches
+        .with_label_values(&[source, rule])
+        .set(i64::try_from(matched).unwrap_or(i64::MAX));
+    if matched == 0 {
+        tracing::warn!(
+            source,
+            rule,
+            "catalog selection rule matched nothing in the current upstream catalog; \
+             review data/catalog_selection/"
+        );
     }
 }
 
@@ -374,6 +403,29 @@ mod tests {
             Frequency::Annual,
             Some("GDP")
         ));
+    }
+
+    #[test]
+    fn a_rule_matching_nothing_is_published_even_when_other_rules_select_tables() {
+        let mut r = rules();
+        let mut renamed = r.rule[0].clone();
+        renamed.prefix = "ZZRENAMEDGONE".into();
+        r.rule.push(renamed);
+        let selected = r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(selected.len(), 1);
+        let gauge = |label: &str| {
+            econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+                .rule_matches
+                .with_label_values(&["BEA", label])
+                .get()
+        };
+        // Other tests share the global gauge, so only this test's unique label is checked.
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_matches
+            .with_label_values(&["BEA", "1:Regional:ZZRENAMEDGONE"])
+            .set(-1);
+        r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(gauge("1:Regional:ZZRENAMEDGONE"), 0);
     }
 
     #[test]

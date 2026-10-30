@@ -24,6 +24,7 @@ fn tracked(id: &str) -> State {
         last_seen_at: None,
         proposed_successor_id: None,
         successor_id: None,
+        in_accepted_catalog: true,
     }
 }
 #[test]
@@ -115,8 +116,7 @@ fn explicit_restrictions_and_discontinued_titles_are_distinct_from_absence() {
     let facts = CatalogLifecycle {
         restricted_ids: vec!["r".into()],
         discontinued_ids: vec!["d".into()],
-        confirmed_missing_ids: vec![],
-        scope_ids: vec![],
+        ..Default::default()
     };
     let (states, guarded) = plan(
         &[],
@@ -238,7 +238,7 @@ async fn retained_history_survives_discovery_fetch_and_confirmed_successor() {
         .await
         .unwrap();
     }
-    let states:Vec<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id='0'").load(&mut conn).await.unwrap();
+    let states:Vec<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id='0'").load(&mut conn).await.unwrap();
     assert_eq!(states[0].status, "missing_from_catalog");
     assert_eq!(
         states[0].proposed_successor_id,
@@ -302,7 +302,7 @@ async fn retained_history_survives_discovery_fetch_and_confirmed_successor() {
     confirm_successor(pool, SourceId::Fred, "0", "new")
         .await
         .unwrap();
-    let confirmed:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id='0'").get_result(&mut conn).await.unwrap();
+    let confirmed:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id='0'").get_result(&mut conn).await.unwrap();
     assert_eq!(confirmed.status, "superseded");
     assert_eq!(
         confirmed.successor_id,
@@ -338,7 +338,7 @@ async fn fetch_only_not_found_and_restriction_evidence_is_durable() {
         })
         .await
         .unwrap();
-        let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id='retired'").get_result(&mut conn).await.unwrap();
+        let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id='retired'").get_result(&mut conn).await.unwrap();
         assert_eq!(state.missing_refreshes, 0);
         assert_eq!(fetch_evidence(pool, "retired").await.fetch_misses, n);
         assert_eq!(state.status, if n < 3 { "active" } else { "retired" });
@@ -450,7 +450,7 @@ async fn guarded_catalog_still_hides_explicitly_restricted_history() {
     })
     .await
     .unwrap();
-    let rows:Vec<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle ORDER BY external_id").load(&mut conn).await.unwrap();
+    let rows:Vec<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle ORDER BY external_id").load(&mut conn).await.unwrap();
     assert_eq!(rows[0].status, "restricted");
     assert!(rows[1..]
         .iter()
@@ -632,7 +632,7 @@ name="Regional"
     })
     .await
     .unwrap();
-    let enrolled:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+    let enrolled:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id=$1")
         .bind::<Text,_>(old_id).get_result(&mut conn).await.unwrap();
     assert_eq!(enrolled.status, "active");
     assert_eq!(enrolled.missing_refreshes, 0);
@@ -652,7 +652,7 @@ name="Regional"
         })
         .await
         .unwrap();
-        let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+        let state:State=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id=$1")
             .bind::<Text,_>(old_id).get_result(&mut conn).await.unwrap();
         assert_eq!(state.missing_refreshes, refresh);
         assert_eq!(
@@ -664,7 +664,7 @@ name="Regional"
             }
         );
     }
-    let unrelated_state:Option<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id FROM series_lifecycle WHERE external_id=$1")
+    let unrelated_state:Option<State>=diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id=$1")
         .bind::<Text,_>(unrelated_id).get_result(&mut conn).await.optional().unwrap();
     assert!(unrelated_state.is_none());
     #[derive(QueryableByName)]
@@ -770,8 +770,7 @@ async fn direct_fetch_success_resets_a_worker_miss_committed_while_it_waited() {
     }
 
     let fetch = conn.transaction::<_, AppError, _>(async |conn| {
-        diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
-            .bind::<SqlUuid,_>(source_id).execute(&mut *conn).await?;
+        lock_series(conn, source_id, id).await?;
         let blocker: Pid = diesel::sql_query("SELECT pg_backend_pid() AS pid")
             .get_result(&mut *conn).await?;
         let direct_pool = pool.clone();
@@ -1106,5 +1105,359 @@ async fn catalog_confirmed_retirement_survives_fetch_success_and_rule_baseline_r
         ("retired", 1, 0, false)
     );
     drop(conn);
+    db.drop().await;
+}
+
+/// Scope members already absent when a rules baseline is taken were never listed by an
+/// accepted catalog, so they must not count as a mass disappearance on the next run.
+#[test]
+fn absent_scope_members_at_baseline_do_not_lock_the_guard() {
+    let now = Utc::now();
+    let listed: Vec<_> = (0..5).map(|i| found(&format!("listed{i}"))).collect();
+    let facts = CatalogLifecycle {
+        scope_ids: (0..5)
+            .map(|i| format!("listed{i}"))
+            .chain((0..5).map(|i| format!("absent{i}")))
+            .collect(),
+        ..Default::default()
+    };
+    let (mut states, guarded) = plan(&[], &listed, &facts, false, now, LifecyclePolicy::default());
+    assert!(!guarded);
+    for run in 2..=5 {
+        let (next, guarded) = plan(
+            &states,
+            &listed,
+            &facts,
+            true,
+            now,
+            LifecyclePolicy::default(),
+        );
+        assert!(!guarded, "run {run} was guarded");
+        states = next;
+    }
+    let absent: Vec<_> = states
+        .iter()
+        .filter(|s| s.external_id.starts_with("absent"))
+        .collect();
+    assert_eq!(absent.len(), 5);
+    assert!(absent
+        .iter()
+        .all(|s| s.status == "missing_from_catalog" && !s.in_accepted_catalog));
+    assert!(states
+        .iter()
+        .filter(|s| s.external_id.starts_with("listed"))
+        .all(|s| s.status == "active" && s.in_accepted_catalog));
+}
+
+async fn reconcile_at(
+    pool: &DatabasePool,
+    listed: &[DiscoveredSeries],
+    facts: &CatalogLifecycle,
+    at: DateTime<Utc>,
+) -> Reconciled {
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<_, AppError, _>(async |conn| {
+        reconcile_conn(conn, SourceId::Fred, listed, facts, "rules", at).await
+    })
+    .await
+    .unwrap()
+}
+
+#[derive(QueryableByName)]
+struct Pending {
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    pending: bool,
+}
+
+async fn guarded_snapshot_pending(pool: &DatabasePool) -> bool {
+    let mut conn = pool.get().await.unwrap();
+    let row: Pending = diesel::sql_query(
+        "SELECT guarded_snapshot IS NOT NULL AS pending FROM catalog_lifecycle_scopes",
+    )
+    .get_result(&mut conn)
+    .await
+    .unwrap();
+    row.pending
+}
+
+#[tokio::test]
+async fn baseline_absent_scope_members_do_not_guard_stored_catalogs() {
+    let Some(db) = fetch_counter_db("eco464_baseline_absent").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let listed: Vec<_> = (0..5)
+        .map(|i| counter_series(&format!("listed{i}")))
+        .collect();
+    let facts = CatalogLifecycle {
+        scope_ids: (0..5).map(|i| format!("absent{i}")).collect(),
+        ..Default::default()
+    };
+    let start = Utc::now();
+    for run in 0..5 {
+        let result = reconcile_at(
+            pool,
+            &listed,
+            &facts,
+            start + chrono::Duration::seconds(run),
+        )
+        .await;
+        assert!(!result.guarded, "run {} was guarded", run + 1);
+    }
+    assert!(!guarded_snapshot_pending(pool).await);
+    let absent = fetch_evidence(pool, "absent0").await;
+    assert_eq!(
+        (absent.status.as_str(), absent.catalog_misses),
+        ("missing_from_catalog", 4)
+    );
+    assert_eq!(fetch_evidence(pool, "listed0").await.status, "active");
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn operator_accepts_a_reviewed_guarded_catalog() {
+    let Some(db) = fetch_counter_db("eco464_accept_guarded").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let all: Vec<_> = (0..10).map(|i| counter_series(&format!("s{i}"))).collect();
+    let facts = CatalogLifecycle::default();
+    let start = Utc::now();
+    assert!(!reconcile_at(pool, &all, &facts, start).await.guarded);
+    let err = review_guarded_catalog(pool, SourceId::Fred, false)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no guarded catalog snapshot"));
+
+    let half = &all[..5];
+    let guarded = reconcile_at(pool, half, &facts, start + chrono::Duration::seconds(1)).await;
+    assert!(guarded.guarded);
+    assert!(guarded_snapshot_pending(pool).await);
+
+    let review = review_guarded_catalog(pool, SourceId::Fred, false)
+        .await
+        .unwrap();
+    assert_eq!((review.listed, review.previously_listed), (5, 10));
+    assert_eq!(
+        review.newly_missing,
+        (5..10).map(|i| format!("s{i}")).collect::<Vec<_>>()
+    );
+    assert_eq!(fetch_evidence(pool, "s9").await.catalog_misses, 0);
+    assert!(guarded_snapshot_pending(pool).await);
+
+    let accepted = review_guarded_catalog(pool, SourceId::Fred, true)
+        .await
+        .unwrap();
+    assert_eq!(accepted.newly_missing.len(), 5);
+    assert_eq!(accepted.transitions, 0);
+    let s9 = fetch_evidence(pool, "s9").await;
+    assert_eq!((s9.status.as_str(), s9.catalog_misses), ("active", 1));
+    assert_eq!(fetch_evidence(pool, "s0").await.catalog_misses, 0);
+    assert!(!guarded_snapshot_pending(pool).await);
+
+    // The accepted snapshot is the new baseline: the same catalog is no longer guarded,
+    // and the absent series need two more accepted absences.
+    for run in 2..=3 {
+        let next = reconcile_at(pool, half, &facts, start + chrono::Duration::seconds(run)).await;
+        assert!(!next.guarded);
+    }
+    let s9 = fetch_evidence(pool, "s9").await;
+    assert_eq!(
+        (s9.status.as_str(), s9.catalog_misses),
+        ("missing_from_catalog", 3)
+    );
+    db.drop().await;
+}
+
+/// The per-series lock lets different series of one source persist concurrently.
+#[tokio::test]
+async fn successful_fetches_of_different_series_do_not_wait_for_each_other() {
+    let Some(db) = fetch_counter_db("eco464_concurrent_fetches").await else {
+        return;
+    };
+    let pool = &db.pool;
+    persist::persist_discovered(
+        pool,
+        SourceId::Fred,
+        &[counter_series("held"), counter_series("other")],
+    )
+    .await
+    .unwrap();
+    fetch_miss(pool, "other").await;
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        persist::persist_series_conn(conn, SourceId::Fred, "held", &successful_history(), true)
+            .await?;
+        let other_pool = pool.clone();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            persist::persist_series(&other_pool, SourceId::Fred, "other", &successful_history()),
+        )
+        .await
+        .expect("a different series' fetch waited for the open transaction")
+        .unwrap();
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(fetch_evidence(pool, "other").await.fetch_misses, 0);
+    drop(conn);
+    db.drop().await;
+}
+
+/// The reviewed case: 50 old series enrolled at adoption without being listed upstream (a
+/// renamed table family), 50 renamed and 10 other listed series. No refresh may be guarded,
+/// and the old series reach `missing_from_catalog` after three refreshes.
+#[test]
+fn a_fifty_series_rename_enrolled_at_adoption_is_badged_not_guarded() {
+    let now = Utc::now();
+    let old: Vec<String> = (0..50)
+        .map(|i| format!("bea_regional/SAGDP2N.{i}.06000"))
+        .collect();
+    let current: Vec<_> = (0..50)
+        .map(|i| found(&format!("bea_regional/SAGDP2.{i}.06000")))
+        .chain((0..10).map(|i| found(&format!("bea_nipa/T10101.{i}.A"))))
+        .collect();
+    let facts = CatalogLifecycle {
+        scope_ids: old.clone(),
+        ..Default::default()
+    };
+    let (mut states, guarded) = plan(
+        &[],
+        &current,
+        &facts,
+        false,
+        now,
+        LifecyclePolicy::default(),
+    );
+    assert!(!guarded);
+    assert_eq!(states.len(), 110);
+    let mut guarded_runs = 0;
+    for refresh in 1..=3 {
+        let (next, guarded) = plan(
+            &states,
+            &current,
+            &facts,
+            true,
+            now,
+            LifecyclePolicy::default(),
+        );
+        guarded_runs += usize::from(guarded);
+        states = next;
+        for id in &old {
+            let s = states.iter().find(|s| &s.external_id == id).unwrap();
+            assert_eq!(s.missing_refreshes, refresh);
+        }
+    }
+    assert_eq!(guarded_runs, 0);
+    for id in &old {
+        let s = states.iter().find(|s| &s.external_id == id).unwrap();
+        assert_eq!(s.status, "missing_from_catalog");
+    }
+    assert!(current.iter().all(|d| {
+        states
+            .iter()
+            .find(|s| s.external_id == d.external_id)
+            .is_some_and(|s| s.status == "active")
+    }));
+}
+
+/// Rule drift: a tracked series the walked catalog still lists, but the rules no longer
+/// select (exact ids for FRED, table prefixes for BEA), is never absent and never trips the
+/// guard; a series missing from the whole walked catalog still is.
+#[test]
+fn a_series_listed_upstream_but_outside_the_rules_is_never_absent() {
+    let now = Utc::now();
+    let baseline: Vec<_> = (0..5).map(|i| tracked(&i.to_string())).collect();
+    let selected: Vec<_> = (2..5).map(|i| found(&i.to_string())).collect();
+    for facts in [
+        CatalogLifecycle {
+            unselected_ids: vec!["0".into(), "1".into(), "not-tracked".into()],
+            ..Default::default()
+        },
+        CatalogLifecycle {
+            unselected_prefixes: vec!["0".into(), "1".into()],
+            ..Default::default()
+        },
+    ] {
+        let mut states = baseline.clone();
+        states[0].status = "missing_from_catalog".into();
+        states[0].missing_refreshes = 3;
+        states[0].since = Some(now);
+        for refresh in 1..=4 {
+            // Two of five drifting out of the rules would trip the 20% guard if counted.
+            let (next, guarded) = plan(
+                &states,
+                &selected,
+                &facts,
+                true,
+                now,
+                LifecyclePolicy::default(),
+            );
+            assert!(!guarded, "refresh {refresh} was guarded");
+            states = next;
+            for id in ["0", "1"] {
+                let s = states.iter().find(|s| s.external_id == id).unwrap();
+                assert_eq!(
+                    (
+                        s.status.as_str(),
+                        s.missing_refreshes,
+                        s.since,
+                        s.in_accepted_catalog
+                    ),
+                    ("active", 0, None, true)
+                );
+            }
+        }
+        assert!(states.iter().all(|s| s.external_id != "not-tracked"));
+    }
+    // Once the walked catalog no longer lists it at all, absence counts again.
+    let mut states = baseline.clone();
+    let listed: Vec<_> = (1..5).map(|i| found(&i.to_string())).collect();
+    for _ in 0..3 {
+        let (next, guarded) = plan(
+            &states,
+            &listed,
+            &CatalogLifecycle::default(),
+            true,
+            now,
+            LifecyclePolicy::default(),
+        );
+        assert!(!guarded);
+        states = next;
+    }
+    assert_eq!(states[0].status, "missing_from_catalog");
+}
+
+#[tokio::test]
+async fn rule_drift_is_counted_for_review_and_keeps_publication_state() {
+    let Some(db) = fetch_counter_db("eco464_rule_drift").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let all: Vec<_> = (0..5)
+        .map(|i| counter_series(&format!("GDP_{i}")))
+        .collect();
+    persist::persist_discovered(pool, SourceId::Fred, &all)
+        .await
+        .unwrap();
+    let start = Utc::now();
+    reconcile_at(pool, &all, &CatalogLifecycle::default(), start).await;
+    let drifted = CatalogLifecycle {
+        unselected_ids: vec!["GDP_0".into()],
+        ..Default::default()
+    };
+    for run in 1..=4 {
+        let result = reconcile_at(
+            pool,
+            &all[1..],
+            &drifted,
+            start + chrono::Duration::seconds(run),
+        )
+        .await;
+        assert_eq!(result.unselected_tracked, Some(1));
+        let e = fetch_evidence(pool, "GDP_0").await;
+        assert_eq!((e.status.as_str(), e.catalog_misses), ("active", 0));
+    }
     db.drop().await;
 }

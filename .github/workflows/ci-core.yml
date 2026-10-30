@@ -398,6 +398,14 @@ jobs:
         shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
         scripts/deploy/test-release-deploy.sh
 
+    # tag.sh tags vX.Y.0 with train-N, and a patch release vX.Y.Z only on a
+    # branch that descends from an existing train-N, against a local origin and
+    # a stub git push.
+    - name: Check the release tag script
+      run: |
+        shellcheck -x scripts/release/tag.sh scripts/release/test-tag.sh
+        scripts/release/test-tag.sh
+
     # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
     # identity printed first, and the resume hint keeping the run's options, against stubs.
     - name: Check the full-history re-fetch script
@@ -2329,9 +2337,10 @@ jobs:
         push: false
         load: true
         tags: econ-graph-frontend:test
-        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        # Keycloak issuer for sign-in, from the repository variable when set, else the
+        # same-origin path scripts/deploy/build-images.sh uses (ECO-728).
         build-args: |
-          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER || '/idp/realms/econ-graph' }}
           VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max

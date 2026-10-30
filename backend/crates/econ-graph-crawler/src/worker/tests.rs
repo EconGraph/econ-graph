@@ -4508,9 +4508,7 @@ async fn scoped_discovery_takes_source_lock_before_metadata_rows() {
         .execute(&mut blocker)
         .await
         .unwrap();
-    diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
-        .bind::<diesel::sql_types::Uuid, _>(source_id)
-        .execute(&mut blocker)
+    crate::lifecycle::lock_source_exclusive(&mut blocker, source_id)
         .await
         .unwrap();
     #[derive(QueryableByName)]
@@ -4574,7 +4572,7 @@ async fn scoped_discovery_takes_source_lock_before_metadata_rows() {
     assert!(waited.is_ok(), "discovery did not reach the source lock");
     assert!(
         metadata_free.is_ok(),
-        "discovery locked metadata before the source row: {metadata_free:?}"
+        "discovery locked metadata before the source lock: {metadata_free:?}"
     );
     assert!(matches!(
         tokio::time::timeout(Duration::from_secs(5), job)
@@ -4637,9 +4635,7 @@ async fn concurrent_fetch_and_refetch_success_resets_the_other_kinds_new_miss() 
             .execute(&mut blocker)
             .await
             .unwrap();
-        diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
-            .bind::<diesel::sql_types::Uuid, _>(source_id)
-            .execute(&mut blocker)
+        crate::lifecycle::lock_series(&mut blocker, source_id, id)
             .await
             .unwrap();
         #[derive(QueryableByName)]

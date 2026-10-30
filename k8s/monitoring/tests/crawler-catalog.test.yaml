@@ -22,7 +22,9 @@ tests:
         summary: BEA catalog rejected by volume guard
         description: A catalog exceeded its configured selection limit or disappearance
           threshold. The worker retained stored histories; inspect its catalog warning
-          and upstream completeness before changing selection rules or retrying.
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
   - eval_time: 2h
     alertname: CrawlerCatalogGuardRejected
     exp_alerts: []
@@ -45,7 +47,9 @@ tests:
         summary: FRED catalog rejected by mass_disappearance guard
         description: A catalog exceeded its configured selection limit or disappearance
           threshold. The worker retained stored histories; inspect its catalog warning
-          and upstream completeness before changing selection rules or retrying.
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
   - eval_time: 2h
     alertname: CrawlerCatalogGuardRejected
     exp_alerts: []
@@ -80,3 +84,48 @@ tests:
   - eval_time: 10m
     alertname: CrawlerSeriesPublicationChanged
     exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 4x10 0x60
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="0:NIPA:T10101"}
+    values: 1x70
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph-branch",pod="b1",source="BEA",rule="1:NIPA:T10105"}
+    values: 0x70
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        rule: 6:Regional:SAGDP2
+      exp_annotations:
+        summary: BEA selection rule 6:Regional:SAGDP2 matches nothing upstream
+        description: The last BEA discovery found no catalog entries for selection
+          rule 6:Regional:SAGDP2 (position:catalog in data/catalog_selection/). Its
+          previously selected series will be counted as absent; check whether upstream
+          renamed the table or release and update the rule.
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_unselected_series{kubernetes_namespace="econ-graph",pod="w1",source="FRED"}
+    values: 0x10 3x60
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogSeriesUnselected
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: CrawlerCatalogSeriesUnselected
+    exp_alerts:
+    - exp_labels:
+        severity: info
+        source: FRED
+      exp_annotations:
+        summary: 3 tracked FRED series no longer match the selection rules
+        description: The last complete FRED catalog still lists these series upstream,
+          so they keep their publication state and are still fetched. The worker log's
+          catalog warning counts them; review whether the rules in data/catalog_selection/
+          should follow the upstream change.

@@ -23,6 +23,9 @@ validated against the live API.
 Series whose `notes` match known copyright or reproduction-restriction phrases, such as
 those on Coinbase and S&P/Case-Shiller series, are recorded as restricted and are not
 fetched. Complete catalogs track repeated absences separately from fetch failures.
+Absence counts only for ids the walked release or category no longer lists: a series
+retitled or re-frequencied out of a rule stays published and scheduled, and is reported for
+rule review. A `/series` response with no series is a failed fetch, not removal evidence.
 Restricted series are retained internally and hidden from public reads. Discontinued,
 missing and retired histories stay publicly reachable with a badge and lower search
 priority. Successor candidates require operator confirmation; histories are never merged.

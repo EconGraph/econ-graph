@@ -517,11 +517,6 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(row.n, 6);
-        diesel::sql_query("DELETE FROM series_lifecycle WHERE source_id=$1")
-            .bind::<diesel::sql_types::Uuid, _>(src)
-            .execute(&mut conn)
-            .await
-            .unwrap();
         drop(conn);
         exec(
             &pool,

@@ -79,7 +79,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::AsyncPgConnection;
 use econ_graph_core::models::{CrawlQueueItem, JobKind, LeaseOutcome, QueueTransition};
 use econ_graph_core::{AppError, AppResult};
 use tokio::sync::watch;
@@ -903,6 +903,10 @@ impl Worker {
             crate::lifecycle::Reconciled,
         >::new()));
         let transaction_metrics = pending_metrics.clone();
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
         // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
         // the token after a lock wait; the queue row stays locked through commit.
         let outcome = conn
@@ -923,9 +927,14 @@ impl Worker {
                 }
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
-                        let write =
-                            persist::persist_series_conn(conn, source, &item.series_id, &fetched)
-                                .await?;
+                        let write = persist::persist_series_conn(
+                            conn,
+                            source,
+                            &item.series_id,
+                            &fetched,
+                            tracks_lifecycle,
+                        )
+                        .await?;
                         Ok(JobStats {
                             series_id: Some(write.series_id),
                             points_written: write.points_upserted,
@@ -943,16 +952,13 @@ impl Worker {
                         observed_at,
                         validator,
                     }) => {
-                        // Lifecycle fetch writers acquire this source row before touching
-                        // series/metadata. Take the same lock order before validators and
-                        // discovered metadata so catalog and restricted fetch commits cannot
-                        // hold each other's source/metadata locks in opposite order.
+                        // Lifecycle fetch writers take this source's advisory lock (shared)
+                        // before touching series/metadata. Take it exclusively before
+                        // validators and discovered metadata so catalog and per-series
+                        // lifecycle commits cannot hold each other's locks in opposite order.
                         if complete && catalog_scope.is_some() {
                             let source_id = persist::data_source_id_conn(conn, source).await?;
-                            diesel::sql_query("SELECT id FROM data_sources WHERE id=$1 FOR UPDATE")
-                                .bind::<diesel::sql_types::Uuid, _>(source_id)
-                                .execute(&mut *conn)
-                                .await?;
+                            crate::lifecycle::lock_source_exclusive(conn, source_id).await?;
                         }
                         if let Some((url, validators)) = &validator {
                             persist::set_url_validators_conn(conn, source, url, validators).await?;
@@ -1069,6 +1075,7 @@ impl Worker {
                     guarded: false,
                     transitions: 1,
                     transition_statuses: vec![status],
+                    ..Default::default()
                 });
         }
         if matches!(result, Err(CrawlError::Restricted(_)))
@@ -1082,6 +1089,7 @@ impl Worker {
                     guarded: false,
                     transitions: 1,
                     transition_statuses: vec![status],
+                    ..Default::default()
                 });
         }
         let series_id = match result {

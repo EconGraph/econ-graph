@@ -43,6 +43,13 @@
 //!    again (see [`coverage`](crate::coverage) for how this keeps it out of coverage's
 //!    denominator).
 //!
+//!    A series with a publication state other than active (see [`lifecycle`](crate::lifecycle))
+//!    is not a candidate, except one retired solely by consecutive fetch NotFound results
+//!    (`series_lifecycle.fetch_retired`). That series is probed once
+//!    [`FETCH_RETIRED_PROBE_FACTOR`] intervals after its last attempt (a discovered series
+//!    without an `economic_series` row uses its last failed queue row, so at most the queue
+//!    retention), and a successful probe makes it active again.
+//!
 //!    Discovered series and refreshes of existing series take turns in the batch, each kind
 //!    oldest first (never-crawled series first; discovered series never tried before ones whose
 //!    last fetch failed), so neither starves the other.
@@ -99,6 +106,10 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Default maximum `fetch_series` jobs enqueued per tick.
 pub const DEFAULT_BATCH_LIMIT: i64 = 500;
+
+/// A series retired only by consecutive fetch NotFound results is still probed, once per this
+/// many refresh intervals, so a later successful fetch can reactivate it.
+pub const FETCH_RETIRED_PROBE_FACTOR: i64 = 12;
 
 /// Refresh interval, in days, for a frequency that matches no rule.
 pub const UNKNOWN_FREQUENCY_DAYS: i64 = 7;
@@ -206,13 +217,15 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
          ), cand AS ( \
              SELECT src.code, es.id, es.external_id, es.last_crawled_at, es.crawl_status, \
                     NULL::timestamptz AS failed_at, FALSE AS discovered, \
-                    make_interval(days => ({es_days})) AS refresh \
+                    make_interval(days => ({es_days})) AS refresh, \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = es.source_id \
+                        AND lc.external_id = es.external_id AND {fetch_retired}) AS probe \
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
                AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
                    WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
-                     AND lc.status <> 'active') \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM datasets d \
@@ -220,7 +233,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
-                    make_interval(days => ({sm_days})) \
+                    make_interval(days => ({sm_days})), \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = sm.source_id \
+                        AND lc.external_id = sm.external_id AND {fetch_retired}) \
              FROM series_metadata sm \
              JOIN src ON sm.source_id = src.ds_id \
              LEFT JOIN failed_jobs f \
@@ -228,7 +243,7 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              WHERE sm.is_active \
                AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
                    WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
-                     AND lc.status <> 'active') \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR sm.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
@@ -245,7 +260,13 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                  WHERE q.source = c.code AND q.series_id = c.external_id \
                    AND q.kind IN ('fetch_series', 'refetch_series') \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
-           AND CASE WHEN c.crawl_status IN ('failed', 'not_found') THEN \
+           AND CASE WHEN c.probe THEN \
+                   COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
+                                     (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
+                                      WHERE ca.series_id = c.id)), \
+                            '-infinity'::timestamptz) \
+                       <= NOW() - {probe_factor} * c.refresh \
+               WHEN c.crawl_status IN ('failed', 'not_found') THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
@@ -262,6 +283,8 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
         es_days = frequency_days_sql("lower(btrim(es.frequency))"),
         sm_days = frequency_days_sql("lower(btrim(sm.frequency))"),
         census = SourceId::Census.as_str(),
+        fetch_retired = "(lc.status = 'retired' AND lc.fetch_retired)",
+        probe_factor = FETCH_RETIRED_PROBE_FACTOR,
     )
 });
 
@@ -1055,6 +1078,67 @@ mod tests {
         exec(
             pool,
             "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
+        )
+        .await;
+    }
+
+    /// A series retired only by fetch NotFound results is still probed on a slow schedule,
+    /// so a later successful fetch can reactivate it. Catalog-confirmed retirement is not.
+    #[tokio::test]
+    async fn fetch_retired_series_are_probed_slowly() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        // Monthly refreshes every 7 days, so a probe is due after 84.
+        for (id, days_ago, fetch_retired) in [
+            ("t15c_probe_recent", 30.0, true),
+            ("t15c_probe_due", 100.0, true),
+            ("t15c_probe_catalog", 100.0, false),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some("retired"),
+            )
+            .await;
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,$3)")
+                .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(id)
+                .bind::<diesel::sql_types::Bool,_>(fetch_retired).execute(&mut conn).await.unwrap();
+        }
+        let metadata_only = "t15c_probe_catalog_only";
+        discover(pool, SourceId::Fred, &[(metadata_only, "Monthly")]).await;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,TRUE)")
+            .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(metadata_only)
+            .execute(&mut conn).await.unwrap();
+        drop(conn);
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_probe_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_probe_catalog_only".to_string(),
+                "FRED/t15c_probe_due".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_probe_%'",
         )
         .await;
     }

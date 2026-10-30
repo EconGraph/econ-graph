@@ -131,6 +131,12 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    not found, the worker deactivates its `series_metadata` row instead; it becomes a candidate
    again only when catalog discovery lists that id again.
 
+   Sources that track publication lifecycle (FRED and BEA) keep the row active instead and
+   count confirmed NotFound results. A series with a publication state other than active is
+   not a candidate, except one retired only by three consecutive NotFound results: it is
+   probed once every 12 intervals, and a successful fetch makes it active again (see the
+   [crawler coverage runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series)).
+
    Only sources in `CRAWLER_SOURCES` (default: all) are considered, and only series whose
    `data_sources` row is enabled and whose own `is_active` flag is set; for Census, only ids
    matching `fetchable_id_regex()` (national and per-state BDS ids).
