@@ -1,5 +1,5 @@
 // REQUIREMENT: The explorer's URL and its search form stay in step on same-route navigation
-// PURPOSE: A link to /explore while already on /explore (the sidebar's FRED Data), browser
+// PURPOSE: A link to /explore while already on /explore (any link to an /explore URL), browser
 // back/forward and direct loads all show the URL's query and source, not the previous state
 
 import React from 'react';
@@ -55,14 +55,14 @@ vi.mock('../../hooks/useSeriesData', () => ({
   },
 }));
 
-// Shows the router's current URL, and stands in for the sidebar and the browser's buttons
+// Shows the router's current URL, and stands in for a link to another /explore URL and the browser's buttons
 const Chrome: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   return (
     <>
       <output data-testid='url'>{`${location.pathname}${location.search}`}</output>
-      <Link to='/explore?source=Federal Reserve Economic Data'>FRED Data</Link>
+      <Link to='/explore?source=Federal Reserve Economic Data'>Browse FRED</Link>
       <button onClick={() => navigate(-1)}>Back</button>
       <button onClick={() => navigate(1)}>Forward</button>
     </>
@@ -110,13 +110,13 @@ async function expectAllSourceGdpSearch() {
 }
 
 describe('the explorer follows navigation to another /explore URL (ECO-511)', () => {
-  test('a GDP search, then the sidebar FRED Data link, browses FRED without remounting', async () => {
+  test('a GDP search, then a link to the FRED listing, browses FRED without remounting', async () => {
     const user = userEvent.setup();
     renderExplorerAt('/explore?q=GDP');
     await expectAllSourceGdpSearch();
     const searchInput = searchBox();
 
-    await user.click(screen.getByRole('link', { name: 'FRED Data' }));
+    await user.click(screen.getByRole('link', { name: 'Browse FRED' }));
 
     await expectFredBrowse();
     // Same page instance: the link navigated within the explorer rather than reloading it
@@ -127,7 +127,7 @@ describe('the explorer follows navigation to another /explore URL (ECO-511)', ()
     const user = userEvent.setup();
     renderExplorerAt('/explore?q=GDP');
     await expectAllSourceGdpSearch();
-    await user.click(screen.getByRole('link', { name: 'FRED Data' }));
+    await user.click(screen.getByRole('link', { name: 'Browse FRED' }));
     await expectFredBrowse();
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -141,7 +141,7 @@ describe('the explorer follows navigation to another /explore URL (ECO-511)', ()
     const user = userEvent.setup();
     renderExplorerAt('/explore?q=GDP');
     await expectAllSourceGdpSearch();
-    await user.click(screen.getByRole('link', { name: 'FRED Data' }));
+    await user.click(screen.getByRole('link', { name: 'Browse FRED' }));
     await expectFredBrowse();
 
     await user.type(searchBox(), 'unemployment');
@@ -154,7 +154,7 @@ describe('the explorer follows navigation to another /explore URL (ECO-511)', ()
     expect(searchBox()).toHaveValue('unemployment');
   });
 
-  test('a direct load of the FRED Data URL browses FRED', async () => {
+  test('a direct load of a FRED listing URL by source name browses FRED', async () => {
     renderExplorerAt('/explore?source=Federal%20Reserve%20Economic%20Data');
     await expectFredBrowse();
   });
