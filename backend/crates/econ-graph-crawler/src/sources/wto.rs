@@ -887,19 +887,20 @@ fn resolve<'a>(
     let mut out: BTreeMap<&str, (&Area, EconomySeries)> = BTreeMap::new();
     let mut unknown = BTreeSet::new();
     let mut duplicate = BTreeSet::new();
-    let mut other_selection = 0usize;
-    // The WTO codes of NON_ISO_COUNTRIES that this response uses, by area key.
+    let differs = |want: &str, got: &str| !want.is_empty() && !got.is_empty() && want != got;
+    let selected = |row: &Row| {
+        !differs(&indicator.product, &row.product) && !differs(&indicator.partner, &row.partner)
+    };
+    let (rows, other): (Vec<Row>, Vec<Row>) = rows.into_iter().partition(selected);
+    let other_selection = other.len();
+    // The WTO codes of NON_ISO_COUNTRIES among the rows kept, by area key. Only those rows count:
+    // a WTO code seen only for another product or partner must not hide the ISO code's rows.
     let preferred: BTreeMap<&str, &str> = NON_ISO_COUNTRIES
         .iter()
         .filter(|(code, _)| rows.iter().any(|r| r.economy == *code))
         .map(|(code, key)| (*key, *code))
         .collect();
     for row in rows {
-        let differs = |want: &str, got: &str| !want.is_empty() && !got.is_empty() && want != got;
-        if differs(&indicator.product, &row.product) || differs(&indicator.partner, &row.partner) {
-            other_selection += 1;
-            continue;
-        }
         let Some(area) = lookup(areas, &row.economy) else {
             unknown.insert(format!("{} {}", row.economy, row.economy_name));
             continue;

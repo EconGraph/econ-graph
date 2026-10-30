@@ -481,6 +481,20 @@ fn a_wto_code_wins_over_the_iso_code_for_the_same_country() {
             );
         }
     }
+    // A WTO code seen only on another product's rows doesn't hide the ISO code's headline rows.
+    let headline = WtoIndicator {
+        id: "T".into(),
+        product: "TO".into(),
+        partner: String::new(),
+    };
+    let body = r#"{"Dataset": [
+        {"ReportingEconomyCode": "892", "ProductOrSectorCode": "AG", "Year": 2024, "Value": 9},
+        {"ReportingEconomyCode": "688", "ProductOrSectorCode": "TO", "Year": 2024, "Value": 4}
+    ]}"#;
+    let resolved = resolve(&headline, parse_rows("t", body).unwrap(), areas().unwrap()).unwrap();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].0.key, "SRB");
+    assert_eq!(resolved[0].1.points[&date(2024, 1)], dec("4"));
     // The ISO code alone still resolves.
     let body = r#"{"Dataset": [{"ReportingEconomyCode": "688", "Year": 2024, "Value": 3}]}"#;
     let resolved = resolve(&unpinned, parse_rows("t", body).unwrap(), areas().unwrap()).unwrap();
