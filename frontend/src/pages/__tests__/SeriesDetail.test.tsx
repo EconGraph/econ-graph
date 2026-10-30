@@ -152,7 +152,9 @@ describe('SeriesDetail', () => {
     renderPage(UNRATE_ID);
     await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
 
-    const explore = screen.getByRole('link', { name: 'Explore' });
+    const explore = within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    });
     expect(explore).toHaveAttribute('href', '/explore?q=rate&page=2');
     await userEvent.setup().click(explore);
     expect(router.navigate).toHaveBeenCalledWith('/explore?q=rate&page=2');
@@ -181,7 +183,9 @@ describe('SeriesDetail', () => {
     renderPage(UNRATE_ID);
     await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
 
-    expect(screen.getByRole('link', { name: 'Explore' })).toHaveAttribute('href', '/explore');
+    expect(within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    })).toHaveAttribute('href', '/explore');
   });
 
   test('shows the series and its observations from the API', async () => {

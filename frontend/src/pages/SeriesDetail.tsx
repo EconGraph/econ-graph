@@ -297,7 +297,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
 
   return (
     <Box>
-      <Breadcrumbs sx={{ mb: 2 }}>
+      <Breadcrumbs aria-label='breadcrumb' sx={{ mb: 2 }}>
         <Link
           color='inherit'
           href={explorerUrl}
