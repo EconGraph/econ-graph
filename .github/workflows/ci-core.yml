@@ -885,7 +885,7 @@ jobs:
         cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
         grep -Eq '^test result: ok\. 15 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
         cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
-        grep -Eq '^test result: ok\. 6 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 7 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
         cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
         grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
         cargo test -p econ-graph-services --lib services::series_check::tests::readable_series_exists_applies_the_plane_answer_and_the_callers_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-plane-grants.log"

@@ -634,9 +634,9 @@ if [ "$have_script" = true ]; then
     grep -q 'Enter each key' "$out" && fail "set-crawler-keys $args: prompted"
     [ -s "$log" ] && fail "set-crawler-keys $args: called kubectl: $(cat "$log")"
   done
-  # Google mode (crawler keys left blank) writes its IdP keys and reapplies the realm.
+  # Google mode (the five crawler keys left blank) writes its IdP keys and reapplies the realm.
   google_args='--google --no-start-crawler'
-  google_input=$'\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
+  google_input=$'\n\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
   run_keys 'STUB_MARKER=none' "$google_args" "$google_input" ||
     fail "set-crawler-keys --google failed: $(cat "$out")"
   grep -q 'create secret generic econ-graph-keycloak .*--from-file=google-idp-client-id=.*--from-file=google-idp-client-secret=' "$log" ||
