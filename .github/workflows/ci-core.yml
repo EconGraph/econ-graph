@@ -350,6 +350,14 @@ jobs:
           scripts/deploy/lib/release-images.sh
         scripts/deploy/test-release-images.sh
 
+    # tag.sh tags vX.Y.0 with train-N, and a patch release vX.Y.Z only on a
+    # branch that descends from an existing train-N, against a local origin and
+    # a stub git push.
+    - name: Check the release tag script
+      run: |
+        shellcheck -x scripts/release/tag.sh scripts/release/test-tag.sh
+        scripts/release/test-tag.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

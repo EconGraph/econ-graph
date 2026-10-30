@@ -62,6 +62,13 @@ When QA passes and the maintainer agrees, tag the tested commit on the release b
 the flags `remove_by` check runs with that tag, so a flag that is due for removal blocks the tag.
 The tag workflow reuses the tested image digests instead of rebuilding.
 
+A patch release (`vX.Y.Z` with `Z` greater than 0) is tagged the same way, from the same release
+branch, with the train number the branch shipped as (`scripts/release/tag.sh 4.0.1 1`). It needs a
+dated `## [X.Y.Z]` CHANGELOG section and the version bumped in `backend/Cargo.toml`,
+`frontend/package.json` and `frontend/package-lock.json`, like any release. `tag.sh` refuses it
+unless `train-N` already exists on origin and its commit is an ancestor of the tagged commit,
+and then pushes only `vX.Y.Z`; `train-N` stays on the train's first release.
+
 ## Scoping the next release
 
 Once a release branch is cut, scoping of the next release starts on `main`, and a separate
