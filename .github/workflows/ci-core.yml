@@ -317,6 +317,7 @@ jobs:
         scripts/deploy/test-public-host-lib.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
       run: |
@@ -820,17 +821,22 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
 
+    # The runner image's SDKs this job never uses: about 34 GB on ubuntu-24.04, more than
+    # the job's own peak (a 12 GB target dir). Runners don't all have the same free space,
+    # and a full disk fails the job with only "No space left on device" from the runner.
+    # The prune keeps the running Postgres service's image.
+    - name: Free runner disk
+      run: |
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell
+        docker image prune --all --force >/dev/null
+        df -h /
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
-
-    - name: Disk usage (after toolchain)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
 
     - name: Cache cargo registry
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -860,13 +866,6 @@ jobs:
 
     # Fail closed: only the focused user-admin regressions become required, while
     # the unrelated full GraphQL/workspace suite below remains advisory.
-    - name: Disk usage (after cache and setup)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
-
     - name: Run user administration authorization regressions (required)
       run: |
         set -euo pipefail
@@ -964,13 +963,6 @@ jobs:
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
     # flag also applies to the other workspace crates it depends on.
-    - name: Disk usage (after the required regressions)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
-
     - name: Clippy (econ-graph-crawler, no exemptions)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1013,13 +1005,6 @@ jobs:
     # backend/.cargo/config.toml defaults FLAGS_PROFILE to dev, which keeps the static_catalogs
     # build flag on even in a --release cargo build; only building with FLAGS_PROFILE=release
     # explicitly set (as deployed images do) proves a release image leaves the catalogs out.
-    - name: Disk usage (after crawler tests)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
-
     - name: Crawler CLI in release mode registers only the live sources
       run: |
         set -euo pipefail
@@ -1043,13 +1028,6 @@ jobs:
         FLAGS_PROFILE: release
 
     # The complete workspace suite is required, including integration tests.
-    - name: Disk usage (after release build)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
-
     - name: Run all workspace tests (lib, bins, integration tests)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1061,13 +1039,6 @@ jobs:
       working-directory: backend
 
     # Report documentation failures even when the broader test step failed.
-    - name: Disk usage (after workspace tests)
-      run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
-        docker system df || true
-
     - name: Run workspace doctests
       if: ${{ !cancelled() }}
       run: |
@@ -1079,12 +1050,12 @@ jobs:
         exit $status
       working-directory: backend
 
-    - name: Disk usage (end of job)
+    # Headroom left at the end of the job, and what used it.
+    - name: Disk usage
       if: always()
       run: |
-        df -h / /tmp
-        sudo du -xsh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /opt/google /usr/lib/jvm 2>/dev/null || true
-        du -sh backend/target backend/target/debug backend/target/debug/deps backend/target/debug/build backend/target/debug/incremental backend/target/release ~/.cargo/registry ~/.cargo/git ~/.rustup /tmp "$RUNNER_TEMP" 2>/dev/null || true
+        df -h /
+        du -sh backend/target backend/target/* ~/.cargo/registry ~/.rustup 2>/dev/null || true
         docker system df || true
 
   backend-db-tests:
