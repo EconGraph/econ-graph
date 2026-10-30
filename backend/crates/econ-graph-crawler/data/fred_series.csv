@@ -175,6 +175,10 @@ RETAILSMSA
 RSAFS
 RSXFS
 #
+# --- Business cycle ---
+# NBER-based recession indicator (1 in recession months), the source of chart recession shading.
+USREC
+#
 # --- Regional headline: state unemployment rate (seasonally adjusted), one per state and DC ---
 ALUR
 AKUR

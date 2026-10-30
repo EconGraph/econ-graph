@@ -458,7 +458,7 @@ mod tests {
             "expected a curated list of a few hundred to ~2000 ids, got {}",
             ids.len()
         );
-        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR"] {
+        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR", "USREC"] {
             assert!(
                 ids.iter().any(|s| s == id),
                 "{id} missing from {}",
