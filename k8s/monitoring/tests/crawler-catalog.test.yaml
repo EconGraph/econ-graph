@@ -22,7 +22,9 @@ tests:
         summary: BEA catalog rejected by volume guard
         description: A catalog exceeded its configured selection limit or disappearance
           threshold. The worker retained stored histories; inspect its catalog warning
-          and upstream completeness before changing selection rules or retrying.
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
   - eval_time: 2h
     alertname: CrawlerCatalogGuardRejected
     exp_alerts: []
@@ -45,7 +47,9 @@ tests:
         summary: FRED catalog rejected by mass_disappearance guard
         description: A catalog exceeded its configured selection limit or disappearance
           threshold. The worker retained stored histories; inspect its catalog warning
-          and upstream completeness before changing selection rules or retrying.
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
   - eval_time: 2h
     alertname: CrawlerCatalogGuardRejected
     exp_alerts: []
