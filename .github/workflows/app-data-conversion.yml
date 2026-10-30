@@ -5,12 +5,18 @@ on:
     paths:
       - '.github/workflows/app-data-conversion.yml'
       - 'scripts/deploy/*split-app-data*'
+      - 'scripts/deploy/*convert-app-data*'
+      - 'scripts/deploy/backup-kind-databases.sh'
+      - 'scripts/deploy/lib/**'
       - 'backend/migrations/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/app-data-conversion.yml'
       - 'scripts/deploy/*split-app-data*'
+      - 'scripts/deploy/*convert-app-data*'
+      - 'scripts/deploy/backup-kind-databases.sh'
+      - 'scripts/deploy/lib/**'
       - 'backend/migrations/**'
   workflow_dispatch:
 
@@ -37,3 +43,5 @@ jobs:
         run: python -m pip install 'psycopg[binary]==3.3.6'
       - name: Rehearse a conversion and refusal cases
         run: python scripts/deploy/test-split-app-data.py -v
+      - name: Check the operator wrapper against stub kubectl, docker and kind
+        run: scripts/deploy/test-convert-app-data.sh
