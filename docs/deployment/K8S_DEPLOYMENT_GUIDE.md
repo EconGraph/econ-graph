@@ -6,8 +6,8 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 
 ### Architecture Components
 
-- **Backend**: Rust API with GraphQL (v4.0.0)
-- **Frontend**: React application (v4.0.0) 
+- **Backend**: Rust API with GraphQL (v4.0.1)
+- **Frontend**: React application (v4.0.1) 
 - **Admin Frontend**: Administrative interface (v1.0.0)
 - **Chart API Service**: Private chart generation service (v1.0.0)
 - **Database**: PostgreSQL 18 with persistent storage
