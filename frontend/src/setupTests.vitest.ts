@@ -359,6 +359,7 @@ vi.mock('react-router-dom', () => ({
   Route: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  useNavigationType: () => 'POP',
   useParams: () => ({}),
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
   Link: ({ children, to, ...props }: any) => {
