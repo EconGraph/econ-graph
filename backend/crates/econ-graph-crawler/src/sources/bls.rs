@@ -1217,11 +1217,11 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
 
 /// Seasonal adjustment as the id encodes it, for the surveys in the series list: the letter after
 /// the two-letter survey prefix is `S` (adjusted) or `U` (not), as in `CUSR`/`CUUR`,
-/// `CES`/`CEU`, `LNS`/`LNU` and `LASST`/`LAUST`.
+/// `CES`/`CEU`, `LNS`/`LNU`, `LASST`/`LAUST`, `JTS`/`JTU`, `WPS`/`WPU` and `EIS`/`EIU`.
 fn seasonal_adjustment_from_id(external_id: &str) -> Option<&'static str> {
     match external_id.get(..3)? {
-        "CUS" | "CES" | "LNS" | "LAS" => Some("Seasonally Adjusted"),
-        "CUU" | "CEU" | "LNU" | "LAU" => Some("Not Seasonally Adjusted"),
+        "CUS" | "CES" | "LNS" | "LAS" | "JTS" | "WPS" | "EIS" => Some("Seasonally Adjusted"),
+        "CUU" | "CEU" | "LNU" | "LAU" | "JTU" | "WPU" | "EIU" => Some("Not Seasonally Adjusted"),
         _ => None,
     }
 }
@@ -2048,6 +2048,12 @@ mod tests {
             ("LNU04000000", Some("Not Seasonally Adjusted")),
             ("LASST060000000000003", Some("Seasonally Adjusted")),
             ("LAUST060000000000003", Some("Not Seasonally Adjusted")),
+            ("JTS000000000000000JOR", Some("Seasonally Adjusted")),
+            ("JTU000000000000000JOR", Some("Not Seasonally Adjusted")),
+            ("WPSFD4", Some("Seasonally Adjusted")),
+            ("WPU01", Some("Not Seasonally Adjusted")),
+            ("EISIQ", Some("Seasonally Adjusted")),
+            ("EIUIR", Some("Not Seasonally Adjusted")),
             ("CIU1010000000000A", None),
             ("X", None),
         ] {
