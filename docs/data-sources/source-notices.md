@@ -35,15 +35,21 @@ output.
 ## Where notices appear
 
 - **Series page:** below the chart, the source's citation, notice and a link to its terms.
-  For BLS this includes the date EconGraph last retrieved the series (`lastUpdated`).
-- **CSV export:** metadata rows `Citation`, `Notice`, `Retrieved from source` (BLS only)
-  and `Terms of use`, after the existing title, source, units, transformation and
-  retrieval rows.
+  For BLS this includes the date EconGraph last retrieved the series (`lastUpdated`), or
+  "Retrieval date not recorded" when that is unknown.
+- **CSV export:** metadata rows `Citation`, `Notice`, `Retrieved from source` (BLS only;
+  `not recorded` when unknown) and `Terms of use`, after the existing title, source,
+  units, transformation and retrieval rows.
+- **Dashboard:** each value card shows its source's notice and terms link below the card's
+  link to the series.
+- **World map:** the World Bank citation, notice and terms link below the map. Without a
+  notice from the API, the caption cites "The World Bank: <dataset name>".
 - **About page:** a Source Notices section listing every source that has a notice.
-- **GraphQL:** `notice` on every `DataSourceType`, including `series.source`.
+- **GraphQL:** `notice` on every `DataSourceType`, including `series.source` and
+  `dataset.source`.
 - **MCP:** the search, series metadata and series data tools, and the data sources and
-  series catalog resources, return each source's `notice`.
-- **World map:** the caption cites "The World Bank: <dataset name>".
+  series catalog resources, return each source's `notice`. The chart tool lists each
+  charted series' source, notice and `lastUpdated`.
 
 No provider logos are shown, and no text implies endorsement.
 
@@ -59,12 +65,8 @@ notice.
 ## Adding a source
 
 `notice` in the table is an exhaustive `match` on `SourceId`, so a new source code does
-not compile until it has a notice or is listed in `NOTICE_PENDING`. Tests check that:
-
-- every source granted by the `catalog-public` role in
-  [the Keycloak realm](../../config/keycloak/econ-graph-realm.json) has a notice, unless
-  it is in `NOTICE_PENDING`;
-- `NOTICE_PENDING` lists exactly the sources without one.
-
-A source can therefore become public only with reviewed wording in the table or an
-explicit pending entry.
+not compile until the match says whether it has a notice. A test reads the sources the
+`catalog-public` role in [the Keycloak realm](../../config/keycloak/econ-graph-realm.json)
+makes public and requires those without a notice to be exactly `PUBLIC_WITHOUT_NOTICE`.
+Making another source public without a notice therefore fails the test, as does leaving a
+source in `PUBLIC_WITHOUT_NOTICE` once it has a notice or is no longer public.

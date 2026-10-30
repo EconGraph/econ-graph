@@ -485,6 +485,52 @@ describe('WorldMapTab', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  it("shows the World Bank's attribution, notice and terms link", async () => {
+    mockGraphQL.mockImplementation(async request => {
+      if (request.operationName === 'GetMapDatasets') {
+        return {
+          data: {
+            datasets: [
+              {
+                ...DATASET,
+                source: {
+                  name: 'World Bank Open Data',
+                  notice: {
+                    citation: 'The World Bank: World Development Indicators',
+                    notice: 'World Bank data are licensed under CC BY 4.0.',
+                    termsUrl: 'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets',
+                    retrievalDateRequired: false,
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { data: { crossSection: [] } };
+    });
+    renderTab();
+
+    const notice = await screen.findByTestId('source-notice', {}, WAIT);
+    expect(notice).toHaveTextContent('The World Bank: World Development Indicators');
+    expect(notice).toHaveTextContent('World Bank data are licensed under CC BY 4.0.');
+    expect(within(notice).getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
+      'href',
+      'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets'
+    );
+    // The caption doesn't repeat the citation the notice carries.
+    expect(screen.getAllByText(/The World Bank: World Development Indicators/)).toHaveLength(1);
+  });
+
+  it('falls back to the World Bank citation in the caption without a source notice', async () => {
+    renderTab();
+
+    expect(
+      await screen.findByText(/The World Bank: World Development Indicators\./, {}, WAIT)
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('source-notice')).not.toBeInTheDocument();
+  });
+
   it('says so when the WDI dataset is not loaded', async () => {
     mockGraphQL.mockImplementation(async () => ({ data: { datasets: [] } }));
     renderTab();

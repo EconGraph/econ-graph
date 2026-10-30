@@ -51,7 +51,10 @@ export function SourceNoticePanel({
       {notice && (
         <Typography variant='body2' gutterBottom>
           {notice.notice}
-          {retrieved && ` Data retrieved from ${sourceName || 'the source'} on ${retrieved}.`}{' '}
+          {notice.retrievalDateRequired &&
+            (retrieved
+              ? ` Data retrieved from ${sourceName || 'the source'} on ${retrieved}.`
+              : ' Retrieval date not recorded.')}{' '}
           <Link href={notice.termsUrl} target='_blank' rel='noopener noreferrer'>
             Terms of use
           </Link>

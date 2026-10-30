@@ -58,7 +58,9 @@ describe('SourceNoticePanel', () => {
         transformationLabel=''
       />
     );
-    expect(screen.getByTestId('source-notice')).not.toHaveTextContent('retrieved');
+    expect(screen.getByTestId('source-notice')).toHaveTextContent(
+      'BLS.gov cannot vouch. Retrieval date not recorded.'
+    );
   });
 
   it('marks transformed values as derived, even for a source without a notice', () => {

@@ -91,7 +91,10 @@ export function buildSeriesCsv(input: SeriesCsvInput): string {
     if (notice.citation) meta.push(['Citation', notice.citation]);
     meta.push(['Notice', notice.notice]);
     if (notice.retrievalDateRequired) {
-      meta.push(['Retrieved from source', retrievalDate(input.fetchedFromSource ?? null) ?? '']);
+      meta.push([
+        'Retrieved from source',
+        retrievalDate(input.fetchedFromSource ?? null) ?? 'not recorded',
+      ]);
     }
     meta.push(['Terms of use', notice.termsUrl]);
   }

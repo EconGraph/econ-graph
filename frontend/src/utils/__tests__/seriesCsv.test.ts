@@ -96,6 +96,21 @@ describe('buildSeriesCsv', () => {
     ]);
   });
 
+  it('says the retrieval date is not recorded when the series has none', () => {
+    const rows = buildSeriesCsv({
+      ...base,
+      notice: {
+        citation: null,
+        notice: 'BLS.gov cannot vouch.',
+        termsUrl: 'https://www.bls.gov/developers/termsOfService.htm',
+        retrievalDateRequired: true,
+      },
+      fetchedFromSource: null,
+    }).split('\r\n');
+    expect(rows).toContain('Retrieved from source,not recorded');
+    expect(rows.some(r => r.startsWith('Citation'))).toBe(false);
+  });
+
   it('keeps the trademark sign and quotes a notice with commas or quotes', () => {
     const csv = buildSeriesCsv({
       ...base,

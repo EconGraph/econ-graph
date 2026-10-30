@@ -31,10 +31,11 @@ pub struct SourceNotice {
     pub retrieval_date_required: bool,
 }
 
-/// Sources whose terms have not been reviewed yet, so they have no notice. The match in
-/// [`notice`] is exhaustive, so a new [`SourceId`] needs a notice or an entry here; the tests
-/// check that every source in the `catalog-public` grant has a notice unless it is listed here.
-pub const NOTICE_PENDING: &[SourceId] = &[
+/// Sources the `catalog-public` grant in the Keycloak realm makes public although they have no
+/// notice. A test requires the public sources without a notice to be exactly these, so making
+/// another source public without one fails, as does leaving a source here once it has a notice
+/// or is no longer public.
+pub const PUBLIC_WITHOUT_NOTICE: &[SourceId] = &[
     SourceId::Imf,
     SourceId::Ecb,
     SourceId::Oecd,
@@ -46,7 +47,6 @@ pub const NOTICE_PENDING: &[SourceId] = &[
     SourceId::UnStats,
     SourceId::Ilo,
     SourceId::Wto,
-    SourceId::Sec,
 ];
 
 /// The notice for `source`, if it has one.
@@ -192,18 +192,6 @@ mod tests {
         }
     }
 
-    /// `NOTICE_PENDING` lists exactly the sources without a notice.
-    #[test]
-    fn pending_list_matches_the_table() {
-        for s in SourceId::ALL {
-            assert_eq!(
-                notice(s).is_none(),
-                NOTICE_PENDING.contains(&s),
-                "{s}: a notice, or an entry in NOTICE_PENDING, but not both"
-            );
-        }
-    }
-
     /// Every data source name maps to its code, and unknown names map to nothing.
     #[test]
     fn names_map_to_codes() {
@@ -223,11 +211,11 @@ mod tests {
         assert_eq!(notice_for_name(""), None);
     }
 
-    /// Every source the default public grant (`catalog-public` in the Keycloak realm) lets
-    /// anyone read has a notice, unless it is listed in `NOTICE_PENDING`: a source can't become
-    /// public without one.
+    /// The sources the default public grant (`catalog-public` in the Keycloak realm) lets anyone
+    /// read without a notice are exactly `PUBLIC_WITHOUT_NOTICE`: a source can't become public
+    /// without one unless it is added there.
     #[test]
-    fn every_public_catalog_source_has_a_notice() {
+    fn public_sources_without_a_notice_are_exactly_the_allowed_ones() {
         let realm: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../config/keycloak/econ-graph-realm.json"
         ))
@@ -244,6 +232,7 @@ mod tests {
             .map(|r| r.as_str().unwrap())
             .collect();
         assert!(public.contains(&"catalog.bls:read"), "{public:?}");
+        let mut without_notice = Vec::new();
         for role in &public {
             let source = SourceId::ALL
                 .into_iter()
@@ -252,10 +241,28 @@ mod tests {
                         .is_some_and(|r| r.as_str() == *role)
                 })
                 .unwrap_or_else(|| panic!("{role} grants no known source"));
-            assert!(
-                notice(source).is_some() || NOTICE_PENDING.contains(&source),
-                "{source} is public ({role}) but has no notice"
-            );
+            if notice(source).is_none() {
+                without_notice.push(source);
+            }
+        }
+        let mut allowed = PUBLIC_WITHOUT_NOTICE.to_vec();
+        allowed.sort_by_key(|s| s.as_str());
+        without_notice.sort_by_key(|s| s.as_str());
+        assert_eq!(
+            without_notice, allowed,
+            "public sources without a notice must be exactly PUBLIC_WITHOUT_NOTICE"
+        );
+        // The reviewed sources are public and have notices.
+        for s in [
+            SourceId::Bls,
+            SourceId::Bea,
+            SourceId::Census,
+            SourceId::Fhfa,
+            SourceId::WorldBank,
+        ] {
+            let role = Role::for_catalog(&data_source_template(s).name).unwrap();
+            assert!(public.contains(&role.as_str()), "{s} is public");
+            assert!(notice(s).is_some(), "{s} has a notice");
         }
     }
 }
