@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as d3 from 'd3';
-import { geoPath, geoNaturalEarth1, geoMercator, geoOrthographic } from 'd3-geo';
+import { geoPath, geoEqualEarth, geoNaturalEarth1, geoMercator, geoOrthographic } from 'd3-geo';
 import type { GeoProjection } from 'd3-geo';
 import { zoom } from 'd3-zoom';
 import type { ZoomBehavior } from 'd3-zoom';
@@ -24,7 +24,16 @@ export interface MapProjection {
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 8;
 
+/** Equal-area default for comparing country and continent sizes. */
+export const DEFAULT_PROJECTION = 'equalEarth';
+
 export const PROJECTIONS: Record<string, MapProjection> = {
+  equalEarth: {
+    name: 'Equal Earth',
+    create: geoEqualEarth,
+    defaultScale: 150,
+    defaultCenter: [0, 0],
+  },
   naturalEarth: {
     name: 'Natural Earth',
     create: geoNaturalEarth1,
@@ -48,12 +57,12 @@ export const PROJECTIONS: Record<string, MapProjection> = {
 /**
  * Build a projection of the given type, fitted to the whole globe when the
  * container size is known and at its default scale otherwise.
- * @param projectionType Key into PROJECTIONS; unknown types fall back to Natural Earth.
+ * @param projectionType Key into PROJECTIONS; unknown types fall back to Equal Earth.
  * @param size Container width and height in pixels, when measured.
  * @returns A new projection.
  */
 const buildProjection = (projectionType: string, size?: [number, number]): GeoProjection => {
-  const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
+  const proj = PROJECTIONS[projectionType] || PROJECTIONS[DEFAULT_PROJECTION];
   const projection = proj.create();
   if (size && size[0] > 0 && size[1] > 0) {
     return projection.fitSize(size, { type: 'Sphere' });
@@ -63,7 +72,7 @@ const buildProjection = (projectionType: string, size?: [number, number]): GeoPr
 
 export const useWorldMap = (
   svgRef: React.RefObject<SVGSVGElement | null>,
-  projectionType = 'naturalEarth',
+  projectionType = DEFAULT_PROJECTION,
   size?: [number, number]
 ) => {
   const [projection, setProjection] = useState(() => buildProjection(projectionType, size));

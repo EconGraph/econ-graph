@@ -294,7 +294,7 @@ fn parse_fred_series(text: &str) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    /// The shipped indicator list parses and holds the curated set (about 50).
+    /// The shipped indicator list parses and holds the curated set (about 150).
     #[test]
     fn shipped_wdi_indicators_file_is_valid() {
         let list = load_wdi_indicators(
@@ -303,7 +303,7 @@ mod tests {
                 .join(WDI_INDICATORS_FILE),
         )
         .unwrap();
-        assert!((45..=60).contains(&list.len()), "{}", list.len());
+        assert!((140..=170).contains(&list.len()), "{}", list.len());
         let gdp = list.iter().find(|i| i.id == "NY.GDP.PCAP.CD").unwrap();
         assert_eq!(gdp.unit, "current US$");
     }
@@ -458,7 +458,7 @@ mod tests {
             "expected a curated list of a few hundred to ~2000 ids, got {}",
             ids.len()
         );
-        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR"] {
+        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR", "USREC"] {
             assert!(
                 ids.iter().any(|s| s == id),
                 "{id} missing from {}",

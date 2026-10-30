@@ -86,8 +86,10 @@
 //! stored as the period's first day. A `null` value is no observation and is dropped.
 //!
 //! Every point's `revision_date` is the response's `lastupdated` (the date the World Bank last
-//! updated the database), so each database update is stored as a new vintage of the whole series;
-//! `is_original_release` is `true`, as for the other sources without vintage history. `since` is
+//! updated the database). Persisting compares each point with the newest stored value for its
+//! date ([`persist::persist_series`]): a WDI release appends a row only for a value that is new
+//! (`is_original_release` true) or changed (`false`), and an unchanged value keeps its earlier
+//! vintage's row. The adapter itself marks every point `is_original_release`. `since` is
 //! ignored: the full history comes in the same single request, and returning all of it keeps
 //! revisions to old years. Values are read from the response text digit for digit
 //! ([`crate::value::parse_observation_value`]), never through an `f64`: aggregates such as
