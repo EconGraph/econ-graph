@@ -48,6 +48,10 @@ terraform/k8s/          # Terraform configuration
 scripts/deploy/         # Deployment scripts
 ├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
+├── release-deploy.sh          # Back up, load, check, deploy and verify a release in order
+├── load-release-images.sh     # Put a release candidate's GHCR images on the nodes
+├── verify-release-images.sh   # Restart and check the pods run them
+├── rollback-release-images.sh # Go back to what ran before the load
 ├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── deploy.sh          # Deploy to K8s
 ├── mark-production-cluster.sh # Mark the cluster that serves the public site
@@ -86,6 +90,17 @@ once instead.
 ```bash
 ./scripts/deploy/deploy.sh
 ```
+
+### Release images instead of local builds
+
+To run the images that `.github/workflows/release.yml` built for a release candidate tag,
+and not images built here, run `./scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N` from
+a clean checkout of the tag. It runs the database backup, the load of the images onto the
+nodes under the manifests' names, the Keycloak backup, the pre-deploy check, `deploy.sh`
+(with `PUBLIC_HOST` from the host's deploy config) and the verify in order; see
+[Deploying a release](../docs/deployment/RELEASE_DEPLOY.md).
+`./scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N` goes back to what ran
+before the load.
 
 ## 🔐 Keycloak
 

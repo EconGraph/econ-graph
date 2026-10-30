@@ -11,7 +11,9 @@
 # cluster, or none.
 #
 # Covered: backup-keycloak-db.sh (lib/keycloak-db.sh kdb_use_context), in a dry
-# run and a real one; deploy.sh up to its first apply; teardown.sh --dry-run;
+# run and a real one; backup-postgres-now.sh with its wait timing out (a Job
+# still running, or one that failed); deploy.sh up to its first apply;
+# teardown.sh --dry-run;
 # apply-host-storage.sh up to its host checks; build-images.sh;
 # setup-port-forwarding.sh and setup-letsencrypt-cloudflare.sh up to their
 # cluster check. Also that DOCKER_HOST set to another daemon is replaced, and
@@ -78,6 +80,8 @@ case "$*" in
     "get nodes"*) printf 'econ-graph-control-plane econ-graph-worker' ;;
     "get namespace kube-system"*) printf '%s' "$TEST_UID" ;;
     "get pod keycloak-postgres-0"*) printf true ;;
+    # backup-postgres-now.sh: the Job's active pods (FAKE_JOB_ACTIVE).
+    "get job/"*) printf '%s' "${FAKE_JOB_ACTIVE:-}" ;;
 esac
 exit 0
 STUB
@@ -220,6 +224,21 @@ expect "backup-keycloak-db.sh --dry-run with CLUSTER_ROLE_CONTEXT set" 0 \
 run env FAKE_FAIL=pg_dump "$DEPLOY/backup-keycloak-db.sh"
 expect "backup-keycloak-db.sh" nonzero "failed; what was written is in" \
     "--context kind-econ-graph -n econ-graph exec -i keycloak-postgres-0 -- pg_dump"
+
+# --- backup-postgres-now.sh: the wait times out --------------------------------------
+# A Job still running when the wait times out is said, with how to wait for it,
+# and not called failed; a Job that is not running is.
+run env FAKE_FAIL="wait --for=condition=complete" FAKE_JOB_ACTIVE=1 "$DEPLOY/backup-postgres-now.sh"
+expect "backup-postgres-now.sh with the Job still running at the timeout" nonzero \
+    "backup-postgres-now: still running: job/postgres-backup-manual-" "--context kind-econ-graph get job/postgres-backup-manual-"
+grep -qF "did not complete successfully" <<<"$out" &&
+    fail "backup-postgres-now.sh with the Job still running: calls it failed"
+grep -qF "don't start another backup" <<<"$out" ||
+    fail "backup-postgres-now.sh with the Job still running: does not warn against a second backup"
+run env FAKE_FAIL="wait --for=condition=complete" "$DEPLOY/backup-postgres-now.sh"
+expect "backup-postgres-now.sh with a failed Job" nonzero "Backup job did not complete successfully" \
+    "--context kind-econ-graph get job/postgres-backup-manual-"
+grep -qF "still running" <<<"$out" && fail "backup-postgres-now.sh with a failed Job: says it is still running"
 
 # --- deploy.sh, up to its first apply ----------------------------------------------
 run env PUBLIC_HOST= "$TREE/scripts/deploy/deploy.sh"
