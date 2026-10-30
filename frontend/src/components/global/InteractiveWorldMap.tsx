@@ -24,7 +24,7 @@ import {
 } from '@mui/material';
 import { Add, Remove, CenterFocusStrong } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { useWorldMap, MAX_ZOOM, MIN_ZOOM } from './hooks/useWorldMap';
+import { useWorldMap, MAX_ZOOM, MIN_ZOOM, DEFAULT_PROJECTION } from './hooks/useWorldMap';
 import type { MapCountryValue } from './hooks/useWorldMapData';
 import { worldAtlasQuery, type WorldAtlasTopology } from './worldAtlas';
 import CountryTooltip from './CountryTooltip';
@@ -100,7 +100,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
   labelSize = 12,
   width,
   height,
-  projection = 'naturalEarth',
+  projection = DEFAULT_PROJECTION,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);

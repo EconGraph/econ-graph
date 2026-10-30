@@ -26,6 +26,7 @@ import MapLegend from './MapLegend';
 import MapValuesTable from './MapValuesTable';
 import WorldMapControls from './WorldMapControls';
 import { worldAtlasQuery } from './worldAtlas';
+import { DEFAULT_PROJECTION } from './hooks/useWorldMap';
 import { useCountryData } from './hooks/useCountryData';
 import {
   DEFAULT_INDICATOR,
@@ -42,7 +43,7 @@ const NO_VALUES: MapCountryValue[] = [];
 const WorldMapTab: React.FC = () => {
   const navigate = useNavigate();
   const [pickedIndicator, setPickedIndicator] = useState<string | null>(null);
-  const [projection, setProjection] = useState('naturalEarth');
+  const [projection, setProjection] = useState(DEFAULT_PROJECTION);
   const [colorScheme, setColorScheme] = useState('viridis');
 
   const datasetQuery = useMapDataset();

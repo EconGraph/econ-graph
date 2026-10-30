@@ -31,7 +31,7 @@ are available in the table.
 
 - **Zoom in**, **Zoom out** and **Reset zoom** buttons sit on the map, with the current zoom
   level. You can also zoom with the scroll wheel and pan by dragging.
-- **Projection**: Natural Earth (the default), Mercator or Orthographic.
+- **Projection**: Equal Earth (the default), Natural Earth, Mercator or Orthographic. Equal Earth preserves relative land areas, making continent and country sizes comparable. Shapes and distances can still be distorted. Natural Earth balances distortions but does not preserve area.
 - **Color scheme**: Viridis (the default), Blues, Reds or Greens.
 
 ## The values table
