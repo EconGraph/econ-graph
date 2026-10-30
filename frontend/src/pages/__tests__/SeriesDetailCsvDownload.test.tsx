@@ -18,7 +18,11 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
-const hooks = vi.hoisted(() => ({ isPlaceholderData: false, transformation: 'YEAR_OVER_YEAR' }));
+const hooks = vi.hoisted(() => ({
+  isPlaceholderData: false,
+  isError: false,
+  transformation: 'YEAR_OVER_YEAR',
+}));
 
 vi.mock('../../hooks/useSeriesData', () => ({
   useSeriesDetail: () => ({
@@ -49,10 +53,12 @@ vi.mock('../../hooks/useSeriesData', () => ({
   }),
   useSeriesData: () => ({
     isPending: false,
-    isError: false,
+    isError: hooks.isError,
+    error: hooks.isError ? new Error('page 3 failed') : null,
+    refetch: () => undefined,
     isPlaceholderData: hooks.isPlaceholderData,
     dataUpdatedAt: RETRIEVED_AT,
-    data: {
+    data: hooks.isError ? undefined : {
       transformation: hooks.transformation,
       points: [
         { date: '2024-03-01', value: 3.5, revisionDate: '2024-04-10', isOriginalRelease: true },
@@ -97,6 +103,7 @@ describe('SeriesDetail CSV download', () => {
 
   beforeEach(() => {
     hooks.isPlaceholderData = false;
+    hooks.isError = false;
     hooks.transformation = 'YEAR_OVER_YEAR';
     blobs = [];
     clicked = [];
@@ -165,6 +172,15 @@ describe('SeriesDetail CSV download', () => {
       'href',
       'https://www.bls.gov/developers/termsOfService.htm'
     );
+  });
+
+  it('describes no values as derived while the observations failed to load', () => {
+    hooks.isError = true;
+    renderPage();
+    const notice = screen.getByTestId('source-notice');
+    expect(notice).toHaveTextContent('BLS.gov cannot vouch for the data.');
+    expect(notice).not.toHaveTextContent('computed by EconGraph');
+    expect(screen.queryByText(/Year-over-Year % Change/)).not.toBeInTheDocument();
   });
 
   it('writes only the dates inside the chart range', async () => {

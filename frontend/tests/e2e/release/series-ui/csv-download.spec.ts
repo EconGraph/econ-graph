@@ -9,11 +9,12 @@ import { expect, test } from '@playwright/test';
 import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
-import { asShown, parseShown } from '../seriesPage';
+import { asShown, parseShown, splitSeriesCsv } from '../seriesPage';
 
 // Live QA: downloading CSV from a series page saves every point the chart shows, in its own
 // metadata-then-data format (src/utils/seriesCsv.ts): five `label,value` rows (Title, Source,
-// Units, Transformation, Retrieved at), then a `date,value` header, then one row per point,
+// Units, Transformation, Retrieved at), the source's notice rows, then a `date,value` header,
+// then one row per point,
 // oldest first. Unlike the Recent Data table, the export is not capped to the last 10 points and
 // keeps missing values as an empty field rather than dropping them.
 test.describe('download CSV', () => {
@@ -51,9 +52,14 @@ test.describe('download CSV', () => {
     expect(lines[2]).toBe(`Units,${series.units}`);
     expect(lines[3]).toBe('Transformation,None');
     expect(lines[4]).toMatch(/^Retrieved at,/);
-    expect(lines[5]).toBe('date,value');
+    // Then FRED's notice and terms link (ECO-767), and the data header.
+    const { notice, data } = splitSeriesCsv(lines);
+    expect(notice).toEqual([
+      'Notice,This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.',
+      'Terms of use,https://fred.stlouisfed.org/docs/api/terms_of_use.html',
+    ]);
 
-    const rows = lines.slice(6).map(line => {
+    const rows = data.map(line => {
       const [date, value] = line.split(',');
       return { date, value: value === '' ? null : Number(value) };
     });

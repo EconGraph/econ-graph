@@ -338,7 +338,10 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
             sourceName={series.source?.name ?? ''}
             notice={series.source?.notice}
             lastUpdated={series.lastUpdated}
-            transformationLabel={transformationLabel}
+            // Only values on screen are described as derived: none while loading or failed.
+            transformationLabel={
+              data.data && !data.isError ? describeTransformation(data.data.transformation) : ''
+            }
           />
         </Grid>
 
