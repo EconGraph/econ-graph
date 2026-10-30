@@ -13,7 +13,7 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [release-e2e.yml](release-e2e.yml) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
 | [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
-| [update-cost-analysis.yml](update-cost-analysis.yml) | Daily 06:00 UTC | Recalculate cost documentation and attempt to publish changes |
+| [update-cost-analysis.yml](update-cost-analysis.yml) | Manual dispatch; matching PRs | Recalculate cost documentation; manual runs on main attempt to publish changes |
 | [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
 | [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
 | [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
