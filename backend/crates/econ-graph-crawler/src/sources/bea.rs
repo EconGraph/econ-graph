@@ -2034,10 +2034,11 @@ mod tests {
         assert!(mock.received_requests().await.is_empty());
     }
 
-    /// Regional titles from a successful refresh that no longer list the curated `SAGDP2`.
+    /// Regional titles from a successful refresh that no longer list the curated `SAGDP2`; the
+    /// one table still listed matches no selection rule.
     const REGIONAL_WITHOUT_SAGDP2: &[(&str, &str)] = &[(
-        "SAINC1",
-        "SAINC1 Personal income summary: personal income, population, per capita personal income",
+        "SAINC4",
+        "SAINC4 Personal income and employment by major component",
     )];
 
     /// After a successful title refresh, a curated table BEA no longer lists is skipped (and
