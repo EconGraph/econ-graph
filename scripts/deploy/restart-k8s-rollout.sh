@@ -3,6 +3,10 @@
 # Restart Kubernetes rollout to deploy the current release with monitoring stack (Grafana + Loki + Prometheus)
 # Run this script when Docker and Kubernetes cluster are available
 #
+# It runs scripts/deploy/create-secrets.sh: on a cluster whose econ-graph-secrets has no
+# app-database-url (deployed before the app database existed), set APP_DATABASE=shared until
+# docs/deployment/APP_DATA_CONVERSION.md has moved the app records, separate afterwards.
+#
 # For MicroK8s setup and troubleshooting, see: docs/deployment/MICROK8S_DEPLOYMENT.md
 # For general Kubernetes deployment, see: docs/deployment/KUBERNETES_DEPLOYMENT.md
 

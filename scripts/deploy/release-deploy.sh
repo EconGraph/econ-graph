@@ -66,6 +66,10 @@
 #     cluster's own kubectl and kubeconfig (ensure_kind_kubectl), exported to
 #     every step, on context kind-<cluster>. On the production host plain
 #     `kubectl` is the MicroK8s snap wrapper.
+#   - APP_DATABASE (shared or separate) is passed to deploy.sh's create-secrets.sh. On a
+#     cluster whose econ-graph-secrets has no app-database-url (deployed before the app
+#     database existed) it is required, and its absence is refused here
+#     (docs/deployment/APP_DATA_CONVERSION.md); otherwise leave it unset.
 #   - PUBLIC_HOST comes from the host's deploy config,
 #     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV
 #     names another file), a line PUBLIC_HOST=<host name> (the last one, when
@@ -360,6 +364,27 @@ if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] &
 fi
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
+
+# --- APP_DATABASE ------------------------------------------------------------------------
+# A cluster deployed before the app database existed has econ-graph-secrets without
+# app-database-url, and create-secrets.sh (run by deploy.sh, after the backups, the load and
+# the precheck that stops the crawler) refuses it unless APP_DATABASE says where the app
+# records are. Refuse here instead, before any step.
+case "${APP_DATABASE:-}" in
+    "" | shared | separate) ;;
+    *) die "APP_DATABASE must be shared or separate" ;;
+esac
+if [ -z "${APP_DATABASE:-}" ]; then
+    secrets_found="$(kc -n "$NAMESPACE" get secret econ-graph-secrets --ignore-not-found -o name)" ||
+        die "could not read Secret econ-graph-secrets on ${CONTEXT}"
+    if [ -n "$secrets_found" ]; then
+        app_url="$(kc -n "$NAMESPACE" get secret econ-graph-secrets -o 'jsonpath={.data.app-database-url}')" ||
+            die "could not read Secret econ-graph-secrets on ${CONTEXT}"
+        [ -n "$app_url" ] ||
+            die "econ-graph-secrets on ${CONTEXT} has no app-database-url: the cluster was deployed before the app database existed, so its app records are in the data database. Run this again with APP_DATABASE=shared until docs/deployment/APP_DATA_CONVERSION.md has moved them (APP_DATABASE=separate afterwards); nothing was changed"
+    fi
+fi
+echo "  APP_DATABASE    ${APP_DATABASE:-(unset: app-database-url is kept)}"
 
 # --- what earlier runs of this tag recorded -------------------------------------------
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"

@@ -21,13 +21,20 @@ can also be run on its own against any two libpq services.
   is refused without an explicit `APP_DATABASE`. Once the key is written, leaving
   `APP_DATABASE` unset keeps it, and so does a value equal to it. Only a cluster without
   `econ-graph-secrets` at all gets `separate` by default.
-- **`create-secrets.sh` refuses a switch to the database without the accounts**
-  (`scripts/deploy/lib/app-database-guard.sh`): `separate` while `econ_graph` still holds
-  `public.users`, and `shared` once the removal has left them only in `econ_graph_app`
-  (the backend would create empty app tables in `econ_graph`). After a removal, `shared`
-  is correct again only after a rollback. A refusal writes nothing; if it says a database
-  could not be checked, wait until `postgresql-0` and `app-postgres-0` accept connections
-  and rerun.
+- **`create-secrets.sh` refuses a setting that points at the database without the
+  accounts** (`scripts/deploy/lib/app-database-guard.sh`), before it writes anything:
+  `shared` on every run of an existing cluster, kept or not, once the removal has left the
+  app tables only in `econ_graph_app` (the backend would create empty app tables in
+  `econ_graph`); `separate`, when it changes, while `econ_graph` still holds
+  `public.users`; and `separate` on a Secret without `app-database-url` unless
+  `econ_graph` is running and answers that it holds no app tables. If a refusal says a
+  database could not be checked, wait until `postgresql-0` and `app-postgres-0` accept
+  connections and rerun.
+- **The Secret records where the app tables are.** The wrapper rewrites
+  `app-database-url` to `econ_graph_app` as soon as a removal commits, and back to
+  `econ_graph` after a rollback, through `create-secrets.sh` with `APP_DATABASE` set and an
+  environment cut down to the basics. After either, a deploy with `APP_DATABASE` unset
+  keeps the right setting.
 - **Every deploy names its cluster**: `KIND_CLUSTER=<name> ... scripts/deploy/deploy.sh`.
   `deploy.sh` runs `create-secrets.sh` on the context `kind-<name>`, so a rehearsal
   cannot write a setting into production.
@@ -69,8 +76,11 @@ scripts/deploy/convert-app-data.sh --cluster NAME [--production] \
    port-forwards are removed on exit. `pg_dump` and `pg_restore` run from `PG_IMAGE`
    on the host network, not from the host's packages.
 5. **Conversion**: `split-app-data.py` with `--dry-run`, then the copy, then, with
-   `--drop-source-app`, the removal, which asks for a typed phrase on the terminal. With
-   `--restore-source-app`, the rollback instead.
+   `--drop-source-app`, the removal, which asks for a typed phrase on the terminal, and the
+   switch of `app-database-url` to `econ_graph_app`. With `--restore-source-app`, the
+   rollback and the switch back to `econ_graph` instead. If the switch fails, the run
+   fails, the backend stays stopped, and the message gives the `create-secrets.sh`
+   command to run.
 
 The check step prints the kubectl it uses: the cluster's own copy under
 `${XDG_CACHE_HOME:-~/.cache}/econgraph/bin/kubectl`, so in a rehearsal with a scratch
@@ -159,8 +169,8 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    If the backend ran on `econ_graph` in between, the copy in `econ_graph_app` is stale; add
    `--previous-evidence <scratch backup root>/<copy timestamp>/evidence.json` to replace it.
 
-7. Switch the backend over and start it with
-   `KIND_CLUSTER=<name> APP_DATABASE=separate scripts/deploy/deploy.sh`, then check that
+7. Start the backend, which now finds `app-database-url` naming `econ_graph_app`, with
+   `KIND_CLUSTER=<name> scripts/deploy/deploy.sh`, then check that
    existing users sign in and their annotations still show on their original series.
    Run the tagged crawler's `migrate --dry-run` against the data database to confirm
    nothing is pending.
@@ -192,19 +202,13 @@ evidence is marked `pending` before the commit so a failure right after it is st
 recoverable. A wrong phrase, a refusal or a failed check leaves the source as it was, with
 the verified copy committed and every writer put back.
 
-After a removal the backend stays stopped, and from now on deploys use
-`APP_DATABASE=separate` (`create-secrets.sh` refuses `shared`). Start it on the app
-database with
-`KIND_CLUSTER=econ-graph APP_DATABASE=separate PUBLIC_HOST=<the public host>
-scripts/deploy/deploy.sh` and check users and annotations as in the rehearsal.
+After a removal `app-database-url` names `econ_graph_app` and the backend stays stopped.
+Start it with `KIND_CLUSTER=econ-graph PUBLIC_HOST=<the public host>
+scripts/deploy/deploy.sh` (`APP_DATABASE` unset, or `separate`; `create-secrets.sh` refuses
+`shared` from now on) and check users and annotations as in the rehearsal.
 
-The backup CronJob is resumed when the wrapper exits. Until the deploy above it still
-reads `app-database-url` as the combined database, so its nightly dumps cover `econ_graph`
-but not `econ_graph_app`. Nothing writes app rows in that interval, because the backend is
-stopped, and the app records as of the removal are in the removal's backup directory. The
-deploy that starts the backend also points the CronJob at `econ_graph_app`, which closes
-the gap. Keeping the CronJob suspended instead would also stop the crawl's nightly dumps
-for as long as the switch waits.
+The backup CronJob is resumed when the wrapper exits, after the switch, so its next run
+reads `app-database-url` as `econ_graph_app` and dumps it next to `econ_graph`.
 
 ## Roll back a removal
 
@@ -237,8 +241,8 @@ as it was before the rollback, and stops. Data tables are not touched; crawl dat
 after the conversion stays.
 
 Rows written to `econ_graph_app` after the switch are not carried back. The app database
-is left as it is. The backend stays stopped; start it on the combined database with
-`KIND_CLUSTER=econ-graph APP_DATABASE=shared PUBLIC_HOST=<the public host>
+is left as it is. `app-database-url` names `econ_graph` again and the backend stays
+stopped; start it with `KIND_CLUSTER=econ-graph PUBLIC_HOST=<the public host>
 scripts/deploy/deploy.sh`.
 
 `scripts/deploy/restore-kind-databases.sh` does not restore conversion backups: they have no

@@ -156,6 +156,16 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
 
+## APP_DATABASE
+
+`APP_DATABASE` (`shared` or `separate`) is passed to `deploy.sh`, whose `create-secrets.sh`
+decides which database `app-database-url` names. On a cluster whose `econ-graph-secrets` has
+no `app-database-url` (deployed before the app database existed, its app records still in
+the data database), set `APP_DATABASE=shared` until
+[the app/data conversion](APP_DATA_CONVERSION.md) has moved them; before any step,
+`release-deploy.sh` refuses such a cluster without `APP_DATABASE`, and any value other than
+`shared` or `separate`. Once the key is written, leave it unset.
+
 ## Dry run
 
 `--dry-run` runs each step's own dry run: both backups, the load (which still fetches the
