@@ -1,50 +1,82 @@
 # World Bank (Indicators API v2)
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/world_bank.rs`. Fixtures:
-`tests/fixtures/world_bank/`. No key. Background:
+The [World Bank adapter](../../backend/crates/econ-graph-crawler/src/sources/world_bank.rs)
+uses the public Indicators API v2 without an API key. Its
+[fixtures](../../backend/crates/econ-graph-crawler/tests/fixtures/world_bank/)
+cover observation and metadata responses. Background:
 [World Bank API experimental findings](../technical/WORLD_BANK_API_EXPERIMENTAL_FINDINGS.md)
 and [integration post-mortem](../archive/technical/WORLD_BANK_INTEGRATION_POST_MORTEM.md).
 
-A live call on 2026-09-26 returned the same fields as the fixtures below, including
-`obs_status` and `decimal`.
+## Coverage and requests
 
-## What we fetch today
+The adapter crawls the 53 curated World Development Indicators in
+[wdi_indicators.csv](../../backend/crates/econ-graph-crawler/data/wdi_indicators.csv).
+Discovery lists supported areas with at least one non-null value for each indicator.
+Each series belongs to dataset `wdi`, defined in
+[world_bank.toml](../../backend/crates/econ-graph-crawler/data/datasets/world_bank.toml),
+with dimensions `indicator` (the WDI code) and `area` (a key from the
+[shared country reference](../../backend/crates/econ-graph-core/data/countries.csv)).
+Countries use ISO alpha-3 keys; aggregates use World Bank codes such as `EMU` or `WLD`.
+The canonical external ID is `wdi/{indicator}.{area}`, for example
+`wdi/NY.GDP.PCAP.CD.USA`. The catalog size depends on which supported areas have values
+for each curated indicator.
 
-About 50 curated World Development Indicators, listed in
-`backend/crates/econ-graph-crawler/data/wdi_indicators.csv`.
+When observations are needed, discovery and fetching use
+`GET /country/all/indicator/{id}?format=json&per_page=20000&page=N`.
+Fetching is batched by indicator, so the same download supplies all requested areas of
+that indicator. One page commonly holds the whole indicator; the adapter follows the
+response's page count up to ten pages, warning and skipping any remaining pages.
+A public call for `NY.GDP.PCAP.CD` on 2026-10-26 returned 17,556 rows in one page;
+this is an example, not a page-count guarantee for every indicator.
 
-- **Discovery and fetch** both use one request per indicator for every area:
-  `GET /country/all/indicator/{id}?format=json&per_page=20000[&page=N]`. One page holds a
-  whole indicator today (about 266 areas times decades of history); further pages are
-  followed when the response says so. Discovery lists the areas with at least one value for
-  each indicator; fetching is batched by indicator, one request serving every area.
-- **Series and ids**: one series per indicator and area, in dataset `wdi`
-  (`data/datasets/world_bank.toml`) with dimensions `indicator` (the WDI code) and `area` (a
-  key from the shared country reference: ISO alpha-3 for countries, the World Bank code for
-  aggregates such as `EMU` or `WLD`). The external id is `wdi/{indicator}.{area}` (for
-  example `wdi/NY.GDP.PCAP.CD.USA`). That is about 50 x 217 ≈ 11,000 series, not the
-  roughly 1,400 x 217 ≈ 300,000 a crawl of all of WDI's indicators would be.
-- **Kept**: indicator id (from `wdi_indicators.csv`), per-row `date`, `value` and the
-  response's `lastupdated` (as the vintage date). The indicator's name and description
-  (`sourceNote`) are not shipped in the csv: `refresh_reference_data` fetches them from
-  `GET /indicator/{id}?format=json` on each scheduled crawl and merges them into the `wdi`
-  dataset's `indicator` dimension codes and into each series' title/description.
-- **Aggregate names**: the shared country table carries the aggregates we crawl (World, Euro
-  area, European Union, income groups) by code only. `refresh_reference_data` also fetches
-  `GET /country?format=json&per_page=1000` and merges the World Bank's names for those
-  aggregates into the `wdi` dataset's `area` dimension codes; the API prefers them to the
-  shared list, so countries keep their ISO names. Series titles name an aggregate by the
-  `country.value` its data rows carry. World Bank regions and income levels are in the same
-  response but not stored.
-- **Dropped**: `obs_status` and `decimal` — `data_points` has no attribute columns
-  (the dataset still declares them, for the schema). WDI leaves `obs_status` empty for
-  nearly every row. Rows for an area outside the shared country table (regional aggregates
-  not in it, the Channel Islands) are skipped, with one warning per request.
+On the first discovery, the adapter downloads observations and builds a catalog version.
+Only a discovery in which every indicator succeeds stores that version. With a stored
+version, later discoveries first request `per_page=1` for each listed indicator.
+If the combined version matches, discovery returns unchanged without downloading history.
 
-## Sample (recorded)
+A fetch batch can also use a one-row probe when every requested series for an indicator
+has the same stored validators, including a version. If that version matches the probe,
+the adapter marks those series crawled and keeps their stored points. The version includes
+the response's `lastupdated`, the parser version, and a fingerprint of the cached indicator name and description. Discovery combines these
+versions with the indicator IDs, so changes to the curated list also trigger discovery.
+Missing or different validators, a changed version, or bypassing fetch validators causes a
+full download. Authentication and rate-limit errors from a probe abort discovery or fail
+the affected indicator's requested series; other probe failures fall back to full discovery
+or fetching.
 
-Every response is a two-element array `[meta, items]`. From `gdp_per_capita.json`,
-trimmed:
+## Reference metadata and area names
+
+Before discovery, the worker calls `refresh_reference_data`. It conditionally requests
+`GET /indicator/{id}?format=json` for each curated indicator and
+`GET /country?format=json&per_page=1000` for aggregate names, using stored HTTP validators.
+Changed indicator names and descriptions (`sourceNote`) are merged into the `wdi`
+dataset's `indicator` dimension codes. The adapter reloads its indicator metadata cache
+from those codes after refresh and at the start of discovery and fetching. Those operations
+use the cached values to construct series titles and descriptions; refreshing the codes
+does not itself rewrite existing series.
+
+The curated CSV carries indicator IDs and units, but no names or descriptions. Without
+cached metadata, a series title uses the data row's `indicator.value`, falling back to the
+indicator ID if that is also absent. The adapter also attempts to store a row-carried name
+in the dataset's indicator codes. The data rows have no `sourceNote`, so without indicator
+metadata the series gets a generic description identifying its indicator and area.
+
+The shared country reference carries supported aggregates by code only. Reference refresh
+stores the World Bank's names for those aggregates in the `wdi` dataset's `area` dimension
+codes. EconGraph's API uses these dataset-specific labels for aggregates and the shared
+ISO labels for countries. Series titles use a different source for aggregate names:
+the `country.value` carried by observation rows. Country titles use the shared reference's
+names. World Bank region and income-level fields in the country response are not stored.
+
+Rows for areas outside the shared country reference, such as unsupported regional
+aggregates and the Channel Islands, are skipped with a warning listing the unknown areas
+for that indicator.
+
+## Sample (checked-in fixture)
+
+Successful observation responses have the shape `[meta, items]`. This excerpt retains the
+metadata and first row of
+[gdp_per_capita.json](../../backend/crates/econ-graph-crawler/tests/fixtures/world_bank/gdp_per_capita.json):
 
 ```json
 [
@@ -64,35 +96,44 @@ trimmed:
 ]
 ```
 
-Errors are HTTP 200 with `[{"message": [{"id": "120", "key": "Invalid value", ...}]}]`.
-`value` is a JSON number or `null` (dropped as a missing observation). `date` is `"2025"`
-for annual data, and `"2025Q1"` or `"2025M01"` for the rare quarterly or monthly indicator
-(from public docs).
+API errors can arrive with HTTP 200 in a one-element envelope such as
+`[{"message": [{"id": "120", "key": "Invalid value", ...}]}]`.
+`value` is a JSON number or `null`; null values are dropped as missing observations.
+WDI dates are annual strings such as `"2025"`. The adapter's date parser also accepts
+quarterly (`"2025Q1"`) and monthly (`"2025M01"`) forms; the annual fixture above does not
+illustrate those forms.
 
 ## Frequency and revisions
 
-Mostly annual. World Development Indicators (source 2) is updated several times a year, and
-each update can revise past years. Every point's `revision_date` is the response's
-`lastupdated` (the date the World Bank last updated the database), so each database update
-is stored as a new vintage of the whole series — this is one of only two adapters (with
-FRED) that store a real vintage rather than overwriting in place. `since` is ignored: the
-full history comes back in the same single request regardless, which keeps revisions to old
-years.
+WDI observations are mostly annual. Database updates can revise past years.
+Every point's `revision_date` is the response's `lastupdated`, the date the World Bank last
+updated the database. A changed release date therefore creates a new vintage of the series
+rather than overwriting the previous vintage. FRED and World Bank are the two adapters
+that use source vintage dates. `is_original_release` is `true` for World Bank points;
+the adapter retrieves the current edition, not a historical-vintage endpoint.
+
+When a download is needed, `since` does not trim the requested history. Returning earlier
+years preserves their revised values under the new release date, subject to the ten-page
+limit above. An unchanged probe keeps the observations already stored.
 
 ## Flags and footnotes
 
-`obs_status` per observation (empty in the recorded samples; used for estimates and
-forecasts in some sources) and `decimal` (display precision) are returned but dropped (see
-above). Footnotes exist at the country-series level through the separate metadata API (from
-public docs), not requested.
+Observation rows return `obs_status` (observation status) and `decimal` (display precision).
+Both are dropped because `data_points` has no attribute columns, although the dataset
+declares them. `obs_status` is empty in the checked-in sample.
+
+The World Bank's [basic-call documentation](https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures)
+describes `footnote=y` on observation requests. These footnotes apply to a country,
+indicator and year. The adapter does not request this option or store observation footnotes.
 
 ## Dataset mapping
 
-One dataset for WDI, already in effect (`data/datasets/world_bank.toml`):
+The [WDI dataset definition](../../backend/crates/econ-graph-crawler/data/datasets/world_bank.toml)
+declares the following structure:
 
 | Role | Columns |
 |---|---|
 | Dimensions | `indicator`, `area` |
 | Measures | `value` (decimal) |
-| Attributes | `obs_status` (string), `decimal` (small int) — declared, not yet populated |
-| Shape | long, `revision_date` = `lastupdated` of the edition |
+| Attributes | `obs_status` (string), `decimal` (integer) — declared; observation values are not stored |
+| Shape | long, `revision_date` = the response's `lastupdated` |

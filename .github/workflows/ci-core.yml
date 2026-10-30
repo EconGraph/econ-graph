@@ -14,14 +14,13 @@ on:
   # Retargeting a PR to main after its parent merges is an `edited` event, which
   # does not run here (and `types: [edited]` would let title edits cancel runs),
   # so the child's next push after retarget is its first run against main.
+  # No paths-ignore: Core CI Result is a required check and must report on
+  # every PR. A docs-only PR runs only the changes job and the result job
+  # (the code output of changes, below).
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/workflows/README.md'
+  # The merge queue (docs/development/MERGE_QUEUE.md): the full suite, without
+  # path filtering, on the queued PRs merged onto their base branch.
+  merge_group:
   workflow_dispatch:
     inputs:
       run_e2e_tests:
@@ -86,13 +85,34 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
       e2e_images: ${{ steps.filter.outputs.e2e_images }}
+      # False only on a PR that changes nothing but documentation (the paths
+      # the push trigger ignores); every other event runs the suite.
+      code: ${{ github.event_name != 'pull_request' || steps.code.outputs.code == 'true' }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
-    - uses: dorny/paths-filter@v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+    - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+      id: code
+      if: github.event_name == 'pull_request'
+      with:
+        base: main
+        # A file counts only if it matches every pattern: anything but docs.
+        predicate-quantifier: every
+        filters: |
+          code:
+            - '**'
+            - '!*.md'
+            - '!docs/**'
+            - '!LICENSE'
+            - '!.gitignore'
+            - '!.github/workflows/README.md'
+    - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
       id: filter
-      # Protected-branch pushes run the ordinary suite without path filtering.
-      if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
+      # Protected-branch pushes and merge groups run the ordinary suite without
+      # path filtering.
+      if: github.event_name != 'merge_group' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
       with:
         base: main
         filters: |
@@ -191,22 +211,23 @@ jobs:
     needs: [changes]
     # Only the filter step is skipped on main/develop/release/**; changes succeeds.
     # Keep the explicit selection and failure/cancellation gate for feature refs.
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
     timeout-minutes: 90
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -224,11 +245,15 @@ jobs:
   prometheus-rules:
     name: Prometheus Rules
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 10
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
 
     - name: Install promtool
       run: |
@@ -246,13 +271,15 @@ jobs:
   postgres-backup-scripts:
     name: PostgreSQL Backup Scripts
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 15
     permissions:
       contents: read
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
 
@@ -267,13 +294,15 @@ jobs:
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 10
     permissions:
       contents: read
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
 
@@ -286,8 +315,15 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-public-host-lib.sh
+        python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
         scripts/deploy/test-stage-tunnel-origin-ca.sh
+
+    - name: Check isolated branch rendering and deployment guards
+      run: |
+        KUSTOMIZE_KUBECTL="$(command -v kubectl)" || { echo 'kubectl is required for Kustomize parity' >&2; exit 1; }
+        export KUSTOMIZE_KUBECTL
+        python3 scripts/deploy/test-branch-environments.py
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.
@@ -299,9 +335,42 @@ jobs:
     - name: Check that teardown uses only the kind cluster's context
       run: scripts/deploy/test-teardown-kubectl.sh
 
+    # recreate-kind-cluster.sh identifies the cluster inside its control plane on
+    # the rootful daemon and, before any backup, delete or create, asks for the
+    # kube-system UID prefix on a cluster with a production marker (or one that
+    # can't be read), never taking --yes for it (all stubs here).
+    - name: Check that recreate-kind-cluster confirms before deleting
+      run: |
+        shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
+        scripts/deploy/test-recreate-kind-cluster.sh
+
+    # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
+    # reach only the kind cluster's kubectl with --context, never plain kubectl.
+    - name: Check which cluster the operator scripts reach
+      run: scripts/deploy/test-operator-kubectl.sh
+
+    # With none of KUBECTL, KUBECONFIG and DOCKER_HOST set, the deploy, Keycloak
+    # backup, gateway and port-forwarding scripts reach the kind cluster's own
+    # kubectl, and kind on the rootful Docker daemon, never plain kubectl or kind.
+    - name: Check that the deploy scripts default to the kind cluster's kubectl
+      run: scripts/deploy/test-kind-kubectl-default.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
+
+    # deploy.sh stops before applying anything when Secret econ-graph-keycloak lacks
+    # anonymous-client-secret, against a stub kubectl.
+    - name: Check the Keycloak Secret guard
+      run: scripts/deploy/test-keycloak-secret-guard.sh
+
+    - name: Check restricted agent access and credential guards
+      run: scripts/deploy/test-agent-access.sh
+
+    # deploy.sh runs test-monitoring.sh --lint-only; it must reach no cluster
+    # and no network (kubectl, kind, docker, curl and the rest are stubs here).
+    - name: Check that the monitoring lint contacts nothing
+      run: scripts/test-monitoring-lint-only.sh
 
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
@@ -312,6 +381,28 @@ jobs:
     # against a stub kubectl.
     - name: Check the pre-deploy database check
       run: scripts/deploy/test-precheck-db-migration.sh
+
+    # Loading a release candidate's GHCR images into the kind cluster, the
+    # restart and image check after deploy.sh, and the rollback, against stub
+    # git, docker, kind and kubectl.
+    - name: Check the release image load, verify and rollback scripts
+      run: |
+        shellcheck -x scripts/deploy/load-release-images.sh scripts/deploy/verify-release-images.sh \
+          scripts/deploy/rollback-release-images.sh scripts/deploy/test-release-images.sh \
+          scripts/deploy/lib/release-images.sh
+        scripts/deploy/test-release-images.sh
+
+    # release-deploy.sh, the one-command release deploy, with its steps as stubs:
+    # order, stop at the first failure, the PUBLIC_HOST guard and the dry run.
+    - name: Check the release deploy entry point
+      run: |
+        shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
+        scripts/deploy/test-release-deploy.sh
+
+    # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
+    # identity printed first, and the resume hint keeping the run's options, against stubs.
+    - name: Check the full-history re-fetch script
+      run: scripts/deploy/test-refetch-full-history.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -324,12 +415,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
-      uses: actions/setup-python@v7
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
       with:
         python-version: '3.14'
 
@@ -406,17 +498,18 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -496,6 +589,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         scripts/keycloak/test-check-keycloak-roles.sh
         scripts/keycloak/test-render-realm.sh
+        python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
 
     - name: Check the branch-clone delete safety checks
@@ -515,12 +609,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -585,17 +680,18 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -623,7 +719,7 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -710,18 +806,18 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -771,6 +867,26 @@ jobs:
           grep -Fq "test $name ... ok" "$log"
           grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
         done
+      working-directory: backend
+
+    - name: Run catalog and anonymous permission regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
+        grep -Eq '^test result: ok\. 15 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
+        cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 6 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
+        cargo test -p econ-graph-services --lib services::series_check::tests::readable_series_exists_applies_the_plane_answer_and_the_callers_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-plane-grants.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-plane-grants.log"
+        cargo test -p econ-graph-services --lib services::series_check::tests::skip_accepts_every_series_but_none_against_catalog_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-skip.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-skip.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend series_check_startup_tests::neither_with_sign_in_refuses_to_start -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-startup.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-startup.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend databases_tests::the_data_plane_check_agrees_with_the_database_check -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-preflight.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-preflight.log"
       working-directory: backend
 
     - name: Run mapped trusted-proxy regression (required)
@@ -939,15 +1055,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1070,16 +1187,17 @@ jobs:
     needs: [changes]
     # Skipped on backend-only PRs; a manual run always gets it. See
     # backend-build-cache for the failure/cancellation gate
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1110,7 +1228,7 @@ jobs:
       run: npm run e2e:smoke
 
     - name: Upload admin frontend test coverage
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: admin-frontend-coverage-${{ github.sha }}
         path: admin-frontend/coverage/
@@ -1124,16 +1242,17 @@ jobs:
     # Skipped on backend-only PRs (and frontend-integration-tests with it);
     # pushes and manual runs always get it, so a manual E2E run is never
     # skipped. See backend-build-cache for the failure/cancellation gate
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1166,24 +1285,27 @@ jobs:
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 90
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Check dev/QA Keycloak data is not deployed to k8s
       run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: |
           ~/.cargo/registry
@@ -1206,7 +1328,7 @@ jobs:
         cargo clippy -- -W clippy::all
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1243,15 +1365,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1270,7 +1393,7 @@ jobs:
       working-directory: backend
 
     - name: Setup Node.js for npm audit
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1310,15 +1433,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1326,7 +1450,7 @@ jobs:
         save-if: ${{ github.job == 'backend-build-cache' }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1388,7 +1512,7 @@ jobs:
         echo "✅ License compliance check completed successfully"
 
     - name: Upload license reports
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: license-compliance-reports-${{ github.sha }}
         path: |
@@ -1419,15 +1543,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1466,12 +1591,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -1496,12 +1622,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
     - name: Build optimized E2E container
       run: |
@@ -1518,7 +1645,7 @@ jobs:
         docker save econ-graph-e2e-mobile-optimized:latest | gzip > e2e-mobile-container-optimized.tar.gz
 
     - name: Upload optimized E2E containers
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: e2e-containers-optimized
         path: |
@@ -1552,8 +1679,9 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Load CI port configuration
@@ -1587,10 +1715,10 @@ jobs:
         } >> "$GITHUB_ENV"
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1627,7 +1755,7 @@ jobs:
       working-directory: backend
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -1700,15 +1828,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1754,7 +1883,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -1865,7 +1994,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: playwright-test-results-e2e-comprehensive
         path: |
@@ -1903,17 +2032,18 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.99.1
+      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: backend
         shared-key: backend
@@ -1959,7 +2089,7 @@ jobs:
         echo "✅ PostgreSQL is fully functional!"
 
     - name: Download optimized E2E containers
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
       with:
         name: e2e-containers-optimized
 
@@ -2074,7 +2204,7 @@ jobs:
 
     - name: Upload Playwright test artifacts
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: playwright-test-results-mobile-e2e-core
         path: |
@@ -2100,8 +2230,9 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     # Plain docker build on the runner's daemon, not buildx with the GHA cache:
@@ -2153,15 +2284,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
+        persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
     - name: Build backend Docker image
-      uses: docker/build-push-action@v7
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./backend
         push: false
@@ -2171,7 +2303,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build frontend Docker image
-      uses: docker/build-push-action@v7
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./frontend
         push: false
@@ -2239,6 +2371,63 @@ jobs:
           exit 1
         fi
         docker rm -f frontend-smoke-test
+
+  # The one check branch protection requires of this workflow
+  # (docs/development/MERGE_QUEUE.md). It always runs, and fails when any job
+  # failed or was cancelled. On a pull request a job that path filtering
+  # skipped passes; in a merge group nothing is filtered, so every job of the
+  # ordinary suite must have succeeded, and a skipped one fails it too.
+  ci-result:
+    name: Core CI Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ always() }}
+    needs:
+      - changes
+      - backend-build-cache
+      - prometheus-rules
+      - postgres-backup-scripts
+      - deploy-manifests
+      - backend-migration-validation-tests
+      - backend-smoke-tests
+      - chart-api-integration-tests
+      - backend-mcp-integration-tests
+      - backend-workspace-tests
+      - backend-db-tests
+      - admin-frontend-tests
+      - frontend-tests
+      - quality-checks
+      - security-audit
+      - license-compliance
+      - backend-integration-tests
+      - frontend-integration-tests
+      - e2e-container-build-optimized
+      - e2e-core-tests
+      - e2e-comprehensive-tests
+      - mobile-e2e-tests
+      - e2e-image-build
+      - docker-build
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+        sparse-checkout: ci/scripts
+
+    - name: Check the job results
+      env:
+        NEEDS: ${{ toJSON(needs) }}
+        EVENT: ${{ github.event_name }}
+        # The ordinary suite: in a merge group each of these must succeed.
+        MUST_RUN: >-
+          changes backend-build-cache prometheus-rules postgres-backup-scripts
+          deploy-manifests backend-migration-validation-tests backend-smoke-tests
+          chart-api-integration-tests backend-mcp-integration-tests
+          backend-workspace-tests backend-db-tests admin-frontend-tests
+          frontend-tests quality-checks security-audit license-compliance
+          backend-integration-tests frontend-integration-tests e2e-image-build
+          docker-build
+      run: ci/scripts/check-required-jobs.sh
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT

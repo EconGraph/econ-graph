@@ -48,6 +48,7 @@ if name == 'cargo' and 'seed-fixtures' in sys.argv:
                        APP_DATABASE_URL='postgres://do-not-touch',
                        DATA_DATABASE_URL='postgres://do-not-touch')
             env.pop('RELEASE_BACKEND_BIN', None)
+            env.pop('RELEASE_E2E_CONFIG', None)
             subprocess.run(['bash', str(repo / 'scripts/release-e2e.sh'), 'smoke.spec.ts'],
                            cwd=repo, env=env, check=True)
             calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -69,6 +70,16 @@ if name == 'cargo' and 'seed-fixtures' in sys.argv:
                              str(repo / 'backend/custom-target/release/econ-graph-backend'))
             self.assertEqual(playwright['args'], ['playwright', 'test',
                              '--config=playwright.release.config.ts', 'smoke.spec.ts'])
+
+            # RELEASE_E2E_CONFIG picks another config on the same stack (the QA scenario suite).
+            log.unlink()
+            shutil.rmtree(repo / 'backend/custom-target')
+            subprocess.run(['bash', str(repo / 'scripts/release-e2e.sh')], cwd=repo, check=True,
+                           env=dict(env, RELEASE_E2E_CONFIG='playwright.qa-stack.config.ts'))
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            playwright = next(call for call in calls if call['name'] == 'npx')
+            self.assertEqual(playwright['args'], ['playwright', 'test',
+                             '--config=playwright.qa-stack.config.ts'])
 
 
 if __name__ == '__main__':

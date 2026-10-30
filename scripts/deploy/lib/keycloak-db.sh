@@ -37,11 +37,13 @@ KDB_COUNT_SQL="select table_name, (xpath('/row/c/text()', query_to_xml(format('s
 
 # Pin every kc call to context $1, which must exist. Without KUBECTL, first put
 # the kind cluster's kubectl and kubeconfig on PATH and KUBECONFIG
-# (ensure_kind_kubectl; under DRY_RUN=true nothing is cached). Unlike
-# cluster_role_use_context, the current context stays as it is.
+# (ensure_kind_kubectl; under DRY_RUN=true nothing is cached), on the Docker
+# daemon kind-env.sh chose, which it names. Unlike cluster_role_use_context,
+# the current context stays as it is.
 kdb_use_context() {
     local names
     if [ -z "${KUBECTL:-}" ]; then
+        check_docker_daemon
         ensure_kind_kubectl_quietly || {
             echo "${KDB_SCRIPT}: error: cannot reach the API server of kind cluster '${KIND_CLUSTER}' on ${DOCKER_HOST}" >&2
             return 1

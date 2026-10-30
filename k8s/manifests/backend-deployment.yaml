@@ -82,7 +82,10 @@ spec:
               name: econ-graph-secrets
               key: app-database-url
         # Optional: a namespace without a data database has no data-database-url, and the
-        # backend then serves data fields as DATA_SERVED_REMOTELY (deploy.sh skips crawler-migrate).
+        # backend then serves data fields as DATA_SERVED_REMOTELY.
+        # Such a namespace must also set DATA_GRAPHQL_URL (the shared data plane), or the
+        # backend refuses to start: with sign-in on it could not apply catalog grants to
+        # annotations (backend/README.md).
         - name: DATA_DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -114,6 +117,20 @@ spec:
         # PUBLIC_HOST (https://<host>/idp/realms/econ-graph); OIDC_JWKS_URL stays in-cluster.
         - name: OIDC_ISSUER
           value: "http://localhost/idp/realms/econ-graph"
+        # Credential transport stays on the private in-cluster Keycloak service.
+        - name: OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP
+          value: "true"
+        - name: OIDC_ANONYMOUS_TOKEN_URL
+          value: "http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/token"
+        - name: OIDC_ANONYMOUS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: anonymous-client-secret
+        # Seconds the last anonymous catalog grants stay in use past expiry while Keycloak
+        # can't renew them; 0 fails closed (config/keycloak/README.md).
+        - name: ANONYMOUS_GRANTS_STALE_MAX_SECS
+          value: "0"
         - name: OIDC_AUDIENCE
           value: "econ-graph-api"
         - name: OIDC_JWKS_URL

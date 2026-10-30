@@ -1,11 +1,12 @@
 name: Docs Checks
 
-# Runs on every PR, including docs-only ones that Core CI skips and stacked
-# PRs based on another branch.
+# Runs on every PR, including docs-only ones and stacked PRs based on another
+# branch, and on merge groups (docs/development/MERGE_QUEUE.md).
 on:
   push:
     branches: [ main, develop ]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -19,10 +20,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version-file: '.nvmrc'
 
@@ -36,7 +39,7 @@ jobs:
     # Relative links and images only: --offline skips http(s) URLs, which
     # would make the check depend on other sites being up
     - name: Check relative links
-      uses: lycheeverse/lychee-action@v2
+      uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
       with:
         args: --offline --no-progress './**/*.md'
         fail: true

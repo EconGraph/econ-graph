@@ -1,0 +1,63 @@
+# Anonymous catalog grant alerts. Anonymous visitors read only the catalogs Keycloak grants the
+# econgraph-anonymous client; the backend renews those grants in one background task
+# (config/keycloak/README.md, "Catalog access, including anonymous visitors"). If renewal keeps
+# failing, or the task stops, the grants lapse and anonymous visitors see empty catalogs.
+#
+# Metrics, served by the backend on /metrics (scraped once, by the annotation-based
+# 'kubernetes-pods' job in prometheus-config.yaml) only when anonymous grants are configured:
+#   anonymous_grant_renewals_total{outcome}           counter; outcome = success|outage|refused
+#   anonymous_grant_renewal_consecutive_failures      gauge; failed renewals since the last success
+#                                                     (renewal retries every 10 seconds)
+#   anonymous_catalog_grants                          gauge; catalog roles anonymous visitors hold
+#   anonymous_grants_serving_stale                    gauge; 1 while expired grants are served
+#                                                     (ANONYMOUS_GRANTS_STALE_MAX_SECS above 0)
+#   anonymous_grant_refresh_task_running              gauge; 1 while the renewal task runs
+#
+# Loading: like prometheus-rules-tunnel.yaml, a plain ConfigMap projected into
+# /etc/prometheus/rules by prometheus-deployment.yaml. Tests: tests/anonymous-grants.test.yaml,
+# run by check-prometheus-rules.sh in CI.
+#
+# KNOWN GAP: no Alertmanager is deployed, so firing alerts are visible in Prometheus
+# (/alerts, the ALERTS series) but are not routed or notified anywhere.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules-auth
+  namespace: econ-graph
+data:
+  auth.rules.yml: |
+      groups:
+      - name: anonymous-grants
+        rules:
+        # Six failures in a row is Keycloak not answering the backend (or refusing its anonymous
+        # client) for 60 to 90 seconds: each attempt can wait out its 5-second timeout before
+        # the 10-second retry. With the 1-minute hold, the alert fires about 2 to 2.5 minutes
+        # into an outage. Grants survive that only until they expire.
+        - alert: AnonymousGrantRenewalFailing
+          expr: anonymous_grant_renewal_consecutive_failures >= 6
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: The backend can't renew anonymous catalog grants from Keycloak
+            description: A backend has failed to renew the anonymous catalog grants six or more times in a row. Once the current grants expire (and any ANONYMOUS_GRANTS_STALE_MAX_SECS window passes), anonymous visitors see no catalogs. Check the backend log for "Anonymous catalog grant renewal failed" or "Keycloak refused the anonymous catalog client", and Keycloak itself.
+
+        # Also fires when every catalog was deliberately withdrawn from anonymous visitors; then
+        # it is expected and can be silenced.
+        - alert: AnonymousCatalogGrantsEmpty
+          expr: anonymous_catalog_grants == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Anonymous visitors have had no catalog access for 10 minutes
+            description: A backend has held no anonymous catalog grants for 10 minutes, so anonymous visitors see empty catalogs. Expected only when every catalog was withdrawn from anonymous visitors in Keycloak; otherwise see AnonymousGrantRenewalFailing and the backend log.
+
+        - alert: AnonymousGrantRefreshStopped
+          expr: anonymous_grant_refresh_task_running == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: A backend stopped renewing anonymous catalog grants
+            description: The background task that renews anonymous catalog grants has ended in a backend, so its anonymous grants lapse within five minutes and are never renewed. Restart the backend (`kubectl -n econ-graph rollout restart deployment/econ-graph-backend`) and look for "refresh task" in its log.

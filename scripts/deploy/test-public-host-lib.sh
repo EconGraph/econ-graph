@@ -767,6 +767,111 @@ grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore
 run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
+# require_recreate_confirmation: before the downtime, a cluster that
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
+# but none, one that can't be read, or one noted as production) needs the prefix: a
+# matching --confirm-production, or typed at a terminal, then passed on to
+# recreate-kind-cluster.sh. rrc runs it with stdin /dev/null (no terminal); rrc_tty under a
+# pseudo-terminal (run_migrate_tty).
+# shellcheck disable=SC2016 # expanded by run_migrate's bash
+rrc_setup='source scripts/deploy/lib/cluster-role.sh
+  kube_system_uid() { [ -z "${STUB_UID_FAILS:-}" ] || return 1; echo uid-kind-cluster; }
+  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  recreate_flags=()
+  CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"'
+# shellcheck disable=SC2016
+rrc="$rrc_setup"'
+  require_recreate_confirmation </dev/null && echo "went on, flags: ${recreate_flags[*]}"'
+# shellcheck disable=SC2016
+rrc_tty="$rrc_setup"'
+  require_recreate_confirmation && echo "went on, flags: ${recreate_flags[*]}"'
+# run_migrate_tty INPUT SCRIPT [VAR=value ...]: run_migrate under a pseudo-terminal, with
+# INPUT typed ahead; killed after a minute if it waits for more.
+run_migrate_tty() {
+  local input="$1" script="$2"
+  shift 2
+  : >"$log"; rm -f "$stub_dir/mig/state.env"
+  env "$@" timeout 60 python3 -c '
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[2], sys.argv[2:])
+os.write(fd, sys.argv[1].encode())
+out = b""
+while True:
+    try:
+        data = os.read(fd, 4096)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(status))
+' "$input" bash -c '
+    log() { echo "==> $*"; }
+    die() { echo "error: $*" >&2; exit 1; }
+    kind_cluster_is_production() { CLUSTER_ROLE_REASON="stub reason"; return "$STUB_RC"; }
+    KIND_CLUSTER=econ-graph PROJECT_ROOT="$MIG_ROOT" STATE_FILE="$MIG_ROOT/state.env" DRY_RUN="${DRY_RUN:-false}"
+    eval "$MIGRATE_SRC"
+    eval "$1"' _ "$script" >"$out" 2>&1
+}
+for marker in "production uid-kind-cluster" "Production uid-other" "None uid-kind-cluster" "staging uid-kind-cluster"; do
+  if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker"; then
+    fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
+  fi
+  grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_WAS=true; then
+  fail "require_recreate_confirmation: went on without a terminal for a cluster noted as production"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind STUB_UID_FAILS=1; then
+  fail "require_recreate_confirmation: went on when the kube-system UID can't be read"
+fi
+for marker in "" "none uid-kind-cluster"; do
+  run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker" ||
+    fail "require_recreate_confirmation: refused a cluster without a production marker ('$marker'): $(cat "$out")"
+  grep -q 'went on, flags: $' "$out" || fail "require_recreate_confirmation: passed a prefix on for '$marker': $(cat "$out")"
+done
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind ||
+  fail "require_recreate_confirmation: refused a matching --confirm-production: $(cat "$out")"
+if run_migrate "$rrc" STUB_RC=1 STUB_CONFIRM=uid-othe; then
+  fail "require_recreate_confirmation: took a --confirm-production that doesn't match"
+fi
+grep -q 'does not match' "$out" || fail "require_recreate_confirmation: the mismatch was not reported: $(cat "$out")"
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" DRY_RUN=true ||
+  fail "require_recreate_confirmation: refused a dry run"
+# At a terminal: the prefix is asked and checked here, then passed on; --yes plays no part.
+run_migrate_tty $'uid-kind\n' "$rrc_tty" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" ||
+  fail "require_recreate_confirmation: refused the right prefix typed at a terminal: $(cat "$out")"
+grep -q 'Type the first 8 characters of the kube-system UID above' "$out" ||
+  fail "require_recreate_confirmation: no prompt at a terminal: $(cat "$out")"
+grep -q 'went on, flags: --confirm-production uid-kind' "$out" ||
+  fail "require_recreate_confirmation: the typed prefix is not passed on to recreate-kind-cluster.sh: $(cat "$out")"
+if run_migrate_tty $'yes\n' "$rrc_tty" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on with a wrong answer typed at a terminal"
+fi
+grep -q 'confirmation did not match' "$out" ||
+  fail "require_recreate_confirmation: the wrong answer was not reported: $(cat "$out")"
+run_migrate_tty '' "$rrc_tty" STUB_RC=1 STUB_MARKER="none uid-kind-cluster" ||
+  fail "require_recreate_confirmation: asked at a terminal for a cluster without a production marker: $(cat "$out")"
+grep -q 'Type the first 8' "$out" && fail "require_recreate_confirmation: prompted for a cluster without a production marker"
+# ...and both forward() and rollback() call it before their downtime confirmation and before
+# stopping the writers.
+for fn in forward rollback; do
+  body="$(sed -n "/^${fn}() {\$/,/^}\$/p" scripts/deploy/migrate-to-host-storage.sh)"
+  check_at="$(grep -n '^ *require_recreate_confirmation$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  confirm_at="$(grep -n '^ *confirm "This stops econ-graph' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  stop_at="$(grep -n '^ *stop_writers$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  if [ -z "$check_at" ] || [ -z "$confirm_at" ] || [ -z "$stop_at" ] ||
+    [ "$check_at" -gt "$confirm_at" ] || [ "$check_at" -gt "$stop_at" ]; then
+    fail "migrate-to-host-storage.sh ${fn}(): require_recreate_confirmation (line ${check_at:-none}) is not before the downtime confirmation (${confirm_at:-none}) and stop_writers (${stop_at:-none})"
+  fi
+done
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached
@@ -803,39 +908,74 @@ detected="Using the kind cluster's kubectl $cache2/bin/kubectl and KUBECONFIG=$c
 run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (bare) failed: $(cat "$out")"
 grep -qF "$detected" "$out" || fail "create-secrets (bare): did not say it uses the kind kubectl: $(cat "$out")"
 used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets (bare)"
-# An exported KUBECONFIG skips the detection, and says so, for both scripts.
+# An exported KUBECONFIG is used with the kind kubectl binary (never plain kubectl, which
+# may ignore it), and that is said, for both scripts.
+with_config="Using the kind cluster's kubectl $cache2/bin/kubectl with KUBECONFIG=$stub_dir/other-kubeconfig"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "create-secrets with KUBECONFIG: skipping detection was not said"
-used_only plain "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
+grep -qF "$with_config" "$out" || fail "create-secrets with KUBECONFIG: the choice was not said: $(cat "$out")"
+used_only cache "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run ||
   fail "mark with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark with KUBECONFIG: skipping the kind kubectl was not said"
+grep -qF "$with_config" "$out" || fail "mark with KUBECONFIG: the choice was not said"
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
 grep -qE "context +kind-test" "$out" || fail "mark with KUBECONFIG: the context in use is not shown"
-used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
-# An explicit KUBECTL wins silently; a context pinned by deploy.sh keeps deploy.sh's kubectl.
+used_only cache "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
+# An explicit KUBECTL wins silently, also with a context pinned by deploy.sh (which
+# exports both).
 run_bare KUBECTL="$stub_dir/plain/kubectl" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECTL failed: $(cat "$out")"
 grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with KUBECTL: detection spoke"
 used_only plain "" "create-secrets with KUBECTL"
-run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
-  fail "create-secrets with a pinned context failed: $(cat "$out")"
-grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
+run_bare KUBECTL="$stub_dir/plain/kubectl" CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with KUBECTL and a pinned context failed: $(cat "$out")"
 grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" || fail "create-secrets with a pinned context: did not write on it"
-used_only plain "" "create-secrets with a pinned context"
-# Only one of the two cached files: plain kubectl, with a warning naming what is missing.
+used_only plain "" "create-secrets with KUBECTL and a pinned context"
+# A pinned context alone doesn't choose the kubectl: the kind kubectl, on that context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with only a pinned context failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "create-secrets with only a pinned context: did not say it uses the kind kubectl"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets with only a pinned context: did not write on it"
+used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets with only a pinned context"
+# Without KUBECTL and a complete kind cache nothing runs: plain kubectl may be another
+# cluster's. Each case fails before any kubectl call, naming what is missing.
+# refused_bare LABEL STATUS MESSAGE: the last run_bare exited STATUS (non-zero), said
+# MESSAGE, and ran no kubectl.
+refused_bare() {
+  if [ "$2" -eq 0 ]; then
+    fail "$1: succeeded"
+  elif grep -q '^\[' "$log"; then
+    fail "$1: ran a kubectl: $(grep '^\[' "$log" | sort -u)"
+  elif ! grep -qF -- "$3" "$out"; then
+    fail "$1: no '$3' in: $(cat "$out")"
+  fi
+}
 mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubectl only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/bin/kubectl but not $cache2/kubeconfig-econ-graph: using plain kubectl" "$out" ||
-  fail "create-secrets (kubectl only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubectl only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubectl only)" "$rc" "no $cache2/kubeconfig-econ-graph"
 mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl" "$cache2/bin/kubectl.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubeconfig only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/kubeconfig-econ-graph but not $cache2/bin/kubectl: using plain kubectl" "$out" ||
-  fail "create-secrets (kubeconfig only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubeconfig only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubeconfig only)" "$rc" "no $cache2/bin/kubectl"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || rc=$?
+refused_bare "mark with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with only a pinned context (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/protect-postgres-pv.sh --dry-run || rc=$?
+refused_bare "protect-postgres-pv (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/install-gateway.sh --dry-run || rc=$?
+refused_bare "install-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/apply-gateway-routes.sh --dry-run || rc=$?
+refused_bare "apply-gateway-routes (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/cutover-to-gateway.sh --dry-run || rc=$?
+refused_bare "cutover-to-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl.away" "$cache2/bin/kubectl"
 [ ! -s "$path_log" ] || fail "detection tests: called the failing kubectl on PATH: $(cat "$path_log")"
 

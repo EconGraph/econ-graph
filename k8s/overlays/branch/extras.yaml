@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: econ-graph-br-example-50d858e098
+  labels:
+    econgraph.io/env: branch
+    econgraph.io/branch: example-50d858e098
+    econgraph.io/data-mode: primary
+    econgraph.io/gateway-access: 'true'
+  annotations:
+    econgraph.io/branch-name: example
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: branch-budget
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  hard:
+    requests.cpu: '4'
+    requests.memory: 8Gi
+    limits.cpu: '12'
+    limits.memory: 16Gi
+    requests.storage: 8Gi
+    persistentvolumeclaims: '4'
+    pods: '16'
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: branch-defaults
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 64Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: branch-isolation
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: NotIn
+      values:
+      - branch-network-deny
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - &id001
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: econ-graph-br-example-50d858e098
+  egress:
+  - to:
+    - *id001
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-app
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - econ-graph-backend
+      - econ-graph-frontend
+      - keycloak
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - port: 3000
+      protocol: TCP
+    - port: 8080
+      protocol: TCP
+    - port: 9876
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: branch-probe-deny
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  podSelector:
+    matchLabels:
+      app: branch-network-deny
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-data-gateway
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-backend
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+          gateway.envoyproxy.io/owning-gateway-namespace: econ-graph-gateway
+    ports:
+    - port: 10080
+      protocol: TCP

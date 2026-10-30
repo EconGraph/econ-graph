@@ -29,8 +29,6 @@ while (($#)); do
     shift
 done
 [[ -n "$context" ]] || { echo 'error: choose an explicit --context' >&2; exit 2; }
-# Run kubectl only against the context explicitly selected by the operator.
-kc() { command "${KUBECTL:-kubectl}" --context "$context" "$@"; }
 
 if [[ "$apply" != true ]]; then
     printf 'Dry run on context %q: apply %q\n' "$context" "$resources/ca.yaml"
@@ -41,7 +39,18 @@ if [[ "$apply" != true ]]; then
     exit 0
 fi
 
-for tool in "${KUBECTL:-kubectl}" openssl base64; do
+# kubectl is KUBECTL, with the KUBECONFIG it finds. Without KUBECTL it is the
+# kind cluster's own kubectl kept in ${XDG_CACHE_HOME:-~/.cache}/econgraph
+# (cluster_role_default_kubectl in lib/cluster-role.sh); without those copies the
+# script stops. Never plain `kubectl`: it may be another cluster's, such as the
+# MicroK8s snap wrapper. kc below replaces the library's.
+# shellcheck source=scripts/deploy/lib/cluster-role.sh
+source "$project_root/scripts/deploy/lib/cluster-role.sh"
+cluster_role_default_kubectl || exit 1
+# Run kubectl only against the context explicitly selected by the operator.
+kc() { command "$KUBECTL" --context "$context" "$@"; }
+
+for tool in "$KUBECTL" openssl base64; do
     command -v "$tool" >/dev/null || { echo "error: missing tool: $tool" >&2; exit 1; }
 done
 # An explicitly selected context is still required; never silently switch contexts.
