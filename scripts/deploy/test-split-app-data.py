@@ -151,16 +151,45 @@ class ConversionRehearsal(unittest.TestCase):
             db.execute('ALTER TABLE financial_annotations ADD FOREIGN KEY(statement_id) REFERENCES financial_statements(id) ON DELETE CASCADE')
             db.execute('ALTER TABLE financial_annotations ADD FOREIGN KEY(line_item_id) REFERENCES financial_line_items(id) ON DELETE CASCADE')
             self.before = conversion.fingerprints(db, conversion.inventory('data')[0])
+            self.app_before = conversion.fingerprints(db, conversion.inventory('app')[0])
+            self.versions_before = conversion.versions(db)
         self.mapping = self.root / ('source-map-' + self.number + '.json')
         self.mapping.write_text(json.dumps({str(source_id): 'FRED'}))
         self.args = SimpleNamespace(source_service='conversion_source', app_service='conversion_app', source_map=self.mapping,
                                     backup_dir=self.backup_root / ('backup-' + self.number), dry_run=False,
-                                    writers_stopped=True, drop_source_app=False, previous_evidence=None)
+                                    writers_stopped=True, drop_source_app=False, previous_evidence=None,
+                                    restore_source_app=None)
+        self.phrase = f'DROP APP TABLES FROM {self.source_db}'
 
     def run_conversion(self):
         """Run the maintenance command while keeping synthetic evidence out of test logs."""
         with contextlib.redirect_stdout(io.StringIO()):
             conversion.convert(self.args)
+
+    def copy_and_drop(self):
+        """Copy, then remove the source app tables with confirmation; return the cleanup backup."""
+        self.run_conversion()
+        self.args.backup_dir = self.backup_root / ('cleanup-' + self.number)
+        self.args.drop_source_app = True
+        with patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value=self.phrase):
+            self.run_conversion()
+        self.args.drop_source_app = False
+        return self.args.backup_dir
+
+    def app_count(self, service, table='users'):
+        """Count rows of an app table, or None when the table does not exist."""
+        with psycopg.connect(service=service) as db:
+            if table not in conversion.tables(db):
+                return None
+            return db.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(table))).fetchone()[0]
+
+    def restore(self, backup):
+        """Run the rollback mode quietly."""
+        args = SimpleNamespace(source_service='conversion_source', writers_stopped=True, restore_source_app=backup,
+                               backup_dir=self.backup_root / ('rollback-' + uuid.uuid4().hex[:12]))
+        with contextlib.redirect_stdout(io.StringIO()):
+            conversion.restore_source_app(args)
+        return args.backup_dir
 
     def test_copy_cleanup_and_idempotent_rerun(self):
         """Verify locks, exact copy, a restorable verified backup, cleanup and evidence-backed rerun."""
@@ -185,7 +214,7 @@ class ConversionRehearsal(unittest.TestCase):
         # Reuse neither backup directories nor overwrite a verified dump on rerun.
         self.args.backup_dir = self.backup_root / ('cleanup-' + self.number)
         self.args.drop_source_app = True
-        with patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value=f'DROP APP TABLES FROM {self.source_db}'):
+        with patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value=self.phrase):
             self.run_conversion()
         with psycopg.connect(service='conversion_source') as db:
             self.assertNotIn('users', conversion.tables(db))
@@ -200,18 +229,16 @@ class ConversionRehearsal(unittest.TestCase):
         backup = self.args.backup_dir
         self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
         self.assertEqual(sorted(p.name for p in backup.iterdir()),
-                         ['SHA256SUMS', 'counts.env', 'econ_graph.dump', 'evidence.json', 'source-evidence.json'])
+                         ['SHA256SUMS', 'combined.dump', 'evidence.json', 'pg_tools.log', 'source-evidence.json'])
         for path in backup.iterdir():
             self.assertEqual(path.stat().st_mode & 0o777, 0o600, path.name)
         # No VERIFIED marker: the off-site copy of nightly dumps must never select this directory.
+        # No econ_graph.dump: restore-kind-databases.sh must refuse it rather than compare data counts.
         self.assertFalse((backup / 'VERIFIED').exists())
-        self.assertEqual((backup / 'counts.env').read_text(),
-                         '# Row counts at backup time, compared after a restore.\n'
-                         f"SERIES_COUNT={self.before['economic_series']['rows']}\n"
-                         f"DATA_POINTS_COUNT={self.before['data_points']['rows']}\n")
-        archive = (backup / 'econ_graph.dump').read_bytes()
+        self.assertFalse((backup / 'econ_graph.dump').exists())
+        archive = (backup / 'combined.dump').read_bytes()
         self.assertEqual(hashlib.sha256(archive).hexdigest(), evidence['backup_sha256'])
-        self.assertEqual((backup / 'SHA256SUMS').read_text(), f"{evidence['backup_sha256']}  econ_graph.dump\n")
+        self.assertEqual((backup / 'SHA256SUMS').read_text(), f"{evidence['backup_sha256']}  combined.dump\n")
         restored_db = 'restored_' + self.number
         with psycopg.connect(self.admin, autocommit=True) as admin:
             admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(restored_db)))
@@ -230,13 +257,15 @@ class ConversionRehearsal(unittest.TestCase):
         run = subprocess.run
         def unreadable(command, *args, **kwargs):
             if command[0] == 'pg_restore':
-                raise subprocess.CalledProcessError(1, command)
+                kwargs['stderr'].write('pg_restore: error: synthetic corrupt block\n')
+                return subprocess.CompletedProcess(command, 1)
             return run(command, *args, **kwargs)
         with patch.object(conversion.subprocess, 'run', side_effect=unreadable):
-            with self.assertRaises(subprocess.CalledProcessError):
+            with self.assertRaisesRegex(RuntimeError, 'pg_restore exited with status 1; .*synthetic corrupt block'):
                 self.run_conversion()
-        # The unverified archive is kept for inspection, never promoted or deleted.
-        self.assertEqual(sorted(p.name for p in self.args.backup_dir.iterdir()), ['econ_graph.dump.partial'])
+        # The unverified archive and the tool log are kept for inspection, never promoted or deleted.
+        self.assertEqual(sorted(p.name for p in self.args.backup_dir.iterdir()), ['combined.dump.partial', 'pg_tools.log'])
+        self.assertEqual((self.args.backup_dir / 'pg_tools.log').stat().st_mode & 0o777, 0o600)
         with psycopg.connect(service='conversion_app') as db:
             self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
         with psycopg.connect(service='conversion_source') as db:
@@ -285,7 +314,7 @@ class ConversionRehearsal(unittest.TestCase):
             db.execute("ALTER TABLE users ADD CONSTRAINT rehearsal_refusal CHECK(name <> 'Synthetic User')")
         with self.assertRaises(psycopg.errors.CheckViolation):
             self.run_conversion()
-        self.assertTrue((self.args.backup_dir / 'econ_graph.dump').is_file())
+        self.assertTrue((self.args.backup_dir / 'combined.dump').is_file())
         with psycopg.connect(service='conversion_app') as db:
             self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
             self.assertEqual(db.execute('SELECT count(*) FROM annotation_templates').fetchone()[0], 3)
@@ -304,7 +333,8 @@ class ConversionRehearsal(unittest.TestCase):
         root = self.backup_root / ('default-' + self.number)
         self.args.backup_dir = None
         with patch.dict(os.environ, {'ECONGRAPH_BACKUP_ROOT': str(root)}), \
-                patch('sys.stdin.isatty', return_value=False):
+                patch('sys.stdin.isatty', return_value=False), \
+                patch('builtins.input', side_effect=AssertionError('must not prompt without a terminal')):
             with self.assertRaisesRegex(RuntimeError, 'typed confirmation'):
                 self.run_conversion()
         with psycopg.connect(service='conversion_source') as db:
@@ -313,7 +343,153 @@ class ConversionRehearsal(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 1)
         (backup,) = root.iterdir()
         self.assertEqual(backup, self.args.backup_dir)
-        self.assertTrue((backup / 'econ_graph.dump').is_file())
+        self.assertTrue((backup / 'combined.dump').is_file())
+
+
+    def test_wrong_confirmation_phrase_keeps_source_app_tables(self):
+        """Only the exact phrase removes the source app tables; the verified copy stays committed."""
+        self.args.drop_source_app = True
+        with patch('sys.stdin.isatty', return_value=True), patch('builtins.input', return_value='DROP APP TABLES'):
+            with self.assertRaisesRegex(RuntimeError, 'Confirmation did not match'):
+                self.run_conversion()
+        self.assertEqual(self.app_count('conversion_source'), 1)
+        self.assertEqual(self.app_count('conversion_app'), 1)
+
+    def test_copy_mismatch_rolls_back_the_target(self):
+        """A copy whose content differs from the source is never committed."""
+        copy = conversion.copy_app
+        def corrupt(source, target, app_tables):
+            copy(source, target, app_tables)
+            target.execute("UPDATE users SET name='altered in transit'")
+        with patch.object(conversion, 'copy_app', side_effect=corrupt):
+            with self.assertRaisesRegex(RuntimeError, 'App copy content verification failed'):
+                self.run_conversion()
+        self.assertEqual(self.app_count('conversion_app'), 0)
+        self.assertEqual(self.app_count('conversion_source'), 1)
+
+    def test_data_change_during_cleanup_keeps_source_app_tables(self):
+        """The data tables are re-verified before the removal commits."""
+        fingerprints = conversion.fingerprints
+        confirmed = []
+        def changed_after_confirmation(conn, names):
+            result = fingerprints(conn, names)
+            if confirmed and 'data_points' in names:
+                result = dict(result, data_points={'rows': -1, 'sha256': 'changed'})
+            return result
+        def confirm(prompt):
+            confirmed.append(prompt)
+            return self.phrase
+        self.args.drop_source_app = True
+        with patch.object(conversion, 'fingerprints', side_effect=changed_after_confirmation), \
+                patch('sys.stdin.isatty', return_value=True), patch('builtins.input', side_effect=confirm):
+            with self.assertRaisesRegex(RuntimeError, 'Data table content changed during cleanup'):
+                self.run_conversion()
+        self.assertEqual(self.app_count('conversion_source'), 1)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(conversion.versions(db), self.versions_before)
+
+    def test_previous_evidence_must_match_the_databases(self):
+        """An already converted source is accepted only with evidence that matches both databases."""
+        cleanup = self.copy_and_drop()
+        evidence = json.loads((cleanup / 'evidence.json').read_text())
+        for key, value in [('data_before', {}), ('series', {}), ('source_app', {}), ('copy_verified', False),
+                           ('source_identity', ['0', 'other']), ('target_identity', ['0', 'other'])]:
+            tampered = self.root / f'tampered-{key}-{self.number}.json'
+            tampered.write_text(json.dumps(dict(evidence, **{key: value})))
+            self.args.previous_evidence = tampered
+            with self.assertRaisesRegex(RuntimeError, 'Previous conversion evidence does not match', msg=key):
+                self.run_conversion()
+        # An emptied target is not a completed conversion, even with the genuine evidence.
+        self.args.previous_evidence = cleanup / 'evidence.json'
+        self.run_conversion()
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute(sql.SQL('TRUNCATE {}').format(conversion.identifiers(conversion.inventory('app')[0])))
+        with self.assertRaisesRegex(RuntimeError, 'Previous conversion evidence does not match'):
+            self.run_conversion()
+
+    def test_stale_copy_is_replaced_only_with_its_evidence(self):
+        """After writers resumed on the combined database, its own earlier copy may be replaced."""
+        self.run_conversion()
+        first = self.args.backup_dir / 'evidence.json'
+        with psycopg.connect(service='conversion_source') as db:
+            db.execute("UPDATE users SET name='Renamed after the copy'")
+        self.args.backup_dir = self.backup_root / ('second-' + self.number)
+        with self.assertRaisesRegex(RuntimeError, 'Target contains existing app data'):
+            self.run_conversion()
+        self.args.previous_evidence = first
+        self.run_conversion()
+        with psycopg.connect(service='conversion_app') as db:
+            self.assertEqual(db.execute('SELECT name FROM users').fetchone()[0], 'Renamed after the copy')
+        # Not when the target holds anything other than that verified copy.
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute("INSERT INTO users(email,name) VALUES ('new@example.invalid','Written to the app database')")
+        self.args.backup_dir = self.backup_root / ('third-' + self.number)
+        with self.assertRaisesRegex(RuntimeError, 'does not match the previous verified copy'):
+            self.run_conversion()
+
+    def test_column_type_and_nullability_must_match(self):
+        """Same column names with a different type or nullability are refused."""
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute('ALTER TABLE users ALTER COLUMN name TYPE text')
+        self.args.dry_run = True
+        with self.assertRaisesRegex(RuntimeError, 'Column inventory differs for users'):
+            self.run_conversion()
+        with psycopg.connect(service='conversion_app') as db:
+            db.execute('ALTER TABLE users ALTER COLUMN name TYPE varchar(255)')
+            nullable = db.execute("SELECT attnotnull FROM pg_attribute WHERE attrelid='public.users'::regclass "
+                                  "AND attname='name'").fetchone()[0]
+            db.execute(f"ALTER TABLE users ALTER COLUMN name {'DROP' if nullable else 'SET'} NOT NULL")
+        with self.assertRaisesRegex(RuntimeError, 'Column inventory differs for users'):
+            self.run_conversion()
+
+    def test_rollback_restores_the_source_app_tables(self):
+        """Convert, remove, roll back: the source app tables, enums and history are as before."""
+        cleanup = self.copy_and_drop()
+        self.assertIsNone(self.app_count('conversion_source'))
+        record = self.restore(cleanup)
+        with psycopg.connect(service='conversion_source') as db:
+            self.assertEqual(conversion.fingerprints(db, conversion.inventory('app')[0]), self.app_before)
+            self.assertEqual(conversion.fingerprints(db, conversion.inventory('data')[0]), self.before)
+            self.assertEqual(conversion.versions(db), self.versions_before)
+            enums = {r[0] for r in db.execute("SELECT typname FROM pg_type WHERE typnamespace='public'::regnamespace")}
+            self.assertLessEqual(set(conversion.inventory('app')[1]), enums)
+            # Foreign keys back to the data tables are restored too.
+            fkeys = {r[0] for r in db.execute("SELECT conrelid::regclass::text FROM pg_constraint WHERE contype='f' "
+                                              "AND confrelid='public.data_sources'::regclass")}
+            self.assertIn('user_data_source_preferences', fkeys)
+        self.assertEqual(record.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(sorted(p.name for p in record.iterdir()), ['pg_tools.log', 'restore.list'])
+        listing = (record / 'restore.list').read_text()
+        self.assertIn('TABLE DATA public users ', listing)
+        self.assertNotIn('TABLE DATA public data_points ', listing)
+        # The restored source converts again and the copy verifies against it.
+        self.args.backup_dir = self.backup_root / ('again-' + self.number)
+        self.args.previous_evidence = None
+        self.run_conversion()
+        # A second rollback has nothing to restore and refuses a partial state.
+        with self.assertRaisesRegex(RuntimeError, 'not the backup of a run that removed'):
+            self.restore(self.args.backup_dir)
+
+    def test_rollback_refuses_a_tampered_or_wrong_backup(self):
+        """Rollback needs the untouched backup of the removal run, from this source."""
+        cleanup = self.copy_and_drop()
+        with self.assertRaisesRegex(RuntimeError, 'not the backup of a run that removed'):
+            self.restore(self.backup_root / ('backup-' + self.number))
+        evidence = json.loads((cleanup / 'evidence.json').read_text())
+        original = cleanup / 'evidence.json'
+        tampered = self.backup_root / ('tampered-' + self.number)
+        tampered.mkdir()
+        for name in ('combined.dump', 'SHA256SUMS'):
+            (tampered / name).write_bytes((cleanup / name).read_bytes())
+        (tampered / 'evidence.json').write_text(json.dumps(dict(evidence, source_identity=['0', 'other'])))
+        with self.assertRaisesRegex(RuntimeError, 'not the database this backup was taken from'):
+            self.restore(tampered)
+        (tampered / 'evidence.json').write_text(original.read_text())
+        with (tampered / 'combined.dump').open('ab') as dump:
+            dump.write(b'x')
+        with self.assertRaisesRegex(RuntimeError, 'does not match its recorded checksum'):
+            self.restore(tampered)
+        self.assertIsNone(self.app_count('conversion_source'))
 
 
 if __name__ == '__main__':

@@ -108,44 +108,53 @@ def write_private(path, text):
         os.fsync(output.fileno())
 
 
+def run_logged(command, log, **kwargs):
+    """Run a PostgreSQL client tool, keeping its stderr in an owner-only log in the backup directory."""
+    descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, 'a') as output:
+        output.write(f'$ {" ".join(command)}\n')
+        output.flush()
+        result = subprocess.run(command, stderr=output, **kwargs)
+    if result.returncode != 0:
+        lines = log.read_text(errors='replace').splitlines()[-5:]
+        raise RuntimeError(f'{command[0]} exited with status {result.returncode}; last lines of {log}: '
+                           + ' | '.join(lines))
+    return result
+
+
 def verified_backup(source, service, directory, evidence):
-    """Write a verified dump of the locked source in the backup-kind-databases.sh layout.
+    """Write a verified dump of the locked source to a new owner-only directory.
 
     The directory must not exist yet. It is created mode 0700 and every file in it is mode
-    0600: econ_graph.dump (the whole combined database, app records included), counts.env,
-    SHA256SUMS and the pre-copy evidence. Nothing here is ever deleted, not even a partial
-    dump after a failure. No VERIFIED marker is written, so the off-site copy of the nightly
-    dumps never selects this directory.
+    0600: combined.dump (the whole combined database, app records included), SHA256SUMS,
+    the client tools' stderr in pg_tools.log, and the pre-copy evidence. Nothing here is
+    ever deleted, not even a partial dump after a failure. No VERIFIED marker is written, so
+    the off-site copy of the nightly dumps never selects this directory, and there is no
+    econ_graph.dump, so restore-kind-databases.sh refuses it instead of comparing only data
+    row counts that the conversion never changes.
     """
     require(not directory.exists() and not directory.is_symlink(),
             f'{directory} already exists; refusing to overwrite a backup')
     directory.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory.mkdir(mode=0o700)
     directory.chmod(0o700)
+    log = directory / 'pg_tools.log'
     snapshot = query(source, 'SELECT pg_export_snapshot()')[0][0]
-    partial = directory / 'econ_graph.dump.partial'
+    partial = directory / 'combined.dump.partial'
     # Open the private archive ourselves, including when pg_dump is wrapped in a container.
     with partial.open('xb') as archive:
         partial.chmod(0o600)
-        subprocess.run(['pg_dump', '--no-password', '--dbname', f'service={service}',
-                        '--format=custom', '--snapshot', snapshot, '--lock-wait-timeout=10s'], check=True,
-                       stdout=archive, stderr=subprocess.DEVNULL)
+        run_logged(['pg_dump', '--no-password', '--dbname', f'service={service}',
+                    '--format=custom', '--snapshot', snapshot, '--lock-wait-timeout=10s'], log, stdout=archive)
         archive.flush()
         os.fsync(archive.fileno())
     # Decode every data block, not just the archive's table of contents.
     with partial.open('rb') as archive:
-        subprocess.run(['pg_restore', '--file', os.devnull], stdin=archive, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run_logged(['pg_restore', '--file', os.devnull], log, stdin=archive, stdout=subprocess.DEVNULL)
     with partial.open('rb') as archive:
         digest = hashlib.file_digest(archive, 'sha256').hexdigest()
-    partial.rename(directory / 'econ_graph.dump')
-    write_private(directory / 'SHA256SUMS', f'{digest}  econ_graph.dump\n')
-    # The keys restore-kind-databases.sh reads back and compares after a restore.
-    data = evidence['data_before']
-    write_private(directory / 'counts.env',
-                  '# Row counts at backup time, compared after a restore.\n'
-                  f"SERIES_COUNT={data['economic_series']['rows']}\n"
-                  f"DATA_POINTS_COUNT={data['data_points']['rows']}\n")
+    partial.rename(directory / 'combined.dump')
+    write_private(directory / 'SHA256SUMS', f'{digest}  combined.dump\n')
     write_private(directory / 'source-evidence.json', json.dumps(evidence, indent=2) + '\n')
     sync_directory(directory)
     sync_directory(directory.parent)
@@ -174,9 +183,10 @@ def save_evidence(directory, report):
 
 
 def columns(conn, table):
-    """Read ordered column names so COPY cannot silently reorder app fields."""
-    return query(conn, "SELECT column_name FROM information_schema.columns "
-                 "WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position", (table,))
+    """Read ordered column names, types and nullability so COPY cannot reorder or coerce app fields."""
+    return query(conn, "SELECT attname, format_type(atttypid, atttypmod), attnotnull FROM pg_attribute "
+                 "WHERE attrelid = to_regclass(%s) AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+                 (f'public.{table}',))
 
 
 def copy_app(source, target, app_tables):
@@ -294,7 +304,18 @@ def convert(args):
         source_app_before = fingerprints(source, app_tables)
         matches = target_before == source_app_before
         if not matches:
-            only_seed_templates(target, app_tables, baseline)
+            previous = json.loads(args.previous_evidence.read_text()) if args.previous_evidence else None
+            if previous is not None:
+                # A copy this tool made and verified earlier, which went stale when writers resumed
+                # on the combined database, may be replaced; anything else in the target may not.
+                require(previous.get('copy_verified') is True
+                        and previous.get('source_app') == target_before
+                        and previous.get('source_identity') == list(source_identity)
+                        and previous.get('target_identity') == list(target_identity),
+                        'Target app data does not match the previous verified copy; refusing replacement')
+                report['replaced_previous_copy'] = True
+            else:
+                only_seed_templates(target, app_tables, baseline)
         report['source_app'] = source_app_before
         print(json.dumps(report, indent=2))
         if args.dry_run:
@@ -316,6 +337,7 @@ def convert(args):
         # Commit the verified app copy first. Source locks remain held until the final commit.
         target.commit()
         if args.drop_source_app:
+            report['removed_versions'] = sorted(app_versions - data_versions)
             phrase = f'DROP APP TABLES FROM {query(source, "SELECT current_database()")[0][0]}'
             require(sys.stdin.isatty(), 'Source drop requires typed confirmation on a terminal; copy is retained')
             require(input(f'Type {phrase!r}: ') == phrase, 'Confirmation did not match; source is unchanged')
@@ -323,7 +345,7 @@ def convert(args):
             for enum in app_enums:
                 source.execute(sql.SQL('DROP TYPE {}').format(sql.Identifier('public', enum)))
             source.execute('DELETE FROM public.__diesel_schema_migrations WHERE version = ANY(%s)',
-                           (sorted(app_versions - data_versions),))
+                           (report['removed_versions'],))
             require(fingerprints(source, data_tables) == data_before, 'Data table content changed during cleanup')
             require(stable_ids(source, mapping) == series, 'Series IDs changed during cleanup')
             source.commit()
@@ -336,23 +358,154 @@ def convert(args):
               'Source app tables retained; rerun with --drop-source-app only after reviewing the copy.'))
 
 
+APP_ENTRY_TYPES = {'TABLE', 'TABLE DATA', 'CONSTRAINT', 'FK CONSTRAINT', 'TRIGGER', 'POLICY', 'ROW SECURITY',
+                   'DEFAULT', 'COMMENT', 'ACL', 'INDEX', 'TYPE'}
+TOC_ENTRY = re.compile(r'^\d+; \d+ \d+ (?P<kind>' + '|'.join(sorted(APP_ENTRY_TYPES, key=len, reverse=True))
+                       + r') (?P<schema>\S+) (?P<tag>.+) (?P<owner>\S+)$')
+
+
+def app_restore_list(listing, schema_sql, app_tables, app_enums):
+    """Select the archive entries that recreate the app tables, their rows, enum types and dependents."""
+    indexes = {match[1] for match in re.finditer(
+        r'^CREATE (?:UNIQUE )?INDEX (\w+) ON (?:ONLY )?public\.(\w+) ', schema_sql, re.M)
+        if match[2] in app_tables}
+    selected = []
+    for line in listing.splitlines():
+        entry = TOC_ENTRY.match(line)
+        if entry is None or entry['schema'] != 'public':
+            continue
+        kind, words = entry['kind'], entry['tag'].split(' ')
+        if kind in ('TABLE', 'TABLE DATA'):
+            keep = entry['tag'] in app_tables
+        elif kind == 'TYPE':
+            keep = entry['tag'] in app_enums
+        elif kind == 'INDEX':
+            keep = entry['tag'] in indexes
+        elif kind in ('COMMENT', 'ACL'):
+            # Tags such as "TABLE users", "COLUMN users.email" or "TYPE user_role".
+            keep = (len(words) == 2 and ((words[0] == 'TABLE' and words[1] in app_tables)
+                                        or (words[0] == 'COLUMN' and words[1].split('.')[0] in app_tables)
+                                        or (words[0] == 'TYPE' and words[1] in app_enums)))
+        else:
+            # Constraints, triggers, policies and defaults are tagged "<table> <name>".
+            keep = words[0] in app_tables
+        if keep:
+            selected.append(line)
+    return '\n'.join(selected) + '\n'
+
+
+def restore_source_app(args):
+    """Put the app tables back into a converted source from the backup taken before their removal."""
+    import psycopg
+    from psycopg import sql
+    app_tables, app_enums, app_versions, _ = inventory('app')
+    data_tables, _, data_versions, _ = inventory('data')
+    require(re.fullmatch(r'[A-Za-z0-9_.-]+', args.source_service) is not None,
+            'Use a simple libpq service name containing only letters, digits, underscore, dot or hyphen')
+    require(args.writers_stopped, 'Stop all app/crawler writers and pass --writers-stopped before restoring')
+    backup = args.restore_source_app
+    evidence = json.loads((backup / 'evidence.json').read_text())
+    require(evidence.get('copy_verified') is True and evidence.get('source_app_removed') is True
+            and evidence.get('removed_versions'),
+            f'{backup} is not the backup of a run that removed the source app tables')
+    dump = backup / 'combined.dump'
+    with dump.open('rb') as archive:
+        digest = hashlib.file_digest(archive, 'sha256').hexdigest()
+    require(digest == evidence.get('backup_sha256')
+            and (backup / 'SHA256SUMS').read_text() == f'{digest}  combined.dump\n',
+            f'{dump} does not match its recorded checksum')
+    expected_versions = data_versions | set(evidence['removed_versions'])
+    metadata = {'__diesel_schema_migrations'}
+    identity = 'SELECT system_identifier::text, current_database() FROM pg_control_system()'
+
+    def inspect(conn):
+        present = tables(conn) & set(app_tables)
+        enums = {r[0] for r in query(conn, "SELECT typname FROM pg_type WHERE typnamespace='public'::regnamespace")}
+        return present, enums & set(app_enums)
+
+    with psycopg.connect(service=args.source_service) as source:
+        require(list(query(source, identity)[0]) == evidence.get('source_identity'),
+                'The source is not the database this backup was taken from')
+        require(tables(source) - set(app_tables) == set(data_tables) | metadata, 'Source has unknown or missing tables')
+        present, enums = inspect(source)
+    if not present and not enums:
+        require(versions_of(args.source_service) == data_versions,
+                'Source migration history is not the converted data history; operator investigation required')
+        record = new_backup_dir() if args.backup_dir is None else args.backup_dir
+        require(not record.exists(), f'{record} already exists; refusing to overwrite it')
+        record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        record.mkdir(mode=0o700)
+        log = record / 'pg_tools.log'
+        schema_sql = run_logged(['pg_restore', '--schema-only', '--file', '-', str(dump)], log,
+                                stdout=subprocess.PIPE, text=True).stdout
+        listing = run_logged(['pg_restore', '--list', str(dump)], log, stdout=subprocess.PIPE, text=True).stdout
+        selection = app_restore_list(listing, schema_sql, set(app_tables), set(app_enums))
+        write_private(record / 'restore.list', selection)
+        print(f'Restoring {sum(1 for _ in selection.splitlines())} archive entries listed in {record / "restore.list"}')
+        # One transaction: an error leaves the source exactly as it was.
+        run_logged(['pg_restore', '--single-transaction', '--exit-on-error', '--no-password',
+                    '--use-list', str(record / 'restore.list'), '--dbname', f'service={args.source_service}',
+                    str(dump)], log, stdout=subprocess.DEVNULL)
+    else:
+        # A previous rollback restored the tables but stopped before recording the versions.
+        require(present == set(app_tables) and enums == set(app_enums),
+                'Source has a partial app schema; operator investigation required')
+    with psycopg.connect(service=args.source_service) as source:
+        source.execute("SET LOCAL lock_timeout='10s'")
+        source.execute("SET LOCAL timezone='UTC'")
+        source.execute("SET LOCAL search_path=pg_catalog,public")
+        source.execute("SET LOCAL extra_float_digits=3")
+        source.execute("SET LOCAL datestyle='ISO, YMD'")
+        source.execute("SET LOCAL intervalstyle='postgres'")
+        source.execute("SET LOCAL bytea_output='hex'")
+        source.execute(sql.SQL('LOCK TABLE {} IN SHARE MODE').format(identifiers(sorted(app_tables) + sorted(metadata))))
+        require(inspect(source) == (set(app_tables), set(app_enums)), 'Restored app schema is incomplete')
+        require(fingerprints(source, app_tables) == evidence['source_app'],
+                'Restored app tables do not match the pre-conversion fingerprints; nothing recorded')
+        source.execute('INSERT INTO public.__diesel_schema_migrations(version) SELECT unnest(%s::text[]) '
+                       'ON CONFLICT DO NOTHING', (evidence['removed_versions'],))
+        require(versions(source) == expected_versions, 'Source migration history does not match the backup')
+        source.commit()
+    print('Source app tables restored from the pre-removal backup and verified against its fingerprints. '
+          'The app database copy is unchanged; point the backend at the combined database before resuming writers.')
+
+
+def versions_of(service):
+    """Read migration versions on a fresh connection."""
+    import psycopg
+    with psycopg.connect(service=service) as conn:
+        return versions(conn)
+
+
 def main():
     """Parse operator options and redact database/tool failures before reporting them."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-service', required=True, help='libpq service for the existing combined/data database')
-    parser.add_argument('--app-service', required=True, help='libpq service for a migrated app database')
-    parser.add_argument('--source-map', required=True, type=Path, help='JSON object: data_sources UUID -> canonical crawler code')
+    parser.add_argument('--app-service', help='libpq service for a migrated app database (required to convert)')
+    parser.add_argument('--source-map', type=Path, help='JSON object: data_sources UUID -> canonical crawler code (required to convert)')
     parser.add_argument('--backup-dir', type=Path,
                         help='New directory for the verified source backup and evidence '
                         '(default: a new UTC-timestamped directory under $ECONGRAPH_BACKUP_ROOT, ~/econgraph-backups)')
     parser.add_argument('--dry-run', action='store_true', help='Read and lock schemas; never write persistent data')
-    parser.add_argument('--previous-evidence', type=Path, help='Previous evidence.json required to verify an already converted source')
+    parser.add_argument('--previous-evidence', type=Path,
+                        help='evidence.json of an earlier verified run: verifies an already converted source, '
+                        'or allows replacing that run\'s app copy after it went stale')
     parser.add_argument('--writers-stopped', action='store_true', help='Operator confirms every app and crawler writer is stopped')
     parser.add_argument('--drop-source-app', action='store_true', help='After copy verification, ask for typed source cleanup confirmation')
+    parser.add_argument('--restore-source-app', type=Path, metavar='BACKUP_DIR',
+                        help='Roll back a removal: restore the app tables, enum types and app migration entries into '
+                        'the source from the backup directory of the --drop-source-app run, and verify them')
     args = parser.parse_args()
-    require(not (args.dry_run and args.drop_source_app), '--drop-source-app cannot be combined with --dry-run')
     os.umask(0o077)
     try:
+        if args.restore_source_app is not None:
+            require(not (args.dry_run or args.drop_source_app or args.previous_evidence),
+                    '--restore-source-app runs on its own')
+            restore_source_app(args)
+            return 0
+        require(args.app_service is not None and args.source_map is not None,
+                '--app-service and --source-map are required to convert')
+        require(not (args.dry_run and args.drop_source_app), '--drop-source-app cannot be combined with --dry-run')
         convert(args)
     except Exception as exc:
         # Database errors can include row values. Never echo them or connection strings.
