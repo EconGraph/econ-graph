@@ -110,6 +110,19 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
   // last tapped, so that a tap can show the tooltip before a second one opens the country.
   const lastPointerType = useRef<string | null>(null);
   const tappedIsoNumeric = useRef<number | null>(null);
+  const highlightedCountry = useRef<{
+    element: SVGElement;
+    stroke: string;
+    width: string;
+  } | null>(null);
+  const clearHighlight = useCallback(() => {
+    const previous = highlightedCountry.current;
+    if (!previous) return;
+    d3.select(previous.element)
+      .style('stroke', previous.stroke)
+      .style('stroke-width', previous.width);
+    highlightedCountry.current = null;
+  }, []);
 
   const {
     path,
@@ -154,6 +167,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
     if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
+    clearHighlight();
     svg.selectAll('*').remove(); // Clear previous content
 
     svg
@@ -190,6 +204,16 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
 
     const pointerIn = (event: MouseEvent, d: any) => {
       if (gestureActive.current) return;
+      const element = event.currentTarget as SVGElement;
+      const selected = d3.select(element);
+      if (highlightedCountry.current?.element !== element) {
+        clearHighlight();
+        highlightedCountry.current = {
+          element,
+          stroke: selected.style('stroke'),
+          width: selected.style('stroke-width'),
+        };
+      }
       const box = boxRef.current?.getBoundingClientRect();
       setHover({
         isoNumeric: featureIsoNumeric(d),
@@ -199,9 +223,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         boxWidth: box?.width ?? 0,
         boxHeight: box?.height ?? 0,
       });
-      d3.select(event.currentTarget as SVGElement)
-        .style('stroke', '#1976d2')
-        .style('stroke-width', '2');
+      selected.style('stroke', '#1976d2').style('stroke-width', '2');
     };
 
     countriesGroup
@@ -240,9 +262,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
       .on('mouseout', (event: MouseEvent) => {
         if (lastPointerType.current === 'touch' && tappedIsoNumeric.current !== null) return;
         setHover(null);
-        d3.select(event.currentTarget as SVGElement)
-          .style('stroke', borderStroke)
-          .style('stroke-width', borderWidth);
+        if (highlightedCountry.current?.element === event.currentTarget) clearHighlight();
       });
 
     applyFills();
@@ -296,6 +316,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
     zoomBehavior,
     gestureActive,
     applyFills,
+    clearHighlight,
   ]);
 
   // Geographic movement updates paths in place, preserving pointer gestures and country
@@ -308,9 +329,10 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
       .attr('display', d => (path(d) ? null : 'none'))
       .attr('x', d => path.centroid(d)[0] || 0)
       .attr('y', d => path.centroid(d)[1] || 0);
+    clearHighlight();
     setHover(null);
     tappedIsoNumeric.current = null;
-  }, [path]);
+  }, [path, clearHighlight]);
 
   // Restyle, without rebuilding, when the values or the color scale change.
   useEffect(() => {
@@ -342,6 +364,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         tabIndex={0}
         onPointerMove={() => {
           if (gestureActive.current) {
+            clearHighlight();
             setHover(null);
             tappedIsoNumeric.current = null;
           }

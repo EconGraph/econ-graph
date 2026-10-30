@@ -162,6 +162,48 @@ test.describe('Geographic map dragging on the seeded backend', () => {
     await expect(page.getByRole('button', { name: 'Reset view' })).toBeDisabled();
   });
 
+  test('touch selection highlights only the current country and clears on rotation and reset', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'Uses genuine touchscreen taps in the mobile Chromium project');
+    await page.goto('/global');
+    await expect(country(page, 156)).toHaveAttribute('data-has-data', 'true');
+    await map(page).scrollIntoViewIfNeeded();
+    const highlighted = () =>
+      country(page, 156).evaluate(() =>
+        [...document.querySelectorAll<SVGElement>('path.country')]
+          .filter(path => getComputedStyle(path).stroke === 'rgb(25, 118, 210)')
+          .map(path => Number(path.dataset.isoNumeric))
+      );
+    const tapCountry = async (code: number, name: string) => {
+      const point = await interior(page, code);
+      await page.touchscreen.tap(point.x, point.y);
+      await expect(page.getByTestId('country-tooltip')).toContainText(name);
+      await expect.poll(highlighted).toEqual([code]);
+    };
+    for (const [code, name] of [
+      [156, 'China'],
+      [76, 'Brazil'],
+      [840, 'United States'],
+    ] as const) {
+      await tapCountry(code, name);
+    }
+    await map(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(highlighted).toEqual([]);
+    await expect(page.getByTestId('country-tooltip')).toHaveCount(0);
+
+    await tapCountry(156, 'China');
+    await page.getByRole('button', { name: 'Reset view' }).tap();
+    await expect.poll(highlighted).toEqual([]);
+    await expect(page.getByTestId('country-tooltip')).toHaveCount(0);
+    await tapCountry(840, 'United States');
+    const point = await interior(page, 840);
+    await page.touchscreen.tap(point.x, point.y);
+    await expect(page).toHaveURL(/\/series\//);
+  });
+
   test('touch dragging, pinch zoom, and cancellation leave a usable globe', async ({
     page,
     isMobile,
