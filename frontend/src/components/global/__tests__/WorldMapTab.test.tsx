@@ -57,9 +57,27 @@ const area = (name: string, iso3: string | null, isoNumeric: number | null, kind
 
 const CROSS_SECTIONS: Record<string, unknown[]> = {
   'NY.GDP.PCAP.CD': [
-    { key: 'CHN', seriesId: 's-chn', date: '2023-01-01', value: '12614.1', area: area('China', 'CHN', 156) },
-    { key: 'DEU', seriesId: 's-deu', date: '2022-01-01', value: '54343.2', area: area('Germany', 'DEU', 276) },
-    { key: 'USA', seriesId: 's-usa', date: '2023-01-01', value: '82769.4', area: area('United States', 'USA', 840) },
+    {
+      key: 'CHN',
+      seriesId: 's-chn',
+      date: '2023-01-01',
+      value: '12614.1',
+      area: area('China', 'CHN', 156),
+    },
+    {
+      key: 'DEU',
+      seriesId: 's-deu',
+      date: '2022-01-01',
+      value: '54343.2',
+      area: area('Germany', 'DEU', 276),
+    },
+    {
+      key: 'USA',
+      seriesId: 's-usa',
+      date: '2023-01-01',
+      value: '82769.4',
+      area: area('United States', 'USA', 840),
+    },
     // A microstate the 1:50m outline has no shape for: in the table, not on the map.
     {
       key: 'TUV',
@@ -71,14 +89,44 @@ const CROSS_SECTIONS: Record<string, unknown[]> = {
     // No value: shown as no data.
     { key: 'AUS', seriesId: 's-aus', date: null, value: null, area: area('Australia', 'AUS', 36) },
     // No ISO numeric code, so it can't be joined to the outline.
-    { key: 'XKX', seriesId: 's-xkx', date: '2023-01-01', value: '5943.1', area: area('Kosovo', null, null) },
+    {
+      key: 'XKX',
+      seriesId: 's-xkx',
+      date: '2023-01-01',
+      value: '5943.1',
+      area: area('Kosovo', null, null),
+    },
     // Aggregates are left out.
-    { key: 'WLD', seriesId: 's-wld', date: '2023-01-01', value: '13138.3', area: area('World', null, null, 'AGGREGATE') },
+    {
+      key: 'WLD',
+      seriesId: 's-wld',
+      date: '2023-01-01',
+      value: '13138.3',
+      area: area('World', null, null, 'AGGREGATE'),
+    },
   ],
   'FP.CPI.TOTL.ZG': [
-    { key: 'CHN', seriesId: 's-chn-cpi', date: '2023-01-01', value: '0.2', area: area('China', 'CHN', 156) },
-    { key: 'USA', seriesId: 's-usa-cpi', date: '2023-01-01', value: '4.1', area: area('United States', 'USA', 840) },
-    { key: 'AUS', seriesId: 's-aus-cpi', date: '2023-01-01', value: '5.6', area: area('Australia', 'AUS', 36) },
+    {
+      key: 'CHN',
+      seriesId: 's-chn-cpi',
+      date: '2023-01-01',
+      value: '0.2',
+      area: area('China', 'CHN', 156),
+    },
+    {
+      key: 'USA',
+      seriesId: 's-usa-cpi',
+      date: '2023-01-01',
+      value: '4.1',
+      area: area('United States', 'USA', 840),
+    },
+    {
+      key: 'AUS',
+      seriesId: 's-aus-cpi',
+      date: '2023-01-01',
+      value: '5.6',
+      area: area('Australia', 'AUS', 36),
+    },
   ],
 };
 
@@ -94,7 +142,9 @@ beforeEach(() => {
       }
       case 'GetMapSeriesMeta':
         return {
-          data: { series: { id: request.variables?.id, units: 'current US$', frequency: 'Annual' } },
+          data: {
+            series: { id: request.variables?.id, units: 'current US$', frequency: 'Annual' },
+          },
         };
       default:
         throw new Error(`unexpected operation ${request.operationName}`);
@@ -119,8 +169,7 @@ const renderTab = () => {
 const countryPath = (isoNumeric: string) =>
   document.querySelector(`path.country[data-iso-numeric="${isoNumeric}"]`) as HTMLElement;
 
-const kosovoPath = () =>
-  document.querySelector('path.country[data-name="Kosovo"]') as HTMLElement;
+const kosovoPath = () => document.querySelector('path.country[data-name="Kosovo"]') as HTMLElement;
 
 /** Wait until the map is drawn and colored for the current indicator. */
 const waitForColors = () =>
@@ -250,6 +299,61 @@ describe('WorldMapTab', () => {
     expect(usa.style.fill).not.toBe(gdpFill);
     expect(countryPath('276').getAttribute('data-has-data')).toBe('false');
     expect(countryPath('36').getAttribute('data-has-data')).toBe('true');
+  });
+
+  it('defaults GDP to log and synchronizes the ramp and midpoint without refetching', async () => {
+    renderTab();
+    await waitForColors();
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Logarithmic');
+    const midpoint = () =>
+      Number(screen.getAllByTestId('map-scale-tick')[1].getAttribute('data-value'));
+    expect(midpoint()).toBeCloseTo(Math.sqrt(12614.1 * 82769.4));
+    const germany = countryPath('276');
+    const logFill = germany.style.fill;
+    const calls = mockGraphQL.mock.calls.filter(
+      ([r]) => r.operationName === 'GetMapCrossSection'
+    ).length;
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+    fireEvent.click(screen.getByRole('option', { name: /^Linear$/ }));
+    expect(screen.getByTestId('map-legend')).toHaveTextContent('Scale: Linear');
+    expect(midpoint()).toBeCloseTo((12614.1 + 82769.4) / 2);
+    expect(germany.style.fill).not.toBe(logFill);
+    expect(countryPath('276')).toBe(germany);
+    expect(
+      mockGraphQL.mock.calls.filter(([r]) => r.operationName === 'GetMapCrossSection')
+    ).toHaveLength(calls);
+  });
+
+  it('keeps signed observations and explains why Log is disabled', async () => {
+    const signed = CROSS_SECTIONS['FP.CPI.TOTL.ZG'].map((row, i) => ({
+      ...(row as object),
+      ...(i === 0 ? { value: '-2' } : {}),
+    }));
+    mockGraphQL.mockImplementation(async request => {
+      if (request.operationName === 'GetMapDatasets') return { data: { datasets: [DATASET] } };
+      if (request.operationName === 'GetMapCrossSection')
+        return {
+          data: {
+            crossSection:
+              request.variables?.filter[0].value === 'FP.CPI.TOTL.ZG'
+                ? signed
+                : CROSS_SECTIONS['NY.GDP.PCAP.CD'],
+          },
+        };
+      return { data: { series: { units: 'current US$', frequency: 'Annual' } } };
+    });
+    renderTab();
+    await waitForColors();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    await screen.findByText(/zero or negative country values/);
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Linear');
+    expect(countryPath('156').getAttribute('data-has-data')).toBe('true');
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+    expect(screen.getByRole('option', { name: 'Logarithmic' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
   });
 
   it('opens the series of a clicked country', async () => {

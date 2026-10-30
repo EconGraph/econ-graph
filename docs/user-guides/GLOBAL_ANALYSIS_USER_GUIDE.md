@@ -32,7 +32,15 @@ are available in the table.
 - **Zoom in**, **Zoom out** and **Reset zoom** buttons sit on the map, with the current zoom
   level. You can also zoom with the scroll wheel and pan by dragging.
 - **Projection**: Equal Earth (the default), Natural Earth, Mercator or Orthographic. Equal Earth preserves relative land areas, making continent and country sizes comparable. Shapes and distances can still be distorted. Natural Earth balances distortions but does not preserve area.
-- **Color scheme**: Viridis (the default), Blues, Reds or Greens.
+- **Color scheme**: Viridis (the default), Blues, Reds or Greens. The lightest part of
+  Blues, Reds and Greens is omitted so low values remain distinct from the background.
+- **Color scale**: GDP per capita starts on **Logarithmic**; other indicators start on
+  **Linear**. Switch between them to compare relative ratios or absolute differences.
+  In log mode, equal ratios (for example 1,000 to 10,000 and 10,000 to 100,000) occupy
+  equal distances along the color ramp. The legend identifies the scale and labels its
+  midpoint in the indicator's original units. Tooltips and table values are unchanged.
+  Log mode is unavailable when mapped values include zero or negative numbers, or when
+  no country has data; an explanation appears beside the control.
 
 ## The values table
 
