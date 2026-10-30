@@ -762,3 +762,161 @@ async fn data_source_fields_check_the_catalog_themselves() {
     }
     let _ = (f.fred_series, f.bea_series);
 }
+
+/// The anonymous reader's default catalog grants, as the realm file maps them to the
+/// `econgraph-anonymous` client (what the backend receives for a visitor on a fresh realm).
+fn realm_default_anonymous_roles() -> Vec<Role> {
+    let realm: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../config/keycloak/econ-graph-realm.json"
+    ))
+    .unwrap();
+    realm["clientScopeMappings"]["econ-graph-api"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["client"] == "econgraph-anonymous")
+        .unwrap()["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|name| name.as_str().unwrap().parse::<Role>().ok())
+        .collect()
+}
+
+/// The WTO catalog is off by default: with the realm's default grants a visitor or a signed-in
+/// user without the role finds no WTO series anywhere (search, suggestions, data-source lists and
+/// counts, lookups by id and external id; MCP tools run these same queries with the caller's
+/// grants), while a caller granted `catalog.world_trade_organization:read` reads them.
+#[tokio::test]
+async fn world_trade_organization_series_need_their_catalog_role() {
+    let db = ScratchDatabase::create("catalog_auth_wto");
+    econ_graph_core::database::run_migrations(&db.url)
+        .await
+        .unwrap();
+    let pool = econ_graph_core::database::create_pool(&db.url)
+        .await
+        .unwrap();
+    let fred = DataSource::find_by_name(&pool, &DataSource::fred().name)
+        .await
+        .unwrap()
+        .unwrap();
+    let wto = match DataSource::find_by_name(&pool, &DataSource::wto().name)
+        .await
+        .unwrap()
+    {
+        Some(source) => source,
+        None => DataSource::create(&pool, DataSource::wto()).await.unwrap(),
+    };
+    let (fred_series, _) = seed(&pool, fred.clone(), "FRED").await;
+    let (wto_series, _) = seed(&pool, wto.clone(), "WTO").await;
+
+    let defaults = realm_default_anonymous_roles();
+    assert!(defaults.contains(&Role::CatalogFredRead));
+    assert!(!defaults.contains(&Role::CatalogWorldTradeOrganizationRead));
+    let mut granted = defaults.clone();
+    granted.push(Role::CatalogWorldTradeOrganizationRead);
+    let signed_in = |roles: &[Role]| {
+        let mut context = GraphQLContext::anonymous();
+        context.principal = Some(Principal::new(Uuid::new_v4(), roles.iter().copied()));
+        context
+    };
+    let query = format!(
+        r#"{{ dataSources {{ id seriesCount series {{ totalCount }} }}
+        seriesList {{ totalCount nodes {{ id }} }}
+        searchSeries(query:"Catalogtest") {{ totalCount series {{ id }} }}
+        searchSuggestions(partialQuery:"Catalogtest") {{ suggestion }}
+        series(id:"{wto_series}") {{ id }}
+        seriesExists(id:"{wto_series}")
+        seriesByExternalId(sourceName:"{}", externalId:"CATALOG-WTO") {{ id }} }}"#,
+        wto.name
+    );
+    let ids = |list: &serde_json::Value| -> Vec<String> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    for (who, context) in [
+        ("anonymous", anonymous(&defaults)),
+        ("signed in", signed_in(&defaults)),
+    ] {
+        let result = execute(&pool, context.clone(), &query).await;
+        assert!(result.errors.is_empty(), "{who}: {:?}", result.errors);
+        let data = result.data.into_json().unwrap();
+        let sources = ids(&data["dataSources"]);
+        assert!(!sources.contains(&wto.id.to_string()), "{who}");
+        assert!(sources.contains(&fred.id.to_string()), "{who}");
+        assert_eq!(
+            ids(&data["seriesList"]["nodes"]),
+            [fred_series.to_string()],
+            "{who}"
+        );
+        assert_eq!(data["searchSeries"]["totalCount"], 1, "{who}");
+        assert_eq!(
+            ids(&data["searchSeries"]["series"]),
+            [fred_series.to_string()],
+            "{who}"
+        );
+        assert!(
+            data["searchSuggestions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|s| !s["suggestion"].as_str().unwrap().contains("WTO")),
+            "{who}"
+        );
+        assert!(data["series"].is_null(), "{who}");
+        assert_eq!(data["seriesExists"], false, "{who}");
+        assert!(data["seriesByExternalId"].is_null(), "{who}");
+        // The source itself is refused by id.
+        let source = execute(
+            &pool,
+            context,
+            &format!(r#"{{ dataSource(id:"{}") {{ name }} }}"#, wto.id),
+        )
+        .await;
+        assert_eq!(
+            source.errors[0].extensions.as_ref().unwrap().get("code"),
+            Some(&async_graphql::Value::from("FORBIDDEN")),
+            "{who}: {:?}",
+            source.errors
+        );
+    }
+
+    for (who, context) in [
+        ("anonymous", anonymous(&granted)),
+        ("signed in", signed_in(&granted)),
+    ] {
+        let result = execute(&pool, context, &query).await;
+        assert!(result.errors.is_empty(), "{who}: {:?}", result.errors);
+        let data = result.data.into_json().unwrap();
+        let wto_source = data["dataSources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == wto.id.to_string())
+            .unwrap_or_else(|| panic!("{who}: WTO is listed"))
+            .clone();
+        assert_eq!(wto_source["seriesCount"], 1, "{who}");
+        assert_eq!(wto_source["series"]["totalCount"], 1, "{who}");
+        assert!(
+            ids(&data["seriesList"]["nodes"]).contains(&wto_series.to_string()),
+            "{who}"
+        );
+        assert_eq!(data["searchSeries"]["totalCount"], 2, "{who}");
+        assert!(
+            ids(&data["searchSeries"]["series"]).contains(&wto_series.to_string()),
+            "{who}"
+        );
+        assert_eq!(data["series"]["id"], wto_series.to_string(), "{who}");
+        assert_eq!(data["seriesExists"], true, "{who}");
+        assert_eq!(
+            data["seriesByExternalId"]["id"],
+            wto_series.to_string(),
+            "{who}"
+        );
+    }
+    drop(pool);
+}

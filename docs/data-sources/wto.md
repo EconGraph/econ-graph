@@ -38,31 +38,18 @@ startup, "source skipped: its API key is not set ...", with fields `source=WTO` 
 
 For local runs, export `WTO_API_KEY` in the environment of the worker or the `crawler` CLI.
 
-## Terms of use and attribution
+## Access
 
-The API portal links its terms to the WTO website's
-[Copyright and permissions](https://www.wto.org/english/info_e/copyrights_permissions_e.htm)
-page and its [disclaimer](https://www.wto.org/english/info_e/disclaimer_e.htm); the Standard
-product states no terms of its own. The copyright page:
+WTO series are restricted by default. Their catalog role,
+`catalog.world_trade_organization:read`, is defined in the Keycloak realm but is in neither the
+`catalog-public` composite nor the anonymous reader's scope, so anonymous visitors and ordinary
+signed-in users don't see WTO series in search, suggestions, data-source lists or lookups, and
+MCP tools don't return them. A user or group granted the role reads them. An operator can open
+the catalog by granting the role to users or groups, or make it public by adding it to
+`catalog-public` and the anonymous scope; see
+[Catalog access](../../config/keycloak/README.md#catalog-access-including-anonymous-visitors).
 
-- states that the site and its contents are the copyright of the WTO;
-- allows material other than official documents to be reproduced for non-commercial
-  purposes, provided attribution is given to the WTO and the WTO is informed;
-- requires written permission from the WTO for commercial use (requests to
-  `publications@wto.org`, answered by e-mail).
-
-For non-commercial use, these terms allow WTO data to be shown on a public site with
-attribution once the WTO has been informed; they do not forbid redistribution. Before enabling
-the source on a public deployment, the operator informs the WTO of the use, and any commercial
-use of the data needs the WTO's written permission first. Every WTO series description ends
-with "Source: World Trade Organization, WTO Stats." for attribution.
-
-The WTO's separate
-[Tariff and Trade Data terms](https://ttd.wto.org/docs/Terms_of_Use_WTO_Tariff_and_Trade_Data.pdf),
-which ask for the Secretariat's approval (`idb@wto.org`) before mass downloads or
-re-dissemination, govern that platform's Integrated Database and Consolidated Tariff Schedules
-data. The adapter does not use that platform; its tariff indicators are the Timeseries API's
-headline tariff-profile averages.
+Every WTO series description ends with "Source: World Trade Organization, WTO Stats."
 
 ## Rate limits
 
