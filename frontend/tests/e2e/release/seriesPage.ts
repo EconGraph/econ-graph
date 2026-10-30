@@ -146,7 +146,7 @@ export async function applyTransformation(page: Page, label: string) {
  * @param text - The raw field.
  * @returns The field as written.
  */
-function csvTextField(text: string) {
+export function csvTextField(text: string) {
   const field = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }

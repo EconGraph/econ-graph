@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
-import { asShown, parseShown } from '../seriesPage';
+import { asShown, csvTextField, parseShown } from '../seriesPage';
 
 // Live QA: downloading CSV from a series page saves every point the chart shows, in its own
 // metadata-then-data format (src/utils/seriesCsv.ts): five `label,value` rows (Title, Source,
@@ -47,9 +47,10 @@ test.describe('download CSV', () => {
     const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
     const lines = text.trim().split('\r\n');
 
-    expect(lines[0]).toBe(`Title,${series.title}`);
-    expect(lines[1]).toBe(`Source,${series.sourceName}`);
-    expect(lines[2]).toBe(`Units,${series.units}`);
+    // CPI's title holds commas, so it is quoted.
+    expect(lines[0]).toBe(`Title,${csvTextField(series.title)}`);
+    expect(lines[1]).toBe(`Source,${csvTextField(series.sourceName)}`);
+    expect(lines[2]).toBe(`Units,${csvTextField(series.units)}`);
     expect(lines[3]).toBe('Transformation,None');
     expect(lines[4]).toMatch(/^Retrieved at,/);
     expect(lines[5]).toBe('date,value');
