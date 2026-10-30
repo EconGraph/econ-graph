@@ -398,6 +398,14 @@ jobs:
         shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
         scripts/deploy/test-release-deploy.sh
 
+    # tag.sh tags vX.Y.0 with train-N, and a patch release vX.Y.Z only on a
+    # branch that descends from an existing train-N, against a local origin and
+    # a stub git push.
+    - name: Check the release tag script
+      run: |
+        shellcheck -x scripts/release/tag.sh scripts/release/test-tag.sh
+        scripts/release/test-tag.sh
+
     # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
     # identity printed first, and the resume hint keeping the run's options, against stubs.
     - name: Check the full-history re-fetch script
