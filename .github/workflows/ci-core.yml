@@ -2308,9 +2308,10 @@ jobs:
         push: false
         load: true
         tags: econ-graph-frontend:test
-        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        # Keycloak issuer for sign-in, from the repository variable when set, else the
+        # same-origin path scripts/deploy/build-images.sh uses (ECO-728).
         build-args: |
-          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER || '/idp/realms/econ-graph' }}
           VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
