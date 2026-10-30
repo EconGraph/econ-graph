@@ -16,6 +16,8 @@ test('signed out, the header keeps Sign in to one row and the search field usabl
   const signIn = page.getByRole('button', { name: 'Sign in', exact: true });
   await expect(signIn).toBeVisible();
   const search = page.getByRole('textbox', { name: 'search economic series' });
+  // Measure with the web font in place: the fallback font lays the title out wider.
+  await page.evaluate(() => document.fonts.ready);
 
   const button = await signIn.boundingBox();
   const field = await search.boundingBox();

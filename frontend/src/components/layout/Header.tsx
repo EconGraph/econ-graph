@@ -17,6 +17,7 @@ import {
   Divider,
   Snackbar,
   Alert,
+  Tooltip,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
@@ -271,9 +272,11 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                 </Button>
                 {/* Hidden while the session is restored, so it does not flash before the avatar */}
                 {isConfigured && !isLoading && isPhone && (
-                  <IconButton color='inherit' aria-label='Sign in' onClick={() => void signIn()}>
-                    <PersonIcon />
-                  </IconButton>
+                  <Tooltip title='Sign in'>
+                    <IconButton color='inherit' aria-label='Sign in' onClick={() => void signIn()}>
+                      <PersonIcon />
+                    </IconButton>
+                  </Tooltip>
                 )}
                 {isConfigured && !isLoading && !isPhone && (
                   <Button
