@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -53,10 +53,23 @@ import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesC
  * the GraphQL API. Transformations are computed by the backend.
  */
 
+/**
+ * Where links back to the explorer go: the explorer results this series was opened from (its
+ * URL, query, filters and page included, which the explorer puts in the history state), or the
+ * explorer itself when the series was reached any other way.
+ * @returns A path under /explore.
+ */
+const useExplorerUrl = (): string => {
+  const state = useLocation().state as { explorerUrl?: unknown } | null;
+  const url = state?.explorerUrl;
+  return typeof url === 'string' && /^\/explore(\?|$)/.test(url) ? url : '/explore';
+};
+
 const BackToExplorer: React.FC = () => {
   const navigate = useNavigate();
+  const explorerUrl = useExplorerUrl();
   return (
-    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/explore')}>
+    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(explorerUrl)}>
       Back to Explorer
     </Button>
   );
@@ -98,6 +111,7 @@ const todayIso = () => {
 
 const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
+  const explorerUrl = useExplorerUrl();
   const [transformation, setTransformation] = React.useState<DataTransformation>('NONE');
   // Owned here (rather than inside SeriesChart) so the CSV download writes exactly the
   // range the chart shows. This also means the range now survives a chart remount (an
@@ -283,13 +297,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
 
   return (
     <Box>
-      <Breadcrumbs sx={{ mb: 2 }}>
+      <Breadcrumbs aria-label='breadcrumb' sx={{ mb: 2 }}>
         <Link
           color='inherit'
-          href='/explore'
+          href={explorerUrl}
           onClick={e => {
             e.preventDefault();
-            navigate('/explore');
+            navigate(explorerUrl);
           }}
         >
           Explore

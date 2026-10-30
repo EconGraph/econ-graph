@@ -16,6 +16,7 @@ const RETRIEVED_AT = Date.UTC(2026, 8, 26, 12, 0, 0);
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ id: SERIES_ID }),
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/series', search: '', hash: '', state: null }),
 }));
 
 const hooks = vi.hoisted(() => ({ isPlaceholderData: false, transformation: 'YEAR_OVER_YEAR' }));
