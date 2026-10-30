@@ -779,14 +779,25 @@ type Query {
 	
 	Unlike `series`, a series with no data points counts. Backends without a data database
 	ask this before storing an annotation on the series.
+	
+	`false` for a series in a catalog the caller can't read, exactly as for an unknown id.
 	"""
 	seriesExists(id: ID!): Boolean!
+	"""
+	The catalog (data source name) of a series the caller may read, observations or not;
+	null for an unknown id or a series in a catalog the caller can't read.
+	
+	Backends without a data database ask this before storing or showing annotations on the
+	series, then apply their own caller's catalog grants to the name.
+	"""
+	seriesCatalog(id: ID!): String
 	"""
 	Get an economic series by its source's name and the source's own id for it
 	
 	`sourceName` is the data source's `name` exactly as `dataSources` returns it (for
 	example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
-	id (for example "GDP"). Returns null when no such series exists.
+	id (for example "GDP"). Returns null when no such series exists, or when it is in a
+	catalog the caller can't read.
 	"""
 	seriesByExternalId(sourceName: String!, externalId: String!): EconomicSeriesType
 	"""
@@ -820,11 +831,12 @@ type Query {
 	"""
 	List datasets, optionally only one source's, grouped by source id (in no particular
 	order across sources) and by code within a source. Unpaginated: sources publish a
-	handful of datasets each.
+	handful of datasets each. A `sourceId` that isn't a UUID is rejected with a
+	`BAD_USER_INPUT` error.
 	"""
 	datasets(sourceId: ID): [Dataset!]!
 	"""
-	Get a dataset by ID
+	Get a dataset by ID. An `id` that isn't a UUID is rejected with a `BAD_USER_INPUT` error.
 	"""
 	dataset(id: ID!): Dataset
 	"""
@@ -871,10 +883,12 @@ type Query {
 	searchSuggestions(partialQuery: String!, limit: Int): [SearchSuggestionType!]!
 	"""
 	Get annotations for a specific series: public ones, plus the caller's own private ones.
+	Empty for a series in a catalog the caller can't read, as for an unknown series.
 	"""
 	annotationsForSeries(seriesId: String!, userId: ID @deprecated(reason: "Ignored: the viewer is the signed-in caller")): [ChartAnnotationType!]!
 	"""
-	Get comments for an annotation the caller can see (public, or their own)
+	Get comments for an annotation the caller can see (public, or their own) on a series
+	whose catalog they may read. Any other annotation is reported as not found.
 	"""
 	commentsForAnnotation(annotationId: ID!): [AnnotationCommentType!]!
 	"""

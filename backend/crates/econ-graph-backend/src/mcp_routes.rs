@@ -21,9 +21,9 @@ async fn mcp_access(
     verifier: Option<&OidcVerifier>,
     authorization: Option<&str>,
     client: &ClientInfo,
-) -> Result<(), McpRejection> {
+) -> Result<econ_graph_auth::Caller, McpRejection> {
     match authenticate(pool, verifier, authorization).await {
-        Ok(Some(caller)) if caller.principal.has_role(Role::ApiMcp) => Ok(()),
+        Ok(Some(caller)) if caller.principal.has_role(Role::ApiMcp) => Ok(caller),
         Ok(Some(_)) => Err(McpRejection::MissingRole),
         Ok(None) => Err(McpRejection::Unauthorized),
         Err(BearerError::InvalidToken(why)) => {
@@ -151,15 +151,17 @@ fn mcp_route(
                         .map_err(warp::reject::custom)
                 }
             },
-        )
-        .untuple_one();
+        );
 
     warp::path("mcp")
         .and(warp::post())
         .and(authenticate)
         .and(warp::body::stream())
-        .and_then(move |body| {
-            let server = server.clone();
+        .and_then(move |caller: econ_graph_auth::Caller, body| {
+            let context = Arc::new(econ_graph_graphql::graphql::context::GraphQLContext::new(
+                Some(caller),
+            ));
+            let server = Arc::new(server.as_ref().clone().with_auth_context(context));
             async move {
                 let body = read_body_limited(body, MCP_BODY_LIMIT).await?;
                 mcp_handler(body, server)
@@ -415,20 +417,27 @@ mod tests {
                 .await
             }
         };
-        assert_eq!(access(Some(&verifier), &with_role).await, Ok(()));
         assert_eq!(
-            access(Some(&verifier), &without_role).await,
-            Err(McpRejection::MissingRole)
+            access(Some(&verifier), &with_role)
+                .await
+                .unwrap()
+                .principal
+                .user_id,
+            sub
         );
         assert_eq!(
-            access(None, &with_role).await,
-            Err(McpRejection::Unauthorized)
+            access(Some(&verifier), &without_role).await.unwrap_err(),
+            McpRejection::MissingRole
+        );
+        assert_eq!(
+            access(None, &with_role).await.unwrap_err(),
+            McpRejection::Unauthorized
         );
 
         set_active(&pool, sub, false).await;
         assert_eq!(
-            access(Some(&verifier), &with_role).await,
-            Err(McpRejection::Suspended)
+            access(Some(&verifier), &with_role).await.unwrap_err(),
+            McpRejection::Suspended
         );
     }
 

@@ -64,7 +64,15 @@ fi
 # Load port configuration
 if [ -f "ports.env" ]; then
     echo "📋 Loading port configuration from ports.env..."
+    # A PUBLIC_HOST the caller set (release-deploy.sh's, from the host's deploy
+    # config) wins over one in ports.env, which only configures ports.
+    caller_public_host_set="${PUBLIC_HOST+set}"
+    caller_public_host="${PUBLIC_HOST-}"
     source ports.env
+    if [ "$caller_public_host_set" = set ]; then
+        PUBLIC_HOST="$caller_public_host"
+        export PUBLIC_HOST
+    fi
 else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
@@ -118,6 +126,36 @@ if [ "$DRY_RUN" != true ]; then
     kubectl() { kc "$@"; }
 fi
 
+# The pod status printed every 10 seconds while the deploy waits. It is also
+# stopped on exit, so a wait that fails never leaves it running: it would keep
+# printing, and hold the output of whoever runs deploy.sh (release-deploy.sh)
+# open, after deploy.sh has failed.
+MONITOR_PID=""
+start_pod_monitor() {
+  stop_pod_monitor
+  (
+    sleeper=""
+    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
+    while true; do
+      sleep 10 >/dev/null 2>&1 &
+      sleeper=$!
+      wait "$sleeper"
+      echo "📊 Pod status update:"
+      kubectl get pods -n econ-graph
+      echo ""
+    done
+  ) &
+  MONITOR_PID=$!
+}
+stop_pod_monitor() {
+  if [ -n "$MONITOR_PID" ]; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+    MONITOR_PID=""
+  fi
+}
+add_exit_cleanup stop_pod_monitor
+
 # Monitoring stack linter: static checks only (--lint-only contacts no cluster).
 # Run after the kind cluster's kubectl and context are set, so nothing before
 # this point can reach another cluster. A failure stops the deploy; a checkout
@@ -133,6 +171,11 @@ else
 fi
 echo "✅ All linter checks passed - proceeding with deployment"
 echo ""
+
+# Secrets from an earlier version may lack keys this one needs: stop before applying anything.
+# shellcheck source=scripts/deploy/lib/keycloak-secret.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/keycloak-secret.sh"
+require_anonymous_client_secret || exit 1
 
 public_host_init
 
@@ -181,6 +224,7 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
     --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
+    --from-file=preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
@@ -209,9 +253,9 @@ fi
 
 # Data migrations: the crawler-migrate Job applies backend/migrations/data and must
 # complete before the backend and crawler-worker are applied; no service applies them at
-# startup. It runs only in a namespace that owns a data database: one whose Secret
-# econ-graph-secrets has the key data-database-url (create-secrets.sh writes it). Without
-# that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
+# startup. It needs the data database: the Secret econ-graph-secrets's key
+# data-database-url (create-secrets.sh writes it). Without that key the deploy stops, since
+# the backend would refuse to start. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
 # crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
@@ -248,7 +292,11 @@ if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
     esac
   fi
 else
-  echo "⚠️  Secret econ-graph-secrets has no data-database-url: no data database here, skipping crawler-migrate."
+  # The backend these manifests deploy has sign-in on and no DATA_GRAPHQL_URL, so without a
+  # data database it refuses to start (it could not apply catalog grants to annotations).
+  echo "❌ Secret econ-graph-secrets has no data-database-url, so the backend would refuse to start."
+  echo "   Run scripts/deploy/create-secrets.sh (it writes the key), then deploy again."
+  exit 1
 fi
 
 # Deploy application
@@ -282,16 +330,7 @@ echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
 echo ""
 
-# Start background monitoring
-(
-  while true; do
-    sleep 10
-    echo "📊 Pod status update:"
-    kubectl get pods -n econ-graph
-    echo ""
-  done
-) &
-MONITOR_PID=$!
+start_pod_monitor
 
 # Wait for backend deployment
 echo "Waiting for backend deployment..."
@@ -329,7 +368,6 @@ if [ "$KEYCLOAK_DEPLOYED" = true ] && [ "$DRY_RUN" = false ]; then
     *)
       echo "❌ Keycloak realm import did not complete (status: ${realm_import_status:-none}):"
       kubectl -n econ-graph logs job/keycloak-realm-import --all-containers || true
-      kill $MONITOR_PID 2>/dev/null || true
       exit 1
       ;;
   esac
@@ -337,8 +375,7 @@ fi
 
 wait_cloudflared
 
-# Stop monitoring
-kill $MONITOR_PID 2>/dev/null || true
+stop_pod_monitor
 
 # Install cert-manager first: k8s/monitoring/letsencrypt-cloudflare-dns01.yaml
 # defines ClusterIssuer/Certificate resources whose CRDs cert-manager provides.
@@ -440,23 +477,13 @@ echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
 echo ""
 
-# Start background monitoring
-(
-  while true; do
-    sleep 10
-    echo "📊 Pod status update:"
-    kubectl get pods -n econ-graph
-    echo ""
-  done
-) &
-MONITOR_PID=$!
+start_pod_monitor
 
 kubectl wait --for=condition=ready pod -l app=grafana -n econ-graph --timeout=300s
 kubectl wait --for=condition=ready pod -l app=loki -n econ-graph --timeout=300s
 kubectl wait --for=condition=ready pod -l app=prometheus -n econ-graph --timeout=300s
 
-# Stop monitoring
-kill $MONITOR_PID 2>/dev/null || true
+stop_pod_monitor
 
 # Show final pod status
 echo "📊 Final pod status:"

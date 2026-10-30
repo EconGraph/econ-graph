@@ -43,7 +43,7 @@ Check application/container logs and readiness before changing browser timeouts.
 
 Use the [release suite guide](../../frontend/tests/e2e/release/README.md) to reproduce the recorded-fixture release stack. The manually dispatched legacy Playwright workflows listed in the [workflow inventory](../../.github/workflows/README.md) use different setups; reproduce a failure with the environment defined by the failing workflow.
 
-## Scheduled automation failures
+## Automation failures
 
 In the [cost-update workflow](../../.github/workflows/update-cost-analysis.yml), identify whether `validate` or `publish` failed. Validation tests calculations and repeatability; publication runs only for non-PR events on `main` and creates or updates a PR from `automation/update-cost-analysis`. If ‘Reject stale generated output’ fails, `main` changed after validation recorded its source commit; inspect the latest run before investigating permissions. For a PR publication failure, check token and repository permissions. Inspect generated calculations and diffs before changing publishing permissions.
 

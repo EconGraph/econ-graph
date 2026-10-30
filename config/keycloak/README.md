@@ -4,7 +4,7 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 
 | File | Used by | Contents |
 |---|---|---|
-| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google identity provider |
+| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google and Facebook identity providers |
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
 | `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
@@ -33,7 +33,8 @@ scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's acces
 
 ### Test users
 
-The release end-to-end suite depends on these. Keep the usernames, ids and
+The release end-to-end suite depends on these; the QA scenario suite signs in as
+`grace` against the release e2e stack. Keep the usernames, ids and
 passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 
 | Username | Id (`sub`) | Password |
@@ -44,6 +45,7 @@ passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 | `carol` | `0199a0e0-0000-7000-8000-00000000ca01` | `carol-dev-password` |
 | `erin` | `0199a0e0-0000-7000-8000-0000000000e1` | `erin-dev-password` |
 | `frank` | `0199a0e0-0000-7000-8000-0000000000f1` | `frank-dev-password` |
+| `grace` | `0199a0e0-0000-7000-8000-0000000009a7` | `grace-dev-password` |
 | `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
 
 Imported users get no default roles automatically, so each one lists
@@ -93,6 +95,8 @@ The realm file reads these environment variables when it is imported:
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
 | `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when both the Google client id and secret are configured |
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
+| `KC_FACEBOOK_ENABLED` | `false` | Enabled by the Kubernetes render command only when both Facebook credentials are present |
+| `KC_FACEBOOK_CLIENT_ID`, `KC_FACEBOOK_CLIENT_SECRET` | `unset` | Facebook app credentials, read from the environment-specific Kubernetes Secret |
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
 is first imported; change a value later by recreating the volume. In Kubernetes the
@@ -142,7 +146,204 @@ redeploy — as long as the roles they're mapped to stay in the file. A realm ro
 client or mapper removed from the file is removed from the cluster on the next
 deploy, taking any user's mapping to that role with it.
 
+A maintainer enters the Google client with hidden input with
+`scripts/deploy/set-crawler-keys.sh --google`, which then restarts Keycloak and reruns
+the Job. Before asking for anything it checks that the cluster's `keycloak-realm`
+ConfigMap holds this checkout's realm files, so run it from a checkout of the commit
+the cluster runs (for production, the release tag). It renders the Job for the public
+host the cluster serves, and refuses a production cluster that serves none, or a
+`PUBLIC_HOST` (in the environment or `~/.config/econgraph/deploy.env`) that differs
+from it.
+
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
 realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --all-containers`.
+
+## Facebook sign-in
+
+Facebook sign-in is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)).
+The realm declares an optional `facebook` provider that uses the same
+first-broker-login and account-linking flow as Google, requests only `email` and
+`public_profile`, and stores no upstream token. Facebook emails are not trusted as
+verified: Keycloak handles profile completion and existing-account verification through
+its default first-broker-login flow, rather than automatically linking by email. The
+realm import enables the provider only when `econ-graph-keycloak` holds both
+`facebook-idp-client-id` and `facebook-idp-client-secret`; without them no Facebook
+button appears.
+
+`scripts/deploy/set-crawler-keys.sh --facebook` refuses before any prompt, cluster call
+or write, and exits non-zero, with `--dry-run` too. `scripts/deploy/create-secrets.sh`
+likewise refuses to run, before any cluster call and with `--dry-run` too, while
+`KEYCLOAK_FACEBOOK_CLIENT_ID` or `KEYCLOAK_FACEBOOK_CLIENT_SECRET` is set and non-empty;
+it keeps Facebook keys a Secret already holds (see below to remove them). Local compose
+does not forward Facebook credentials.
+
+The privacy policy at `https://econgraph.com/privacy` covers either provider, and
+`https://econgraph.com/privacy#account-deletion` gives the data-deletion instructions a
+Meta app links to. A Meta app for this realm uses domain `econgraph.com` and redirect
+URI `https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`
+([Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook)).
+There is no Facebook deletion callback: the instructions explain how to request
+account deletion. The backend serves no `/auth/*` routes; sign-in goes through Keycloak.
+
+### Disabling Facebook sign-in
+
+Neither `set-crawler-keys.sh` nor `create-secrets.sh` removes a key, so remove the
+two keys from the Secret by hand, with the kind cluster's kubectl, then restart
+Keycloak and rerun the realm import. Use a checkout of the commit the cluster runs
+(for production, the release tag). A JSON-patch `remove` fails on a key that is
+absent, so remove only the keys the Secret has:
+
+```bash
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
+k -n econ-graph patch secret econ-graph-keycloak --type=json -p='[
+  {"op": "remove", "path": "/data/facebook-idp-client-id"},
+  {"op": "remove", "path": "/data/facebook-idp-client-secret"}]'
+k -n econ-graph rollout restart deployment/keycloak
+k -n econ-graph rollout status deployment/keycloak --timeout=600s
+k -n econ-graph delete job keycloak-realm-import --ignore-not-found
+# On the production cluster, rendered for its public host; elsewhere apply the file as it is.
+scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
+k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
+```
+
+Use this on a cluster whose Secret holds either key. Without both keys the realm
+import disables the `facebook` provider and the Facebook button disappears. Accounts
+whose only sign-in is Facebook can then no longer sign in; their data stays in place.
+A later deploy keeps the provider disabled while the keys are absent.
+
+## Catalog access, including anonymous visitors
+
+Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
+`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
+canonical data-source names to these capabilities; adding a source requires its role and mapping.
+Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
+So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
+`updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
+caller can't read; `createAnnotation` answers as for a missing series. Lookups by id or external id
+(`series`, `seriesExists`, `seriesCatalog`, `seriesByExternalId`) return null or `false`, as for a
+missing series, so none of them reveals what an unreadable catalog contains.
+MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
+
+The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
+the `econgraph-anonymous` service account inherit it, so it may hold only `econ-graph-api`
+`catalog.*:read` roles: a deploy stops, before importing anything, while it holds any other
+composite (the error names each one to remove). For the same reason no `catalog.*:read` role
+may itself be a composite, at any depth: a role nested under one would reach every account. A
+deploy stops while one is, live or in the realm file. Remove a catalog read role from
+`catalog-public` to withdraw default access for both anonymous visitors and signed-in users.
+Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
+`catalog-public` from the anonymous service account and assign its permitted catalog roles
+individually instead. Use group/composite grants for signed-in exceptions as usual.
+
+Visitors receive no token and no service-account identity. The backend obtains a client-credentials
+token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
+anonymous data requests. It never turns those roles into account, annotation, or staff privileges.
+Signed-in callers use only their own token's roles, even if anonymous visitors have broader access.
+
+Configure the backend with:
+
+| Setting | Purpose |
+|---|---|
+| `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` | Existing token verification settings |
+| `OIDC_ANONYMOUS_TOKEN_URL` | Reachable HTTPS token endpoint, or loopback HTTP for local development |
+| `OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP` | Explicit `true` allows private-network HTTP credential transport; enabled only for the internal Compose/Kubernetes Keycloak service |
+| `OIDC_ANONYMOUS_CLIENT_ID` | Defaults to `econgraph-anonymous` |
+| `OIDC_ANONYMOUS_CLIENT_SECRET` | Server-only credential matching `KC_ANONYMOUS_CLIENT_SECRET` in the realm import |
+| `ANONYMOUS_GRANTS_STALE_MAX_SECS` | Seconds (0 to 86400, default 0) that the last fetched anonymous grants may still be used after they expire, only while renewal is failing; see below |
+
+Missing anonymous configuration grants no anonymous data access, including when sign-in is off.
+Partial configuration fails startup. Keycloak omits the roles claim for a reader with no grants;
+that is an empty grant set. Signed-in token verification remains strict.
+
+Anonymous grants are renewed by one background task per backend process, never by a request:
+requests read the current grant set from memory and never wait for Keycloak. The task fetches at
+startup (until it succeeds, anonymous visitors have no catalog access), then again when three
+quarters of each grant set's lifetime has passed, and every ten seconds while renewal fails. A
+grant set lasts no longer than its token's absolute expiry, `expires_in`, or five minutes,
+whichever is shortest.
+
+A change in Keycloak reaches anonymous visitors at the backend's next renewal, not at once: with
+five-minute grants, up to about 225 seconds later (three quarters of 300 seconds). The renewal
+replaces the grant set entirely, so a revocation, or a narrower grant, applies from that moment.
+Disabling the anonymous client, or rotating its secret, also takes effect at the next renewal:
+Keycloak's refusal then drops the grants instead of keeping them, whatever the stale setting
+below. To make a revocation take effect immediately, make it in Keycloak, then restart the
+backend. A new process serves no anonymous catalog data until its first fetch succeeds, so once
+the rollout finishes, every backend serves the revoked grant set:
+
+```bash
+kubectl -n econ-graph rollout restart deployment/econ-graph-backend
+```
+
+During a Keycloak outage (no answer, a timeout, or a server error), unexpired grants stay in use.
+What happens after they expire depends on `ANONYMOUS_GRANTS_STALE_MAX_SECS`:
+
+- `0`, the default, fails closed: anonymous visitors lose catalog access when the grants expire.
+- Above `0`, the last successfully fetched grants stay in use for at most that many seconds past
+  their expiry, only while renewal keeps failing, and the backend logs a warning on every failed
+  renewal while it serves them. The first successful renewal replaces them, so a revocation made
+  during the outage takes effect as soon as Keycloak answers again.
+
+A stale window delays only revocations that can't be fetched; it never extends grants past a
+successful renewal. A refusal from Keycloak is not an outage, so it never opens the window.
+
+The backend reports renewal on `/metrics` (`anonymous_grant_renewals_total{outcome}`,
+`anonymous_grant_renewal_consecutive_failures`, `anonymous_catalog_grants`,
+`anonymous_grants_serving_stale`, `anonymous_grant_refresh_task_running`), and
+`k8s/monitoring/prometheus-rules-auth.yaml` alerts after six failed renewals in a row, after ten
+minutes with no anonymous grants, and when the renewal task stops.
+
+User role removals take effect when existing five-minute access tokens expire, plus the
+verifier's 30-second clock tolerance. No permission check calls Keycloak.
+
+Docker Compose uses a development-only client secret. Kubernetes provisions a random credential
+through `scripts/deploy/create-secrets.sh`, preserving it across deployments, and supplies the
+same Secret key (`econ-graph-keycloak/anonymous-client-secret`) to the backend, Keycloak and realm
+import Job. Set `KEYCLOAK_ANONYMOUS_CLIENT_SECRET` to supply a managed credential instead.
+`scripts/deploy/deploy.sh` stops before applying anything when that Secret exists without the
+`anonymous-client-secret` key; run `scripts/deploy/create-secrets.sh` (it keeps every existing
+value and adds the key), then deploy again.
+Existing Compose realms need the normal development realm reset. Kubernetes reapplies structural
+configuration on deployment, but `preserve-catalog-grants.py` snapshots catalog policy first.
+Existing catalog-public grants, catalog edges on managed composites, anonymous-reader mappings,
+reader scope restrictions and enabled states survive reapply, including empty sets. Defaults seed
+only the first feature rollout. The render step records which policy resources originally needed
+bootstrap, so an interrupted first import can retry without freezing partial empty mappings. A
+finalizer marks initialization only after config-cli succeeds; deleting a policy role or reader
+cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
+from signed-in default roles, which would otherwise bypass anonymous-only restrictions.
+
+Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
+separate admin API operations, so preservation is best effort under concurrent administrator edits;
+avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
+modified. Role definitions and non-catalog structural settings remain configuration as code.
+
+### Separate and shared data planes
+
+For requests to the same GraphQL endpoint, the browser sends the signed-in user's token.
+A separate `VITE_DATA_GRAPHQL_URL` stays anonymous by default, preserving branch environments
+that share a data plane with a different Keycloak realm. These reads use the **data plane's
+anonymous catalog grants**, rather than that branch user's roles. Set the frontend build option
+`VITE_DATA_GRAPHQL_AUTH=true` only when that data plane trusts the same issuer and audience;
+then signed-in catalog roles apply there. A denied or invalid token is never retried anonymously
+except for the existing explicit suspended-account public-read behavior.
+
+An app-only backend checks an annotation's series through `DATA_GRAPHQL_URL`, asking
+`seriesCatalog(id)` before creating the annotation or showing it, its comments, or writes to it.
+The data plane answers null for a series it doesn't have or won't let this request read; this
+backend then applies its own caller's catalog grants to the catalog name. If the data plane can't
+answer, these annotation requests fail with `DATA_PLANE_UNAVAILABLE` rather than skip the check.
+This preflight likewise uses anonymous grants by default. For a trusted data plane, set
+`DATA_GRAPHQL_FORWARD_AUTHORIZATION=true` so the preflight can read a catalog granted to the
+signed-in caller even when anonymous access is disabled. Forwarding requires HTTPS by default.
+For a deliberately trusted private HTTP hop, also set `DATA_GRAPHQL_ALLOW_INSECURE_AUTHORIZATION=true`;
+that exception sends the bearer token in plaintext and must not be used for public network targets.
+Requests follow no redirects and tokens are not logged. Cross-realm gateways must continue to strip credentials; a trusted route must
+preserve them. Catalog authorization does not replace that gateway trust configuration.
+
+For a local sign-in-off server, clear `OIDC_ISSUER`, `OIDC_ANONYMOUS_TOKEN_URL` and
+`OIDC_ANONYMOUS_CLIENT_SECRET` together. Empty anonymous settings count as absent. This starts
+the server without Keycloak and denies catalog reads, while keeping health and other public
+non-data routes available.

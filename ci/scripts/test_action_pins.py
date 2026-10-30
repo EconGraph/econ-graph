@@ -5,7 +5,7 @@ import unittest
 
 import yaml
 
-from check_action_pins import check_document
+from check_action_pins import check_document, check_version_comments
 
 
 class ActionPinsTest(unittest.TestCase):
@@ -14,7 +14,9 @@ class ActionPinsTest(unittest.TestCase):
         for reference in ("actions/checkout@v7", "owner/repo@main", "owner/repo@1234567",
                           "docker://alpine:latest", "${{ inputs.action }}", ""):
             with self.subTest(reference=reference):
-                document = {"jobs": {"build": {"steps": [{"uses": reference}]}}}
+                document = {"jobs": {"build": {"steps": [
+                    {"uses": reference, "with": {"persist-credentials": False}}
+                ]}}}
                 self.assertEqual(len(check_document(document, "fixture")), 1)
 
     def test_accepts_commit_digest_and_local_actions(self):
@@ -33,6 +35,8 @@ class ActionPinsTest(unittest.TestCase):
     steps:
       - 'uses': >-
           actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: |
           # uses: this is shell content, not an action
           echo fine
@@ -46,6 +50,69 @@ class ActionPinsTest(unittest.TestCase):
         for value in (None, 123, [], {}):
             self.assertTrue(check_document({"uses": value}, "fixture"))
 
+    def test_checkout_requires_literal_false(self):
+        """Missing, enabled, malformed and computed inputs cannot persist tokens."""
+        for inputs in (None, {}, {"persist-credentials": True},
+                       {"persist-credentials": "false"}, {"persist-credentials": 0},
+                       {"persist-credentials": "${{ inputs.persist }}"}, False, []):
+            with self.subTest(inputs=inputs):
+                document = {"uses": "actions/checkout@" + "a" * 40, "with": inputs}
+                errors = check_document(document, "fixture")
+                self.assertEqual(len(errors), 1)
+                self.assertIn("fixture.with.persist-credentials", errors[0])
+
+    def test_checkout_policy_covers_versions_case_and_composites(self):
+        """Check every checkout, including nested composite-action steps."""
+        for path in ("actions/checkout", "Actions/Checkout", "actions/checkout/.",
+                     "actions/checkout/", "actions/checkout/./", "actions/checkout/sub/.."):
+            reference = path + "@" + "a" * 40
+            with self.subTest(reference=reference):
+                document = yaml.safe_load(f'''runs:
+  using: composite
+  steps:
+    - uses: {reference}
+      with:
+        fetch-depth: 0
+    - uses: {reference}
+      with:
+        persist-credentials: false
+''')
+                errors = check_document(document, "fixture")
+                self.assertEqual(len(errors), 1)
+                self.assertIn("fixture.runs.steps[0].with.persist-credentials", errors[0])
+
+    def test_pinned_references_need_version_comments(self):
+        """A SHA alone does not say which release it is, so require a comment."""
+        sha = "a" * 40
+        lines = [
+            "steps:",
+            f"  - uses: owner/repo@{sha} # v1.2.3",
+            f"  - uses: owner/repo@{sha}   ",
+            f'  - "uses": "owner/repo@{sha}"   #',
+            f"  - uses: owner/repo@{sha}  # v2",
+            "  - uses: ./.github/actions/local",
+            f"# - uses: owner/repo@{sha}",
+            f"  - uses: owner/repo@{sha} # TODO",
+            f"  - uses: owner/repo@{sha} # 1.99.1",
+        ]
+        errors = check_version_comments("\n".join(lines), "fixture")
+        self.assertEqual(len(errors), 3)
+        self.assertIn("fixture:3:", errors[0])
+        self.assertIn("fixture:4:", errors[1])
+        self.assertIn("fixture:8:", errors[2])
+
+    def test_pinned_references_must_be_block_style_lines(self):
+        """A flow mapping or folded scalar hides the comment from the line check."""
+        sha = "a" * 40
+        for text in (
+            f"steps:\n  - {{uses: owner/repo@{sha}}} # v1\n",
+            f"steps:\n  - uses: >-\n      owner/repo@{sha}\n",
+        ):
+            with self.subTest(text=text):
+                errors = check_version_comments(text, "fixture", yaml.safe_load(text))
+                self.assertTrue(any("block-style" in error for error in errors), errors)
+        text = f"steps:\n  - uses: owner/repo@{sha} # v1\n"
+        self.assertEqual(check_version_comments(text, "fixture", yaml.safe_load(text)), [])
 
 
 if __name__ == "__main__":

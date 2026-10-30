@@ -23,9 +23,11 @@ console.log('  - Final GRAPHQL_ENDPOINT (app operations):', GRAPHQL_ENDPOINT);
 console.log('  - Final DATA_GRAPHQL_ENDPOINT (data operations):', DATA_GRAPHQL_ENDPOINT);
 
 /**
- * Data operations: queries that read only data-plane tables, and whose resolvers never read
- * the caller. They go to the data URL without an `Authorization` header. The audit behind
- * this list is in ECO-427. `graphql-operations.test.ts` fails if an operation in `src/` is in
+ * Data operations read data-plane tables and go to the data URL. Signed-in requests carry
+ * the caller's token so the data backend can enforce catalog roles when it shares our trust.
+ * A separate data URL stays anonymous unless VITE_DATA_GRAPHQL_AUTH=true, preserving access
+ * to shared data planes that use a different deployment's Keycloak realm. The routing audit
+ * behind this list is in ECO-427. `graphql-operations.test.ts` fails if an operation in `src/` is in
  * neither this set nor `APP_OPERATIONS`, or in both.
  */
 export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
@@ -289,7 +291,8 @@ export function isDataOperation(request: GraphQLRequest): boolean {
 
 /**
  * Execute a GraphQL query against the backend. Data operations (`isDataOperation`) go to the
- * data URL without a token; everything else goes to the GraphQL URL with the user's token.
+ * data URL; everything else goes to the GraphQL URL. User tokens are forwarded to the app
+ * endpoint and to trusted data endpoints; separate cross-realm data planes use public grants.
  * @param request - The GraphQL request object containing query, variables, and operation name.
  * @param signal - Optional AbortSignal passed to fetch; aborting it rejects with an AbortError.
  * @returns Promise that resolves to the GraphQL response.
@@ -302,30 +305,31 @@ export async function executeGraphQL<T = any>(
   // if (MSW_DEBUG) {
   //   console.log('🔧 executeGraphQL called with:', { endpoint: GRAPHQL_ENDPOINT, request });
   // }
-  // Data operations never carry a token: the data plane may not know this deployment's
-  // Keycloak realm, and the backend answers a token it can't verify with a 401. They are
-  // queries, so a suspended account (whose token is never sent here) reads them as before.
   const isData = isDataOperation(request);
-  let response: Response;
-  if (isData) {
-    response = await postGraphQL(DATA_GRAPHQL_ENDPOINT, request, null, signal);
-  } else {
-    // A suspended account's token is refused on every request, public reads included, so those
-    // go anonymously instead; a mutation would only fail as "Authentication required" that way.
-    const isMutation = /^\s*mutation\b/.test(request.query);
-    if (isAccountSuspended() && isMutation) {
+  const endpoint = isData ? DATA_GRAPHQL_ENDPOINT : GRAPHQL_ENDPOINT;
+  // Cross-realm branch environments deliberately use the shared plane's public grants.
+  // Opt in only when the separate data plane trusts this frontend's issuer and audience.
+  const anonymousDataPlane =
+    isData &&
+    DATA_GRAPHQL_ENDPOINT !== GRAPHQL_ENDPOINT &&
+    import.meta.env.VITE_DATA_GRAPHQL_AUTH !== 'true';
+  // Suspension preserves only anonymous catalog access. Expired/unverifiable credentials
+  // otherwise fail normally; a denied catalog role is never retried anonymously.
+  const isMutation = /^\s*mutation\b/.test(request.query);
+  if (isAccountSuspended() && isMutation) {
+    throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
+  }
+  const token = isAccountSuspended() || anonymousDataPlane ? null : await getAccessToken();
+  let response = await postGraphQL(endpoint, request, token, signal);
+
+  if (token && (await isSuspendedRefusal(response))) {
+    // A separate data backend may have an independent account database. Its refusal
+    // must not disable mutations against the app backend.
+    if (endpoint === GRAPHQL_ENDPOINT) setAccountSuspended(true);
+    if (isMutation) {
       throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
     }
-    const token = isAccountSuspended() ? null : await getAccessToken();
-    response = await postGraphQL(GRAPHQL_ENDPOINT, request, token, signal);
-
-    if (token && (await isSuspendedRefusal(response))) {
-      setAccountSuspended(true);
-      if (isMutation) {
-        throw new Error(ACCOUNT_SUSPENDED_MESSAGE);
-      }
-      response = await postGraphQL(GRAPHQL_ENDPOINT, request, null, signal);
-    }
+    response = await postGraphQL(endpoint, request, null, signal);
   }
 
   if (!response.ok) {

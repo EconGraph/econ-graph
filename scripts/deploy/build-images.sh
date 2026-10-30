@@ -58,16 +58,20 @@ echo "Building frontend image..."
 # full URL only for a Keycloak on another origin; set it to the empty string
 # to build with sign-in hidden.
 VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}"
+VITE_OIDC_SIGN_IN_DISABLED=false
 if [ -z "${VITE_OIDC_ISSUER}" ]; then
   echo "Warning: VITE_OIDC_ISSUER is empty; the frontend image will have sign-in hidden." >&2
+  VITE_OIDC_SIGN_IN_DISABLED=true
 fi
 cd ../frontend
 docker build \
   --build-arg VITE_API_URL="http://localhost" \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_DATA_GRAPHQL_AUTH="${VITE_DATA_GRAPHQL_AUTH:-false}" \
   --build-arg VITE_DATA_GRAPHQL_URL="${VITE_DATA_GRAPHQL_URL:-}" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
   --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER}" \
+  --build-arg VITE_OIDC_SIGN_IN_DISABLED="${VITE_OIDC_SIGN_IN_DISABLED}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:"${VERSION}" -t econ-graph-frontend:latest .

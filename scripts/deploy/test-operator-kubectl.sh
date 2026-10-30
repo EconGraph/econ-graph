@@ -46,6 +46,9 @@ case " \$* " in
         [ -z "\${FAKE_NODES_FAIL:-}" ] || { echo "error: the server is unavailable" >&2; exit 1; }
         echo "econ-graph-control-plane econ-graph-worker" ;;
     *" get namespace kube-system "*) echo "11111111-2222-3333-4444-555555555555" ;;
+    # backup-postgres-now.sh: a wait that times out, and the Job's active pods.
+    *" wait "*) [ -z "\${FAKE_WAIT_FAIL:-}" ] || { echo "error: timed out waiting for the condition" >&2; exit 1; } ;;
+    *" get job/"*) echo "\${FAKE_JOB_ACTIVE:-}" ;;
 esac
 exit 0
 EOF
@@ -106,7 +109,7 @@ reset; out="$(FAKE_NODES_FAIL=1 run backup-postgres-now.sh)"; rc=$?
 expect "backup-postgres-now.sh with an unreadable identity" nonzero "could not read the identity" none
 reset; out="$(FAKE_NODES_FAIL=1 run restore-postgres-backup.sh --yes)"; rc=$?
 expect "restore-postgres-backup.sh with an unreadable identity" nonzero "could not read the identity" none
-reset; out="$(FAKE_NODES_FAIL=1 run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token)"; rc=$?
+reset; out="$(FAKE_NODES_FAIL=1 CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
 reset; out="$(FAKE_NODES_FAIL=1 run test-letsencrypt-cloudflare.sh -d example.invalid)"; rc=$?
 expect "test-letsencrypt-cloudflare.sh with an unreadable identity" nonzero "could not read the identity" none
@@ -117,7 +120,7 @@ for script in backup-postgres-now.sh restore-postgres-backup.sh; do
     expect "$script --dry-run --context kind-other" 0 "context         kind-other" none
     only_context "$script --context kind-other" kind-other
 done
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --dry-run --context kind-other)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --dry-run --context kind-other)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --dry-run --context kind-other" 0 "Dry run: on context kind-other" none
 only_context "setup-letsencrypt-cloudflare.sh --context kind-other" kind-other
 reset; out="$(run test-letsencrypt-cloudflare.sh -d example.invalid --dry-run --context kind-other)"; rc=$?
@@ -133,6 +136,17 @@ expect "backup-postgres-now.sh --context ''" nonzero "--context needs a non-empt
 [ -s "$CALLS" ] && fail "backup-postgres-now.sh --context '' called kubectl"
 reset; out="$(run backup-postgres-now.sh --context missing)"; rc=$?
 expect "backup-postgres-now.sh on an unknown context" nonzero "has no context missing" none
+# A backup Job still running when the wait times out is said, with how to wait
+# for it, and not called failed; a Job that is not running is.
+reset; out="$(FAKE_WAIT_FAIL=1 FAKE_JOB_ACTIVE=1 run backup-postgres-now.sh)"; rc=$?
+expect "backup-postgres-now.sh with the Job still running at the timeout" nonzero "backup-postgres-now: still running: job/postgres-backup-manual-" changes
+grep -qF "did not complete successfully" <<<"$out" &&
+    fail "backup-postgres-now.sh with the Job still running: calls it failed"
+grep -qF "don't start another backup" <<<"$out" ||
+    fail "backup-postgres-now.sh with the Job still running: does not warn against a second backup"
+reset; out="$(FAKE_WAIT_FAIL=1 run backup-postgres-now.sh)"; rc=$?
+expect "backup-postgres-now.sh with a failed Job" nonzero "Backup job did not complete successfully" changes
+grep -qF "still running" <<<"$out" && fail "backup-postgres-now.sh with a failed Job: says it is still running"
 
 reset; out="$(run restore-postgres-backup.sh --dry-run)"; rc=$?
 expect "restore-postgres-backup.sh --dry-run" 0 "Dry run: would DROP and recreate" none
@@ -151,11 +165,11 @@ expect "restore-postgres-backup.sh --context ''" nonzero "--context needs a non-
 reset; out="$(run restore-postgres-backup.sh --context missing --yes)"; rc=$?
 expect "restore-postgres-backup.sh on an unknown context" nonzero "has no context missing" none
 
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --dry-run)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --dry-run)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --dry-run" 0 "Dry run: on context kind-econ-graph" none
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --context missing)"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --context missing)"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh on an unknown context" nonzero "has no context missing" none
-reset; out="$(run setup-letsencrypt-cloudflare.sh -d example.invalid -t stub-token --context '')"; rc=$?
+reset; out="$(CLOUDFLARE_API_TOKEN=stub-token run setup-letsencrypt-cloudflare.sh -d example.invalid --context '')"; rc=$?
 expect "setup-letsencrypt-cloudflare.sh --context ''" nonzero "--context needs a non-empty value" none
 
 reset; out="$(run test-letsencrypt-cloudflare.sh -d example.invalid --dry-run)"; rc=$?

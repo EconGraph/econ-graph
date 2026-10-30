@@ -26,8 +26,9 @@ import {
 const backendPort = Number(process.env.RELEASE_BACKEND_PORT ?? 18080);
 const frontendPort = Number(process.env.RELEASE_FRONTEND_PORT ?? 18081);
 const backendUrl = `http://localhost:${backendPort}`;
-const frontendUrl = `http://localhost:${frontendPort}`;
-const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
+export const frontendUrl = `http://localhost:${frontendPort}`;
+const backendBin =
+  process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
 
 // Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
 // mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
@@ -45,7 +46,8 @@ if (!DEPLOYED && !databaseUrl) {
 }
 if (DEPLOYED && !SKIP_AUTH) checkDeployedAuthEnv();
 
-const webServer: PlaywrightTestConfig['webServer'] = [
+// Exported for playwright.qa-stack.config.ts, which runs the QA scenario suite against this stack.
+export const webServer: PlaywrightTestConfig['webServer'] = [
   {
     // Built by scripts/release-e2e.sh. It applies the app migrations on start; the seed has
     // already applied the data migrations and loaded the fixtures.
@@ -63,6 +65,8 @@ const webServer: PlaywrightTestConfig['webServer'] = [
       // The dev realm from docker-compose.release-e2e.yml's keycloak service.
       OIDC_ISSUER,
       OIDC_AUDIENCE: 'econ-graph-api',
+      OIDC_ANONYMOUS_TOKEN_URL: `${OIDC_ISSUER}/protocol/openid-connect/token`,
+      OIDC_ANONYMOUS_CLIENT_SECRET: 'anonymous-dev-only',
       RUST_LOG: process.env.RUST_LOG ?? 'warn',
     },
   },
@@ -124,7 +128,7 @@ export default defineConfig({
     {
       // A phone (ECO-335: at this width the app once started behind its open nav drawer, so the
       // world map's controls were unreachable). The world map, the smoke checks on the home and
-      // explore pages, and the phone-only navigation spec. Pixel 5 is Chromium, like the above.
+      // explore pages, and the phone-only navigation and header specs. Pixel 5 is Chromium, like the above.
       name: 'release-mobile',
       testMatch: ['world-map/**/*.spec.ts', 'smoke.spec.ts', 'mobile/**/*.spec.ts'],
       use: { ...devices['Pixel 5'], launchOptions },

@@ -4,6 +4,9 @@
 *.pdb
 *.profraw
 
+# Python bytecode (the deploy scripts' tests import them)
+__pycache__/
+
 # Node.js - ignore all node_modules directories
 node_modules/
 /frontend/node_modules/
@@ -90,6 +93,9 @@ temp/
 /frontend/playwright-report/
 /frontend/test-results-release/
 /frontend/playwright-report-release/
+/frontend/test-results-qa/
+/frontend/test-results-qa-stack/
+/frontend/qa-scenarios-report.json
 /frontend/playwright/.cache/
 /frontend/debug-*.png
 /frontend/debug-*.jpg
@@ -105,3 +111,6 @@ EarningsCalls/
 # Demo videos and audio files
 demo-videos/
 *.aiff
+
+# Python bytecode
+__pycache__/

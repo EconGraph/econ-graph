@@ -6,6 +6,10 @@
 //! otherwise through the data plane's GraphQL endpoint ([`SeriesCheck::DataPlane`],
 //! `DATA_GRAPHQL_URL`), otherwise not at all ([`SeriesCheck::Skip`]). When the data plane
 //! can't answer, the check fails closed with [`AppError::DataPlaneUnavailable`].
+//!
+//! [`SeriesCheck::readable_series_exists`] also applies the caller's catalog grants, for
+//! annotation writes and reads: a series in a catalog the caller can't read answers exactly
+//! like a missing one.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +26,10 @@ use econ_graph_core::{
 /// `economic_series` row alone, as [`SeriesCheck::Database`] does; `series(id)` would not do,
 /// since it hides a series with no observations.
 const SERIES_EXISTS_QUERY: &str = "query SeriesExists($id: ID!) { seriesExists(id: $id) }";
+
+/// The data-plane query for "which catalog is this series in, if this request may read it".
+/// Like `seriesExists`, it answers for a series without observations.
+const SERIES_CATALOG_QUERY: &str = "query SeriesCatalog($id: ID!) { seriesCatalog(id: $id) }";
 
 /// How [`SeriesCheck::series_exists`] finds out whether a series exists.
 #[derive(Clone)]
@@ -54,13 +62,37 @@ impl SeriesCheck {
             SeriesCheck::Skip => Ok(true),
         }
     }
+
+    /// Whether the series `id` exists in a catalog `can_read` accepts (by data source name).
+    /// A series in an unreadable catalog answers `false`, exactly like a missing one, so the
+    /// answer reveals nothing about catalogs the caller can't read. Through the data plane, the
+    /// plane's own grants for this request apply first (`seriesCatalog` is null when they deny).
+    /// `false` for [`SeriesCheck::Skip`]: with no series to check, no catalog grant can be applied.
+    ///
+    /// # Errors
+    /// As for [`SeriesCheck::series_exists`].
+    pub async fn readable_series_exists(
+        &self,
+        id: Uuid,
+        can_read: impl Fn(&str) -> bool,
+    ) -> AppResult<bool> {
+        let catalog = match self {
+            SeriesCheck::Database(pool) => {
+                crate::services::series_service::series_catalog(pool, id).await?
+            }
+            SeriesCheck::DataPlane(client) => client.series_catalog(id).await?,
+            SeriesCheck::Skip => return Ok(false),
+        };
+        Ok(catalog.is_some_and(|catalog| can_read(&catalog)))
+    }
 }
 
-/// Asks the data plane's GraphQL endpoint about series, with no token: the gateway strips
-/// credentials on that route anyway, and the data plane may not trust this backend's identity
-/// provider.
+/// Asks the data plane about series. Cross-realm shared planes use anonymous grants by
+/// default; explicit trust configuration permits forwarding the verified caller token.
 #[derive(Clone)]
 pub struct DataPlaneClient {
+    forward_authorization: bool,
+    authorization: Option<String>,
     http: reqwest::Client,
     url: String,
     /// `url` without anything that could be secret, for logs and error detail.
@@ -99,18 +131,41 @@ impl DataPlaneClient {
     /// # Errors
     /// [`AppError::ConfigError`] when the HTTP client can't be built.
     pub fn new(config: &DataGraphqlConfig) -> AppResult<Self> {
+        if config.forward_authorization
+            && !config.allow_insecure_authorization
+            && reqwest::Url::parse(&config.url).map_or(true, |url| url.scheme() != "https")
+        {
+            return Err(AppError::ConfigError(
+                "Bearer forwarding requires HTTPS or an explicit private HTTP transport exception"
+                    .into(),
+            ));
+        }
         let http = reqwest::Client::builder()
             .timeout(config.timeout)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| AppError::ConfigError(format!("data plane HTTP client: {e}")))?;
         Ok(Self {
+            forward_authorization: config.forward_authorization,
+            authorization: None,
             http,
             url: config.url.clone(),
             log_url: redacted_url(&config.url),
             host: config.host.clone(),
             timeout: config.timeout,
         })
+    }
+
+    /// Bind a verified HTTP caller to this request's preflight. The token is retained only
+    /// when the configured target explicitly shares the issuer and audience trust.
+    pub fn for_caller(&self, authorization: Option<&str>) -> Self {
+        let mut client = self.clone();
+        client.authorization = if self.forward_authorization {
+            authorization.map(str::to_owned)
+        } else {
+            None
+        };
+        client
     }
 
     /// The URL this client asks, as it may be logged ([`redacted_url`]): no user name,
@@ -136,41 +191,85 @@ impl DataPlaneClient {
     /// not a success, or it is not a GraphQL response with a boolean `data.seriesExists` and no
     /// errors.
     pub async fn series_exists(&self, id: Uuid) -> AppResult<bool> {
-        let unavailable = |detail: String| {
-            tracing::warn!(series_id = %id, url = %self.log_url, "series check failed: {detail}");
-            AppError::DataPlaneUnavailable(detail)
-        };
+        match self
+            .ask(id, SERIES_EXISTS_QUERY, "SeriesExists", "seriesExists")
+            .await?
+        {
+            serde_json::Value::Bool(exists) => Ok(exists),
+            other => Err(self.unavailable(id, format!("unexpected answer: {other}"))),
+        }
+    }
+
+    /// The catalog (data source name) of the series `id` when the data plane has it and lets
+    /// this request read it; `None` otherwise, a denial answering exactly like a missing series.
+    ///
+    /// # Errors
+    /// As for [`DataPlaneClient::series_exists`], with `data.seriesCatalog` a string or null.
+    pub async fn series_catalog(&self, id: Uuid) -> AppResult<Option<String>> {
+        match self
+            .ask(id, SERIES_CATALOG_QUERY, "SeriesCatalog", "seriesCatalog")
+            .await?
+        {
+            serde_json::Value::String(catalog) => Ok(Some(catalog)),
+            serde_json::Value::Null => Ok(None),
+            other => Err(self.unavailable(id, format!("unexpected answer: {other}"))),
+        }
+    }
+
+    fn unavailable(&self, id: Uuid, detail: String) -> AppError {
+        tracing::warn!(series_id = %id, url = %self.log_url, "series check failed: {detail}");
+        AppError::DataPlaneUnavailable(detail)
+    }
+
+    /// Run `query` for the series `id` and return `data.<field>`, which must be present.
+    async fn ask(
+        &self,
+        id: Uuid,
+        query: &str,
+        operation: &str,
+        field: &str,
+    ) -> AppResult<serde_json::Value> {
         let mut request = self.http.post(&self.url).json(&serde_json::json!({
-            "query": SERIES_EXISTS_QUERY,
-            "operationName": "SeriesExists",
+            "query": query,
+            "operationName": operation,
             "variables": { "id": id.to_string() },
         }));
+        if let Some(authorization) = &self.authorization {
+            request = request.header(reqwest::header::AUTHORIZATION, authorization);
+        }
         if let Some(host) = &self.host {
             request = request.header(reqwest::header::HOST, host);
         }
         let response = request.send().await.map_err(|e| {
-            unavailable(if e.is_timeout() {
-                format!("no answer within {:?}", self.timeout)
-            } else {
-                format!("request failed: {}", error_chain(&e.without_url()))
-            })
+            self.unavailable(
+                id,
+                if e.is_timeout() {
+                    format!("no answer within {:?}", self.timeout)
+                } else {
+                    format!("request failed: {}", error_chain(&e.without_url()))
+                },
+            )
         })?;
         let status = response.status();
         if !status.is_success() {
-            return Err(unavailable(format!("HTTP {status}")));
+            return Err(self.unavailable(id, format!("HTTP {status}")));
         }
-        let body: serde_json::Value = response.json().await.map_err(|e| {
-            unavailable(format!(
-                "unreadable answer: {}",
-                error_chain(&e.without_url())
-            ))
+        let mut body: serde_json::Value = response.json().await.map_err(|e| {
+            self.unavailable(
+                id,
+                format!("unreadable answer: {}", error_chain(&e.without_url())),
+            )
         })?;
         if let Some(errors) = body.get("errors").filter(|e| !e.is_null()) {
-            return Err(unavailable(format!("GraphQL errors: {errors}")));
+            return Err(self.unavailable(id, format!("GraphQL errors: {errors}")));
         }
-        match body.pointer("/data/seriesExists") {
-            Some(serde_json::Value::Bool(exists)) => Ok(*exists),
-            _ => Err(unavailable(format!("unexpected answer: {body}"))),
+        match body
+            .get_mut("data")
+            .and_then(|data| data.as_object_mut())
+            .and_then(|data| data.remove(field))
+        {
+            Some(value) => Ok(value),
+            None => Err(self.unavailable(id, format!("unexpected answer: {body}"))),
         }
     }
 }
@@ -183,6 +282,8 @@ mod tests {
 
     fn client(url: String, host: Option<&str>, timeout: Duration) -> DataPlaneClient {
         DataPlaneClient::new(&DataGraphqlConfig {
+            forward_authorization: false,
+            allow_insecure_authorization: false,
             url,
             host: host.map(str::to_string),
             timeout,
@@ -372,10 +473,95 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skip_accepts_every_series() {
+    async fn skip_accepts_every_series_but_none_against_catalog_grants() {
         assert!(SeriesCheck::Skip
             .series_exists(Uuid::new_v4())
             .await
             .unwrap());
+        // No catalog can be checked, so even a caller holding every catalog is refused.
+        assert!(!SeriesCheck::Skip
+            .readable_series_exists(Uuid::new_v4(), |_| true)
+            .await
+            .unwrap());
+    }
+
+    /// The data plane names the catalog, or null for a missing or (to it) unreadable series;
+    /// the caller's own grants then decide, and a denial looks exactly like a missing series.
+    #[tokio::test]
+    async fn readable_series_exists_applies_the_plane_answer_and_the_callers_grants() {
+        for (answer, can_read, expected) in [
+            (serde_json::json!("FRED"), true, Ok(true)),
+            (serde_json::json!("FRED"), false, Ok(false)),
+            (serde_json::Value::Null, true, Ok(false)),
+            (serde_json::json!(true), true, Err(())),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_partial_json(serde_json::json!({
+                    "operationName": "SeriesCatalog",
+                })))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "data": { "seriesCatalog": answer } })),
+                )
+                .mount(&server)
+                .await;
+            let check = SeriesCheck::DataPlane(Arc::new(client(
+                server.uri(),
+                None,
+                Duration::from_secs(2),
+            )));
+            let result = check
+                .readable_series_exists(Uuid::new_v4(), |catalog| {
+                    assert_eq!(catalog, "FRED");
+                    can_read
+                })
+                .await;
+            match expected {
+                Ok(expected) => assert_eq!(result.unwrap(), expected, "{answer}"),
+                Err(()) => assert!(
+                    matches!(result, Err(AppError::DataPlaneUnavailable(_))),
+                    "{answer}"
+                ),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod trusted_plane_tests {
+    use super::*;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn caller_credentials_are_forwarded_only_with_explicit_trust_and_never_logged() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data":{"seriesExists":true}})),
+            )
+            .mount(&server)
+            .await;
+        for trusted in [false, true] {
+            let client = DataPlaneClient::new(&DataGraphqlConfig {
+                url: server.uri(),
+                host: None,
+                timeout: Duration::from_secs(2),
+                forward_authorization: trusted,
+                allow_insecure_authorization: true,
+            })
+            .unwrap()
+            .for_caller(Some("Bearer test-caller-token"));
+            assert!(!format!("{client:?}").contains("test-caller-token"));
+            assert!(client.series_exists(Uuid::new_v4()).await.unwrap());
+        }
+        let requests = server.received_requests().await.unwrap();
+        assert!(!requests[0].headers.contains_key("authorization"));
+        assert_eq!(
+            requests[1].headers.get("authorization").unwrap(),
+            "Bearer test-caller-token"
+        );
     }
 }

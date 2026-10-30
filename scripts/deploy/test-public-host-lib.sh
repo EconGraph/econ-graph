@@ -20,13 +20,20 @@
 #   - deploy.sh and restart-k8s-rollout.sh leave cloudflared.yaml to apply_cloudflared,
 #     and no script applies it or the whole k8s/manifests directory itself.
 # And, with the same stubbed cluster:
-#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
+#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster,
+#     and refuses a Facebook credential in the environment before any kubectl call;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
 #     cloudflared before removing the marker and deletes the token only when told to;
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
+#   - scripts/deploy/set-crawler-keys.sh --facebook refuses (Facebook sign-in is disabled)
+#     before any prompt or kubectl call; --google refuses before it asks
+#     for anything when the cluster's realm ConfigMap is not this checkout's, and renders
+#     the realm-import Job for the public host the cluster serves; it refuses a cluster
+#     marked production that serves none, and a PUBLIC_HOST (environment or deploy
+#     config) that differs from the served host. Refusals exit non-zero in a dry run too.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -66,6 +73,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        STUB_SCALE_FAILS=1 scaling it fails
 #   STUB_LOOKUP_FAILS=1, STUB_NO_NAMESPACE=1, STUB_DELETE_FAILS=1  the econ-graph namespace
 #                        lookup fails / finds nothing; deleting the retired Ingress fails
+#   STUB_REALM           ConfigMap keycloak-realm: current (this checkout's files, read from
+#                        $STUB_REPO; the default), stale (an older realm) or missing
 cat >"$stub_dir/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -99,6 +108,18 @@ case "$*" in
   *"get secret cloudflare-tunnel"*)
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  *"get job keycloak-realm-import"*) echo Complete ;;
+  *"get configmap keycloak-realm"*)
+    case "${STUB_REALM:-current}" in
+      missing) ;;
+      stale) case "$*" in *"-o name"*) echo configmap/keycloak-realm ;; *) echo '{"realm": "old"}' ;; esac ;;
+      *) case "$*" in
+           *"-o name"*) echo configmap/keycloak-realm ;;
+           *econ-graph-realm.json*) cat "$STUB_REPO/config/keycloak/econ-graph-realm.json" ;;
+           *render-realm.sh*) cat "$STUB_REPO/scripts/keycloak/render-realm.sh" ;;
+           *preserve-catalog-grants.py*) cat "$STUB_REPO/scripts/keycloak/preserve-catalog-grants.py" ;;
+         esac ;;
+    esac ;;
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
@@ -299,6 +320,23 @@ run_stubbed STUB_MARKER=production CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts
   fail "create-secrets: refused the tunnel token on a marked cluster: $(cat "$out")"
 grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
   fail "create-secrets: the tunnel token was not written on a marked cluster"
+# Facebook sign-in is disabled: a Facebook credential in the environment is refused
+# before any kubectl call, in a dry run too; an empty one is not a credential.
+for fb in KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET; do
+  for args in '' --dry-run; do
+    # shellcheck disable=SC2086 # $args is empty or one flag
+    if run_stubbed STUB_MARKER=production "$fb=facebook-test-value" scripts/deploy/create-secrets.sh $args; then
+      fail "create-secrets $args: accepted $fb"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "create-secrets $args: $fb refused without the reason: $(cat "$out")"
+    grep -q 'facebook-test-value' "$out" && fail "create-secrets $args: printed the value of $fb"
+    [ -s "$log" ] && fail "create-secrets $args: called kubectl with $fb set: $(cat "$log")"
+  done
+done
+run_stubbed STUB_MARKER=none KEYCLOAK_FACEBOOK_CLIENT_ID= KEYCLOAK_FACEBOOK_CLIENT_SECRET= scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused empty Facebook variables: $(cat "$out")"
+grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp' "$log" &&
+  fail "create-secrets: wrote a Facebook key from empty variables"
 # No token given: as before on an unmarked cluster; a token already there is reported.
 run_stubbed STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets: failed without a token on an unmarked cluster: $(cat "$out")"
@@ -544,10 +582,15 @@ chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$stub_dir/yqbin/yq"
 keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
+# The host's deploy config is $keys_deploy_env (absent unless a test writes it), and
+# keys_env adds settings such as PUBLIC_HOST to the script's environment.
+keys_deploy_env="$stub_dir/config/econgraph/deploy.env"
+keys_env=()
 run_keys() {
-  printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
+  printf 'STUB_LOG=%q\nSTUB_REPO=%q\n%s\n' "$log" "$repo_root" "$1" >"$stub_dir/stub.env"
   : >"$log"; rm -f "$log.ctx"
-  printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+  printf '%s' "${3:-}" | env -u PUBLIC_HOST XDG_CONFIG_HOME="$stub_dir/config" ECONGRAPH_DEPLOY_ENV="$keys_deploy_env" \
+    ${keys_env[@]+"${keys_env[@]}"} XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     script -qec "$keys $2" /dev/null >"$out" 2>&1
 }
@@ -581,6 +624,91 @@ if [ "$have_script" = true ]; then
   grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
   grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
+  # Facebook sign-in is disabled: --facebook refuses before any prompt, cluster call
+  # or write, with --dry-run too.
+  for args in --facebook '--facebook --dry-run'; do
+    if run_keys 'STUB_MARKER=none' "$args" $'facebook-test-app\nfacebook-test-secret\n'; then
+      fail "set-crawler-keys $args: did not refuse"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "set-crawler-keys $args: no refusal shown: $(cat "$out")"
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys $args: prompted"
+    [ -s "$log" ] && fail "set-crawler-keys $args: called kubectl: $(cat "$log")"
+  done
+  # Google mode (crawler keys left blank) writes its IdP keys and reapplies the realm.
+  google_args='--google --no-start-crawler'
+  google_input=$'\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
+  run_keys 'STUB_MARKER=none' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed: $(cat "$out")"
+  grep -q 'create secret generic econ-graph-keycloak .*--from-file=google-idp-client-id=.*--from-file=google-idp-client-secret=' "$log" ||
+    fail "Google IdP keys were not written"
+  grep -q 'rollout restart deployment/keycloak' "$log" || fail "Google mode did not restart Keycloak"
+  grep -q 'delete job keycloak-realm-import' "$log" || fail "Google mode did not reapply the realm"
+  grep -q 'stdin: .*name: keycloak-realm-import' "$log" || fail "Google mode did not apply the realm-import Job"
+  grep -q 'stdin: .*https://' "$log" && fail "Google mode rendered a public host on a cluster without one"
+  grep -q 'crawler-worker' "$log" && fail "Google mode with --no-start-crawler touched the crawler"
+  # On a cluster serving a public host, the Job is rendered for it as deploy.sh renders
+  # it, so the realm keeps the public redirect URIs and web origins.
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed with a public host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "Google mode did not render the realm import for the public host"
+  # A realm ConfigMap older than this checkout: refused before the prompt, nothing written.
+  for realm in stale missing; do
+    if run_keys "STUB_MARKER=none STUB_REALM=$realm" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted a $realm realm ConfigMap"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with a $realm realm ConfigMap"
+    grep -q 'deploy.sh' "$out" || fail "set-crawler-keys --google: the $realm realm refusal is not shown: $(cat "$out")"
+    grep -Eq 'create secret|apply|rollout|delete job' "$log" &&
+      fail "set-crawler-keys --google: changed the cluster with a $realm realm ConfigMap"
+  done
+  # A dry run reports the refusal and exits non-zero too.
+  run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' &&
+    fail "set-crawler-keys --google --dry-run: exited 0 on a stale realm ConfigMap"
+  grep -q 'would refuse: .*econ-graph-realm.json' "$out" ||
+    fail "set-crawler-keys --google --dry-run: no refusal on a stale realm ConfigMap: $(cat "$out")"
+  grep -q 'release-deploy.sh' "$out" ||
+    fail "set-crawler-keys: the stale realm refusal does not point to release-deploy.sh"
+
+  # keys_refused NAME SETTINGS PATTERN: --google refused before the prompt, nothing changed.
+  keys_refused() {
+    if run_keys "$2" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted $1"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with $1"
+    grep -q "$3" "$out" || fail "set-crawler-keys --google: $1 refused without '$3': $(cat "$out")"
+    if grep -Eq 'create secret|apply|rollout|delete job' "$log"; then
+      fail "set-crawler-keys --google: changed the cluster with $1"
+    fi
+  }
+  # Marked production but serving no public host (routes gone after a recreate or a
+  # partial deploy): refused, rather than rendering the realm for localhost only.
+  keys_refused 'a production cluster with no public route' 'STUB_MARKER=production' 'serves no public host'
+  keys_env=(PUBLIC_HOST=econgraph.com)
+  keys_refused 'a production cluster with no public route and PUBLIC_HOST set' 'STUB_MARKER=production' 'serves no public host'
+  keys_refused 'PUBLIC_HOST naming a host the cluster does not serve' 'STUB_MARKER=none' "PUBLIC_HOST='econgraph.com' is set"
+  keys_env=(PUBLIC_HOST=econ-graph.com)
+  keys_refused 'PUBLIC_HOST differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    "PUBLIC_HOST='econ-graph.com' is set"
+  # An explicit PUBLIC_HOST naming the served host (in any case) is accepted.
+  keys_env=(PUBLIC_HOST=EconGraph.com)
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused an explicit PUBLIC_HOST matching the served host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "set-crawler-keys --google: did not render the realm import for the explicit, served host"
+  keys_env=()
+  # The host's deploy config, read as release-deploy.sh reads it.
+  mkdir -p "$(dirname "$keys_deploy_env")"
+  echo 'PUBLIC_HOST=econ-graph.com' >"$keys_deploy_env"
+  keys_refused 'a deploy config differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    'says PUBLIC_HOST=econ-graph.com'
+  echo 'PUBLIC_HOST="econgraph.com"' >"$keys_deploy_env"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused a deploy config matching the served host: $(cat "$out")"
+  keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
+    'says PUBLIC_HOST=econgraph.com'
+  rm -f "$keys_deploy_env"
+
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
 fi
@@ -767,6 +895,111 @@ grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore
 run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
+# require_recreate_confirmation: before the downtime, a cluster that
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
+# but none, one that can't be read, or one noted as production) needs the prefix: a
+# matching --confirm-production, or typed at a terminal, then passed on to
+# recreate-kind-cluster.sh. rrc runs it with stdin /dev/null (no terminal); rrc_tty under a
+# pseudo-terminal (run_migrate_tty).
+# shellcheck disable=SC2016 # expanded by run_migrate's bash
+rrc_setup='source scripts/deploy/lib/cluster-role.sh
+  kube_system_uid() { [ -z "${STUB_UID_FAILS:-}" ] || return 1; echo uid-kind-cluster; }
+  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  recreate_flags=()
+  CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"'
+# shellcheck disable=SC2016
+rrc="$rrc_setup"'
+  require_recreate_confirmation </dev/null && echo "went on, flags: ${recreate_flags[*]}"'
+# shellcheck disable=SC2016
+rrc_tty="$rrc_setup"'
+  require_recreate_confirmation && echo "went on, flags: ${recreate_flags[*]}"'
+# run_migrate_tty INPUT SCRIPT [VAR=value ...]: run_migrate under a pseudo-terminal, with
+# INPUT typed ahead; killed after a minute if it waits for more.
+run_migrate_tty() {
+  local input="$1" script="$2"
+  shift 2
+  : >"$log"; rm -f "$stub_dir/mig/state.env"
+  env "$@" timeout 60 python3 -c '
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[2], sys.argv[2:])
+os.write(fd, sys.argv[1].encode())
+out = b""
+while True:
+    try:
+        data = os.read(fd, 4096)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(status))
+' "$input" bash -c '
+    log() { echo "==> $*"; }
+    die() { echo "error: $*" >&2; exit 1; }
+    kind_cluster_is_production() { CLUSTER_ROLE_REASON="stub reason"; return "$STUB_RC"; }
+    KIND_CLUSTER=econ-graph PROJECT_ROOT="$MIG_ROOT" STATE_FILE="$MIG_ROOT/state.env" DRY_RUN="${DRY_RUN:-false}"
+    eval "$MIGRATE_SRC"
+    eval "$1"' _ "$script" >"$out" 2>&1
+}
+for marker in "production uid-kind-cluster" "Production uid-other" "None uid-kind-cluster" "staging uid-kind-cluster"; do
+  if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker"; then
+    fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
+  fi
+  grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_WAS=true; then
+  fail "require_recreate_confirmation: went on without a terminal for a cluster noted as production"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind STUB_UID_FAILS=1; then
+  fail "require_recreate_confirmation: went on when the kube-system UID can't be read"
+fi
+for marker in "" "none uid-kind-cluster"; do
+  run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker" ||
+    fail "require_recreate_confirmation: refused a cluster without a production marker ('$marker'): $(cat "$out")"
+  grep -q 'went on, flags: $' "$out" || fail "require_recreate_confirmation: passed a prefix on for '$marker': $(cat "$out")"
+done
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind ||
+  fail "require_recreate_confirmation: refused a matching --confirm-production: $(cat "$out")"
+if run_migrate "$rrc" STUB_RC=1 STUB_CONFIRM=uid-othe; then
+  fail "require_recreate_confirmation: took a --confirm-production that doesn't match"
+fi
+grep -q 'does not match' "$out" || fail "require_recreate_confirmation: the mismatch was not reported: $(cat "$out")"
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" DRY_RUN=true ||
+  fail "require_recreate_confirmation: refused a dry run"
+# At a terminal: the prefix is asked and checked here, then passed on; --yes plays no part.
+run_migrate_tty $'uid-kind\n' "$rrc_tty" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" ||
+  fail "require_recreate_confirmation: refused the right prefix typed at a terminal: $(cat "$out")"
+grep -q 'Type the first 8 characters of the kube-system UID above' "$out" ||
+  fail "require_recreate_confirmation: no prompt at a terminal: $(cat "$out")"
+grep -q 'went on, flags: --confirm-production uid-kind' "$out" ||
+  fail "require_recreate_confirmation: the typed prefix is not passed on to recreate-kind-cluster.sh: $(cat "$out")"
+if run_migrate_tty $'yes\n' "$rrc_tty" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on with a wrong answer typed at a terminal"
+fi
+grep -q 'confirmation did not match' "$out" ||
+  fail "require_recreate_confirmation: the wrong answer was not reported: $(cat "$out")"
+run_migrate_tty '' "$rrc_tty" STUB_RC=1 STUB_MARKER="none uid-kind-cluster" ||
+  fail "require_recreate_confirmation: asked at a terminal for a cluster without a production marker: $(cat "$out")"
+grep -q 'Type the first 8' "$out" && fail "require_recreate_confirmation: prompted for a cluster without a production marker"
+# ...and both forward() and rollback() call it before their downtime confirmation and before
+# stopping the writers.
+for fn in forward rollback; do
+  body="$(sed -n "/^${fn}() {\$/,/^}\$/p" scripts/deploy/migrate-to-host-storage.sh)"
+  check_at="$(grep -n '^ *require_recreate_confirmation$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  confirm_at="$(grep -n '^ *confirm "This stops econ-graph' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  stop_at="$(grep -n '^ *stop_writers$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  if [ -z "$check_at" ] || [ -z "$confirm_at" ] || [ -z "$stop_at" ] ||
+    [ "$check_at" -gt "$confirm_at" ] || [ "$check_at" -gt "$stop_at" ]; then
+    fail "migrate-to-host-storage.sh ${fn}(): require_recreate_confirmation (line ${check_at:-none}) is not before the downtime confirmation (${confirm_at:-none}) and stop_writers (${stop_at:-none})"
+  fi
+done
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached
@@ -803,39 +1036,74 @@ detected="Using the kind cluster's kubectl $cache2/bin/kubectl and KUBECONFIG=$c
 run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (bare) failed: $(cat "$out")"
 grep -qF "$detected" "$out" || fail "create-secrets (bare): did not say it uses the kind kubectl: $(cat "$out")"
 used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets (bare)"
-# An exported KUBECONFIG skips the detection, and says so, for both scripts.
+# An exported KUBECONFIG is used with the kind kubectl binary (never plain kubectl, which
+# may ignore it), and that is said, for both scripts.
+with_config="Using the kind cluster's kubectl $cache2/bin/kubectl with KUBECONFIG=$stub_dir/other-kubeconfig"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "create-secrets with KUBECONFIG: skipping detection was not said"
-used_only plain "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
+grep -qF "$with_config" "$out" || fail "create-secrets with KUBECONFIG: the choice was not said: $(cat "$out")"
+used_only cache "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run ||
   fail "mark with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark with KUBECONFIG: skipping the kind kubectl was not said"
+grep -qF "$with_config" "$out" || fail "mark with KUBECONFIG: the choice was not said"
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
 grep -qE "context +kind-test" "$out" || fail "mark with KUBECONFIG: the context in use is not shown"
-used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
-# An explicit KUBECTL wins silently; a context pinned by deploy.sh keeps deploy.sh's kubectl.
+used_only cache "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
+# An explicit KUBECTL wins silently, also with a context pinned by deploy.sh (which
+# exports both).
 run_bare KUBECTL="$stub_dir/plain/kubectl" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECTL failed: $(cat "$out")"
 grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with KUBECTL: detection spoke"
 used_only plain "" "create-secrets with KUBECTL"
-run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
-  fail "create-secrets with a pinned context failed: $(cat "$out")"
-grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
+run_bare KUBECTL="$stub_dir/plain/kubectl" CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with KUBECTL and a pinned context failed: $(cat "$out")"
 grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" || fail "create-secrets with a pinned context: did not write on it"
-used_only plain "" "create-secrets with a pinned context"
-# Only one of the two cached files: plain kubectl, with a warning naming what is missing.
+used_only plain "" "create-secrets with KUBECTL and a pinned context"
+# A pinned context alone doesn't choose the kubectl: the kind kubectl, on that context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with only a pinned context failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "create-secrets with only a pinned context: did not say it uses the kind kubectl"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets with only a pinned context: did not write on it"
+used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets with only a pinned context"
+# Without KUBECTL and a complete kind cache nothing runs: plain kubectl may be another
+# cluster's. Each case fails before any kubectl call, naming what is missing.
+# refused_bare LABEL STATUS MESSAGE: the last run_bare exited STATUS (non-zero), said
+# MESSAGE, and ran no kubectl.
+refused_bare() {
+  if [ "$2" -eq 0 ]; then
+    fail "$1: succeeded"
+  elif grep -q '^\[' "$log"; then
+    fail "$1: ran a kubectl: $(grep '^\[' "$log" | sort -u)"
+  elif ! grep -qF -- "$3" "$out"; then
+    fail "$1: no '$3' in: $(cat "$out")"
+  fi
+}
 mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubectl only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/bin/kubectl but not $cache2/kubeconfig-econ-graph: using plain kubectl" "$out" ||
-  fail "create-secrets (kubectl only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubectl only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubectl only)" "$rc" "no $cache2/kubeconfig-econ-graph"
 mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl" "$cache2/bin/kubectl.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubeconfig only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/kubeconfig-econ-graph but not $cache2/bin/kubectl: using plain kubectl" "$out" ||
-  fail "create-secrets (kubeconfig only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubeconfig only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubeconfig only)" "$rc" "no $cache2/bin/kubectl"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || rc=$?
+refused_bare "mark with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with only a pinned context (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/protect-postgres-pv.sh --dry-run || rc=$?
+refused_bare "protect-postgres-pv (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/install-gateway.sh --dry-run || rc=$?
+refused_bare "install-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/apply-gateway-routes.sh --dry-run || rc=$?
+refused_bare "apply-gateway-routes (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/cutover-to-gateway.sh --dry-run || rc=$?
+refused_bare "cutover-to-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl.away" "$cache2/bin/kubectl"
 [ ! -s "$path_log" ] || fail "detection tests: called the failing kubectl on PATH: $(cat "$path_log")"
 

@@ -6,14 +6,14 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 
 | File | Automatic triggers | Purpose |
 | --- | --- | --- |
-| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/**; PRs into any branch, subject to paths-ignore | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
-| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs | Markdown lint and offline relative-link checks |
-| [actionlint.yml](actionlint.yml) | Push to main/develop and PRs that change workflows, local actions or their validation | Immutable action references and actionlint, with shellcheck on `run:` scripts |
-| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; Monday 06:17 UTC | Flag validation and generated-file consistency |
-| [release-e2e.yml](release-e2e.yml) | PRs touching its listed application, Keycloak, release-stack or workflow paths | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
+| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/** (push subject to paths-ignore); all PRs (a docs-only PR runs only Detect changes and Core CI Result); merge groups | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
+| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs; merge groups | Markdown lint and offline relative-link checks |
+| [actionlint.yml](actionlint.yml) | Push to main/develop that changes workflows, local actions or their validation; all PRs; merge groups | Immutable action references and actionlint, with shellcheck on `run:` scripts |
+| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; merge groups; Monday 06:17 UTC | Flag validation and generated-file consistency |
+| [release-e2e.yml](release-e2e.yml) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
 | [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
-| [update-cost-analysis.yml](update-cost-analysis.yml) | Daily 06:00 UTC | Recalculate cost documentation and attempt to publish changes |
+| [update-cost-analysis.yml](update-cost-analysis.yml) | Manual dispatch; matching PRs | Recalculate cost documentation; manual runs on main attempt to publish changes |
 | [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
 | [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
 | [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
@@ -21,7 +21,7 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [ci-experimental.yml](ci-experimental.yml) | None | Optional RAM-disk experiment |
 | [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | None | Manual build-cache experiment |
 
-All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
+The merge queue's required checks are the result jobs of Core CI and Release E2E, and the Docs Checks, Feature Flags and Actionlint jobs; see [Merge queue](../../docs/development/MERGE_QUEUE.md). All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
 
 ## Operational notes
 
@@ -31,7 +31,9 @@ Core CI builds and smoke-tests Docker images; it does not publish or deploy them
 
 External actions and reusable workflows are pinned to full commit SHAs, with version comments for readability. Resolve updates from the action's upstream repository and update the SHA and comment together. Docker actions require an image digest; local actions use the calling commit. The Actionlint workflow enforces these rules in workflows and composite actions.
 
-The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
+Every `actions/checkout` must set `persist-credentials: false`. Steps that need authenticated Git or GitHub API access must receive credentials explicitly for that step. The same validation script enforces this for workflows and composite actions.
+
+The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY`, `gh secret set BEA_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED, BEA and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
 
 ## Validation
 

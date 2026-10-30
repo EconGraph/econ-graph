@@ -87,7 +87,8 @@ The [Release E2E workflow](../../../../.github/workflows/release-e2e.yml) runs
 the suite in Chromium on PRs into any branch when they touch `frontend/`,
 `backend/`, `config/keycloak/`, the release Compose file, the runner, its
 orchestration test or the workflow itself. It also supports GitHub’s **Run
-workflow** button (`workflow_dispatch`).
+workflow** button (`workflow_dispatch`). A second leg of the same workflow runs the
+[QA scenario suite](../../../../docs/release/qa-scenarios.md) against this stack.
 
 ## Against a deployed build (REL-QA check 3)
 
@@ -156,7 +157,10 @@ it does not verify the deployed data or sign-in.
 ## What the suite covers
 
 - `smoke.spec.ts`: the home page loads, the seeded series are reachable through
-  the frontend's `/graphql` proxy, and explore search finds one.
+  the frontend's `/graphql` proxy, and explore search finds one. It also looks up
+  the recession indicator (`USREC`) with `seriesByExternalId`. Against a deployed
+  build, that check is skipped when the lookup finds nothing: `USREC` may not be
+  crawled yet, or may not be visible to anonymous readers.
 - `journey.spec.ts`: exit criterion 5's cross-area journey in one
   browser session. Search for GDP, open it, check the chart's newest point,
   apply every transformation and check the value it shows, download the CSV and

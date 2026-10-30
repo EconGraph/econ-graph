@@ -56,12 +56,12 @@ A second run with unchanged inputs should produce no changes.
 
 ## GitHub Actions
 
-`.github/workflows/update-cost-analysis.yml` runs on its daily schedule at
-06:00 UTC, manual dispatch, and relevant pull-request changes.
+`.github/workflows/update-cost-analysis.yml` runs on manual dispatch and
+relevant pull-request changes. It has no schedule.
 
 The validation job runs regression tests, generation, JSON validation, and
-repeatability checks with read-only repository permissions. For scheduled or
-manual runs on main, a separate publishing job receives the validated outputs,
+repeatability checks with read-only repository permissions. For manual runs on
+main, a separate publishing job receives the validated outputs,
 rejects an outdated source revision, and creates or updates the
 `automation/update-cost-analysis` pull request. Only that publishing job has
 `contents: write` and `pull-requests: write`.
