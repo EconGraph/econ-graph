@@ -106,9 +106,12 @@ canonical external ID is `timeseries/{indicator}.{area}`, for example
 `timeseries/ITS_MTV_AX.USA`. Fetching is batched by indicator: one pair of requests serves
 every economy. Discovery lists every economy with at least one value and is complete, so
 series of an economy the WTO stops publishing for an indicator are retired. An indicator is
-never retired: one the WTO no longer lists, or lists with no data at all (an empty `204` or an
-empty `Dataset`), is skipped with a warning and counted in `crawler_curated_missing`, and the
-worker then retires nothing for that discovery.
+never retired: one the WTO no longer lists, or lists without a usable value (an empty `204`, an
+empty `Dataset`, or only rows for another product or partner or for economies the shared
+reference doesn't list), is skipped with a warning and counted in `crawler_curated_missing`,
+and the worker then retires nothing for that discovery. Where a response carries rows for
+Serbia, Montenegro or Sudan under both the WTO's code and the ISO code, the adapter keeps the
+WTO code's rows and logs the dropped code.
 
 Discovery also merges each indicator's name, unit and description into the dataset's
 `indicator` codes, and the WTO's names for the world and the European Union into its `area`

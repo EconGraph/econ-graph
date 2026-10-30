@@ -303,14 +303,26 @@ fn quota_exhaustion_is_rate_limited() {
             retry_after: secs(600)
         }
     );
-    // Days, hours, minutes and seconds.
+    // Days, hours, minutes and seconds; a wait over a day is capped at one.
+    assert_eq!(
+        quota_replenished_in("Quota will be replenished in 1.02:03:04."),
+        Some(std::time::Duration::from_secs(((24 + 2) * 60 + 3) * 60 + 4))
+    );
     let e = classify(CrawlError::Auth(
         "HTTP 403: Out of call volume quota. Quota will be replenished in 1.02:03:04.".into(),
     ));
     assert_eq!(
         e,
         CrawlError::RateLimited {
-            retry_after: secs(((24 + 2) * 60 + 3) * 60 + 4)
+            retry_after: secs(24 * 3600)
+        }
+    );
+    assert_eq!(
+        classify(CrawlError::Auth(
+            "HTTP 403: Out of call volume quota. Quota will be replenished in 05:00:00.".into()
+        )),
+        CrawlError::RateLimited {
+            retry_after: secs(5 * 3600)
         }
     );
     // No usable time: wait an hour. Almost replenished: at least a minute.
@@ -333,6 +345,51 @@ fn quota_exhaustion_is_rate_limited() {
         )),
         CrawlError::RateLimited {
             retry_after: secs(60)
+        }
+    );
+    let quota = |when: &str| {
+        classify(CrawlError::Auth(format!(
+            "HTTP 403: Out of call volume quota. Quota will be replenished in {when}."
+        )))
+    };
+    // Fractional seconds are dropped.
+    assert_eq!(
+        quota("00:10:00.1234567"),
+        CrawlError::RateLimited {
+            retry_after: secs(600)
+        }
+    );
+    assert_eq!(
+        quota("1.00:00:01.5"),
+        CrawlError::RateLimited {
+            retry_after: secs(24 * 3600)
+        }
+    );
+    // Huge waits are capped at a day; ones that overflow u64 seconds count as unstated.
+    assert_eq!(
+        quota("99999.00:00:00"),
+        CrawlError::RateLimited {
+            retry_after: secs(24 * 3600)
+        }
+    );
+    assert_eq!(
+        quota("00:00:00:00"),
+        CrawlError::RateLimited {
+            retry_after: secs(3600)
+        }
+    );
+    assert_eq!(
+        quota_replenished_in("replenished in 18446744073709551615.00:00:00"),
+        None
+    );
+    assert_eq!(
+        quota_replenished_in("replenished in 0.18446744073709551615:00:00"),
+        None
+    );
+    assert_eq!(
+        quota("18446744073709551615.00:00:00"),
+        CrawlError::RateLimited {
+            retry_after: secs(3600)
         }
     );
     let e = classify(CrawlError::Auth("HTTP 401: Access denied".into()));
@@ -388,6 +445,48 @@ fn economy_codes_round_trip_to_areas() {
     assert_eq!(wto_economy_code(areas.by_key("EMU").unwrap()), None);
 }
 
+/// Rows for one country under both its WTO code and its ISO code keep the WTO code's, with
+/// differing values or not, rather than failing the indicator.
+#[test]
+fn a_wto_code_wins_over_the_iso_code_for_the_same_country() {
+    let unpinned = WtoIndicator {
+        id: "T".into(),
+        product: String::new(),
+        partner: String::new(),
+    };
+    for (wto, iso, key) in [
+        ("892", "688", "SRB"),
+        ("893", "499", "MNE"),
+        ("736", "729", "SDN"),
+    ] {
+        for order in [[wto, iso], [iso, wto]] {
+            let body = format!(
+                r#"{{"Dataset": [
+                    {{"ReportingEconomyCode": "{}", "Year": 2024, "Value": {}}},
+                    {{"ReportingEconomyCode": "{}", "Year": 2024, "Value": {}}}
+                ]}}"#,
+                order[0],
+                if order[0] == wto { 1 } else { 2 },
+                order[1],
+                if order[1] == wto { 1 } else { 2 },
+            );
+            let resolved =
+                resolve(&unpinned, parse_rows("t", &body).unwrap(), areas().unwrap()).unwrap();
+            assert_eq!(resolved.len(), 1, "{key}");
+            assert_eq!(resolved[0].0.key, key);
+            assert_eq!(
+                resolved[0].1.points[&date(2024, 1)],
+                dec("1"),
+                "{key} {order:?}"
+            );
+        }
+    }
+    // The ISO code alone still resolves.
+    let body = r#"{"Dataset": [{"ReportingEconomyCode": "688", "Year": 2024, "Value": 3}]}"#;
+    let resolved = resolve(&unpinned, parse_rows("t", body).unwrap(), areas().unwrap()).unwrap();
+    assert_eq!(resolved[0].1.points[&date(2024, 1)], dec("3"));
+}
+
 /// Serbia, Montenegro and Sudan have WTO codes that are not their ISO codes; historical entities
 /// map to no area.
 #[test]
@@ -427,7 +526,17 @@ fn wto_specific_country_codes() {
 /// and reported, so the worker retires none of its series.
 #[tokio::test]
 async fn a_listed_indicator_without_data_is_curated_missing() {
-    for reply in [Reply::status(204), Reply::json_str(r#"{"Dataset": []}"#)] {
+    for reply in [
+        Reply::status(204),
+        Reply::json_str(r#"{"Dataset": []}"#),
+        // Rows, but none the adapter keeps: another product, and an economy outside the table.
+        Reply::json_str(
+            r#"{"Dataset": [
+                {"ReportingEconomyCode": "840", "ProductOrSectorCode": "AG", "PartnerEconomyCode": "000", "Year": 2024, "Value": 1},
+                {"ReportingEconomyCode": "975", "ProductOrSectorCode": "TO", "PartnerEconomyCode": "000", "Year": 2024, "Value": 2}
+            ]}"#,
+        ),
+    ] {
         let mock = MockSource::start().await;
         mock.mount(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS))
             .await;

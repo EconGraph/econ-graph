@@ -50,7 +50,8 @@
 //! Discovery makes both requests for each listed indicator and lists every economy with at least
 //! one value; it is complete ([`SourceAdapter::discovery_is_complete`]), so series of an economy
 //! the WTO stops publishing for an indicator are retired. An indicator the WTO no longer lists, or
-//! lists with no data at all (a `204` or an empty `Dataset`), is skipped and reported by
+//! lists with no usable value (a `204`, an empty `Dataset`, or no row [`resolve`] keeps), is
+//! skipped and reported by
 //! [`SourceAdapter::curated_missing`] instead, so the worker retires none of its series (nor
 //! anything else in that discovery). Fetching is batched by indicator
 //! ([`SourceAdapter::batch_key`]): one pair of requests serves every economy of an indicator.
@@ -325,16 +326,19 @@ impl SourceAdapter for WtoAdapter {
                 Err(e) => return Err(e),
             };
             let rows = self.fetch_rows(ctx, key, indicator, None).await?;
-            if rows.is_empty() {
-                // Listed but without data for any economy: likely a passing gap upstream, or a
-                // product or partner the WTO no longer publishes. Retiring every series of the
-                // indicator on that would be wrong either way.
+            let resolved = resolve(indicator, rows, areas)?;
+            if resolved.is_empty() {
+                // Listed but without a value for any economy we keep (no rows at all, or only
+                // rows for another product or partner, or for economies the country table
+                // doesn't list): likely a passing gap upstream, or a product or partner the WTO
+                // no longer publishes. Retiring every series of the indicator on that would be
+                // wrong either way.
                 tracing::warn!(indicator = %indicator.id,
-                    "WTO lists this indicator of wto_indicators.csv but returned no data; skipping it");
+                    "WTO lists this indicator of wto_indicators.csv but returned no usable data; skipping it");
                 missing.push(indicator.id.clone());
                 continue;
             }
-            for (area, series) in resolve(indicator, rows, areas)? {
+            for (area, series) in resolved {
                 let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
                 let meta = series_metadata(&info, indicator, area, &series);
                 if area.kind == AreaKind::Aggregate && !series.economy_name.is_empty() {
@@ -487,8 +491,6 @@ fn api_key(ctx: &CrawlCtx) -> Result<&str, CrawlError> {
         .ok_or_else(|| CrawlError::Auth(MISSING_KEY.into()))
 }
 
-/// The API portal answers an exhausted call quota with `403` ("Out of call volume quota. Quota
-/// will be replenished in ..."): that is throttling, retried later, not a bad key.
 /// `e` with every occurrence of `key` in its message replaced.
 fn redact_key(e: CrawlError, key: &str) -> CrawlError {
     if key.is_empty() {
@@ -512,14 +514,16 @@ fn redact_key(e: CrawlError, key: &str) -> CrawlError {
     }
 }
 
-/// The job is retried once the quota is replenished, as the message says (at least a minute
-/// later), or after [`QUOTA_RETRY_FLOOR`] when it doesn't say.
+/// The API portal answers an exhausted call quota with `403` ("Out of call volume quota. Quota
+/// will be replenished in ..."): that is throttling, retried later, not a bad key. The job is
+/// retried once the quota is replenished, as the message says, kept between a minute and
+/// [`QUOTA_RETRY_MAX`], or after [`QUOTA_RETRY_FLOOR`] when it doesn't say.
 fn classify(e: CrawlError) -> CrawlError {
     match e {
         CrawlError::Auth(m) if m.to_ascii_lowercase().contains("quota") => {
             CrawlError::RateLimited {
                 retry_after: Some(quota_replenished_in(&m).map_or(QUOTA_RETRY_FLOOR, |d| {
-                    d.max(std::time::Duration::from_secs(60))
+                    d.clamp(std::time::Duration::from_secs(60), QUOTA_RETRY_MAX)
                 })),
             }
         }
@@ -530,7 +534,12 @@ fn classify(e: CrawlError) -> CrawlError {
 /// How long to wait after an exhausted quota whose message gives no replenishment time.
 const QUOTA_RETRY_FLOOR: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
-/// The wait in "Quota will be replenished in HH:MM:SS" (or `D.HH:MM:SS`), if the message has it.
+/// The longest wait for a quota, whatever the message says: a day.
+const QUOTA_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// The wait in "Quota will be replenished in HH:MM:SS" (also `D.HH:MM:SS`, and fractional
+/// seconds `HH:MM:SS.fff`, which are dropped), if the message has it and it fits a `u64` of
+/// seconds.
 fn quota_replenished_in(message: &str) -> Option<std::time::Duration> {
     const MARKER: &str = "replenished in ";
     let start = message.find(MARKER)? + MARKER.len();
@@ -539,16 +548,28 @@ fn quota_replenished_in(message: &str) -> Option<std::time::Duration> {
         .take_while(|c| c.is_ascii_digit() || *c == ':' || *c == '.')
         .collect();
     let text = text.trim_end_matches('.');
+    // A leading `D.` is days; a `.` after the seconds starts their fraction.
     let (days, clock) = match text.split_once('.') {
-        Some((d, rest)) => (d.parse::<u64>().ok()?, rest),
-        None => (0, text),
+        Some((d, rest)) if !d.contains(':') => (d.parse::<u64>().ok()?, rest),
+        _ => (0, text),
     };
+    let clock = clock.split('.').next()?;
     let parts: Vec<u64> = clock
         .split(':')
         .map(|p| p.parse().ok())
         .collect::<Option<_>>()?;
     let [h, m, s] = parts[..] else { return None };
-    (m < 60 && s < 60).then(|| std::time::Duration::from_secs(((days * 24 + h) * 60 + m) * 60 + s))
+    if m >= 60 || s >= 60 {
+        return None;
+    }
+    let secs = days
+        .checked_mul(24)?
+        .checked_add(h)?
+        .checked_mul(60)?
+        .checked_add(m)?
+        .checked_mul(60)?
+        .checked_add(s)?;
+    Some(std::time::Duration::from_secs(secs))
 }
 
 /// The `timeseries` definition from `datasets/wto.toml`.
@@ -855,7 +876,9 @@ fn wto_economy_code(area: &Area) -> Option<String> {
 
 /// `rows` grouped by area of the country table, sorted by area key, keeping only rows of the
 /// list's product and partner. Economies the table does not know are logged once and dropped.
-/// Two different values for one area and date are a `Parse` error.
+/// When rows for a country in [`NON_ISO_COUNTRIES`] come under both its WTO code and its ISO code,
+/// only the WTO code's rows are kept, and the dropped code is logged once. Two different values
+/// for one area and date are otherwise a `Parse` error.
 fn resolve<'a>(
     indicator: &WtoIndicator,
     rows: Vec<Row>,
@@ -863,7 +886,14 @@ fn resolve<'a>(
 ) -> Result<Vec<(&'a Area, EconomySeries)>, CrawlError> {
     let mut out: BTreeMap<&str, (&Area, EconomySeries)> = BTreeMap::new();
     let mut unknown = BTreeSet::new();
+    let mut duplicate = BTreeSet::new();
     let mut other_selection = 0usize;
+    // The WTO codes of NON_ISO_COUNTRIES that this response uses, by area key.
+    let preferred: BTreeMap<&str, &str> = NON_ISO_COUNTRIES
+        .iter()
+        .filter(|(code, _)| rows.iter().any(|r| r.economy == *code))
+        .map(|(code, key)| (*key, *code))
+        .collect();
     for row in rows {
         let differs = |want: &str, got: &str| !want.is_empty() && !got.is_empty() && want != got;
         if differs(&indicator.product, &row.product) || differs(&indicator.partner, &row.partner) {
@@ -874,6 +904,13 @@ fn resolve<'a>(
             unknown.insert(format!("{} {}", row.economy, row.economy_name));
             continue;
         };
+        if preferred
+            .get(area.key.as_str())
+            .is_some_and(|code| *code != row.economy)
+        {
+            duplicate.insert(format!("{} ({})", row.economy, area.key));
+            continue;
+        }
         let (_, series) = out.entry(area.key.as_str()).or_insert_with(|| {
             (
                 area,
@@ -905,6 +942,13 @@ fn resolve<'a>(
             count = unknown.len(),
             economies = ?unknown,
             "WTO rows for economies not in the country table skipped"
+        );
+    }
+    if !duplicate.is_empty() {
+        tracing::warn!(
+            indicator = %indicator.id,
+            economies = ?duplicate,
+            "WTO rows under a country's ISO code dropped in favour of its WTO code"
         );
     }
     Ok(out.into_values().collect())
