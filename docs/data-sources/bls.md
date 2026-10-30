@@ -156,7 +156,8 @@ dataset dimensions are defined in
 consists of the two-letter survey prefix followed by fixed-width fields that become
 dimension values. A series from any other survey, or whose ID does not fit its survey's
 layout, belongs to the dimensionless `other` dataset, keyed by its BLS ID like a FRED
-series.
+series. So do the PPI special composites `WPS01PLUS02`, `WPS03T15M05` and `WPS03THRU15`
+(and their `WPU` versions), whose groups (`PFF`, `ILF`, `IND`) are not in their IDs.
 
 For CPI (CU), ID `CUUR0000SA0` has the following mapping:
 
@@ -175,7 +176,7 @@ The other layouts split IDs the same way:
 | LN | `LNS14000000` | `seasonal` (1), `series_code` (8) |
 | LA | `LASST060000000000003` | `seasonal` (1), `area` (15), `measure` (2) |
 | JT | `JTS000000000000000JOR` | `seasonal` (1), `industry` (6), `state` (2), `area` (5), `size_class` (2), `data_element` (2), `rate_level` (1) |
-| WP | `WPSFD4`, `WPU01` | `seasonal` (1), `group` (2), `item` (the rest, empty for a group index such as `WPU01`) |
+| WP | `WPSFD4`, `WPSID61`, `WPU01` | `seasonal` (1), `group` (2, or 3 for the intermediate demand groups `ID5` and `ID6`), `item` (the rest, empty for a group index such as `WPU01`) |
 | EI | `EIUCOCHNTOT`, `EIUIR` | `seasonal` (1), `index` (2), `item` (the rest, empty for an index's all-commodities series such as `EIUIR`) |
 
 Annual averages are excluded from this mapping. Keeping their separate period codes
