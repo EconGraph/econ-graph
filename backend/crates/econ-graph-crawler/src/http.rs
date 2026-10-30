@@ -283,9 +283,10 @@ impl HttpFetcher {
         Ok(self.execute(&target).await?.body)
     }
 
-    /// [`get_text`](Self::get_text) with a per-attempt timeout of at least `timeout` (never less
-    /// than [`HttpConfig::timeout`]), for a source endpoint known to take longer than ordinary
-    /// requests to produce one large response.
+    /// [`get_text`](Self::get_text) with a timeout of at least `timeout` (never less than
+    /// [`HttpConfig::timeout`]), for a source endpoint known to take longer than ordinary requests
+    /// to produce one large response. Made once, with no in-process retry: a failure goes back to
+    /// the queue rather than holding the source's concurrency slot for several long attempts.
     pub async fn get_text_slow(
         &self,
         source: SourceId,
@@ -295,6 +296,7 @@ impl HttpFetcher {
     ) -> Result<String, CrawlError> {
         let mut target = Target::new(source, Method::GET, url, query, None, false)?;
         target.timeout = Some(timeout.max(self.inner.config.timeout));
+        target.extra_attempts = 0;
         Ok(self.execute(&target).await?.body)
     }
 
@@ -1208,6 +1210,8 @@ mod tests {
             matches!(&err, CrawlError::Transient(m) if m.contains("timed out after 100ms")),
             "{err:?}"
         );
+        // No in-process retry: one request each.
+        assert_eq!(hits(&server).await, 2);
     }
 
     #[tokio::test]
