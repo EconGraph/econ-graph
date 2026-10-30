@@ -65,12 +65,80 @@ describe('buildSeriesCsv', () => {
         'Units,Billions of Chained 2017 Dollars',
         'Transformation,Year-over-Year % Change',
         'Retrieved at,2026-09-26T12:30:00.000Z',
+        'Derived values,"Values show the Year-over-Year % Change, computed by EconGraph from data published by FRED; they are not figures published by FRED."',
         'date,value',
         '2024-01-01,2.5',
         '2024-04-01,-0.125',
         '',
       ].join('\r\n')
     );
+  });
+
+  it("writes the source's citation, notice, retrieval date and terms after the metadata", () => {
+    const csv = buildSeriesCsv({
+      ...base,
+      source: 'Bureau of Labor Statistics (BLS)',
+      notice: {
+        citation: 'Source: U.S. Bureau of Labor Statistics',
+        notice:
+          'BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov.',
+        termsUrl: 'https://www.bls.gov/developers/termsOfService.htm',
+        retrievalDateRequired: true,
+      },
+      fetchedFromSource: '2026-10-29T08:15:00Z',
+    });
+    expect(csv.split('\r\n').slice(5, 10)).toEqual([
+      'Citation,Source: U.S. Bureau of Labor Statistics',
+      'Notice,BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov.',
+      'Retrieved from source,2026-10-29',
+      'Terms of use,https://www.bls.gov/developers/termsOfService.htm',
+      'date,value',
+    ]);
+  });
+
+  it('says the retrieval date is not recorded when the series has none', () => {
+    const rows = buildSeriesCsv({
+      ...base,
+      notice: {
+        citation: null,
+        notice: 'BLS.gov cannot vouch.',
+        termsUrl: 'https://www.bls.gov/developers/termsOfService.htm',
+        retrievalDateRequired: true,
+      },
+      fetchedFromSource: null,
+    }).split('\r\n');
+    expect(rows).toContain('Retrieved from source,not recorded');
+    expect(rows.some(r => r.startsWith('Citation'))).toBe(false);
+  });
+
+  it('keeps the trademark sign and quotes a notice with commas or quotes', () => {
+    const csv = buildSeriesCsv({
+      ...base,
+      notice: {
+        citation: 'Source: FHFA HPI®',
+        notice: 'A notice, with "quotes".',
+        termsUrl: 'https://www.fhfa.gov/about/fhfa-policies/api-terms-of-service',
+        retrievalDateRequired: false,
+      },
+    });
+    const rows = csv.split('\r\n');
+    expect(rows).toContain('Citation,Source: FHFA HPI®');
+    expect(rows).toContain('Notice,"A notice, with ""quotes""."');
+    expect(rows.some(r => r.startsWith('Retrieved from source'))).toBe(false);
+  });
+
+  it('writes no notice rows for a source without a notice, and no derived row for levels', () => {
+    for (const notice of [null, undefined]) {
+      const rows = buildSeriesCsv({ ...base, notice }).split('\r\n');
+      expect(rows.slice(0, 6)).toEqual([
+        'Title,Real Gross Domestic Product',
+        'Source,FRED',
+        'Units,Billions of Chained 2017 Dollars',
+        'Transformation,None',
+        'Retrieved at,2026-09-26T12:30:00.000Z',
+        'date,value',
+      ]);
+    }
   });
 
   it('writes the exact decimal the API sent, keeping digits a double loses', () => {

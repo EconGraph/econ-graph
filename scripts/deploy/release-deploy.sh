@@ -18,7 +18,8 @@
 #
 # Usage:
 #   scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N [--cluster NAME] [--dry-run] [--yes]
-#       [--confirm-production UID-PREFIX] [--change-public-host] [--report FILE]
+#       [--confirm-production UID-PREFIX] [--change-public-host] [--change-tls-issuer]
+#       [--report FILE]
 #   scripts/deploy/release-deploy.sh --tag vX.Y.Z ...
 #
 #   --tag TAG      the release candidate to deploy. A final tag vX.Y.Z deploys
@@ -50,6 +51,11 @@
 #   --change-public-host
 #                  deploy a PUBLIC_HOST other than the one the production
 #                  cluster serves now (or one where it serves none)
+#   --change-tls-issuer
+#                  issue the gateway certificate from GATEWAY_TLS_ISSUER in the
+#                  environment, else the deploy config's, when it differs from the
+#                  certificate's current issuer (passed to deploy.sh as
+#                  GATEWAY_TLS_ISSUER); without it such a change is refused
 #   --report FILE  append one line per step (step=NAME status=ok|failed|dry-run,
 #                  and unchecked=N on a verify that left N things unchecked),
 #                  the backups taken (backup= and keycloak_backup=), on a
@@ -67,8 +73,9 @@
 #     every step, on context kind-<cluster>. On the production host plain
 #     `kubectl` is the MicroK8s snap wrapper.
 #   - PUBLIC_HOST comes from the host's deploy config,
-#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV
-#     names another file), a line PUBLIC_HOST=<host name> (the last one, when
+#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_CONFIG_DIR
+#     names another directory, ECONGRAPH_DEPLOY_ENV another file; see
+#     lib/deploy-config.sh), a line PUBLIC_HOST=<host name> (the last one, when
 #     there are several); the file is read, not sourced, and the name is
 #     lowercased. On the production cluster it is econgraph.com. A cluster
 #     marked production (scripts/deploy/mark-production-cluster.sh) with no
@@ -79,6 +86,15 @@
 #     (deploy.sh would refuse it after the load and backups), a cluster whose
 #     marker can't be read, and a PUBLIC_HOST in the environment that differs
 #     from the config.
+#   - With a public host, the gateway certificate's ClusterIssuer is chosen as
+#     deploy.sh will (tls_issuer_choose in lib/deploy-config.sh): GATEWAY_TLS_ISSUER
+#     from the environment, else a GATEWAY_TLS_ISSUER= line in the same config when
+#     it matches the certificate's current issuer or there is no certificate, else
+#     the current issuer, else econ-graph-selfsigned. A configured issuer that
+#     differs from the current one, from the config or the environment, is refused
+#     without --change-tls-issuer, so a
+#     stale or mistyped line never re-issues the certificate from an issuer the
+#     tunnel rejects. The plan shows the current and the new issuer.
 #   - It shows the cluster's identity and the plan, and asks once (--yes
 #     answers, except on a cluster marked production, which needs the UID
 #     prefix typed or --confirm-production; a dry run doesn't ask).
@@ -116,7 +132,7 @@
 # scales down a running worker, deploy.sh applies, verify restarts and checks),
 # so after a failure, fix the cause and run the same command again.
 #
-# Environment: ECONGRAPH_DEPLOY_ENV, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
+# Environment: ECONGRAPH_CONFIG_DIR, ECONGRAPH_DEPLOY_ENV, GATEWAY_TLS_ISSUER, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
 # (the load records and this script's), ECONGRAPH_BACKUP_ROOT.
 
 set -euo pipefail
@@ -132,6 +148,7 @@ ASSUME_YES=false
 REPORT=""
 CONFIRM_PRODUCTION=""
 CHANGE_PUBLIC_HOST=false
+CHANGE_TLS_ISSUER=false
 CLUSTER="${KIND_CLUSTER:-$DEFAULT_CLUSTER}"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -154,6 +171,7 @@ while [ $# -gt 0 ]; do
             fi
             CONFIRM_PRODUCTION="$2"; shift 2 ;;
         --change-public-host) CHANGE_PUBLIC_HOST=true; shift ;;
+        --change-tls-issuer) CHANGE_TLS_ISSUER=true; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         --yes | -y) ASSUME_YES=true; shift ;;
         -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
@@ -329,6 +347,36 @@ if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] &
 fi
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
+# The gateway certificate's issuer, only with a public host (without one the
+# certificate is removed and the config line is not read).
+if [ -n "$PUBLIC_HOST" ]; then
+    current_issuer="$(gateway_tls_current_issuer)" ||
+        die "could not read the issuer of certificate econ-graph-tls on ${CONTEXT}"
+    # An inherited GATEWAY_TLS_ISSUER (a shell left over from the cutover) must not
+    # change a live certificate's issuer silently: as for PUBLIC_HOST, a change needs
+    # the flag.
+    if [ -n "${GATEWAY_TLS_ISSUER:-}" ] && [ -n "$current_issuer" ] &&
+        [ "$GATEWAY_TLS_ISSUER" != "$current_issuer" ] && [ "$CHANGE_TLS_ISSUER" != true ]; then
+        die "GATEWAY_TLS_ISSUER=${GATEWAY_TLS_ISSUER} is set in the environment, but certificate econ-graph-tls on ${CONTEXT} is issued by ${current_issuer}. If ${GATEWAY_TLS_ISSUER} is right, pass --change-tls-issuer; otherwise unset GATEWAY_TLS_ISSUER"
+    fi
+    if [ "$CHANGE_TLS_ISSUER" = true ] && [ -z "${GATEWAY_TLS_ISSUER:-}" ]; then
+        GATEWAY_TLS_ISSUER="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" ||
+            die "could not read GATEWAY_TLS_ISSUER from ${DEPLOY_ENV}"
+        [ -n "$GATEWAY_TLS_ISSUER" ] ||
+            die "--change-tls-issuer needs a GATEWAY_TLS_ISSUER= line in ${DEPLOY_ENV}"
+        # Passed to deploy.sh as an explicit choice.
+        export GATEWAY_TLS_ISSUER
+    fi
+    tls_issuer_choose "$current_issuer" ||
+        die "the gateway certificate's issuer could not be chosen (above); nothing was changed"
+    if [ "$TLS_ISSUER" = "$current_issuer" ]; then
+        echo "  TLS issuer      ${TLS_ISSUER} (unchanged; from ${TLS_ISSUER_SOURCE})"
+    else
+        echo "  TLS issuer      ${current_issuer:-(no certificate)} → ${TLS_ISSUER} (from ${TLS_ISSUER_SOURCE})"
+    fi
+elif [ "$CHANGE_TLS_ISSUER" = true ]; then
+    die "--change-tls-issuer needs a public host: without one there is no certificate"
+fi
 
 # --- what earlier runs of this tag recorded -------------------------------------------
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"

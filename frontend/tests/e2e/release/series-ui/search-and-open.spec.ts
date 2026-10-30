@@ -4,6 +4,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 
 // Live QA: search for a real series by name and open its page from the results.
@@ -72,7 +73,12 @@ test.describe('browse a source', () => {
     await browseFredFromSources(page);
 
     await expect(page.getByText(/series, by title/)).toBeVisible();
-    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.locator('.MuiCard-root').first()).toBeVisible();
+    // The listing comes 20 at a time by title: the fixtures' few FRED series include GDP on the
+    // first page, a deployed catalog's first page is whatever sorts first.
+    if (!DEPLOYED) {
+      await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    }
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
 

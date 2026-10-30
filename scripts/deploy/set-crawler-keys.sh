@@ -44,7 +44,8 @@
 # in scripts/deploy/lib/public-host.sh, as deploy.sh renders it), so the realm
 # keeps that host's redirect URIs and web origins. A PUBLIC_HOST in the
 # environment, or in the host's deploy config read as release-deploy.sh reads
-# it (${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env), must name the host
+# it (ECONGRAPH_DEPLOY_ENV, else ECONGRAPH_CONFIG_DIR/deploy.env, else
+# ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env; see lib/deploy-config.sh), must name the host
 # the cluster serves; and a cluster marked production that serves no public
 # host (its routes missing after a recreate or a partial deploy) is refused,
 # since the realm would then lose the public redirect URIs. Every refusal

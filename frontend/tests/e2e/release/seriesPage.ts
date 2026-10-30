@@ -151,6 +151,40 @@ function csvTextField(text: string) {
   return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }
 
+/** Labels of the rows between a series CSV's metadata and its data (src/utils/seriesCsv.ts). */
+const NOTICE_LABELS = new Set([
+  'Derived values',
+  'Citation',
+  'Notice',
+  'Retrieved from source',
+  'Terms of use',
+]);
+
+/**
+ * Split a series CSV's lines into its five metadata rows, the source-notice rows after them,
+ * and the data rows after the `date,value` header. Every seeded source has a notice (ECO-767),
+ * so the notice rows must include `Notice` and `Terms of use`, and hold nothing else.
+ * @param lines - The file's lines, byte-order mark removed.
+ * @returns The metadata, notice and data rows.
+ */
+export function splitSeriesCsv(lines: string[]): {
+  meta: string[];
+  notice: string[];
+  data: string[];
+} {
+  const header = lines.indexOf('date,value');
+  expect(header, 'the date,value header follows the metadata').toBeGreaterThan(4);
+  const notice = lines.slice(5, header);
+  const labels = notice.map(line => line.slice(0, line.indexOf(',')));
+  expect(
+    labels.filter(label => !NOTICE_LABELS.has(label)),
+    'unexpected header rows'
+  ).toEqual([]);
+  expect(labels).toContain('Notice');
+  expect(labels).toContain('Terms of use');
+  return { meta: lines.slice(0, 5), notice, data: lines.slice(header + 1) };
+}
+
 /**
  * Downloads the series page's CSV of levels and checks its file name (seriesCsvFileName's rule)
  * and its metadata header.
@@ -180,7 +214,6 @@ export async function downloadLevelsCsv(
     'Transformation,None',
   ]);
   expect(lines[4]).toMatch(/^Retrieved at,/);
-  expect(lines[5]).toBe('date,value');
   // Data rows hold only ISO dates and plain numbers, so a comma always separates the two.
-  return lines.slice(6).map(line => line.split(','));
+  return splitSeriesCsv(lines).data.map(line => line.split(','));
 }

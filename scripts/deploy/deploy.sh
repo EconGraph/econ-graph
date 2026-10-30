@@ -403,7 +403,8 @@ kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-ca
 # The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
 # public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
 if [ "$DRY_RUN" = true ]; then
-  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none})"
+  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none};" \
+    "certificate issuer: GATEWAY_TLS_ISSUER, else the host's deploy config, else the current one)"
 else
   apply_public_edge
 fi

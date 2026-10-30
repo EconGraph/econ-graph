@@ -10,7 +10,7 @@ import { feature } from 'topojson-client';
 import { loadWorldAtlas } from '../worldAtlas';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import WorldMapTab from '../WorldMapTab';
 import { NO_DATA_FILL } from '../mapFormat';
@@ -152,11 +152,24 @@ beforeEach(() => {
   });
 });
 
-const renderTab = () => {
+/** Shows the router's current URL, and stands in for the browser's Back button. */
+const RouterChrome: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid='url'>{`${location.pathname}${location.search}`}</output>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+};
+
+const renderTab = (url = '/global') => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/global']}>
+      <MemoryRouter initialEntries={[url]}>
+        <RouterChrome />
         <Routes>
           <Route path='/global' element={<WorldMapTab />} />
           <Route path='/series/:id' element={<div>series page</div>} />
@@ -393,6 +406,55 @@ describe('WorldMapTab', () => {
     expect(await screen.findByText('series page')).toBeInTheDocument();
   });
 
+  // ECO-732: Back from a country's series reset the map to GDP per capita.
+  it('keeps the picked indicator in the URL, so Back from a country returns to it', async () => {
+    renderTab();
+    await waitForColors();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('url')).toHaveTextContent('/global?indicator=FP.CPI.TOTL.ZG');
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('Unit: %');
+    }, WAIT);
+
+    fireEvent.click(countryPath('840'));
+    expect(await screen.findByText('series page')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'Inflation, consumer prices (annual %)'
+    );
+    expect(screen.getByTestId('url')).toHaveTextContent('/global?indicator=FP.CPI.TOTL.ZG');
+  });
+
+  it("opens on the URL's indicator, without loading GDP per capita first", async () => {
+    renderTab('/global?indicator=FP.CPI.TOTL.ZG');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('Unit: %');
+    }, WAIT);
+    expect(screen.getByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'Inflation, consumer prices (annual %)'
+    );
+    const requested = mockGraphQL.mock.calls
+      .filter(([request]) => request.operationName === 'GetMapCrossSection')
+      .map(([request]) => request.variables?.filter[0].value);
+    expect(requested).toEqual(['FP.CPI.TOTL.ZG']);
+  });
+
+  it('falls back to GDP per capita for an indicator the dataset does not have', async () => {
+    renderTab('/global?indicator=NOT.AN.INDICATOR');
+    await waitForColors();
+
+    expect(screen.getByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'GDP per capita (current US$)'
+    );
+    const requested = mockGraphQL.mock.calls
+      .filter(([request]) => request.operationName === 'GetMapCrossSection')
+      .map(([request]) => request.variables?.filter[0].value);
+    expect(requested).toEqual(['NY.GDP.PCAP.CD']);
+  });
+
   it('ignores clicks on countries without data', async () => {
     renderTab();
     await waitForColors();
@@ -483,6 +545,52 @@ describe('WorldMapTab', () => {
     expect(legend).toHaveTextContent('3 countries with data.');
     expect(legend).not.toHaveTextContent('Unit:');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it("shows the World Bank's attribution, notice and terms link", async () => {
+    mockGraphQL.mockImplementation(async request => {
+      if (request.operationName === 'GetMapDatasets') {
+        return {
+          data: {
+            datasets: [
+              {
+                ...DATASET,
+                source: {
+                  name: 'World Bank Open Data',
+                  notice: {
+                    citation: 'The World Bank: World Development Indicators',
+                    notice: 'World Bank data are licensed under CC BY 4.0.',
+                    termsUrl: 'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets',
+                    retrievalDateRequired: false,
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { data: { crossSection: [] } };
+    });
+    renderTab();
+
+    const notice = await screen.findByTestId('source-notice', {}, WAIT);
+    expect(notice).toHaveTextContent('The World Bank: World Development Indicators');
+    expect(notice).toHaveTextContent('World Bank data are licensed under CC BY 4.0.');
+    expect(within(notice).getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
+      'href',
+      'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets'
+    );
+    // The caption doesn't repeat the citation the notice carries.
+    expect(screen.getAllByText(/The World Bank: World Development Indicators/)).toHaveLength(1);
+  });
+
+  it('falls back to the World Bank citation in the caption without a source notice', async () => {
+    renderTab();
+
+    expect(
+      await screen.findByText(/The World Bank: World Development Indicators\./, {}, WAIT)
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('source-notice')).not.toBeInTheDocument();
   });
 
   it('says so when the WDI dataset is not loaded', async () => {

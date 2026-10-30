@@ -37,11 +37,15 @@ and configure it in the worker's environment.
 
 [`CensusAdapter`](../../backend/crates/econ-graph-crawler/src/sources/census.rs) implements
 `SourceAdapter`. Its `discover(&ctx)` method reads the variable and geography metadata,
-selects variables using economic keywords in their names or labels, and crosses them with
+selects the measures, and crosses them with
 the supported geographic levels. When the metadata lists `us`, discovery produces one
 national series per selected variable. When it lists `state`, discovery reads the state
 reference file and produces one series per variable for each of the 50 states and DC.
-County, metropolitan-area, and other geographic levels are skipped.
+County, metropolitan-area, and other geographic levels are skipped. A measure is a
+variable with a numeric `predicateType` (`int` or `float`) whose name or label matches an
+economic keyword. Classification codes such as `EAGE` and `EMPSZES` are `string`
+variables and never become series; see the
+[Census BDS data-source page](../data-sources/census-bds.md#what-we-fetch-today).
 
 Discovery generates canonical external IDs and returns `DiscoveredSeries` metadata; the
 worker records that catalog in `series_metadata`. A later fetch supplies observations,

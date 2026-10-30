@@ -94,6 +94,11 @@ WTO's `ValueFlagCode` are also not stored as observation attributes. WDI and WTO
 attributes in their dataset contracts, but those declarations do not populate them. FRED has no per-observation flags;
 its `"."` missing-value marker becomes `NULL`.
 
+## Attribution
+
+The citation and notice each source's terms require, and where they appear, are in
+[Source notices](source-notices.md).
+
 ## Related notes
 
 - [BLS API experimental findings](../technical/BLS_API_EXPERIMENTAL_FINDINGS.md)
