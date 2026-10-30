@@ -176,7 +176,7 @@ RSAFS
 RSXFS
 #
 # --- Business cycle ---
-# NBER-based recession indicator (1 in recession months), the source of chart recession shading.
+# NBER-based recession indicator: 1 in recession months, 0 otherwise.
 USREC
 #
 # --- Regional headline: state unemployment rate (seasonally adjusted), one per state and DC ---

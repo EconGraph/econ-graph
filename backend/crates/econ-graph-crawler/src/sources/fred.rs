@@ -1968,7 +1968,7 @@ mod tests {
         }
     }
 
-    /// The recession indicator behind chart recession shading: `discover()` finds `USREC` in the
+    /// The NBER recession indicator: `discover()` finds `USREC` in the
     /// shipped list, and the copyright safety net keeps it given FRED's real notes for it.
     #[tokio::test]
     async fn discover_keeps_usrec_with_its_real_notes() {
