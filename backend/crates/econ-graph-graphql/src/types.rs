@@ -474,6 +474,7 @@ impl DataSourceType {
     ) -> Result<SeriesConnection> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
+        crate::graphql::catalogs::require_source(ctx, source_uuid).await?;
 
         use diesel::{ExpressionMethods, QueryDsl};
         use diesel_async::RunQueryDsl;
@@ -527,6 +528,7 @@ impl DataSourceType {
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
+        crate::graphql::catalogs::require_source(ctx, source_uuid).await?;
 
         use diesel::{ExpressionMethods, QueryDsl};
         use diesel_async::RunQueryDsl;

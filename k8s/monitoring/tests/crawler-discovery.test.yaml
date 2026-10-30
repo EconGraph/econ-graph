@@ -11,9 +11,9 @@ tests:
   # FRED resolves every curated id and never fires. A fixed list (BEA back to 0 at 1h) clears it.
   - interval: 5m
     input_series:
-      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-1"}'
+      - series: 'crawler_curated_missing{kubernetes_namespace="econ-graph", source="BEA", pod="crawler-worker-1"}'
         values: '0 0 1x10 0x12'
-      - series: 'crawler_curated_missing{source="FRED", pod="crawler-worker-1"}'
+      - series: 'crawler_curated_missing{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
         values: '0x24'
     alert_rule_test:
       - eval_time: 20m
@@ -37,9 +37,9 @@ tests:
   # discovery reports 0.
   - interval: 1h
     input_series:
-      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-1"}'
+      - series: 'crawler_curated_missing{kubernetes_namespace="econ-graph", source="BEA", pod="crawler-worker-1"}'
         values: '0 1 1 stale'
-      - series: 'crawler_curated_missing{source="BEA", pod="crawler-worker-2"}'
+      - series: 'crawler_curated_missing{kubernetes_namespace="econ-graph", source="BEA", pod="crawler-worker-2"}'
         values: '_x150 0'
     alert_rule_test:
       - eval_time: 2h30m

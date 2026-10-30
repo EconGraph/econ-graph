@@ -30,7 +30,8 @@
 use crate::DEFAULT_REGISTRY;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
+    Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Registry,
 };
 
 /// Comprehensive metrics collection for web crawlers
@@ -603,6 +604,8 @@ pub static CRAWLER_CATALOG_METRICS: Lazy<CrawlerCatalogMetrics> = Lazy::new(|| {
 
 /// Refresh scheduler activity. Counters have bounded registry-source and job-kind labels.
 pub struct CrawlerSchedulerMetrics {
+    /// Whether this worker starts the automatic refresh scheduler (1 enabled, 0 disabled).
+    pub enabled: IntGauge,
     /// Scheduling passes started, including idle passes and passes that later fail.
     pub ticks_total: IntCounterVec,
     /// Jobs actually inserted (duplicate active jobs are not counted).
@@ -623,6 +626,13 @@ impl CrawlerSchedulerMetrics {
             registry.register(Box::new(value.clone()))?;
             Ok(value)
         };
+        let enabled = IntGauge::new(
+            "crawler_scheduler_enabled",
+            "Whether this worker starts the automatic refresh scheduler (1 enabled, 0 disabled)",
+        )?;
+        // Fail open until startup configuration explicitly selects static mode.
+        enabled.set(1);
+        registry.register(Box::new(enabled.clone()))?;
         let last_discovery_success_timestamp_seconds = GaugeVec::new(
             Opts::new(
                 "crawler_scheduler_last_discovery_success_timestamp_seconds",
@@ -632,6 +642,7 @@ impl CrawlerSchedulerMetrics {
         )?;
         registry.register(Box::new(last_discovery_success_timestamp_seconds.clone()))?;
         Ok(Self {
+            enabled,
             ticks_total: counter(
                 "crawler_scheduler_ticks_total",
                 "Scheduling passes started, including idle and failed passes, by source and kind",
@@ -658,6 +669,7 @@ pub static CRAWLER_SCHEDULER_METRICS: Lazy<CrawlerSchedulerMetrics> = Lazy::new(
 mod queue_metrics_tests {
     use super::*;
 
+    /// Registers queue families and verifies that a completed job can be recorded.
     #[test]
     fn queue_metrics_register_and_record() {
         let registry = Registry::new();
@@ -673,6 +685,7 @@ mod queue_metrics_tests {
         assert!(names.contains(&"crawler_queue_items".to_string()));
     }
 
+    /// Registers each per-source coverage family exposed by the worker.
     #[test]
     fn coverage_metrics_register() {
         let registry = Registry::new();
@@ -700,6 +713,27 @@ mod queue_metrics_tests {
         }
     }
 
+    /// Verifies both scheduler modes are scrapeable before any jobs or scheduler ticks.
+    #[test]
+    fn scheduler_mode_is_exposed_when_no_jobs_have_run() {
+        use prometheus::Encoder;
+        let registry = Registry::new();
+        let metrics = CrawlerSchedulerMetrics::new(&registry).unwrap();
+        assert_eq!(metrics.enabled.get(), 1);
+        for enabled in [false, true] {
+            metrics.enabled.set(i64::from(enabled));
+            let mut encoded = Vec::new();
+            prometheus::TextEncoder::new()
+                .encode(&registry.gather(), &mut encoded)
+                .unwrap();
+            let body = String::from_utf8(encoded).unwrap();
+            assert!(body
+                .lines()
+                .any(|line| line == format!("crawler_scheduler_enabled {}", i64::from(enabled))));
+        }
+    }
+
+    /// Registers the upstream catalog-drift gauge for a source.
     #[test]
     fn discovery_metrics_register() {
         let registry = Registry::new();

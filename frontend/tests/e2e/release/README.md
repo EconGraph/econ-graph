@@ -1,15 +1,24 @@
 # Release end-to-end suite
 
-The Playwright project `release` (`frontend/playwright.release.config.ts`) runs
-the frontend release build against the real backend on Postgres 18. The database
-is seeded from recorded fixtures through the crawler adapters, so nothing
-touches the network and no API keys are needed. This suite is the release exit
-check (exit criterion 5 in ECO-5). The other specs under `tests/e2e/` belong to
-the older configs, which skip this directory — except
-`world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`
-(ECO-282), which only mock GraphQL via `page.route` and so also run under the
-older `global-analysis` and default/mobile configs; everything else here needs
-this suite's seeded backend.
+The Playwright project `release` ([configuration](../../../playwright.release.config.ts))
+runs the frontend release build against the real backend on Postgres 18. The
+database is seeded from recorded fixtures through the crawler adapters. The seed
+uses local mock upstreams and refuses requests to external data sources, so no
+upstream API keys are needed. The suite uses real local HTTP services. It is the
+release exit check (exit criterion 5 in ECO-5). The other specs under
+`tests/e2e/` belong to the older configs. The default and mobile configs exclude
+this directory apart from two map specs: `world-map/world-map-mocked.spec.ts`
+and `world-map/world-atlas.spec.ts` (ECO-282). The first mocks GraphQL via
+`page.route`; the second checks outline loading and intercepts a failed outline
+request.
+
+The standalone [Global Analysis config](../../../ci/configs/playwright-global-analysis.config.ts)
+and its [mobile counterpart](../../../ci/configs/playwright-mobile-global-analysis.config.ts)
+also collect `world-map/world-map-every-country.spec.ts`, which requires the
+release fixture data unless deployed mode is selected and the spec skips
+itself. Within `world-map/`, those standalone configs exclude only
+`world-map.spec.ts`. The remaining release specs use this suite’s seeded
+backend by default; deployed mode is described below.
 
 A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts`
 and the phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone
@@ -19,7 +28,8 @@ e.g. `scripts/release-e2e.sh --project release-mobile`.
 
 ## Run it
 
-From the repo root:
+Stop the development stack’s Keycloak before running the suite: both stacks bind
+port 8081. From the repo root, run the [release runner](../../../../scripts/release-e2e.sh):
 
 ```bash
 scripts/release-e2e.sh                        # everything
@@ -29,14 +39,17 @@ scripts/release-e2e.sh --headed series-ui/    # one area, with a visible browser
 
 The script does five things:
 
-1. It starts a fresh Keycloak container from `docker-compose.release-e2e.yml` on
-   port 8081, importing the auth area's dev realm (`config/keycloak/`). Always,
-   even when `RELEASE_E2E_DATABASE_URL` is set: CI has no service-container
-   equivalent for it, since the realm and users files come from the checkout
+1. It starts a fresh Keycloak container from the [release Compose file](../../../../docker-compose.release-e2e.yml)
+   on port 8081, importing the auth area’s [dev realm](../../../../config/keycloak/).
+   It does this even when `RELEASE_E2E_DATABASE_URL` is set: CI has no
+   service-container equivalent for it, since the realm and users files come from the checkout
    under test.
 2. It starts a fresh Postgres 18 container from `docker-compose.release-e2e.yml`
    on port 5439, with data in tmpfs. It skips this when
    `RELEASE_E2E_DATABASE_URL` is set, which CI points at a service container.
+   Any override must name a disposable test database: it bypasses recreation and
+   receives data plane migrations, fixture writes, app plane migrations and
+   test writes.
    The script and the Playwright config ignore the `DATABASE_URL`,
    `APP_DATABASE_URL` and `DATA_DATABASE_URL` you export, so neither migrates
    or seeds your dev database. The one database is both the app and the data
@@ -47,9 +60,9 @@ The script does five things:
    dependencies out of the backend. Both use `FLAGS_PROFILE=release` (no `/mcp`,
    no static catalogs). `smoke.spec.ts` checks that `/mcp` is a 404. Build durations
    are printed separately; CI caches both profiles for subsequent runs.
-4. It runs `seed-fixtures`, which applies the data migrations and loads the series listed
-   in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
-5. It runs Playwright. Playwright starts the backend (which applies the app
+4. It runs `seed-fixtures`, which applies the data plane migrations and loads
+   the series listed in the [seed manifest](../../../../backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json).
+5. It runs Playwright. Playwright starts the backend (which applies the app plane
    migrations) on port 18080, pointed at
    Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend
    with `FLAGS_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
@@ -68,43 +81,78 @@ Environment overrides:
   defaults to `target/release/econ-graph-backend` and respects `CARGO_TARGET_DIR`.
 - `RELEASE_CHROMIUM_PATH` sets a Chromium executable, for machines whose
   preinstalled browser doesn't match this Playwright version. For example, use
-  `/opt/pw-browsers/chromium` in Claude Code cloud containers.
+  `/opt/pw-browsers/chromium` when that executable is installed.
 
-CI runs the suite in `.github/workflows/release-e2e.yml`, in Chromium only, on
-every PR that touches `frontend/` or `backend/`.
+The [Release E2E workflow](../../../../.github/workflows/release-e2e.yml) runs
+the suite in Chromium on PRs into any branch when they touch `frontend/`,
+`backend/`, `config/keycloak/`, the release Compose file, the runner, its
+orchestration test or the workflow itself. It also supports GitHub’s **Run
+workflow** button (`workflow_dispatch`). A second leg of the same workflow runs the
+[QA scenario suite](../../../../docs/release/qa-scenarios.md) against this stack.
 
 ## Against a deployed build (REL-QA check 3)
 
-Set `RELEASE_BASE_URL` to the deployed frontend's origin and run Playwright
-directly, not through the script:
+With `RELEASE_BASE_URL` unset, the configuration selects the local fixture stack.
+Set it to the deployed frontend's origin to select deployed mode, and run
+Playwright directly. The runner above always builds and seeds the local stack.
+
+Exclude the fixture-valued map test when running against a deployed catalog:
 
 ```bash
 cd frontend
 RELEASE_BASE_URL=https://qa.example \
 RELEASE_OIDC_ISSUER=https://auth.qa.example/realms/econ-graph \
 RELEASE_QA_USER1_PASSWORD=... RELEASE_QA_USER2_PASSWORD=... \
-  npx playwright test --config=playwright.release.config.ts
+  npx playwright test --config=playwright.release.config.ts \
+  --grep-invert 'World map release spec'
 ```
 
-In this mode (`env.ts`):
+In this mode ([environment and user mapping](env.ts)):
 
 - Playwright starts no backend or frontend and needs no database URL.
-- Specs that compare with fixture values check live data instead: the journey
-  checks that GDP's newest point is within FRED's publication cadence
-  (`liveMaxAgeDays` in `fixtures.ts`) and that each transformation shows a
-  number. The six-source sweep checks each other source's newest point
-  against its own cadence (`liveMaxAgeDays` in `SWEPT_SOURCES`). Census BDS
-  series crawled before #316 have their external id as title until the crawler
-  fetches them again (weekly, since their frequency reads "Unknown"), and the
-  sweep searches by title, so run it once they have been re-fetched.
+- The journey and six-source sweep replace exact fixture observations with
+  live checks. The journey checks that GDP's newest point is within FRED's
+  publication cadence (`liveMaxAgeDays` in [fixture expectations](fixtures.ts)) and that each
+  computed transformation shows a finite number different from the level. The
+  six-source sweep checks each source’s newest point against its own cadence
+  (`liveMaxAgeDays` in `SWEPT_SOURCES`). The sweep requires enough live history
+  to compute every offered transformation. The deployed database must contain
+  those series with current catalog metadata, including the Census BDS titles.
+  The sweep searches by the expected title and checks the title on the series
+  page.
+  If metadata or observations are missing or stale, use the
+  [crawler discovery and fetch guidance](../../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
+  to populate them before running the sweep.
+- Deployed mode does not adapt every spec to live values.
+  `world-map/world-map.spec.ts` still asserts exact `SEEDED_WDI` values, dates
+  and country counts; the command above excludes its `World map release spec`
+  group. `world-map/world-map-every-country.spec.ts` and the synthetic multipage
+  series spec skip themselves in deployed mode. The mocked map checks still
+  use mocked responses, and the atlas checks cover outline loading. These map
+  checks do not establish live country-value coverage.
 - The signed-in specs use the two QA-only realm users, `qa-alice` and `qa-bob`
-  (`config/keycloak/qa/`). Their passwords come from `RELEASE_QA_USER1_PASSWORD`
-  and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
+  ([QA realm configuration](../../../../config/keycloak/qa/)). Their passwords
+  come from `RELEASE_QA_USER1_PASSWORD` and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
   override the username, display name and email.
 - Specs run one at a time, since two users are shared by every signed-in spec.
-- `RELEASE_SKIP_AUTH=1` drops the `auth/` folder and ends the journey before it
-  signs in, for a QA run while sign-in is broken. The config refuses to start
-  without the issuer and passwords unless it is set.
+- `RELEASE_SKIP_AUTH=1` excludes `auth/`, skips the annotation and sign-in
+  failure groups, and ends the journey before sign-in. It also bypasses the
+  configuration check for the issuer and passwords. The public-annotation
+  group in `series-ui/annotations.spec.ts` still signs in; exclude that group
+  too when running without authentication:
+
+  ```bash
+  RELEASE_BASE_URL=https://qa.example RELEASE_SKIP_AUTH=1 \
+    npx playwright test --config=playwright.release.config.ts \
+    --grep-invert 'World map release spec|public annotations for an anonymous viewer'
+  ```
+
+  Run this command from `frontend/`. It omits signed-in coverage; a full deployed
+  run with signed-in coverage requires the issuer and passwords shown above.
+
+Append `--list` to either command to inspect test selection without starting
+servers or a browser. Listing includes tests that skip themselves at runtime;
+it does not verify the deployed data or sign-in.
 
 ## What the suite covers
 
@@ -112,8 +160,8 @@ In this mode (`env.ts`):
   the frontend's `/graphql` proxy, and explore search finds one.
 - `journey.spec.ts`: exit criterion 5's cross-area journey in one
   browser session. Search for GDP, open it, check the chart's newest point,
-  apply every transformation and check the value it shows, then sign in and
-  annotate. The CSV download step joins it with UI-6 (#223).
+  apply every transformation and check the value it shows, download the CSV and
+  compare its newest row with the charted levels, then sign in and annotate.
 - `crawl/`: every visible control with a control's ARIA role (link, button, tab,
   checkbox, switch, combobox) on every route in `src/App.tsx` is clicked, signed
   out, starting from a freshly loaded page. The click must change the visible
@@ -132,48 +180,66 @@ In this mode (`env.ts`):
 - `sources/six-source-sweep.spec.ts`: one series from each source (FRED,
   BLS, Census BDS, BEA, FHFA, World Bank WDI), signed out. Search for it on the
   explore page and open it, check its newest point, apply every transformation
-  the page offers (checking its value, or that the page says there aren't enough
-  observations), and download the CSV (header and row count). The expected
-  values are `SWEPT_SOURCES` in `fixtures.ts`. The world map's three WDI
-  indicators are the world-map area's spec.
-- `series-ui/multipage-series.spec.ts` (fixture mode only, ECO-261): a synthetic
-  daily FRED series of 22,000 points (`SEEDED_MULTIPAGE`), which the series page
-  reads in three `seriesData` pages. It loads the page, picks a date range and
-  the change-since-first-value transformation, and compares the CSV each time,
-  row by row, with an expected series the spec derives from the raw upstream
-  response the seed loads (latest vintage per date, `.` as missing), never from
-  app code: truncation, a skipped or repeated page, reordering, a dropped
-  missing value or a stale revision fails it. A third page that fails (HTTP 503,
-  GraphQL error, dropped connection), or a second page while transforming,
-  must show the observations error with no chart, recent data or CSV at any
-  point, and Retry must then load the whole series. Its fault injection is
-  `failures/faults.ts` (ECO-264).
+  the page offers and download the CSV. In fixture mode, `SWEPT_SOURCES` in
+  `fixtures.ts` supplies exact values, insufficient-history cases and CSV row
+  counts. Deployed mode checks publication cadence, finite transformed values
+  different from levels, and a nonempty CSV. Both modes check CSV headers and
+  the newest non-missing row’s date against the chart. This exercises WDI series
+  pages; the map has separate checks in `world-map/`.
+- `series-ui/multipage-series.spec.ts` (fixture mode only, ECO-261): the spec
+  uses a synthetic daily FRED series of 22,000 points (`SEEDED_MULTIPAGE`), which
+  the series page reads in three `seriesData` pages. It compares the downloaded
+  CSV row by row after loading the page, selecting a date range and applying
+  the change-since-first-value transformation. Expected values come from the raw
+  upstream response loaded by the seed, with the latest vintage per date and
+  `.` treated as missing; they do not come from app code. Truncation, a skipped
+  or repeated page, reordering, a dropped missing value or a stale revision
+  fails the spec.
+
+  The spec injects an HTTP 503, GraphQL error or dropped connection on the third
+  page. It also checks a second-page failure during transformation. These cases
+  must show the observations error without displaying partial results as a
+  chart, recent data or CSV, and Retry must load the complete series. The
+  third-page cases watch for results appearing before the error as well. Fault
+  injection uses `failures/faults.ts` (ECO-264).
 - `auth/`: sign-in and annotation privacy (the auth area's spec).
-- `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`: the
-  map's zoom, projection, click-through, table, tooltip and indicator-refetch
-  behavior, and the outline's load-without-a-network-request and failure/Reload
-  cases, all against mocked GraphQL responses (`page.route`) rather than this
-  suite's seeded backend (ECO-282).
+- `world-map/world-map.spec.ts`: exact seeded values, dates and country counts
+  for the three WDI indicators, with table and tooltip checks and no unexpected
+  external requests. It has no live-value branch and must be excluded from a
+  deployed run as shown above.
+- `world-map/world-map-mocked.spec.ts`: the map's zoom, projection,
+  click-through, table, tooltip and indicator-refetch behavior against mocked
+  GraphQL responses (`page.route`), in either mode (ECO-282).
+- `world-map/world-atlas.spec.ts`: the outline loads without an external request
+  and shows an error with Reload when its request is intercepted and aborted.
+  These checks concern the outline, not the backend's country values (ECO-282).
 - `world-map/world-map-every-country.spec.ts` (fixture mode only, ECO-262): every
   seeded WDI country on every seeded indicator, compared with the recorded World
   Bank responses and `e2e-seed.json` themselves rather than `fixtures.ts`: its
   outline is colored, its tooltip and table row show the newest value, unit and
   year, and the recorded response's unseeded countries show as no data. Repeated
   after each indicator switch.
-- `failures/` (ECO-264): sampled failure and recovery checks against the seeded
-  backend, with chosen requests failed in the browser by `failures/faults.ts`.
-  A failed search, series, observations read or transformation shows an error
-  (never stand-in values or levels labelled as transformed) and recovers through
-  Retry or Search; an empty search is "No series found", not an error; a failed
-  annotation save or delete reports it, keeps the panel accurate, and succeeds
-  once on retry; an unreachable sign-in service, a failed callback and a session
-  ended at Keycloak leave the page signed out with a way to sign in again; a map
-  whose values fail to load says so and Retry recovers. The detailed permutations
-  are the component tests'. The signed-in specs use `erin` and `frank`. Saving
-  an annotation again after a lost response stores it once. A failed source
-  listing offers Retry and loads the source’s series after recovery (ECO-440).
-  The backend side of ECO-264 is mapped in
-  `docs/testing/failure-behavior-matrix.md`.
+- `failures/` (ECO-264): sampled failure and recovery checks, with chosen
+  requests failed in the browser by `failures/faults.ts`. In fixture mode these
+  run against the seeded backend; deployed mode uses the deployed backend.
+  A failed search, series read, observations read or transformation shows an
+  error and recovers through Retry or Search. These checks reject stand-in
+  values and levels labelled as transformed. An empty search shows "No series
+  found" rather than an error. A failed source listing offers Retry and loads
+  the source’s series after recovery (ECO-440). A map whose values fail to load
+  reports the error and recovers through Retry.
+
+  A failed annotation save or delete reports the error, keeps the panel accurate
+  and succeeds once on retry. Saving an annotation again after a lost response
+  stores it once. In fixture mode, this group uses `USERS.failureAnnotator`.
+
+  An unreachable sign-in service, a failed callback and a session ended at
+  Keycloak leave the page signed out with a way to sign in again. In fixture
+  mode, this group uses `USERS.failureSignIn`.
+
+  Component tests cover the detailed permutations. The backend side of ECO-264
+  is mapped in the
+  [failure behavior matrix](../../../../docs/testing/failure-behavior-matrix.md).
 - `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
   pages load with the phone nav drawer closed, the menu opens it and picking a
   page closes it, and the map's zoom controls leave the map uncovered (ECO-335).
@@ -184,40 +250,39 @@ Put them in `tests/e2e/release/<area>/`, for example
 `series-ui/series-page.spec.ts`.
 
 - **Assert on seeded data.** Use the constants in `fixtures.ts`, not literals
-  copied from a fixture file, so a fixture change shows up in one place.
-- **Need more data?** Add the recorded response under
-  `backend/crates/econ-graph-crawler/tests/fixtures/<source>/`. Then add an
-  entry to `e2e-seed.json` with the source, the external id, and each request
-  the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
+  copied from a fixture file, so a fixture change shows up in one place. Specs
+  that need an independent observation oracle, such as the multipage and
+  every-country specs, derive expected values from the recorded responses.
+- **Need more data?** Add the recorded response to the source’s directory under
+  [crawler fixtures](../../../../backend/crates/econ-graph-crawler/tests/fixtures/).
+  Then add an entry to `e2e-seed.json` with the source, the external id, and each
+  request the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
   series to `fixtures.ts`. The seed fails on any request the manifest doesn't
   cover, so a stale fixture shows up there, not as an empty page. A source whose
   fetch response carries no title or units (Census BDS) also lists its catalog
   requests under `discovery`; the seed runs discovery first, as the crawler
   worker does, and the series takes its title, units and frequency from that.
-- **Need a signed-in user?** Use `signInOnKeycloak` from `auth/helpers.ts`,
-  which drives Keycloak's login page, with a user from `USERS` in `env.ts`, and
-  `uniqueTitle` for rows you create. Never sign the same dev user in from two
-  specs at once: the realm's brute-force detection can then lock that user out
-  (for a minute, by default). alice and bob belong to the auth area's serial
-  group in `auth/sign-in.spec.ts` and dave to the journey; an area that needs a
-  signed-in user adds its own dev user to `config/keycloak/dev/` and `USERS`, or
-  its test joins that file.
+- **Need a signed-in user?** Use `signInOnKeycloak` from [auth/helpers.ts](auth/helpers.ts),
+  which drives Keycloak’s login page. Choose a user from `USERS` in
+  [env.ts](env.ts), and use `uniqueTitle` for rows you create. Never sign the same
+  dev user in from two specs at once: the realm's brute-force detection can then lock that user out
+  (for a minute, by default). In fixture mode, the auth area’s serial group
+  uses `USERS.annotator` and `USERS.viewer`; the journey, public-annotation
+  group and failure groups each use their own entries in `USERS`. An area that
+  needs another signed-in user adds its own dev user to
+  [the dev realm](../../../../config/keycloak/dev/) and `USERS`, or joins an
+  existing serial group. Deployed mode shares two QA users and runs one test at
+  a time; configure any new user role for that mode too.
 - **Need a seeded series' id?** `seededSeriesId(request, SEEDED.x)` from
-  `auth/helpers.ts` finds it by search, so it works in deployed mode too.
-- **Keep specs independent.** They run in parallel against one shared database.
-  A spec that writes, such as an annotation, creates its own rows and must not
-  depend on rows another spec creates (the auth group's serial tests are the one
-  exception).
-- **Blocked by unmerged work?** Write the spec anyway and mark it `test.fixme`
-  with a reason that names the blocking PR. Change it to `test` when the blocker
-  merges.
+  [auth/helpers.ts](auth/helpers.ts) finds it by search, so it works in deployed
+  mode too.
+- **Keep specs independent.** In fixture mode, tests run in parallel against
+  one shared database except within explicitly serial groups, including auth,
+  public annotations and signed-in failures. A spec that writes, such as an
+  annotation, creates its own rows and must not depend on another spec’s rows.
+  Tests within a serial group may share that group’s rows. Deployed mode runs
+  one test at a time but still needs independent rows across groups.
 - **Live QA.** Each spec should name the live QA check it stands in for, so the
   same specs can run against the deployed build in the final QA phase. Where a
   spec asserts a fixture value, branch on `DEPLOYED` from `env.ts` and assert
   what holds live instead.
-
-## Known differences from the deployed build
-
-- **Test-only code in the backend binary.** The e2e backend is a debug build
-  that shares one cargo invocation with `seed-fixtures`. That means it links the
-  crawler's `testkit` feature. It is not the deployed image.

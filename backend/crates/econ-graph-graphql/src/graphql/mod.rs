@@ -5,6 +5,7 @@
 //! models with the external API consumers.
 
 pub(crate) mod audit;
+pub mod catalogs;
 pub mod context;
 pub mod cross_section;
 pub mod dataloaders;

@@ -25,12 +25,22 @@ pub struct SearchPage {
 /// Service for handling full-text search operations
 pub struct SearchService {
     pool: Arc<DatabasePool>,
+    allowed_sources: Option<Vec<uuid::Uuid>>,
 }
 
 impl SearchService {
     /// Create a new search service
     pub fn new(pool: Arc<DatabasePool>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            allowed_sources: None,
+        }
+    }
+
+    /// Restrict results, counts and suggestions to sources authorized by the API.
+    pub fn with_allowed_sources(mut self, sources: Vec<uuid::Uuid>) -> Self {
+        self.allowed_sources = Some(sources);
+        self
     }
 
     /// Perform full-text search for economic series with spelling correction
@@ -74,6 +84,7 @@ impl SearchService {
         let limit = params.get_limit();
         let offset = params.get_offset();
         let source_filter = params.source_id;
+        let allowed_sources = self.allowed_sources.clone();
         // Sources don't agree on how they spell a frequency in the stored `frequency` column
         // (FRED: "Weekly, Ending Friday"; BLS: "Semi-Annual"; others: a bare "Monthly"), so an
         // exact-match filter silently misses rows. Match on the same prefixes that classify a
@@ -145,6 +156,7 @@ impl SearchService {
                          AND es.end_date IS NOT NULL
                          AND coalesce(lifecycle.status, 'active') <> 'restricted'
                          AND ($2::uuid IS NULL OR es.source_id = $2)
+                         AND ($11::uuid[] IS NULL OR es.source_id = ANY($11))
                          AND (($3::text[] IS NULL AND $8::text IS NULL)
                               OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
@@ -172,6 +184,9 @@ impl SearchService {
                             expanded_query.clone(),
                         )
                         .bind::<diesel::sql_types::Text, _>(&term)
+                        .bind::<diesel::sql_types::Nullable<
+                            diesel::sql_types::Array<diesel::sql_types::Uuid>,
+                        >, _>(allowed_sources.clone())
                     };
 
                     let rows = page_query(limit, offset)
@@ -252,6 +267,7 @@ impl SearchService {
                                  AND lifecycle.external_id = economic_series.external_id
                                  AND lifecycle.status = 'restricted')
                AND is_active = true AND end_date IS NOT NULL AND (title ILIKE $3 OR title % $1)
+               AND ($4::uuid[] IS NULL OR source_id = ANY($4))
              GROUP BY title
              ORDER BY (title ILIKE $3) DESC, rank DESC, title ASC
              LIMIT $2",
@@ -259,6 +275,9 @@ impl SearchService {
         .bind::<diesel::sql_types::Text, _>(&query)
         .bind::<diesel::sql_types::Integer, _>(search_limit)
         .bind::<diesel::sql_types::Text, _>(&prefix_pattern)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Array<diesel::sql_types::Uuid>>, _>(
+            self.allowed_sources.clone(),
+        )
         .load::<SuggestionRow>(&mut conn)
         .await
         .map_err(|e| {

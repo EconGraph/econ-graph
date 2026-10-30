@@ -1,78 +1,139 @@
-# GraphQL API Documentation
+# GraphQL API Guide
 
-## Overview
+EconGraph's GraphQL API lets applications discover economic series and datasets,
+read observations and historical revisions, and work with annotations and chart sharing.
+The [schema reference](../../backend/crates/econ-graph-graphql/schema.graphql) lists
+all fields, arguments, enums, and scalars. Dates use `NaiveDate` (`YYYY-MM-DD`),
+timestamps use `DateTime` (RFC 3339), and observation values use `BigDecimal`.
 
-The EconGraph backend exposes a GraphQL API. DataLoaders batch selected relationship queries; they do not cover every resolver.
+## Send a request
 
-## N+1 Problem Prevention
+Send a JSON body containing `query` and, when needed, `variables` and `operationName`,
+using `POST` with `Content-Type: application/json`. Application operations, including
+annotations, sharing, accounts, and administration, use `/graphql`. Economic data
+reads also use `/graphql` in deployments that serve both kinds of operations there.
+Deployments serving economic data separately expose `/data/graphql` for those reads.
+If `/graphql` returns `errors[].extensions.code: DATA_SERVED_REMOTELY`, send the data
+operation to `/data/graphql`.
 
-### DataLoader Implementation
+For example, this body discovers datasets for a source. Replace the sample UUID
+with a source ID returned by `dataSources`, and use the deployment's economic data endpoint:
 
-The current [DataLoaders implementation](../../backend/crates/econ-graph-graphql/src/graphql/dataloaders.rs) has these fields:
+```json
+{
+  "operationName": "FindDatasets",
+  "query": "query FindDatasets($sourceId: ID!) { datasets(sourceId: $sourceId) { id code name defaultMeasure } }",
+  "variables": { "sourceId": "00000000-0000-0000-0000-000000000001" }
+}
+```
 
-- `data_source_loader` — source lookups by ID
-- `data_points_by_series_loader` — data points by series ID
-- `data_point_count_loader` — data point counts by series ID
-- `series_by_source_loader` — series by source ID
-- `series_count_loader` — series counts by source ID
-- `user_loader` — user lookups by ID
-- `latest_observation_loader` — latest observations by series ID (non-cached)
+Check the response's `errors` as well as its `data`. Endpoint selection, available
+data, and account permissions are separate concerns: signing in does not fix a
+`DATA_SERVED_REMOTELY` error or make an absent dataset available.
 
-### Field Resolvers with DataLoaders
+## Access and sign-in
 
-[EconomicSeriesType resolvers](../../backend/crates/econ-graph-graphql/src/graphql/types.rs)
-obtain loaders from `ctx.data::<SchemaResources>()?.data_loaders` and call
-`.load(key).await`. For example, `source` uses `data_source_loader`, and
-`recentDataPoints` uses `data_points_by_series_loader` before taking the requested limit.
-The limit does not bound the loader's database fetch.
+The economic data reads in this guide are available anonymously. For application
+requests that need an identity, send an identity-provider access token in
+`Authorization: Bearer <token>`. Sign-in identifies the viewer for reads as well as
+writes. Each protected operation also checks its required permission, and some
+operations check ownership or a role on the individual chart.
 
-The filtered `EconomicSeriesType.dataPoints` resolver queries the database directly for
-each series. Selecting it across several series therefore performs per-series queries;
-there is no filtered-date-range loader.
+Sign-in must be available in the deployment. Where sign-in is disabled, sending a
+token establishes no identity. Where token verification is configured, an invalid
+or expired token can reject even an otherwise public request with HTTP 401 and
+`UNAUTHENTICATED`; a suspended account gets HTTP 403 and `ACCOUNT_SUSPENDED`.
+If sign-in verification is temporarily unavailable, a request may run anonymously,
+so public reads can succeed while protected operations fail or viewer-specific
+results are absent.
 
-Cached loaders are created with the schema and stored in its `SchemaResources`, so
-cache lifetime follows schema lifetime. The backend's [`/graphql` route](../../backend/crates/econ-graph-backend/src/main.rs)
-builds a fresh schema for every HTTP request, making those caches request-scoped.
-Callers that retain a schema, such as the MCP and security servers, retain its cached
-loaders across requests. The latest-observation loader is explicitly non-cached so
-retained schemas can read observations updated by a crawl.
+### Application reads
 
-## GraphQL Schema
+| Operation | Access and visibility |
+| --- | --- |
+| `annotationsForSeries` | Public annotations, plus the signed-in caller's own private annotations. The deprecated `userId` argument is ignored; it cannot select another viewer. Empty when the caller can't read the series' catalog, as for an unknown series. |
+| `commentsForAnnotation` | Comments are readable only when the parent annotation is public or belongs to the caller, and the caller can read its series' catalog; otherwise the annotation is reported as not found. |
+| `chartCollaborators` | Requires sign-in. Only the chart's collaborators see the list; other callers receive an empty list. |
+| `user` | Requires sign-in. Reading the caller's own record is allowed; reading another user's requires `admin.users:read`. |
+| `users` | Requires `admin.users:read`. |
+| `crawlerStatus`, `queueStatistics`, `systemHealth` | Require `admin.system:read`. |
+| `securityEvents`, `securityEventsPage` | Require `admin.security:read`. |
+| `auditLogs` | Requires `admin.audit:read`. |
 
-### Queries
+### Writes
 
-#### Core Data Queries
-- `series(id: ID!)` - Get a specific economic series
-- `seriesList(filter: SeriesFilter, pagination: PaginationInput)` - List series with filtering
-- `searchSeries(query: String!, ...)` - Full-text search across series
-- `dataSource(id: ID!)` - Get a specific data source
-- `dataSources` - List all data sources
-- `seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String)` - Get time series data, one page at a time
-- `crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean)` - One measure of a dataset for every value of one dimension (e.g. every country), at a date or at each key's latest value
+All mutations require sign-in. Permissions below are the fine-grained roles granted
+to the caller; a valid token alone does not grant them. Administrative permissions
+do not bypass private-annotation visibility.
 
-#### Monitoring Queries
-- `crawlerStatus` - Get crawler status information
-- `queueStatistics` - Get queue processing statistics
+| Operation | Additional requirements |
+| --- | --- |
+| `createAnnotation` | `annotation:create` and read access to the series' catalog (a series the caller can't read gets the same error as a missing one); the caller becomes the author. New annotations are private unless `isPublic: true` is requested. |
+| `updateAnnotation` | `annotation:create`, authorship, and read access to the series' catalog. |
+| `addComment` | `annotation:comment`, visibility of the annotation, and read access to its series' catalog. A chart annotation also requires an `admin` role on that chart. |
+| `shareChart` | `chart:share` and an existing `admin` role on the chart. |
+| `deleteAnnotation` | Authorship, or an `admin` role on the annotation's chart if the annotation is public. Another author's private annotation remains inaccessible. |
+| `triggerCrawl` | `admin.crawlers:manage`; returns the number of jobs enqueued, not completed observations. |
+| `updateUser` | `admin.users:update`; changing `isActive` also requires `admin.users:suspend`. |
+| `deleteUser` | `admin.users:delete`; cannot delete the caller's own account. |
+| `suspendUser`, `activateUser` | `admin.users:suspend`; callers cannot suspend themselves. |
 
-### Mutations
+Updating, deleting, suspending, or activating another user's account also requires
+every `admin.*` permission:
 
-- `triggerCrawl(input: TriggerCrawlInput!)` - Manually trigger data crawling
+- `admin.users:read`, `admin.users:create`, `admin.users:update`,
+  `admin.users:delete`, and `admin.users:suspend`;
+- `admin.sessions:read` and `admin.sessions:revoke`;
+- `admin.crawlers:manage` and `admin.system:read`;
+- `admin.security:read` and `admin.audit:read`.
 
-### Types
+A caller with only `admin.users:update` can update their own record; changing its
+`isActive` field still requires `admin.users:suspend`. Callers cannot delete or
+suspend their own account, including by setting `isActive: false` through `updateUser`.
 
-The complete type, field, argument, enum, and scalar reference is the committed
-[generated schema](../../backend/crates/econ-graph-graphql/schema.graphql), checked by the
-[schema snapshot test](../../backend/crates/econ-graph-graphql/tests/schema_snapshot.rs)
-against the runtime schema. Use it rather than a separate handwritten SDL copy.
+Available source data and product features vary by deployment. Use discovery queries
+to find the data present at the selected endpoint; availability does not imply an
+account entitlement, and a missing source does not by itself indicate a permission denial.
 
-In particular, the series and source types are `EconomicSeriesType` and
-`DataSourceType`; dates use `NaiveDate`, and numeric observation values use
-`BigDecimal`. Transformations return data points through the existing `value` field;
-there is no separate `TransformedDataPoint` output type.
+## Discover sources and series
 
-## Example Queries
+Start with `dataSources`, which returns sources by name and includes only sources
+with at least one series containing observations. `dataSource(id: ...)` can still
+return a source omitted from that listing. Use the returned source UUID to narrow
+series or dataset discovery.
 
-### Basic Series Query with Related Data
+`seriesList` accepts a `SeriesFilter` with `sourceId`, `frequency`, `isActive`, and
+`searchQuery`. An omitted `isActive` selects active series; `false` selects inactive
+ones. Results omit series without observations and are ordered by title, with ID
+breaking ties. `pagination.first` defaults to 50 and is clamped to 1–100. Omit
+`pagination.after` initially, then pass `pageInfo.endCursor` while `hasNextPage` is
+true. These cursors are decimal offsets; use the same filter for each page.
+
+```graphql
+query ListSeries($filter: SeriesFilter, $after: String) {
+  seriesList(filter: $filter, pagination: { first: 50, after: $after }) {
+    nodes { id title frequency }
+    totalCount
+    pageInfo { hasNextPage endCursor }
+  }
+}
+```
+
+For direct lookup, `series(id: ...)` returns null for an unknown series or one
+without observations. `seriesByExternalId(sourceName: ..., externalId: ...)` resolves
+a source's native series ID; use the exact source name returned by `dataSources`
+(for example, `Federal Reserve Economic Data (FRED)` with external ID `GDP`).
+It returns null when no such series exists. `seriesExists(id: ...)` checks existence
+even when there are no observations, and `seriesCatalog(id: ...)` returns the series' data
+source name. All four answer a series in a catalog the caller can't read exactly as a missing
+one: null, or `false`.
+
+### Read a series and recent observations
+
+`recentDataPoints(limit: ...)` returns the latest revision for each selected
+observation date, newest date first. `dataPointCount` counts all stored point rows,
+including revisions, so it can exceed the number of distinct observation dates.
+
 ```graphql
 query GetSeries($id: ID!) {
   series(id: $id) {
@@ -95,10 +156,27 @@ query GetSeries($id: ID!) {
 }
 ```
 
-### Search with Pagination
+### Search with pagination
+
+`searchSeries` returns active series with observations in relevance order. Its
+optional `source` argument is a source UUID, despite having type `String`; invalid
+UUIDs return `BAD_USER_INPUT`. The optional `frequency` uses `SeriesFrequency`
+(for example, `MONTHLY` or `ANNUAL`). `searchSuggestions(partialQuery: ...)` offers
+query completions and corrections.
+
+Search text must be 1–500 characters. Omit `after` for the first search page.
+`first` defaults to 50; supplied values must be between 1 and 1,000.
+`totalCount` counts all matching series. For the next page, set `after` to the number
+of series already read as a decimal string: after reading 50 results, send
+`"after": "50"` with the same query and filters. Add each page's returned series count
+to that offset and stop when it reaches `totalCount`. An `after` offset must be an
+integer from 0 through 2,147,483,647. Malformed cursors and offsets outside that
+range return `BAD_USER_INPUT`. Unlike
+`seriesList` and `seriesData`, search results have no `pageInfo` or `endCursor`.
+
 ```graphql
-query SearchSeries($query: String!, $first: Int, $after: String) {
-  searchSeries(query: $query, first: $first, after: $after) {
+query SearchSeries($query: String!, $source: String, $frequency: SeriesFrequency, $first: Int, $after: String) {
+  searchSeries(query: $query, source: $source, frequency: $frequency, first: $first, after: $after) {
     series {
       id
       title
@@ -114,7 +192,49 @@ query SearchSeries($query: String!, $first: Int, $after: String) {
 }
 ```
 
-### Data with Transformation
+## Read observations and revisions
+
+A data point's `date` is the observation date; `revisionDate` is the publication
+date of that version. A date can have several stored revisions, and `value` can be
+null when the source publishes an observation without a number.
+
+`seriesData` accepts inclusive `startDate` and `endDate` bounds in its `filter`.
+Without a transformation or revision filter, it returns all stored revisions in
+ascending observation date, then revision date, then ID order. Choose a revision
+mode explicitly to control which versions are included:
+
+- `latestRevisionOnly: true` selects each date's newest revision.
+- `originalOnly: true` restricts results to original releases.
+- `asOf` selects each date's newest revision published on or before the supplied
+  date and omits observations first published later. It takes precedence over
+  `latestRevisionOnly`. If combined with `originalOnly: true`, only original releases
+  are eligible; `asOf` does not remove that restriction.
+
+Historical reads reflect the vintages available in EconGraph; they cannot
+reconstruct revisions the source no longer provides and EconGraph never captured.
+
+### Transform values
+
+Set `transformation` on `seriesData` to return transformed results in `value`, with
+the point's dates and other fields retained. `NONE` leaves values unchanged. Other
+transformations default to latest revisions unless the filter chooses `asOf`,
+`originalOnly: true`, or an explicit `latestRevisionOnly` value. Setting
+`latestRevisionOnly: false` alone allows every stored revision into the transformation.
+Date bounds apply before transformation, so a comparison outside the selected range
+is unavailable.
+
+| Transformation | Returned value |
+| --- | --- |
+| `YEAR_OVER_YEAR` | Percentage change from a reading 360–370 days earlier. |
+| `QUARTER_OVER_QUARTER` | Percentage change from a reading 85–95 days earlier. |
+| `MONTH_OVER_MONTH` | Percentage change from a reading 28–32 days earlier. |
+| `PERCENT_CHANGE` | Percentage change from the filtered series' earliest non-null, nonzero value. |
+| `LOG_DIFFERENCE` | `ln(value) - ln(previous value)`, comparing consecutive selected points; both values must be positive. |
+
+The period comparisons use the earliest observation within the stated window.
+A missing comparison, null input, or zero percentage-change denominator yields a
+null value. Rows remain in the result even when their transformed value is null.
+
 ```graphql
 query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
   seriesData(
@@ -131,13 +251,15 @@ query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
 }
 ```
 
-### Every Point of a Long Series
-`seriesData` returns at most 10,000 points per page (`first` defaults to and is capped at 10,000).
-`totalCount` counts every point matching the filter. Pass the previous page's `endCursor` as
-`after` until `hasNextPage` is false. A cursor is the number of points up to and including the
-one it names. A transformed page has the values it would have in the whole series, so pages can
-be concatenated. `LOG_DIFFERENCE` is `ln(value) - ln(previous value)`, empty unless both are
-positive.
+### Read every point of a long series
+
+`seriesData` returns at most 10,000 points per page (`first` defaults to and is capped
+at 10,000; negative values are rejected). `totalCount` counts matching point rows,
+including any selected revisions. Pass the previous page's `endCursor` as `after`
+until `hasNextPage` is false. A cursor is the number of points up to and including
+the one it names. Keep filters and transformation the same between pages. A transformed
+page has the values it would have in the whole filtered series, so pages can be concatenated.
+
 ```graphql
 query GetSeriesPage($seriesId: ID!, $after: String) {
   seriesData(seriesId: $seriesId, filter: { latestRevisionOnly: true }, first: 10000, after: $after) {
@@ -154,9 +276,11 @@ query GetSeriesPage($seriesId: ID!, $after: String) {
 }
 ```
 
-### Data as Known on a Past Date
-`asOf` returns each observation's newest revision published on or before that date, and omits
-observations first published later. It takes precedence over `latestRevisionOnly`.
+### Read data as known on a past date
+
+This request selects the revisions known by March 15, 2024, rather than restricting
+observations to that date:
+
 ```graphql
 query GetSeriesAsOf($seriesId: ID!) {
   seriesData(seriesId: $seriesId, filter: { asOf: "2024-03-15" }) {
@@ -169,7 +293,44 @@ query GetSeriesAsOf($seriesId: ID!) {
 }
 ```
 
+## Discover datasets and build cross-sections
+
+Use `datasets(sourceId: ...)` to find a source's datasets, or omit `sourceId` to list
+all datasets. Results are grouped by source and ordered by code within each source;
+the list is unpaginated. Use a returned ID with `dataset(id: ...)` to inspect its
+dimensions, allowed codes and labels, measures, and `defaultMeasure`.
+
+```graphql
+query InspectDataset($id: ID!) {
+  dataset(id: $id) {
+    id
+    code
+    name
+    dimensions {
+      name
+      label
+      codelist
+      codes { code label unit }
+    }
+    measures { name label unit }
+    defaultMeasure
+  }
+}
+```
+
+Dimension `name` and code values supply the inputs for `crossSection`; labels are
+for display. `codelist` identifies a shared list such as `countries`. A non-null
+`codelist` with empty `codes` means that list could not be resolved, rather than
+that the dimension has no codes. On an individual series, `dimensions` supplies
+its dimension values and labels, and `defaultMeasure` gives its measure override
+or the dataset's default.
+
 ### Cross-section for a map
+
+After finding the World Development Indicators dataset and inspecting its
+`indicator` and `area` dimensions, pass its ID as `$wdi`. Omitting `measure` selects
+the dataset's `defaultMeasure`.
+
 ```graphql
 query GdpPerCapitaByCountry($wdi: ID!) {
   crossSection(
@@ -192,11 +353,22 @@ query GdpPerCapitaByCountry($wdi: ID!) {
 date, since the latest year is often missing for many countries. Every active matching
 series is returned, ordered by key; `value` (and with `latest`, `date`) is null where the
 series has no value. `area` is set when `across` uses the `countries` code list, and `kind` tells
-countries from aggregates such as `WLD`. `flags` stays empty until datasets store
-observation attributes, and `asOf` is not supported yet. An unknown dataset is a
+countries from aggregates such as `WLD`. `flags` is empty. An unknown dataset is a
 `NOT_FOUND` error; an invalid request is `BAD_REQUEST`.
 
-### Multiple Series with Batched Relationship Fields
+`asOf` selects each observation's newest revision published on or before that date;
+observations first published later are excluded. Combine it with `date` to read that
+observation date as it was known at `asOf`, or with `latest: true` to find each key's
+most recent non-null value among the revisions known at `asOf`. Omit `asOf` to use
+current revisions.
+
+### Latest observations across a source
+
+`latestObservation` selects the newest observation date at that date's newest
+revision. The field is null if there are no points; its `value` can be null even
+when an older date has a number. This differs from `crossSection(latest: true)`,
+which seeks each key's most recent non-null value.
+
 ```graphql
 query GetMultipleSeries($sourceId: ID!) {
   dataSource(id: $sourceId) {
@@ -205,10 +377,14 @@ query GetMultipleSeries($sourceId: ID!) {
       nodes {
         id
         title
-        dataPointCount
-        recentDataPoints(limit: 5) {
+        dataset {
+          code
+          source { name }
+        }
+        latestObservation {
           date
           value
+          revisionDate
         }
       }
     }
@@ -216,24 +392,14 @@ query GetMultipleSeries($sourceId: ID!) {
 }
 ```
 
-## Performance Features
+## Request limits and exploration
 
-1. **Batched Database Queries** - Selected relationship fields use DataLoaders; filtered `dataPoints` remains a direct per-series query
-2. **Query Complexity Analysis** - Built-in protection against expensive queries
-3. **Caching** - Cache lifetime follows schema lifetime: request-scoped on the backend `/graphql` route, retained when callers reuse a schema; latest-observation loading is non-cached
-4. **Efficient Pagination** - Cursor-based pagination for large result sets
-5. **Selective Field Loading** - Only requested fields are processed
-6. **Schema Reference** - The generated SDL and snapshot test keep the full API reference aligned with runtime types
+Queries are limited to depth 15 and complexity 1,000 (one unit per selected field);
+requests exceeding either limit are rejected. Request only the fields needed by the application, and use
+pagination for large series lists and observation histories.
 
-## Development Tools
-
-- **GraphQL Playground** - Served at `/playground` only when the backend runs with `ENABLE_GRAPHQL_PLAYGROUND=true` (docker-compose sets it; deployed environments do not)
-- **Introspection** - Full schema introspection support
-- **Query Validation** - Automatic query validation and error reporting
-
-## Migration from REST
-
-Economic series queries use `POST /graphql`. The current server does not expose
-legacy `/api/v1/series` or `/auth/login` endpoints; authentication uses
-identity-provider access tokens. See the [backend API documentation](../../backend/README.md#api-documentation)
-for the server's health, metrics, and optional playground routes.
+Schema introspection is supported. The optional GraphQL Playground at `/playground`
+is available when enabled for the deployment. See the
+[backend API documentation](../../backend/README.md#api-documentation) for health,
+metrics, and playground routes. The API uses identity-provider access tokens;
+there is no `/auth/login` route or legacy `/api/v1/series` endpoint.

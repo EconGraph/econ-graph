@@ -335,11 +335,41 @@ async fn the_data_plane_check_agrees_with_the_database_check() {
         .expect("data migrations");
     let plane = open(&plane_app.url, Some(&plane_data.url)).await;
     let schema = create_schema_with_data(plane.app.clone(), plane.data.clone(), ());
+    // Public data now requires explicit anonymous catalog grants. Use a real signed token
+    // and the normal token provider path rather than bypassing the HTTP authorization context.
+    use warp::Filter as _;
+    let issuer = econ_graph_auth::testkit::TestIssuer::start().await;
+    let roles: Vec<_> = econ_graph_auth::Role::all()
+        .iter()
+        .copied()
+        .filter(|role| role.is_catalog())
+        .map(|role| role.as_str())
+        .collect();
+    let token = issuer.mint_token(uuid::Uuid::new_v4(), &roles);
+    let tokens = warp::post().map(move || {
+        warp::reply::json(&serde_json::json!({
+            "access_token": token, "expires_in": 300,
+        }))
+    });
+    let (token_addr, token_server) = warp::serve(tokens).bind_ephemeral(([127, 0, 0, 1], 0));
+    tokio::spawn(token_server);
+    let verifier = issuer
+        .verifier()
+        .with_anonymous(econ_graph_auth::anonymous::AnonymousConfig {
+            token_url: format!("http://{token_addr}/token"),
+            client_id: "econgraph-anonymous".into(),
+            client_secret: "test-only".into(),
+            stale_max: std::time::Duration::ZERO,
+        });
+    assert!(matches!(
+        verifier.renew_anonymous_grants().await,
+        econ_graph_auth::anonymous::Renewal::Renewed(_)
+    ));
     let routes = build_routes(
         plane.clone(),
         None,
         schema,
-        None,
+        Some(Arc::new(verifier)),
         &["http://localhost:3000".to_string()],
         false,
     );
@@ -356,6 +386,8 @@ async fn the_data_plane_check_agrees_with_the_database_check() {
     // The gateway rewrites /data/graphql to the backend's /graphql.
     let client = Arc::new(
         DataPlaneClient::new(&DataGraphqlConfig {
+            forward_authorization: false,
+            allow_insecure_authorization: false,
             url: format!("http://{addr}/graphql"),
             host: Some("br-check.localhost".to_string()),
             timeout: std::time::Duration::from_secs(5),

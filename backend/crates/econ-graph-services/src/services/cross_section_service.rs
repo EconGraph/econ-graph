@@ -84,6 +84,11 @@ pub struct CrossSectionRow {
 /// a row, including series with no value at the date, so a map can tell "no data" from "not
 /// in the dataset". An inactive series is left out entirely.
 ///
+/// The error for an unknown dataset, which callers also give for a dataset the caller can't read.
+pub fn dataset_not_found(dataset_id: uuid::Uuid) -> AppError {
+    AppError::NotFound(format!("dataset {dataset_id} not found"))
+}
+
 /// Errors: `NotFound` for an unknown dataset; `BadRequest` when `across` or a filter
 /// dimension is not one of the dataset's dimensions, `filter` sets `across` or leaves another
 /// dimension unset, or the measure is not declared (or is not `value`).
@@ -98,7 +103,7 @@ pub async fn cross_section(
         .first(conn)
         .await
         .optional()?
-        .ok_or_else(|| AppError::NotFound(format!("dataset {} not found", request.dataset_id)))?;
+        .ok_or_else(|| dataset_not_found(request.dataset_id))?;
 
     let uses_countries = validate(&dataset, request)?;
 

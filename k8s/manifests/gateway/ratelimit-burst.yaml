@@ -1,0 +1,47 @@
+# Bursts of 100 for the per-client GraphQL rate limits
+# (routes/ratelimit-policies.yaml), on listener http of every namespace's
+# econ-graph-graphql and econ-graph-data-graphql routes. The same patch for
+# listener https is in gateway-https.yaml.
+#
+# A BackendTrafficPolicy rate limit is a token bucket that holds as many
+# tokens as it refills per unit, so "20 a second" alone allows bursts of only
+# 20. This patch raises the bucket size of those routes' per-client
+# descriptors (0: IPv4 clients, 1: IPv6 clients) to 100, keeping the refill
+# at 20 a second: a client may send 100
+# requests at once, then 20 a second. Envoy Gateway applies it to the
+# generated Envoy configuration; it needs extensionApis.enableEnvoyPatchPolicy
+# in Envoy Gateway's own configuration, which scripts/deploy/install-gateway.sh
+# sets. While no such route has a rate limit (no app deployed yet, or its
+# policy missing), the patch has nothing to change and this policy's status
+# is Programmed: False; the routes keep working, with bursts of 20.
+#
+# Check it with the proxy's admin API:
+#   kubectl -n envoy-gateway-system port-forward deploy/<proxy> 19000
+#   curl -s localhost:19000/config_dump?resource=dynamic_route_configs
+# (max_tokens 100 under the routes' local_ratelimit descriptors).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyPatchPolicy
+metadata:
+  name: econ-graph-ratelimit-burst
+  namespace: econ-graph-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: econ-graph-gateway
+  type: JSONPatch
+  jsonPatches:
+  - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: econ-graph-gateway/econ-graph-gateway/http
+    operation:
+      op: replace
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/0/token_bucket/max_tokens
+      value: 100
+  - type: type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: econ-graph-gateway/econ-graph-gateway/http
+    operation:
+      op: replace
+      jsonPath: "$.virtual_hosts[*].routes[?(@.name =~ /^httproute\\/[^\\/]+\\/econ-graph-(data-)?graphql\\//)]"
+      path: /typed_per_filter_config/envoy.filters.http.local_ratelimit/descriptors/1/token_bucket/max_tokens
+      value: 100

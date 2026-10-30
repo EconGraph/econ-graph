@@ -66,5 +66,7 @@ spec:
               name: prometheus-rules-crawler
           - configMap:
               name: prometheus-rules-tunnel
+          - configMap:
+              name: prometheus-rules-auth
       - name: prometheus-storage
         emptyDir: {}

@@ -12,9 +12,11 @@ scale (`1.50` stays `1.50`). The path from the source to the user keeps those di
   response (`serde_json::value::RawValue`) instead of letting the JSON parser turn it into an
   `f64`. BEA's `UNIT_MULT` scaling is an exact decimal multiplication.
 - **Limits.** A value may have at most 40 digits before the decimal point and 30 significant
-  digits after it, and its text at most 128 characters; it may be written with at most 128
-  digits after the point and an exponent of at most 40 (zero included, so `0e999999999` is
-  refused). Text that isn't a plain decimal (`NaN`, `inf`, `1,234` after the adapter's own
+  digits after it. Its text may contain at most 128 characters, with at most 128 digits after
+  the decimal point and an exponent of at most 40. The exponent limit also applies when the
+  value is zero: `0e999999999` is rejected.
+
+  Text that isn't a plain decimal (`NaN`, `inf`, `1,234` after the adapter's own
   clean-up) is rejected. A source's missing-value marker (FRED's `.`, BLS and BEA markers
   without digits, a Census letter flag) is a missing value; anything else that fails to parse
   is an error, never a missing value that would overwrite a stored one. The worker checks
@@ -74,44 +76,64 @@ Only precision the source still serves can be recovered:
 ### Deploying the migration
 
 Migration `2026-10-25-000100_observation_values_unconstrained_numeric` (version
-`20261025000100`) is a data migration (`backend/migrations/data`). Only `crawler migrate`
+`20261025000100`) is a data plane migration (`backend/migrations/data`). Only `crawler migrate`
 applies it: `scripts/deploy/deploy.sh` runs it as the Job `crawler-migrate` before it applies
 the backend and `crawler-worker`, and stops the deploy if the Job fails (see
 [database migrations](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate)). The
 backend never applies it. A database that has it recorded already (from a release whose single
 migration directory held it, under the same version) has nothing pending.
 
-It locks `crawl_queue`, `data_points` and `global_indicator_data` and gives up after about 10
-seconds if other transactions hold them, so the deploy goes in this order. `KC` below stands for
-the kind cluster's kubectl:
-`KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph`.
+The forward migration rewrites neither observation table and keeps `data_points`' indexes.
+It rebuilds only `global_indicator_data`'s partial index `idx_global_data_date_value`, whose
+predicate reads the column. It takes `ACCESS EXCLUSIVE` locks on `crawl_queue`, `data_points`
+and `global_indicator_data`, in the crawler worker's order, and holds them until commit.
+
+Lock acquisition is bounded: each lock waits at most 10 seconds (`lock_timeout`), and the
+statement taking all three locks has a total limit of 10 seconds (`statement_timeout`). If
+other transactions hold the tables, the migration gives up after about 10 seconds with
+nothing changed. Once it has the locks, it sets `statement_timeout = 0`, so the alterations
+and partial-index rebuild have no statement time limit.
+
+Deploy in the order below. Define `KC` in your shell to run the commands with the kind
+cluster's kubectl and context:
+
+```bash
+KC() {
+  KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph \
+    ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"
+}
+```
 
 1. **Pick the time.** The whole deploy, from the check below until `crawler-migrate` has
    completed, stays clear of 08:00 UTC, when the nightly `postgres-backup` CronJob starts and
    holds a long transaction on the data database.
 2. **Check the database, immediately before deploying.** Run
    `scripts/deploy/precheck-db-migration.sh --stop-crawler` (first with `--dry-run`, which
-   changes nothing) right before `deploy.sh`, so nothing new starts in between. It works on the
-   kind cluster's own kubectl, context `kind-econ-graph`, the cluster `deploy.sh` deploys to. It
-   refuses while a `postgres-backup` Job or a `crawler-migrate` Job runs, scales
-   `crawler-worker` to 0 and waits for its pods, and lists any session on the data database
-   (`econ_graph`) in a transaction for more than 5 seconds or idle in one, exiting non-zero
-   while there are any. It never ends a session: find the owner it names, stop or finish that
-   work, and run it again until it passes. If a check fails after it stopped the worker, it
-   prints the command that scales the worker back.
+   changes nothing) right before `deploy.sh`, so nothing new starts in between. The precheck
+   script uses the kind cluster's kubectl and the `kind-econ-graph` context, matching `deploy.sh`.
+   It exits without proceeding if a `postgres-backup` or `crawler-migrate` Job is running.
+   Otherwise, it scales `crawler-worker` to 0 and waits for its pods to stop; a dry run reports
+   this action without performing it. It then lists transactions on `econ_graph` that have
+   been open for more than 5 seconds or are idle in a transaction, and exits non-zero if any
+   remain. The precheck script never ends a session: find the owner it names, stop or finish
+   that work, and run it again until it passes. If a check fails after it stopped the worker,
+   it prints the command that scales the worker back.
 3. **Deploy and confirm.** Run `scripts/deploy/deploy.sh`. The `crawler-migrate` Job applies
    the migration, and `deploy.sh` applies `crawler-worker.yaml` only once the Job has completed,
    so the worker stays stopped while the migration runs. Then check that the migration is
    recorded:
    `KC -n econ-graph exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph -Atc "SELECT version FROM __diesel_schema_migrations WHERE version = '20261025000100'"`
    prints `20261025000100`.
-   If something held the tables, the Job's pod fails after about 10 seconds with a lock or
-   statement timeout and nothing changed; the Job tries once more (`backoffLimit: 1`), and if
-   the tables are still held it fails and `deploy.sh` stops, printing the Job's log, before it
-   applies the backend or `crawler-worker`, so the worker stays stopped and the previous backend
-   keeps serving. Run `scripts/deploy/precheck-db-migration.sh --dry-run` to list the sessions
-   holding transactions open, deal with their owner, and run `deploy.sh` again; it replaces the
-   failed Job.
+
+   If other transactions prevent lock acquisition, the Job's pod fails after about 10 seconds
+   with a lock or statement timeout, without applying this migration. The Job tries once more
+   (`backoffLimit: 1`). If the tables are still held, the Job fails. `deploy.sh` prints the
+   Job's log and stops before applying the backend or `crawler-worker`. The worker stays
+   stopped and the previous backend keeps serving.
+
+   Run `scripts/deploy/precheck-db-migration.sh --dry-run` to list the sessions holding
+   transactions open. Deal with their owner, then run `deploy.sh` again; it replaces the failed
+   Job.
 4. **Crawler back on the new image.** After `crawler-migrate` completes, `deploy.sh` applies
    `crawler-worker.yaml`, which brings the worker back at 1 replica with the new image. Check
    with `KC -n econ-graph get deployment crawler-worker -o jsonpath='{.status.readyReplicas} {..image}'`;
@@ -120,14 +142,16 @@ the kind cluster's kubectl:
 
 ### Running it
 
-Enqueue only once every `crawler-worker` pod runs an image that knows the `refetch_series`
+Enqueue only after every `crawler-worker` pod runs an image that knows the `refetch_series`
 kind (check `KC -n econ-graph get pods -l app=crawler-worker -o
 jsonpath='{..image}'`, `KC` as above). A worker from an earlier image fails each `refetch_series` job it claims
 as an unknown job kind; running the command again after the rollout re-enqueues those series.
 
 Run from a checkout on the host of the kind cluster. The script runs the crawler CLI in the
 `crawler-worker` pod (`/app/crawler`) through the kind cluster's own kubectl on context
-`kind-econ-graph`, and the CLI uses the worker's own data database URL (`DATA_DATABASE_URL`):
+`kind-econ-graph`, and the CLI uses the worker's own data database URL (`DATA_DATABASE_URL`).
+Before the crawler runs, the script prints the cluster's context, `kube-system` UID and
+production marker:
 
 ```bash
 # What would be enqueued, per source (writes nothing).
@@ -145,7 +169,7 @@ scripts/deploy/refetch-full-history.sh --all --completed-since 2026-10-26T00:00:
 ```
 
 After enqueuing, the script prints the matching progress and resume commands with the start
-time filled in. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
+time filled in; the resume command keeps `--include-inactive` and `--priority N`. The underlying commands are `crawler refetch` and `crawler refetch-status` (see
 `crawler --help`); `--json` gives machine-readable output.
 
 - **Which series.** The series the refresh scheduler refreshes: active `economic_series` rows
@@ -170,18 +194,7 @@ time filled in. The underlying commands are `crawler refetch` and `crawler refet
 
 ## Rolling back the column type
 
-The migration that made the columns unconstrained
-(`2026-10-25-000100_observation_values_unconstrained_numeric`) rewrites neither table and keeps
-`data_points`' indexes; it rebuilds only `global_indicator_data`'s partial index
-`idx_global_data_date_value`, whose predicate reads the column. It holds `ACCESS EXCLUSIVE` on
-`crawl_queue`, `data_points` and `global_indicator_data` for its few milliseconds, taking them in
-the crawler worker's order. Taking the three locks is bounded as a whole: each lock waits at most
-10 seconds (`lock_timeout`) and the lock statement at most 10 seconds in all
-(`statement_timeout`), so if long transactions hold the tables it gives up after about 10
-seconds with nothing changed; `crawler migrate` (the `crawler-migrate` Job) fails and applies
-it again on its next run (see [Deploying the migration](#deploying-the-migration)).
-
-Its `down.sql` narrows the columns back to `DECIMAL(20,6)`, which rewrites both tables and
+The migration's `down.sql` narrows the columns back to `DECIMAL(20,6)`, which rewrites both tables and
 rebuilds their indexes. It locks the tables before checking them, and refuses, changing
 nothing, while any stored value needs more than 14 integer or 6 fractional digits, or while any
 `refetch_series` queue row exists; it never rounds or deletes values itself.

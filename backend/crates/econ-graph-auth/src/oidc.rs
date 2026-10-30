@@ -178,6 +178,8 @@ impl VerifyError {
 pub struct VerifiedToken {
     /// The caller's user id (`sub`), which keys their `users` row.
     pub subject: Uuid,
+    /// Absolute expiry of the verified access token (Unix seconds).
+    pub expires_at: u64,
     /// The top-level `roles` claim, as sent: names outside the catalog are kept here and
     /// skipped by [`Principal::from_claim`].
     pub roles: Vec<String>,
@@ -198,6 +200,7 @@ impl VerifiedToken {
 
 #[derive(Deserialize)]
 struct AccessClaims {
+    exp: u64,
     sub: String,
     typ: Option<String>,
     roles: Option<Vec<String>>,
@@ -237,6 +240,7 @@ pub struct OidcVerifier {
     min_refresh_interval: Duration,
     cache: RwLock<KeyCache>,
     refresh: Mutex<RefreshState>,
+    pub(crate) anonymous: Option<crate::anonymous::AnonymousPermissions>,
 }
 
 impl std::fmt::Debug for OidcVerifier {
@@ -280,6 +284,7 @@ impl OidcVerifier {
             min_refresh_interval: MIN_REFRESH_INTERVAL,
             cache: RwLock::default(),
             refresh: Mutex::new(refresh),
+            anonymous: None,
         }
     }
 
@@ -303,6 +308,26 @@ impl OidcVerifier {
 
     /// Check `token` and return the claims the API uses.
     pub async fn verify(&self, token: &str) -> Result<VerifiedToken, VerifyError> {
+        self.verify_token(token, true).await
+    }
+
+    /// Keycloak omits the mapped roles claim when an anonymous reader has no grants.
+    /// Authenticate the token identically, treating only that absent claim as an empty set.
+    /// This path supplies catalog grants, never an authenticated request identity.
+    pub(crate) async fn verify_catalog_token(
+        &self,
+        token: &str,
+    ) -> Result<VerifiedToken, VerifyError> {
+        self.verify_token(token, false).await
+    }
+
+    /// Both callers run identical cryptographic and identity checks. Only the signed-in
+    /// contract requires a roles claim; its absence cannot grant anonymous permissions.
+    async fn verify_token(
+        &self,
+        token: &str,
+        require_roles_claim: bool,
+    ) -> Result<VerifiedToken, VerifyError> {
         let header = jsonwebtoken::decode_header(token)
             .map_err(|e| VerifyError::invalid(format!("malformed token: {e}")))?;
         if header.alg != Algorithm::RS256 {
@@ -331,14 +356,19 @@ impl OidcVerifier {
         }
         let subject = Uuid::parse_str(&claims.sub)
             .map_err(|_| VerifyError::invalid("subject is not a UUID"))?;
-        let roles = claims
-            .roles
-            .ok_or_else(|| VerifyError::invalid("token has no roles claim"))?;
+        let roles = match claims.roles {
+            Some(roles) => roles,
+            None if require_roles_claim => {
+                return Err(VerifyError::invalid("token has no roles claim"))
+            }
+            None => Vec::new(),
+        };
         let non_empty =
             |s: Option<String>| s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
         Ok(VerifiedToken {
             subject,
+            expires_at: claims.exp,
             roles,
             email: non_empty(claims.email),
             email_verified: claims.email_verified.unwrap_or(false),

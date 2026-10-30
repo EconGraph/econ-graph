@@ -17,6 +17,7 @@
 //! - Error messages must be user-friendly and actionable
 //! - All resolvers must have comprehensive documentation
 
+use crate::graphql::catalogs;
 use crate::imports::*;
 use crate::types::*;
 
@@ -54,6 +55,13 @@ impl Query {
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
+        // A series in a catalog the caller can't read is null, exactly like an unknown id.
+        if catalogs::readable_series_catalog(ctx, series_uuid)
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
 
         match series_service::get_series_by_id(&pool, series_uuid).await? {
             // A series with no data points (e.g. a discovered series whose source adapter was
@@ -67,17 +75,31 @@ impl Query {
     ///
     /// Unlike `series`, a series with no data points counts. Backends without a data database
     /// ask this before storing an annotation on the series.
+    ///
+    /// `false` for a series in a catalog the caller can't read, exactly as for an unknown id.
     async fn series_exists(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&id)?;
-        Ok(series_service::series_exists(pool, series_uuid).await?)
+        Ok(catalogs::readable_series_catalog(ctx, series_uuid)
+            .await?
+            .is_some())
+    }
+
+    /// The catalog (data source name) of a series the caller may read, observations or not;
+    /// null for an unknown id or a series in a catalog the caller can't read.
+    ///
+    /// Backends without a data database ask this before storing or showing annotations on the
+    /// series, then apply their own caller's catalog grants to the name.
+    async fn series_catalog(&self, ctx: &Context<'_>, id: ID) -> Result<Option<String>> {
+        let series_uuid = Uuid::parse_str(&id)?;
+        catalogs::readable_series_catalog(ctx, series_uuid).await
     }
 
     /// Get an economic series by its source's name and the source's own id for it
     ///
     /// `sourceName` is the data source's `name` exactly as `dataSources` returns it (for
     /// example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
-    /// id (for example "GDP"). Returns null when no such series exists.
+    /// id (for example "GDP"). Returns null when no such series exists, or when it is in a
+    /// catalog the caller can't read.
     async fn series_by_external_id(
         &self,
         ctx: &Context<'_>,
@@ -101,7 +123,17 @@ impl Query {
             .await
             .optional()?;
 
-        Ok(series.map(EconomicSeriesType::from))
+        drop(conn);
+        let Some(series) = series else {
+            return Ok(None);
+        };
+        if !catalogs::allowed_sources(ctx)
+            .await?
+            .contains(&series.source_id)
+        {
+            return Ok(None);
+        }
+        Ok(Some(EconomicSeriesType::from(series)))
     }
 
     /// List economic series with filtering and pagination
@@ -122,8 +154,11 @@ impl Query {
         let mut search_params = convert_series_filter_to_params(filter)?;
         search_params.limit = Some(i64::from(first));
         search_params.offset = Some(i64::from(offset));
-        let total_count = series_service::count_series(pool, &search_params).await?;
-        let series = series_service::list_series(pool, search_params).await?;
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let total_count =
+            series_service::count_series_in_sources(pool, &search_params, Some(&allowed)).await?;
+        let series =
+            series_service::list_series_in_sources(pool, search_params, Some(&allowed)).await?;
 
         let end_index = i64::from(offset) + series.len() as i64;
         Ok(SeriesConnection {
@@ -142,6 +177,7 @@ impl Query {
     async fn data_source(&self, ctx: &Context<'_>, id: ID) -> Result<Option<DataSourceType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&id)?;
+        catalogs::require_source(ctx, source_uuid).await?;
 
         use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
         use diesel_async::RunQueryDsl;
@@ -198,10 +234,12 @@ impl Query {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::{data_sources, economic_series};
 
-        let mut conn = pool.get().await?;
         // Excludes sources with no series that has data (e.g. a source whose crawler adapter
         // was removed before any series it discovered ever got data points).
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let mut conn = pool.get().await?;
         let sources = data_sources::table
+            .filter(data_sources::id.eq_any(allowed))
             .filter(exists(
                 economic_series::table
                     .filter(series_service::public_series_predicate())
@@ -232,7 +270,10 @@ impl Query {
         use econ_graph_core::schema::datasets;
 
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let mut query = datasets::table.into_boxed();
+        let allowed = catalogs::allowed_sources(ctx).await?;
+        let mut query = datasets::table
+            .filter(datasets::source_id.eq_any(allowed))
+            .into_boxed();
         if let Some(source_id) = source_id {
             let source_id = Uuid::parse_str(&source_id)
                 .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
@@ -262,7 +303,17 @@ impl Query {
         let id =
             Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
-        Ok(dataset.map(crate::graphql::datasets::DatasetType))
+        // A dataset in a catalog the caller can't read is null, exactly like an unknown id.
+        let Some(dataset) = dataset else {
+            return Ok(None);
+        };
+        if !catalogs::allowed_sources(ctx)
+            .await?
+            .contains(&dataset.source_id)
+        {
+            return Ok(None);
+        }
+        Ok(Some(crate::graphql::datasets::DatasetType(dataset)))
     }
 
     /// Get data points for a specific series with filtering and transformation, one page at a
@@ -295,6 +346,20 @@ impl Query {
         // A cursor is the number of matching points up to and including the one it names, so
         // `after: endCursor` continues where the last page stopped.
         let offset = parse_offset_cursor(after.as_deref())?;
+        // A series in a catalog the caller can't read answers exactly like an unknown id: an
+        // empty page at this offset.
+        if !catalogs::series_readable_or_missing(ctx, series_uuid).await? {
+            return Ok(DataPointConnection {
+                nodes: Vec::new(),
+                total_count: 0,
+                page_info: PageInfo {
+                    has_next_page: false,
+                    has_previous_page: offset > 0,
+                    start_cursor: None,
+                    end_cursor: Some(offset.to_string()),
+                },
+            });
+        }
 
         let transformation =
             transformation.filter(|&transformation| transformation != DataTransformationType::None);
@@ -416,7 +481,8 @@ impl Query {
             .map(|id| parse_id_argument("source", id))
             .transpose()?;
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let search_service = SearchService::new(Arc::new(pool.clone()));
+        let search_service = SearchService::new(Arc::new(pool.clone()))
+            .with_allowed_sources(catalogs::allowed_sources(ctx).await?);
 
         // Convert GraphQL input to internal search parameters
         let search_params = search::SearchParams {
@@ -453,7 +519,8 @@ impl Query {
         limit: Option<i32>,
     ) -> Result<Vec<SearchSuggestionType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let search_service = SearchService::new(Arc::new(pool.clone()));
+        let search_service = SearchService::new(Arc::new(pool.clone()))
+            .with_allowed_sources(catalogs::allowed_sources(ctx).await?);
 
         let suggestions = search_service
             .get_suggestions(&partial_query, limit.unwrap_or(10))
@@ -465,6 +532,7 @@ impl Query {
     }
 
     /// Get annotations for a specific series: public ones, plus the caller's own private ones.
+    /// Empty for a series in a catalog the caller can't read, as for an unknown series.
     async fn annotations_for_series(
         &self,
         ctx: &Context<'_>,
@@ -474,6 +542,13 @@ impl Query {
         let _ = user_id;
         let viewer = current_user_id_opt(ctx)?;
         let pool: &DatabasePool = crate::graphql::context::app_pool(ctx)?;
+        let readable = match Uuid::parse_str(&series_id) {
+            Ok(series) => catalogs::series_visible(ctx, series).await?,
+            Err(_) => false,
+        };
+        if !readable {
+            return Ok(Vec::new());
+        }
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotations = collaboration_service
@@ -485,7 +560,8 @@ impl Query {
             .collect())
     }
 
-    /// Get comments for an annotation the caller can see (public, or their own)
+    /// Get comments for an annotation the caller can see (public, or their own) on a series
+    /// whose catalog they may read. Any other annotation is reported as not found.
     async fn comments_for_annotation(
         &self,
         ctx: &Context<'_>,
@@ -496,6 +572,7 @@ impl Query {
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
+        catalogs::require_annotation_readable(ctx, &collaboration_service, annotation_uuid).await?;
         let comments = collaboration_service
             .get_comments_for_annotation(annotation_uuid, viewer)
             .await?;

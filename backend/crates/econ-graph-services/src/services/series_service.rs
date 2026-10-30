@@ -92,6 +92,15 @@ pub async fn list_series(
     pool: &DatabasePool,
     params: SeriesSearchParams,
 ) -> AppResult<Vec<EconomicSeries>> {
+    list_series_in_sources(pool, params, None).await
+}
+
+/// List series after applying an optional API authorization scope, before pagination.
+pub async fn list_series_in_sources(
+    pool: &DatabasePool,
+    params: SeriesSearchParams,
+    sources: Option<&[uuid::Uuid]>,
+) -> AppResult<Vec<EconomicSeries>> {
     let mut conn = pool.get().await.map_err(|e| {
         econ_graph_core::error::AppError::DatabaseError(format!(
             "Failed to get database connection: {}",
@@ -104,7 +113,7 @@ pub async fn list_series(
 
     // Ordered by title (id breaks ties) so pages are stable and a source's catalog reads
     // alphabetically; `last_updated` is our crawl time, which says nothing to a reader.
-    let query = filtered_series(&params)
+    let query = filtered_series(&params, sources)
         .order_by(economic_series::title.asc())
         .then_order_by(economic_series::id.asc())
         .limit(limit)
@@ -121,6 +130,15 @@ pub async fn list_series(
 /// Counts the series [`list_series`] would return for `params` without its limit and offset,
 /// so a caller can say how many there are in all.
 pub async fn count_series(pool: &DatabasePool, params: &SeriesSearchParams) -> AppResult<i64> {
+    count_series_in_sources(pool, params, None).await
+}
+
+/// Count only authorized sources, using the same scope as the paginated list.
+pub async fn count_series_in_sources(
+    pool: &DatabasePool,
+    params: &SeriesSearchParams,
+    sources: Option<&[uuid::Uuid]>,
+) -> AppResult<i64> {
     let mut conn = pool.get().await.map_err(|e| {
         econ_graph_core::error::AppError::DatabaseError(format!(
             "Failed to get database connection: {}",
@@ -128,7 +146,7 @@ pub async fn count_series(pool: &DatabasePool, params: &SeriesSearchParams) -> A
         ))
     })?;
 
-    Ok(filtered_series(params)
+    Ok(filtered_series(params, sources)
         .count()
         .get_result::<i64>(&mut *conn)
         .await?)
@@ -137,6 +155,7 @@ pub async fn count_series(pool: &DatabasePool, params: &SeriesSearchParams) -> A
 /// The filters [`list_series`] and [`count_series`] share.
 fn filtered_series(
     params: &SeriesSearchParams,
+    sources: Option<&[uuid::Uuid]>,
 ) -> economic_series::BoxedQuery<'static, diesel::pg::Pg> {
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
@@ -144,6 +163,9 @@ fn filtered_series(
         .filter(public_series_predicate())
         .into_boxed();
 
+    if let Some(sources) = sources {
+        query = query.filter(economic_series::source_id.eq_any(sources.to_vec()));
+    }
     if let Some(source_id) = params.source_id {
         query = query.filter(economic_series::source_id.eq(source_id));
     }
@@ -240,6 +262,29 @@ pub async fn get_series_by_id(
         .optional()?;
 
     Ok(series)
+}
+
+/// The catalog (its data source's `name`) of the series with this id, observations or not;
+/// `None` when there is no such series or it is restricted, as for [`series_exists`].
+pub async fn series_catalog(
+    pool: &DatabasePool,
+    series_id: uuid::Uuid,
+) -> AppResult<Option<String>> {
+    use econ_graph_core::schema::data_sources;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {e}"
+        ))
+    })?;
+    economic_series::table
+        .inner_join(data_sources::table)
+        .filter(economic_series::id.eq(series_id))
+        .filter(public_series_predicate())
+        .select(data_sources::name)
+        .first::<String>(&mut *conn)
+        .await
+        .optional()
+        .map_err(|e| econ_graph_core::error::AppError::DatabaseError(e.to_string()))
 }
 
 /// Whether `economic_series` has a row with this id, whether or not it has observations.

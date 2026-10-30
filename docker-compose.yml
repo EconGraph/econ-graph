@@ -44,10 +44,15 @@ services:
       ENABLE_GRAPHQL_PLAYGROUND: "true"
       # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
       # browser-facing URL as issuer; the API fetches signing keys from the service directly.
-      # Set OIDC_ISSUER to an empty value to run with sign-in off (every caller anonymous).
+      # Clear OIDC_ISSUER, OIDC_ANONYMOUS_TOKEN_URL and OIDC_ANONYMOUS_CLIENT_SECRET
+      # to run with sign-in off (anonymous catalog access is denied).
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      # Explicit private-network credential transport to the Compose Keycloak service.
+      OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP: ${OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP:-true}
+      OIDC_ANONYMOUS_TOKEN_URL: ${OIDC_ANONYMOUS_TOKEN_URL-http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token}
+      OIDC_ANONYMOUS_CLIENT_SECRET: ${OIDC_ANONYMOUS_CLIENT_SECRET-${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}}
     ports:
       - "8000:8000"
     depends_on:
@@ -123,6 +128,7 @@ services:
       # Frontend origin of the release e2e stack
       KC_WEB_E2E_BASE_URL: http://localhost:18081
       KC_WEB_DIRECT_GRANTS: "true"
+      KC_ANONYMOUS_CLIENT_SECRET: ${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}
       KC_GOOGLE_CLIENT_ID: ${KEYCLOAK_GOOGLE_CLIENT_ID:-unset}
       KC_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-unset}
     ports:
@@ -156,10 +162,15 @@ services:
       RUST_LOG: debug
       # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
       # browser-facing URL as issuer; the API fetches signing keys from the service directly.
-      # Set OIDC_ISSUER to an empty value to run with sign-in off (every caller anonymous).
+      # Clear OIDC_ISSUER, OIDC_ANONYMOUS_TOKEN_URL and OIDC_ANONYMOUS_CLIENT_SECRET
+      # to run with sign-in off (anonymous catalog access is denied).
       OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
       OIDC_AUDIENCE: econ-graph-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
+      # Explicit private-network credential transport to the Compose Keycloak service.
+      OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP: ${OIDC_ANONYMOUS_ALLOW_INSECURE_HTTP:-true}
+      OIDC_ANONYMOUS_TOKEN_URL: ${OIDC_ANONYMOUS_TOKEN_URL-http://keycloak:8080/realms/econ-graph/protocol/openid-connect/token}
+      OIDC_ANONYMOUS_CLIENT_SECRET: ${OIDC_ANONYMOUS_CLIENT_SECRET-${KEYCLOAK_ANONYMOUS_CLIENT_SECRET:-anonymous-dev-only}}
     ports:
       - "8000:8000"
     depends_on:

@@ -42,7 +42,6 @@ microk8s status --wait-ready
 ```bash
 # Enable essential addons
 microk8s enable dns
-microk8s enable ingress
 microk8s enable storage
 microk8s enable metrics-server
 
@@ -79,7 +78,7 @@ This script will:
 - ✅ Deploy monitoring stack
 - ✅ Install cert-manager for SSL
 - ✅ Configure Let's Encrypt issuer
-- ✅ Deploy SSL ingress with security features
+- ✅ Install the gateway and apply its routes
 - ✅ Wait for rollout completion
 - ✅ Display deployment status
 
@@ -126,7 +125,7 @@ kubectl apply -f k8s/monitoring/
 
 ```bash
 # Install cert-manager
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
 
 # Wait for cert-manager to be ready
 kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s
@@ -135,9 +134,9 @@ kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --tim
 kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 ```
 
-The public site is no longer served by an SSL Ingress in the cluster (the old
-`k8s/manifests/ssl-ingress.yaml` is retired). TLS ends at Cloudflare, and the
-Cloudflare Tunnel reaches the cluster: see "Public site" in `k8s/README.md`.
+The public site is served through the Cloudflare Tunnel: TLS for visitors ends at Cloudflare,
+and the tunnel reaches the gateway's https listener. `PUBLIC_HOST=econgraph.com
+./scripts/deploy/deploy.sh` sets it up; see "Public site" in `k8s/README.md`.
 
 ## Service URLs
 
@@ -147,7 +146,7 @@ Cloudflare Tunnel reaches the cluster: see "Public site" in `k8s/README.md`.
 - **GraphQL**: https://www.econgraph.com/graphql
 - **Admin UI**: https://www.econgraph.com/admin
 
-Grafana is not exposed on the public ingress; see the port-forwarding section below.
+Grafana is not routed by the gateway; see the port-forwarding section below.
 
 ### Local Development Access
 Add to `/etc/hosts`:
@@ -174,7 +173,7 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 
 ### SSL/TLS Configuration
 - **Let's Encrypt**: Automatic SSL certificate generation
-- **TLS Termination**: SSL termination at ingress level
+- **TLS Termination**: at the gateway's https listener
 - **Certificate Management**: Automated certificate renewal
 
 ### HTTP Security Headers
@@ -286,8 +285,10 @@ kubectl get certificate -n econ-graph
 # Check cert-manager logs
 kubectl logs -f deployment/cert-manager -n cert-manager
 
-# Check ingress status
-kubectl describe ingress -n econ-graph -l econgraph.io/public-host=true
+# Check the https listener, its certificate and the public routes
+kubectl -n econ-graph-gateway describe gateway econ-graph-gateway
+kubectl -n econ-graph-gateway get certificate econ-graph-tls
+kubectl -n econ-graph get httproute -l econgraph.io/public-host=true
 ```
 
 #### Memory Issues
@@ -314,8 +315,8 @@ kubectl top pods -n econ-graph
 # View all events
 kubectl get events -n econ-graph --sort-by='.metadata.creationTimestamp'
 
-# Check ingress status
-kubectl get ingress -n econ-graph
+# Check route status
+kubectl get httproute -n econ-graph
 
 # Check certificate status
 kubectl get certificate -n econ-graph
@@ -394,10 +395,10 @@ sudo snap remove microk8s
 |---------|----------|------|
 | **Installation** | `snap install microk8s` | `go install` or binary |
 | **Resource Usage** | Lower overhead | Higher overhead |
-| **Addons** | Built-in (dns, ingress, storage) | Manual configuration |
-| **SSL Support** | Native ingress with SSL | Requires additional setup |
+| **Addons** | Built-in (dns, storage) | Manual configuration |
+| **SSL Support** | Gateway https listener with cert-manager | Gateway https listener with cert-manager |
 | **Production-like** | More production-like | Development-focused |
-| **Port Access** | Ingress-based | NodePort-based |
+| **Port Access** | Through the gateway | Through the gateway (host ports 80/443) |
 | **Security** | Built-in security features | Manual configuration |
 
 ## Best Practices
