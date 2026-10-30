@@ -32,6 +32,15 @@
 # restarted and the keycloak-realm-import Job is run again (as deploy.sh
 # does), since that Job is what puts the Google client into the realm.
 # --facebook does the same for Facebook, without prompting for crawler keys.
+# The Job applies the realm in the cluster's keycloak-realm ConfigMap, so in
+# both modes the script first checks that this ConfigMap holds this checkout's
+# realm files (config/keycloak/econ-graph-realm.json and the two helpers
+# scripts/deploy/deploy.sh puts next to it); if it does not, the script stops
+# before asking for anything, since the import could succeed without the
+# provider. Deploy the checkout with deploy.sh first. The Job is rendered
+# for the public host the cluster serves (render_manifest in
+# scripts/deploy/lib/public-host.sh, as deploy.sh renders it), so the
+# realm keeps that host's redirect URIs and web origins.
 #
 # --dry-run prints which keys are currently set (names only) and what would
 # happen (with --tunnel, whether the cluster is marked production: these reads
@@ -161,6 +170,57 @@ for v in "${vars[@]}"; do
     printf '  %-30s %s/%s: %s\n' "$v" "$(secret_of "$v")" "$(key_of "$v")" "$(key_state "$v")"
 done
 
+# The realm-import Job reads the realm from ConfigMap keycloak-realm, which only
+# deploy.sh writes. Check, before asking for anything, that it holds this
+# checkout's files: an older realm has no provider for the new keys, and the
+# import would succeed without it. Also read the public host the cluster serves
+# now, so the Job is rendered for it as deploy.sh renders it; otherwise the
+# realm's redirect URIs and web origins would fall back to http://localhost.
+REALM_FILES=(
+    "econ-graph-realm.json=config/keycloak/econ-graph-realm.json"
+    "render-realm.sh=scripts/keycloak/render-realm.sh"
+    "preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py"
+)
+# Prints why the cluster's realm ConfigMap is not this checkout's; nothing if it is.
+realm_configmap_mismatch() {
+    local entry key file live
+    if [ -z "$(kubectl -n "$NAMESPACE" get configmap keycloak-realm --ignore-not-found -o name)" ]; then
+        echo "ConfigMap keycloak-realm does not exist"
+        return 0
+    fi
+    for entry in "${REALM_FILES[@]}"; do
+        key="${entry%%=*}"
+        file="${entry#*=}"
+        live="$(kubectl -n "$NAMESPACE" get configmap keycloak-realm \
+            -o "go-template={{index .data \"$key\"}}")" || {
+            echo "could not read ConfigMap keycloak-realm"
+            return 0
+        }
+        if [ "$live" != "$(cat "$PROJECT_ROOT/$file")" ]; then
+            echo "ConfigMap keycloak-realm's ${key} differs from ${file} in this checkout"
+            return 0
+        fi
+    done
+}
+REIMPORT_REALM=false
+if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } &&
+    kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
+    REIMPORT_REALM=true
+    realm_mismatch="$(realm_configmap_mismatch)"
+    if [ -n "$realm_mismatch" ]; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "==> Dry run: would refuse: ${realm_mismatch}"
+            exit 0
+        fi
+        die "refusing to set sign-in keys: ${realm_mismatch}." \
+            "The realm import would apply the cluster's older realm, which may lack this provider." \
+            "Deploy this checkout with scripts/deploy/deploy.sh (with the cluster's PUBLIC_HOST), then run this again." \
+            "Nothing was asked for or written."
+    fi
+    PUBLIC_HOST="$(public_host_in_cluster)" ||
+        die "could not read the cluster's routes to see which public host it serves; nothing was asked for or written"
+fi
+
 # The tunnel token goes only into the production cluster: refuse before asking
 # for it (create-secrets.sh would refuse it too, but only after it was typed).
 if [ "$TUNNEL" = true ]; then
@@ -181,8 +241,8 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
-    { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
-        "then delete and re-apply job/keycloak-realm-import and wait for it"
+    [ "$REIMPORT_REALM" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
+        "then delete and re-apply job/keycloak-realm-import (for ${PUBLIC_HOST:+https://${PUBLIC_HOST} and }http://localhost) and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
 fi
@@ -237,17 +297,18 @@ if [ "$START_CRAWLER" = true ] &&
     kubectl -n "$NAMESPACE" scale deployment/crawler-worker --replicas=1
     kubectl -n "$NAMESPACE" rollout restart deployment/crawler-worker
 fi
-if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } && [ "$entered" -gt 0 ] &&
-    kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
+if [ "$REIMPORT_REALM" = true ] && [ "$entered" -gt 0 ]; then
     echo "==> Restarting Keycloak for the new sign-in client"
     kubectl -n "$NAMESPACE" rollout restart deployment/keycloak
     kubectl -n "$NAMESPACE" rollout status deployment/keycloak --timeout=600s
     # The realm-import Job renders the sign-in client from the Secret into
     # the realm; a restart alone does not re-run it. A finished Job cannot be
-    # re-run in place, so the old one goes first (as in deploy.sh).
-    echo "==> Re-running the Keycloak realm import for the new sign-in client"
+    # re-run in place, so the old one goes first (as in deploy.sh). Rendered
+    # for the public host read above, as deploy.sh renders it.
+    echo "==> Re-running the Keycloak realm import for the new sign-in client${PUBLIC_HOST:+ (public host https://${PUBLIC_HOST})}"
     kubectl -n "$NAMESPACE" delete job keycloak-realm-import --ignore-not-found
-    kubectl -n "$NAMESPACE" apply -f "$PROJECT_ROOT/k8s/manifests/keycloak/realm-import-job.yaml"
+    (cd "$PROJECT_ROOT" && render_manifest k8s/manifests/keycloak/realm-import-job.yaml) |
+        kubectl -n "$NAMESPACE" apply -f -
     realm_import_status=""
     for _ in $(seq 1 120); do
         realm_import_status="$(kubectl -n "$NAMESPACE" get job keycloak-realm-import \

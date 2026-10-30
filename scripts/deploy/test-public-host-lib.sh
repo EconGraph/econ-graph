@@ -27,6 +27,9 @@
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
+#   - scripts/deploy/set-crawler-keys.sh --facebook (and --google) refuses before it asks
+#     for anything when the cluster's realm ConfigMap is not this checkout's, and renders
+#     the realm-import Job for the public host the cluster serves.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -66,6 +69,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        STUB_SCALE_FAILS=1 scaling it fails
 #   STUB_LOOKUP_FAILS=1, STUB_NO_NAMESPACE=1, STUB_DELETE_FAILS=1  the econ-graph namespace
 #                        lookup fails / finds nothing; deleting the retired Ingress fails
+#   STUB_REALM           ConfigMap keycloak-realm: current (this checkout's files, read from
+#                        $STUB_REPO; the default), stale (an older realm) or missing
 cat >"$stub_dir/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -100,6 +105,17 @@ case "$*" in
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
   *"get job keycloak-realm-import"*) echo Complete ;;
+  *"get configmap keycloak-realm"*)
+    case "${STUB_REALM:-current}" in
+      missing) ;;
+      stale) case "$*" in *"-o name"*) echo configmap/keycloak-realm ;; *) echo '{"realm": "old"}' ;; esac ;;
+      *) case "$*" in
+           *"-o name"*) echo configmap/keycloak-realm ;;
+           *econ-graph-realm.json*) cat "$STUB_REPO/config/keycloak/econ-graph-realm.json" ;;
+           *render-realm.sh*) cat "$STUB_REPO/scripts/keycloak/render-realm.sh" ;;
+           *preserve-catalog-grants.py*) cat "$STUB_REPO/scripts/keycloak/preserve-catalog-grants.py" ;;
+         esac ;;
+    esac ;;
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
@@ -546,7 +562,7 @@ keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
 run_keys() {
-  printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
+  printf 'STUB_LOG=%q\nSTUB_REPO=%q\n%s\n' "$log" "$repo_root" "$1" >"$stub_dir/stub.env"
   : >"$log"; rm -f "$log.ctx"
   printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
@@ -589,9 +605,31 @@ if [ "$have_script" = true ]; then
   grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp-client-id=.*--from-file=facebook-idp-client-secret=' "$log" ||
     fail "Facebook IdP keys were not written"
   grep -q 'rollout restart deployment/keycloak' "$log" || fail "Facebook mode did not restart Keycloak"
-  grep -q 'apply -f .*keycloak/realm-import-job.yaml' "$log" || fail "Facebook mode did not reapply the realm"
+  grep -q 'delete job keycloak-realm-import' "$log" || fail "Facebook mode did not reapply the realm"
+  grep -q 'stdin: .*name: keycloak-realm-import' "$log" || fail "Facebook mode did not apply the realm-import Job"
+  grep -q 'stdin: .*https://' "$log" && fail "Facebook mode rendered a public host on a cluster without one"
   grep -q 'crawler-worker' "$log" && fail "Facebook mode touched the crawler"
   grep -q 'FRED_API_KEY:' "$out" && fail "Facebook mode prompted for crawler credentials"
+  # On a cluster serving a public host, the Job is rendered for it as deploy.sh renders
+  # it, so the realm keeps the public redirect URIs and web origins.
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
+    fail "set-crawler-keys --facebook failed with a public host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "Facebook mode did not render the realm import for the public host"
+  # A realm ConfigMap older than this checkout: refused before the prompt, nothing written.
+  for realm in stale missing; do
+    if run_keys "STUB_MARKER=none STUB_REALM=$realm" --facebook $'facebook-test-app\nfacebook-test-secret\n'; then
+      fail "set-crawler-keys --facebook: accepted a $realm realm ConfigMap"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --facebook: prompted with a $realm realm ConfigMap"
+    grep -q 'deploy.sh' "$out" || fail "set-crawler-keys --facebook: the $realm realm refusal is not shown: $(cat "$out")"
+    grep -Eq 'create secret|apply|rollout|delete job' "$log" &&
+      fail "set-crawler-keys --facebook: changed the cluster with a $realm realm ConfigMap"
+  done
+  run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' ||
+    fail "set-crawler-keys --google --dry-run failed: $(cat "$out")"
+  grep -q 'would refuse: .*econ-graph-realm.json' "$out" ||
+    fail "set-crawler-keys --google --dry-run: no refusal on a stale realm ConfigMap"
 
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
