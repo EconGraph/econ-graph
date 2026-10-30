@@ -69,8 +69,21 @@ async fn seed(pool: &DatabasePool, source: &DataSource, external_id: &str) -> St
     .execute(&mut pool.get().await.unwrap())
     .await
     .unwrap();
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
+         SELECT $1::uuid, make_date(2023, m, 1), m, make_date(2023, m, 15), TRUE \
+         FROM generate_series(1, $2) AS m",
+    )
+    .bind::<diesel::sql_types::Text, _>(&id)
+    .bind::<diesel::sql_types::Integer, _>(OBSERVATIONS)
+    .execute(&mut pool.get().await.unwrap())
+    .await
+    .unwrap();
     id
 }
+
+/// Observations seeded per series.
+const OBSERVATIONS: i32 = 3;
 
 struct Reads {
     graphql: Value,
@@ -99,7 +112,8 @@ async fn read_everything(
             searchSuggestions(partialQuery:"Restrictedtest") {{ suggestion }}
             byId: series(id:"{boc_series}") {{ id }}
             exists: seriesExists(id:"{boc_series}")
-            byExternalId: seriesByExternalId(sourceName:"{}", externalId:"BOC-RESTRICTED") {{ id }} }}"#,
+            byExternalId: seriesByExternalId(sourceName:"{}", externalId:"BOC-RESTRICTED") {{ id }}
+            data: seriesData(seriesId:"{boc_series}") {{ totalCount nodes {{ id }} }} }}"#,
         boc.name
     );
     let response = schema.execute(Request::new(query)).await;
@@ -181,6 +195,11 @@ async fn bank_of_canada_is_hidden_until_its_catalog_role_is_granted() {
     assert!(g["byId"].is_null());
     assert_eq!(g["exists"], false);
     assert!(g["byExternalId"].is_null());
+    let data = &g["data"];
+    assert!(
+        data.is_null() || (data["totalCount"] == 0 && ids(&data["nodes"]).is_empty()),
+        "seriesData served a restricted series: {data}"
+    );
     assert_eq!(
         ids(&hidden.mcp_search["data"]["searchSeries"]["series"]),
         std::slice::from_ref(&bea_series)
@@ -212,6 +231,8 @@ async fn bank_of_canada_is_hidden_until_its_catalog_role_is_granted() {
     assert_eq!(g["byId"]["id"], boc_series.as_str());
     assert_eq!(g["exists"], true);
     assert_eq!(g["byExternalId"]["id"], boc_series.as_str());
+    assert_eq!(g["data"]["totalCount"], OBSERVATIONS);
+    assert_eq!(ids(&g["data"]["nodes"]).len(), OBSERVATIONS as usize);
     assert!(ids(&shown.mcp_search["data"]["searchSeries"]["series"]).contains(&boc_series));
     assert!(ids(&shown.mcp_sources["data"]["dataSources"]).contains(&boc_id));
     assert!(shown.mcp_series_data_ok);
