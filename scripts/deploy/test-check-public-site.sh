@@ -6,10 +6,12 @@
 # against the stub and are not looked at.
 #
 #   - the gateway's 301 to https://econgraph.com/<path>?<query>, no port: passes;
-#   - ingress-nginx's 308 to the same with :443, until the gateway cut-over (ECO-800):
-#     passes, named as ECO-709's known case;
-#   - any other port, status, or a dropped query fails, as does a spoofed
-#     X-Forwarded-Port that reaches the redirect.
+#   - ingress-nginx's 308 to the same with :443 and nginx's redirect page, until the
+#     gateway cut-over (ECO-800): passes, named as ECO-709's known case;
+#   - the same 308 without nginx's page (a Cloudflare redirect rule) fails, as does any
+#     other port, status, or a dropped query, and a spoofed request that gets anything
+#     but the 301;
+#   - plain http's redirect must name https://econgraph.com/ with no port.
 #
 # Usage: scripts/deploy/test-check-public-site.sh
 set -euo pipefail
@@ -23,8 +25,10 @@ mkdir -p "$W/bin"
 cat >"$W/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 # Stub curl: -o BODY -D HEADERS -w FORMAT [-H HEADER]... URL. Answers www.econgraph.com
-# with STUB_WWW_STATUS and STUB_WWW_LOCATION (STUB_SPOOF_LOCATION instead when the
-# request spoofs X-Forwarded-Port), everything else with 404.
+# with STUB_WWW_STATUS, STUB_WWW_LOCATION and the body STUB_WWW_BODY (STUB_SPOOF_STATUS
+# and STUB_SPOOF_LOCATION instead, where set, when the request spoofs
+# X-Forwarded-Port), http://econgraph.com with STUB_PLAIN_STATUS and
+# STUB_PLAIN_LOCATION, and everything else with 404.
 out=/dev/null hdr=/dev/null url="" spoof=false
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -42,10 +46,15 @@ case "$url" in
     https://www.econgraph.com/*)
         status="$STUB_WWW_STATUS"
         location="$STUB_WWW_LOCATION"
-        if [ "$spoof" = true ] && [ -n "${STUB_SPOOF_LOCATION:-}" ]; then
-            location="$STUB_SPOOF_LOCATION"
+        if [ "$spoof" = true ]; then
+            status="${STUB_SPOOF_STATUS:-$status}"
+            location="${STUB_SPOOF_LOCATION:-$location}"
         fi
+        printf '%s' "${STUB_WWW_BODY:-}" >"$out"
         printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "$location" >"$hdr" ;;
+    http://econgraph.com/*)
+        status="${STUB_PLAIN_STATUS:-404}"
+        printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "${STUB_PLAIN_LOCATION:-}" >"$hdr" ;;
     *)
         status=404
         printf 'HTTP/1.1 404 Not Found\r\n\r\n' >"$hdr" ;;
@@ -62,12 +71,16 @@ bad() {
 }
 
 TARGET='https://econgraph.com/series/smoke-check?from=www'
+INGRESS_TARGET='https://econgraph.com:443/series/smoke-check?from=www'
+# ingress-nginx's own 308 page (observed through Cloudflare, ECO-709)
+NGINX_BODY='<html><head><title>308 Permanent Redirect</title></head><body><center><h1>308 Permanent Redirect</h1></center><hr><center>nginx</center></body></html>'
 WWW_LINE='www.econgraph.com redirects'
 SPOOF_LINE='spoofed X-Forwarded-\* headers leave'
 
-# run NAME STATUS LOCATION [SPOOF_LOCATION]: the check's output against the stub.
+# run NAME STATUS LOCATION: the check's output against the stub, with any STUB_* from the
+# caller's environment (env STUB_WWW_BODY=... run ...).
 run() {
-    STUB_WWW_STATUS="$2" STUB_WWW_LOCATION="$3" STUB_SPOOF_LOCATION="${4:-}" \
+    STUB_WWW_STATUS="$2" STUB_WWW_LOCATION="$3" \
         PATH="$W/bin:$PATH" "$CHECK" --host econgraph.com >"$W/$1.out" 2>&1 || true
 }
 # expect NAME ok|FAIL PATTERN DESCRIPTION: a line of that outcome matching PATTERN.
@@ -85,12 +98,16 @@ expect gateway ok "$WWW_LINE \(301\) to https://econgraph.com/series/smoke-check
     "the gateway's 301 without a port, path and query kept, passes"
 expect gateway ok "$SPOOF_LINE the www redirect" "and the spoofed check passes"
 
-run ingress 308 'https://econgraph.com:443/series/smoke-check?from=www'
+STUB_WWW_BODY="$NGINX_BODY" run ingress 308 "$INGRESS_TARGET"
 expect ingress ok "$WWW_LINE \(308\) through ingress-nginx.*ECO-709: production not yet cut over" \
     "ingress-nginx's 308 with :443 is the named known case"
 expect ingress ok "$SPOOF_LINE ingress-nginx's www redirect.*ECO-709" "and so is its spoofed check"
 
-run port-301 301 'https://econgraph.com:443/series/smoke-check?from=www'
+STUB_WWW_BODY='<p>Redirecting</p>' run cloudflare-rule 308 "$INGRESS_TARGET"
+expect cloudflare-rule FAIL "$WWW_LINE" "the same 308 without nginx's page (a Cloudflare rule, say) fails"
+expect cloudflare-rule FAIL "with spoofed X-Forwarded-\* headers www redirects" "and so does its spoofed check"
+
+run port-301 301 "$INGRESS_TARGET"
 expect port-301 FAIL "$WWW_LINE" "a 301 that spells out :443 fails"
 
 run plain-308 308 "$TARGET"
@@ -105,9 +122,21 @@ expect no-query FAIL "$WWW_LINE" "a redirect that drops the query fails"
 run found 302 "$TARGET"
 expect found FAIL "$WWW_LINE" "a 302 fails"
 
-run spoofed 301 "$TARGET" 'https://econgraph.com:8443/series/smoke-check?from=www'
+STUB_SPOOF_LOCATION='https://econgraph.com:8443/series/smoke-check?from=www' run spoofed 301 "$TARGET"
 expect spoofed ok "$WWW_LINE \(301\)" "with a spoofed X-Forwarded-Port reaching the redirect, the www check passes"
 expect spoofed FAIL "with spoofed X-Forwarded-\* headers www redirects" "but the spoofed check fails"
+
+STUB_SPOOF_STATUS=302 run spoofed-302 301 "$TARGET"
+expect spoofed-302 FAIL "with spoofed X-Forwarded-\* headers www redirects \(302\)" \
+    "a spoofed request answered with a 302, even to the right Location, fails"
+
+PLAIN='plain http \(even claiming https\)'
+STUB_PLAIN_STATUS=301 STUB_PLAIN_LOCATION='https://econgraph.com/idp/realms/econ-graph/.well-known/openid-configuration' \
+    run plain-ok 301 "$TARGET"
+expect plain-ok ok "$PLAIN is redirected" "plain http redirected to https://econgraph.com/ passes"
+STUB_PLAIN_STATUS=301 STUB_PLAIN_LOCATION='https://econgraph.com:443/idp/realms/econ-graph/.well-known/openid-configuration' \
+    run plain-port 301 "$TARGET"
+expect plain-port FAIL "plain http redirects" "plain http redirected with :443 spelled out fails"
 
 if [ "$failures" -eq 0 ]; then
     echo "all passed"

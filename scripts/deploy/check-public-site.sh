@@ -58,7 +58,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h | --help)
-            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+            awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -207,15 +207,19 @@ fi
 WWW_TARGET="${PUBLIC_URL}/series/smoke-check?from=www"
 # Until production is cut over to the gateway, and only until then (ECO-800 removes
 # this): ingress-nginx still answers www with a 308 that spells out :443 (ECO-709).
-# That exact response is reported as known; any other one fails. The no-Ingress QA
-# scenario fails if ingress-nginx still serves after the cut-over.
+# That exact response, with nginx's own redirect page as its body (which a Cloudflare
+# redirect rule would not send), is reported as known; any other one fails.
 INGRESS_NGINX_WWW_TARGET="https://${HOST}:443/series/smoke-check?from=www"
-ingress_nginx_www() { [ "$1" = 308 ] && [ "$2" = "$INGRESS_NGINX_WWW_TARGET" ]; }
+# ingress_nginx_www NAME STATUS LOCATION: the response saved as NAME is ingress-nginx's.
+ingress_nginx_www() {
+    [ "$2" = 308 ] && [ "$3" = "$INGRESS_NGINX_WWW_TARGET" ] &&
+        grep -qF '<center>nginx</center>' "$tmp/$1"
+}
 status="$(fetch www "${WWW_BASE}/series/smoke-check?from=www")"
 location="$(header www Location)"
 if [ "$status" = 301 ] && [ "$location" = "$WWW_TARGET" ]; then
     pass "www.${HOST} redirects (301) to ${location}"
-elif ingress_nginx_www "$status" "$location"; then
+elif ingress_nginx_www www "$status" "$location"; then
     pass "www.${HOST} redirects (308) through ingress-nginx, with :443 (ECO-709: production not yet cut over to the gateway)"
 else
     fail "www.${HOST} redirects (${status}) to '${location}', expected a 301 to ${WWW_TARGET}"
@@ -240,9 +244,9 @@ else
 fi
 status="$(fetch spoof-www "${SPOOF[@]}" "${WWW_BASE}/series/smoke-check?from=www")"
 location="$(header spoof-www Location)"
-if [ "$location" = "$WWW_TARGET" ]; then
+if [ "$status" = 301 ] && [ "$location" = "$WWW_TARGET" ]; then
     pass "spoofed X-Forwarded-* headers leave the www redirect on ${PUBLIC_URL}"
-elif ingress_nginx_www "$status" "$location"; then
+elif ingress_nginx_www spoof-www "$status" "$location"; then
     pass "spoofed X-Forwarded-* headers leave ingress-nginx's www redirect on ${HOST}:443 (ECO-709: production not yet cut over to the gateway)"
 else
     fail "with spoofed X-Forwarded-* headers www redirects (${status}) to '${location}'"
