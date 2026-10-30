@@ -959,6 +959,12 @@ jobs:
         done
       working-directory: backend
 
+    # Checkpoints, not only the report at the end: when the disk fills, the runner may
+    # not manage to log the end of the job, but these lines are already written.
+    - name: Disk checkpoint (after the required regressions)
+      if: ${{ !cancelled() }}
+      run: df -h /; du -sh backend/target || true
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
@@ -1027,6 +1033,10 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
+    - name: Disk checkpoint (after the feature and release builds)
+      if: ${{ !cancelled() }}
+      run: df -h /; du -sh backend/target || true
+
     # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
       run: |
@@ -1037,6 +1047,10 @@ jobs:
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
         exit $status
       working-directory: backend
+
+    - name: Disk checkpoint (before the doctests)
+      if: ${{ !cancelled() }}
+      run: df -h /; du -sh backend/target || true
 
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
