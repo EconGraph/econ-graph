@@ -28,6 +28,8 @@
 
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
+# shellcheck source=scripts/deploy/lib/deploy-config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-config.sh"
 
 PUBLIC_HOST_LABEL="econgraph.io/public-host"
 
@@ -83,6 +85,17 @@ public_host_init() {
             refuse_public_host
         fi
         echo "🌐 Public host: https://${PUBLIC_HOST} (www.${PUBLIC_HOST} redirects to it)"
+        # The certificate's issuer, chosen as apply-gateway-routes.sh will
+        # (tls_issuer_choose): a bad GATEWAY_TLS_ISSUER line in the deploy config, or
+        # one that would change the issuer implicitly, stops the deploy here, before
+        # anything is applied. Without a public host the line is not read.
+        local issuer_now
+        if ! issuer_now="$(gateway_tls_current_issuer)"; then
+            echo "❌ Could not read the issuer of certificate econ-graph-tls"
+            exit 1
+        fi
+        tls_issuer_choose "$issuer_now" || exit 1
+        echo "🔐 Certificate issuer: ${TLS_ISSUER} (from ${TLS_ISSUER_SOURCE})"
     else
         echo "🌐 No PUBLIC_HOST: serving http://localhost only"
     fi

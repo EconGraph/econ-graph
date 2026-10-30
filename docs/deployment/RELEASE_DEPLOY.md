@@ -142,6 +142,7 @@ the name is lowercased (`ECONGRAPH.COM` deploys `econgraph.com`). When there are
 production host it holds `econgraph.com`; a test cluster's host has no file, or
 `PUBLIC_HOST=` (empty), and serves localhost only. Before any step it refuses:
 
+- a deploy config that exists but cannot be read, or an `export PUBLIC_HOST=` line;
 - a `PUBLIC_HOST` line with a carriage return (a file saved with CRLF endings), a value
   with blanks in it (an inline comment, spaces inside the quotes), or one that is not a
   public DNS name, by the check `deploy.sh` makes too (`render-public-host.py`);
@@ -159,19 +160,24 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
 
 ## GATEWAY_TLS_ISSUER
 
-The same file may hold the ClusterIssuer of the gateway's https certificate, read the same
-way:
+With a public host, the same file may hold the ClusterIssuer of the gateway's https
+certificate, read the same way:
 
 ```sh
 GATEWAY_TLS_ISSUER=econ-graph-origin-ca
 ```
 
-`GATEWAY_TLS_ISSUER` in the environment wins over the file; with neither, the certificate
-keeps its current issuer, else `econ-graph-selfsigned`. The plan shows the issuer and
-where it came from, and a value that is not a resource name is refused before any step.
-`apply-gateway-routes.sh`, and so `deploy.sh`, read the line too
-(`scripts/deploy/lib/deploy-config.sh`), so a recreated cluster gets the configured issuer
-on its first deploy. See [Tunnel origin TLS](TUNNEL_ORIGIN_TLS.md) for the CA issuer.
+`GATEWAY_TLS_ISSUER` in the environment is an explicit choice and wins. Otherwise the
+line is used when it matches the certificate's current issuer or the cluster has no
+certificate (a recreated cluster); a line that differs from the current issuer is refused
+unless `--change-tls-issuer` is given, which passes it to `deploy.sh` as an explicit
+choice. With neither, the certificate keeps its current issuer, else
+`econ-graph-selfsigned`. The plan shows the current and the chosen issuer. A value that
+is not a resource name, an `export GATEWAY_TLS_ISSUER=` line or a config file that exists
+but cannot be read is refused before any step. `deploy.sh` (before it applies anything)
+and `apply-gateway-routes.sh` choose the issuer the same way
+(`scripts/deploy/lib/deploy-config.sh`); without a public host none of them reads the
+line. See [Tunnel origin TLS](TUNNEL_ORIGIN_TLS.md) for the CA issuer.
 
 ## Dry run
 

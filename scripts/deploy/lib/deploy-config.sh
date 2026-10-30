@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # The host's deploy config: a file of NAME=value lines, read and never sourced.
-# release-deploy.sh takes PUBLIC_HOST from it, and apply-gateway-routes.sh (so
-# deploy.sh and restart-k8s-rollout.sh too) takes GATEWAY_TLS_ISSUER from it when
-# the environment does not set one.
+# release-deploy.sh takes PUBLIC_HOST from it. For a public host, release-deploy.sh,
+# deploy.sh and restart-k8s-rollout.sh (lib/public-host.sh, before anything is
+# applied) and apply-gateway-routes.sh take GATEWAY_TLS_ISSUER from it through
+# tls_issuer_choose.
 #
 # The file is ECONGRAPH_DEPLOY_ENV, else deploy.env in ECONGRAPH_CONFIG_DIR, else
-# in ${XDG_CONFIG_HOME:-~/.config}/econgraph. A missing file or line is no value.
+# in ${XDG_CONFIG_HOME:-~/.config}/econgraph. A missing file or line is no value; a
+# file that exists but cannot be read is an error.
 
 # Print the deploy config's path.
 deploy_config_path() {
@@ -14,12 +16,22 @@ deploy_config_path() {
 
 # deploy_config_value NAME [WHAT]: print NAME's value from the last NAME= line, with
 # surrounding blanks and one pair of matching quotes removed; nothing else is
-# rewritten. Fails, saying why on stderr, on a carriage return in that line or blanks
-# inside the value (WHAT names the value in that message: "write the WHAT alone").
+# rewritten. Fails, saying why on stderr, on an unreadable file, an `export NAME=`
+# line (refused rather than read differently from a plain one), a carriage return
+# in the NAME line or blanks inside the value (WHAT names the value in that
+# message: "write the WHAT alone").
 deploy_config_value() {
     local name="$1" what="${2:-value}" file line value
     file="$(deploy_config_path)"
-    [ -f "$file" ] || return 0
+    [ -e "$file" ] || return 0
+    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+        echo "error: ${file} exists but is not a readable file" >&2
+        return 1
+    fi
+    if grep -qE "^[[:space:]]*export[[:space:]]+${name}=" "$file"; then
+        echo "error: ${file} has an 'export ${name}=' line; it is read, not sourced: write ${name}=... without export" >&2
+        return 1
+    fi
     # The last line wins, as it would if the file were sourced.
     line="$(grep -E "^[[:space:]]*${name}=" "$file" | tail -1)" || line=""
     [ -n "$line" ] || return 0
@@ -42,4 +54,55 @@ deploy_config_value() {
         return 1
     fi
     printf '%s\n' "$value"
+}
+
+# gateway_tls_current_issuer: print the ClusterIssuer of certificate
+# econ-graph-gateway/econ-graph-tls, or nothing without the certificate or without
+# cert-manager. Fails when the cluster cannot be asked. Uses the caller's kc.
+gateway_tls_current_issuer() {
+    local crd
+    crd="$(kc get crd certificates.cert-manager.io --ignore-not-found -o name)" || return 1
+    [ -n "$crd" ] || return 0
+    kc -n econ-graph-gateway get certificate econ-graph-tls --ignore-not-found \
+        -o 'jsonpath={.spec.issuerRef.name}'
+}
+
+# tls_issuer_choose CURRENT: choose the gateway certificate's ClusterIssuer, given
+# the issuer of the certificate the cluster has now (empty without one), and set
+# TLS_ISSUER and TLS_ISSUER_SOURCE. In order:
+#   - GATEWAY_TLS_ISSUER in the environment: an explicit choice, which may change it;
+#   - the deploy config's GATEWAY_TLS_ISSUER line, only when it matches CURRENT or
+#     there is no certificate (a recreated cluster). One that differs is refused: a
+#     deploy never changes the issuer implicitly, since a stale or mistyped line
+#     would otherwise re-issue the certificate from an issuer the tunnel rejects;
+#   - CURRENT;
+#   - econ-graph-selfsigned.
+# Fails, saying why on stderr, on that conflict, a bad config line, or a value that
+# is not a resource name.
+tls_issuer_choose() {
+    local current="$1" configured
+    if [ -n "${GATEWAY_TLS_ISSUER:-}" ]; then
+        TLS_ISSUER="$GATEWAY_TLS_ISSUER"
+        TLS_ISSUER_SOURCE="GATEWAY_TLS_ISSUER in the environment"
+    else
+        configured="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" || return 1
+        if [ -n "$configured" ]; then
+            if [ -n "$current" ] && [ "$current" != "$configured" ]; then
+                echo "error: certificate econ-graph-tls is issued by ${current}, but $(deploy_config_path) says GATEWAY_TLS_ISSUER=${configured}; a deploy never changes the issuer implicitly. If ${configured} is right, set GATEWAY_TLS_ISSUER=${configured} in the environment (release-deploy.sh: --change-tls-issuer); otherwise correct the config" >&2
+                return 1
+            fi
+            TLS_ISSUER="$configured"
+            TLS_ISSUER_SOURCE="$(deploy_config_path)"
+        elif [ -n "$current" ]; then
+            TLS_ISSUER="$current"
+            TLS_ISSUER_SOURCE="the certificate's current issuer"
+        else
+            TLS_ISSUER=econ-graph-selfsigned
+            TLS_ISSUER_SOURCE="the default"
+        fi
+    fi
+    if ! [[ "$TLS_ISSUER" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+        echo "error: GATEWAY_TLS_ISSUER='${TLS_ISSUER}' (from ${TLS_ISSUER_SOURCE}) is not a resource name" >&2
+        return 1
+    fi
 }

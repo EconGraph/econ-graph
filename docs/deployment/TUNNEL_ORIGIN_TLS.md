@@ -29,8 +29,9 @@ preserves it.
 
 The public certificate is at `/etc/cloudflared/origin-ca/ca.crt` in each connector. Confirm
 the connector rollout is healthy before proceeding. Staging refuses to overwrite a
-ConfigMap containing a different root, other than a renewal of the same root; use the
-rotation procedure below instead.
+ConfigMap containing a different root, other than a renewal of the same root, and leaves
+a bundle that still contains the current root among others unchanged; see the rotation
+procedure below.
 
 ## Select and verify the gateway certificate
 
@@ -53,9 +54,8 @@ With issuer `econ-graph-origin-ca`, `apply-gateway-routes.sh` (and so `deploy.sh
 `restart-k8s-rollout.sh`, which run it) first runs
 `stage-tunnel-origin-ca.sh --context <context> --apply`, which is idempotent; if staging
 fails, it stops without changing the certificate. Its `--dry-run` prints that command
-without running it. On later deploys the certificate's existing issuer is retained unless
-`GATEWAY_TLS_ISSUER` overrides it, and the retained `econ-graph-origin-ca` is staged again
-the same way.
+without running it. Later deploys choose the issuer as described below, and stage
+`econ-graph-origin-ca` again the same way whenever it is the chosen issuer.
 
 Then record the selection in the host's deploy config, `~/.config/econgraph/deploy.env`
 (the file that holds `PUBLIC_HOST`; `ECONGRAPH_CONFIG_DIR` or `ECONGRAPH_DEPLOY_ENV` name
@@ -65,11 +65,22 @@ another), by adding this line:
 GATEWAY_TLS_ISSUER=econ-graph-origin-ca
 ```
 
-The issuer is chosen in this order: `GATEWAY_TLS_ISSUER` in the environment, then that
-line, then the certificate's existing issuer, then `econ-graph-selfsigned`.
-`apply-gateway-routes.sh`, `deploy.sh` and `release-deploy.sh` all read the line through
-`scripts/deploy/lib/deploy-config.sh`, and `release-deploy.sh` shows the issuer and its
-source in its plan.
+With a public host, every deploy chooses the issuer the same way (`tls_issuer_choose` in
+`scripts/deploy/lib/deploy-config.sh`, used by `apply-gateway-routes.sh`, by `deploy.sh`
+and `restart-k8s-rollout.sh` before they apply anything, and by `release-deploy.sh` before
+any step):
+
+1. `GATEWAY_TLS_ISSUER` in the environment: an explicit choice, which may change the
+   certificate's issuer. `release-deploy.sh --change-tls-issuer` passes the config's line
+   this way.
+2. The deploy config's line, when it matches the existing certificate's issuer or there
+   is no certificate. A line that differs from the existing issuer is refused, so a stale
+   or mistyped line never re-issues the certificate from an issuer the tunnel rejects.
+3. The existing certificate's issuer.
+4. `econ-graph-selfsigned`.
+
+Without a public host the line is not read. `release-deploy.sh` shows the current and the
+chosen issuer in its plan.
 
 The leaf covers the public host and `www` name. In the dashboard, use the public host as
 **Origin Server Name** even though the Service URL uses the internal proxy Service DNS.
@@ -150,18 +161,23 @@ TLS Verify back on for the public routes until the certificate is issued from th
 If public requests fail during cutover, first restore the dashboard's prior No TLS Verify
 setting. This restores the earlier behavior while investigating. Retain the CA, trust
 bundle and signing Secret; no database, backup or token changes are involved. If needed,
-select the prior gateway issuer explicitly with `GATEWAY_TLS_ISSUER`, and remove or change
-the deploy config's `GATEWAY_TLS_ISSUER` line so later deploys keep it; changing the issuer
-can renew the leaf, so wait for readiness and retest.
+change the deploy config's line to the prior gateway issuer, then select it explicitly:
+run `apply-gateway-routes.sh` with `GATEWAY_TLS_ISSUER` set to it, as in the selection step,
+or `release-deploy.sh` with `--change-tls-issuer`. A deploy without that explicit choice
+refuses a line that differs from the certificate's issuer. Changing the issuer can renew
+the leaf, so wait for readiness and retest.
 
 cert-manager renews leaf certificates using the CA. The root has a ten-year lifetime and
 reuses its key on renewal (`rotationPolicy: Never`); operators must monitor both root and
 leaf expiry and rerun staging after root renewal before the old trust certificate expires.
 Staging replaces the published root only with a renewal of it: a single certificate with
-the same subject and public key, which still verifies leaves the old one signed. It
-refuses any other change, including a different key or a two-root bundle. For a key rotation, issue a new CA under
-a distinct Secret/issuer name, publish both roots to every connector, restart connectors
-and verify that all replicas trust the new root, then switch the gateway leaf to the new
-issuer. Repeat the positive and negative origin checks before retiring the old root from
+the same subject and public key, which still verifies leaves the old one signed. A
+published bundle of several roots that still contains the current root exactly is left
+unchanged, so deploys continue during a rotation. It refuses any other change, including
+a different key or a bundle without the current root. For a key rotation, issue a new CA
+under a distinct Secret/issuer name, publish both roots to every connector, restart
+connectors and verify that all replicas trust the new root, then switch the gateway leaf
+to the new issuer: change the deploy config's line and select it explicitly, as for a
+rollback. Repeat the positive and negative origin checks before retiring the old root from
 the public bundle. Never mount a signing key into a connector or delete a root Secret as
 part of staging.

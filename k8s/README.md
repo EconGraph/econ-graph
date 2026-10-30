@@ -901,6 +901,8 @@ gateway. Stage only its public trust certificate with
 [Tunnel origin TLS](../docs/deployment/TUNNEL_ORIGIN_TLS.md) for issuer selection,
 certificate checks, the remote dashboard transition and rollback. Staging does not change
 the gateway issuer or disable the dashboard's existing No TLS Verify setting. A deploy whose
-gateway issuer is `econ-graph-origin-ca` (`GATEWAY_TLS_ISSUER` from the environment or the
-host's deploy config, `~/.config/econgraph/deploy.env`, or the certificate's existing
-issuer) runs the staging itself before issuing the certificate.
+gateway issuer is `econ-graph-origin-ca` runs the staging itself before issuing the
+certificate. The issuer comes from `GATEWAY_TLS_ISSUER` in the environment, else the
+host's deploy config (`~/.config/econgraph/deploy.env`) when it matches the existing
+certificate's issuer or there is none, else the existing issuer; a config line that would
+change the issuer is refused without an explicit choice.

@@ -23,9 +23,13 @@
 #     one that serves another host than the configured one, a cluster not
 #     marked production with one, a marker that can't be read, an environment
 #     PUBLIC_HOST that differs from the config, the last config line winning,
-#     and uppercase lowercased); GATEWAY_TLS_ISSUER from the environment, else
-#     the deploy config (ECONGRAPH_CONFIG_DIR names its directory), else unset,
-#     and a malformed one refused; --yes alone is not enough on a production
+#     and uppercase lowercased); the certificate issuer: the deploy config's
+#     (ECONGRAPH_CONFIG_DIR names its directory) only when it matches the current
+#     one or there is none, a change only with --change-tls-issuer or
+#     GATEWAY_TLS_ISSUER in the environment (never a silent move off
+#     econ-graph-origin-ca), current -> new in the plan, a malformed, exported or
+#     unreadable config refused, and the line unread without a public host;
+#     --yes alone is not enough on a production
 #     cluster (--confirm-production);
 #   - --dry-run passes --dry-run to every step it runs and does not run verify;
 #   - without a terminal and without --yes it refuses before any step;
@@ -92,7 +96,9 @@ STUB
 # The kind cluster's kubectl: context kind-econ-graph, a kube-system UID, the
 # production marker as STUB_MARKER says (production, none, fails), and the
 # public host the cluster serves as STUB_SERVED_HOST says (default
-# econgraph.com; "fail" fails).
+# econgraph.com; "fail" fails), and the gateway certificate's issuer as
+# STUB_CERT_ISSUER says (default econ-graph-selfsigned; empty: no certificate;
+# "fail" fails).
 cat >"$WORK/source/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "$0 KUBECONFIG=${KUBECONFIG:-} $*" >>"$TEST_LOGS/kind-kubectl.log"
@@ -116,6 +122,10 @@ case "$*" in
         [ "${STUB_SERVED_HOST-}" != fail ] || exit 1
         printf '%s\n' "${STUB_SERVED_HOST-econgraph.com}" ;;
     "get ingress "*) ;;
+    "get crd certificates.cert-manager.io "*) echo customresourcedefinition.apiextensions.k8s.io/certificates.cert-manager.io ;;
+    "get certificate econ-graph-tls "*)
+        [ "${STUB_CERT_ISSUER-}" != fail ] || exit 1
+        printf '%s' "${STUB_CERT_ISSUER-econ-graph-selfsigned}" ;;
     "get configmap econgraph-cluster-role"*)
         case "${STUB_MARKER:-production}" in
             production) printf 'production %s' "$uid" ;;
@@ -1069,33 +1079,82 @@ else
 fi
 echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
-# --- GATEWAY_TLS_ISSUER: the environment, else the deploy config, else unset ---------------
-issuer_case() { # NAME EXPECTED: the last run deployed with GATEWAY_TLS_ISSUER EXPECTED
-    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2\$" "$LOGS/steps.log"; then
+# --- GATEWAY_TLS_ISSUER ---------------------------------------------------------------------
+issuer_case() { # NAME EXPECTED PLAN: the last run deployed with GATEWAY_TLS_ISSUER EXPECTED, showing PLAN
+    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2\$" "$LOGS/steps.log" && has "$3"; then
         echo "ok   $1"
     else
-        fail "$1: exit $rc, $(grep '^deploy ' "$LOGS/steps.log" || true)"
+        fail "$1: exit $rc, $(grep '^deploy ' "$LOGS/steps.log" || true), $(grep 'TLS issuer' <<<"$out" || true)"
     fi
 }
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-issuer_case "no GATEWAY_TLS_ISSUER configured leaves it unset" "<unset>"
+issuer_case "no GATEWAY_TLS_ISSUER configured keeps the current issuer" "<unset>" \
+    "econ-graph-selfsigned (unchanged; from the certificate's current issuer)"
 printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER="econ-graph-origin-ca"\n' >"$CONFIG"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "a configured issuer equal to the current one" "<unset>" \
+    "econ-graph-origin-ca (unchanged; from $CONFIG)"
+run env STUB_CERT_ISSUER= "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "a configured issuer on a cluster without the certificate (recreated)" "<unset>" \
+    "(no certificate) → econ-graph-origin-ca (from $CONFIG)"
+# A configured issuer that differs from the live one: refused unless explicit.
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-issuer_case "GATEWAY_TLS_ISSUER from the deploy config reaches deploy.sh" "econ-graph-origin-ca"
-has "econ-graph-origin-ca (from $CONFIG)" || fail "the configured issuer is not shown with its source"
-run env GATEWAY_TLS_ISSUER=econ-graph-selfsigned "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-issuer_case "an environment GATEWAY_TLS_ISSUER wins over the config" "econ-graph-selfsigned"
+refused "a configured issuer that differs from the current one" "never changes the issuer implicitly"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --change-tls-issuer
+issuer_case "--change-tls-issuer passes the configured issuer to deploy.sh" "econ-graph-origin-ca" \
+    "econ-graph-selfsigned → econ-graph-origin-ca (from GATEWAY_TLS_ISSUER in the environment)"
+# Never off econ-graph-origin-ca implicitly: a stale rollback edit or a typo.
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-selfsigned\n' >"$CONFIG"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a configured downgrade off econ-graph-origin-ca" "never changes the issuer implicitly"
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-cq\n' >"$CONFIG"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a mistyped configured issuer" "never changes the issuer implicitly"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca GATEWAY_TLS_ISSUER=econ-graph-selfsigned "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "an environment GATEWAY_TLS_ISSUER changes it explicitly" "econ-graph-selfsigned" \
+    "econ-graph-origin-ca → econ-graph-selfsigned (from GATEWAY_TLS_ISSUER in the environment)"
+printf 'PUBLIC_HOST=econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --change-tls-issuer
+refused "--change-tls-issuer without a configured issuer" "needs a GATEWAY_TLS_ISSUER= line"
+run env STUB_CERT_ISSUER=fail "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a certificate whose issuer can't be read" "could not read the issuer"
 # ECONGRAPH_CONFIG_DIR names another directory, as the backup scripts' does.
 mkdir -p "$WORK/other-config"
 printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=letsencrypt-test\n' >"$WORK/other-config/deploy.env"
-run env ECONGRAPH_CONFIG_DIR="$WORK/other-config" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-issuer_case "ECONGRAPH_CONFIG_DIR's deploy.env is read" "letsencrypt-test"
-printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$CONFIG"
+run env ECONGRAPH_CONFIG_DIR="$WORK/other-config" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --change-tls-issuer
+issuer_case "ECONGRAPH_CONFIG_DIR's deploy.env is read" "letsencrypt-test" \
+    "econ-graph-selfsigned → letsencrypt-test"
+# Malformed lines.
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-selfsigned # verified\n' >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a GATEWAY_TLS_ISSUER with a trailing comment" "with blanks in it"
 printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=Bad_Issuer\n' >"$CONFIG"
-run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+run env STUB_CERT_ISSUER= "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a GATEWAY_TLS_ISSUER that is not a resource name" "is not a resource name"
+printf 'PUBLIC_HOST=econgraph.com\nexport GATEWAY_TLS_ISSUER=econ-graph-selfsigned\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an exported GATEWAY_TLS_ISSUER line" "without export"
+printf 'export PUBLIC_HOST=econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an exported PUBLIC_HOST line" "without export"
+# Without a public host the issuer line is not read, so a bad one breaks nothing.
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$CONFIG"
+run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes
+if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST= " "$LOGS/steps.log"; then
+    echo "ok   a bad issuer line does not stop a deploy without a public host"
+else
+    fail "a bad issuer line without a public host: exit $rc, $(cat "$LOGS/steps.log")"
+fi
+# A deploy config that exists but can't be read is refused, not taken as empty.
+echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
+chmod 000 "$CONFIG"
+if [ -r "$CONFIG" ]; then
+    echo "ok   (an unreadable deploy config: skipped, this user can read any file)"
+else
+    run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+    refused "an unreadable deploy config" "is not a readable file"
+fi
+chmod 600 "$CONFIG"
 echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
 # --- confirmation -------------------------------------------------------------------------------

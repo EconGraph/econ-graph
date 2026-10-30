@@ -5,8 +5,11 @@
 # exists, replacement of a renewed root (same subject and key) and refusal of any
 # other root; and apply-gateway-routes.sh staging the CA before it selects issuer
 # econ-graph-origin-ca, printing it under --dry-run and not changing the certificate
-# when staging fails; its issuer precedence (environment, then the host's deploy
-# config, then the certificate's current issuer, then self-signed), with HOME and
+# when staging fails; its issuer choice (the environment; else the host's deploy
+# config only when it matches the current certificate's issuer or there is none,
+# refused when it differs, never moving off econ-graph-origin-ca implicitly; else
+# the current issuer; else self-signed), malformed, exported or unreadable config
+# refused, and the config unread without a public host, with HOME and
 # ECONGRAPH_CONFIG_DIR in a scratch directory, never the real ~/.config/econgraph.
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -171,6 +174,37 @@ elif 'patch' in args:
         result = run('--context','scratch-only','--apply',EXISTING_CA=existing,MOUNTED='1')
         assert result.returncode != 0 and 'two-root rotation' in result.stderr, result
         assert not published(logged()) and not patched(logged()) and not restarted(logged())
+    # A two-root bundle that still holds the current root (a rotation in progress) is
+    # left as it is, in either order, so deploys go on during the rotation.
+    for existing in [ca.read_text() + other_key.read_text(), other_key.read_text() + ca.read_text()]:
+        calls.write_text('')
+        result = run('--context','scratch-only','--apply',EXISTING_CA=existing,MOUNTED='1')
+        assert result.returncode == 0, result.stderr
+        assert 'two-root rotation' in result.stdout, result.stdout
+        assert not published(logged()) and not patched(logged()) and not restarted(logged())
+    # The issued root must itself be a self-signed CA: a certificate with the published
+    # root's subject and key, but cross-signed by another CA (fails the self-verify),
+    # or self-signed without CA:TRUE (fails the CA check), is never published, even
+    # though its subject and key match a published root.
+    csr = work / 'same.csr'
+    subprocess.run(['openssl', 'req', '-new', '-key', str(work / 'test.key'), '-subj', '/CN=offline-test-ca',
+                    '-out', str(csr)], check=True, capture_output=True)
+    extensions = work / 'ca.ext'
+    extensions.write_text('basicConstraints=critical,CA:TRUE\n')
+    cross_signed = work / 'cross-signed.crt'
+    subprocess.run(['openssl', 'x509', '-req', '-in', str(csr), '-CA', str(other_key),
+                    '-CAkey', str(work / 'other.key'),
+                    '-CAcreateserial', '-days', '365', '-extfile', str(extensions), '-out', str(cross_signed)],
+                   check=True, capture_output=True)
+    not_ca = work / 'not-ca.crt'
+    subprocess.run(['openssl', 'req', '-x509', '-key', str(work / 'test.key'), '-out', str(not_ca),
+                    '-days', '365', '-subj', '/CN=offline-test-ca',
+                    '-addext', 'basicConstraints=critical,CA:FALSE'], check=True, capture_output=True)
+    for issued in [cross_signed, not_ca]:
+        calls.write_text('')
+        result = run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text(),MOUNTED='1',CA=str(issued))
+        assert result.returncode != 0, (issued.name, result.stdout)
+        assert not published(logged()) and not patched(logged()) and not restarted(logged()), issued.name
     # Near-expiry roots must not be published as a new trust bundle.
     subprocess.run(['openssl','req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256',
                     '-nodes','-keyout',str(work/'short.key'),'-out',str(ca),'-days','30',
@@ -202,6 +236,7 @@ with tempfile.TemporaryDirectory() as folder:
 echo "kubectl $*" >>"$LOG"
 case "$*" in
     *"config current-context"*) echo kind-current ;;
+    *"get crd certificates.cert-manager.io"*) echo customresourcedefinition/certificates.cert-manager.io ;;
     *"get certificate econ-graph-tls"*) printf '%s' "${CURRENT_ISSUER:-}" ;;
     *--field-manager*)
         all="$*"; file="${all##* -f }"
@@ -256,25 +291,49 @@ exit 0
         issuers = [line.split(' ', 1)[1] for line in lines if line.startswith('issuer ')]
         assert len(issuers) == 1, lines
         return issuers[0], 'stage --context kind-test --apply' in lines
-    # Precedence: environment, deploy config, current certificate, self-signed.
+    def refused(text, **updates):
+        """The run failed, saying `text`, before applying or staging anything."""
+        result, lines = routes('--context', 'kind-test', **updates)
+        assert result.returncode != 0 and text in result.stderr, result
+        assert not any(line.startswith(('stage', 'issuer')) or ' apply ' in line for line in lines), lines
+    # No config: the current issuer, else self-signed.
     assert chosen() == ('econ-graph-selfsigned', False)
     assert chosen(CURRENT_ISSUER='letsencrypt-test') == ('letsencrypt-test', False)
+    assert chosen(CURRENT_ISSUER='econ-graph-origin-ca') == ('econ-graph-origin-ca', True)
     # After a recreate (no certificate), the deploy config keeps the CA issuer and stages it.
     deploy_env.write_text('PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-ca\n')
     assert chosen() == ('econ-graph-origin-ca', True)
-    assert chosen(CURRENT_ISSUER='econ-graph-selfsigned') == ('econ-graph-origin-ca', True)
-    assert chosen(GATEWAY_TLS_ISSUER='econ-graph-selfsigned') == ('econ-graph-selfsigned', False)
+    assert chosen(CURRENT_ISSUER='econ-graph-origin-ca') == ('econ-graph-origin-ca', True)
+    # A config that differs from the live certificate's issuer never changes it implicitly.
+    refused('never changes the issuer implicitly', CURRENT_ISSUER='econ-graph-selfsigned')
+    deploy_env.write_text('GATEWAY_TLS_ISSUER=econ-graph-selfsigned\n')
+    refused('never changes the issuer implicitly', CURRENT_ISSUER='econ-graph-origin-ca')
+    # The environment is an explicit choice, which may change it.
+    assert chosen(CURRENT_ISSUER='econ-graph-origin-ca',
+                  GATEWAY_TLS_ISSUER='econ-graph-selfsigned') == ('econ-graph-selfsigned', False)
+    deploy_env.write_text('GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n')
+    assert chosen(CURRENT_ISSUER='econ-graph-selfsigned',
+                  GATEWAY_TLS_ISSUER='econ-graph-origin-ca') == ('econ-graph-origin-ca', True)
     # An empty environment value falls through to the config.
     assert chosen(GATEWAY_TLS_ISSUER='') == ('econ-graph-origin-ca', True)
     # The last line wins; quotes are removed.
     deploy_env.write_text('GATEWAY_TLS_ISSUER=econ-graph-origin-ca\nGATEWAY_TLS_ISSUER="letsencrypt-test"\n')
     assert chosen() == ('letsencrypt-test', False)
-    # A malformed line stops before anything is applied.
-    for text in ['GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n', 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\r\n']:
+    # A malformed, exported or unreadable config stops before anything is applied ...
+    for text, message in [('GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n', 'with blanks in it'),
+                          ('GATEWAY_TLS_ISSUER=econ-graph-origin-ca\r\n', 'carriage return'),
+                          ('export GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n', 'without export'),
+                          ('GATEWAY_TLS_ISSUER=Bad_Issuer\n', 'not a resource name')]:
         deploy_env.write_text(text)
-        result, lines = routes('--context', 'kind-test')
-        assert result.returncode != 0 and 'GATEWAY_TLS_ISSUER' in result.stderr, result
-        assert not any(line.startswith(('stage', 'issuer')) for line in lines)
+        refused(message)
+        # ... but only with a public host: without one the line is not read.
+        result, _ = routes('--context', 'kind-test', PUBLIC_HOST='none')
+        assert result.returncode == 0, (text, result.stderr)
+    deploy_env.write_text('GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n')
+    deploy_env.chmod(0)
+    if not os.access(deploy_env, os.R_OK):
+        refused('is not a readable file')
+    deploy_env.chmod(0o600)
     deploy_env.unlink()
     assert chosen() == ('econ-graph-selfsigned', False)
     assert not home.exists(), 'the scratch HOME must not be written'

@@ -8,7 +8,8 @@
 # Without a cloudflared Deployment yet, it publishes the CA and ConfigMap only; the
 # normal connector manifest carries the same optional mount.
 # A published root is replaced only by a renewal of itself (same subject and public
-# key); any other root needs the two-root rotation runbook.
+# key); a published bundle that still contains this root among others (a two-root
+# rotation) is left unchanged; any other root needs the two-root rotation runbook.
 # It does not switch the gateway issuer or Cloudflare dashboard TLS settings;
 # apply-gateway-routes.sh runs it when that issuer is econ-graph-origin-ca.
 #
@@ -79,8 +80,9 @@ openssl verify -CAfile "$work/ca.crt" "$work/ca.crt" >/dev/null
 # Replacing an active trust root before the gateway leaf is rotated can break the
 # running tunnel. A renewal of the published root (rotationPolicy: Never keeps its
 # key) has the same subject and public key, so leaves it signed still verify and it
-# may replace the published one. Anything else, including a two-root bundle, needs
-# the documented two-root rotation procedure.
+# may replace the published one. A bundle of several roots that still contains this
+# one exactly (a two-root rotation in progress) is left as it is. Anything else
+# needs the documented two-root rotation procedure.
 kc -n econ-graph get configmap cloudflared-origin-ca --ignore-not-found \
     -o 'jsonpath={.data.ca\.crt}' >"$work/existing-ca.crt"
 # Prints the subject and public key of a file holding exactly one certificate.
@@ -88,6 +90,22 @@ root_identity() {
     [[ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$1")" == 1 ]] || return 1
     openssl x509 -in "$1" -noout -subject -nameopt RFC2253 &&
         openssl x509 -in "$1" -noout -pubkey
+}
+# Whether bundle $1 contains certificate $2 (the same SHA-256 fingerprint).
+bundle_contains() {
+    local want cert fingerprint
+    want="$(openssl x509 -in "$2" -noout -fingerprint -sha256)" || return 1
+    rm -rf "$work/bundle" && mkdir "$work/bundle"
+    awk -v dir="$work/bundle" '
+        /-----BEGIN CERTIFICATE-----/ { n++; out = dir "/" n ".pem"; inside = 1 }
+        inside { print > out }
+        /-----END CERTIFICATE-----/ { inside = 0; close(out) }' "$1"
+    for cert in "$work/bundle"/*.pem; do
+        [[ -e "$cert" ]] || continue
+        fingerprint="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null)" || continue
+        [[ "$fingerprint" == "$want" ]] && return 0
+    done
+    return 1
 }
 bundle_changed=false
 if [[ ! -s "$work/existing-ca.crt" ]]; then
@@ -98,6 +116,8 @@ elif ! cmp -s "$work/ca.crt" "$work/existing-ca.crt"; then
         [[ "$new_id" == "$old_id" ]]; then
         echo 'Published root renewed (same subject and public key); replacing it.'
         bundle_changed=true
+    elif bundle_contains "$work/existing-ca.crt" "$work/ca.crt"; then
+        echo 'Trust bundle holds this root among others (a two-root rotation); left unchanged.'
     else
         echo 'error: existing trust bundle differs; follow the two-root rotation runbook' >&2
         exit 1
