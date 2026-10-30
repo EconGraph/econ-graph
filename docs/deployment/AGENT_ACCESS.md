@@ -77,10 +77,13 @@ Bootstrap refuses an output directory that is a symlink, is not yours, or is
 inside a git work tree. It also refuses when any directory on the way to it can be
 changed by another user: writable by others without the sticky bit, by a group
 other than your own private group, or by another user or group through an ACL.
-Your private group is your primary group when it has your user name, no listed
-members, and is no other user's primary group. An ACL that cannot be read, for a
-reason other than there being none or the filesystem not supporting them, is
-refused. NFSv4 ACLs are not read, so keep the output directory off NFSv4 mounts.
+Your private group is your primary group when it has your user name, no group
+entry with its GID lists another member, and it is no other user's primary group;
+with LDAP or SSSD and enumeration off, only local members and users are seen. An
+ACL that cannot be read, for a reason other than there being none or the
+filesystem not supporting them, is refused. Only POSIX ACLs are read: keep the
+output directory off filesystems with NFSv4 ACLs (NFSv4 mounts, ZFS with
+`acltype=nfsv4`) or CIFS ACLs.
 That walk follows symlinks one component at a time, so the directory holding a
 symlink is checked as well as where it points. Inside a sticky directory such as
 `/tmp`, a symlink must be yours or root's. Never attach or paste the

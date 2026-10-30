@@ -21,7 +21,10 @@ spec = importlib.util.spec_from_file_location("agent_paths", SCRIPT)
 agent_paths = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent_paths)
 
-ME = pwd.getpwuid(os.getuid()).pw_name
+try:
+    ME = pwd.getpwuid(os.getuid()).pw_name
+except KeyError:  # no passwd entry, as in some containers
+    ME = None
 OTHER_UID = next(uid for uid in range(60000, 70000) if uid != os.getuid())
 
 
@@ -39,7 +42,8 @@ class PrivateBase(unittest.TestCase):
     def setUp(self):
         old_umask = os.umask(0o077)
         self.addCleanup(os.umask, old_umask)
-        self.base = Path(tempfile.mkdtemp(prefix="agent-paths-"))
+        # Resolved, so the paths the patched lstat compares are the ones walked.
+        self.base = Path(os.path.realpath(tempfile.mkdtemp(prefix="agent-paths-")))
         self.addCleanup(shutil.rmtree, self.base)
         os.chmod(self.base, 0o700)
         # The chain to the base must be acceptable, or the tests below prove nothing.
@@ -81,14 +85,20 @@ class TrustedTests(PrivateBase):
                          f"{theirs} can be changed by other users")
 
 
+@unittest.skipIf(ME is None, "no passwd entry for this uid")
 class OwnPrivateGroupTests(unittest.TestCase):
-    def patched(self, members=(), other_primary=False):
+    def patched(self, members=(), other_primary=False, alias_members=None):
         group = grp.struct_group((ME, "x", os.getgid(), list(members)))
+        groups = [group]
+        if alias_members is not None:
+            # A second /etc/group entry with the same GID.
+            groups.append(grp.struct_group(("alias", "x", os.getgid(), list(alias_members))))
         users = [pwd.struct_passwd((ME, "x", os.getuid(), os.getgid(), "", "/", "/bin/sh"))]
         if other_primary:
             users.append(pwd.struct_passwd(("mallory", "x", OTHER_UID, os.getgid(), "", "/", "/bin/sh")))
         return [
             mock.patch.object(agent_paths.grp, "getgrgid", return_value=group),
+            mock.patch.object(agent_paths.grp, "getgrall", return_value=groups),
             mock.patch.object(agent_paths.pwd, "getpwall", return_value=users),
         ]
 
@@ -105,6 +115,9 @@ class OwnPrivateGroupTests(unittest.TestCase):
 
     def test_group_with_another_member_is_not_private(self):
         self.assertFalse(self.check(members=["mallory"]))
+
+    def test_another_entry_with_the_same_gid_and_a_member_is_not_private(self):
+        self.assertFalse(self.check(alias_members=["mallory"]))
 
     def test_group_that_is_another_users_primary_group_is_not_private(self):
         self.assertFalse(self.check(other_primary=True))
@@ -149,6 +162,23 @@ class SymlinkTests(PrivateBase):
         (self.base / "target").mkdir()
         (sticky / "link").symlink_to(self.base / "target")
         return sticky / "link"
+
+    def test_link_reached_through_dotdot_is_judged_by_the_sticky_directory(self):
+        link = self.sticky_with_link()
+        (link.parent / "sub").mkdir()
+        real_lstat = os.lstat
+
+        def lstat(path):
+            st = real_lstat(path)
+            return as_owner(st, OTHER_UID) if os.fspath(path) == str(link) else st
+
+        with mock.patch.object(agent_paths.os, "lstat", lstat):
+            self.refused(lambda: agent_paths.check_chain(f"{link.parent}/sub/../link/agent"),
+                         f"{link} is a symlink owned by another user in a sticky directory")
+
+    def test_dotdot_after_a_missing_component_is_refused(self):
+        self.refused(lambda: agent_paths.check_chain(f"{self.base}/missing/../../../../tmp/agent"),
+                     f"has .. after {self.base}/missing, which is missing")
 
     def test_your_own_link_in_a_sticky_directory_is_followed(self):
         link = self.sticky_with_link()

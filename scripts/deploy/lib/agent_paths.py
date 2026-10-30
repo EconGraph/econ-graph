@@ -11,18 +11,22 @@ Used by create-agent-kubeconfig.sh and run-agent-session.sh; not run by hand.
       group-writable except by your own private group, and with no POSIX ACL
       entry giving another user or group write access. A symlink inside a
       sticky directory must be owned by you or root. A missing tail of PATH is
-      fine: it is created under the last checked directory.
+      fine, as long as it has no "..": it is created under the last checked
+      directory.
 
   check-private LABEL dir|file MODE PATH
       PATH is a directory or regular file, not a symlink, owned by you, with
       exactly MODE (octal) and no extended or default POSIX ACL.
 
 Your private group is your primary group when it has your user name, no
-listed members and is no other user's primary group.
+group entry with its GID lists another member, and it is no other user's
+primary group. Members and users are those the system can list: with LDAP or
+SSSD and enumeration off, only local ones.
 
 Only POSIX ACLs are read. An error reading one, other than "no ACL" or "ACLs
-not supported here", is refused. NFSv4 ACLs (system.nfs4_acl) are not read, so
-a write grant made only through one is not seen; don't use an NFSv4 mount.
+not supported here", is refused. NFSv4 ACLs (NFSv4 mounts, ZFS with
+acltype=nfsv4) and CIFS ACLs are not read, so a write grant made only through
+one is not seen; don't use such a filesystem.
 
 Exit status 1 with an error naming LABEL or the offending directory.
 """
@@ -66,7 +70,8 @@ def own_private_group(gid):
         return False
     if gid != os.getgid() or group.gr_name != me:
         return False
-    if any(member != me for member in group.gr_mem):
+    # Every entry with this GID: getgrgid returns only the first.
+    if any(member != me for entry in grp.getgrall() if entry.gr_gid == gid for member in entry.gr_mem):
         return False
     return not any(user.pw_gid == gid and user.pw_name != me for user in pwd.getpwall())
 
@@ -96,8 +101,7 @@ def check_chain(path):
     if not path.startswith("/"):
         fail(f"{path} is not absolute")
     current = "/"
-    current_st = os.lstat(current)
-    if not trusted(current, current_st):
+    if not trusted(current, os.lstat(current)):
         fail("/ can be changed by other users; choose another --output-dir")
     pending = path.split("/")
     hops = 0
@@ -107,12 +111,13 @@ def check_chain(path):
             continue
         if name == "..":
             current = os.path.dirname(current)
-            current_st = os.lstat(current)
             continue
         candidate = os.path.join(current, name)
         try:
             st = os.lstat(candidate)
         except FileNotFoundError:
+            if ".." in pending:
+                fail(f"{path} has .. after {candidate}, which is missing")
             return
         except OSError as error:
             fail(f"cannot check {candidate}: {error.strerror}")
@@ -121,7 +126,7 @@ def check_chain(path):
             # In a sticky directory others may add entries, and the kernel's
             # protected_symlinks covers only world-writable ones: the link
             # itself must then be yours or root's.
-            if current_st.st_mode & stat.S_ISVTX and st.st_uid not in (0, os.getuid()):
+            if os.lstat(current).st_mode & stat.S_ISVTX and st.st_uid not in (0, os.getuid()):
                 fail(f"{candidate} is a symlink owned by another user in a sticky directory")
             hops += 1
             if hops > 40:
@@ -129,14 +134,13 @@ def check_chain(path):
             target = os.readlink(candidate)
             if target.startswith("/"):
                 current = "/"
-                current_st = os.lstat(current)
             pending = target.split("/") + pending
             continue
         if not stat.S_ISDIR(st.st_mode):
             fail(f"{candidate} is not a directory")
         if not trusted(candidate, st):
             fail(f"{candidate} can be changed by other users; choose another --output-dir")
-        current, current_st = candidate, st
+        current = candidate
 
 
 def check_private(label, kind, mode, path):

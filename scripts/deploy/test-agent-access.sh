@@ -275,7 +275,8 @@ if [ -n "$other_group" ]; then
     chmod 0770 "$scratch/shared"
     refused group-parent "$scratch/shared can be changed by other users" --output-dir "$scratch/shared/agent"
 fi
-if [ "$(id -gn)" = "$(id -un)" ]; then
+if python3 -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import agent_paths
+sys.exit(not agent_paths.own_private_group(os.getgid()))' "$ROOT/scripts/deploy/lib"; then
     mkdir "$scratch/private-group"
     chmod 0770 "$scratch/private-group"
     bootstrap --output-dir "$scratch/private-group/agent" >/dev/null
