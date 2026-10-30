@@ -15,7 +15,7 @@ import {
   type FaultKind,
 } from '../failures/faults';
 import { SEEDED_MULTIPAGE } from '../fixtures';
-import { recentRows } from '../seriesPage';
+import { recentRows, splitSeriesCsv } from '../seriesPage';
 
 // ECO-261: a series too long for one `seriesData` page, driven through the series page —
 // loading, a date range, a transformation and the CSV download — and checked observation by
@@ -133,7 +133,8 @@ interface Csv {
 
 /**
  * Clicks Download CSV and parses the file (format: src/utils/seriesCsv.ts; see
- * csv-download.spec.ts): five metadata rows, a `date,value` header, then one row per point with
+ * csv-download.spec.ts): five metadata rows, the source's notice rows, a `date,value` header,
+ * then one row per point with
  * a missing value as an empty field.
  * @param page - A series page.
  * @returns The file's name, metadata rows and observations.
@@ -146,8 +147,7 @@ async function downloadCsv(page: Page): Promise<Csv> {
   const raw = readFileSync(await download.path(), 'utf8');
   const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
   const lines = text.trim().split('\r\n');
-  expect(lines[5]).toBe('date,value');
-  const data = lines.slice(6);
+  const { meta, data } = splitSeriesCsv(lines);
   // One check for the whole file: a per-row expect is a trace step per row.
   expect(
     data.find(line => !/^\d{4}-\d{2}-\d{2},[^,]*$/.test(line)) ?? null,
@@ -155,7 +155,7 @@ async function downloadCsv(page: Page): Promise<Csv> {
   ).toBeNull();
   return {
     fileName: download.suggestedFilename(),
-    meta: lines.slice(0, 5),
+    meta,
     rows: data.map(line => {
       const [date, value] = line.split(',');
       return { date, value: value === '' ? null : Number(value) };

@@ -2,12 +2,14 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
+import { readFileSync } from 'node:fs';
+
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { devUserToken, readAsDevUser, seededSeriesId } from './auth/helpers';
 import { DEPLOYED } from './env';
 import { SEEDED } from './fixtures';
-import { latestShown } from './seriesPage';
+import { latestShown, splitSeriesCsv } from './seriesPage';
 
 // Catalog access (config/keycloak/README.md, "Catalog access"): FRED is readable by admins only.
 // Visitors and signed-in users who aren't admins see no FRED source, series or search result,
@@ -125,5 +127,17 @@ test.describe('catalog access: FRED is admin-only', () => {
     await page.goto(`/series/${await seededSeriesId(request, SEEDED.fredGdp, token)}`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(SEEDED.fredGdp.title);
     await expect.poll(() => latestShown(page)).toEqual(SEEDED.fredGdp.latestShown);
+
+    // Its CSV carries FRED's notice and terms link (ECO-767).
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Download CSV' }).click(),
+    ]);
+    const raw = readFileSync(await download.path(), 'utf8');
+    const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    expect(splitSeriesCsv(text.trim().split('\r\n')).notice).toEqual([
+      'Notice,This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.',
+      'Terms of use,https://fred.stlouisfed.org/docs/api/terms_of_use.html',
+    ]);
   });
 });

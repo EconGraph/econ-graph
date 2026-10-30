@@ -15,14 +15,16 @@ const area = { name: 'area', label: 'Area', codelist: 'countries', codes: [] };
 
 describe('pickMapDataset', () => {
   it('finds the WDI dataset and its area and indicator dimensions', () => {
+    const source = { name: 'World Bank Open Data', notice: null };
     const picked = pickMapDataset([
       { id: '1', code: 'bds', name: 'BDS', dimensions: [] },
-      { id: '2', code: 'wdi', name: 'WDI', dimensions: [indicator, area] },
+      { id: '2', code: 'wdi', name: 'WDI', source, dimensions: [indicator, area] },
     ]);
 
     expect(picked).toEqual({
       id: '2',
       name: 'WDI',
+      source,
       areaDimension: 'area',
       indicatorDimension: 'indicator',
       indicators: indicator.codes,

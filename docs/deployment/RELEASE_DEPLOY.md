@@ -129,7 +129,10 @@ the run: before any step, or at the step whose result it was recording. A record
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
-`ECONGRAPH_DEPLOY_ENV` names another file), one line:
+`ECONGRAPH_CONFIG_DIR` names another directory; `ECONGRAPH_DEPLOY_ENV` names another file
+and wins over both). `ECONGRAPH_CONFIG_DIR` is also the backup scripts' variable
+(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too. One
+line:
 
 ```sh
 PUBLIC_HOST=econgraph.com
@@ -141,6 +144,7 @@ the name is lowercased (`ECONGRAPH.COM` deploys `econgraph.com`). When there are
 production host it holds `econgraph.com`; a test cluster's host has no file, or
 `PUBLIC_HOST=` (empty), and serves localhost only. Before any step it refuses:
 
+- a deploy config that exists but cannot be read, or an `export PUBLIC_HOST=` line;
 - a `PUBLIC_HOST` line with a carriage return (a file saved with CRLF endings), a value
   with blanks in it (an inline comment, spaces inside the quotes), or one that is not a
   public DNS name, by the check `deploy.sh` makes too (`render-public-host.py`);
@@ -155,6 +159,29 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
   it too, but only after the load and the backups);
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
+
+## GATEWAY_TLS_ISSUER
+
+With a public host, the same file may hold the ClusterIssuer of the gateway's https
+certificate, read the same way:
+
+```sh
+GATEWAY_TLS_ISSUER=econ-graph-origin-ca
+```
+
+`GATEWAY_TLS_ISSUER` in the environment wins over the line, but an environment value that
+differs from the certificate's current issuer is refused unless `--change-tls-issuer` is
+given, as for `PUBLIC_HOST`: a shell left over from an earlier change must not re-issue
+the certificate. Otherwise the line is used when it matches the certificate's current
+issuer or the cluster has no certificate (a recreated cluster); a line that differs from
+the current issuer is refused unless `--change-tls-issuer` is given, which passes it to
+`deploy.sh` as an explicit choice. With neither, the certificate keeps its current issuer, else
+`econ-graph-selfsigned`. The plan shows the current and the chosen issuer. A value that
+is not a resource name, an `export GATEWAY_TLS_ISSUER=` line or a config file that exists
+but cannot be read is refused before any step. `deploy.sh` (before it applies anything)
+and `apply-gateway-routes.sh` choose the issuer the same way
+(`scripts/deploy/lib/deploy-config.sh`); without a public host none of them reads the
+line. See [Tunnel origin TLS](TUNNEL_ORIGIN_TLS.md) for the CA issuer.
 
 ## Dry run
 

@@ -9,11 +9,12 @@ import { expect, test } from '@playwright/test';
 import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
-import { asShown, csvTextField, parseShown } from '../seriesPage';
+import { asShown, csvTextField, parseShown, splitSeriesCsv } from '../seriesPage';
 
 // Live QA: downloading CSV from a series page saves every point the chart shows, in its own
 // metadata-then-data format (src/utils/seriesCsv.ts): five `label,value` rows (Title, Source,
-// Units, Transformation, Retrieved at), then a `date,value` header, then one row per point,
+// Units, Transformation, Retrieved at), the source's notice rows, then a `date,value` header,
+// then one row per point,
 // oldest first. Unlike the Recent Data table, the export is not capped to the last 10 points and
 // keeps missing values as an empty field rather than dropping them.
 test.describe('download CSV', () => {
@@ -53,9 +54,17 @@ test.describe('download CSV', () => {
     expect(lines[2]).toBe(`Units,${csvTextField(series.units)}`);
     expect(lines[3]).toBe('Transformation,None');
     expect(lines[4]).toMatch(/^Retrieved at,/);
-    expect(lines[5]).toBe('date,value');
+    // Then BLS's citation, notice, retrieval date and terms link (ECO-767), and the data header.
+    const { notice, data } = splitSeriesCsv(lines);
+    expect(notice).toHaveLength(4);
+    expect(notice[0]).toBe('Citation,Source: U.S. Bureau of Labor Statistics');
+    expect(notice[1]).toBe(
+      'Notice,BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov.'
+    );
+    expect(notice[2]).toMatch(/^Retrieved from source,\d{4}-\d{2}-\d{2}$/);
+    expect(notice[3]).toBe('Terms of use,https://www.bls.gov/developers/termsOfService.htm');
 
-    const rows = lines.slice(6).map(line => {
+    const rows = data.map(line => {
       const [date, value] = line.split(',');
       return { date, value: value === '' ? null : Number(value) };
     });
