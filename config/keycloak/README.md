@@ -155,20 +155,11 @@ Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:
 `catalog.bea:read`, or `catalog.bank_of_canada:read`. Unknown source names are denied. The
 backend maps canonical data-source names to these capabilities; adding a source requires its
 role and mapping. A new catalog role spells the source out (`catalog.bank_of_canada:read`, not
-an acronym). The crawler's `catalog_roles` test fails when a source's name has no role or a
-catalog role is missing from `catalog-public`, apart from the exceptions it lists.
+an acronym). The crawler's `catalog_roles` test fails when a source's name has no role, a
+catalog role is missing from `catalog-public`, or a role in `catalog-public` is missing from the
+`econgraph-anonymous` scope mapping, apart from the exceptions it lists. See
+[Renaming a catalog role](#renaming-a-catalog-role) before renaming one.
 
-Renaming a catalog role in the realm file needs an entry in `RENAMED_CATALOG_ROLES` in
-`scripts/keycloak/preserve-catalog-grants.py` (old name to new name). keycloak-config-cli deletes
-a client role it created once the realm file drops it, with every grant it carries, and refuses
-an import whose composites still name it. So on the next deploy the render step moves the live
-grants of the old name (in `catalog-public`, managed composites, the anonymous reader's scope and
-role mappings) to the new name, and keeps the old role declared for that one import. After the
-import, the finalize step grants the new role to every remaining holder of the old one (users,
-groups, other composite roles, client scope mappings) and deletes the old role. A revoked grant
-stays revoked under the new name. Later deploys find no old role and change nothing. The entry
-for `catalog.boc:read` (renamed to `catalog.bank_of_canada:read`) can be dropped once every
-realm has been deployed with it.
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
 So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
 `updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
@@ -270,6 +261,51 @@ Snapshot failures abort the import instead of falling back to defaults. Snapshot
 separate admin API operations, so preservation is best effort under concurrent administrator edits;
 avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
 modified. Role definitions and non-catalog structural settings remain configuration as code.
+
+The render step also stops, before anything is imported, when `catalog-public`, a managed
+composite, or the anonymous reader's scope or role mappings hold a live catalog role the realm
+file does not define. keycloak-config-cli would delete such a role with every grant it carries
+and then fail the import. The error names the roles and where they are held.
+
+### Renaming a catalog role
+
+Renaming a catalog role in the realm file needs an entry in `RENAMED_CATALOG_ROLES` in
+`scripts/keycloak/preserve-catalog-grants.py` (old name to new name). keycloak-config-cli deletes
+a client role it created once the realm file drops it, with every grant it carries, and refuses
+an import whose composites still name it. So on the next deploy the render step moves the live
+grants of the old name in `catalog-public`, managed composites and the anonymous reader's scope
+and role mappings to the new name, and keeps the old role declared for that one import. After
+the import, the finalize step grants the new role to every remaining holder of the old one and
+deletes the old role. The holders it covers are exactly: users and groups the old role is mapped
+to directly, composite realm roles, composite client roles of every client, and every client's
+own scope mappings. Client scopes' scope mappings are not covered (the import replaces them from
+the realm file); deleting the old role removes it from them and from anything else not listed.
+A revoked grant stays revoked under the new name. Later deploys find no old role and change
+nothing.
+
+The renamed roles so far: `catalog.boc:read` to `catalog.bank_of_canada:read`.
+
+**Redeploying a release from before a rename.** That release's realm file and
+`preserve-catalog-grants.py` know only the old name. Its import carries the live grants of the
+new name into the import, keycloak-config-cli deletes the new role with every grant, and the
+import fails; deploying forward again does not bring the grants back. So before a full redeploy
+(`scripts/deploy/deploy.sh`) of such a release, rename the live role back.
+`scripts/keycloak/rename-catalog-role.py` renames it in place, and Keycloak keeps every grant
+because grants refer to the role's id. It refuses when both names exist and does nothing when
+the rename is already done. From the repository root, for the Bank of Canada role:
+
+```sh
+kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080 &
+export KEYCLOAK_URL=http://localhost:18080/idp
+export KEYCLOAK_USER="$(kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-username}' | base64 -d)"
+export KEYCLOAK_PASSWORD="$(kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d)"
+scripts/keycloak/rename-catalog-role.py --from catalog.bank_of_canada:read --to catalog.boc:read --dry-run
+scripts/keycloak/rename-catalog-role.py --from catalog.bank_of_canada:read --to catalog.boc:read
+```
+
+Then deploy the older release. Deploying a release with the rename again moves the grants to the
+new name as above. `scripts/deploy/rollback-release-images.sh` only retags images and restarts
+the backend, crawler-worker and frontend; it runs no realm import, so it needs none of this.
 
 ### Separate and shared data planes
 

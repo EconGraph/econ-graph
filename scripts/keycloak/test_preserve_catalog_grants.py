@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import urllib.parse
 import unittest
 
 HERE = Path(__file__).resolve().parent
@@ -273,6 +274,36 @@ class RenamedCatalogRoleTests(unittest.TestCase):
         merged = self.merge()
         self.assertEqual(merged["roles"]["client"], self.realm["roles"]["client"])
 
+    def test_a_live_grant_of_a_role_the_realm_file_does_not_define_fails_before_any_change(self):
+        # What a release from before a rename sees once the rename has run: config-cli would
+        # delete the role with every grant and then fail. The render step stops first.
+        gone = "catalog.gone:read"
+        edge = {"name": gone, "clientRole": True, "containerId": "api"}
+        for path, value, where in [
+            ("/roles/catalog-public/composites", [edge], "catalog-public"),
+            ("/roles/user/composites", [edge], "user"),
+            ("/clients/anon/scope-mappings/clients/api", [{"name": gone}], "econgraph-anonymous scope"),
+            ("/users/reader/role-mappings",
+             {"realmMappings": [], "clientMappings": {"econ-graph-api": {"mappings": [{"name": gone}]}}},
+             "econgraph-anonymous service account"),
+        ]:
+            saved = self.state[self.prefix + path]
+            self.state[self.prefix + path] = value
+            with self.assertRaises(RuntimeError) as raised:
+                self.merge()
+            message = str(raised.exception)
+            self.assertIn(gone, message)
+            self.assertIn(where, message)
+            self.assertIn("Rename the role back", message)
+            self.state[self.prefix + path] = saved
+        self.merge()
+
+    def test_the_old_name_live_is_carried_as_the_new_name_not_refused(self):
+        self.state[self.prefix + "/roles/catalog-public/composites"] = [
+            {"name": OLD, "clientRole": True, "containerId": "api"}]
+        self.assertEqual(self.role(self.merge(), "catalog-public")["composites"]["client"],
+                         {"econ-graph-api": [NEW]})
+
     def test_a_realm_file_missing_the_new_name_fails(self):
         self.realm["roles"]["client"]["econ-graph-api"] = [
             role for role in self.realm["roles"]["client"]["econ-graph-api"] if role["name"] != NEW]
@@ -310,9 +341,18 @@ class RetireRenamedRolesTests(unittest.TestCase):
             p + "/roles-by-id/cp/composites": [{"name": OLD, "clientRole": True, "containerId": "api"}],
             p + "/roles-by-id/ur/composites": [{"name": "annotation:create", "clientRole": True, "containerId": "api"}],
             p + "/roles-by-id/ad/composites": [{"name": OLD, "clientRole": True, "containerId": "other"}],
-            p + "/clients": [{"id": "api"}, {"id": "anon"}],
+            p + "/clients": [{"id": "api"}, {"id": "anon"}, {"id": "other"}],
+            p + "/clients/anon/roles?briefRepresentation=false": [],
+            # A composite client role on another client that bundles the old catalog role.
+            p + "/clients/other/roles?briefRepresentation=false": [
+                {"id": "bu", "name": "bundle", "composite": True},
+                {"id": "lo", "name": "loner", "composite": True},
+            ],
+            p + "/roles-by-id/bu/composites": [{"name": OLD, "clientRole": True, "containerId": "api"}],
+            p + "/roles-by-id/lo/composites": [{"name": "catalog.fred:read", "clientRole": True, "containerId": "api"}],
             p + "/clients/api/scope-mappings/clients/api": [],
             p + "/clients/anon/scope-mappings/clients/api": [{"name": OLD}],
+            p + "/clients/other/scope-mappings/clients/api": [],
         }
         self.sends = []
 
@@ -329,9 +369,18 @@ class RetireRenamedRolesTests(unittest.TestCase):
             ("POST", p + "/users/u1/role-mappings/clients/api", new_role),
             ("POST", p + "/groups/g1/role-mappings/clients/api", new_role),
             ("POST", p + "/roles-by-id/cp/composites", new_role),
+            ("POST", p + "/roles-by-id/bu/composites", new_role),
             ("POST", p + "/clients/anon/scope-mappings/clients/api", new_role),
             ("DELETE", self.old, None),
         ])
+
+    def test_composite_client_roles_of_other_clients_get_the_new_role(self):
+        self.retire()
+        composites = [path for method, path, _ in self.sends if path.endswith("/composites")]
+        self.assertIn(self.prefix + "/roles-by-id/bu/composites", composites)
+        self.assertNotIn(self.prefix + "/roles-by-id/lo/composites", composites)
+        # admin.users:read nests a role named like the old one, but on another client.
+        self.assertNotIn(self.prefix + "/roles-by-id/ad/composites", composites)
 
     def test_holders_are_paged(self):
         old = self.old
@@ -356,6 +405,49 @@ class RetireRenamedRolesTests(unittest.TestCase):
         self.state[self.prefix + "/clients/api/roles/catalog.bank_of_canada%3Aread"] = None
         with self.assertRaises(RuntimeError):
             self.retire()
+        self.assertEqual(self.sends, [])
+
+
+rename_spec = importlib.util.spec_from_file_location("rename", HERE / "rename-catalog-role.py")
+rename = importlib.util.module_from_spec(rename_spec)
+rename_spec.loader.exec_module(rename)
+
+
+class RenameCatalogRoleTests(unittest.TestCase):
+    """rename-catalog-role.py renames a live role in place (its grants follow by id)."""
+
+    def setUp(self):
+        p = "/admin/realms/econ-graph"
+        self.roles = p + "/clients/api/roles/"
+        self.state = {
+            p + "/clients?clientId=econ-graph-api": [{"id": "api"}],
+            self.roles + "catalog.bank_of_canada%3Aread": {"id": "r1", "name": NEW, "description": "d"},
+        }
+        self.sends = []
+
+    def run_rename(self, old=NEW, new=OLD, dry_run=False):
+        def send(method, path, body=None):
+            self.sends.append((method, path, body))
+            self.state[self.roles + urllib.parse.quote(body["name"], safe="")] = body
+            del self.state[path]
+        return rename.rename_role("econ-graph", old, new, self.state.get, send, dry_run)
+
+    def test_renames_in_place_keeping_the_id(self):
+        self.assertEqual(self.run_rename(dry_run=True), "would rename %s to %s" % (NEW, OLD))
+        self.assertEqual(self.sends, [])
+        self.assertEqual(self.run_rename(), "renamed %s to %s" % (NEW, OLD))
+        self.assertEqual(self.sends, [("PUT", self.roles + "catalog.bank_of_canada%3Aread",
+                                       {"id": "r1", "name": OLD, "description": "d"})])
+        # Running it again changes nothing.
+        self.assertIn("nothing to do", self.run_rename())
+        self.assertEqual(len(self.sends), 1)
+
+    def test_refuses_when_both_neither_or_not_a_catalog_role(self):
+        self.state[self.roles + "catalog.boc%3Aread"] = {"id": "r2", "name": OLD}
+        for old, new in [(NEW, OLD), ("catalog.x:read", "catalog.y:read"), (NEW, "admin.users:read"),
+                         (NEW, NEW)]:
+            with self.assertRaises(RuntimeError):
+                self.run_rename(old, new)
         self.assertEqual(self.sends, [])
 
 
