@@ -276,7 +276,8 @@ connection's own.
 **The host name is one setting, `PUBLIC_HOST`.** `deploy.sh` and `restart-k8s-rollout.sh`
 apply it through `scripts/deploy/lib/public-host.sh` and
 `scripts/deploy/render-public-host.py`. The committed manifests stay localhost-only, and
-`http://localhost` keeps working on the host:
+`http://localhost` still serves the app on the host, but signing in works only on
+`https://econgraph.com`: the realm accepts no localhost redirect:
 
 | What | Value for `PUBLIC_HOST=econgraph.com` |
 | --- | --- |
@@ -284,7 +285,7 @@ apply it through `scripts/deploy/lib/public-host.sh` and
 | HTTPRoutes | a separate `<name>-public` route per localhost one, for `econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
 | `www.econgraph.com` and plain http | `econ-graph-www-redirect` and `econ-graph-public-redirect`: permanent redirects to `https://econgraph.com`, same path |
 | Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
-| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` and `http://localhost` |
+| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
 | Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
 | Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
 
