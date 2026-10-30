@@ -7,6 +7,7 @@ import { format, isValid, parseISO } from 'date-fns';
 import type { DashboardSeriesEntry } from '../../config/dashboardSeries';
 import { useLatestObservation } from '../../hooks/useLatestObservation';
 import { formatDecimalString } from '../../utils/formatDecimal';
+import { SourceNoticePanel } from '../common/SourceNoticePanel';
 
 /**
  * Format a `YYYY-MM-DD` date for display.
@@ -140,6 +141,17 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
         </CardActionArea>
       ) : (
         content
+      )}
+      {/* Outside the card's link, since the notice has a link of its own. */}
+      {series && observation && (
+        <Box sx={{ px: 2, pb: 2 }}>
+          <SourceNoticePanel
+            sourceName={series.source?.name ?? ''}
+            notice={series.source?.notice}
+            lastUpdated={series.lastUpdated ?? null}
+            transformationLabel=''
+          />
+        </Box>
       )}
     </Card>
   );

@@ -20,7 +20,8 @@
 #   - deploy.sh and restart-k8s-rollout.sh leave cloudflared.yaml to apply_cloudflared,
 #     and no script applies it or the whole k8s/manifests directory itself.
 # And, with the same stubbed cluster:
-#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
+#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster,
+#     and refuses a Facebook credential in the environment before any kubectl call;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
 #     cloudflared before removing the marker and deletes the token only when told to;
@@ -28,6 +29,12 @@
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
+#   - scripts/deploy/set-crawler-keys.sh --facebook refuses (Facebook sign-in is disabled)
+#     before any prompt or kubectl call; --google refuses before it asks
+#     for anything when the cluster's realm ConfigMap is not this checkout's, and renders
+#     the realm-import Job for the public host the cluster serves; it refuses a cluster
+#     marked production that serves none, and a PUBLIC_HOST (environment or deploy
+#     config) that differs from the served host. Refusals exit non-zero in a dry run too.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -50,7 +57,10 @@ trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 # host storage under /srv/econgraph is never written: every script that could
 # (apply-host-storage.sh and the other deploy helpers) is a stub wherever deploy.sh runs.
 export HOME="$stub_dir/home" XDG_CACHE_HOME="$stub_dir/xdg-cache" ECONGRAPH_BACKUP_ROOT="$stub_dir/backups"
-mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
+# The deploy config (lib/deploy-config.sh) too: never the operator's ~/.config/econgraph.
+unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER
+export ECONGRAPH_CONFIG_DIR="$stub_dir/config"
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_DIR"
 
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
@@ -67,6 +77,11 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        STUB_SCALE_FAILS=1 scaling it fails
 #   STUB_LOOKUP_FAILS=1, STUB_NO_NAMESPACE=1, STUB_DELETE_FAILS=1  the econ-graph namespace
 #                        lookup fails / finds nothing; deleting the retired Ingress fails
+#   STUB_CERT_ISSUER     cert-manager is installed and certificate econ-graph-tls has this
+#                        issuer (empty: no certificate); unset: no cert-manager.
+#                        STUB_CERT_FAILS=1 the certificate lookup fails
+#   STUB_REALM           ConfigMap keycloak-realm: current (this checkout's files, read from
+#                        $STUB_REPO; the default), stale (an older realm) or missing
 cat >"$stub_dir/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -87,6 +102,8 @@ case "$*" in
   *"get namespace econ-graph"*)
     [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
+  *"get crd certificates.cert-manager.io"*) [ -z "${STUB_CERT_ISSUER+x}" ] || echo customresourcedefinition/certificates.cert-manager.io ;;
+  *"get certificate econ-graph-tls"*) [ "${STUB_CERT_FAILS:-0}" != 1 ] || exit 1; printf '%s' "${STUB_CERT_ISSUER:-}" ;;
   *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
   *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
@@ -102,6 +119,18 @@ case "$*" in
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
   *"get secret econ-graph-secrets --ignore-not-found -o name"*)
     [ "${STUB_KEYLESS_SECRET:-0}" != 1 ] || echo secret/econ-graph-secrets ;;
+  *"get job keycloak-realm-import"*) echo Complete ;;
+  *"get configmap keycloak-realm"*)
+    case "${STUB_REALM:-current}" in
+      missing) ;;
+      stale) case "$*" in *"-o name"*) echo configmap/keycloak-realm ;; *) echo '{"realm": "old"}' ;; esac ;;
+      *) case "$*" in
+           *"-o name"*) echo configmap/keycloak-realm ;;
+           *econ-graph-realm.json*) cat "$STUB_REPO/config/keycloak/econ-graph-realm.json" ;;
+           *render-realm.sh*) cat "$STUB_REPO/scripts/keycloak/render-realm.sh" ;;
+           *preserve-catalog-grants.py*) cat "$STUB_REPO/scripts/keycloak/preserve-catalog-grants.py" ;;
+         esac ;;
+    esac ;;
   *"get deployment cloudflared"*) printf '%s' "${STUB_CLOUDFLARED_REPLICAS:-}" ;;
   *"scale deployment/cloudflared"*) [ "${STUB_SCALE_FAILS:-0}" != 1 ] || exit 1 ;;
   *"create secret generic"* | *"create configmap"*) echo "kind: Stub" ;;
@@ -123,7 +152,8 @@ export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 # appends its PUBLIC_HOST and arguments to $log.
 lib_root="$stub_dir/lib-root"
 mkdir -p "$lib_root/scripts/deploy/lib" "$lib_root/k8s/manifests"
-cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh "$lib_root/scripts/deploy/lib/"
+cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh scripts/deploy/lib/deploy-config.sh \
+  "$lib_root/scripts/deploy/lib/"
 cp scripts/deploy/render-public-host.py "$lib_root/scripts/deploy/"
 cp k8s/manifests/cloudflared.yaml "$lib_root/k8s/manifests/"
 printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
@@ -178,6 +208,44 @@ fi
 if PUBLIC_HOST="not a host" run_lib public_host_init; then
   fail "a bad PUBLIC_HOST was accepted"
 fi
+
+# The certificate issuer is chosen in public_host_init, before anything is applied, and
+# only with a public host (tls_issuer_choose, lib/deploy-config.sh).
+config="$ECONGRAPH_CONFIG_DIR/deploy.env"
+no_apply() { ! grep -qE 'kubectl .*(apply|create|patch|scale)' "$log"; }
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$config"
+if PUBLIC_HOST=econgraph.com run_lib public_host_init; then
+  fail "a GATEWAY_TLS_ISSUER line with a comment was accepted"
+fi
+if ! { grep -q 'with blanks in it' "$out" && no_apply; }; then fail "a bad issuer line: $(cat "$out")"; fi
+PUBLIC_HOST='' run_lib public_host_init ||
+  fail "a bad issuer line stopped a deploy without a public host: $(cat "$out")"
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\r\n' >"$config"
+PUBLIC_HOST='' run_lib public_host_init || fail "a CRLF issuer line stopped a deploy without a public host"
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$config"
+# The configured issuer differs from the live certificate's: refused, both ways.
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-selfsigned run_lib public_host_init; then
+  fail "a configured issuer that differs from the certificate's was accepted"
+fi
+if ! { grep -q 'never changes the issuer implicitly' "$out" && no_apply; }; then fail "issuer conflict: $(cat "$out")"; fi
+printf 'GATEWAY_TLS_ISSUER=econ-graph-selfsigned\n' >"$config"
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-origin-ca run_lib public_host_init; then
+  fail "a stale config moved the certificate off econ-graph-origin-ca implicitly"
+fi
+# Explicit in the environment: allowed.
+GATEWAY_TLS_ISSUER=econ-graph-selfsigned PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-origin-ca \
+  run_lib public_host_init || fail "an explicit GATEWAY_TLS_ISSUER was refused: $(cat "$out")"
+grep -q 'Certificate issuer: econ-graph-selfsigned (from GATEWAY_TLS_ISSUER in the environment)' "$out" ||
+  fail "explicit issuer not shown: $(cat "$out")"
+# No certificate yet (a recreated cluster): the config's issuer.
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$config"
+PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER='' run_lib public_host_init || fail "recreated cluster: $(cat "$out")"
+grep -q "Certificate issuer: econ-graph-origin-ca (from $config)" "$out" || fail "recreated cluster: $(cat "$out")"
+# A failed certificate lookup stops.
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=x STUB_CERT_FAILS=1 run_lib public_host_init; then
+  fail "a failed certificate lookup did not stop"
+fi
+rm -f "$config"
 
 # The retired Ingress goes in public_host_init, before anything applies an Ingress.
 PUBLIC_HOST=econgraph.com run_lib public_host_init ||
@@ -302,6 +370,23 @@ run_stubbed STUB_MARKER=production CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts
   fail "create-secrets: refused the tunnel token on a marked cluster: $(cat "$out")"
 grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
   fail "create-secrets: the tunnel token was not written on a marked cluster"
+# Facebook sign-in is disabled: a Facebook credential in the environment is refused
+# before any kubectl call, in a dry run too; an empty one is not a credential.
+for fb in KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET; do
+  for args in '' --dry-run; do
+    # shellcheck disable=SC2086 # $args is empty or one flag
+    if run_stubbed STUB_MARKER=production "$fb=facebook-test-value" scripts/deploy/create-secrets.sh $args; then
+      fail "create-secrets $args: accepted $fb"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "create-secrets $args: $fb refused without the reason: $(cat "$out")"
+    grep -q 'facebook-test-value' "$out" && fail "create-secrets $args: printed the value of $fb"
+    [ -s "$log" ] && fail "create-secrets $args: called kubectl with $fb set: $(cat "$log")"
+  done
+done
+run_stubbed STUB_MARKER=none KEYCLOAK_FACEBOOK_CLIENT_ID= KEYCLOAK_FACEBOOK_CLIENT_SECRET= scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused empty Facebook variables: $(cat "$out")"
+grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp' "$log" &&
+  fail "create-secrets: wrote a Facebook key from empty variables"
 # No token given: as before on an unmarked cluster; a token already there is reported.
 run_stubbed STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets: failed without a token on an unmarked cluster: $(cat "$out")"
@@ -545,12 +630,17 @@ print(yaml.safe_dump(d))
 STUB
 chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$stub_dir/yqbin/yq"
 keys=scripts/deploy/set-crawler-keys.sh
-# run_keys STUB-SETTINGS ARGS [INPUT] [VAR=value]: set-crawler-keys.sh under a terminal, with
-# KUBECTL and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
+# run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
+# and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
+# The host's deploy config is $keys_deploy_env (absent unless a test writes it), and
+# keys_env adds settings such as PUBLIC_HOST or APP_DATABASE to the script's environment.
+keys_deploy_env="$stub_dir/config/econgraph/deploy.env"
+keys_env=()
 run_keys() {
-  printf 'STUB_LOG=%q\n%s\n' "$log" "$1" >"$stub_dir/stub.env"
+  printf 'STUB_LOG=%q\nSTUB_REPO=%q\n%s\n' "$log" "$repo_root" "$1" >"$stub_dir/stub.env"
   : >"$log"; rm -f "$log.ctx"
-  printf '%s' "${3:-}" | env ${4:+"$4"} XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+  printf '%s' "${3:-}" | env -u PUBLIC_HOST XDG_CONFIG_HOME="$stub_dir/config" ECONGRAPH_DEPLOY_ENV="$keys_deploy_env" \
+    ${keys_env[@]+"${keys_env[@]}"} XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     script -qec "$keys $2" /dev/null >"$out" 2>&1
 }
@@ -591,12 +681,114 @@ if [ "$have_script" = true ]; then
     fail "set-crawler-keys --tunnel: wrote into a Secret without app-database-url without APP_DATABASE"
   fi
   grep -q 'has no app-database-url' "$out" || fail "set-crawler-keys: the APP_DATABASE refusal is not shown: $(cat "$out")"
-  run_keys "$keyless" --tunnel "$fake_token"$'\n' APP_DATABASE=shared ||
+  keys_env=(APP_DATABASE=shared)
+  run_keys "$keyless" --tunnel "$fake_token"$'\n' ||
     fail "set-crawler-keys --tunnel: APP_DATABASE=shared did not reach create-secrets.sh: $(cat "$out")"
+  keys_env=()
   grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
     fail "set-crawler-keys --tunnel with APP_DATABASE=shared: the token was not written"
   grep -q 'app-database-url (shared with the data database, from APP_DATABASE)' "$out" ||
     fail "set-crawler-keys --tunnel with APP_DATABASE=shared: create-secrets.sh did not use it: $(cat "$out")"
+
+  # Facebook sign-in is disabled: --facebook refuses before any prompt, cluster call
+  # or write, with --dry-run too.
+  for args in --facebook '--facebook --dry-run'; do
+    if run_keys 'STUB_MARKER=none' "$args" $'facebook-test-app\nfacebook-test-secret\n'; then
+      fail "set-crawler-keys $args: did not refuse"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "set-crawler-keys $args: no refusal shown: $(cat "$out")"
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys $args: prompted"
+    [ -s "$log" ] && fail "set-crawler-keys $args: called kubectl: $(cat "$log")"
+  done
+  # Google mode (crawler keys left blank) writes its IdP keys and reapplies the realm.
+  google_args='--google --no-start-crawler'
+  google_input=$'\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
+  run_keys 'STUB_MARKER=none' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed: $(cat "$out")"
+  grep -q 'create secret generic econ-graph-keycloak .*--from-file=google-idp-client-id=.*--from-file=google-idp-client-secret=' "$log" ||
+    fail "Google IdP keys were not written"
+  grep -q 'rollout restart deployment/keycloak' "$log" || fail "Google mode did not restart Keycloak"
+  grep -q 'delete job keycloak-realm-import' "$log" || fail "Google mode did not reapply the realm"
+  grep -q 'stdin: .*name: keycloak-realm-import' "$log" || fail "Google mode did not apply the realm-import Job"
+  grep -q 'stdin: .*https://' "$log" && fail "Google mode rendered a public host on a cluster without one"
+  grep -q 'crawler-worker' "$log" && fail "Google mode with --no-start-crawler touched the crawler"
+  # On a cluster serving a public host, the Job is rendered for it as deploy.sh renders
+  # it, so the realm keeps the public redirect URIs and web origins.
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google failed with a public host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "Google mode did not render the realm import for the public host"
+  # A realm ConfigMap older than this checkout: refused before the prompt, nothing written.
+  for realm in stale missing; do
+    if run_keys "STUB_MARKER=none STUB_REALM=$realm" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted a $realm realm ConfigMap"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with a $realm realm ConfigMap"
+    grep -q 'deploy.sh' "$out" || fail "set-crawler-keys --google: the $realm realm refusal is not shown: $(cat "$out")"
+    grep -Eq 'create secret|apply|rollout|delete job' "$log" &&
+      fail "set-crawler-keys --google: changed the cluster with a $realm realm ConfigMap"
+  done
+  # A dry run reports the refusal and exits non-zero too.
+  run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' &&
+    fail "set-crawler-keys --google --dry-run: exited 0 on a stale realm ConfigMap"
+  grep -q 'would refuse: .*econ-graph-realm.json' "$out" ||
+    fail "set-crawler-keys --google --dry-run: no refusal on a stale realm ConfigMap: $(cat "$out")"
+  grep -q 'release-deploy.sh' "$out" ||
+    fail "set-crawler-keys: the stale realm refusal does not point to release-deploy.sh"
+
+  # keys_refused NAME SETTINGS PATTERN: --google refused before the prompt, nothing changed.
+  keys_refused() {
+    if run_keys "$2" "$google_args" "$google_input"; then
+      fail "set-crawler-keys --google: accepted $1"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --google: prompted with $1"
+    grep -q "$3" "$out" || fail "set-crawler-keys --google: $1 refused without '$3': $(cat "$out")"
+    if grep -Eq 'create secret|apply|rollout|delete job' "$log"; then
+      fail "set-crawler-keys --google: changed the cluster with $1"
+    fi
+  }
+  # Marked production but serving no public host (routes gone after a recreate or a
+  # partial deploy): refused, rather than rendering the realm for localhost only.
+  keys_refused 'a production cluster with no public route' 'STUB_MARKER=production' 'serves no public host'
+  keys_env=(PUBLIC_HOST=econgraph.com)
+  keys_refused 'a production cluster with no public route and PUBLIC_HOST set' 'STUB_MARKER=production' 'serves no public host'
+  keys_refused 'PUBLIC_HOST naming a host the cluster does not serve' 'STUB_MARKER=none' "PUBLIC_HOST='econgraph.com' is set"
+  keys_env=(PUBLIC_HOST=econ-graph.com)
+  keys_refused 'PUBLIC_HOST differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    "PUBLIC_HOST='econ-graph.com' is set"
+  # An explicit PUBLIC_HOST naming the served host (in any case) is accepted.
+  keys_env=(PUBLIC_HOST=EconGraph.com)
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused an explicit PUBLIC_HOST matching the served host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "set-crawler-keys --google: did not render the realm import for the explicit, served host"
+  keys_env=()
+  # The host's deploy config, read as release-deploy.sh reads it.
+  mkdir -p "$(dirname "$keys_deploy_env")"
+  echo 'PUBLIC_HOST=econ-graph.com' >"$keys_deploy_env"
+  keys_refused 'a deploy config differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    'says PUBLIC_HOST=econ-graph.com'
+  echo 'PUBLIC_HOST="econgraph.com"' >"$keys_deploy_env"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' "$google_args" "$google_input" ||
+    fail "set-crawler-keys --google: refused a deploy config matching the served host: $(cat "$out")"
+  keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
+    'says PUBLIC_HOST=econgraph.com'
+  # The shared reader's refusals (lib/deploy-config.sh) reach this path too: an
+  # exported line and a file that exists but cannot be read are refused, not read as
+  # "no host configured".
+  echo 'export PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  keys_refused 'an exported PUBLIC_HOST line in the deploy config' \
+    'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' 'without export'
+  echo 'PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  chmod 000 "$keys_deploy_env"
+  if [ -r "$keys_deploy_env" ]; then
+    echo "skip: an unreadable deploy config (this user can read any file)"
+  else
+    keys_refused 'an unreadable deploy config' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+      'is not a readable file'
+  fi
+  chmod 600 "$keys_deploy_env"
+  rm -f "$keys_deploy_env"
 
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"
@@ -667,6 +859,9 @@ echo "helper ran: %s $*" >>"$STUB_LOG"
 echo econ-graph
 ' >"$kind_dir/bin/kind"
   chmod +x "$kind_dir/bin/kind"
+  # A configured issuer: a dry run cannot see the cluster's certificate, so it must not
+  # name a concrete issuer (which would look like the result of the conflict check).
+  printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$ECONGRAPH_CONFIG_DIR/deploy.env"
   for host in '' econgraph.com; do
     printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
     : >"$log"; rm -f "$log.ctx"
@@ -682,8 +877,13 @@ echo econ-graph
     if [ -n "$host" ]; then
       grep -q '\[dry-run\] check that context kind-econ-graph is marked production' "$out" ||
         fail "deploy.sh --dry-run: the production check was not reported"
+      grep -q 'Certificate issuer: chosen when applied; not checked against the cluster in a dry run' "$out" ||
+        fail "deploy.sh --dry-run: the issuer note was not shown: $(grep -i issuer "$out" || true)"
     fi
+    grep -qE 'Certificate issuer: econ-graph|ClusterIssuer econ-graph' "$out" &&
+      fail "deploy.sh --dry-run (PUBLIC_HOST=$host) printed a concrete issuer: $(grep -i issuer "$out")"
   done
+  rm -f "$ECONGRAPH_CONFIG_DIR/deploy.env"
 
   # A stray CLUSTER_ROLE_DRY_RUN=true in the environment does not turn a real deploy into a
   # half dry run (kc printing while helper scripts run): kc runs for real from the start.

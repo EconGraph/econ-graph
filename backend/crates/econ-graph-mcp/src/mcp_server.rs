@@ -15,6 +15,15 @@ use warp::Reply;
 use econ_graph_core::database::{AppPool, DataPool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
+/// The GraphQL selection for a source's required notice (`DataSourceType.notice`), included
+/// wherever a tool or resource returns a source, so clients receive the citation and notice
+/// the source's terms require with its data.
+macro_rules! notice_fields {
+    () => {
+        "notice { citation notice termsUrl retrievalDateRequired }"
+    };
+}
+
 /// MCP Server implementation for EconGraph
 #[derive(Clone)]
 pub struct EconGraphMcpServer {
@@ -239,14 +248,18 @@ impl EconGraphMcpServer {
             .and_then(|v| v.as_i64())
             .unwrap_or(10) as i32;
 
-        let graphql_query = r#"
+        let graphql_query = concat!(
+            r#"
             query SearchSeries($query: String!, $limit: Int!) {
                 searchSeries(query: $query, first: $limit) {
-                    series { id name: title description frequency units source { name description } lastUpdated }
+                    series { id name: title description frequency units source { name description "#,
+            notice_fields!(),
+            r#" } lastUpdated }
                     totalCount
                 }
             }
-        "#;
+        "#
+        );
 
         let variables = json!({
             "query": query,
@@ -297,15 +310,19 @@ impl EconGraphMcpServer {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: series_id"))?;
 
-        let graphql_query = r#"
+        let graphql_query = concat!(
+            r#"
             query GetSeriesMetadata($seriesId: ID!) {
                 series(id: $seriesId) {
                     id name: title description frequency units
-                    source { name description url: baseUrl }
+                    source { name description url: baseUrl "#,
+            notice_fields!(),
+            r#" }
                     lastUpdated createdAt
                 }
             }
-        "#;
+        "#
+        );
 
         let variables = json!({
             "seriesId": series_id
@@ -373,9 +390,10 @@ impl EconGraphMcpServer {
                         "content": [{
                             "type": "text",
                             "text": format!(
-                                "✅ Chart visualization generated successfully using private frontend API!\n\n📊 Chart Configuration:\n{}\n\n📈 Metadata:\n{}",
+                                "✅ Chart visualization generated successfully using private frontend API!\n\n📊 Chart Configuration:\n{}\n\n📈 Metadata:\n{}\n\n📜 Source notices:\n{}",
                                 serde_json::to_string_pretty(chart_config).unwrap_or_else(|_| "Failed to format chart config".to_string()),
-                                serde_json::to_string_pretty(chart_response.get("metadata").unwrap_or(&json!(null))).unwrap_or_else(|_| "No metadata available".to_string())
+                                serde_json::to_string_pretty(chart_response.get("metadata").unwrap_or(&json!(null))).unwrap_or_else(|_| "No metadata available".to_string()),
+                                serde_json::to_string_pretty(&source_notices(&series_data)).unwrap_or_default()
                             )
                         }],
                         "is_error": false
@@ -462,7 +480,8 @@ impl EconGraphMcpServer {
 
     /// Get data sources
     pub async fn get_data_sources(&self) -> Result<Value> {
-        let graphql_query = r#"
+        let graphql_query = concat!(
+            r#"
             query GetDataSources {
                 dataSources {
                     id
@@ -470,9 +489,13 @@ impl EconGraphMcpServer {
                     description
                     url: baseUrl
                     lastUpdated: updatedAt
+                    "#,
+            notice_fields!(),
+            r#"
                 }
             }
-        "#;
+        "#
+        );
 
         let result = self.execute_graphql_query(graphql_query, None).await?;
 
@@ -486,13 +509,17 @@ impl EconGraphMcpServer {
 
     /// Get series catalog
     pub async fn get_series_catalog(&self) -> Result<Value> {
-        let graphql_query = r#"
+        let graphql_query = concat!(
+            r#"
             query GetSeriesCatalog {
                 series: seriesList(pagination: {first: 100}) {
-                    nodes { id name: title description frequency units source { name } }
+                    nodes { id name: title description frequency units source { name "#,
+            notice_fields!(),
+            r#" } }
                 }
             }
-        "#;
+        "#
+        );
 
         let result = self.execute_graphql_query(graphql_query, None).await?;
 
@@ -512,14 +539,18 @@ impl EconGraphMcpServer {
         end_date: Option<&str>,
         limit: i32,
     ) -> Result<Value> {
-        let query = r#"
+        let query = concat!(
+            r#"
             query GetSeriesPayload($seriesId: ID!, $limit: Int!, $filter: DataFilter) {
-                series(id: $seriesId) { id name: title description }
+                series(id: $seriesId) { id name: title description lastUpdated source { name "#,
+            notice_fields!(),
+            r#" } }
                 seriesData(seriesId: $seriesId, first: $limit, filter: $filter) {
                     nodes { date value }
                 }
             }
-        "#;
+        "#
+        );
         let variables = json!({"seriesId": series_id, "limit": limit,
             "filter": {"startDate": start_date, "endDate": end_date}});
         let response = self.execute_graphql_query(query, Some(variables)).await?;
@@ -541,6 +572,24 @@ impl EconGraphMcpServer {
         self.get_series_payload(series_id, start_date, end_date, 1000)
             .await
     }
+}
+
+/// Each charted series' source, with the notice its terms require and when the series was last
+/// retrieved (BLS requires that date), so a chart's caller gets the attribution with the data.
+fn source_notices(series_data: &[Value]) -> Value {
+    Value::Array(
+        series_data
+            .iter()
+            .map(|s| {
+                json!({
+                    "series": s["name"],
+                    "source": s["source"]["name"],
+                    "notice": s["source"]["notice"],
+                    "lastUpdated": s["lastUpdated"],
+                })
+            })
+            .collect(),
+    )
 }
 
 /// MCP Server HTTP handler
@@ -693,6 +742,30 @@ mod tests {
         // Test that the server has the expected fields
         assert!(!server.frontend_chart_api_url.is_empty());
         assert!(server.frontend_chart_api_url.contains("chart-api-service"));
+    }
+
+    /// The chart tool's notices list each series' source notice and retrieval date.
+    #[test]
+    fn source_notices_list_each_series_source() {
+        let notice = json!({"citation": null, "notice": "BLS.gov cannot vouch.",
+            "termsUrl": "https://www.bls.gov/developers/termsOfService.htm",
+            "retrievalDateRequired": true});
+        let series = [
+            json!({"name": "CPI", "lastUpdated": "2026-10-29T08:15:00Z",
+                "source": {"name": "Bureau of Labor Statistics (BLS)", "notice": notice},
+                "dataPoints": []}),
+            json!({"name": "Other", "lastUpdated": null,
+                "source": {"name": "International Monetary Fund (IMF)", "notice": null}}),
+        ];
+        assert_eq!(
+            source_notices(&series),
+            json!([
+                {"series": "CPI", "source": "Bureau of Labor Statistics (BLS)",
+                    "notice": notice, "lastUpdated": "2026-10-29T08:15:00Z"},
+                {"series": "Other", "source": "International Monetary Fund (IMF)",
+                    "notice": null, "lastUpdated": null},
+            ])
+        );
     }
 
     #[tokio::test]
@@ -1142,13 +1215,81 @@ mod tests {
         let pool = container.pool();
         let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test get_data_sources method
-        let result = server.get_data_sources().await;
-        assert!(result.is_ok());
+        // A BLS series with data, so BLS is listed (dataSources skips sources without any).
+        let series_id = {
+            #[derive(diesel::QueryableByName)]
+            struct Row {
+                #[diesel(sql_type = diesel::sql_types::Uuid)]
+                id: econ_graph_graphql::imports::Uuid,
+            }
+            let mut conn = pool.get().await.unwrap();
+            let source = diesel::sql_query(
+                "SELECT id FROM data_sources WHERE name = 'Bureau of Labor Statistics (BLS)'",
+            )
+            .get_result::<Row>(&mut conn)
+            .await
+            .expect("the data baseline seeds BLS")
+            .id;
+            let dataset = econ_graph_core::test_utils::test_dataset_id(&mut conn, source).await;
+            diesel::sql_query(
+                "INSERT INTO economic_series (source_id, external_id, title, frequency, \
+                 is_active, dataset_id, start_date, end_date) \
+                 VALUES ($1, $2, 'BLS notice test', 'Monthly', TRUE, $3, '2024-01-01', \
+                 '2024-03-01') RETURNING id",
+            )
+            .bind::<diesel::sql_types::Uuid, _>(source)
+            .bind::<diesel::sql_types::Text, _>(format!(
+                "notice-{}",
+                econ_graph_graphql::imports::Uuid::new_v4()
+            ))
+            .bind::<diesel::sql_types::Uuid, _>(dataset)
+            .get_result::<Row>(&mut conn)
+            .await
+            .unwrap()
+            .id
+        };
+        let assert_bls_notice = |notice: &Value| {
+            assert!(
+                notice["notice"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("BLS.gov cannot vouch for the data"),
+                "{notice}"
+            );
+            assert_eq!(notice["retrievalDateRequired"], true);
+            assert_eq!(
+                notice["termsUrl"],
+                "https://www.bls.gov/developers/termsOfService.htm"
+            );
+        };
+        let body = |data: &Value, key: &str| -> Value {
+            serde_json::from_str(data[key][0]["text"].as_str().unwrap()).unwrap()
+        };
 
-        let data = result.unwrap();
-        assert!(data.get("contents").is_some());
-        assert!(data.get("contents").unwrap().is_array());
+        // Each source carries the notice its terms require, so MCP clients receive the
+        // attribution with the data (ECO-767).
+        let data = server.get_data_sources().await.unwrap();
+        let sources = body(&data, "contents")["data"]["dataSources"].clone();
+        let bls = sources
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "Bureau of Labor Statistics (BLS)")
+            .unwrap_or_else(|| panic!("BLS in {sources}"))
+            .clone();
+        assert_bls_notice(&bls["notice"]);
+
+        let metadata = server
+            .get_series_metadata(json!({"series_id": series_id.to_string()}))
+            .await
+            .unwrap();
+        assert_bls_notice(&body(&metadata, "content")["data"]["series"]["source"]["notice"]);
+
+        let data = server
+            .get_series_data(json!({"series_id": series_id.to_string()}))
+            .await
+            .unwrap();
+        assert_bls_notice(&body(&data, "content")["data"]["series"]["source"]["notice"]);
     }
 
     #[tokio::test]

@@ -32,13 +32,26 @@ export interface SeriesObservations {
   points: SeriesDataPoint[];
 }
 
+/** The citation and notice a source's terms require (GraphQL `SourceNotice`). */
+export interface SourceNotice {
+  /** Such as "Source: FHFA HPI®"; null when the terms prescribe none. */
+  citation: string | null;
+  /** The statement the terms require, such as a no-endorsement notice. */
+  notice: string;
+  /** The provider's terms of use. */
+  termsUrl: string;
+  /** Whether the date the data were retrieved from the source must be shown (BLS). */
+  retrievalDateRequired: boolean;
+}
+
 /** Series metadata as returned by the `series(id)` query. */
 export interface SeriesDetail {
   id: string;
   externalId: string;
   title: string;
   description: string | null;
-  source: { name: string } | null;
+  /** The source; `notice` is null for a source without one. */
+  source: { name: string; notice?: SourceNotice | null } | null;
   frequency: string;
   units: string | null;
   seasonalAdjustment: string | null;
@@ -110,6 +123,8 @@ export interface DataSource {
   seriesCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Null for a source without a notice. */
+  notice: SourceNotice | null;
 }
 
 export interface CrawlerStatus {
@@ -277,23 +292,25 @@ export interface SeriesBrowsePage {
  * Lists series by source and/or frequency without a search query, in title order, so a
  * researcher can see what a source has without guessing a word to search for (ECO-405).
  * Runs only when a source or frequency is given.
- * @param filters - The source id and/or backend frequency to list, and how many to fetch.
+ * @param filters - The source id and/or backend frequency to list, how many to fetch, and how
+ * many series in title order to skip first (the page's offset), for paging through a source.
  * @param enabled - False to hold the request (e.g. while the source list loads).
- * @returns The query; `data` is the first page and the total count.
+ * @returns The query; `data` is that page and the total count.
  */
 export const useSeriesBrowse = (
-  filters: { sourceId?: string; frequency?: string; limit?: number },
+  filters: { sourceId?: string; frequency?: string; limit?: number; offset?: number },
   enabled = true
 ) => {
-  const { sourceId, frequency, limit } = filters;
+  const { sourceId, frequency, limit, offset = 0 } = filters;
   return useQuery({
-    queryKey: ['seriesBrowse', sourceId, frequency, limit],
+    queryKey: ['seriesBrowse', sourceId, frequency, limit, offset],
     queryFn: async (): Promise<SeriesBrowsePage> => {
       const result = await executeGraphQL({
         query: QUERIES.GET_SERIES_LIST,
         variables: {
           filter: { sourceId, frequency },
-          pagination: { first: limit },
+          // seriesList's cursor is the number of series already read
+          pagination: { first: limit, ...(offset > 0 && { after: String(offset) }) },
         },
       });
       const list = result.data?.seriesList;

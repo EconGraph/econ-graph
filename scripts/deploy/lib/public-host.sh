@@ -28,6 +28,8 @@
 
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cluster-role.sh"
+# shellcheck source=scripts/deploy/lib/deploy-config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-config.sh"
 
 PUBLIC_HOST_LABEL="econgraph.io/public-host"
 
@@ -53,6 +55,44 @@ public_host_in_cluster() {
             -o jsonpath='{range .spec.rules[*]}{.host}{"\n"}{end}')" || return 1
     fi
     printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
+}
+
+# The PUBLIC_HOST in the host's deploy config (deploy_config_path in
+# lib/deploy-config.sh: ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env, or
+# ECONGRAPH_CONFIG_DIR/deploy.env, or ECONGRAPH_DEPLOY_ENV): a line
+# PUBLIC_HOST=<host name>, the last one when there are several, read by
+# deploy_config_read (not sourced; surrounding blanks and one pair of matching
+# quotes dropped), then lowercased. Used by release-deploy.sh and
+# set-crawler-keys.sh. Sets DEPLOY_ENV, CONFIGURED_PUBLIC_HOST (empty when none is
+# configured) and PUBLIC_HOST_CONFIGURED (true or false). Returns 1, with the
+# reason in PUBLIC_HOST_CONFIG_ERROR, for a config it can't use: an unreadable
+# file, an `export PUBLIC_HOST=` line, CRLF endings, blanks inside the name, or a
+# name that is not a public DNS name.
+# shellcheck disable=SC2034 # the variables it sets are for the caller
+read_configured_public_host() {
+    local host
+    DEPLOY_ENV="$(deploy_config_path)"
+    CONFIGURED_PUBLIC_HOST=""
+    PUBLIC_HOST_CONFIGURED=false
+    PUBLIC_HOST_CONFIG_ERROR=""
+    if ! deploy_config_read PUBLIC_HOST "host name"; then
+        PUBLIC_HOST_CONFIG_ERROR="$DEPLOY_CONFIG_ERROR"
+        return 1
+    fi
+    host="$DEPLOY_CONFIG_VALUE"
+    # Host names are case-insensitive; the routes, the certificate and the
+    # comparisons use the lowercase form.
+    if [ "$host" != "${host,,}" ]; then
+        echo "  PUBLIC_HOST     ${host} in ${DEPLOY_ENV} is used as ${host,,}"
+        host="${host,,}"
+    fi
+    if [ -n "$host" ] &&
+        ! "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" "$host" /dev/null >/dev/null; then
+        PUBLIC_HOST_CONFIG_ERROR="${DEPLOY_ENV} sets PUBLIC_HOST='${host}', which is not a public DNS name"
+        return 1
+    fi
+    CONFIGURED_PUBLIC_HOST="$host"
+    [ -z "$host" ] || PUBLIC_HOST_CONFIGURED=true
 }
 
 # Decide PUBLIC_HOST (see above) and validate it. Exits on a bad name, when the
@@ -83,6 +123,24 @@ public_host_init() {
             refuse_public_host
         fi
         echo "🌐 Public host: https://${PUBLIC_HOST} (www.${PUBLIC_HOST} redirects to it)"
+        # The certificate's issuer, chosen as apply-gateway-routes.sh will
+        # (tls_issuer_choose): a bad GATEWAY_TLS_ISSUER line in the deploy config, or
+        # one that would change the issuer implicitly, stops the deploy here, before
+        # anything is applied. Without a public host the line is not read. A dry run
+        # does not ask the cluster (kc only prints), so it cannot know the current
+        # issuer: it checks only that the line can be read, and says so.
+        local issuer_now
+        if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
+            deploy_config_value GATEWAY_TLS_ISSUER "issuer name" >/dev/null || exit 1
+            echo "🔐 Certificate issuer: chosen when applied; not checked against the cluster in a dry run"
+        else
+            if ! issuer_now="$(gateway_tls_current_issuer)"; then
+                echo "❌ Could not read the issuer of certificate econ-graph-tls"
+                exit 1
+            fi
+            tls_issuer_choose "$issuer_now" || exit 1
+            echo "🔐 Certificate issuer: ${TLS_ISSUER} (from ${TLS_ISSUER_SOURCE})"
+        fi
     else
         echo "🌐 No PUBLIC_HOST: serving http://localhost only"
     fi

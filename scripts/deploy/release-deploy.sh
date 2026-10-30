@@ -18,7 +18,8 @@
 #
 # Usage:
 #   scripts/deploy/release-deploy.sh --tag vX.Y.Z-rc.N [--cluster NAME] [--dry-run] [--yes]
-#       [--confirm-production UID-PREFIX] [--change-public-host] [--report FILE]
+#       [--confirm-production UID-PREFIX] [--change-public-host] [--change-tls-issuer]
+#       [--report FILE]
 #   scripts/deploy/release-deploy.sh --tag vX.Y.Z ...
 #
 #   --tag TAG      the release candidate to deploy. A final tag vX.Y.Z deploys
@@ -50,6 +51,11 @@
 #   --change-public-host
 #                  deploy a PUBLIC_HOST other than the one the production
 #                  cluster serves now (or one where it serves none)
+#   --change-tls-issuer
+#                  issue the gateway certificate from GATEWAY_TLS_ISSUER in the
+#                  environment, else the deploy config's, when it differs from the
+#                  certificate's current issuer (passed to deploy.sh as
+#                  GATEWAY_TLS_ISSUER); without it such a change is refused
 #   --report FILE  append one line per step (step=NAME status=ok|failed|dry-run,
 #                  and unchecked=N on a verify that left N things unchecked),
 #                  the backups taken (backup= and keycloak_backup=), on a
@@ -71,8 +77,9 @@
 #     database existed) it is required, and its absence is refused here
 #     (docs/deployment/APP_DATA_CONVERSION.md); otherwise leave it unset.
 #   - PUBLIC_HOST comes from the host's deploy config,
-#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV
-#     names another file), a line PUBLIC_HOST=<host name> (the last one, when
+#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_CONFIG_DIR
+#     names another directory, ECONGRAPH_DEPLOY_ENV another file; see
+#     lib/deploy-config.sh), a line PUBLIC_HOST=<host name> (the last one, when
 #     there are several); the file is read, not sourced, and the name is
 #     lowercased. On the production cluster it is econgraph.com. A cluster
 #     marked production (scripts/deploy/mark-production-cluster.sh) with no
@@ -80,9 +87,19 @@
 #     without its host (and its tunnel connector stopped); so is one whose
 #     configured PUBLIC_HOST differs from the host it serves now, without
 #     --change-public-host; a cluster not marked production with one configured
-#     (deploy.sh would refuse it after the load and backups), a cluster whose
-#     marker can't be read, and a PUBLIC_HOST in the environment that differs
-#     from the config.
+#     (deploy.sh would refuse it after the load and backups), one not marked
+#     production without one configured that serves a public host now (a deploy
+#     would remove its routes), a cluster whose marker can't be read, and a
+#     PUBLIC_HOST in the environment that differs from the config.
+#   - With a public host, the gateway certificate's ClusterIssuer is chosen as
+#     deploy.sh will (tls_issuer_choose in lib/deploy-config.sh): GATEWAY_TLS_ISSUER
+#     from the environment, else a GATEWAY_TLS_ISSUER= line in the same config when
+#     it matches the certificate's current issuer or there is no certificate, else
+#     the current issuer, else econ-graph-selfsigned. A configured issuer that
+#     differs from the current one, from the config or the environment, is refused
+#     without --change-tls-issuer, so a
+#     stale or mistyped line never re-issues the certificate from an issuer the
+#     tunnel rejects. The plan shows the current and the new issuer.
 #   - It shows the cluster's identity and the plan, and asks once (--yes
 #     answers, except on a cluster marked production, which needs the UID
 #     prefix typed or --confirm-production; a dry run doesn't ask).
@@ -120,7 +137,7 @@
 # scales down a running worker, deploy.sh applies, verify restarts and checks),
 # so after a failure, fix the cause and run the same command again.
 #
-# Environment: ECONGRAPH_DEPLOY_ENV, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
+# Environment: ECONGRAPH_CONFIG_DIR, ECONGRAPH_DEPLOY_ENV, GATEWAY_TLS_ISSUER, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
 # (the load records and this script's), ECONGRAPH_BACKUP_ROOT.
 
 set -euo pipefail
@@ -136,6 +153,7 @@ ASSUME_YES=false
 REPORT=""
 CONFIRM_PRODUCTION=""
 CHANGE_PUBLIC_HOST=false
+CHANGE_TLS_ISSUER=false
 CLUSTER="${KIND_CLUSTER:-$DEFAULT_CLUSTER}"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -158,6 +176,7 @@ while [ $# -gt 0 ]; do
             fi
             CONFIRM_PRODUCTION="$2"; shift 2 ;;
         --change-public-host) CHANGE_PUBLIC_HOST=true; shift ;;
+        --change-tls-issuer) CHANGE_TLS_ISSUER=true; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         --yes | -y) ASSUME_YES=true; shift ;;
         -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
@@ -294,43 +313,12 @@ CLUSTER_UID="$(kube_system_uid)" || die "could not read the kube-system UID of $
 UID_PREFIX="${CLUSTER_UID:0:8}"
 
 # --- PUBLIC_HOST, from the host's deploy config ----------------------------------------
-DEPLOY_ENV="${ECONGRAPH_DEPLOY_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/econgraph/deploy.env}"
-configured=false
-PUBLIC_HOST=""
-if [ -f "$DEPLOY_ENV" ]; then
-    # The last line wins, as it would if the file were sourced.
-    line="$(grep -E '^[[:space:]]*PUBLIC_HOST=' "$DEPLOY_ENV" | tail -1)" || line=""
-    if [ -n "$line" ]; then
-        PUBLIC_HOST="${line#*=}"
-        # A CRLF file would otherwise pass silently (the renderer strips a
-        # trailing CR): refuse it.
-        [[ "$PUBLIC_HOST" != *$'\r'* ]] ||
-            die "${DEPLOY_ENV} has a carriage return in its PUBLIC_HOST line (CRLF line endings?); save it with LF endings"
-        # Surrounding blanks and one pair of matching quotes; nothing else is
-        # rewritten, so a comment or a typo reaches the check below.
-        PUBLIC_HOST="${PUBLIC_HOST#"${PUBLIC_HOST%%[![:space:]]*}"}"
-        PUBLIC_HOST="${PUBLIC_HOST%"${PUBLIC_HOST##*[![:space:]]}"}"
-        if [[ "$PUBLIC_HOST" =~ ^\"(.*)\"$ || "$PUBLIC_HOST" =~ ^\'(.*)\'$ ]]; then
-            PUBLIC_HOST="${BASH_REMATCH[1]}"
-        fi
-        # Blanks inside (or inside the quotes): the renderer would strip them,
-        # but deploy.sh's gateway step would not. Refuse, rather than guess.
-        [[ "$PUBLIC_HOST" != *[[:space:]]* ]] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', with blanks in it; write the host name alone"
-        # Host names are case-insensitive; the routes, the certificate and the
-        # comparison below use the lowercase form.
-        if [ "$PUBLIC_HOST" != "${PUBLIC_HOST,,}" ]; then
-            echo "  PUBLIC_HOST     ${PUBLIC_HOST} in ${DEPLOY_ENV} is used as ${PUBLIC_HOST,,}"
-            PUBLIC_HOST="${PUBLIC_HOST,,}"
-        fi
-        [ -z "$PUBLIC_HOST" ] || configured=true
-    fi
-fi
-# A malformed host is refused here, before any step, not by deploy.sh after the
-# load, the backups and the precheck (the same check, render-public-host.py).
-if [ -n "$PUBLIC_HOST" ] && ! "$DEPLOY_DIR/render-public-host.py" "$PUBLIC_HOST" /dev/null >/dev/null; then
-    die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', which is not a public DNS name"
-fi
+# Read by read_configured_public_host (lib/public-host.sh), which also refuses
+# a malformed host here, before any step, not in deploy.sh after the load, the
+# backups and the precheck.
+read_configured_public_host || die "$PUBLIC_HOST_CONFIG_ERROR"
+PUBLIC_HOST="$CONFIGURED_PUBLIC_HOST"
+configured="$PUBLIC_HOST_CONFIGURED"
 if [ "$ENV_PUBLIC_HOST_SET" = set ] && [ "${ENV_PUBLIC_HOST,,}" != "$PUBLIC_HOST" ]; then
     die "PUBLIC_HOST='${ENV_PUBLIC_HOST}' is set in the environment, but ${DEPLOY_ENV} says '${PUBLIC_HOST}'; the config decides: unset PUBLIC_HOST, or change the config"
 fi
@@ -352,7 +340,15 @@ case "$marker" in
         fi ;;
     1)
         [ "$configured" = false ] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host" ;;
+            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host"
+        # Without a configured PUBLIC_HOST, deploy.sh gets an empty one and removes any
+        # public routes: its own refusal covers only an unset PUBLIC_HOST. A cluster that
+        # serves a public host now is the production cluster without its marker and its
+        # config, so refuse here, before any step, rather than take the site down.
+        served="$(public_host_in_cluster)" ||
+            die "could not read which public host ${CONTEXT} serves now; without PUBLIC_HOST configured, a deploy would remove its public routes"
+        [ -z "$served" ] ||
+            die "${CONTEXT} serves https://${served} now, but ${CLUSTER_ROLE_REASON} and ${DEPLOY_ENV} configures no PUBLIC_HOST: a deploy would remove its public routes. If it is the production cluster, mark it (scripts/deploy/mark-production-cluster.sh) and add PUBLIC_HOST=${served} to ${DEPLOY_ENV}; if it should not serve ${served}, delete its public routes first." ;;
     *) die "${CLUSTER_ROLE_REASON}" ;;
 esac
 # --confirm-production names one cluster: refuse it for any other, marked or not.
@@ -364,6 +360,36 @@ if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] &
 fi
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
+# The gateway certificate's issuer, only with a public host (without one the
+# certificate is removed and the config line is not read).
+if [ -n "$PUBLIC_HOST" ]; then
+    current_issuer="$(gateway_tls_current_issuer)" ||
+        die "could not read the issuer of certificate econ-graph-tls on ${CONTEXT}"
+    # An inherited GATEWAY_TLS_ISSUER (a shell left over from the cutover) must not
+    # change a live certificate's issuer silently: as for PUBLIC_HOST, a change needs
+    # the flag.
+    if [ -n "${GATEWAY_TLS_ISSUER:-}" ] && [ -n "$current_issuer" ] &&
+        [ "$GATEWAY_TLS_ISSUER" != "$current_issuer" ] && [ "$CHANGE_TLS_ISSUER" != true ]; then
+        die "GATEWAY_TLS_ISSUER=${GATEWAY_TLS_ISSUER} is set in the environment, but certificate econ-graph-tls on ${CONTEXT} is issued by ${current_issuer}. If ${GATEWAY_TLS_ISSUER} is right, pass --change-tls-issuer; otherwise unset GATEWAY_TLS_ISSUER"
+    fi
+    if [ "$CHANGE_TLS_ISSUER" = true ] && [ -z "${GATEWAY_TLS_ISSUER:-}" ]; then
+        GATEWAY_TLS_ISSUER="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" ||
+            die "could not read GATEWAY_TLS_ISSUER from ${DEPLOY_ENV}"
+        [ -n "$GATEWAY_TLS_ISSUER" ] ||
+            die "--change-tls-issuer needs a GATEWAY_TLS_ISSUER= line in ${DEPLOY_ENV}"
+        # Passed to deploy.sh as an explicit choice.
+        export GATEWAY_TLS_ISSUER
+    fi
+    tls_issuer_choose "$current_issuer" ||
+        die "the gateway certificate's issuer could not be chosen (above); nothing was changed"
+    if [ "$TLS_ISSUER" = "$current_issuer" ]; then
+        echo "  TLS issuer      ${TLS_ISSUER} (unchanged; from ${TLS_ISSUER_SOURCE})"
+    else
+        echo "  TLS issuer      ${current_issuer:-(no certificate)} → ${TLS_ISSUER} (from ${TLS_ISSUER_SOURCE})"
+    fi
+elif [ "$CHANGE_TLS_ISSUER" = true ]; then
+    die "--change-tls-issuer needs a public host: without one there is no certificate"
+fi
 
 # --- APP_DATABASE ------------------------------------------------------------------------
 # A cluster deployed before the app database existed has econ-graph-secrets without
@@ -549,11 +575,16 @@ backup_before() {
 
 # print_backups RUN DATE LABEL: the data databases' dumps run RUN recorded, with
 # the restore command for econ_graph's, reported as restore_backup= (LABEL
-# "restore") or restore_backup_if_restored= (LABEL "later").
+# "restore") or restore_backup_if_restored= (LABEL "later"). LABEL "app" lists only
+# econ_graph_app's dump, unreported.
 print_backups() {
     local path
     while IFS= read -r path; do
         [ -n "$path" ] || continue
+        if [ "$3" = app ]; then
+            case "${path##*/}" in econ_graph_app-*) echo "  ${path}" ;; esac
+            continue
+        fi
         echo "  ${path}"
         case "$3" in
             restore) report "restore_backup=${path}" ;;
@@ -571,13 +602,39 @@ print_backups() {
 # not be. Before any deploy was started, the latest complete backup. When this
 # run's deploy came later, the latest backup before it is named too, for the
 # case where the databases were restored to before the tag since.
+# After a failure before deploy.sh ran (the load, keycloak or precheck step, or deploy.sh
+# not started): no migration ran, but the new images may be on the nodes, and a backend
+# pod that restarts runs the new one, which migrates econ_graph_app when it starts. The
+# data migrations (the crawler-migrate Job) and Keycloak's upgrade happen only in
+# deploy.sh, so no other database can have changed. Nothing is reported as
+# restore_backup=: there may be nothing to restore.
+explain_app_restore() {
+    local chosen
+    chosen="$(backup_before backup_complete first)"
+    echo
+    echo "Only econ_graph_app can have changed, and only if a backend pod restarted on the new"
+    echo "image: it migrates the app database when it starts. The other databases are as they"
+    echo "were. Check for a backend pod that restarted since the load:"
+    echo "  ${kubectl_hint} get pods -l app=econ-graph-backend"
+    echo "If one did, go back with the rollback above, then restore econ_graph_app alone"
+    echo "(docs/deployment/POSTGRES_BACKUP_RESTORE.md, \"econ_graph_app\" under Restore) from the"
+    echo "last backup taken before ${RC_TAG} was first deployed on this cluster:"
+    if [ -n "$chosen" ]; then
+        print_backups "${chosen%%$'\t'*}" "$(cut -f2 <<<"$chosen")" app
+        echo "  (with APP_DATABASE=shared there is no separate dump: the app tables are in econ_graph's)"
+    else
+        echo "  no complete backup is recorded for ${RC_TAG} on this cluster in ${RECORD}"
+    fi
+}
+
 explain_restore() {
     local chosen run date newer kc kc_newer
     chosen="$(backup_before backup_complete first)"
     run="${chosen%%$'\t'*}"
     date="$(cut -f2 <<<"$chosen")"
     echo
-    echo "If the data migrations (the crawler-migrate Job) ran, or Keycloak started on a new"
+    echo "If the data migrations (the crawler-migrate Job) ran, a backend pod restarted on the"
+    echo "new image (it migrates the app database when it starts), or Keycloak started on a new"
     echo "version, the databases are migrated: restore them from the last backups taken before"
     echo "${RC_TAG} was first deployed on this cluster:"
     if [ -n "$chosen" ]; then
@@ -628,8 +685,8 @@ explain_failure() {
     case "$failed" in
         backup)
             if [ -n "$BACKUP_STILL_RUNNING" ]; then
-                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running: it timed out here, but was"
-                echo "not stopped. Wait for it to finish:"
+                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running (it outlasted the wait here, or"
+                echo "was already running when this run started), and was not stopped. Wait for it to finish:"
                 echo "  ${kubectl_hint} wait --for=condition=complete ${BACKUP_STILL_RUNNING} --timeout=3600s"
                 echo "and only then run this command again: a run starts another backup Job, which"
                 echo "would run beside this one. Nothing else was changed."
@@ -653,7 +710,8 @@ explain_failure() {
             echo "Fix the cause and run this command again, or go back with:" ;;
         keycloak)
             echo "The new images are loaded on the nodes under the names the manifests run;"
-            echo "running pods keep the old ones until they restart. The databases are unchanged."
+            echo "running pods keep the old ones until they restart. This run migrated nothing, but a"
+            echo "backend pod that restarts on the new image migrates the app database (see below)."
             echo "Fix the Keycloak backup and run this command again, or go back with:" ;;
         precheck)
             echo "The new images are loaded, the backups are taken, and the crawler worker"
@@ -675,7 +733,11 @@ explain_failure() {
     esac
     echo "  scripts/deploy/rollback-release-images.sh --to pre-${RC_TAG}${cluster_arg} --dry-run   # then without --dry-run"
     case "$failed" in
-        deploy | verify) [ -n "$NOT_STARTED" ] || explain_restore ;;
+        # From the load on, the new images may be on the nodes: a backend pod that
+        # restarts runs the new one, which migrates the app database.
+        load | keycloak | precheck) explain_app_restore ;;
+        deploy | verify)
+            if [ -n "$NOT_STARTED" ]; then explain_app_restore; else explain_restore; fi ;;
     esac
     case "$failed" in
         keycloak | precheck | deploy)

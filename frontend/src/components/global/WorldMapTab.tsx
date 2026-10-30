@@ -2,12 +2,14 @@
  * WorldMapTab Component.
  *
  * The Global Analysis page's map: pick a World Development Indicator and see each country's
- * latest value on a world map. Clicking a country opens its series.
+ * latest value on a world map. Clicking a country opens its series. The picked indicator is the
+ * URL's `indicator` parameter (a WDI code such as `SP.POP.TOTL`), so Back from a country's
+ * series, a reload or a shared link shows the same indicator.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -24,6 +26,7 @@ import {
 import InteractiveWorldMap from './InteractiveWorldMap';
 import MapLegend from './MapLegend';
 import MapValuesTable from './MapValuesTable';
+import { SourceNoticePanel } from '../common/SourceNoticePanel';
 import WorldMapControls from './WorldMapControls';
 import { worldAtlasQuery } from './worldAtlas';
 import { DEFAULT_PROJECTION } from './hooks/useWorldMap';
@@ -42,7 +45,20 @@ const NO_VALUES: MapCountryValue[] = [];
 
 const WorldMapTab: React.FC = () => {
   const navigate = useNavigate();
-  const [pickedIndicator, setPickedIndicator] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pickedIndicator = searchParams.get('indicator');
+  const pickIndicator = useCallback(
+    (code: string) =>
+      setSearchParams(
+        previous => {
+          const next = new URLSearchParams(previous);
+          next.set('indicator', code);
+          return next;
+        },
+        { replace: true }
+      ),
+    [setSearchParams]
+  );
   const [projection, setProjection] = useState(DEFAULT_PROJECTION);
   const [colorScheme, setColorScheme] = useState('viridis');
   const [pickedScales, setPickedScales] = useState<Record<string, ColorScaleMode>>({});
@@ -51,12 +67,12 @@ const WorldMapTab: React.FC = () => {
   const dataset = datasetQuery.data;
   const indicators = dataset?.indicators ?? [];
 
-  // Until the user picks one: GDP per capita when the dataset has it, else its first indicator.
+  // The URL's indicator when the dataset has it. Otherwise (none picked yet, or a code the
+  // dataset doesn't have): GDP per capita when the dataset has it, else its first indicator.
+  const listed = (code: string | null) => indicators.some(c => c.code === code);
   const indicator =
-    pickedIndicator ??
-    (indicators.some(c => c.code === DEFAULT_INDICATOR)
-      ? DEFAULT_INDICATOR
-      : indicators[0]?.code) ??
+    (listed(pickedIndicator) ? pickedIndicator : null) ??
+    (listed(DEFAULT_INDICATOR) ? DEFAULT_INDICATOR : indicators[0]?.code) ??
     '';
   const indicatorLabel = indicators.find(c => c.code === indicator)?.label ?? indicator;
 
@@ -115,7 +131,7 @@ const WorldMapTab: React.FC = () => {
                 labelId='indicator-select-label'
                 value={indicator}
                 label='Indicator'
-                onChange={event => setPickedIndicator(event.target.value)}
+                onChange={event => pickIndicator(event.target.value)}
                 MenuProps={{ slotProps: { paper: { sx: { maxHeight: 400 } } } }}
               >
                 {indicators.map(code => (
@@ -201,8 +217,20 @@ const WorldMapTab: React.FC = () => {
             }}
           >
             Hover over a country for its value; click it (tap twice on a touch screen) to open its
-            series. Source: {dataset?.name ?? 'World Development Indicators'}, World Bank.
+            series.{' '}
+            {/* The World Bank's dataset terms prescribe this attribution format; the source
+                notice below carries it when the API returns one. */}
+            {!dataset?.source?.notice &&
+              `The World Bank: ${dataset?.name ?? 'World Development Indicators'}.`}
           </Typography>
+          {dataset?.source && (
+            <SourceNoticePanel
+              sourceName={dataset.source.name}
+              notice={dataset.source.notice}
+              lastUpdated={null}
+              transformationLabel=''
+            />
+          )}
           {values.length > 0 && (
             <MapValuesTable values={values} unit={unit} frequency={frequency} />
           )}

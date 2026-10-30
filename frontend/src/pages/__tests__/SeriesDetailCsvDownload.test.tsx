@@ -16,9 +16,14 @@ const RETRIEVED_AT = Date.UTC(2026, 8, 26, 12, 0, 0);
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ id: SERIES_ID }),
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/series', search: '', hash: '', state: null }),
 }));
 
-const hooks = vi.hoisted(() => ({ isPlaceholderData: false, transformation: 'YEAR_OVER_YEAR' }));
+const hooks = vi.hoisted(() => ({
+  isPlaceholderData: false,
+  isError: false,
+  transformation: 'YEAR_OVER_YEAR',
+}));
 
 vi.mock('../../hooks/useSeriesData', () => ({
   useSeriesDetail: () => ({
@@ -29,22 +34,32 @@ vi.mock('../../hooks/useSeriesData', () => ({
       externalId: 'CPIAUCSL',
       title: 'Consumer Price Index, "All Items"',
       description: null,
-      source: { name: 'FRED' },
+      source: {
+        name: 'Bureau of Labor Statistics (BLS)',
+        notice: {
+          citation: 'Source: U.S. Bureau of Labor Statistics',
+          notice: 'BLS.gov cannot vouch for the data.',
+          termsUrl: 'https://www.bls.gov/developers/termsOfService.htm',
+          retrievalDateRequired: true,
+        },
+      },
       frequency: 'Monthly',
       units: 'Index 1982-1984=100',
       seasonalAdjustment: null,
       startDate: '2024-01-01',
       endDate: '2024-03-01',
-      lastUpdated: null,
+      lastUpdated: '2026-10-29T08:15:00Z',
       isActive: true,
     },
   }),
   useSeriesData: () => ({
     isPending: false,
-    isError: false,
+    isError: hooks.isError,
+    error: hooks.isError ? new Error('page 3 failed') : null,
+    refetch: () => undefined,
     isPlaceholderData: hooks.isPlaceholderData,
     dataUpdatedAt: RETRIEVED_AT,
-    data: {
+    data: hooks.isError ? undefined : {
       transformation: hooks.transformation,
       points: [
         { date: '2024-03-01', value: 3.5, revisionDate: '2024-04-10', isOriginalRelease: true },
@@ -89,6 +104,7 @@ describe('SeriesDetail CSV download', () => {
 
   beforeEach(() => {
     hooks.isPlaceholderData = false;
+    hooks.isError = false;
     hooks.transformation = 'YEAR_OVER_YEAR';
     blobs = [];
     clicked = [];
@@ -128,10 +144,15 @@ describe('SeriesDetail CSV download', () => {
     const text = await readBlob(blobs[0]);
     expect(text.split('\r\n')).toEqual([
       'Title,"Consumer Price Index, ""All Items"""',
-      'Source,FRED',
+      'Source,Bureau of Labor Statistics (BLS)',
       'Units,%',
       'Transformation,Year-over-Year % Change',
       'Retrieved at,2026-09-26T12:00:00.000Z',
+      'Derived values,"Values show the Year-over-Year % Change, computed by EconGraph from data published by Bureau of Labor Statistics (BLS); they are not figures published by Bureau of Labor Statistics (BLS)."',
+      'Citation,Source: U.S. Bureau of Labor Statistics',
+      'Notice,BLS.gov cannot vouch for the data.',
+      'Retrieved from source,2026-10-29',
+      'Terms of use,https://www.bls.gov/developers/termsOfService.htm',
       'date,value',
       '2024-01-01,3.1',
       '2024-02-01,',
@@ -140,12 +161,36 @@ describe('SeriesDetail CSV download', () => {
     ]);
   });
 
+  it("shows the source's notice, retrieval date and the derived-values statement", () => {
+    renderPage();
+    const notice = screen.getByTestId('source-notice');
+    expect(notice).toHaveTextContent('Source: U.S. Bureau of Labor Statistics');
+    expect(notice).toHaveTextContent(
+      'BLS.gov cannot vouch for the data. Data retrieved from Bureau of Labor Statistics (BLS) on 2026-10-29.'
+    );
+    expect(notice).toHaveTextContent('computed by EconGraph');
+    expect(screen.getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
+      'href',
+      'https://www.bls.gov/developers/termsOfService.htm'
+    );
+  });
+
+  it('describes no values as derived while the observations failed to load', () => {
+    hooks.isError = true;
+    renderPage();
+    const notice = screen.getByTestId('source-notice');
+    expect(notice).toHaveTextContent('BLS.gov cannot vouch for the data.');
+    expect(notice).not.toHaveTextContent('computed by EconGraph');
+    expect(screen.queryByText(/Year-over-Year % Change/)).not.toBeInTheDocument();
+  });
+
   it('writes only the dates inside the chart range', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Narrow range' }));
     fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
 
-    const rows = (await readBlob(blobs[0])).split('\r\n').slice(6);
+    const rows = (await readBlob(blobs[0])).split('\r\n');
+    rows.splice(0, rows.indexOf('date,value') + 1);
     expect(rows).toEqual(['2024-02-01,', '2024-03-01,3.5', '']);
   });
 
