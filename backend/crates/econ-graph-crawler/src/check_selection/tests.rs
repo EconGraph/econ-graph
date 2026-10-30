@@ -56,6 +56,8 @@ const WB_ARCHIVED: &str =
     include_str!("../../tests/fixtures/world_bank/indicator_archived_ag_agr_trac_no.json");
 const WB_IDS: &str =
     include_str!("../../tests/fixtures/world_bank/indicator_ids_dt_amt_mltc_gg_cd.json");
+const WB_DATA_NOT_FOUND: &str =
+    include_str!("../../tests/fixtures/world_bank/data_probe_not_found_dt_amt_mltc_gg_cd.json");
 const WB_UNKNOWN: &str = include_str!("../../tests/fixtures/world_bank/indicator_unknown.json");
 const CENSUS_VARIABLES: &str = include_str!("../../tests/fixtures/census/variables.json");
 const CENSUS_GEOGRAPHY: &str = include_str!("../../tests/fixtures/census/geography.json");
@@ -74,6 +76,7 @@ fn checker_with(mock: &MockSource, policies: HashMap<SourceId, SourcePolicy>) ->
     let base = mock.base_url();
     Checker {
         ctx,
+        worker_policies: HashMap::new(),
         // The BLS fixtures' latest periods are in 2024.
         today: date("2025-03-01"),
         fred: FredAdapter::new(&base),
@@ -290,6 +293,17 @@ async fn mount_bea(mock: &MockSource) {
         )
         .await;
     }
+    // BEA lists T20100 but rejects a request for it as an invalid parameter.
+    mock.mount(
+        &Route::get("/")
+            .query("method", "GetData")
+            .query("TableName", "T20100"),
+        Reply::json(serde_json::json!({"BEAAPI": {"Results": {"Error": {
+            "APIErrorCode": "40",
+            "APIErrorDescription": "The value provided for TableName is not valid."
+        }}}})),
+    )
+    .await;
     // BEA lists T30100 but serves no rows for it.
     mock.mount(
         &Route::get("/")
@@ -350,16 +364,21 @@ async fn bea_reports_a_rule_matching_nothing_and_a_table_without_rows() {
     mount_bea(&mock).await;
     let rules = "max_tables=4\nmax_series=5000\n\
         [[rule]]\ndataset='NIPA'\nprefix='T99999'\nfrequencies=['A']\n\
-        [[rule]]\ndataset='NIPA'\nprefix='T30100'\nfrequencies=['A']\n";
+        [[rule]]\ndataset='NIPA'\nprefix='T30100'\nfrequencies=['A']\n\
+        [[rule]]\ndataset='NIPA'\nprefix='T20100'\nfrequencies=['A']\n";
     let check = check_one(&bea_checker(&mock, rules), SourceId::Bea).await;
     assert_eq!(check.status, CheckStatus::Problems, "{check:#?}");
     assert_eq!(
         problems(&check),
         [
             (FindingKind::Missing, "NIPA T99999* frequencies=A"),
+            (FindingKind::Rejected, "T20100"),
             (FindingKind::Discontinued, "T30100"),
         ]
     );
+    let rejected = &check.problems[1].detail;
+    assert!(rejected.starts_with("rejected by BEA: "), "{rejected}");
+    assert!(rejected.contains("not valid"), "{rejected}");
 }
 
 #[tokio::test]
@@ -514,19 +533,47 @@ async fn world_bank_clean_list_and_missing_or_archived_indicators() {
     let mock = MockSource::start().await;
     mount_world_bank(&mock).await;
     let mut checker = checker(&mock);
-    // An International Debt Statistics indicator is current, under its own live source.
+    // An International Debt Statistics indicator: listed under source 81, but the adapter's
+    // sourceless data request answers "not found" (recorded): unfetchable.
+    mock.mount(
+        &Route::get("/country/all/indicator/DT.AMT.MLTC.GG.CD").query("per_page", "1"),
+        Reply::json_str(WB_DATA_NOT_FOUND),
+    )
+    .await;
     checker.wdi_indicators = Some(vec!["NY.GDP.PCAP.CD".into(), "DT.AMT.MLTC.GG.CD".into()]);
     let check = check_one(&checker, SourceId::WorldBank).await;
-    assert_eq!(check.status, CheckStatus::Ok, "{check:#?}");
-    assert_eq!(check.selected, Some(2));
-    assert_eq!(check.refresh.as_ref().unwrap().requests, 2);
-    assert_eq!(check.notices.len(), 1, "{check:#?}");
-    assert_eq!(check.notices[0].kind, FindingKind::OtherSource);
-    assert_eq!(check.notices[0].entry, "DT.AMT.MLTC.GG.CD");
-    assert!(check.notices[0]
+    assert_eq!(check.status, CheckStatus::Problems, "{check:#?}");
+    assert_eq!(
+        problems(&check),
+        [(FindingKind::Unfetchable, "DT.AMT.MLTC.GG.CD")]
+    );
+    assert!(check.problems[0]
         .detail
         .contains("International Debt Statistics"));
+    assert_eq!(check.selected, Some(1));
 
+    // The same listing with a data request that works: a notice, and selected.
+    let other = MockSource::start().await;
+    mount_world_bank(&other).await;
+    other
+        .mount(
+            &Route::get("/country/all/indicator/DT.AMT.MLTC.GG.CD").query("per_page", "1"),
+            Reply::json(serde_json::json!([
+                {"page": 1, "pages": 1, "per_page": 1, "total": 1, "lastupdated": "2026-10-08"},
+                [{"indicator": {"id": "DT.AMT.MLTC.GG.CD"}, "countryiso3code": "AGO",
+                  "date": "2024", "value": 1.0}]
+            ])),
+        )
+        .await;
+    let mut checker = self::checker(&other);
+    checker.wdi_indicators = Some(vec!["DT.AMT.MLTC.GG.CD".into()]);
+    let check = check_one(&checker, SourceId::WorldBank).await;
+    assert_eq!(check.status, CheckStatus::Ok, "{check:#?}");
+    assert_eq!(check.selected, Some(1));
+    assert_eq!(check.notices.len(), 1, "{check:#?}");
+    assert_eq!(check.notices[0].kind, FindingKind::OtherSource);
+
+    let mut checker = self::checker(&mock);
     checker.wdi_indicators = Some(vec![
         "NY.GDP.PCAP.CD".into(),
         "AG.AGR.TRAC.NO".into(),

@@ -260,6 +260,27 @@ impl HttpFetcher {
         })
     }
 
+    /// [`new`](Self::new) with every policy at `percent` of its rate, burst and concurrency
+    /// ([`SourcePolicy::scaled`]): for a process that runs beside the worker on the same keys,
+    /// so together they stay near each source's limit.
+    pub fn with_rate_share(
+        config: HttpConfig,
+        policies: HashMap<SourceId, SourcePolicy>,
+        percent: u8,
+    ) -> Result<Self, CrawlError> {
+        let scaled = SourceId::ALL
+            .into_iter()
+            .map(|id| {
+                let p = policies
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_else(|| SourcePolicy::default_for(id));
+                (id, p.scaled(percent))
+            })
+            .collect();
+        Self::new(config, scaled)
+    }
+
     /// The effective policy for `source`.
     pub fn policy(&self, source: SourceId) -> SourcePolicy {
         self.inner

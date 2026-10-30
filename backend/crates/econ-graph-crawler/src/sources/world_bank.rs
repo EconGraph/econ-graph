@@ -427,7 +427,7 @@ impl WorldBankAdapter {
 
     /// `lastupdated` of `indicator`, from a one-row page of the same request
     /// [`fetch_indicator`](Self::fetch_indicator) makes (see [Re-crawls](self#re-crawls)).
-    async fn probe_last_updated(
+    pub(crate) async fn probe_last_updated(
         &self,
         ctx: &CrawlCtx,
         indicator: &str,

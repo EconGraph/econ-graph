@@ -121,16 +121,21 @@ Problems, each of which makes the command exit nonzero:
 - **over-cap**: a selection past `max_series`, `max_tables` or `max_catalog_series`, which would
   stop discovery;
 - **over-quota**: a refresh needing more requests than the source's daily quota (BLS: 500 a day
-  with a key, 25 without).
+  with a key, 25 without);
+- **unfetchable**: a World Bank indicator listed under a source other than WDI whose data request
+  fails. The adapter's `/country/all/indicator/{id}` names no source, and the API answers it only
+  for WDI indicators (message 175, "not found", for one such as `DT.AMT.MLTC.GG.CD` in
+  International Debt Statistics). The check makes that request, for one row, for each indicator
+  not listed under WDI;
+- **rejected**: a selected BEA table whose request BEA refuses as invalid ("rejected by BEA").
 
 BLS and World Bank publish no discontinued flag, so the check infers one:
 
 - **BLS**: the series file's `end_year`, the year of the latest published period, is before
   last year. Annual and semi-annual series, which BLS publishes with a lag, get one more year.
 - **World Bank**: `/indicator/{id}` names an archive as the indicator's source (a source whose
-  name contains "Archive", such as 57, "WDI Database Archives"). The adapter requests each
-  indicator without naming a source, so it crawls from the API's default source. An indicator
-  reported under another live source, such as International Debt Statistics, is a notice.
+  name contains "Archive", such as 57, "WDI Database Archives"). An indicator listed under
+  another live source is unfetchable (above) unless its data request works, which is a notice.
 
 Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired include
 probes (`expected_missing`), are reported as notices: discovery keeps them on purpose. Each

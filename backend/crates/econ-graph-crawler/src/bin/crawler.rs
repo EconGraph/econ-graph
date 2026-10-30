@@ -6,7 +6,7 @@
 //! check catalog selections against the live sources, or apply the data migrations. See [`econ_graph_crawler::cli`].
 
 use clap::Parser;
-use econ_graph_crawler::cli::{Cli, ExitStatus};
+use econ_graph_crawler::cli::{Cli, ExitStatus, EXIT_USAGE};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -19,12 +19,28 @@ async fn main() -> std::process::ExitCode {
         .with_writer(std::io::stderr)
         .init();
 
-    match Cli::parse().run().await {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        // --help and --version print and succeed; anything else is a usage error.
+        Err(e) if !e.use_stderr() => {
+            let _ = e.print();
+            return std::process::ExitCode::SUCCESS;
+        }
+        Err(e) => {
+            let _ = e.print();
+            return std::process::ExitCode::from(EXIT_USAGE);
+        }
+    };
+    match cli.run().await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => match e.downcast_ref::<ExitStatus>() {
             // The command printed its output; it only sets the exit status.
             Some(status) => {
-                tracing::warn!("{status}");
+                if status.code == EXIT_USAGE {
+                    tracing::error!("{status}");
+                } else {
+                    tracing::warn!("{status}");
+                }
                 std::process::ExitCode::from(status.code)
             }
             None => {

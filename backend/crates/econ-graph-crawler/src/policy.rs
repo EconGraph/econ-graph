@@ -107,6 +107,20 @@ impl SourcePolicy {
         }
     }
 
+    /// This policy at `percent` (1 to 100) of its request rate, burst and concurrency, each at
+    /// least its minimum (burst and concurrency 1). For a process that shares a source's limits
+    /// with the worker, such as `crawler check-selection`.
+    pub fn scaled(self, percent: u8) -> Self {
+        let percent = percent.clamp(1, 100);
+        let share = |n: usize| (n * usize::from(percent) / 100).max(1);
+        SourcePolicy {
+            requests_per_second: self.requests_per_second * f64::from(percent) / 100.0,
+            burst: share(self.burst as usize) as u32,
+            max_concurrency: share(self.max_concurrency),
+            ..self
+        }
+    }
+
     /// Queue-level retry delay after `attempt` failed attempts (0-based):
     /// `base_backoff * 2^attempt`, capped at `max_backoff`. No jitter.
     pub fn backoff(&self, attempt: u32) -> Duration {
@@ -203,6 +217,20 @@ mod tests {
             // BLS's keyless limit; `sources::bls::policy(true)` raises it.
             assert_eq!(quota, (id == SourceId::Bls).then_some(25), "{id}");
         }
+    }
+
+    #[test]
+    fn scaled_policy_keeps_a_share_of_rate_burst_and_concurrency() {
+        let fred = SourcePolicy::default_for(SourceId::Fred);
+        let quarter = fred.scaled(25);
+        assert_eq!(per_minute(&quarter), 30.0);
+        assert_eq!(quarter.burst, 1);
+        assert_eq!(quarter.max_concurrency, 1);
+        assert_eq!(quarter.max_batch, fred.max_batch);
+        assert_eq!(fred.scaled(100), fred);
+        // Out of range is clamped; never zero.
+        assert!(fred.scaled(0).requests_per_second > 0.0);
+        assert_eq!(fred.scaled(200), fred);
     }
 
     #[test]

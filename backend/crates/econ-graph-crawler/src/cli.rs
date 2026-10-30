@@ -37,6 +37,9 @@
 //! every checked source is clean, 1 when any has a problem, 2 when a check could not finish and
 //! 3 when the rest are clean but a source was skipped for a missing API key.
 //!
+//! A command line the CLI can't run (a parse error, or `check-selection --source` naming a
+//! source it doesn't check) exits [`EXIT_USAGE`] (64).
+//!
 //! Diagnostics go through `tracing` (stderr, `RUST_LOG`); stdout carries only the command's output.
 
 use std::collections::HashMap;
@@ -65,6 +68,10 @@ use crate::status::{crawler_status, CrawlerStatusSnapshot};
 /// `series_id` stored for `discover_catalog` jobs (one per source).
 pub const CATALOG_SERIES_ID: &str = "catalog";
 
+/// `check-selection --rate-percent` default: a quarter of each source's policy rate, so the
+/// check beside a running worker stays within 125% of it.
+pub const DEFAULT_CHECK_RATE_PERCENT: u8 = 25;
+
 /// Default queue priority (1 = lowest, 10 = highest).
 pub const DEFAULT_PRIORITY: i32 = 5;
 
@@ -76,7 +83,8 @@ pub const DEFAULT_PRIORITY: i32 = 5;
     about = "Enqueue crawl jobs and inspect the crawl queue"
 )]
 pub struct Cli {
-    /// The data database's Postgres connection string. `DATABASE_URL` is not read.
+    /// The data database's Postgres connection string. `DATABASE_URL` is not read. Unused by
+    /// sources, record-reference-seeds and check-selection, which need no database.
     #[arg(long, env = "DATA_DATABASE_URL", global = true, hide_env_values = true)]
     pub database_url: Option<String>,
 
@@ -220,6 +228,12 @@ pub enum Command {
         /// Print JSON instead of text.
         #[arg(long)]
         json: bool,
+        /// Percent of each source's policy rate, burst and concurrency the check uses. Its rate
+        /// limiter is its own, so with the worker running on the same keys the two together send
+        /// up to (100 + PCT)% of the policy rate.
+        #[arg(long, value_name = "PCT", default_value_t = DEFAULT_CHECK_RATE_PERCENT,
+              value_parser = clap::value_parser!(u8).range(1..=100))]
+        rate_percent: u8,
     },
     /// Apply the pending data migrations (backend/migrations/data) and print each version
     /// applied, one per line. Never touches the app migrations.
@@ -341,8 +355,13 @@ fn clean_series(series: &[String]) -> Vec<String> {
     out
 }
 
-/// A command that printed its output and must end with a nonzero exit status other than 1
-/// (`check-selection`). The `crawler` binary exits with `code`.
+/// Exit status for a command line the CLI can't run: a parse error, or a source a command
+/// doesn't support (`EX_USAGE` from sysexits.h). Distinct from `check-selection`'s statuses.
+pub const EXIT_USAGE: u8 = 64;
+
+/// A command that must end with a nonzero exit status other than 1: `check-selection`'s
+/// findings (after printing its output) or [`EXIT_USAGE`]. The `crawler` binary exits with
+/// `code`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExitStatus {
     /// The process exit status.
@@ -364,7 +383,13 @@ impl std::error::Error for ExitStatus {}
 pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceId>> {
     use crate::check_selection::CHECKED_SOURCES;
     if let Some(bad) = named.iter().find(|s| !CHECKED_SOURCES.contains(s)) {
-        bail!("{bad} has no curated list or selection rules to check; checked sources: {CHECKED_SOURCES:?}");
+        return Err(ExitStatus {
+            code: EXIT_USAGE,
+            message: format!(
+                "{bad} has no curated list or selection rules to check; checked sources: {CHECKED_SOURCES:?}"
+            ),
+        }
+        .into());
     }
     Ok(CHECKED_SOURCES
         .into_iter()
@@ -412,13 +437,20 @@ impl Cli {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
         }
-        if let Command::CheckSelection { source, json } = &self.command {
+        if let Command::CheckSelection {
+            source,
+            json,
+            rate_percent,
+        } = &self.command
+        {
             let sources = check_selection_sources(source)?;
             let checker = crate::check_selection::Checker::live(
-                build_http(&default_registry())?,
+                http_config(),
+                worker_policies(&default_registry()),
+                *rate_percent,
                 ApiKeys::from_env(),
                 Utc::now().date_naive(),
-            );
+            )?;
             let report = checker.check(&sources).await;
             let (out, status) = check_selection_output(&report, *json)?;
             return match status {
@@ -839,9 +871,9 @@ async fn fetch_one(
     ))
 }
 
-/// The HTTP layer the worker binary builds: built-in policies overridden by adapters' own.
-fn build_http(registry: &AdapterRegistry) -> anyhow::Result<HttpFetcher> {
-    let policies: HashMap<SourceId, SourcePolicy> = SourceId::ALL
+/// The worker binary's policies: built-in ones overridden by adapters' own.
+fn worker_policies(registry: &AdapterRegistry) -> HashMap<SourceId, SourcePolicy> {
+    SourceId::ALL
         .into_iter()
         .map(|id| {
             let policy = registry
@@ -849,14 +881,20 @@ fn build_http(registry: &AdapterRegistry) -> anyhow::Result<HttpFetcher> {
                 .map_or_else(|| SourcePolicy::default_for(id), |a| a.policy());
             (id, policy)
         })
-        .collect();
-    Ok(HttpFetcher::new(
-        HttpConfig {
-            timeout: Duration::from_secs(30),
-            ..HttpConfig::default()
-        },
-        policies,
-    )?)
+        .collect()
+}
+
+/// The HTTP settings the worker binary uses.
+fn http_config() -> HttpConfig {
+    HttpConfig {
+        timeout: Duration::from_secs(30),
+        ..HttpConfig::default()
+    }
+}
+
+/// The HTTP layer the worker binary builds.
+fn build_http(registry: &AdapterRegistry) -> anyhow::Result<HttpFetcher> {
+    Ok(HttpFetcher::new(http_config(), worker_policies(registry))?)
 }
 
 fn fmt_time(t: Option<chrono::DateTime<chrono::Utc>>) -> String {
@@ -1043,7 +1081,8 @@ mod tests {
             parse(&["check-selection"]).unwrap().command,
             Command::CheckSelection {
                 source: vec![],
-                json: false
+                json: false,
+                rate_percent: DEFAULT_CHECK_RATE_PERCENT,
             }
         );
         assert_eq!(
@@ -1052,9 +1091,25 @@ mod tests {
                 .command,
             Command::CheckSelection {
                 source: vec![SourceId::Bea, SourceId::Fred],
-                json: true
+                json: true,
+                rate_percent: DEFAULT_CHECK_RATE_PERCENT,
             }
         );
+        assert!(matches!(
+            parse(&["check-selection", "--rate-percent", "50"])
+                .unwrap()
+                .command,
+            Command::CheckSelection {
+                rate_percent: 50,
+                ..
+            }
+        ));
+        for bad in ["0", "101"] {
+            assert!(
+                parse(&["check-selection", "--rate-percent", bad]).is_err(),
+                "{bad}"
+            );
+        }
         assert!(parse(&["check-selection", "--source", "NOPE"]).is_err());
         // No database URL is needed to parse it (or to run it).
         assert!(Cli::try_parse_from(["crawler", "check-selection"]).is_ok());
@@ -1069,7 +1124,9 @@ mod tests {
             [SourceId::Fred, SourceId::Fhfa]
         );
         let err = check_selection_sources(&[SourceId::Sec]).unwrap_err();
-        assert!(err.to_string().contains("no curated list"), "{err}");
+        let status = err.downcast_ref::<ExitStatus>().unwrap();
+        assert_eq!(status.code, EXIT_USAGE);
+        assert!(status.message.contains("no curated list"), "{status}");
     }
 
     #[test]

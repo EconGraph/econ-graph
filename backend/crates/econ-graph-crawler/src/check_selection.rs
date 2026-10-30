@@ -13,7 +13,10 @@
 //! - **over-broad**: a rule that matches more than its `max_matches`;
 //! - **over-cap**: a selection past the rules' volume limits (`max_series`, `max_tables`,
 //!   `max_catalog_series`), which stops discovery;
-//! - **over-quota**: a refresh whose estimated requests exceed the source's daily quota.
+//! - **over-quota**: a refresh whose estimated requests exceed the source's daily quota;
+//! - **unfetchable**: listed upstream, but the worker's own data request for it fails;
+//! - **rejected**: the source refused a request for a selected entry (a BEA table whose
+//!   request BEA answers with an invalid-parameter error).
 //!
 //! Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired
 //! include probes (`expected_missing`), are notices: discovery keeps them on purpose.
@@ -24,10 +27,13 @@
 //!   last year; for an annual or semi-annual series, which BLS publishes with a lag, before the
 //!   year before last.
 //! - **World Bank**: `/indicator/{id}` names an archive as the indicator's source (its name
-//!   contains "Archive", such as 57 "WDI Database Archives"). The adapter requests every
-//!   indicator without a source, so the API's own default source is the one it crawls from; an
-//!   indicator reported under another live source (International Debt Statistics, ...) is a
-//!   notice, not a problem.
+//!   contains "Archive", such as 57 "WDI Database Archives").
+//!
+//! The World Bank adapter's data request (`/country/all/indicator/{id}`) names no source, and
+//! the API answers it only for indicators it serves from WDI. So an indicator `/indicator/{id}`
+//! lists under another live source (International Debt Statistics, ...) gets the same request
+//! the worker makes, for one row: if that fails (message 175, "not found") the indicator is
+//! **unfetchable**, a problem; if it works, a notice.
 //!
 //! | Source     | Catalog checked                                     | Selection                       |
 //! |------------|-----------------------------------------------------|---------------------------------|
@@ -38,8 +44,15 @@
 //! | Census     | BDS `variables.json` and `geography.json`           | the adapter's keyword rules     |
 //! | FHFA       | the HPI master CSV                                  | the adapter's scope             |
 //!
-//! Every request goes through the given [`HttpFetcher`], which the CLI builds exactly as the
-//! worker does, so each source's rate limit, concurrency and retry policy apply. The adapters'
+//! Every request goes through an [`HttpFetcher`] built from the worker's policies, so each
+//! source's rate limit, concurrency and retry policy apply, at a share of the rate
+//! ([`HttpFetcher::with_rate_share`], `--rate-percent`, 25% by default). The check's limiter is
+//! its own: beside a running worker on the same API keys the two together send up to 125% of a
+//! source's policy rate. Where the policy is the source's own limit (FRED: 120 a minute per key)
+//! that can exceed it, by up to 30 a minute; the fetcher backs off on the resulting 429s. BEA's
+//! policy (30 a minute) is well under its 100-request limit, but BEA also caps data volume per
+//! minute and locks a key out for an hour when it is exceeded, so prefer running the check when
+//! the worker is idle. `scripts/deploy/check-selection.sh` warns when the worker is running. The adapters'
 //! own catalog code does the downloading and matching. The [`CrawlCtx`] gets a pool that cannot
 //! connect ([`offline_pool`]): nothing here reads or writes a database, and anything that tried
 //! would fail the check instead.
@@ -59,14 +72,14 @@ use econ_graph_core::DatabasePool;
 use serde::Serialize;
 
 use crate::adapter::{ApiKeys, CrawlCtx, SourceAdapter};
-use crate::catalog_selection::is_volume_guard;
+use crate::catalog_selection::{is_empty_selection, is_volume_guard};
 use crate::error::CrawlError;
-use crate::http::{HttpFetcher, IfChanged};
+use crate::http::{HttpConfig, HttpFetcher, IfChanged};
 use crate::policy::SourcePolicy;
 use crate::reference;
 use crate::reference_file::download_seed_codes;
 use crate::source::SourceId;
-use crate::sources::bea::{BeaAdapter, BeaDataset};
+use crate::sources::bea::{self, BeaAdapter, BeaDataset};
 use crate::sources::bls::{self, BlsAdapter};
 use crate::sources::census::CensusAdapter;
 use crate::sources::fhfa::FhfaAdapter;
@@ -135,12 +148,18 @@ pub enum FindingKind {
     OverBroad,
     /// A selection past a volume limit.
     OverCap,
+    /// The source refused a request for a selected entry (BEA: an invalid parameter).
+    Rejected,
     /// A refresh needing more requests than the source's daily quota.
     OverQuota,
     /// A known-retired include probe, absent as expected.
     ExpectedMissing,
-    /// A World Bank indicator listed under a live source other than WDI.
+    /// A World Bank indicator listed under a live source other than WDI whose data request
+    /// still works.
     OtherSource,
+    /// Listed upstream, but the request the worker makes for its data fails (a World Bank
+    /// indicator outside WDI, which the adapter's sourceless data request doesn't find).
+    Unfetchable,
 }
 
 /// One problem or notice.
@@ -431,6 +450,8 @@ fn kind_name(kind: FindingKind) -> String {
 /// rules from the crawler data directory, as the worker does; tests replace them.
 pub struct Checker {
     pub ctx: CrawlCtx,
+    /// The worker's policies, for refresh estimates (the fetcher runs at a share of them).
+    pub worker_policies: HashMap<SourceId, SourcePolicy>,
     /// Today, for the BLS discontinued test (latest period before last year).
     pub today: NaiveDate,
     pub fred: FredAdapter,
@@ -448,15 +469,24 @@ pub struct Checker {
 }
 
 impl Checker {
-    /// The production adapters, over `http` (built as the worker builds it) and `keys`.
-    pub fn live(http: HttpFetcher, keys: ApiKeys, today: NaiveDate) -> Self {
-        Self {
+    /// The production adapters and `keys`, over a fetcher with the worker's `config` and
+    /// `policies` at `rate_percent` of their rate ([`HttpFetcher::with_rate_share`]): the check
+    /// has its own rate limiter, so beside a running worker the two share each source's limit.
+    pub fn live(
+        config: HttpConfig,
+        policies: HashMap<SourceId, SourcePolicy>,
+        rate_percent: u8,
+        keys: ApiKeys,
+        today: NaiveDate,
+    ) -> Result<Self, CrawlError> {
+        Ok(Self {
             ctx: CrawlCtx {
-                http,
+                http: HttpFetcher::with_rate_share(config, policies.clone(), rate_percent)?,
                 pool: offline_pool(),
                 keys,
                 bypass_validators: true,
             },
+            worker_policies: policies,
             today,
             fred: FredAdapter::default(),
             bea: BeaAdapter::default(),
@@ -467,10 +497,19 @@ impl Checker {
             fred_rules: None,
             bls_series: None,
             wdi_indicators: None,
-        }
+        })
     }
 
-    /// Checks each of `sources` in turn (one source's requests at a time, at its policy rate).
+    /// The worker's policy for `source`, which refresh estimates are measured against; the
+    /// fetcher's own when none was given.
+    fn worker_policy(&self, source: SourceId) -> SourcePolicy {
+        self.worker_policies
+            .get(&source)
+            .copied()
+            .unwrap_or_else(|| self.ctx.http.policy(source))
+    }
+
+    /// Checks each of `sources` in turn, one source's requests at a time.
     pub async fn check(&self, sources: &[SourceId]) -> SelectionReport {
         let mut report = SelectionReport {
             sources: Vec::with_capacity(sources.len()),
@@ -483,7 +522,7 @@ impl Checker {
 
     async fn check_source(&self, source: SourceId) -> SourceCheck {
         let mut check = SourceCheck::new(source);
-        let policy = self.ctx.http.policy(source);
+        let policy = self.worker_policy(source);
         if policy.needs_api_key && self.ctx.keys.get(source).is_none() {
             let var = crate::cli::api_key_env_var(source).unwrap_or("its API key");
             check.skipped = Some(format!("no API key ({var} is not set)"));
@@ -615,7 +654,7 @@ impl Checker {
                 return Ok(());
             }
             // Every rule matching nothing is already a problem per rule.
-            Err(_) if !check.problems.is_empty() => return Ok(()),
+            Err(e) if is_empty_selection(&e) => return Ok(()),
             Err(e) => return Err(e),
         };
         check.bound("selected tables", tables.len(), rules.max_tables);
@@ -628,9 +667,15 @@ impl Checker {
                     check.problem(FindingKind::OverCap, &table.table_name, e.to_string());
                 }
                 // Listed in the catalog, but BEA serves no rows or lines for it.
-                Err(e @ (CrawlError::NotFound(_) | CrawlError::Permanent(_))) => {
+                Err(e) if bea::is_empty_table(&e) || matches!(e, CrawlError::NotFound(_)) => {
                     check.problem(FindingKind::Discontinued, &table.table_name, e.to_string())
                 }
+                // BEA refused a request for it (an invalid parameter, ...).
+                Err(CrawlError::Permanent(description)) => check.problem(
+                    FindingKind::Rejected,
+                    &table.table_name,
+                    format!("rejected by BEA: {description}"),
+                ),
                 Err(e) => return Err(e),
             }
         }
@@ -733,15 +778,28 @@ impl Checker {
                     id,
                     format!("moved to archive source {source_id} ({name})"),
                 ),
+                Ok((source_id, _)) if source_id == WDI_SOURCE_ID => listed += 1,
+                // The adapter's data request names no source, so the API serves it from WDI's
+                // default; confirm with the request the worker makes (one row).
                 Ok((source_id, name)) => {
-                    if source_id != WDI_SOURCE_ID {
-                        check.notice(
-                            FindingKind::OtherSource,
+                    match self.world_bank.probe_last_updated(&self.ctx, id).await {
+                        Ok(_) => {
+                            check.notice(
+                                FindingKind::OtherSource,
+                                id,
+                                format!("listed under source {source_id} ({name}); its data request works"),
+                            );
+                            listed += 1;
+                        }
+                        Err(CrawlError::NotFound(e)) => check.problem(
+                            FindingKind::Unfetchable,
                             id,
-                            format!("listed under source {source_id} ({name})"),
-                        );
+                            format!(
+                                "listed under source {source_id} ({name}), but the adapter's data request, which names no source, fails: {e}"
+                            ),
+                        ),
+                        Err(e) => return Err(e),
                     }
-                    listed += 1;
                 }
                 Err(CrawlError::NotFound(_)) => check.problem(
                     FindingKind::Missing,

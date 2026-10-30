@@ -11,7 +11,12 @@
 #     deleted afterwards, also when the Job fails or times out, the script fails partway or it
 #     is interrupted with SIGTERM or SIGINT;
 #   - the Job's log is printed, and the script exits with the check's exit status (4 when the
-#     Job doesn't finish or its status can't be read).
+#     Job doesn't finish or its status can't be read), reading the log and status from the new
+#     Job's pod by its UID, never by the job-name label;
+#   - a crawler-check-selection Job still running (another operator's) makes it refuse (5)
+#     without touching it; a finished one is deleted in the foreground first;
+#   - a running crawler-worker gets a warning naming the combined rate, nothing is scaled, and
+#     --rate-percent reaches the crawler.
 #
 # The stubs: a plain `kubectl` first on PATH that records any call and fails; `docker` and
 # `kind` stubs that pretend a kind cluster econ-graph exists and hand out a fake "kind
@@ -38,6 +43,7 @@ path_log="$work/path-kubectl.log"
 other_log="$work/other.log"
 out="$work/out"
 cluster_uid="11111111-2222-3333-4444-555555555555"
+new_uid="0000aaaa-1111-2222-3333-444455556666"
 
 # The kubectl on PATH (the microk8s wrapper on production): must never run.
 cat >"$work/bin/kubectl" <<EOF
@@ -49,10 +55,14 @@ EOF
 
 # The fake kind kubectl that `docker cp` hands out.
 #   STUB_NO_DEPLOYMENT=1  the namespace has no crawler-worker Deployment
+#   STUB_REPLICAS=N       crawler-worker's replicas (default 0)
 #   STUB_NO_NAMESPACE=1   the namespace doesn't exist
-#   STUB_JOB=done|failed|running  the Job's state (default done)
-#   STUB_JOB_READ_FAILS=1 reading the Job's state fails
+#   STUB_EXISTING=none|running|finished  a crawler-check-selection Job before the run
+#   STUB_JOB=done|failed|running  the new Job's state (default done)
+#   STUB_JOB_READ_FAILS=1 reading the new Job's state fails
+#   STUB_JOB_REPLACED=1   the Job's UID changes while waiting (another operator replaced it)
 #   STUB_EXIT=N           the check's exit status (default 0); "none" for no status
+# The new Job's UID is $new_uid; a pod read by any other selector answers exit status 9.
 cat >"$work/kind-kubectl" <<EOF
 #!/bin/sh
 echo "kubectl \$*" >>"$log"
@@ -66,22 +76,36 @@ case " \$* " in
     [ "\${STUB_NO_NAMESPACE:-0}" = 1 ] && { echo "NotFound" >&2; exit 1; }
     echo namespace/x ;;
   *" get deployment crawler-worker "*)
-    [ "\${STUB_NO_DEPLOYMENT:-0}" = 1 ] && { echo "NotFound" >&2; exit 1; }
+    if [ "\${STUB_NO_DEPLOYMENT:-0}" = 1 ]; then
+      case " \$* " in *" --ignore-not-found "*) exit 0 ;; esac
+      echo "NotFound" >&2; exit 1
+    fi
     case " \$* " in
+      *spec.replicas*) printf '%s' "\${STUB_REPLICAS:-0}" ;;
       *imagePullPolicy*) echo Never ;;
       *) echo econ-graph-crawler-worker:v4.1.0 ;;
     esac ;;
   *" apply -f - "*) cat >>"$applied"; echo "---" >>"$applied" ;;
-  *" get job crawler-check-selection "*)
-    [ "\${STUB_JOB_READ_FAILS:-0}" = 1 ] && { echo "connection refused" >&2; exit 1; }
-    case "\${STUB_JOB:-done}" in
-      done) echo "1/" ;;
-      failed) echo "/1" ;;
-      *) echo "/" ;;
+  *" get job crawler-check-selection --ignore-not-found "*)
+    case "\${STUB_EXISTING:-none}" in
+      running) echo "old-uid / 2026-10-30T10:00:00Z" ;;
+      finished) echo "old-uid 1/ 2026-10-30T10:00:00Z" ;;
     esac ;;
-  *" logs job/crawler-check-selection "*) echo "FRED: ok" ;;
-  *" get pods -l job-name=crawler-check-selection "*)
+  *" get job crawler-check-selection "*status.succeeded*)
+    [ "\${STUB_JOB_READ_FAILS:-0}" = 1 ] && { echo "connection refused" >&2; exit 1; }
+    uid="$new_uid"
+    [ "\${STUB_JOB_REPLACED:-0}" = 1 ] && uid=0000ffff-0000-0000-0000-000000000000
+    case "\${STUB_JOB:-done}" in
+      done) echo "\$uid 1/" ;;
+      failed) echo "\$uid /1" ;;
+      *) echo "\$uid /" ;;
+    esac ;;
+  *" get job crawler-check-selection -o jsonpath={.metadata.uid} "*) echo "$new_uid" ;;
+  *" logs -l batch.kubernetes.io/controller-uid=$new_uid --tail=-1 "*) echo "FRED: ok" ;;
+  *" logs "*) echo "STALE LOG" ;;
+  *" get pods -l batch.kubernetes.io/controller-uid=$new_uid "*)
     [ "\${STUB_EXIT:-0}" = none ] || printf '%s' "\${STUB_EXIT:-0}" ;;
+  *" get pods "*) printf 9 ;;
 esac
 exit 0
 EOF
@@ -145,16 +169,16 @@ all_pinned() {
 
 # --namespace is required; NAMESPACE from the environment is not a default.
 run -- --source FRED
-[ "$status" = 2 ] || fail "no --namespace: status $status, want 2"
+[ "$status" = 64 ] || fail "no --namespace: status $status, want 64"
 grep -q -- "--namespace is required" "$out" || fail "no --namespace is not explained: $(cat "$out")"
 [ -s "$log" ] && fail "kubectl ran without --namespace: $(cat "$log")"
 
 bad_args=("--namespace|Econ_Graph" "--source|fred" "--source|FRED;rm" "--image|a\"b"
   "--image|x
-y" "--timeout|0")
+y" "--timeout|0" "--rate-percent|0" "--rate-percent|101")
 for bad in "${bad_args[@]}"; do
   run -- --namespace econ-graph "${bad%%|*}" "${bad#*|}"
-  [ "$status" = 2 ] || fail "'$bad': status $status, want 2"
+  [ "$status" = 64 ] || fail "'$bad': status $status, want 64"
   [ -s "$log" ] && fail "'$bad': kubectl ran: $(cat "$log")"
 done
 
@@ -165,8 +189,13 @@ all_pinned || fail "a kubectl call was not pinned to kind-econ-graph: $(cat "$lo
 grep -qF "Cluster: context kind-econ-graph, kube-system UID $cluster_uid, marked production" "$out" ||
   fail "the cluster identity is not shown: $(cat "$out")"
 grep -qF "FRED: ok" "$out" || fail "the Job's log is not printed: $(cat "$out")"
+called "get pods -l batch.kubernetes.io/controller-uid=$new_uid" ||
+  fail "the pod is not selected by the new Job's UID: $(cat "$log")"
+called "job-name=" && fail "a pod was selected by the job-name label: $(cat "$log")"
+grep -q "STALE LOG" "$out" && fail "a log was read by a selector other than the new Job's UID"
+grep -q "crawler-worker is running" "$out" && fail "warned about a worker with 0 replicas"
 ns="-n econ-graph-br-x-0123456789"
-delete_job="$(line_of "$ns delete job crawler-check-selection --ignore-not-found --wait=true")"
+delete_job="$(line_of "$ns delete job crawler-check-selection --ignore-not-found --cascade=foreground --wait=true")"
 delete_policy="$(line_of "$ns delete networkpolicy crawler-check-selection")"
 apply="$(line_of "$ns apply -f -")"
 [ -n "$delete_job" ] && [ -n "$delete_policy" ] && [ -n "$apply" ] &&
@@ -241,7 +270,7 @@ called "apply" && fail "applied without an image"
 run STUB_NO_DEPLOYMENT=1 -- --namespace econ-graph-br-x --image econ-graph-crawler-worker:v4.1.0
 [ "$status" = 0 ] || fail "--image run: status $status: $(cat "$out")"
 grep -qF "imagePullPolicy: IfNotPresent" "$applied" || fail "--image does not use IfNotPresent"
-called "get deployment" && fail "--image still read the Deployment"
+called ".image}" && fail "--image still read the Deployment's image"
 
 # Cleaned up after: deleted twice (before apply, and on exit).
 cleaned_up() {
@@ -267,7 +296,7 @@ for signal in TERM INT; do
     "$script" --namespace econ-graph --timeout 5 </dev/null >"$out" 2>&1 &
   pid=$!
   for _ in $(seq 100); do
-    grep -qF "get job crawler-check-selection" "$log" && break
+    grep -qF "status.succeeded" "$log" && break
     sleep 0.1
   done
   kill -s "$signal" "$pid"
@@ -278,6 +307,35 @@ for signal in TERM INT; do
   [ "$status" = "$want" ] || fail "SIG$signal: status $status, want $want: $(cat "$out")"
   cleaned_up || fail "SIG$signal left the Job or NetworkPolicy: $(cat "$log")"
 done
+
+# Another operator's check still running: refuse (5), and touch nothing of theirs.
+run STUB_EXISTING=running -- --namespace econ-graph
+[ "$status" = 5 ] || fail "a running Job: status $status, want 5: $(cat "$out")"
+grep -q "another check is in progress" "$out" || fail "the running Job is not explained: $(cat "$out")"
+called "delete" && fail "deleted while another check runs: $(cat "$log")"
+called "apply" && fail "applied while another check runs"
+
+# A finished leftover is deleted (with its pod) and the run goes on.
+run STUB_EXISTING=finished -- --namespace econ-graph
+[ "$status" = 0 ] || fail "a finished leftover: status $status: $(cat "$out")"
+called "delete job crawler-check-selection --ignore-not-found --cascade=foreground --wait=true" ||
+  fail "a finished leftover is not deleted in the foreground: $(cat "$log")"
+
+# The Job replaced by someone else while waiting: stop, and don't read their pod.
+run STUB_JOB_REPLACED=1 -- --namespace econ-graph
+[ "$status" = 1 ] || fail "a replaced Job: status $status, want 1"
+grep -q "was replaced while waiting" "$out" || fail "the replaced Job is not explained: $(cat "$out")"
+called "get pods" && fail "read a pod of a replaced Job"
+
+# A running worker: a warning naming the combined rate; --rate-percent goes to the crawler.
+run STUB_REPLICAS=1 -- --namespace econ-graph
+[ "$status" = 0 ] || fail "with a running worker: status $status: $(cat "$out")"
+grep -q "crawler-worker is running (1 replica(s)).*up to 125% combined.*FRED 150/min" "$out" ||
+  fail "no combined-rate warning: $(cat "$out")"
+called "scale" && fail "the script scaled something: $(cat "$log")"
+run STUB_REPLICAS=2 -- --namespace econ-graph --rate-percent 50
+grep -q "up to 150% combined.*FRED 180/min" "$out" || fail "the warning ignores --rate-percent: $(cat "$out")"
+grep -qF '"--rate-percent", "50"]' "$applied" || fail "--rate-percent is not passed on: $(grep command "$applied")"
 
 # A namespace that doesn't exist stops it before anything is created.
 run STUB_NO_NAMESPACE=1 -- --namespace econ-graph-br-gone

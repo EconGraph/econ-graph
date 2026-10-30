@@ -11,5 +11,8 @@ per-indicator metadata that the adapter's `code_lists` and `crawler check-select
   "WDI Database Archives", which is no longer updated.
 - `indicator_ids_dt_amt_mltc_gg_cd.json`: an International Debt Statistics indicator, which the
   API reports under source 81, "International Debt Statistics: DSSI", rather than WDI.
+- `data_probe_not_found_dt_amt_mltc_gg_cd.json`: the one-row data request for that indicator
+  (`/country/all/indicator/DT.AMT.MLTC.GG.CD?format=json&per_page=1`, no `source`), which the API
+  answers with message 175, "The indicator was not found".
 - `indicator_unknown.json`: the error the API returns for an id it doesn't know (message 120,
   "Invalid value"), recorded for `NOT.A.REAL.ID`.

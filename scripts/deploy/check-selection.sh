@@ -5,7 +5,7 @@
 #
 # Usage:
 #   scripts/deploy/check-selection.sh --namespace NAMESPACE [--source FRED[,BEA,...]] [--json]
-#       [--image IMAGE] [--timeout SECONDS]
+#       [--image IMAGE] [--timeout SECONDS] [--rate-percent PCT]
 #
 # The Job runs `crawler check-selection` (docs/data-sources/README.md) with the API keys from
 # the namespace's Secret crawler-api-keys, read through the same optional secretKeyRefs as
@@ -13,6 +13,15 @@
 # this script's output. A source whose key the namespace doesn't have is reported as skipped.
 # The check is read-only and needs no database: the Job gets no database URL. Its requests go
 # through the crawler's own per-source rate limits, one source at a time.
+#
+# Rate: the check runs at --rate-percent (default 25) of each source's policy rate, under its own
+# rate limiter. With crawler-worker running on the same keys the two together send up to
+# (100 + PCT)% of each policy rate; at the default, FRED gets up to 150 requests a minute against
+# its 120-a-minute limit (the fetcher backs off on 429s), and BEA, which also caps data volume
+# per minute and locks a key out for an hour, gets more traffic than the worker alone. The
+# script warns, naming the combined rate, when the namespace's crawler-worker has replicas. It
+# never scales the worker; to stay within the limits, run the check while the worker is idle or
+# scaled down.
 #
 # --namespace is required and has no default: name production (econ-graph) or a branch
 # namespace (econ-graph-br-...) explicitly. The image is the one the namespace's crawler-worker
@@ -27,13 +36,18 @@
 #   - Branch namespaces have no crawler-api-keys Secret, so FRED, BEA and Census are reported
 #     as skipped (exit 3 when nothing else is wrong); BLS, World Bank and FHFA need no key.
 #
+# One check at a time per namespace: if a crawler-check-selection Job is still running there
+# (another operator's), it refuses to start (exit 5). A finished one left by an earlier run is
+# deleted first (with its pod), and the exit status is read from the new Job's own pod, by UID.
+#
 # Idempotent: it deletes a Job and NetworkPolicy left by an earlier run, creates them, waits for
 # the Job to finish (--timeout seconds, default 1800), prints the Job's log, deletes both and
 # exits with the check's exit status: 0 clean, 1 problems, 2 a source's check could not finish,
 # 3 a source was skipped for a missing API key (and nothing worse). 4: the Job did not finish
 # in time or its exit status could not be read. They are deleted on every exit, including a
-# failure partway and an interrupt (Ctrl-C, SIGTERM). With --json the log carries only the JSON
-# report and errors.
+# failure partway and an interrupt (Ctrl-C, SIGTERM). 64: the check's command line was refused
+# (an unknown or unsupported source), and also this script's own usage errors, before anything
+# runs. With --json the log carries only the JSON report and errors.
 #
 # Every kubectl call goes to the kind cluster's own kubectl and kubeconfig
 # (scripts/deploy/lib/kind-env.sh) on context kind-econ-graph, through kc
@@ -47,7 +61,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,59p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -57,38 +71,44 @@ sources=""
 json=false
 image=""
 timeout=1800
+rate_percent=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --namespace)
-            [[ $# -ge 2 ]] || usage 2
+            [[ $# -ge 2 ]] || usage 64
             target_ns="$2"; shift ;;
         --source)
-            [[ $# -ge 2 ]] || usage 2
+            [[ $# -ge 2 ]] || usage 64
             sources="$2"; shift ;;
         --json) json=true ;;
         --image)
-            [[ $# -ge 2 ]] || usage 2
+            [[ $# -ge 2 ]] || usage 64
             image="$2"; shift ;;
         --timeout)
-            [[ $# -ge 2 ]] || usage 2
+            [[ $# -ge 2 ]] || usage 64
             timeout="$2"; shift ;;
+        --rate-percent)
+            [[ $# -ge 2 ]] || usage 64
+            rate_percent="$2"; shift ;;
         -h | --help) usage 0 ;;
-        *) echo "unknown argument: $1" >&2; usage 2 ;;
+        *) echo "unknown argument: $1" >&2; usage 64 ;;
     esac
     shift
 done
 if [[ -z "$target_ns" ]]; then
     echo "--namespace is required (econ-graph for production, or a branch namespace)" >&2
-    usage 2
+    usage 64
 fi
 # Everything below lands in a manifest, so only plain names reach it.
 [[ "$target_ns" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] ||
-    { echo "not a namespace name: $target_ns" >&2; exit 2; }
+    { echo "not a namespace name: $target_ns" >&2; exit 64; }
 [[ -z "$sources" || "$sources" =~ ^[A-Z_]+(,[A-Z_]+)*$ ]] ||
-    { echo "--source takes comma-separated source names, e.g. FRED,BEA: $sources" >&2; exit 2; }
+    { echo "--source takes comma-separated source names, e.g. FRED,BEA: $sources" >&2; exit 64; }
 [[ -z "$image" || "$image" =~ ^[A-Za-z0-9][A-Za-z0-9./:@_-]*$ ]] ||
-    { echo "not an image reference: $image" >&2; exit 2; }
-[[ "$timeout" =~ ^[1-9][0-9]*$ ]] || { echo "--timeout takes whole seconds: $timeout" >&2; exit 2; }
+    { echo "not an image reference: $image" >&2; exit 64; }
+[[ "$timeout" =~ ^[1-9][0-9]*$ ]] || { echo "--timeout takes whole seconds: $timeout" >&2; exit 64; }
+[[ -z "$rate_percent" || "$rate_percent" =~ ^([1-9][0-9]?|100)$ ]] ||
+    { echo "--rate-percent takes 1 to 100: $rate_percent" >&2; exit 64; }
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/deploy/lib/kind-env.sh
@@ -131,6 +151,33 @@ if [[ -z "$image" ]]; then
 fi
 echo "Image: ${image} (pull policy ${pull_policy}), namespace ${target_ns}" >&2
 
+# The check has its own rate limiter: beside a running worker the two add up.
+replicas="$(kc -n "$target_ns" get deployment crawler-worker --ignore-not-found \
+    -o 'jsonpath={.spec.replicas}' 2>/dev/null)" || replicas=""
+if [[ "$replicas" =~ ^[1-9][0-9]*$ ]]; then
+    share="${rate_percent:-25}"
+    warn "crawler-worker is running (${replicas} replica(s)) on the same API keys. The check adds" \
+        "${share}% of each source's policy rate to the worker's: up to $((100 + share))% combined," \
+        "e.g. FRED $((120 * (100 + share) / 100))/min against its 120/min limit and BEA" \
+        "$((30 * (100 + share) / 100))/min. For no overlap, run it while the worker is idle."
+fi
+
+# One check per namespace at a time; a finished leftover is deleted below.
+existing="$(kc -n "$target_ns" get job "$JOB" --ignore-not-found \
+    -o 'jsonpath={.metadata.uid} {.status.succeeded}/{.status.failed} {.metadata.creationTimestamp}')" ||
+    die "could not read job/${JOB} in ${target_ns}"
+if [[ -n "$existing" ]]; then
+    read -r existing_uid existing_state existing_created <<<"$existing"
+    case "$existing_state" in
+        [1-9]*/* | */[1-9]*) ;;
+        *)
+            echo "error: job/${JOB} (UID ${existing_uid}, created ${existing_created}) is still" \
+                "running in ${target_ns}: another check is in progress. Wait for it, or delete it:" \
+                "kubectl -n ${target_ns} delete job ${JOB}" >&2
+            exit 5 ;;
+    esac
+fi
+
 args=('"check-selection"')
 if [[ -n "$sources" ]]; then
     args+=('"--source"' "\"${sources}\"")
@@ -139,6 +186,9 @@ log_level=warn
 if $json; then
     args+=('"--json"')
     log_level=error
+fi
+if [[ -n "$rate_percent" ]]; then
+    args+=('"--rate-percent"' "\"${rate_percent}\"")
 fi
 command_yaml='["/app/crawler"'
 for arg in "${args[@]}"; do
@@ -164,8 +214,8 @@ cleanup() {
     kc -n "$target_ns" delete networkpolicy "$JOB" --ignore-not-found >/dev/null 2>&1 || true
 }
 
-# A Job or NetworkPolicy from an earlier, interrupted run goes first.
-kc -n "$target_ns" delete job "$JOB" --ignore-not-found --wait=true >&2
+# A finished Job (and its pod) or a NetworkPolicy from an earlier run goes first.
+kc -n "$target_ns" delete job "$JOB" --ignore-not-found --cascade=foreground --wait=true >&2
 kc -n "$target_ns" delete networkpolicy "$JOB" --ignore-not-found >&2
 trap cleanup EXIT
 # An interrupt exits through the EXIT trap too.
@@ -256,23 +306,32 @@ $(key_env CENSUS_API_KEY census-api-key)
           type: RuntimeDefault
 EOF
 
-echo "Waiting for job/${JOB} (up to ${timeout}s)..." >&2
+# This run's Job, by UID: its pod is selected by that, never by name, so a pod of an earlier
+# Job of the same name is never read.
+job_uid="$(kc -n "$target_ns" get job "$JOB" -o 'jsonpath={.metadata.uid}')" ||
+    die "could not read job/${JOB}"
+[[ "$job_uid" =~ ^[0-9a-f-]+$ ]] || die "job/${JOB} has no UID"
+pods="batch.kubernetes.io/controller-uid=${job_uid}"
+
+echo "Waiting for job/${JOB} (UID ${job_uid}, up to ${timeout}s)..." >&2
 # The Job itself fails at activeDeadlineSeconds; the grace covers its status catching up.
 deadline=$((SECONDS + timeout + ${GRACE_SECONDS:-60}))
 finished=false
 while [[ $SECONDS -lt $deadline ]]; do
-    state="$(kc -n "$target_ns" get job "$JOB" -o 'jsonpath={.status.succeeded}/{.status.failed}')" ||
+    state="$(kc -n "$target_ns" get job "$JOB" -o 'jsonpath={.metadata.uid} {.status.succeeded}/{.status.failed}')" ||
         die "could not read job/${JOB}"
+    [[ "${state%% *}" == "$job_uid" ]] || die "job/${JOB} was replaced while waiting (UID ${state%% *})"
+    state="${state#* }"
     case "$state" in
         [1-9]*/* | */[1-9]*) finished=true; break ;;
     esac
     sleep "${POLL_SECONDS:-5}"
 done
 
-kc -n "$target_ns" logs "job/${JOB}" || warn "could not read the log of job/${JOB}"
+kc -n "$target_ns" logs -l "$pods" --tail=-1 || warn "could not read the log of job/${JOB}"
 
 $finished || { warn "job/${JOB} did not finish within ${timeout}s"; exit 4; }
-code="$(kc -n "$target_ns" get pods -l "job-name=${JOB}" \
+code="$(kc -n "$target_ns" get pods -l "$pods" \
     -o 'jsonpath={.items[0].status.containerStatuses[0].state.terminated.exitCode}')" || code=""
 [[ "$code" =~ ^[0-9]+$ ]] || { warn "could not read the exit status of job/${JOB}"; exit 4; }
 exit "$code"

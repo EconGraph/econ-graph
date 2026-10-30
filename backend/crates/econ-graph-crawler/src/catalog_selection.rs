@@ -154,9 +154,7 @@ impl BeaSelection {
         // An empty result may mean a truncated catalog or a broken rule. Never certify it as a
         // complete disappearance; a later healthy refresh must establish what happened.
         if selected.is_empty() {
-            return Err(CrawlError::Transient(
-                "BEA selection matched no current tables".into(),
-            ));
+            return Err(CrawlError::Transient(EMPTY_SELECTION.into()));
         }
         Ok(selected
             .into_iter()
@@ -229,6 +227,12 @@ impl BeaSelection {
 }
 
 const VOLUME_GUARD: &str = "BEA catalog volume guard";
+const EMPTY_SELECTION: &str = "BEA selection matched no current tables";
+
+/// Whether `error` is [`BeaSelection::select`] finding no current table for any rule.
+pub fn is_empty_selection(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Transient(message) if message == EMPTY_SELECTION)
+}
 
 /// Whether `error` is the volume guard stopping a selection that grew past a limit.
 pub fn is_volume_guard(error: &CrawlError) -> bool {

@@ -323,6 +323,15 @@ fn regional_dimensions(table: &str, line: &str, geo: &str) -> SeriesDataset {
     )
 }
 
+/// What discovery's error says when BEA serves no rows (NIPA) or no line codes or areas
+/// (Regional) for a table it lists.
+const EMPTY_TABLE: &str = "BEA serves no data for this listed table";
+
+/// Whether `error` is discovery finding a listed table empty (see [`EMPTY_TABLE`]).
+pub(crate) fn is_empty_table(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.contains(EMPTY_TABLE))
+}
+
 /// BEA adapter. See the module docs.
 #[derive(Debug)]
 pub struct BeaAdapter {
@@ -654,7 +663,7 @@ impl BeaAdapter {
                 // frequency. Fail rather than skip: discovery is complete, so skipping would
                 // retire the table's series.
                 return Err(CrawlError::Permanent(format!(
-                    "BEA NIPA {} ({}): GetData returned no rows; check the upstream catalog and catalog_selection/bea.toml",
+                    "BEA NIPA {} ({}): {EMPTY_TABLE}; check the upstream catalog and catalog_selection/bea.toml",
                     table.table_name,
                     frequency.code()
                 )));
@@ -707,7 +716,7 @@ impl BeaAdapter {
         // Discovery is complete, so an empty list would retire every series of the table.
         if lines.is_empty() || geos.is_empty() {
             return Err(CrawlError::Permanent(format!(
-                "BEA Regional {}: no line codes or areas; check the upstream catalog and catalog_selection/bea.toml",
+                "BEA Regional {}: {EMPTY_TABLE}; check the upstream catalog and catalog_selection/bea.toml",
                 table.table_name
             )));
         }
