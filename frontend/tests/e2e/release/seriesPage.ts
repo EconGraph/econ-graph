@@ -10,7 +10,7 @@ import type { SeededSeries } from './auth/helpers';
 
 /**
  * Helpers for driving the explore page and a series page (src/pages/SeriesDetail.tsx), shared by
- * the journey and the six-source sweep so a page change needs one edit.
+ * the journey and the source sweep so a page change needs one edit.
  */
 
 /**

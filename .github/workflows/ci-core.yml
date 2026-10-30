@@ -601,6 +601,11 @@ jobs:
         python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
 
+    - name: Check the catalog-access operator script against stubs
+      run: |
+        shellcheck -x scripts/keycloak/set-catalog-access.sh scripts/keycloak/test-set-catalog-access.sh
+        scripts/keycloak/test-set-catalog-access.sh
+
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
 

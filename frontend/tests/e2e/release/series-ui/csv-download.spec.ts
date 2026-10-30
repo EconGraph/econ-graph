@@ -21,17 +21,18 @@ test.describe('download CSV', () => {
     page,
     request,
   }) => {
-    const series = SEEDED.fredGdp;
+    const series = SEEDED.blsCpi;
     const seriesId = await seededSeriesId(request, series);
     await page.goto(`/series/${seriesId}`);
-    // fred/observations_gdp.json, oldest first: the chart's default range shows every point,
-    // including the missing one ("." in the fixture), which the CSV keeps as an empty value.
+    // bls/cpi_monthly.json, oldest first: the chart's default range shows every monthly point,
+    // including the missing one ("-" in the fixture), which the CSV keeps as an empty value, and
+    // not the annual average (period M13).
     const shownObservations: Array<{ date: string; value: number | null }> = [
-      { date: '2025-04-01', value: 30485.729 },
-      { date: '2025-07-01', value: 31095.089 },
-      { date: '2025-10-01', value: null },
-      { date: '2026-01-01', value: 31722.514 },
-      { date: '2026-04-01', value: 32101.6 },
+      { date: '2023-11-01', value: null },
+      { date: '2023-12-01', value: 306.746 },
+      { date: '2024-01-01', value: 308.417 },
+      { date: '2024-02-01', value: 310.326 },
+      { date: '2024-03-01', value: 312.332 },
     ];
     await expect(page.getByRole('columnheader', { name: 'Date' })).toBeVisible();
 
@@ -62,7 +63,7 @@ test.describe('download CSV', () => {
       // Fixture mode: one data row per observation, in the fixture's own (oldest-first) order.
       expect(rows).toEqual(shownObservations);
     } else {
-      // Deployed mode: live GDP has decades of observations, so check structure instead of
+      // Deployed mode: live CPI has decades of observations, so check structure instead of
       // exact values — strictly ascending dates, every value numeric or missing, and the export
       // has the same latest non-missing point as the page's Recent Data table.
       expect(rows.length).toBeGreaterThan(0);
@@ -81,11 +82,11 @@ test.describe('download CSV', () => {
         .getByRole('table', { name: 'Recent observations' })
         .getByRole('row')
         .nth(1);
-      // Quarterly GDP's date reads as its quarter ("2026 Q2"), and its value with the decimals
-      // the series carries, up to 2.
+      // Monthly CPI's date reads as a calendar date ("Mar 1, 2024"), and its value with the
+      // decimals the series carries, up to 2.
       const dateCell = latestRow.getByRole('cell').nth(0);
       const valueCell = latestRow.getByRole('cell').nth(1);
-      await expect(dateCell).toHaveText(/^\d{4} Q[1-4]$/);
+      await expect(dateCell).toHaveText(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
       const shownDate = await dateCell.innerText();
       expect(asShown(latest.date, shownDate)).toBe(shownDate);
       expect(Math.abs(parseShown(await valueCell.innerText()) - latest.value)).toBeLessThan(0.01);

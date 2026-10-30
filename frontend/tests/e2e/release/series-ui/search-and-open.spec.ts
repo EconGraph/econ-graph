@@ -4,6 +4,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { devUserToken, readAsDevUser } from '../auth/helpers';
+import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 
 // Live QA: search for a real series by name and open its page from the results.
@@ -19,7 +21,7 @@ test.describe('search and open a series', () => {
     // search box's own "Clear search text" button.
     await page.getByRole('button', { name: 'Search', exact: true }).click();
 
-    const resultText = page.getByText(SEEDED.fredGdp.title, { exact: true });
+    const resultText = page.getByText(SEEDED.beaGdp.title, { exact: true });
     await expect(resultText).toBeVisible();
 
     // The result cards are MUI Cards with no other stable role/testid; scope by the
@@ -28,16 +30,20 @@ test.describe('search and open a series', () => {
     await card.getByRole('button', { name: 'View Details' }).click();
 
     await expect(page).toHaveURL(/\/series\/[^/]+$/);
-    await expect(page.getByRole('heading', { name: SEEDED.fredGdp.title })).toBeVisible();
+    await expect(page.getByRole('heading', { name: SEEDED.beaGdp.title })).toBeVisible();
   });
 });
 
 // ECO-406: "gdp" listed FRED's GDP sixth, behind World Bank "GDP per capita" series, and missed
-// BEA's GDP, whose title only spells it out.
+// BEA's GDP, whose title only spells it out. FRED is admin-only, so the ranking is checked with an
+// admin's token, which only the fixture stack has.
 test.describe('search by abbreviation', () => {
   test('"gdp" lists the series whose id is GDP first and finds the spelled-out title', async ({
     page,
+    request,
   }) => {
+    test.skip(DEPLOYED, 'FRED is admin-only and the deployed realm has no admin to read as');
+    await readAsDevUser(page, await devUserToken(request, 'staff-admin'));
     await page.goto('/explore');
     await page
       .getByPlaceholder('Search economic series (e.g., GDP, unemployment, inflation)')
@@ -50,35 +56,46 @@ test.describe('search by abbreviation', () => {
     await expect(cards.first().getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
     await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
   });
+
+  test('"gdp" finds the spelled-out title for a visitor, and no FRED series', async ({ page }) => {
+    await page.goto('/explore');
+    await page
+      .getByPlaceholder('Search economic series (e.g., GDP, unemployment, inflation)')
+      .fill('gdp');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+
+    await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toHaveCount(0);
+  });
 });
 
 // ECO-405: Browse Series on /sources used to open an empty explorer asking for a query. It
 // lists the source's series instead.
 test.describe('browse a source', () => {
   /**
-   * Opens FRED's listing the way a visitor does: its Browse Series link on /sources.
+   * Opens BLS's listing the way a visitor does: its Browse Series link on /sources.
    * @param page - The page to drive.
    */
-  const browseFredFromSources = async (page: Page) => {
+  const browseBlsFromSources = async (page: Page) => {
     await page.goto('/sources');
     await page
-      .getByRole('region', { name: SEEDED.fredGdp.sourceName })
+      .getByRole('region', { name: SEEDED.blsCpi.sourceName })
       .getByRole('link', { name: 'Browse Series' })
       .click();
     await expect(page).toHaveURL(/\/explore\?source=[^&]+$/);
   };
 
-  test("Browse Series lists FRED's series without a query", async ({ page }) => {
-    await browseFredFromSources(page);
+  test("Browse Series lists BLS's series without a query", async ({ page }) => {
+    await browseBlsFromSources(page);
 
     await expect(page.getByText(/series, by title/)).toBeVisible();
-    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(SEEDED.blsCpi.title, { exact: true })).toBeVisible();
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
 
   // ECO-511: a link to another /explore URL changed nothing: the explorer wrote its own form
   // back over the link's URL. Each URL's query and source now reach the form and the results.
-  // The header search is the same-route link here: from FRED's listing it opens a GDP search.
+  // The header search is the same-route link here: from BLS's listing it opens a GDP search.
   test('the header search from a source listing searches, and back and forward follow', async ({
     page,
   }) => {
@@ -91,29 +108,29 @@ test.describe('browse a source', () => {
       page
         .locator('.MuiCard-root [title^="Data Source: "]')
         .evaluateAll(chips => chips.map(chip => chip.getAttribute('title')));
-    // Where FRED's Browse Series link lands, read once the test has followed it
-    let fredUrl = '';
+    // Where BLS's Browse Series link lands, read once the test has followed it
+    let blsUrl = '';
 
     const expectGdpSearch = async () => {
       await expect(page).toHaveURL(/\/explore\?q=GDP$/);
       await expect(searchBox).toHaveValue('GDP');
-      await expect(sourceSelect).not.toContainText(SEEDED.fredGdp.sourceName);
+      await expect(sourceSelect).not.toContainText(SEEDED.blsCpi.sourceName);
       await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
     };
-    const expectFredBrowse = async () => {
-      await expect(page).toHaveURL(fredUrl);
+    const expectBlsBrowse = async () => {
+      await expect(page).toHaveURL(blsUrl);
       await expect(searchBox).toHaveValue('');
-      await expect(sourceSelect).toContainText(SEEDED.fredGdp.sourceName);
+      await expect(sourceSelect).toContainText(SEEDED.blsCpi.sourceName);
       await expect(page.getByText(/series, by title/)).toBeVisible();
       await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toHaveCount(0);
       const sources = await cardSources();
       expect(sources.length).toBeGreaterThan(0);
-      expect(new Set(sources)).toEqual(new Set([`Data Source: ${SEEDED.fredGdp.sourceName}`]));
+      expect(new Set(sources)).toEqual(new Set([`Data Source: ${SEEDED.blsCpi.sourceName}`]));
     };
 
-    await browseFredFromSources(page);
-    fredUrl = page.url();
-    await expectFredBrowse();
+    await browseBlsFromSources(page);
+    blsUrl = page.url();
+    await expectBlsBrowse();
     // Survives only while the page stays loaded: the search must navigate within the app
     await page.evaluate(() => Object.assign(window, { eco511SamePage: true }));
 
@@ -122,7 +139,7 @@ test.describe('browse a source', () => {
     await expectGdpSearch();
 
     await page.goBack();
-    await expectFredBrowse();
+    await expectBlsBrowse();
     await page.goForward();
     await expectGdpSearch();
     expect(await page.evaluate(() => 'eco511SamePage' in window)).toBe(true);
@@ -142,9 +159,9 @@ test.describe('results grid', () => {
     await page.getByRole('button', { name: 'Search', exact: true }).click();
 
     const cards = page.locator('.MuiCard-root');
-    await expect(cards.first().getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
     const boxes = await cards.evaluateAll(els => els.map(el => el.getBoundingClientRect().toJSON()));
-    // FRED's and BEA's GDP at least, so there are widths to compare.
+    // BEA's GDP and World Bank GDP per capita series at least, so there are widths to compare.
     expect(boxes.length).toBeGreaterThanOrEqual(2);
 
     const widths = boxes.map(box => Math.round(box.width));

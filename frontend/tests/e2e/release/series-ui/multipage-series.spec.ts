@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test, type Download, type Page } from '@playwright/test';
 
-import { seededSeriesId } from '../auth/helpers';
+import { devUserToken, readAsDevUser, seededSeriesId } from '../auth/helpers';
 import { DEPLOYED } from '../env';
 import {
   failGraphQL,
@@ -25,7 +25,8 @@ import { recentRows } from '../seriesPage';
 // later page that fails must leave the page reporting an error, never a partial series.
 // The pagination code's own unit tests are src/hooks/__tests__/; this is the end-to-end check.
 // Fixture mode only: a deployed build has no such series. Live QA stands in with the CSV
-// download spec's deployed branch.
+// download spec's deployed branch. The series is FRED's, which only admins read, so every request
+// carries an admin's token (auth/helpers.ts' readAsDevUser).
 
 /**
  * The backend's page cap, which the frontend requests (SERIES_PAGE_SIZE). Copied rather than
@@ -248,7 +249,13 @@ test.describe('multi-page series (ECO-261)', () => {
   let seriesPath: string;
 
   test.beforeAll(async ({ request }) => {
-    seriesPath = `/series/${await seededSeriesId(request, SEEDED_MULTIPAGE)}`;
+    const token = await devUserToken(request, 'staff-admin');
+    seriesPath = `/series/${await seededSeriesId(request, SEEDED_MULTIPAGE, token)}`;
+  });
+
+  // Before each test's own fault routes, which fall back to this one.
+  test.beforeEach(async ({ page, request }) => {
+    await readAsDevUser(page, await devUserToken(request, 'staff-admin'));
   });
 
   test('the expected fixture spans three pages, with missing values', () => {

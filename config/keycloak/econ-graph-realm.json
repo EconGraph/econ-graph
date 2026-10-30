@@ -92,7 +92,8 @@
               "admin.sessions:revoke",
               "admin.crawlers:manage",
               "admin.security:read",
-              "admin.audit:read"
+              "admin.audit:read",
+              "catalog.fred:read"
             ]
           }
         }
@@ -114,23 +115,13 @@
         "composites": {
           "client": {
             "econ-graph-api": [
-              "catalog.fred:read",
               "catalog.bls:read",
               "catalog.census:read",
               "catalog.world_bank:read",
               "catalog.bea:read",
-              "catalog.imf:read",
               "catalog.fhfa:read",
-              "catalog.ecb:read",
-              "catalog.oecd:read",
-              "catalog.boe:read",
               "catalog.wto:read",
-              "catalog.boj:read",
-              "catalog.rba:read",
-              "catalog.boc:read",
-              "catalog.snb:read",
-              "catalog.unstats:read",
-              "catalog.ilo:read"
+              "catalog.boc:read"
             ]
           }
         }
@@ -440,23 +431,13 @@
       {
         "client": "econgraph-anonymous",
         "roles": [
-          "catalog.fred:read",
           "catalog.bls:read",
           "catalog.census:read",
           "catalog.world_bank:read",
           "catalog.bea:read",
-          "catalog.imf:read",
           "catalog.fhfa:read",
-          "catalog.ecb:read",
-          "catalog.oecd:read",
-          "catalog.boe:read",
           "catalog.wto:read",
-          "catalog.boj:read",
-          "catalog.rba:read",
-          "catalog.boc:read",
-          "catalog.snb:read",
-          "catalog.unstats:read",
-          "catalog.ilo:read"
+          "catalog.boc:read"
         ]
       }
     ]

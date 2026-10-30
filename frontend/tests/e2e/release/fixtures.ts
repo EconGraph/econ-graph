@@ -7,6 +7,10 @@
  * backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json. Specs assert on these rather
  * than on literals of their own, so a fixture change shows up in one place. `sourceName` is the
  * source's `dataSources` name, which the pages show.
+ *
+ * FRED's series are readable by admins only (config/keycloak/README.md, "Catalog access"): specs
+ * that open them anonymously must expect them hidden, and specs that read them do so with an
+ * admin's token (auth/helpers.ts' `readAsDevUser`). Every other source here is public.
  */
 export const SEEDED = {
   fredGdp: {
@@ -74,13 +78,40 @@ export const SEEDED = {
     // BLS's own catalog title and units (cpi_monthly.json's `catalog`).
     title: 'All items in U.S. city average, all urban consumers, not seasonally adjusted',
     units: 'Index 1982-1984=100',
-    // cpi_monthly.json's newest two points: March 2024 (312.332) over February 2024 (310.326).
+    /** Its newest observation as the series page's Recent Data table shows it. */
+    latestShown: { date: 'Mar 1, 2024', value: '312.33' },
+    /** The same observation as the CSV writes it, unrounded. */
+    latestValue: 312.332,
+    /** Deployed mode: monthly, released about two weeks after the month ends; slack for a shutdown delay. */
+    liveMaxAgeDays: 120,
+    /**
+     * Every transformation the series page offers this monthly series but log difference, in the
+     * order the journey applies them, with the newest value it shows, or null where the page says
+     * there aren't enough observations. bls/cpi_monthly.json has 2023-11 (missing) to 2024-03, so
+     * there is no year-ago point; the first usable value is December's 306.746.
+     */
     transformations: [
+      { label: 'Year-over-Year', description: 'Year-over-Year % Change', latestShown: null },
       {
+        // 312.332 / 306.746 (December)
+        label: 'Quarter-over-Quarter',
+        description: 'Quarter-over-Quarter % Change',
+        latestShown: { date: 'Mar 1, 2024', value: '1.82' },
+      },
+      {
+        // March 2024 (312.332) over February 2024 (310.326).
         label: 'Month-over-Month',
         description: 'Month-over-Month % Change',
         latestShown: { date: 'Mar 1, 2024', value: '0.65' },
       },
+      {
+        // The same comparison as quarter-over-quarter here: the base is December's 306.746.
+        label: 'Change since first available value',
+        description: '% Change since First Available Value',
+        latestShown: { date: 'Mar 1, 2024', value: '1.82' },
+      },
+      // Last, back to levels.
+      { label: 'None', description: '', latestShown: { date: 'Mar 1, 2024', value: '312.33' } },
     ],
   },
   censusEstablishments: {
@@ -193,7 +224,7 @@ export const SEEDED_WDI = {
   ],
 } as const;
 
-/** One release source's series as the six-source sweep (sources/six-source-sweep.spec.ts) checks it. */
+/** One public release source's series as the source sweep (sources/six-source-sweep.spec.ts) checks it. */
 export interface SweptSeries {
   source: string;
   sourceName: string;
@@ -227,7 +258,8 @@ export interface SweptSeries {
 const shown = (date: string, value: string) => ({ date, value });
 
 /**
- * One series per release source, for the six-source sweep. Values are what the series page shows
+ * One series per public release source, for the source sweep (FRED, admin-only, is checked by
+ * catalog-access.spec.ts instead). Values are what the series page shows
  * for the seeded fixtures: levels with the decimals the series carries, up to 2 (none for counts
  * and whole dollars), changes to 2 decimal places and log differences to 4 significant digits.
  * Quarterly and annual dates read as their period ("2024 Q4", "2022"). The comments say where
@@ -235,21 +267,8 @@ const shown = (date: string, value: string) => ({ date, value });
  */
 export const SWEPT_SOURCES: readonly SweptSeries[] = [
   {
-    ...SEEDED.fredGdp,
-    // fred/observations_gdp_e2e.json: 2025-04-01 to 2026-04-01 quarterly, 2025-10-01 missing.
-    csvRows: 5,
-    transformations: {
-      'Year-over-Year': shown('2026 Q2', '5.30'),
-      'Quarter-over-Quarter': shown('2026 Q2', '1.20'),
-      'Change since first available value': shown('2026 Q2', '5.30'),
-      // ln(32101.6 / 31722.514), to four significant digits
-      'Log difference': shown('2026 Q2', '0.01188'),
-    },
-  },
-  {
     ...SEEDED.blsCpi,
     // bls/cpi_monthly.json: 2023-11 (missing) to 2024-03, monthly.
-    latestShown: { date: 'Mar 1, 2024', value: '312.33' },
     csvRows: 5,
     transformations: {
       // Five months: no year-ago point.
@@ -263,8 +282,6 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       // ln(312.332 / 310.326)
       'Log difference': shown('Mar 1, 2024', '0.006443'),
     },
-    // Monthly, released about two weeks after the month ends; slack for a shutdown delay.
-    liveMaxAgeDays: 120,
   },
   {
     ...SEEDED.censusEstablishments,
