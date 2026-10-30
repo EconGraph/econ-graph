@@ -639,6 +639,8 @@ else
   deploy_root="$stub_dir/deploy-root"
   mkdir -p "$deploy_root/scripts"
   cp -r scripts/deploy "$deploy_root/scripts/"
+  mkdir -p "$deploy_root/scripts/backup"
+  cp scripts/backup/encryption.sh "$deploy_root/scripts/backup/"
   cp -r k8s "$deploy_root/"
   for helper in "$deploy_root"/scripts/deploy/*.sh; do
     [ "${helper##*/}" = deploy.sh ] && continue

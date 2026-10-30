@@ -334,6 +334,11 @@ jobs:
     - name: Check that teardown uses only the kind cluster's context
       run: scripts/deploy/test-teardown-kubectl.sh
 
+    # teardown, recreate and migrate refuse before dumping, stopping or
+    # deleting anything when the encrypted backup can't be made (all stubs).
+    - name: Check that destructive scripts refuse without an encrypted backup
+      run: scripts/deploy/test-backup-refusals.sh
+
     # recreate-kind-cluster.sh identifies the cluster inside its control plane on
     # the rootful daemon and, before any backup, delete or create, asks for the
     # kube-system UID prefix on a cluster with a production marker (or one that
@@ -357,6 +362,9 @@ jobs:
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
+
+    - name: Check backup snapshots against concurrent PostgreSQL writers
+      run: python3 scripts/backup/test-snapshot-counts.py
 
     # deploy.sh stops before applying anything when Secret econ-graph-keycloak lacks
     # anonymous-client-secret, against a stub kubectl.
@@ -593,6 +601,15 @@ jobs:
 
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
+
+    - name: Check public-key backup encryption and safe recovery
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y age
+        scripts/backup/test-encryption.sh
+
+    - name: Check the restore drill's encrypted-bundle guard and tmpfs data directory
+      run: scripts/backup/test-restore-drill.sh
 
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh

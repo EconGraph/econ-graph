@@ -28,8 +28,10 @@
 # calls. The stub `kind create cluster` records the call and then stops the
 # run, so nothing after it (the gateway install) runs. HOME, XDG_CACHE_HOME,
 # XDG_DATA_HOME, TMPDIR and ECONGRAPH_BACKUP_ROOT all point into a scratch
-# directory, and the kind config used has no host mounts or ports. The
-# terminal cases run the script under a pseudo-terminal (python3's pty module).
+# directory, and the kind config used has no host mounts or ports. Backups
+# stage plaintext in a private /dev/shm directory and encrypt to a dummy age
+# recipient, with age stubbed. The terminal cases run the script under a
+# pseudo-terminal (python3's pty module).
 #
 # Usage: scripts/deploy/test-recreate-kind-cluster.sh
 
@@ -37,7 +39,9 @@ set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Private tmpfs staging, so the backup gets past its encryption preflight.
+RAM="$(mktemp -d /dev/shm/econgraph-recreate-test.XXXXXXXX)"
+trap 'rm -rf "$WORK" "$RAM"' EXIT
 CACHE="$WORK/cache/econgraph"
 DATA_BIN="$WORK/data/econgraph/bin"
 mkdir -p "$WORK/bin" "$WORK/home/.kube" "$WORK/tmp" "$CACHE" "$DATA_BIN" "$WORK/backups"
@@ -49,6 +53,11 @@ ROOTFUL="unix:///var/run/docker.sock"
 ROOTLESS="unix:///run/user/1000/docker.sock"
 CONFIG="$WORK/kind-config.yaml"
 printf '%s\n' 'kind: Cluster' 'apiVersion: kind.x-k8s.io/v1alpha4' 'nodes:' '- role: control-plane' >"$CONFIG"
+
+# age: the backup stops before it encrypts anything (postgresql-0 is not
+# running); encryption itself is tested in scripts/backup/test-encryption.sh.
+printf '#!/bin/sh\ncat >/dev/null\n' >"$WORK/bin/age"
+printf '#!/bin/sh\nexit 0\n' >"$WORK/bin/age-keygen"
 
 # Plain kubectl and kind (on the production host, the MicroK8s wrapper and
 # whatever kind is on PATH): must never run.
@@ -120,6 +129,8 @@ RECREATE_ENV=(
     -u ECONGRAPH_KUBE_DIR -u ECONGRAPH_SCRATCH_STORAGE -u DRY_RUN -u ASSUME_YES
     HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache" XDG_DATA_HOME="$WORK/data" TMPDIR="$WORK/tmp"
     ECONGRAPH_BACKUP_ROOT="$WORK/backups" DOCKER_HOST="$ROOTLESS"
+    ECONGRAPH_CONFIG_DIR="$WORK/no-config" BACKUP_PLAINTEXT_ROOT="$RAM"
+    BACKUP_AGE_RECIPIENT="age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq"
     PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
 )
 

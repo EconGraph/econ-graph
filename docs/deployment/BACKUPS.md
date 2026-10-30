@@ -125,7 +125,7 @@ automatically.
 | hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | operator | `econgraph-backup-freshness.timer` (user) |
 | nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph`, `econ_graph_app` and `keycloak` | operator | `econgraph-dump.timer` (user) |
 | daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
-| Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | operator | `econgraph-restore-drill.timer` (user) |
+| at least weekly, interactively | `open-backup.sh` followed by `restore-drill.sh`: decrypt and restore a bundle into a throwaway Postgres 18 | operator | manual; no private identity is installed for a timer |
 | before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
 | before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: Keycloak scaled to 0, `pg_dump -Fc` of `keycloak` into `~/econgraph-backups/keycloak/<UTC stamp>/`, verified by a restore into a scratch database with equal row counts. `scripts/deploy/restore-keycloak-db.sh` restores it as a fresh database swapped in by rename, the only way to downgrade Keycloak; `restore-dump.sh`'s `--clean` would leave the newer version's tables behind. These dumps are on the data disk, not the backup pool, and `offsite-restic.sh` doesn't ship them: copy each one off the disk by hand. See the [v4.0.0 QA plan](../release/v4.0.0-qa.md) | operator | by hand |
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
@@ -245,45 +245,147 @@ Like every snapshot it is kept until the operator deletes it by hand.
 
 ## Nightly dumps
 
-`dump-databases.sh` runs `pg_dump --format=custom` inside each Postgres pod
-(through `docker exec econ-graph-control-plane kubectl ...` on the rootful
-daemon, since the host's `kubectl` is a microk8s wrapper) and writes:
+The nightly `dump-databases.sh` and pre-change
+`backup-kind-databases.sh` share one verified recovery payload. Each dumps
+`econ_graph`, `econ_graph_app` and `keycloak` from the kind cluster, reads
+each archive back in full with the pod's matching `pg_restore`, and records
+row counts from the same exported PostgreSQL snapshot as each archive. The
+snapshot-exporting session stays alive until its dump and count queries finish,
+so concurrent nightly writes cannot create a false row-count mismatch during
+recovery. Each database has its own consistent snapshot; there is no atomic
+snapshot spanning the app, data and Keycloak databases. Stop writers, as the
+pre-change migration workflow does, when a coordinated cross-database recovery
+point is required. An optional database is skipped only when neither its StatefulSet
+nor its data PVC exists. A stopped or unreachable deployed database fails the
+backup. The payload includes `counts.env`, `MANIFEST` and the cluster Secrets
+needed to recover the databases with their original credentials.
 
-```
-~/econgraph-backups/<YYYYMMDDTHHMMZ>/
-  econ_graph.dump      econ_graph.dump.toc
-  econ_graph_app.dump  econ_graph_app.dump.toc
-  keycloak.dump        keycloak.dump.toc
-  MANIFEST         sizes, TOC entry counts, row counts at dump time
-  SHA256SUMS
-  VERIFIED         written last, only when every dump passed
+Install `age` (with `age-keygen`) on the host. Set **only the public recipient** in
+`~/.config/econgraph/backup.env` (or the environment):
+
+```sh
+BACKUP_AGE_RECIPIENT=age1... # the maintainer's actual public recipient
 ```
 
-Each archive is checked with `pg_restore --list` and a full read-through
-(`pg_restore --file=/dev/null`), using the `postgres:18` image because the
-host's `pg_restore` is older than the server. The directory is built as
-`<stamp>.partial` and renamed to `<stamp>` only when everything passed; a
-failure renames it to `<stamp>.failed` (kept for inspection, never mistaken
-for a good dump) and exits non-zero. No dump is ever deleted or pruned.
-It runs with `umask 077`, so every file is mode 0600 and every directory
-0700: the dumps hold all the data, Keycloak's secrets and password hashes
-included. (They are not encrypted; that is tracked separately.) Dumps
-written before this change keep their old modes; tighten them once with
-`chmod -R go= ~/econgraph-backups /srv/econgraph-backups/dumps`.
-`--target-dir` (or `BACKUP_ROOT`) moves the output. By default the dumps go
-to `/srv/econgraph-backups/dumps` as soon as that directory exists and is
-writable, and to `~/econgraph-backups` before that; the dumps already in
-`~/econgraph-backups` stay there.
+Keep the private identity outside agent access and off this host if possible.
+No private identity is installed in a timer or backup configuration. Missing
+or invalid recipient, missing age, or unavailable tmpfs staging fails closed:
+there is no plaintext fallback. Teardown, cluster recreation and the
+host-storage migration check these before they dump, stop or delete anything.
+The migration, which stops the writers before its backup, also checks before
+the downtime that the tmpfs staging has room for the on-disk size of every
+running database plus 64 MiB, taking the smaller of the tmpfs's free space and
+`MemAvailable`.
+
+`backup_recipient_proven` in `scripts/backup/encryption.sh` is the hook for
+proving that the maintainer holds the recipient's private identity; it
+currently accepts every well-formed recipient, so a backup proves that its
+ciphertext decrypts, not that the maintainer's key can decrypt it.
+
+The persistent output is:
+
+```text
+~/econgraph-backups/<YYYYMMDDTHHMMSSZ>/
+  backup.tar.age  # encrypted dumps, counts, MANIFEST and Secrets together
+  SHA256SUMS      # checksum of the ciphertext
+  VERIFIED        # timestamp: payload read-back and the decrypt check passed
+```
+
+The payload is encrypted to the public recipient and to a throwaway age key
+generated in the tmpfs staging. The published `backup.tar.age` is decrypted
+with the throwaway key and the decrypted tar stream must hash the same as the
+stream that was encrypted; the throwaway key is then destroyed, so it cannot
+open the bundle later. A payload file that tar cannot read fails the seal
+(each pipeline stage's status is checked). Publication uses an exclusive `.partial` directory, an
+fsync of the ciphertext, checksum, marker and directory, and a final rename
+(itself fsynced) only after all writes and the decrypt check succeed. Failed
+ciphertext remains `.partial` without a `VERIFIED` marker, also when the
+output appears before the rename. Every writer that stages plaintext in the
+same tmpfs (`BACKUP_PLAINTEXT_ROOT`), whatever its destination root, holds one
+lock there (`.econgraph-backup-<uid>.lock`); the migration takes it before its
+room check and keeps it through its backup. The nightly timer fails rather
+than wait; the deployment scripts say which writer holds it and wait up to
+`BACKUP_LOCK_TIMEOUT` seconds (default 3600), then refuse. `open-backup.sh`
+holds the same lock while its command runs, since it decrypts into the same
+tmpfs; a backup that command takes reuses the lock it inherited. Existing backups are never overwritten, deleted or
+converted automatically. The files are 0600 and directories 0700.
+`--target-dir` or `BACKUP_ROOT` selects the nightly output root; the default
+uses `/srv/econgraph-backups/dumps` when available, otherwise
+`~/econgraph-backups`. The pre-change writer uses `ECONGRAPH_BACKUP_ROOT`. The unified writer covers
+the canonical data/app/Keycloak databases; an older `BACKUP_DATABASES` override
+is refused rather than silently ignored. `KIND_NODE` selects its kind cluster
+and must agree with an explicitly supplied `KIND_CLUSTER`.
+
+Plaintext exists only in a private disposable directory under
+`BACKUP_PLAINTEXT_ROOT` (default `/dev/shm`), which must be tmpfs. It is removed
+when the writer/consumer exits, including failures. tmpfs needs enough memory
+for the complete compressed payload; a full filesystem aborts the backup
+before destructive steps. **Use encrypted swap or disable swap**: tmpfs alone
+does not prevent plaintext pages from reaching swap. SIGKILL or a host crash
+may leave temporary RAM staging until cleanup/reboot; review stale staging
+manually. This does not isolate a running backup from another process using
+the same Unix identity or from root.
+
+Fresh host-storage migrations reuse their verified RAM staging until their
+process exits. After an interruption, recovery requires the maintainer to
+open the encrypted bundle interactively; the writer cannot decrypt its own
+stored backups. To recover a downloaded off-site copy, use that downloaded
+bundle directory in the same commands below. Its saved Secrets travel with
+the dumps because the entire verified directory is selected by restic.
+
+Existing plaintext backup directories retain their format and remain readable
+by the restore scripts. Tighten their modes manually and migrate selected
+copies using `backup_seal_dir` from `scripts/backup/encryption.sh` after
+`backup_encryption_preflight`; verify an interactive restore before deciding
+what to do with the originals. Never delete originals automatically.
+
+This encrypts **host logical backup bundles**. Live database files, btrfs
+snapshots, the independent in-cluster backup CronJob/PVC, and the special
+Keycloak-upgrade backup format remain separate copies with their existing
+protection. In particular, these changes do not claim those copies are
+public-key encrypted; the in-cluster backup work must be integrated separately.
+
+The encryption suite (`scripts/backup/test-encryption.sh`) uses a disposable
+synthetic identity and transport stubs. The concurrent-write regression
+(`python3 scripts/backup/test-snapshot-counts.py`) starts one isolated
+`postgres:18` container, inserts rows after each snapshot export, restores all
+three archives, and checks that metadata and restored rows agree while the
+live fixture has newer rows. It also checks that exporter sessions are closed;
+it uses the daemon in `DOCKER_HOST` (for example the rootless one), else the
+system daemon. `scripts/deploy/test-backup-refusals.sh` runs teardown,
+recreation and both migration directions against stubs and checks that each
+refuses without a recipient, with disk staging, and (the migration) with too
+little tmpfs, before any dump or downtime. `scripts/backup/test-restore-drill.sh`
+checks the drill's encrypted-bundle guard and tmpfs data directory with a
+Docker stub. CI runs all four; the real PostgreSQL check adds a
+scratch-container image pull and fixture run. None of them uses a live
+cluster, backup or maintainer key.
 
 ## Restore drill
 
 ```sh
-scripts/backup/restore-drill.sh                       # newest verified dump
-scripts/backup/restore-drill.sh --expect-series 10528 --expect-data-points 503001 \
-    ~/econgraph-backups/20261024T0442Z/econ_graph.dump
+# Run at an operator terminal; the identity path is prompted, not saved.
+scripts/backup/open-backup.sh ~/econgraph-backups/<stamp> -- \
+    scripts/backup/restore-drill.sh @BACKUP@/econ_graph.dump
+scripts/backup/open-backup.sh ~/econgraph-backups/<stamp> -- \
+    scripts/deploy/restore-kind-databases.sh --from @BACKUP@ --dry-run
 ```
 
-It starts `postgres:18` on a random localhost port, restores `econ_graph`
+`open-backup.sh` checks the ciphertext checksum, prompts for the private
+identity path, decrypts and authenticates the payload into private tmpfs,
+rejects archive traversal and links, then runs the command with `@BACKUP@`
+replaced by that directory. It removes only that disposable directory on exit.
+It refuses unattended use. A checksum detects storage corruption; age
+provides ciphertext authentication during decryption.
+
+The installer disables the old unattended weekly restore timer: without a
+private key it cannot restore an encrypted backup. Run the drill manually
+at least weekly; the existing freshness check still reports overdue drills.
+An unattended invocation fails clearly and records no false restore PASS.
+
+The drill starts `postgres:18` on a random localhost port, with a tmpfs at
+every `VOLUME` the image declares, and refuses an image whose `PGDATA` is not
+under one, so the restored plaintext never reaches a disk volume. It restores `econ_graph`
 (and `econ_graph_app` and `keycloak` from the same directory), and checks: `economic_series`,
 `data_points` and `data_sources` are non-empty, no data point references a
 missing series, no data point lacks a date, the Diesel migration table is

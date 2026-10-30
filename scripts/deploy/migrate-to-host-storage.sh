@@ -66,6 +66,9 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
+# open-backup.sh substitutes a fresh tmpfs path for @BACKUP@. Persist the
+# original bundle path so repeated opens still match RESTORED= state.
+RESUME_FROM="$(backup_original_dir "$RESUME_FROM")"
 export DRY_RUN ASSUME_YES
 
 STATE_FILE="${ECONGRAPH_CACHE}/host-storage-migration.env"
@@ -243,14 +246,17 @@ check_local_images() {
 
 save_local_images() {
     if [ "${DRY_RUN}" != "true" ]; then
-        printf '%s\n' "${LOCAL_IMAGES[@]}" >"${BACKUP_DIR}/local-images.txt"
+        printf '%s\n' "${LOCAL_IMAGES[@]}" >"$1/local-images.txt"
     fi
 }
 
+# Called by backup_databases after verification and before age publication.
+backup_prepare_payload() { save_local_images "$1"; }
+
 load_local_images() {
     local image
-    if [ "${#LOCAL_IMAGES[@]}" -eq 0 ] && [ -s "${BACKUP_DIR}/local-images.txt" ]; then
-        mapfile -t LOCAL_IMAGES <"${BACKUP_DIR}/local-images.txt"
+    if [ "${#LOCAL_IMAGES[@]}" -eq 0 ] && [ -s "$(backup_source_dir "$BACKUP_DIR")/local-images.txt" ]; then
+        mapfile -t LOCAL_IMAGES <"$(backup_source_dir "$BACKUP_DIR")/local-images.txt"
     fi
     [ "${#LOCAL_IMAGES[@]}" -gt 0 ] || die "${BACKUP_DIR}/local-images.txt missing; can't tell which images to load"
     log "Loading the images that ran before into the new cluster"
@@ -287,10 +293,10 @@ restore_and_deploy() {
     local src="$1"
     # Once restored, a resumed run must not restore again: deploy.sh may have
     # started the crawler, which adds rows the backup doesn't have.
-    if [ -f "${STATE_FILE}" ] && grep -qx "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
+    if [ -f "${STATE_FILE}" ] && grep -qxF "RESTORED=${BACKUP_DIR}" "${STATE_FILE}"; then
         log "Databases already restored from ${BACKUP_DIR} by an earlier run"
     else
-        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "${BACKUP_DIR}" --no-bootstrap "${common_flags[@]}"
+        run "${PROJECT_ROOT}/scripts/deploy/restore-kind-databases.sh" --from "$(backup_source_dir "$BACKUP_DIR")" --no-bootstrap "${common_flags[@]}"
         if [ "${DRY_RUN}" != "true" ]; then
             echo "RESTORED=${BACKUP_DIR}" >>"${STATE_FILE}"
         fi
@@ -311,7 +317,7 @@ verify() {
     fi
     local series points ok=true
     SERIES_COUNT=0 DATA_POINTS_COUNT=0
-    if [ -n "${BACKUP_DIR:-}" ] && [ -f "${BACKUP_DIR}/counts.env" ]; then
+    if [ -n "${BACKUP_DIR:-}" ] && [ -f "$(backup_source_dir "$BACKUP_DIR")/counts.env" ]; then
         read_counts "${BACKUP_DIR}"
     fi
     series="$(count_rows econ_graph 'select count(*) from economic_series')"
@@ -377,16 +383,17 @@ forward() {
         note_production
         require_recreate_confirmation
         confirm "This stops econ-graph (downtime starts), backs up both databases, then DELETES and recreates kind cluster '${KIND_CLUSTER}'."
+        backup_encryption_preflight
+        backup_check_tmpfs_space
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
         backup_databases "${BACKUP_DIR}"
-        save_local_images
         recreate_cluster --yes --no-backup "${recreate_flags[@]}" "${common_flags[@]}"
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no backup to resume from; pass --resume-from ~/econgraph-backups/<ts>"
-        [ -s "${BACKUP_DIR}/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
+        [ -s "$(backup_source_dir "$BACKUP_DIR")/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
         log "Resuming with backup ${BACKUP_DIR}"
         if [ "$cluster" = "absent" ]; then
             recreate_cluster --yes --no-backup "${recreate_flags[@]}" "${common_flags[@]}"
@@ -434,16 +441,17 @@ rollback() {
         note_production
         require_recreate_confirmation
         confirm "This stops econ-graph, backs up both databases, then DELETES kind cluster '${KIND_CLUSTER}' and redeploys ${REF} with node-local storage."
+        backup_encryption_preflight
+        backup_check_tmpfs_space
         stop_writers
         remember_backup "$(new_backup_dir)"
         remember_production
         backup_databases "${BACKUP_DIR}"
-        save_local_images
     else
         BACKUP_DIR="$(recalled_backup)"
         [ -n "${BACKUP_DIR}" ] || die "no running database to back up; pass --resume-from ~/econgraph-backups/<ts>"
     fi
-    [ "${DRY_RUN}" = "true" ] || [ -s "${BACKUP_DIR}/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
+    [ "${DRY_RUN}" = "true" ] || [ -s "$(backup_source_dir "$BACKUP_DIR")/econ_graph.dump" ] || die "${BACKUP_DIR}/econ_graph.dump missing"
     log "Rolling back to ${REF} with backup ${BACKUP_DIR}"
 
     if [ -d "$src" ]; then
