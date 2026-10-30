@@ -27,7 +27,8 @@ const backendPort = Number(process.env.RELEASE_BACKEND_PORT ?? 18080);
 const frontendPort = Number(process.env.RELEASE_FRONTEND_PORT ?? 18081);
 const backendUrl = `http://localhost:${backendPort}`;
 export const frontendUrl = `http://localhost:${frontendPort}`;
-const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
+const backendBin =
+  process.env.RELEASE_BACKEND_BIN ?? '../backend/target/release/econ-graph-backend';
 
 // Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
 // mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
@@ -127,7 +128,7 @@ export default defineConfig({
     {
       // A phone (ECO-335: at this width the app once started behind its open nav drawer, so the
       // world map's controls were unreachable). The world map, the smoke checks on the home and
-      // explore pages, and the phone-only navigation spec. Pixel 5 is Chromium, like the above.
+      // explore pages, and the phone-only navigation and header specs. Pixel 5 is Chromium, like the above.
       name: 'release-mobile',
       testMatch: ['world-map/**/*.spec.ts', 'smoke.spec.ts', 'mobile/**/*.spec.ts'],
       use: { ...devices['Pixel 5'], launchOptions },

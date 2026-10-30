@@ -72,3 +72,13 @@ describe('Sidebar privacy link', () => {
     );
   });
 });
+
+describe('Sidebar sources', () => {
+  // ECO-751: no item singles out one source; Data Sources lists them all
+  test('has Data Sources and no FRED Data item', () => {
+    render(<Sidebar open onClose={vi.fn()} />);
+
+    expect(screen.getAllByRole('button', { name: /^Navigate to Data Sources/ }).length).toBeGreaterThan(0);
+    expect(screen.queryAllByRole('button', { name: /Navigate to FRED Data/ })).toHaveLength(0);
+  });
+});

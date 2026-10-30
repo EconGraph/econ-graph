@@ -7,6 +7,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as d3 from 'd3';
+import { geoEqualEarth, geoNaturalEarth1 } from 'd3-geo';
 import { useWorldMap } from '../useWorldMap';
 
 // The shared setup file stubs d3-geo and d3-zoom; this hook needs the real ones.
@@ -30,10 +31,10 @@ beforeEach(() => {
 
 describe('useWorldMap', () => {
   describe('projections', () => {
-    it('offers Natural Earth, Mercator and orthographic', () => {
+    it('offers Equal Earth alongside Natural Earth, Mercator and orthographic', () => {
       const { result } = renderHook(() => useWorldMap(REF));
 
-      expect(result.current.projections).toEqual(['naturalEarth', 'mercator', 'orthographic']);
+      expect(result.current.projections).toEqual(['equalEarth', 'naturalEarth', 'mercator', 'orthographic']);
     });
 
     it('fits the projection to the given size', () => {
@@ -45,12 +46,21 @@ describe('useWorldMap', () => {
       expect(x1).toBeCloseTo(960, 0);
     });
 
+    it.each([[960, 500], [320, 240]])('fits Equal Earth into %i × %i', (width, height) => {
+      const { result } = renderHook(() => useWorldMap(REF, undefined, [width, height]));
+      const [[x0, y0], [x1, y1]] = result.current.path.bounds({ type: 'Sphere' });
+      expect(x0).toBeGreaterThanOrEqual(-1e-6);
+      expect(y0).toBeGreaterThanOrEqual(-1e-6);
+      expect(x1).toBeLessThanOrEqual(width + 1e-6);
+      expect(y1).toBeLessThanOrEqual(height + 1e-6);
+      expect(Math.max((x1 - x0) / width, (y1 - y0) / height)).toBeCloseTo(1);
+    });
+
     it('builds a new projection when the type changes', () => {
       const ref = svgRef();
-      const { result, rerender } = renderHook(
-        ({ type }) => useWorldMap(ref, type, [960, 500]),
-        { initialProps: { type: 'naturalEarth' } }
-      );
+      const { result, rerender } = renderHook(({ type }) => useWorldMap(ref, type, [960, 500]), {
+        initialProps: { type: 'naturalEarth' },
+      });
       const before = result.current.projection;
 
       rerender({ type: 'mercator' });
@@ -58,18 +68,24 @@ describe('useWorldMap', () => {
       expect(result.current.projection).not.toBe(before);
     });
 
-    it('falls back to Natural Earth for an unknown type', () => {
+    it('defaults and falls back to Equal Earth for an unknown type', () => {
       const { result: unknown } = renderHook(() => useWorldMap(REF, 'invalid', [960, 500]));
-      const { result: natural } = renderHook(() => useWorldMap(REF, 'naturalEarth', [960, 500]));
+      const { result: defaultMap } = renderHook(() => useWorldMap(REF, undefined, [960, 500]));
+      const equalEarth = geoEqualEarth().fitSize([960, 500], { type: 'Sphere' });
 
-      expect(unknown.current.projection([10, 20])).toEqual(natural.current.projection([10, 20]));
+      expect(unknown.current.projection([10, 20])).toEqual(equalEarth([10, 20]));
+      expect(defaultMap.current.projection([10, 20])).toEqual(equalEarth([10, 20]));
+      expect(defaultMap.current.projection([10, 20])).not.toEqual(
+        geoNaturalEarth1().fitSize([960, 500], { type: 'Sphere' })([10, 20])
+      );
     });
   });
 
   describe('zoom', () => {
     it('zooms by a factor and resets', () => {
       const ref = svgRef();
-      ref.current.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'))
+      ref.current
+        .appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'))
         .setAttribute('class', 'map-container');
       const { result } = renderHook(() => useWorldMap(ref, 'naturalEarth', [960, 500]));
       expect(result.current.zoomLevel).toBe(1);
@@ -115,6 +131,56 @@ describe('useWorldMap', () => {
       act(() => result.current.zoomBy(2));
       act(() => result.current.resetZoom());
       expect(result.current.zoomLevel).toBe(1);
+    });
+  });
+
+  describe('geographic movement', () => {
+    const pointer = (type: string, x: number, y: number, pointerId = 1) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperty(event, 'pointerId', { value: pointerId });
+      REF.current.dispatchEvent(event);
+    };
+
+    it('drags across the geographic seam, keeps orientation through refitting, and resets', () => {
+      const { result, rerender } = renderHook(
+        ({ type, width }) => useWorldMap(REF, type, [width, 500]),
+        { initialProps: { type: 'naturalEarth', width: 960 } }
+      );
+      const before = result.current.projection([100, 30]);
+      act(() => {
+        pointer('pointerdown', 800, 250);
+        pointer('pointermove', 200, 250);
+        pointer('pointerup', 200, 250);
+      });
+      expect(result.current.projection([100, 30])).not.toEqual(before);
+      const longitude = result.current.projection.rotate()[0];
+      expect(result.current.isTransformed).toBe(true);
+      rerender({ type: 'orthographic', width: 700 });
+      expect(result.current.projection.rotate()[0]).toBe(longitude);
+      act(() => result.current.resetZoom());
+      expect(result.current.projection.rotate()).toEqual([0, 0, 0]);
+      expect(result.current.isTransformed).toBe(false);
+    });
+
+    it('rotates latitude on the globe and releases cancelled pointer gestures', () => {
+      const { result } = renderHook(() => useWorldMap(REF, 'orthographic', [960, 500]));
+      act(() => {
+        pointer('pointerdown', 500, 300);
+        pointer('pointermove', 450, 200);
+        pointer('pointercancel', 450, 200);
+      });
+      expect(result.current.projection.rotate()[1]).toBeGreaterThan(0);
+      expect(result.current.gestureActive.current).toBe(false);
+      const previous = result.current.projection.rotate();
+      act(() => pointer('pointermove', 200, 100));
+      expect(result.current.projection.rotate()).toEqual(previous);
+      act(() => {
+        pointer('pointerdown', 500, 300);
+        pointer('pointermove', 600, 300);
+        pointer('lostpointercapture', 600, 300);
+      });
+      expect(result.current.gestureActive.current).toBe(false);
+      expect(result.current.projection.rotate()).not.toEqual(previous);
     });
   });
 

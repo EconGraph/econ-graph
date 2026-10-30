@@ -290,43 +290,12 @@ CLUSTER_UID="$(kube_system_uid)" || die "could not read the kube-system UID of $
 UID_PREFIX="${CLUSTER_UID:0:8}"
 
 # --- PUBLIC_HOST, from the host's deploy config ----------------------------------------
-DEPLOY_ENV="${ECONGRAPH_DEPLOY_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/econgraph/deploy.env}"
-configured=false
-PUBLIC_HOST=""
-if [ -f "$DEPLOY_ENV" ]; then
-    # The last line wins, as it would if the file were sourced.
-    line="$(grep -E '^[[:space:]]*PUBLIC_HOST=' "$DEPLOY_ENV" | tail -1)" || line=""
-    if [ -n "$line" ]; then
-        PUBLIC_HOST="${line#*=}"
-        # A CRLF file would otherwise pass silently (the renderer strips a
-        # trailing CR): refuse it.
-        [[ "$PUBLIC_HOST" != *$'\r'* ]] ||
-            die "${DEPLOY_ENV} has a carriage return in its PUBLIC_HOST line (CRLF line endings?); save it with LF endings"
-        # Surrounding blanks and one pair of matching quotes; nothing else is
-        # rewritten, so a comment or a typo reaches the check below.
-        PUBLIC_HOST="${PUBLIC_HOST#"${PUBLIC_HOST%%[![:space:]]*}"}"
-        PUBLIC_HOST="${PUBLIC_HOST%"${PUBLIC_HOST##*[![:space:]]}"}"
-        if [[ "$PUBLIC_HOST" =~ ^\"(.*)\"$ || "$PUBLIC_HOST" =~ ^\'(.*)\'$ ]]; then
-            PUBLIC_HOST="${BASH_REMATCH[1]}"
-        fi
-        # Blanks inside (or inside the quotes): the renderer would strip them,
-        # but deploy.sh's gateway step would not. Refuse, rather than guess.
-        [[ "$PUBLIC_HOST" != *[[:space:]]* ]] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', with blanks in it; write the host name alone"
-        # Host names are case-insensitive; the routes, the certificate and the
-        # comparison below use the lowercase form.
-        if [ "$PUBLIC_HOST" != "${PUBLIC_HOST,,}" ]; then
-            echo "  PUBLIC_HOST     ${PUBLIC_HOST} in ${DEPLOY_ENV} is used as ${PUBLIC_HOST,,}"
-            PUBLIC_HOST="${PUBLIC_HOST,,}"
-        fi
-        [ -z "$PUBLIC_HOST" ] || configured=true
-    fi
-fi
-# A malformed host is refused here, before any step, not by deploy.sh after the
-# load, the backups and the precheck (the same check, render-public-host.py).
-if [ -n "$PUBLIC_HOST" ] && ! "$DEPLOY_DIR/render-public-host.py" "$PUBLIC_HOST" /dev/null >/dev/null; then
-    die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', which is not a public DNS name"
-fi
+# Read by read_configured_public_host (lib/public-host.sh), which also refuses
+# a malformed host here, before any step, not in deploy.sh after the load, the
+# backups and the precheck.
+read_configured_public_host || die "$PUBLIC_HOST_CONFIG_ERROR"
+PUBLIC_HOST="$CONFIGURED_PUBLIC_HOST"
+configured="$PUBLIC_HOST_CONFIGURED"
 if [ "$ENV_PUBLIC_HOST_SET" = set ] && [ "${ENV_PUBLIC_HOST,,}" != "$PUBLIC_HOST" ]; then
     die "PUBLIC_HOST='${ENV_PUBLIC_HOST}' is set in the environment, but ${DEPLOY_ENV} says '${PUBLIC_HOST}'; the config decides: unset PUBLIC_HOST, or change the config"
 fi

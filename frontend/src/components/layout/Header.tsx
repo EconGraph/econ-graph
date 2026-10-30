@@ -17,6 +17,9 @@ import {
   Divider,
   Snackbar,
   Alert,
+  Tooltip,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -93,6 +96,8 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
     clearError,
   } = useAuth();
   const navigate = useNavigate();
+  // On a phone the labelled Sign in button would take most of the search field's width.
+  const isPhone = useMediaQuery(useTheme().breakpoints.down('sm'));
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
 
@@ -266,13 +271,22 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                   Privacy
                 </Button>
                 {/* Hidden while the session is restored, so it does not flash before the avatar */}
-                {isConfigured && !isLoading && (
+                {isConfigured && !isLoading && isPhone && (
+                  <Tooltip title='Sign in'>
+                    <IconButton color='inherit' aria-label='Sign in' onClick={() => void signIn()}>
+                      <PersonIcon />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {isConfigured && !isLoading && !isPhone && (
                   <Button
                     color='inherit'
                     variant='outlined'
                     startIcon={<PersonIcon />}
                     onClick={() => void signIn()}
                     sx={{
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
                       borderColor: 'rgba(255, 255, 255, 0.5)',
                       '&:hover': {
                         borderColor: 'white',

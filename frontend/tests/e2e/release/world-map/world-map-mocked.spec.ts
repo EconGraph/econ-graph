@@ -3,6 +3,7 @@
 // See LICENSE file for complete terms and conditions.
 
 import { test, expect, type Page } from '@playwright/test';
+import { expectEqualEarthGeometry, expectEqualLandAreas } from './equal-earth';
 
 /**
  * The world map on mocked GraphQL responses: an indicator picker from the WDI dataset's codes,
@@ -191,8 +192,13 @@ test.describe('World map (mocked)', () => {
     await expect(map).toContainText('150%');
     await expect(page.locator('.map-container')).toHaveAttribute('transform', /scale\(1\.5\)/);
 
-    await page.getByRole('button', { name: 'Reset zoom' }).click();
+    await page.getByRole('button', { name: 'Reset view' }).click();
     await expect(map).toContainText('100%');
+  });
+
+  test('defaults to Equal Earth geometry with equal land areas', async ({ page }) => {
+    await expectEqualEarthGeometry(page);
+    await expectEqualLandAreas(page);
   });
 
   test('changes projection', async ({ page }) => {

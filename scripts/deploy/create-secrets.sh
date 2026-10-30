@@ -46,6 +46,10 @@
 #                                  anonymous-client-secret   KEYCLOAK_ANONYMOUS_CLIENT_SECRET (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
+#                                  facebook-idp-client-id    kept as it is; setting
+#                                  facebook-idp-client-secret KEYCLOAK_FACEBOOK_CLIENT_ID or
+#                                                            KEYCLOAK_FACEBOOK_CLIENT_SECRET is
+#                                                            refused: Facebook sign-in is disabled
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
 #   monitoring-auth                auth                      MONITORING_BASIC_AUTH (optional,
 #                                                            one htpasswd line, e.g. from
@@ -144,6 +148,15 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Facebook sign-in is disabled: a Facebook credential in the environment is
+# refused before anything else (a dry run included), never silently dropped.
+if [[ -n "${KEYCLOAK_FACEBOOK_CLIENT_ID-}" || -n "${KEYCLOAK_FACEBOOK_CLIENT_SECRET-}" ]]; then
+    echo "create-secrets: error: KEYCLOAK_FACEBOOK_CLIENT_ID or KEYCLOAK_FACEBOOK_CLIENT_SECRET is set," \
+        "but Facebook sign-in is disabled until its email rules are built" \
+        "(https://linear.app/econgraph/issue/ECO-470); unset them. Nothing was read or written." >&2
+    exit 1
+fi
 
 # Refuse before selecting an operator config, reading credentials or prompting.
 # shellcheck source=scripts/deploy/lib/agent-access.sh
@@ -484,7 +497,8 @@ kc get namespace "$NAMESPACE" >/dev/null 2>&1 ||
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD APP_POSTGRES_PASSWORD APP_POSTGRES_APP_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY WTO_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
-    KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
+    KEYCLOAK_GOOGLE_CLIENT_SECRET KEYCLOAK_FACEBOOK_CLIENT_ID \
+    KEYCLOAK_FACEBOOK_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
     CLOUDFLARE_TUNNEL_TOKEN; do
     [[ -z "${!var-}" ]] || check_input "$var" "${!var}"
 done
@@ -653,6 +667,8 @@ add_required KEYCLOAK_DB_PASSWORD db-password
 add_required KEYCLOAK_ANONYMOUS_CLIENT_SECRET anonymous-client-secret
 add_optional KEYCLOAK_GOOGLE_CLIENT_ID google-idp-client-id
 add_optional KEYCLOAK_GOOGLE_CLIENT_SECRET google-idp-client-secret
+add_optional KEYCLOAK_FACEBOOK_CLIENT_ID facebook-idp-client-id
+add_optional KEYCLOAK_FACEBOOK_CLIENT_SECRET facebook-idp-client-secret
 apply_secret
 
 # --- cloudflare-tunnel (token for the cloudflared connector) -----------------
