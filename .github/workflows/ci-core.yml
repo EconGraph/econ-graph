@@ -996,13 +996,13 @@ jobs:
         cargo build --release -p econ-graph-crawler --bin crawler
         release_sources="$(target/release/crawler sources)"
         echo "$release_sources"
-        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA; do
+        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA WTO; do
           if ! echo "$release_sources" | grep -qE "^$live\b.*\byes\b"; then
             echo "::error::$live has no adapter in a release build"
             exit 1
           fi
         done
-        for gone in IMF ECB OECD BOE BOJ BOC RBA SNB UN_STATS ILO WTO; do
+        for gone in IMF ECB OECD BOE BOJ BOC RBA SNB UN_STATS ILO; do
           if echo "$release_sources" | grep -qE "^$gone\b.*\byes\b"; then
             echo "::error::$gone has an adapter in a release build"
             exit 1
