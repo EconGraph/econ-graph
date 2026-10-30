@@ -3,7 +3,9 @@
 
 Read a rendered realm JSON file and write the merged import to stdout. Existing empty
 mappings are authoritative. Only missing resources receive bootstrap defaults; any
-other API/authentication error aborts rather than risking restored grants.
+other API/authentication error aborts rather than risking restored grants. Before the
+snapshot, catalog read roles the realm file renamed (RENAMED_CATALOG_ROLES) are renamed
+in Keycloak, so their grants carry over to the new name.
 """
 import json
 import os
@@ -18,6 +20,16 @@ PENDING = "econgraph.catalog-policy-bootstrap-pending"
 PUBLIC_ROLE = "catalog-public"
 ANONYMOUS_CLIENT = "econgraph-anonymous"
 API_CLIENT = "econ-graph-api"
+
+
+# Catalog read roles the realm file has renamed: old name -> new name. Before the snapshot, the
+# live role is renamed in place, so every grant of it (users, groups, composites such as
+# catalog-public, the anonymous reader's scope) carries over: Keycloak keys them by role id.
+# Without this, config-cli would delete the old role with its grants and create the new one
+# with none. Entries stay until every deployed realm has been imported with them.
+RENAMED_CATALOG_ROLES = {
+    "catalog.wto:read": "catalog.world_trade_organization:read",
+}
 
 
 def catalog_read(name):
@@ -69,15 +81,15 @@ class Keycloak:
         except (urllib.error.URLError, TimeoutError, ValueError):
             raise RuntimeError("Keycloak catalog-policy snapshot unavailable or malformed") from None
 
-    def put(self, path, body):
-        """Write the completion attribute without following redirects or logging payloads."""
+    def put(self, path, body, failure="Could not record successful catalog bootstrap"):
+        """Write one resource without following redirects or logging payloads."""
         request = urllib.request.Request(self.base_url + path, data=json.dumps(body).encode(),
             headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}, method="PUT")
         try:
             with self.opener.open(request, timeout=10):
                 pass
         except (urllib.error.URLError, TimeoutError):
-            raise RuntimeError("Could not record successful catalog bootstrap") from None
+            raise RuntimeError(failure) from None
 
 
 def required(value):
@@ -119,6 +131,36 @@ def check_catalog_reads_are_plain(realm, get, prefix, api_id):
     if live:
         raise RuntimeError("Catalog read roles may not be composites; remove their associated "
                            "roles in Keycloak before deploying: " + ", ".join(live))
+
+
+def rename_catalog_roles(realm, get, put):
+    """Rename live catalog read roles listed in RENAMED_CATALOG_ROLES, keeping their grants.
+
+    Idempotent: a role already renamed, or a realm or API client that does not exist yet, is
+    left alone. Both names existing at once is refused: merging two roles' grants is an
+    operator decision. Returns the (old, new) pairs renamed."""
+    prefix = "/admin/realms/" + urllib.parse.quote(realm["realm"], safe="")
+    declared = {role["name"] for role in realm.get("roles", {}).get("client", {}).get(API_CLIENT, [])}
+    api_clients = get(prefix + "/clients?clientId=" + API_CLIENT)
+    if not api_clients:
+        return []
+    roles = prefix + "/clients/" + urllib.parse.quote(api_clients[0]["id"], safe="") + "/roles/"
+    renamed = []
+    for old, new in RENAMED_CATALOG_ROLES.items():
+        if not (catalog_read(old) and catalog_read(new)) or old in declared or new not in declared:
+            raise RuntimeError("Invalid catalog role rename %s -> %s for the realm file" % (old, new))
+        live = get(roles + urllib.parse.quote(old, safe=""))
+        if live is None:
+            continue
+        if get(roles + urllib.parse.quote(new, safe="")) is not None:
+            raise RuntimeError("Both %s and its new name %s exist in Keycloak; move the old role's "
+                               "grants to the new one and delete the old role before deploying"
+                               % (old, new))
+        body = dict(live)
+        body["name"] = new
+        put(roles + urllib.parse.quote(old, safe=""), body, "Could not rename role " + old)
+        renamed.append((old, new))
+    return renamed
 
 
 def merge_catalog_policy(realm, get):
@@ -288,6 +330,8 @@ def main():
         complete_bootstrap(realm, client.get, client.put)
         print("Catalog policy initialization recorded")
     else:
+        for old, new in rename_catalog_roles(realm, client.get, client.put):
+            print("Renamed catalog role %s to %s" % (old, new), file=sys.stderr)
         json.dump(merge_catalog_policy(realm, client.get), sys.stdout, indent=2)
         sys.stdout.write("\n")
 

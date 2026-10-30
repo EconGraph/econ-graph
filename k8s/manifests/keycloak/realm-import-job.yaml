@@ -1,7 +1,10 @@
 # keycloak-realm-import: applies config/keycloak/econ-graph-realm.json to the running
 # Keycloak on every deploy, so the realm (clients, roles, composites, mappers, the
 # Google identity provider) stays what the repository says. Existing catalog grants
-# remain operator-managed in Keycloak and are merged into the import before apply.
+# remain operator-managed in Keycloak and are merged into the import before apply. A
+# catalog read role the realm file renamed is first renamed in Keycloak, keeping its
+# grants (RENAMED_CATALOG_ROLES in scripts/keycloak/preserve-catalog-grants.py); that
+# is the render step's only write.
 #
 # `kc.sh start --import-realm` only creates a realm that does not exist yet, and
 # `kc.sh import --override true` would delete the realm and every account in it. So
