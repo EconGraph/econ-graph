@@ -50,7 +50,24 @@ def object_(kind, name, spec=None, **extra):
     return obj
 
 
+def validate_data_image(image):
+    """Disposable copies may run a release or immutable candidate, never latest."""
+    if not image or not re.fullmatch(
+            r'[A-Za-z0-9][A-Za-z0-9./:_-]*(?:@sha256:[0-9a-f]{64}|'
+            r':(?:v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?|sha-[0-9a-f]{40}))', image):
+        raise ValueError('--data-image requires a release tag, full sha-<40 hex commit> tag, or sha256 digest')
+    return image
+
+
+def pull_policy(image):
+    return 'IfNotPresent' if re.search(r'(?:@sha256:[0-9a-f]{64}|:sha-[0-9a-f]{40})$', image) else 'Always'
+
+
 def render(branch, backend_image, frontend_image, local_data=False, data_image=None):
+    if local_data:
+        validate_data_image(data_image)
+    elif data_image:
+        raise ValueError('--data-image is only allowed with --local-data')
     slug, namespace = identity(branch)
     host = slug + '.localhost'
     origin = 'http://' + host
@@ -94,7 +111,9 @@ def render(branch, backend_image, frontend_image, local_data=False, data_image=N
         pod = d['spec']['template']['spec']
         pod['automountServiceAccountToken'] = False
         if kind == 'Deployment':
-            d['spec']['replicas'] = 1
+            # Restored queues are not permission to crawl the public internet.
+            # Explicitly scale a local worker only for a bounded fixture run.
+            d['spec']['replicas'] = 0 if name == 'crawler-worker' else 1
         if kind == 'StatefulSet':
             pod.pop('nodeSelector', None)
             # Local-path volumes need the same chown initContainer as production,
@@ -110,15 +129,15 @@ def render(branch, backend_image, frontend_image, local_data=False, data_image=N
                                               'data-postgres-service' if local_data else 'app-postgres-service')
             if c['name'] in ('backend', 'frontend'):
                 c['image'] = backend_image if c['name'] == 'backend' else frontend_image
-                c['imagePullPolicy'] = 'IfNotPresent'
+                c['imagePullPolicy'] = pull_policy(c['image'])
             if name in ('crawler-worker', 'crawler-migrate') and c['name'] in ('crawler-worker', 'crawler-migrate'):
                 c['image'] = data_image
-                c['imagePullPolicy'] = 'IfNotPresent'
+                c['imagePullPolicy'] = pull_policy(data_image)
                 env_set(c, 'CRAWLER_SCHEDULER', 'false')
             if c['name'] == 'backend':
                 env_set(c, 'OIDC_ISSUER', origin + '/idp/realms/econ-graph')
                 env_set(c, 'DATA_GRAPHQL_URL', None if local_data else
-                        'http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql')
+                        'http://branch-data-proxy:8080/data/graphql')
                 env_set(c, 'DATA_GRAPHQL_HOST', None if local_data else host)
                 if not local_data:
                     env_set(c, 'DATA_DATABASE_URL', None)
@@ -162,8 +181,11 @@ def render(branch, backend_image, frontend_image, local_data=False, data_image=N
                     ingress=[{'from': [proxy], 'ports': [{'port': p, 'protocol': 'TCP'} for p in [3000, 8080, 9876]]}])]
     docs.append(policy('branch-probe-deny', {'matchLabels': {'app': 'branch-network-deny'}}, ingress=[], egress=[]))
     if not local_data:
-        docs.append(policy('backend-to-data-gateway', {'matchLabels': {'app': 'econ-graph-backend'}},
+        # Only this fixed-upstream proxy may reach the shared listener. A branch
+        # backend must not select another branch/production route with Host.
+        docs.append(policy('proxy-to-data-gateway', {'matchLabels': {'app': 'branch-data-proxy'}},
                            egress=[{'to': [proxy], 'ports': [{'port': 10080, 'protocol': 'TCP'}]}]))
+        docs += data_proxy(frontend_image, host)
     if local_data:
         docs.append(policy('crawler-public-https', {'matchLabels': {'app': 'crawler-worker'}},
             egress=[{'to': [{'ipBlock': {'cidr': '0.0.0.0/0', 'except': [
@@ -176,6 +198,61 @@ def render(branch, backend_image, frontend_image, local_data=False, data_image=N
     ns['metadata'].update(labels=labels, annotations={'econgraph.io/branch-name': branch})
     docs.insert(0, ns)
     return docs
+
+
+def data_proxy(image, host):
+    # The branch frontend image already contains nginx. Use no browser assets,
+    # arbitrary destination, credentials or caller-supplied upstream headers.
+    config = '''pid /tmp/nginx.pid;
+events { worker_connections 128; }
+http {
+  client_body_temp_path /tmp/client_temp;
+  proxy_temp_path /tmp/proxy_temp;
+  fastcgi_temp_path /tmp/fastcgi_temp;
+  uwsgi_temp_path /tmp/uwsgi_temp;
+  scgi_temp_path /tmp/scgi_temp;
+  access_log /dev/stdout;
+  error_log /dev/stderr;
+  server {
+    listen 8080;
+    client_max_body_size 1m;
+    location = /health { return 200 'ok'; }
+    location = /data/graphql {
+      proxy_pass http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql;
+      proxy_set_header Host HOST;
+      proxy_set_header Authorization "";
+      proxy_set_header Cookie "";
+      proxy_set_header Forwarded "";
+      proxy_set_header X-Forwarded-Host "";
+      proxy_set_header X-Forwarded-For "";
+      proxy_connect_timeout 5s;
+      proxy_read_timeout 30s;
+    }
+    location / { return 403; }
+  }
+}
+'''.replace('Host HOST;', 'Host ' + host + ';')
+    return [object_('ConfigMap', 'branch-data-proxy', data={'nginx.conf': config}),
+            object_('Service', 'branch-data-proxy', {'type': 'ClusterIP',
+                'selector': {'app': 'branch-data-proxy'}, 'ports': [{'port': 8080, 'targetPort': 8080}]}),
+            {'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': {'name': 'branch-data-proxy'},
+             'spec': {'replicas': 1, 'selector': {'matchLabels': {'app': 'branch-data-proxy'}},
+                'template': {'metadata': {'labels': {'app': 'branch-data-proxy'}}, 'spec': {
+                    'automountServiceAccountToken': False,
+                    'securityContext': {'runAsUser': 101, 'runAsNonRoot': True,
+                                        'seccompProfile': {'type': 'RuntimeDefault'}},
+                    'containers': [{'name': 'proxy', 'image': image, 'imagePullPolicy': pull_policy(image),
+                        'command': ['nginx', '-c', '/branch/nginx.conf', '-g', 'daemon off;'],
+                        'ports': [{'containerPort': 8080}],
+                        'securityContext': {'allowPrivilegeEscalation': False,
+                            'readOnlyRootFilesystem': True, 'capabilities': {'drop': ['ALL']}},
+                        'resources': {'requests': {'cpu': '10m', 'memory': '32Mi'},
+                                      'limits': {'cpu': '100m', 'memory': '64Mi'}},
+                        'readinessProbe': {'httpGet': {'path': '/health', 'port': 8080}},
+                        'volumeMounts': [{'name': 'config', 'mountPath': '/branch', 'readOnly': True},
+                                         {'name': 'tmp', 'mountPath': '/tmp'}]}],
+                    'volumes': [{'name': 'config', 'configMap': {'name': 'branch-data-proxy'}},
+                                {'name': 'tmp', 'emptyDir': {'sizeLimit': '64Mi'}}]}}}}]
 
 
 def grant(branch):

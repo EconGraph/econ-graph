@@ -113,11 +113,13 @@ Example:
 }
 ```
 
-Each release pushes a `train-N` marker tag with its version tag; `scripts/release/tag.sh`
-takes the number and pushes both. From then on the check fails for every flag still
-marked `remove_by: "train N"` or lower. Before pushing the tag,
-`node scripts/check-flags --shipped-train N` lists the flags that release has to
-delete first.
+A completed train is marked by `train-N`. Product releases use
+`scripts/release/tag.sh` to push that marker with their version tag. Train 3 is
+a development milestone: its separate [milestone helper](../../scripts/release/tag_milestone.py)
+pushes only `train-3`, after acceptance on main. Both kinds of completed train
+count for expiry. From then on the check fails for every flag still marked
+`remove_by: "train N"` or lower. Before pushing a marker,
+`node scripts/check-flags --shipped-train N` lists the flags that must be removed first.
 
 ## Removing a flag
 
@@ -131,7 +133,7 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   leaves flagged-off code out. It is one of two permanent build flags (see
   `static_catalogs` below), kept rather than removed because it's a standing
   check, not unfinished work.
-- `mcp` (build, off in release, on in dev, `remove_by: train 3`, owner ECO-123,
+- `mcp` (build, off in release, on in dev, `remove_by: train 7`, owner ECO-123,
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
   builds.
 - `static_catalogs` (build, off in release, on in dev, `remove_by: unscheduled`,
@@ -149,3 +151,21 @@ at tag `json/json-schema-v0.2.15` (Apache-2.0, see [the license](schema/LICENSE)
 copy both files from a newer tag's `json/` directory and run the check. The
 check's validator supports only the JSON Schema keywords these files use, and
 fails loudly on any other.
+
+## Train 3 deadline audit
+
+Train 3 establishes shared development contracts without shipping unfinished
+features or changing production flag values. The deadlines follow the planned
+feature completion, rather than product version numbers:
+
+| Flag | Deadline | Reason |
+|---|---|---|
+| `mcp` | Train 7 | Workspace and machine access complete in Train 7. |
+| `global_analysis_tabs` | Train 8 | Comparative research completes in Train 8. |
+| `financial_components` | Train 5 | The SEC financial UI/demo belongs to Train 5 company research; completion replaces the unfinished financial surface. |
+| `technical_analysis` | Unscheduled | No committed feature completion train yet. |
+| `build_canary`, `static_catalogs` | Unscheduled | Permanent development/build checks described above. |
+
+Only deadline metadata changes at this cut. The generated development and release
+profiles retain exactly the same values. Product versions remain Train 4 v4.2.0,
+Train 5 v4.3.0, Train 6 v4.4.0, Train 7 v4.5.0, Train 8 v4.6.0 and Train 9 v4.7.0.

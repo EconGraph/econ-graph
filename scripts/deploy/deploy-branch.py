@@ -11,12 +11,70 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
+import time
 
 import yaml
 
 spec = importlib.util.spec_from_file_location('branch_renderer', Path(__file__).with_name('render-branch.py'))
 renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
+
+COMMAND_TIMEOUT = 120
+MAX_SEED_BYTES = 128 * 1024 * 1024
+MIN_FREE_BYTES = 4 * 1024 * 1024 * 1024
+
+
+def verify_ownership(existing, slug, branch, local_data=None):
+    if not existing:
+        raise ValueError('namespace disappeared while acquiring the lock')
+    meta = existing['metadata']
+    labels = meta.get('labels', {})
+    if (labels.get('econgraph.io/env') != 'branch' or labels.get('econgraph.io/branch') != slug
+            or meta.get('annotations', {}).get('econgraph.io/branch-name') != branch):
+        raise ValueError('namespace ownership does not match; refusing changes')
+    if meta.get('deletionTimestamp'):
+        raise ValueError('namespace is terminating; wait before redeploying')
+    if local_data is not None and labels.get('econgraph.io/data-mode') != ('local' if local_data else 'primary'):
+        raise ValueError('data mode cannot change in place; remove the disposable branch first')
+
+
+def wait_job(k, namespace, name, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        result = k('-n', namespace, 'get', 'job', name, '-o', 'json', capture=True)
+        job = json.loads(result.stdout)
+        conditions = job.get('status', {}).get('conditions', [])
+        if any(c.get('type') == 'Failed' and c.get('status') == 'True' for c in conditions):
+            raise ValueError(f'Job {namespace}/{name} failed; inspect its logs')
+        if any(c.get('type') == 'Complete' and c.get('status') == 'True' for c in conditions):
+            return
+        time.sleep(2)
+    raise ValueError(f'Job {namespace}/{name} did not complete within {seconds}s')
+
+
+def inspect_seed_size(dump):
+    """Inspect expanded bytes in a temporary file with a hard output limit."""
+    # A regular output file is subject to RLIMIT_FSIZE. A compressed archive is
+    # never treated as evidence of its expanded storage requirement.
+    import resource
+    limit = 256 * 1024 * 1024
+    def bound_output():
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+    with tempfile.TemporaryFile() as output:
+        subprocess.run(['pg_restore', '--file=-', str(dump)], stdout=output,
+                       check=True, timeout=COMMAND_TIMEOUT, preexec_fn=bound_output)
+        return output.tell()
+
+
+def freshen_mutable_images(docs):
+    """A registry tag rebuild must restart pods as well as use Always pulling."""
+    for doc in docs:
+        if doc['kind'] != 'Deployment':
+            continue
+        template = doc['spec']['template']
+        if any(c.get('imagePullPolicy') == 'Always' for c in template['spec']['containers']):
+            template['metadata'].setdefault('annotations', {})['econgraph.io/redeploy-token'] = secrets.token_hex(8)
 
 
 def default_kubectl(environ=os.environ):
@@ -64,17 +122,24 @@ def main():
     p.add_argument('--local-data', action='store_true')
     p.add_argument('--backend-image')
     p.add_argument('--frontend-image')
-    p.add_argument('--data-image', help='tagged release crawler image, required for local data')
+    p.add_argument('--data-image', help='release, full sha-<commit> or digest crawler image; local data only')
     p.add_argument('--seed-dir', type=Path, help='verified primary dump bundle; required for local data')
+    p.add_argument('--seed-sha256', help='expected archive hash from reviewed fixture evidence, outside the bundle')
     args = p.parse_args()
     if args.action != 'list' and not args.branch:
         p.error('branch is required')
     if args.action == 'up' and (not args.backend_image or not args.frontend_image):
         p.error('up requires --backend-image and --frontend-image (built for this branch hostname)')
-    if args.local_data and (not args.data_image or not args.seed_dir):
-        p.error('--local-data requires --data-image and --seed-dir')
-    if args.local_data and not re.search(r':v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?(?:@sha256:[0-9a-f]{64})?$', args.data_image):
-        p.error('--data-image must use a release tag, e.g. econ-graph-crawler-worker:v4.1.0')
+    if args.local_data and (not args.data_image or not args.seed_dir or not args.seed_sha256
+                            or not re.fullmatch('[0-9a-f]{64}', args.seed_sha256)):
+        p.error('--local-data requires --data-image, --seed-dir and a reviewed --seed-sha256')
+    if args.local_data:
+        try:
+            renderer.validate_data_image(args.data_image)
+        except ValueError as error:
+            p.error(str(error))
+    elif args.data_image or args.seed_dir or args.seed_sha256:
+        p.error('--data-image, --seed-dir and --seed-sha256 require --local-data')
     base = []
     def kubectl():
         # Chosen on first use: a dry run and build-frontend contact no cluster.
@@ -83,14 +148,22 @@ def main():
         return base
     args.kubectl = kubectl
     def k(*cmd, data=None, capture=False, check=True):
+        waits = [int(arg.split('=')[1][:-1]) for arg in cmd if re.fullmatch(r'--timeout=\d+s', arg)]
+        timeout = max([COMMAND_TIMEOUT] + [seconds + 30 for seconds in waits])
         return subprocess.run(kubectl() + list(cmd), input=data, text=True, check=check,
-                              stdout=subprocess.PIPE if capture else None)
+                              stdout=subprocess.PIPE if capture else None, timeout=timeout)
     def apply(docs):
         k('apply', '-f', '-', data=yaml.safe_dump_all(docs, sort_keys=False))
     def lookup(kind, name, namespace=None):
         cmd = (['-n', namespace] if namespace else []) + ['get', kind, name, '--ignore-not-found', '-o', 'json']
         result = k(*cmd, capture=True)
         return json.loads(result.stdout) if result.stdout.strip() else None
+    def delete_grant(ref):
+        meta = ref['metadata']
+        options = {'apiVersion': 'v1', 'kind': 'DeleteOptions',
+                   'preconditions': {'uid': meta['uid'], 'resourceVersion': meta['resourceVersion']}}
+        k('delete', '--raw', '/apis/gateway.networking.k8s.io/v1beta1/namespaces/econ-graph/'
+          'referencegrants/' + meta['name'], '-f', '-', data=json.dumps(options))
     @contextmanager
     def lock(namespace):
         # Atomic create is a cluster-wide lock, including invocations on other
@@ -98,17 +171,28 @@ def main():
         obj = {'apiVersion': 'v1', 'kind': 'ConfigMap',
                'metadata': {'name': 'branch-deploy-lock', 'namespace': namespace},
                'data': {'owner': secrets.token_hex(16)}}
+        owner = obj['data']['owner']
         k('create', '-f', '-', data=yaml.safe_dump(obj))
         try:
             yield
         finally:
-            k('-n', namespace, 'delete', 'configmap', 'branch-deploy-lock', '--ignore-not-found', check=False)
+            current = lookup('configmap', 'branch-deploy-lock', namespace)
+            if current and current.get('data', {}).get('owner') == owner:
+                # Delete by UID+resourceVersion through a raw API precondition;
+                # a replacement lock cannot be deleted between get and delete.
+                meta = current['metadata']
+                options = {'apiVersion': 'v1', 'kind': 'DeleteOptions',
+                           'preconditions': {'uid': meta['uid'], 'resourceVersion': meta['resourceVersion']}}
+                k('delete', '--raw', f'/api/v1/namespaces/{namespace}/configmaps/branch-deploy-lock',
+                  '-f', '-', data=json.dumps(options), check=False)
     if args.action == 'list':
         if args.dry_run:
             print('List namespaces labelled econgraph.io/env=branch')
         else:
             k('get', 'namespaces', '-l', 'econgraph.io/env=branch',
               '-L', 'econgraph.io/branch,econgraph.io/data-mode')
+            k('-n', 'econ-graph', 'get', 'referencegrants', '-l', 'econgraph.io/branch',
+              '-L', 'econgraph.io/branch')
         return
     slug, namespace = renderer.identity(args.branch)
     origin = 'http://' + slug + '.localhost'
@@ -139,33 +223,41 @@ def main():
         return
     existing = lookup('namespace', namespace)
     if existing:
-        meta = existing['metadata']
-        labels = meta.get('labels', {})
-        if labels.get('econgraph.io/env') != 'branch' or labels.get('econgraph.io/branch') != slug or meta.get('annotations', {}).get('econgraph.io/branch-name') != args.branch:
-            raise ValueError('namespace ownership does not match; refusing changes')
-        if meta.get('deletionTimestamp'):
-            raise ValueError('namespace is terminating; wait before redeploying')
-        if args.action == 'up' and labels.get('econgraph.io/data-mode') != ('local' if args.local_data else 'primary'):
-            raise ValueError('data mode cannot change in place; remove the disposable branch first')
+        verify_ownership(existing, slug, args.branch, args.local_data if args.action == 'up' else None)
     if args.action == 'down':
         if not existing:
-            print('Branch namespace absent; no resources deleted.')
+            ref = lookup('referencegrant', 'data-graphql-from-' + slug, 'econ-graph')
+            if ref:
+                if (ref.get('metadata', {}).get('labels', {}).get('econgraph.io/branch') != slug
+                        or ref.get('spec') != renderer.grant(args.branch)['spec']):
+                    raise ValueError('ReferenceGrant ownership differs; refusing orphan deletion')
+                if not sys.stdin.isatty() or input(f'Type {namespace} to remove its orphan grant: ') != namespace:
+                    raise ValueError('typed namespace confirmation required')
+                if lookup('namespace', namespace):
+                    raise ValueError('branch namespace appeared during confirmation; refusing orphan cleanup')
+                delete_grant(ref)
+            print('Branch namespace absent; removed its owned orphan grant if present.')
             return
         if not sys.stdin.isatty() or input(f'Type {namespace} to delete its disposable users and databases: ') != namespace:
             raise ValueError('typed namespace confirmation required')
         with lock(namespace):
+            verify_ownership(lookup('namespace', namespace), slug, args.branch)
             ref = lookup('referencegrant', 'data-graphql-from-' + slug, 'econ-graph')
             if ref and ref.get('metadata', {}).get('labels', {}).get('econgraph.io/branch') != slug:
                 raise ValueError('ReferenceGrant ownership differs; refusing deletion')
             if ref:
-                k('-n', 'econ-graph', 'delete', 'referencegrant', 'data-graphql-from-' + slug)
+                delete_grant(ref)
             k('delete', 'namespace', namespace)
         return
     # Confirm gateway dependency exists before creating disposable resources.
     k('-n', 'econ-graph-gateway', 'get', 'gateway', 'econ-graph-gateway', capture=True)
     docs = renderer.render(args.branch, args.backend_image, args.frontend_image, args.local_data, args.data_image)
-    apply([docs[0]])
+    # Create atomically. Never apply an identity label over a namespace another
+    # invocation created between the initial lookup and lock acquisition.
+    if not existing:
+        k('create', '-f', '-', data=yaml.safe_dump(docs[0]))
     with lock(namespace):
+        verify_ownership(lookup('namespace', namespace), slug, args.branch, args.local_data)
         apply([d for d in docs if d['kind'] == 'NetworkPolicy'])
         network_spec = importlib.util.spec_from_file_location('branch_network_check', Path(__file__).with_name('branch-network-check.py'))
         network = importlib.util.module_from_spec(network_spec)
@@ -215,20 +307,21 @@ def main():
             migrate = next(d for d in docs if d['kind'] == 'Job' and d['metadata']['name'] == 'crawler-migrate')
             k('-n', namespace, 'delete', 'job', 'crawler-migrate', '--ignore-not-found')
             apply([migrate])
-            k('-n', namespace, 'wait', '--for=condition=complete', 'job/crawler-migrate', '--timeout=1800s')
+            wait_job(k, namespace, 'crawler-migrate', 1800)
+        freshen_mutable_images(docs)
         apply([d for d in docs if d['kind'] == 'Deployment'])
-        for deployment in ['keycloak', 'econ-graph-backend', 'econ-graph-frontend'] + (['crawler-worker'] if args.local_data else []):
+        for deployment in ['keycloak', 'econ-graph-backend', 'econ-graph-frontend'] + ([] if args.local_data else ['branch-data-proxy']):
             k('-n', namespace, 'rollout', 'status', 'deployment/' + deployment, '--timeout=900s')
         k('-n', namespace, 'delete', 'job', 'keycloak-realm-import', '--ignore-not-found')
         apply([d for d in docs if d['kind'] == 'Job' and d['metadata']['name'] == 'keycloak-realm-import'])
-        k('-n', namespace, 'wait', '--for=condition=complete', 'job/keycloak-realm-import', '--timeout=900s')
+        wait_job(k, namespace, 'keycloak-realm-import', 900)
         if not args.local_data:
             ref = renderer.grant(args.branch)
             current = lookup('referencegrant', ref['metadata']['name'], 'econ-graph')
             if current and current.get('metadata', {}).get('labels', {}).get('econgraph.io/branch') != slug:
                 raise ValueError('ReferenceGrant already exists with different ownership')
             apply([ref])
-        print(f'Branch ready at {origin}; create branch users through Keycloak admin port-forward.')
+        print(f'Branch ready at {origin}; create branch users through Keycloak admin port-forward. Local workers remain stopped.')
 
 
 def seed_local(args, namespace, k, lookup, apply):
@@ -245,7 +338,12 @@ def seed_local(args, namespace, k, lookup, apply):
         digest = hashlib.file_digest(source, 'sha256').hexdigest()
     if expected != digest:
         raise ValueError('primary dump SHA-256 mismatch')
-    listing = subprocess.run(['pg_restore', '--list', str(dump)], capture_output=True, text=True, check=True).stdout
+    if getattr(args, 'seed_sha256', None) != digest:
+        raise ValueError('seed does not match the reviewed external --seed-sha256')
+    if dump.stat().st_size > MAX_SEED_BYTES:
+        raise ValueError('local seed exceeds the 128MiB bounded-fixture limit')
+    listing = subprocess.run(['pg_restore', '--list', str(dump)], capture_output=True, text=True,
+                             check=True, timeout=COMMAND_TIMEOUT).stdout
     allowed = {'__diesel_schema_migrations'}
     for migration in (renderer.ROOT/'backend/migrations/data').glob('*/up.sql'):
         sql = re.sub(r'/\*.*?\*/|--[^\n]*', '', migration.read_text(), flags=re.DOTALL)
@@ -262,12 +360,17 @@ def seed_local(args, namespace, k, lookup, apply):
                '-Atc', "SELECT count(*) FROM pg_tables WHERE schemaname='public'", capture=True)
     if result.stdout.strip() != '0':
         raise ValueError('unmarked local data database is nonempty; refusing overwrite')
+    expanded = inspect_seed_size(dump)
+    free = k('-n', namespace, 'exec', 'postgresql-0', '--', 'sh', '-ec',
+             "df -Pk /var/lib/postgresql/data | awk 'NR==2 {print $4}'", capture=True)
+    if not free.stdout.strip().isdigit() or int(free.stdout.strip()) * 1024 < MIN_FREE_BYTES + expanded * 4:
+        raise ValueError('insufficient node disk reserve for bounded local seed (4GiB plus 4x expanded archive)')
     # Stream only into the explicitly owned branch pod. No primary connection
     # string or credentials are ever requested or copied.
     with dump.open('rb') as src:
         subprocess.run(args.kubectl() + ['-n', namespace, 'exec', '-i', 'postgresql-0', '--', 'pg_restore',
                        '-U', 'postgres', '-d', 'econ_graph', '--no-owner', '--role=econgraph',
-                       '--exit-on-error', '--single-transaction'], stdin=src, check=True)
+                       '--exit-on-error', '--single-transaction'], stdin=src, check=True, timeout=900)
     apply([{'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': {'name': 'branch-data-seed', 'namespace': namespace},
             'data': {'sha256': digest}}])
 
@@ -275,6 +378,6 @@ def seed_local(args, namespace, k, lookup, apply):
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         print(f'deploy-branch: {error}', file=sys.stderr)
         sys.exit(1)
