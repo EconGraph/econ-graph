@@ -152,8 +152,23 @@ realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --
 ## Catalog access, including anonymous visitors
 
 Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
-`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
-canonical data-source names to these capabilities; adding a source requires its role and mapping.
+`catalog.bea:read`, or `catalog.bank_of_canada:read`. Unknown source names are denied. The
+backend maps canonical data-source names to these capabilities; adding a source requires its
+role and mapping. A new catalog role spells the source out (`catalog.bank_of_canada:read`, not
+an acronym). The crawler's `catalog_roles` test fails when a source's name has no role or a
+catalog role is missing from `catalog-public`, apart from the exceptions it lists.
+
+Renaming a catalog role in the realm file needs an entry in `RENAMED_CATALOG_ROLES` in
+`scripts/keycloak/preserve-catalog-grants.py` (old name to new name). keycloak-config-cli deletes
+a client role it created once the realm file drops it, with every grant it carries, and refuses
+an import whose composites still name it. So on the next deploy the render step moves the live
+grants of the old name (in `catalog-public`, managed composites, the anonymous reader's scope and
+role mappings) to the new name, and keeps the old role declared for that one import. After the
+import, the finalize step grants the new role to every remaining holder of the old one (users,
+groups, other composite roles, client scope mappings) and deletes the old role. A revoked grant
+stays revoked under the new name. Later deploys find no old role and change nothing. The entry
+for `catalog.boc:read` (renamed to `catalog.bank_of_canada:read`) can be dropped once every
+realm has been deployed with it.
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
 So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
 `updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the

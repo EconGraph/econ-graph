@@ -55,6 +55,9 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Changed
 
+- The Bank of Canada catalog role is `catalog.bank_of_canada:read` (was `catalog.boc:read`). The
+  next deploy's realm import moves every live grant of the old role, revoked ones staying
+  revoked, to the new name and deletes the old role.
 - The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.9.2, Gateway
   API v1.6.3 standard channel) instead of ingress-nginx, which no longer gets security fixes.
   `deploy.sh` installs it with `scripts/deploy/install-gateway.sh` (pinned, checksummed release

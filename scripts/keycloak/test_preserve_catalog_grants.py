@@ -218,5 +218,146 @@ class CatalogPolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): preserve.merge_catalog_policy(self.realm,failed)
 
 
+OLD = "catalog.boc:read"
+NEW = "catalog.bank_of_canada:read"
+
+
+class RenamedCatalogRoleTests(unittest.TestCase):
+    """A renamed catalog role's live grants move to the new name (RENAMED_CATALOG_ROLES)."""
+    setUp = CatalogPolicyTests.setUp
+    merge = CatalogPolicyTests.merge
+    role = staticmethod(CatalogPolicyTests.role)
+
+    def test_the_bank_of_canada_rename_is_listed(self):
+        self.assertEqual(preserve.RENAMED_CATALOG_ROLES[OLD], NEW)
+
+    def test_realm_file_defines_every_new_name_and_no_old_name(self):
+        declared = {role["name"] for role in self.realm["roles"]["client"]["econ-graph-api"]}
+        text = json.dumps(self.realm)
+        for old, new in preserve.RENAMED_CATALOG_ROLES.items():
+            self.assertIn(new, declared)
+            self.assertNotIn('"%s"' % old, text)
+
+    def test_live_grants_of_the_old_name_move_to_the_new_name(self):
+        self.state[self.prefix + "/clients/api/roles?briefRepresentation=false"].append(
+            {"name": OLD, "composite": False})
+        self.state[self.prefix + "/roles/catalog-public/composites"] = [
+            {"name": OLD, "clientRole": True, "containerId": "api"},
+            {"name": "catalog.bea:read", "clientRole": True, "containerId": "api"},
+        ]
+        self.state[self.prefix + "/roles/user/composites"] = [
+            {"name": OLD, "clientRole": True, "containerId": "api"},
+        ]
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [{"name": OLD}]
+        self.state[self.prefix + "/users/reader/role-mappings"] = {
+            "realmMappings": [],
+            "clientMappings": {"econ-graph-api": {"mappings": [{"name": OLD}, {"name": NEW}]}},
+        }
+        merged = self.merge()
+        self.assertEqual(self.role(merged, "catalog-public")["composites"],
+                         {"realm": [], "client": {"econ-graph-api": [NEW, "catalog.bea:read"]}})
+        self.assertIn(NEW, self.role(merged, "user")["composites"]["client"]["econ-graph-api"])
+        self.assertEqual(merged["clientScopeMappings"]["econ-graph-api"][0]["roles"], [NEW])
+        self.assertEqual(merged["users"][0]["clientRoles"], {"econ-graph-api": [NEW]})
+        # The old role stays declared for this import only, so config-cli does not delete it
+        # before --complete moves the grants it still carries; no edge names it.
+        declared = merged["roles"]["client"]["econ-graph-api"]
+        old_roles = [role for role in declared if role["name"] == OLD]
+        self.assertEqual(len(old_roles), 1)
+        self.assertFalse(old_roles[0].get("composite"))
+        edges = copy.deepcopy(merged)
+        edges["roles"]["client"]["econ-graph-api"] = [r for r in declared if r["name"] != OLD]
+        self.assertNotIn('"%s"' % OLD, json.dumps(edges))
+
+    def test_without_the_old_role_the_import_is_unchanged(self):
+        merged = self.merge()
+        self.assertEqual(merged["roles"]["client"], self.realm["roles"]["client"])
+
+    def test_a_realm_file_missing_the_new_name_fails(self):
+        self.realm["roles"]["client"]["econ-graph-api"] = [
+            role for role in self.realm["roles"]["client"]["econ-graph-api"] if role["name"] != NEW]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn(NEW, str(raised.exception))
+
+
+class RetireRenamedRolesTests(unittest.TestCase):
+    """--complete moves every remaining holder of an old name to the new one, then deletes it."""
+
+    def setUp(self):
+        self.realm = {"realm": "econ-graph"}
+        p = "/admin/realms/econ-graph"
+        old = p + "/clients/api/roles/catalog.boc%3Aread"
+        self.prefix, self.old = p, old
+        self.state = {
+            p + "/clients?clientId=econ-graph-api": [{"id": "api", "clientId": "econ-graph-api"}],
+            old: {"id": "old-id", "name": OLD},
+            p + "/clients/api/roles/catalog.bank_of_canada%3Aread": {"id": "new-id", "name": NEW},
+            old + "/users?first=0&max=100": [{"id": "u1"}, {"id": "u2"}],
+            p + "/users/u1/role-mappings/clients/api": [{"name": OLD}],
+            p + "/users/u2/role-mappings/clients/api": [{"name": OLD}, {"name": NEW}],
+            old + "/groups?first=0&max=100": [{"id": "g1"}],
+            p + "/groups/g1/role-mappings/clients/api": [{"name": OLD}],
+            p + "/roles?briefRepresentation=false": [
+                {"id": "cp", "name": "catalog-public", "composite": True},
+                {"id": "ur", "name": "user", "composite": True},
+                {"id": "pl", "name": "plain", "composite": False},
+            ],
+            p + "/clients/api/roles?briefRepresentation=false": [
+                {"id": "old-id", "name": OLD, "composite": False},
+                {"id": "ad", "name": "admin.users:read", "composite": True},
+            ],
+            p + "/roles-by-id/cp/composites": [{"name": OLD, "clientRole": True, "containerId": "api"}],
+            p + "/roles-by-id/ur/composites": [{"name": "annotation:create", "clientRole": True, "containerId": "api"}],
+            p + "/roles-by-id/ad/composites": [{"name": OLD, "clientRole": True, "containerId": "other"}],
+            p + "/clients": [{"id": "api"}, {"id": "anon"}],
+            p + "/clients/api/scope-mappings/clients/api": [],
+            p + "/clients/anon/scope-mappings/clients/api": [{"name": OLD}],
+        }
+        self.sends = []
+
+    def retire(self, **kwargs):
+        return preserve.retire_renamed_roles(
+            self.realm, lambda path: copy.deepcopy(self.state.get(path)),
+            lambda method, path, body=None: self.sends.append((method, path, body)), **kwargs)
+
+    def test_remaining_holders_get_the_new_role_then_the_old_role_is_deleted(self):
+        self.assertEqual(self.retire(), [OLD])
+        new_role = [{"id": "new-id", "name": NEW}]
+        p = self.prefix
+        self.assertEqual(self.sends, [
+            ("POST", p + "/users/u1/role-mappings/clients/api", new_role),
+            ("POST", p + "/groups/g1/role-mappings/clients/api", new_role),
+            ("POST", p + "/roles-by-id/cp/composites", new_role),
+            ("POST", p + "/clients/anon/scope-mappings/clients/api", new_role),
+            ("DELETE", self.old, None),
+        ])
+
+    def test_holders_are_paged(self):
+        old = self.old
+        del self.state[old + "/users?first=0&max=100"]
+        del self.state[old + "/groups?first=0&max=100"]
+        self.state[old + "/users?first=0&max=1"] = [{"id": "u1"}]
+        self.state[old + "/users?first=1&max=1"] = [{"id": "u3"}]
+        self.state[old + "/users?first=2&max=1"] = []
+        self.state[old + "/groups?first=0&max=1"] = []
+        self.state[self.prefix + "/users/u3/role-mappings/clients/api"] = []
+        self.retire(page=1)
+        users = [path for method, path, _ in self.sends if "/users/" in path]
+        self.assertEqual(users, [self.prefix + "/users/u1/role-mappings/clients/api",
+                                 self.prefix + "/users/u3/role-mappings/clients/api"])
+
+    def test_nothing_happens_once_the_old_role_is_gone(self):
+        self.state[self.old] = None
+        self.assertEqual(self.retire(), [])
+        self.assertEqual(self.sends, [])
+
+    def test_a_missing_new_role_aborts_before_any_change(self):
+        self.state[self.prefix + "/clients/api/roles/catalog.bank_of_canada%3Aread"] = None
+        with self.assertRaises(RuntimeError):
+            self.retire()
+        self.assertEqual(self.sends, [])
+
+
 if __name__ == "__main__":
     unittest.main()
