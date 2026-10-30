@@ -3,8 +3,14 @@
 # Dry run is the default and contacts no cluster. --apply creates the cert-manager
 # resources, copies only the public CA certificate into a ConfigMap, and patches
 # the cloudflared mount, then restarts connectors and waits for their rollout. It
-# leaves replicas and token intact. It does not switch
-# the gateway issuer or Cloudflare dashboard TLS settings.
+# leaves replicas and token intact. When the ConfigMap already holds that
+# certificate and the mount is in place, it changes nothing and restarts nothing.
+# Without a cloudflared Deployment yet, it publishes the CA and ConfigMap only; the
+# normal connector manifest carries the same optional mount.
+# A published root is replaced only by a renewal of itself (same subject and public
+# key); any other root needs the two-root rotation runbook.
+# It does not switch the gateway issuer or Cloudflare dashboard TLS settings;
+# apply-gateway-routes.sh runs it when that issuer is econ-graph-origin-ca.
 #
 # Usage: stage-tunnel-origin-ca.sh --context NAME [--dry-run | --apply]
 set -euo pipefail
@@ -33,8 +39,10 @@ done
 if [[ "$apply" != true ]]; then
     printf 'Dry run on context %q: apply %q\n' "$context" "$resources/ca.yaml"
     echo 'Wait for cert-manager CA readiness; copy only Secret tls.crt to ConfigMap econ-graph/cloudflared-origin-ca.'
+    echo 'Refuse a different published root unless it is a renewal (same subject and public key).'
     echo 'Patch only the cloudflared public-CA mount; leave replicas, token, gateway issuer and dashboard unchanged.'
-    echo 'Restart cloudflared and wait for its rollout so every connector receives the public CA file.'
+    echo 'Restart cloudflared and wait for its rollout so every connector receives the public CA file,'
+    echo 'unless the ConfigMap and mount were already in place, or there is no cloudflared Deployment yet.'
     echo 'After staging, follow docs/deployment/TUNNEL_ORIGIN_TLS.md for the verified cutover.'
     exit 0
 fi
@@ -53,8 +61,8 @@ kc() { command "$KUBECTL" --context "$context" "$@"; }
 for tool in "$KUBECTL" openssl base64; do
     command -v "$tool" >/dev/null || { echo "error: missing tool: $tool" >&2; exit 1; }
 done
-# An explicitly selected context is still required; never silently switch contexts.
-kc -n econ-graph get deployment cloudflared -o name >/dev/null
+# A failed lookup stops staging; a missing Deployment only skips the mount and restart.
+connector="$(kc -n econ-graph get deployment cloudflared --ignore-not-found -o name)"
 kc apply -f "$resources/ca.yaml"
 kc -n cert-manager wait --for=condition=Ready certificate/econ-graph-origin-ca --timeout=120s
 kc wait --for=condition=Ready clusterissuer/econ-graph-origin-ca --timeout=120s
@@ -69,22 +77,56 @@ openssl x509 -in "$work/ca.crt" -noout -ext basicConstraints | grep -q 'CA:TRUE'
 }
 openssl verify -CAfile "$work/ca.crt" "$work/ca.crt" >/dev/null
 # Replacing an active trust root before the gateway leaf is rotated can break the
-# running tunnel. A changed root needs the documented two-root rotation procedure.
+# running tunnel. A renewal of the published root (rotationPolicy: Never keeps its
+# key) has the same subject and public key, so leaves it signed still verify and it
+# may replace the published one. Anything else, including a two-root bundle, needs
+# the documented two-root rotation procedure.
 kc -n econ-graph get configmap cloudflared-origin-ca --ignore-not-found \
     -o 'jsonpath={.data.ca\.crt}' >"$work/existing-ca.crt"
-if [[ -s "$work/existing-ca.crt" ]] && ! cmp -s "$work/ca.crt" "$work/existing-ca.crt"; then
-    echo 'error: existing trust bundle differs; follow the two-root rotation runbook' >&2
-    exit 1
+# Prints the subject and public key of a file holding exactly one certificate.
+root_identity() {
+    [[ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$1")" == 1 ]] || return 1
+    openssl x509 -in "$1" -noout -subject -nameopt RFC2253 &&
+        openssl x509 -in "$1" -noout -pubkey
+}
+bundle_changed=false
+if [[ ! -s "$work/existing-ca.crt" ]]; then
+    bundle_changed=true
+elif ! cmp -s "$work/ca.crt" "$work/existing-ca.crt"; then
+    if new_id="$(root_identity "$work/ca.crt" 2>/dev/null)" &&
+        old_id="$(root_identity "$work/existing-ca.crt" 2>/dev/null)" &&
+        [[ "$new_id" == "$old_id" ]]; then
+        echo 'Published root renewed (same subject and public key); replacing it.'
+        bundle_changed=true
+    else
+        echo 'error: existing trust bundle differs; follow the two-root rotation runbook' >&2
+        exit 1
+    fi
 fi
-kc -n econ-graph create configmap cloudflared-origin-ca --from-file="ca.crt=$work/ca.crt" \
-    --dry-run=client -o yaml | kc apply -f -
-kc -n econ-graph patch deployment cloudflared --type=strategic \
-    --patch-file "$resources/cloudflared-mount.yaml"
-# The mount may already exist, so patching alone need not create new Pods. Restart
-# after publishing the ConfigMap so staging cannot finish before kubelet projects
-# the certificate into every running connector.
-kc -n econ-graph rollout restart deployment/cloudflared
-kc -n econ-graph rollout status deployment/cloudflared --timeout=120s
+if [[ "$bundle_changed" == true ]]; then
+    kc -n econ-graph create configmap cloudflared-origin-ca --from-file="ca.crt=$work/ca.crt" \
+        --dry-run=client -o yaml | kc apply -f -
+fi
+if [[ -z "$connector" ]]; then
+    echo 'No cloudflared Deployment yet: its manifest mounts this ConfigMap when it is applied.'
+else
+    volume="$(kc -n econ-graph get deployment cloudflared \
+        -o 'jsonpath={.spec.template.spec.volumes[?(@.name=="origin-ca")].configMap.name}')"
+    mount="$(kc -n econ-graph get deployment cloudflared \
+        -o 'jsonpath={.spec.template.spec.containers[?(@.name=="cloudflared")].volumeMounts[?(@.name=="origin-ca")].mountPath}')"
+    if [[ "$bundle_changed" == false && "$volume" == cloudflared-origin-ca &&
+        "$mount" == /etc/cloudflared/origin-ca ]]; then
+        echo 'Trust bundle and connector mount already in place; cloudflared not restarted.'
+    else
+        kc -n econ-graph patch deployment cloudflared --type=strategic \
+            --patch-file "$resources/cloudflared-mount.yaml"
+        # The mount may already exist, so patching alone need not create new Pods.
+        # Restart after publishing the ConfigMap so staging cannot finish before
+        # kubelet projects the certificate into every running connector.
+        kc -n econ-graph rollout restart deployment/cloudflared
+        kc -n econ-graph rollout status deployment/cloudflared --timeout=120s
+    fi
+fi
 cat <<'NEXT'
 Public CA staged. No gateway issuer or Cloudflare dashboard setting was changed.
 Follow docs/deployment/TUNNEL_ORIGIN_TLS.md to select the gateway issuer, verify

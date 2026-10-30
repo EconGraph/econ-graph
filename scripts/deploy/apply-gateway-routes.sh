@@ -26,7 +26,12 @@
 #   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate
 #                       (default: the certificate's current one, else
 #                       econ-graph-selfsigned, k8s/manifests/gateway/selfsigned-issuer.yaml,
-#                       which the tunnel connector accepts unverified).
+#                       which the tunnel connector accepts unverified). For
+#                       econ-graph-origin-ca, the private CA and the connector's
+#                       public trust bundle are staged first
+#                       (scripts/deploy/stage-tunnel-origin-ca.sh --apply; idempotent),
+#                       so a fresh cluster gets them before its certificate does; if
+#                       staging fails, the certificate is not changed.
 
 set -euo pipefail
 
@@ -122,6 +127,18 @@ if [ -n "$host" ]; then
         die "cert-manager is not installed; the https listener's certificate needs it"
     if [ "$issuer" = econ-graph-selfsigned ]; then
         run_kc apply -f "$GATEWAY_DIR/selfsigned-issuer.yaml"
+    elif [ "$issuer" = econ-graph-origin-ca ]; then
+        # The tunnel verifies this certificate against the staged public root, so
+        # the CA and trust bundle must exist before the certificate names them.
+        stage_context="$KUBE_CONTEXT"
+        [ -n "$stage_context" ] || stage_context="$(kc config current-context)" ||
+            die "could not read the current kubectl context for staging the origin CA"
+        stage=(scripts/deploy/stage-tunnel-origin-ca.sh --context "$stage_context" --apply)
+        echo "+ ${stage[*]}"
+        if [ "$DRY_RUN" != true ]; then
+            "$PROJECT_ROOT/${stage[0]}" "${stage[@]:1}" ||
+                die "staging the origin CA failed, so certificate econ-graph-tls was not changed; fix it and rerun, or run ${stage[*]} first"
+        fi
     fi
     sed -e "s/__PUBLIC_HOST__/${host}/g" -e "s/__TLS_ISSUER__/${issuer}/g" \
         "$GATEWAY_DIR/gateway-https.yaml" >"$WORK/gateway-https.yaml"

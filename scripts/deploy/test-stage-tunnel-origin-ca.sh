@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Offline integration checks: explicit context, no-contact dry run, public-only
-# certificate transfer, mount-only patch, idempotency and refusal to replace roots.
+# Offline integration checks against stub kubectl, never a cluster: explicit context,
+# no-contact dry run, public-only certificate transfer, mount-only patch, no restart
+# when the bundle and mount are already in place, staging before the connector
+# exists, replacement of a renewed root (same subject and key) and refusal of any
+# other root; and apply-gateway-routes.sh staging the CA before it selects issuer
+# econ-graph-origin-ca, printing it under --dry-run and not changing the certificate
+# when staging fails.
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 - "$project_root" <<'PY'
 import base64
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -51,6 +57,11 @@ if 'secret' in args:
     print(base64.b64encode(Path(os.environ['CA']).read_bytes()).decode(), end='')
 elif 'get' in args and 'configmap' in args:
     print(os.environ.get('EXISTING_CA', ''),end='')
+elif 'get' in args and 'deployment' in args:
+    if 'name' in args:
+        print('' if os.environ.get('NO_CONNECTOR') else 'deployment.apps/cloudflared')
+    elif os.environ.get('MOUNTED'):
+        print('cloudflared-origin-ca' if 'volumes' in args[-1] else '/etc/cloudflared/origin-ca', end='')
 elif 'create' in args and 'configmap' in args:
     certarg=next(arg for arg in args if arg.startswith('--from-file='))
     cert=Path(certarg.split('=',2)[2]).read_text()
@@ -107,11 +118,57 @@ elif 'patch' in args:
                               if container['name'] == patch_container['name'])
     assert mount in deployed_container['volumeMounts']
     assert volume in deployed_pod['volumes'], 'normal deploys must preserve the staged trust mount'
-    assert run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text()).returncode == 0
+    def logged():
+        return [json.loads(line) for line in calls.read_text().splitlines()]
+    def published(commands):
+        return any(command[-3:] == ['apply', '-f', '-'] for command in commands)
+    def restarted(commands):
+        return any('restart' in command for command in commands)
+    def patched(commands):
+        return any('patch' in command for command in commands)
+    # Already staged: nothing is published, patched or restarted.
     calls.write_text('')
-    result=run('--context','scratch-only','--apply',EXISTING_CA='different-existing-public-root')
-    assert result.returncode != 0 and 'two-root rotation' in result.stderr
-    assert not any('patch' in json.loads(line) for line in calls.read_text().splitlines())
+    result = run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text(),MOUNTED='1')
+    assert result.returncode == 0, result.stderr
+    assert 'not restarted' in result.stdout
+    assert not published(logged()) and not patched(logged()) and not restarted(logged())
+    # Same bundle but the mount is missing: patch and restart, no republish.
+    calls.write_text('')
+    assert run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text()).returncode == 0
+    assert not published(logged()) and patched(logged()) and restarted(logged())
+    # No connector yet (it is applied later in the deploy): publish only.
+    calls.write_text('')
+    result = run('--context','scratch-only','--apply',NO_CONNECTOR='1')
+    assert result.returncode == 0, result.stderr
+    assert published(logged()) and not patched(logged()) and not restarted(logged())
+
+    def make_root(path, key, subject, days='365', new_key=False):
+        """Self-sign a synthetic CA root; reuse key unless new_key."""
+        key_args = (['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', str(key)]
+                    if new_key else ['-key', str(key)])
+        subprocess.run(['openssl', 'req', '-x509', *key_args, '-out', str(path), '-days', days,
+                        '-subj', subject, '-addext', 'basicConstraints=critical,CA:TRUE'],
+                       check=True, capture_output=True)
+    # A renewal of the published root (same subject and key, new certificate) replaces it.
+    published_root = work / 'published.crt'
+    published_root.write_text(ca.read_text())
+    make_root(ca, work / 'test.key', '/CN=offline-test-ca', days='400')
+    assert ca.read_text() != published_root.read_text()
+    calls.write_text('')
+    result = run('--context','scratch-only','--apply',EXISTING_CA=published_root.read_text(),MOUNTED='1')
+    assert result.returncode == 0, result.stderr
+    assert 'renewed' in result.stdout and published(logged()) and restarted(logged())
+    # Anything else is refused before publishing or patching.
+    other_key = work / 'other.crt'
+    make_root(other_key, work / 'other.key', '/CN=offline-test-ca', new_key=True)
+    other_subject = work / 'other-subject.crt'
+    make_root(other_subject, work / 'test.key', '/CN=another-test-ca')
+    for existing in ['different-existing-public-root', other_key.read_text(), other_subject.read_text(),
+                     published_root.read_text() + other_key.read_text()]:
+        calls.write_text('')
+        result = run('--context','scratch-only','--apply',EXISTING_CA=existing,MOUNTED='1')
+        assert result.returncode != 0 and 'two-root rotation' in result.stderr, result
+        assert not published(logged()) and not patched(logged()) and not restarted(logged())
     # Near-expiry roots must not be published as a new trust bundle.
     subprocess.run(['openssl','req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256',
                     '-nodes','-keyout',str(work/'short.key'),'-out',str(ca),'-days','30',
@@ -120,5 +177,64 @@ elif 'patch' in args:
     calls.write_text('')
     assert run('--context','scratch-only','--apply').returncode != 0
     assert not any('patch' in json.loads(line) for line in calls.read_text().splitlines())
+
+# apply-gateway-routes.sh, in a copy of the files it uses where staging is a stub.
+with tempfile.TemporaryDirectory() as folder:
+    tree = Path(folder) / 'root'
+    log = Path(folder) / 'log'
+    deploy = tree / 'scripts/deploy'
+    (deploy / 'lib').mkdir(parents=True)
+    for name in ['apply-gateway-routes.sh', 'render-public-host.py', 'lib/cluster-role.sh']:
+        shutil.copy2(root / 'scripts/deploy' / name, deploy / name)
+    shutil.copytree(root / 'k8s/manifests/gateway', tree / 'k8s/manifests/gateway')
+    stage = deploy / 'stage-tunnel-origin-ca.sh'
+    stage.write_text('#!/usr/bin/env bash\necho "stage $*" >>"$LOG"\nexit "${STAGE_RC:-0}"\n')
+    stage.chmod(0o755)
+    kubectl = Path(folder) / 'kubectl'
+    kubectl.write_text('''#!/usr/bin/env bash
+echo "kubectl $*" >>"$LOG"
+case "$*" in
+    *"config current-context"*) echo kind-current ;;
+    *"get certificate econ-graph-tls"*) printf '%s' "${CURRENT_ISSUER:-}" ;;
+esac
+exit 0
+''')
+    kubectl.chmod(0o755)
+    def routes(*args, **updates):
+        """Run the copied apply-gateway-routes.sh against the stub kubectl."""
+        log.write_text('')
+        environment = dict(os.environ, KUBECTL=str(kubectl), LOG=str(log), PUBLIC_HOST='econgraph.com')
+        environment.pop('GATEWAY_TLS_ISSUER', None)
+        environment.update(updates)
+        result = subprocess.run([str(deploy / 'apply-gateway-routes.sh'), *args], env=environment,
+                                text=True, capture_output=True)
+        return result, log.read_text().splitlines()
+    def https_apply(lines):
+        return next(i for i, line in enumerate(lines) if '--field-manager=econ-graph-gateway-https' in line)
+    origin = {'GATEWAY_TLS_ISSUER': 'econ-graph-origin-ca'}
+    result, lines = routes('--context', 'kind-test', **origin)
+    assert result.returncode == 0, result.stderr
+    stage_line = lines.index('stage --context kind-test --apply')
+    assert stage_line < https_apply(lines), 'staging must precede the certificate'
+    # The retained issuer of a later deploy stages too (idempotent).
+    result, lines = routes('--context', 'kind-test', CURRENT_ISSUER='econ-graph-origin-ca')
+    assert result.returncode == 0 and 'stage --context kind-test --apply' in lines
+    # Without --context, staging gets the current context explicitly.
+    result, lines = routes(**origin)
+    assert result.returncode == 0 and 'stage --context kind-current --apply' in lines, lines
+    # Dry run prints the staging command and runs nothing.
+    result, lines = routes('--dry-run', '--context', 'kind-test', **origin)
+    assert result.returncode == 0, result.stderr
+    assert '+ scripts/deploy/stage-tunnel-origin-ca.sh --context kind-test --apply' in result.stdout
+    assert not any(line.startswith('stage') for line in lines)
+    assert not any(' apply ' in line + ' ' for line in lines if line.startswith('kubectl'))
+    # Failed staging: the certificate is not touched, and the command is named.
+    result, lines = routes('--context', 'kind-test', STAGE_RC='1', **origin)
+    assert result.returncode != 0 and 'stage-tunnel-origin-ca.sh --context kind-test --apply' in result.stderr
+    assert not any('--field-manager' in line for line in lines)
+    # Other issuers never stage.
+    for updates in [{}, {'GATEWAY_TLS_ISSUER': 'letsencrypt-test'}]:
+        result, lines = routes('--context', 'kind-test', **updates)
+        assert result.returncode == 0 and not any(line.startswith('stage') for line in lines)
 print('PASS: offline tunnel origin CA staging checks')
 PY

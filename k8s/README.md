@@ -900,4 +900,6 @@ gateway. Stage only its public trust certificate with
 `scripts/deploy/stage-tunnel-origin-ca.sh --context <context> --dry-run`, then follow
 [Tunnel origin TLS](../docs/deployment/TUNNEL_ORIGIN_TLS.md) for issuer selection,
 certificate checks, the remote dashboard transition and rollback. Staging does not change
-the gateway issuer or disable the dashboard's existing No TLS Verify setting.
+the gateway issuer or disable the dashboard's existing No TLS Verify setting. A deploy whose
+gateway issuer is `econ-graph-origin-ca` (`GATEWAY_TLS_ISSUER`, or the certificate's
+existing issuer) runs the staging itself before issuing the certificate.

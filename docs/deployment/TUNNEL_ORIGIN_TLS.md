@@ -20,29 +20,43 @@ Staging creates the private CA and the `econ-graph-origin-ca` ClusterIssuer, wai
 readiness, copies only the root's public `tls.crt` into ConfigMap
 `econ-graph/cloudflared-origin-ca`, and patches the connector's read-only mount. It leaves
 the connector's replicas and token intact, then restarts it and waits for the rollout so
-existing Pods receive the CA file before staging completes. It does not select the gateway certificate
-issuer or change the remote tunnel configuration. The normal connector manifest has the
-same optional mount, so a later deployment preserves it.
+existing Pods receive the CA file before staging completes. When the ConfigMap already
+holds that root and the mount is in place, it changes nothing and does not restart the
+connector. Without a cloudflared Deployment it publishes only the CA and ConfigMap. It
+does not select the gateway certificate issuer or change the remote tunnel configuration.
+The normal connector manifest has the same optional mount, so a later deployment
+preserves it.
 
 The public certificate is at `/etc/cloudflared/origin-ca/ca.crt` in each connector. Confirm
 the connector rollout is healthy before proceeding. Staging refuses to overwrite a
-ConfigMap containing a different root; use the rotation procedure below instead.
+ConfigMap containing a different root, other than a renewal of the same root; use the
+rotation procedure below instead.
 
 ## Select and verify the gateway certificate
 
-Explicitly select the CA issuer for the public listener, keeping the existing public host:
+Explicitly select the CA issuer for the public listener, keeping the existing public host.
+Use the kind cluster's own kubectl, as the deploy scripts do (`KUBECTL`, else
+`~/.cache/econgraph/bin/kubectl` with its kubeconfig); a plain `kubectl` on the host may
+reach another cluster:
 
 ```sh
 PUBLIC_HOST=econgraph.com GATEWAY_TLS_ISSUER=econ-graph-origin-ca \
   scripts/deploy/apply-gateway-routes.sh --context kind-econ-graph --dry-run
 PUBLIC_HOST=econgraph.com GATEWAY_TLS_ISSUER=econ-graph-origin-ca \
   scripts/deploy/apply-gateway-routes.sh --context kind-econ-graph
-kubectl --context kind-econ-graph -n econ-graph-gateway wait \
+KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl \
+  --context kind-econ-graph -n econ-graph-gateway wait \
   --for=condition=Ready certificate/econ-graph-tls --timeout=120s
 ```
 
-`apply-gateway-routes.sh` retains the certificate's existing issuer on subsequent deploys
-unless explicitly overridden. Keep that selection in deployment configuration too.
+With issuer `econ-graph-origin-ca`, `apply-gateway-routes.sh` (and so `deploy.sh` and
+`restart-k8s-rollout.sh`, which run it) first runs
+`stage-tunnel-origin-ca.sh --context <context> --apply`, which is idempotent; if staging
+fails, it stops without changing the certificate. Its `--dry-run` prints that command
+without running it. On later deploys the certificate's existing issuer is retained unless
+`GATEWAY_TLS_ISSUER` overrides it, and the retained `econ-graph-origin-ca` is staged again
+the same way.
+
 The leaf covers the public host and `www` name. In the dashboard, use the public host as
 **Origin Server Name** even though the Service URL uses the internal proxy Service DNS.
 Do not override the HTTP Host header: public HTTPRoutes match the visitor's host.
@@ -104,6 +118,22 @@ connectors. Record the successful checks and the negative certificate tests befo
 considering the transition complete. A healthy tunnel connection to Cloudflare alone
 does not prove its origin TLS is verified.
 
+## After a cluster recreate
+
+A recreated cluster has none of the CA, its ClusterIssuer, the trust ConfigMap or the
+gateway certificate, and its first deploy has no existing issuer to retain. Without
+`GATEWAY_TLS_ISSUER` it issues the certificate from `econ-graph-selfsigned`, which
+connectors verifying the origin reject. Once the remote routes verify the origin, run the
+first deploy of a recreated cluster (`deploy.sh`, or `release-deploy.sh`, which passes the
+variable through) with `GATEWAY_TLS_ISSUER=econ-graph-origin-ca` in its environment. The
+gateway step then stages a new CA and trust bundle before issuing the certificate from it.
+CA Pool names the connector-local file, so the new root needs no dashboard change. Wait for
+the certificate as above and repeat the positive origin check.
+
+If the cluster was already deployed without it, rerun `apply-gateway-routes.sh` with the
+issuer as in the previous section, or turn No TLS Verify back on for the public routes
+until the certificate is issued from the CA.
+
 ## Rollback and CA rotation
 
 If public requests fail during cutover, first restore the dashboard's prior No TLS Verify
@@ -113,10 +143,11 @@ select the prior gateway issuer explicitly with `GATEWAY_TLS_ISSUER`; changing t
 can renew the leaf, so wait for readiness and retest.
 
 cert-manager renews leaf certificates using the CA. The root has a ten-year lifetime and
-reuses its key on renewal; operators must monitor both root and leaf expiry and rerun
-staging after root renewal before the old trust certificate expires. Staging refuses a
-changed trust bundle, including a renewed root: review and publish a bundle containing
-both old and new public roots before proceeding. For a key rotation, issue a new CA under
+reuses its key on renewal (`rotationPolicy: Never`); operators must monitor both root and
+leaf expiry and rerun staging after root renewal before the old trust certificate expires.
+Staging replaces the published root only with a renewal of it: a single certificate with
+the same subject and public key, which still verifies leaves the old one signed. It
+refuses any other change, including a different key or a two-root bundle. For a key rotation, issue a new CA under
 a distinct Secret/issuer name, publish both roots to every connector, restart connectors
 and verify that all replicas trust the new root, then switch the gateway leaf to the new
 issuer. Repeat the positive and negative origin checks before retiring the old root from
