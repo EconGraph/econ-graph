@@ -67,7 +67,8 @@ Only precision the source still serves can be recovered:
 - **World Bank** serves only the current database release. Points carry the release's
   `lastupdated` as their revision date: points of the current release are corrected; points of
   earlier releases keep their stored (possibly rounded) values. If the World Bank has published
-  a new release since the last crawl, the re-fetch stores it as a new vintage.
+  a new release since the last crawl, the re-fetch stores its new and changed values as a new
+  vintage; a value equal to the newest stored one is not written again.
 - **BLS, BEA, Census, FHFA** store one current value per date (revision date = observation
   date), which the re-fetch rewrites with the source's current value, as any refresh does.
   BLS history beyond the adapter's 20-year window is not re-read.

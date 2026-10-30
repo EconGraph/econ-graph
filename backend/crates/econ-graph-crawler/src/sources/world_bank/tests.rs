@@ -1684,3 +1684,157 @@ fn shared_validators_need_one_stored_version() {
     assert_eq!(shared_validators(["a", "d"], &stored), None);
     assert_eq!(shared_validators(["a", "missing"], &stored), None);
 }
+
+/// `GDP_PCAP` as a later WDI release: `lastupdated` replaced, and each `(iso3, year, value)` in
+/// `set` replacing that row's value or added as a new row.
+fn gdp_pcap_release(lastupdated: &str, set: &[(&str, &str, f64)]) -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(GDP_PCAP).unwrap();
+    doc[0]["lastupdated"] = lastupdated.into();
+    let rows = doc[1].as_array_mut().unwrap();
+    for &(iso3, year, value) in set {
+        match rows
+            .iter_mut()
+            .find(|r| r["countryiso3code"] == iso3 && r["date"] == year)
+        {
+            Some(row) => row["value"] = value.into(),
+            None => {
+                let mut row = rows
+                    .iter()
+                    .find(|r| r["countryiso3code"] == iso3)
+                    .unwrap()
+                    .clone();
+                row["date"] = year.into();
+                row["value"] = value.into();
+                rows.push(row);
+            }
+        }
+    }
+    doc.to_string()
+}
+
+/// Serves `body` for the indicator's full request and `lastupdated` for its one-row probe.
+async fn serve_release(mock: &MockSource, body: String, lastupdated: &str) {
+    mock.reset().await;
+    mock.mount(&route("NY.GDP.PCAP.CD"), Reply::json_str(body))
+        .await;
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET")).respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_raw(
+                    format!(r#"[{{"page": 1, "pages": 1, "lastupdated": "{lastupdated}"}}, null]"#)
+                        .into_bytes(),
+                    "application/json",
+                ),
+            ),
+        )
+        .await;
+}
+
+#[derive(diesel::QueryableByName, Debug, Clone, PartialEq)]
+struct StoredRow {
+    #[diesel(sql_type = diesel::sql_types::Date)]
+    date: NaiveDate,
+    #[diesel(sql_type = diesel::sql_types::Date)]
+    revision_date: NaiveDate,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Numeric>)]
+    value: Option<BigDecimal>,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    is_original_release: bool,
+}
+
+async fn stored_rows(pool: &econ_graph_core::DatabasePool, external_id: &str) -> Vec<StoredRow> {
+    let mut conn = pool.get().await.unwrap();
+    diesel_async::RunQueryDsl::load(
+        diesel::sql_query(
+            "SELECT dp.date, dp.revision_date, dp.value, dp.is_original_release \
+             FROM data_points dp JOIN economic_series s ON s.id = dp.series_id \
+             WHERE s.external_id = $1 ORDER BY dp.date, dp.revision_date",
+        )
+        .bind::<diesel::sql_types::Text, _>(external_id),
+        &mut conn,
+    )
+    .await
+    .unwrap()
+}
+
+/// Fetches `id` (which must come back with points: a full fetch) and persists it.
+async fn fetch_and_persist(
+    adapter: &WorldBankAdapter,
+    ctx: &CrawlCtx,
+    id: &str,
+) -> persist::SeriesWrite {
+    let out = adapter.fetch_batch(ctx, &ids(&[id]), None).await.unwrap();
+    let fetched = out[id].as_ref().unwrap();
+    assert!(!fetched.points.is_empty(), "{id} must be fetched in full");
+    persist::persist_series(&ctx.pool, SourceId::WorldBank, id, fetched)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_new_release_appends_only_the_values_it_changes() {
+    let Some(db) = validator_db("econgraph_wb_release_compare").await else {
+        return;
+    };
+    let mock = MockSource::start().await;
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let usa = "wdi/NY.GDP.PCAP.CD.USA";
+    let row = |year: i32, rev: NaiveDate, value: &str, original: bool| StoredRow {
+        date: date(year, 1),
+        revision_date: rev,
+        value: Some(BigDecimal::from_str(value).unwrap()),
+        is_original_release: original,
+    };
+    let july = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+    let october = NaiveDate::from_ymd_opt(2026, 10, 15).unwrap();
+    let december = NaiveDate::from_ymd_opt(2026, 12, 16).unwrap();
+
+    serve_release(&mock, GDP_PCAP.to_string(), "2026-07-01").await;
+    let first = fetch_and_persist(&adapter, &ctx, usa).await;
+    assert_eq!((first.points_upserted, first.points_new), (3, 3));
+    let mut expected = vec![
+        row(2021, july, "71055.9", true),
+        row(2022, july, "77860.9", true),
+        row(2023, july, "82769.4", true),
+    ];
+    assert_eq!(stored_rows(&db.pool, usa).await, expected);
+
+    // A later release revising one value appends one row, as a revision.
+    serve_release(
+        &mock,
+        gdp_pcap_release("2026-10-15", &[("USA", "2023", 82800.1)]),
+        "2026-10-15",
+    )
+    .await;
+    let second = fetch_and_persist(&adapter, &ctx, usa).await;
+    assert_eq!((second.points_upserted, second.points_new), (1, 1));
+    expected.push(row(2023, october, "82800.1", false));
+    assert_eq!(stored_rows(&db.pool, usa).await, expected);
+
+    // The same release read again in full writes nothing.
+    let mut bypass = ctx.clone();
+    bypass.bypass_validators = true;
+    let again = fetch_and_persist(&adapter, &bypass, usa).await;
+    assert_eq!((again.points_upserted, again.points_new), (0, 0));
+    assert_eq!(stored_rows(&db.pool, usa).await, expected);
+
+    // A release adding a year stores it as that year's original release. The revised 2023 is
+    // compared with its newest row, so it is not written again.
+    serve_release(
+        &mock,
+        gdp_pcap_release(
+            "2026-12-16",
+            &[("USA", "2023", 82800.1), ("USA", "2024", 85809.9)],
+        ),
+        "2026-12-16",
+    )
+    .await;
+    let third = fetch_and_persist(&adapter, &ctx, usa).await;
+    assert_eq!((third.points_upserted, third.points_new), (1, 1));
+    expected.push(row(2024, december, "85809.9", true));
+    assert_eq!(stored_rows(&db.pool, usa).await, expected);
+
+    db.drop().await;
+}
