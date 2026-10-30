@@ -269,6 +269,26 @@ impl UnitsContext {
     pub const US_DOLLARS: Self = Self {
         bare_currency: Some("USD"),
     };
+
+    /// What `source`'s units texts may be assumed to mean: US dollars for FRED, BEA and BLS,
+    /// nothing for the rest (the World Bank's units name their currency; Census, FHFA and the
+    /// static catalogs have no dollar amounts). Adapters set this on the metadata they return,
+    /// and readers parsing stored units use it, so both answer the same way.
+    pub const fn for_source(source: SourceId) -> Self {
+        match source {
+            SourceId::Fred | SourceId::Bea | SourceId::Bls => Self::US_DOLLARS,
+            _ => Self::NONE,
+        }
+    }
+
+    /// [`for_source`](Self::for_source) for the source whose `data_sources.name` is `name`;
+    /// [`NONE`](Self::NONE) for a name no source has.
+    pub fn for_data_source_name(name: &str) -> Self {
+        SourceId::ALL
+            .into_iter()
+            .find(|&s| crate::persist::data_source_template(s).name == name)
+            .map_or(Self::NONE, Self::for_source)
+    }
 }
 
 /// Parses a units phrase into the vocabulary, with no assumptions about the source. See the

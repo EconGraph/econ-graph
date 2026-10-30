@@ -152,18 +152,36 @@ impl SeriesUnitsFields {
         )
     }
 
-    /// The series' parsed unit: the stored one, else `units` parsed now with no source
-    /// currency (for rows whose units came from discovery, or that no fetch has written since
-    /// the column was added). Null when the series has no units or they are not in the
-    /// vocabulary.
-    pub fn parsed_unit(&self, units: Option<&str>) -> Option<ParsedUnitType> {
-        if self.source(units) == UnitsSourceType::Unknown {
-            return None;
-        }
+    /// The unit a fetch stored, if it is one this vocabulary reads.
+    fn stored_unit(&self) -> Option<Unit> {
         self.units_parsed
             .as_ref()
             .and_then(|v| serde_json::from_value::<Unit>(v.clone()).ok())
-            .or_else(|| units.and_then(crawler_units::parse))
+    }
+
+    /// Whether [`parsed_unit`](Self::parsed_unit) parses `units` now, and so needs the series'
+    /// source context.
+    pub fn parses_text(&self, units: Option<&str>) -> bool {
+        self.source(units) != UnitsSourceType::Unknown
+            && units.is_some()
+            && self.stored_unit().is_none()
+    }
+
+    /// The series' parsed unit: the stored one, else `units` parsed now with `source_ctx`, the
+    /// series' source's [`UnitsContext::for_source`](crawler_units::UnitsContext::for_source),
+    /// the same as a fetch uses (for rows whose units came from discovery, or that no fetch has
+    /// written since the column was added). Null when the series has no units or they are not
+    /// in the vocabulary.
+    pub fn parsed_unit(
+        &self,
+        units: Option<&str>,
+        source_ctx: &crawler_units::UnitsContext,
+    ) -> Option<ParsedUnitType> {
+        if self.source(units) == UnitsSourceType::Unknown {
+            return None;
+        }
+        self.stored_unit()
+            .or_else(|| units.and_then(|u| crawler_units::parse_with(u, source_ctx)))
             .map(Into::into)
     }
 }
@@ -252,6 +270,7 @@ pub async fn load_series_units_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use econ_graph_crawler::units::UnitsContext;
 
     fn fields(source: &str, parsed: Option<serde_json::Value>) -> SeriesUnitsFields {
         SeriesUnitsFields {
@@ -267,23 +286,32 @@ mod tests {
     fn parsed_unit_prefers_the_stored_unit() {
         let stored = serde_json::json!({"kind": "currency", "currency": "USD", "scale": "units"});
         let unit = fields("structured", Some(stored))
-            .parsed_unit(Some("Millions of current dollars"))
+            .parsed_unit(Some("Millions of current dollars"), &UnitsContext::NONE)
             .unwrap();
         assert_eq!(unit.scale, UnitScaleType::Units);
         assert_eq!(unit.currency_code.as_deref(), Some("USD"));
 
         let unit = fields("structured", None)
-            .parsed_unit(Some("Index 2017=100"))
+            .parsed_unit(Some("Index 2017=100"), &UnitsContext::NONE)
             .unwrap();
         assert_eq!(unit.kind, UnitKindType::Index);
         assert_eq!(unit.index_base.as_deref(), Some("2017=100"));
 
-        assert_eq!(fields("structured", None).parsed_unit(Some("Rate")), None);
-        assert_eq!(fields("unknown", None).parsed_unit(Some("Percent")), None);
-        assert_eq!(fields("structured", None).parsed_unit(None), None);
+        assert_eq!(
+            fields("structured", None).parsed_unit(Some("Rate"), &UnitsContext::NONE),
+            None
+        );
+        assert_eq!(
+            fields("unknown", None).parsed_unit(Some("Percent"), &UnitsContext::NONE),
+            None
+        );
+        assert_eq!(
+            fields("structured", None).parsed_unit(None, &UnitsContext::NONE),
+            None
+        );
         // A stored value from a newer vocabulary falls back to the text.
         let unit = fields("structured", Some(serde_json::json!({"kind": "novel"})))
-            .parsed_unit(Some("Percent"))
+            .parsed_unit(Some("Percent"), &UnitsContext::NONE)
             .unwrap();
         assert_eq!(unit.kind, UnitKindType::Percent);
     }
@@ -320,11 +348,18 @@ mod tests {
             Some("\u{2003}\n"),
         ] {
             assert_eq!(legacy.source(blank), UnitsSourceType::Unknown, "{blank:?}");
-            assert_eq!(legacy.parsed_unit(blank), None, "{blank:?}");
+            assert_eq!(
+                legacy.parsed_unit(blank, &UnitsContext::NONE),
+                None,
+                "{blank:?}"
+            );
         }
         // A legacy row with units parses them now.
         assert_eq!(
-            legacy.parsed_unit(Some("Percent")).unwrap().kind,
+            legacy
+                .parsed_unit(Some("Percent"), &UnitsContext::NONE)
+                .unwrap()
+                .kind,
             UnitKindType::Percent
         );
         // A stored source wins.
@@ -332,5 +367,46 @@ mod tests {
             fields("parsed_from_text", None).source(None),
             UnitsSourceType::ParsedFromText
         );
+    }
+
+    /// Text parsed at read time uses the series' source currency, like a fetch: a row that no
+    /// fetch has written since answers the same as one that has.
+    #[test]
+    fn read_time_parse_uses_the_source_currency() {
+        let legacy = SeriesUnitsFields::default();
+        let text = "Billions of Dollars";
+        let units = Some(text);
+        assert!(legacy.parses_text(units));
+        let fred = UnitsContext::for_source(econ_graph_crawler::SourceId::Fred);
+        let read = legacy.parsed_unit(units, &fred).unwrap();
+        assert_eq!(read.currency_code.as_deref(), Some("USD"));
+        assert_eq!(read.scale, UnitScaleType::Billions);
+        // What a fetch with the same context stores reads back the same.
+        let stored = econ_graph_crawler::units::parse_with(text, &fred).unwrap();
+        let refetched = fields("structured", Some(serde_json::to_value(stored).unwrap()));
+        assert!(!refetched.parses_text(units));
+        assert_eq!(
+            refetched.parsed_unit(units, &UnitsContext::NONE),
+            Some(read.clone())
+        );
+        // Without a source currency the code stays unknown; named currencies keep theirs.
+        assert_eq!(
+            legacy
+                .parsed_unit(units, &UnitsContext::NONE)
+                .unwrap()
+                .currency_code,
+            None
+        );
+        assert_eq!(
+            legacy
+                .parsed_unit(Some("Millions of euro"), &fred)
+                .unwrap()
+                .currency_code
+                .as_deref(),
+            Some("EUR")
+        );
+        // Nothing to parse: no context needed.
+        assert!(!legacy.parses_text(None));
+        assert!(!legacy.parses_text(Some(" ")));
     }
 }

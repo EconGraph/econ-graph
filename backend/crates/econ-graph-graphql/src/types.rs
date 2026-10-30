@@ -132,7 +132,21 @@ impl EconomicSeriesType {
     /// guesses.
     async fn parsed_unit(&self, ctx: &Context<'_>) -> Result<Option<ParsedUnitType>> {
         let fields = self.load_units_fields(ctx).await?;
-        Ok(fields.parsed_unit(self.units.as_deref()))
+        let units = self.units.as_deref();
+        // Text parsed now uses the series' source currency, as a fetch would.
+        let source_ctx = if fields.parses_text(units) {
+            let loaders = crate::graphql::context::data_loaders(ctx)?;
+            let source = loaders
+                .data_source_loader
+                .load(Uuid::parse_str(&self.source_id)?)
+                .await;
+            source.map_or(econ_graph_crawler::units::UnitsContext::NONE, |s| {
+                econ_graph_crawler::units::UnitsContext::for_data_source_name(&s.name)
+            })
+        } else {
+            econ_graph_crawler::units::UnitsContext::NONE
+        };
+        Ok(fields.parsed_unit(units, &source_ctx))
     }
 
     async fn frequency(&self) -> &str {

@@ -14,9 +14,9 @@
 -- not recognise them or has not written them.
 --
 -- Nothing is backfilled. Adding nullable columns without a default only changes the catalog,
--- and the check constraint is added NOT VALID, so Postgres doesn't scan the table to check
--- rows that are all NULL; it still checks every row written from now on. The ACCESS EXCLUSIVE
--- lock is held for milliseconds whatever the table's size. lock_timeout makes the migration
+-- and the check constraint is added NOT VALID, so Postgres doesn't scan the table. The
+-- migration holds the ACCESS EXCLUSIVE lock for milliseconds (no scan, no rewrite), whatever
+-- the table's size. lock_timeout makes the migration
 -- fail, changing nothing, rather than queue behind long transactions on economic_series while
 -- blocking its readers.
 
@@ -26,5 +26,6 @@ ALTER TABLE economic_series
     ADD COLUMN units_source VARCHAR(20),
     ADD COLUMN units_raw TEXT,
     ADD COLUMN units_parsed JSONB,
+    -- Existing rows are NULL, which satisfies the check; every new write is checked.
     ADD CONSTRAINT economic_series_units_source_check
         CHECK (units_source IN ('structured', 'parsed_from_text', 'unknown')) NOT VALID;

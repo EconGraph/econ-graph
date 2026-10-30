@@ -1344,7 +1344,7 @@ fn nipa_metadata(
         units: units(row.metric_name.as_deref(), row.cl_unit.as_deref(), mult),
         units_raw: unit_text(row.metric_name.as_deref(), row.cl_unit.as_deref()).map(Into::into),
         structured_unit: Some(Box::new(scaled_values())),
-        units_context: UnitsContext::US_DOLLARS,
+        units_context: UnitsContext::for_source(SourceId::Bea),
         frequency: Some(frequency.label().into()),
         seasonal_adjustment: nipa_seasonal_adjustment(frequency, row),
         ..NewSeriesMetadataLite::default()
@@ -1391,7 +1391,7 @@ fn regional_series(
         units: units(None, first.cl_unit.as_deref(), mult),
         units_raw: unit_text(None, first.cl_unit.as_deref()).map(Into::into),
         structured_unit: Some(Box::new(scaled_values())),
-        units_context: UnitsContext::US_DOLLARS,
+        units_context: UnitsContext::for_source(SourceId::Bea),
         frequency: Some(Frequency::Annual.label().into()),
         seasonal_adjustment: None,
         ..NewSeriesMetadataLite::default()

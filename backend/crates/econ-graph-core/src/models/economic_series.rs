@@ -39,8 +39,8 @@ pub struct EconomicSeries {
     /// Overrides the dataset's default measure; `None` uses the dataset's.
     pub default_measure: Option<String>,
     /// Where `units` came from: `structured`, `parsed_from_text` or `unknown` (no units). See
-    /// `econ_graph_crawler::units::UnitsSource`. `None` on a row no writer has set it on; read
-    /// it through [`EconomicSeries::units_source_or_derived`].
+    /// `econ_graph_crawler::units::UnitsSource`. `None` on a row no writer has set it on;
+    /// readers then use [`derived_units_source`].
     pub units_source: Option<String>,
     /// The source's units text exactly as received. `None` when it was not recorded; `units`
     /// may then be reworded (BEA's drops the scale its values were multiplied by), so it is not
@@ -269,13 +269,6 @@ impl Default for UpdateEconomicSeries {
 }
 
 impl EconomicSeries {
-    /// `units_source`, or for a row no writer has set it on, [`derived_units_source`].
-    pub fn units_source_or_derived(&self) -> &str {
-        self.units_source
-            .as_deref()
-            .unwrap_or_else(|| derived_units_source(self.units.as_deref()))
-    }
-
     /// Find all economic series
     pub async fn find_all(
         pool: &crate::database::DatabasePool,

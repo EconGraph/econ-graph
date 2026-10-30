@@ -123,7 +123,8 @@ BEA and BLS. The World Bank's units name their currency (`current US$`), and Cen
 the static catalogs state none. Text that names a currency (`Canadian dollars`, `euro`)
 always keeps it, and other kinds never get a currency. GraphQL exposes these as
 `unitsSource`, `unitsRaw` and `parsedUnit`. For a series whose `units_parsed` is not stored,
-`parsedUnit` parses `units` with no source currency, so a bare `dollars` there has no code.
+`parsedUnit` parses `units` with the same source currency a fetch uses, so it answers the
+same before and after the next fetch writes `units_parsed`.
 
 When a fetched series is stored, the crawler parses its units text and, where the adapter
 also states units from structured fields (BEA: values are in base units, since they are

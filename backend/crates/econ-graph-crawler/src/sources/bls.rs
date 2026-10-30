@@ -1384,7 +1384,7 @@ fn build_series(
             units: c.measure_data_type,
             frequency: frequency.map(str::to_string),
             seasonal_adjustment: c.seasonality.or_else(id_seasonality),
-            units_context: UnitsContext::US_DOLLARS,
+            units_context: UnitsContext::for_source(SourceId::Bls),
             ..NewSeriesMetadataLite::default()
         },
         None => NewSeriesMetadataLite {

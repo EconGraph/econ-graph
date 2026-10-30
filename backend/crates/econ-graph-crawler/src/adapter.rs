@@ -119,7 +119,7 @@ pub struct NewSeriesMetadataLite {
     /// [`units::check_and_record`](crate::units::check_and_record)).
     pub structured_unit: Option<Box<StructuredUnit>>,
     /// What the parser may assume about this source's units texts: the currency a bare
-    /// `dollars` or `$` means ([`UnitsContext::US_DOLLARS`] for FRED, BEA and BLS). Text that
+    /// `dollars` or `$` means ([`UnitsContext::for_source`]). Text that
     /// names its currency ignores it.
     pub units_context: UnitsContext,
     /// Observation frequency, as the source states it (e.g. `"Monthly"`).

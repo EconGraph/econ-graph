@@ -686,3 +686,25 @@ fn check_and_record_counts_by_source() {
     assert_eq!(record("e", None, None), None);
     assert_eq!(record("e", Some("  "), None), None);
 }
+
+/// FRED, BEA and BLS mean US dollars by a bare "dollars"; no other source says.
+#[test]
+fn source_contexts() {
+    for source in SourceId::ALL {
+        let expected = match source {
+            SourceId::Fred | SourceId::Bea | SourceId::Bls => UnitsContext::US_DOLLARS,
+            _ => UnitsContext::NONE,
+        };
+        assert_eq!(UnitsContext::for_source(source), expected, "{source}");
+        let name = crate::persist::data_source_template(source).name;
+        assert_eq!(
+            UnitsContext::for_data_source_name(&name),
+            expected,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        UnitsContext::for_data_source_name("Some other source"),
+        UnitsContext::NONE
+    );
+}
