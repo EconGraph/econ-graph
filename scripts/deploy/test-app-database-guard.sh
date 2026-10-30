@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The stub kc is called by the sourced library; the extracted decision runs under eval.
-# shellcheck disable=SC2016,SC2034,SC2154,SC2329
+# shellcheck disable=SC2016,SC2030,SC2031,SC2034,SC2119,SC2120,SC2154,SC2329
 # Tests for scripts/deploy/lib/app-database-guard.sh and the app database decision of
 # scripts/deploy/create-secrets.sh, against a stub kc, no cluster:
 #   - before separate: econ_graph still holding public.users stops it, naming the runbook
@@ -12,10 +12,12 @@
 #     answer stops either guard, saying to wait for the databases and rerun or to leave
 #     APP_DATABASE unset (fail closed);
 #   - the guards only read;
-#   - create-secrets.sh keeps the current setting (no check) when APP_DATABASE is unset or
-#     equals it; a cluster without econ-graph-secrets gets separate; an existing Secret
-#     without app-database-url needs APP_DATABASE, naming the runbook; any change runs the
-#     guard for its direction, before the first Secret is written.
+#   - create-secrets.sh keeps the current setting when APP_DATABASE is unset or equals it; a
+#     cluster without econ-graph-secrets gets separate; an existing Secret without
+#     app-database-url needs APP_DATABASE, naming the runbook; shared is checked on every
+#     run of an existing cluster, kept or not; separate when it changes, and on a Secret
+#     without the key only a data database that answers it has no app tables lets it
+#     through; all before the first Secret is written.
 #
 # Usage: scripts/deploy/test-app-database-guard.sh (from anywhere)
 set -euo pipefail
@@ -112,10 +114,20 @@ fi
 # create-secrets.sh: the decision, extracted and run with stub lookups, and the guard
 # chosen for its direction.
 script=scripts/deploy/create-secrets.sh
-decision="$(sed -n '/^current_app_url="\$(existing econ-graph-secrets app-database-url)" || exit 1$/,/^# Moving app-database-url to a database/p' "$script")"
-[ -n "$decision" ] || fail "cannot find the app database decision in create-secrets.sh"
-guards="$(sed -n '/^if \[\[ "\$app_database_how" != kept \]\]; then$/,/^fi$/p' "$script")"
-[ -n "$guards" ] || fail "cannot find the guard call in create-secrets.sh"
+# extract FIRST LAST: the lines from the one equal to FIRST to the next one equal to LAST;
+# nothing unless both are there.
+extract() {
+  awk -v first="$1" -v last="$2" '
+    $0 == first { on = 1 }
+    on { buf = buf $0 "\n" }
+    on && $0 == last && buf != first "\n" { printf "%s", buf; found = 1; exit }
+    END { if (!found) exit 1 }' "$script"
+}
+decision="$(extract 'current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1' \
+  '# Pointing the backend at a database that does not hold the app records would')" ||
+  { fail "cannot find the app database decision in create-secrets.sh"; decision="false"; }
+guards="$(extract 'if [[ "$app_database" == shared && "$secrets_present" == true ]] ||' 'fi')" ||
+  { fail "cannot find the guard call in create-secrets.sh"; guards="false"; }
 APP_DB_HOST="app-postgres-service"
 # decide APP_DATABASE CURRENT_URL SECRET_EXISTS: prints "<app_database> <how> <guard>" or
 # "refused: <message>".
@@ -123,7 +135,7 @@ decide() {
   (
     existing() { printf '%s' "$CURRENT_URL"; }
     secret_exists() { [ "$SECRET_EXISTS" = yes ]; }
-    require_app_tables_moved() { GUARD=separate; }
+    require_app_tables_moved() { GUARD="separate${1:+-$1}"; }
     require_app_tables_not_moved() { GUARD=shared; }
     source() { :; }
     die() { echo "refused: $*"; exit 0; }
@@ -141,21 +153,55 @@ while IFS='|' read -r env url exists expected; do
   # shellcheck disable=SC2053 # expected may be a glob
   [[ "$got" == $expected ]] || fail "APP_DATABASE='$env', URL '$url', Secret=$exists: got '$got', expected '$expected'"
 done <<EOF
-|$data_url|yes|shared kept none
+|$data_url|yes|shared kept shared
 |$app_url|yes|separate kept none
 ||no|separate new separate
 ||yes|refused: *APP_DATABASE=shared until docs/deployment/APP_DATA_CONVERSION.md*
 shared||yes|shared from APP_DATABASE shared
-separate||yes|separate from APP_DATABASE separate
-shared|$data_url|yes|shared kept none
+separate||yes|separate from APP_DATABASE separate-strict
+shared|$data_url|yes|shared kept shared
 separate|$app_url|yes|separate kept none
 separate|$data_url|yes|separate from APP_DATABASE separate
 shared|$app_url|yes|shared from APP_DATABASE shared
-shared||no|shared from APP_DATABASE shared
+shared||no|shared from APP_DATABASE none
 EOF
 
+# The same decision with the real guards, against database states.
+# decide_real APP_DATABASE URL SECRET_EXISTS "DATA_POD DATA_PVC DATA_USERS" "APP_POD APP_PVC APP_USERS":
+# prints ok, or "refused: " and the message.
+decide_real() {
+  local output status=0
+  output="$( (
+    existing() { printf '%s' "$CURRENT_URL"; }
+    secret_exists() { [ "$SECRET_EXISTS" = yes ]; }
+    source() { :; }
+    APP_DATABASE="$1" CURRENT_URL="$2" SECRET_EXISTS="$3" STUB_LOOKUP=ok
+    read -r DATA_POD DATA_PVC DATA_USERS <<<"$4"
+    read -r APP_POD APP_PVC APP_USERS <<<"$5"
+    eval "$decision"
+    eval "$guards"
+  ) 2>&1)" || status=$?
+  if [ "$status" = 0 ]; then echo ok; else echo "refused: $output"; fi
+}
+while IFS='|' read -r name env url exists data app expected; do
+  [ -n "$expected" ] || continue
+  got="$(decide_real "$env" "$url" "$exists" "$data" "$app")"
+  # shellcheck disable=SC2053 # expected may be a glob
+  [[ "$got" == $expected ]] || fail "$name: got '$got', expected '$expected'"
+done <<CASES
+kept shared after the removal is refused||$data_url|yes|$up f|$up t|refused: *Use APP_DATABASE=separate*
+explicit shared after the removal is refused|shared|$data_url|yes|$up f|$up t|refused: *Use APP_DATABASE=separate*
+kept shared before the removal passes||$data_url|yes|$up t|$up f|ok
+kept shared on a cluster not deployed yet passes||$data_url|yes|$none|$none|ok
+separate on a Secret without the key and no data database is refused|separate||yes|$none|$none|refused: *postgresql-0 is not there to confirm*
+separate on a Secret without the key and app tables in econ_graph is refused|separate||yes|$up t|$up f|refused: *Keep APP_DATABASE=shared*
+separate on a Secret without the key after the removal passes|separate||yes|$up f|$up t|ok
+separate on a new install passes|||no|$none|$none|ok
+separate kept after the removal passes||$app_url|yes|$up f|$up t|ok
+CASES
+
 # The guards run before the first Secret is written.
-guard_line="$(grep -n '^if \[\[ "\$app_database_how" != kept \]\]; then$' "$script" | cut -d: -f1 || true)"
+guard_line="$(grep -nxF 'if [[ "$app_database" == shared && "$secrets_present" == true ]] ||' "$script" | cut -d: -f1 || true)"
 first_write="$(grep -n '^apply_secret$' "$script" | head -1 | cut -d: -f1)"
 if [ -z "$guard_line" ] || [ "$guard_line" -ge "$first_write" ]; then
   fail "create-secrets.sh runs the guards at line ${guard_line:-?}, after its first write at line $first_write"

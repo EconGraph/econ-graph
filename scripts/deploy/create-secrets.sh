@@ -75,12 +75,15 @@
 #   - APP_DATABASE=separate points app-database-url at the app database;
 #     APP_DATABASE=shared points it at the data database (one database holding
 #     both, as in a cluster deployed before the app database existed). Unset,
-#     the cluster's current choice is kept, and a cluster without
-#     econ-graph-secrets gets separate; an existing Secret without the key needs
-#     APP_DATABASE. Moving the URL to the app database while the data database
-#     still holds the app tables, or back to the data database once the tables
-#     are only in the app database, is refused (lib/app-database-guard.sh,
-#     docs/deployment/APP_DATA_CONVERSION.md); the script only rewrites the URL.
+#     the cluster's current choice is kept (so is an APP_DATABASE equal to
+#     it), a cluster without econ-graph-secrets gets separate, and an existing
+#     Secret without the key needs APP_DATABASE. Refused, before anything is
+#     written (lib/app-database-guard.sh, docs/deployment/APP_DATA_CONVERSION.md):
+#     shared, on every run of an existing cluster, once the app tables are only
+#     in the app database; separate, when it changes, while the data database
+#     still holds them, and on a Secret without the key unless the data
+#     database answers that it holds none. scripts/deploy/convert-app-data.sh
+#     rewrites the key when it moves the app tables, so it records where they are.
 #   - Likewise, if grafana-admin/admin-password would be generated but a
 #     Grafana volume (PVC grafana-storage-grafana-*) exists, the script stops
 #     unless GRAFANA_ADMIN_PASSWORD is given (and set in Grafana) or
@@ -538,6 +541,10 @@ if [[ -n "$current_app_url" ]]; then
         current_app_database=shared
     fi
 fi
+secrets_present=false
+if [[ -n "$current_app_url" ]] || secret_exists econ-graph-secrets; then
+    secrets_present=true
+fi
 app_database="${APP_DATABASE-}"
 if [[ -n "$app_database" ]]; then
     if [[ "$app_database" == "$current_app_database" ]]; then
@@ -548,7 +555,7 @@ if [[ -n "$app_database" ]]; then
 elif [[ -n "$current_app_database" ]]; then
     app_database="$current_app_database"
     app_database_how="kept"
-elif ! secret_exists econ-graph-secrets; then
+elif [[ "$secrets_present" == false ]]; then
     app_database=separate
     app_database_how="new"
 else
@@ -557,17 +564,24 @@ else
         "APP_DATABASE=shared until docs/deployment/APP_DATA_CONVERSION.md has moved them" \
         "(APP_DATABASE=separate afterwards); nothing more was written"
 fi
-# Moving app-database-url to a database that does not hold the app records would
-# serve the backend no accounts, and the backend would create empty app tables
-# there (lib/app-database-guard.sh). Checked before any Secret is written; a
-# value that is kept needs no check.
-if [[ "$app_database_how" != kept ]]; then
+# Pointing the backend at a database that does not hold the app records would
+# serve it no accounts, and it would create empty app tables there
+# (lib/app-database-guard.sh). Checked before any Secret is written. shared is
+# checked on every run of an existing cluster, kept or not: the conversion
+# removes the app tables from the data database. separate is checked when it
+# changes; on a Secret without app-database-url (its app records are in the
+# data database) only a data database that answers that it has no app tables
+# lets it through.
+if [[ "$app_database" == shared && "$secrets_present" == true ]] ||
+    [[ "$app_database" == separate && "$app_database_how" != kept ]]; then
     # shellcheck source=scripts/deploy/lib/app-database-guard.sh
     source "$(dirname "${BASH_SOURCE[0]}")/lib/app-database-guard.sh"
-    if [[ "$app_database" == separate ]]; then
-        require_app_tables_moved
-    else
+    if [[ "$app_database" == shared ]]; then
         require_app_tables_not_moved
+    elif [[ "$secrets_present" == true && -z "$current_app_url" ]]; then
+        require_app_tables_moved strict
+    else
+        require_app_tables_moved
     fi
 fi
 

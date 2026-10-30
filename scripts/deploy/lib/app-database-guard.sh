@@ -7,6 +7,7 @@
 # econ_graph would do the same, and the backend would create empty app tables there.
 #
 #   require_app_tables_moved      before APP_DATABASE=separate: econ_graph holds no app tables
+#                                 (strict: and econ_graph is there to say so)
 #   require_app_tables_not_moved  before APP_DATABASE=shared: econ_graph holds the app tables,
 #                                 or econ_graph_app does not hold them either
 #
@@ -41,9 +42,16 @@ app_db_guard_users() {
     esac
 }
 
+# require_app_tables_moved [strict]: strict also refuses a data database that is not there to
+# answer (a Secret without app-database-url says its app records are in it).
 require_app_tables_moved() {
     local data
     data="$(app_db_guard_users postgresql-0 postgresql econ_graph postgresql-data-postgresql-)" || exit 1
+    [[ "${1:-}" != strict || "$data" != absent ]] ||
+        die "econ-graph-secrets has no app-database-url, so the app records are in the data" \
+            "database, but postgresql-0 is not there to confirm they have been moved." \
+            "Rerun once postgresql-0 runs and accepts connections, or set APP_DATABASE=shared" \
+            "(docs/deployment/APP_DATA_CONVERSION.md); nothing more was written"
     [[ "$data" != t ]] ||
         die "the data database econ_graph still holds the app tables (public.users)." \
             "APP_DATABASE=separate would point the backend at the app database without its" \
