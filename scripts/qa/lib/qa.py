@@ -260,6 +260,70 @@ def error_codes(body: dict) -> list[str]:
     ]
 
 
+# --- The kind cluster ------------------------------------------------------------------------
+
+
+class KubeError(Exception):
+    pass
+
+
+class Kube:
+    """kubectl on one explicit kind context, never the current context or plain kubectl.
+
+    QA_KUBE_CONTEXT names the context (kind-<cluster>); without it, the scenario skips.
+    lib/kind-kubectl.sh picks the kind cluster's own kubectl through
+    scripts/deploy/lib/kind-env.sh. QA_KIND_KUBECTL_HELPER replaces that helper in the offline
+    tests (scripts/qa/tests/).
+    """
+
+    def __init__(self, timeout: float = 120):
+        self.context = os.environ.get('QA_KUBE_CONTEXT', '').strip()
+        if not self.context:
+            skip('no cluster: set QA_KUBE_CONTEXT to the kind context, e.g. kind-econ-graph')
+        helper = os.environ.get('QA_KIND_KUBECTL_HELPER') or str(Path(__file__).with_name('kind-kubectl.sh'))
+        self.timeout = timeout
+        try:
+            found = run([helper, self.context], timeout)
+        except subprocess.TimeoutExpired:
+            fail('cluster', f'finding the kubectl for {self.context} overran {timeout:.0f}s')
+        lines = found.stdout.splitlines()
+        if found.returncode or len(lines) < 2:
+            fail('cluster', f'{self.context}: {found.stderr.strip()[-300:] or "no kubectl found"}')
+        self.kubectl, self.kubeconfig = lines[-2], lines[-1]
+
+    def run(self, *args: str, timeout: float | None = None) -> str:
+        """stdout of kubectl ARGS on the context; KubeError when it fails or overruns."""
+        command = [self.kubectl, '--kubeconfig', self.kubeconfig, '--context', self.context, *args]
+        try:
+            done = run(command, timeout or self.timeout)
+        except subprocess.TimeoutExpired:
+            raise KubeError(f'kubectl {" ".join(args[:3])} overran {timeout or self.timeout:.0f}s') from None
+        if done.returncode:
+            raise KubeError(f'kubectl {" ".join(args[:3])}: {done.stderr.strip()[-300:]}')
+        return done.stdout
+
+    def items(self, *args: str) -> list:
+        """The items of `kubectl get ARGS -o json`; [] when the cluster has no such resource type."""
+        try:
+            return json.loads(self.run('get', *args, '-o', 'json')).get('items') or []
+        except KubeError as error:
+            if "doesn't have a resource type" in str(error):
+                return []
+            raise
+
+    def psql(self, namespace: str, pod: str, container: str, database: str, sql: str,
+             timeout: float | None = None) -> list[list[str]]:
+        """Rows of a read query run with psql inside a Postgres pod, as the postgres role."""
+        out = self.run('exec', '-n', namespace, pod, '-c', container, '--', 'psql', '-X', '-q',
+                       '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', database, '-At', '-F', '\x1f',
+                       '-c', sql, timeout=timeout)
+        return [line.split('\x1f') for line in out.splitlines() if line]
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 # --- Sign-in -------------------------------------------------------------------------------
 
 

@@ -96,9 +96,43 @@ deployed realm.
 | `backup-restore` | yes | lab | Backs up the lab database (`QA_BACKUP_SOURCE_DATABASE_URL`), restores it into a new database whose name contains `scratch` (`QA_SCRATCH_DATABASE_URL`), and compares every table's owner and row count. Database passwords reach `psql`, `pg_dump` and `pg_restore` as `PGPASSWORD`, never on their command lines. `QA_BACKUP_COMMAND` and `QA_RESTORE_COMMAND` replace the default `pg_dump` and `pg_restore` with the lab's own, and `QA_EXPECTED_OWNER` names the role every table must belong to |
 | `conversion-checks` | no | lab | Judges the report of a data conversion ([ECO-426](https://linear.app/econgraph/issue/ECO-426)), read from `QA_CONVERSION_REPORT` or printed by `QA_CONVERSION_CHECK_COMMAND`: every table's row count and checksum unchanged, and every annotation still on its original series. The report must list its annotations, as `[]` when there are none |
 | `crawl-sample` | yes | lab | Runs `QA_CRAWL_SAMPLE_COMMAND` once per source in `QA_CRAWL_SOURCES`, one source at a time, `QA_CRAWL_INTERVAL_SECONDS` apart; each run must report one series fetched with observations |
+| `branch-isolation` | yes | lab | v4.1.0 exit criterion 1, against a branch from `deploy-branch.sh` (`QA_BRANCH_NAMESPACE`; the target is its `http://<slug>.localhost`). The namespace reads the primary data plane and has no data Postgres of its own. The series an anonymous `/data/graphql` search finds there are rows of the primary data database. Signed in to the branch's realm, it creates a private annotation. That annotation and its user must be in the branch's app database, and in neither production's nor any other branch's. The annotation is deleted afterwards |
+| `data-survives-redeploy` | yes | lab | v4.1.0 exit criterion 2. It reads every data-database table's row count and id checksum, then runs `QA_DATA_REDEPLOY_COMMAND` (the redeploy or app-database recreate under test). After that it waits for the data database and requires every count and checksum to be unchanged. It fails first while `crawler-worker` has ready replicas, unless `QA_DATA_ALLOW_RUNNING_CRAWLER=1`. The data database is only read |
+| `gateway-routes-only` | no | lab, production | v4.1.0 exit criterion 5. No Ingress, IngressClass or ingress-nginx namespace or pod is left, and there are no route kinds other than HTTPRoute. There is at least one HTTPRoute, and every one of them is accepted, with its references resolved, by each of its Gateways |
 
 `QA_SEARCH_QUERY` (default `GDP`) is the search the read scenarios use. Each scenario's header
 documents its inputs and outputs in full.
+
+### The cluster scenarios
+
+`branch-isolation`, `data-survives-redeploy` and `gateway-routes-only` read the kind cluster. Each
+skips unless `QA_KUBE_CONTEXT` names its context explicitly, e.g. `kind-econ-graph`; the current
+context is never used. They run the kind cluster's own kubectl, chosen by
+[`scripts/qa/lib/kind-kubectl.sh`](../../scripts/qa/lib/kind-kubectl.sh) through
+`scripts/deploy/lib/kind-env.sh`, never a kubectl from `PATH`. They read databases with `psql` in
+the Postgres pods: the data database is `econ_graph` in `postgresql-0`, and each app database is
+`econ_graph_app` in its namespace's `app-postgres-0`. The primary namespace is `QA_DATA_NAMESPACE`
+(default `econ-graph`).
+
+```bash
+# Exit criterion 5, read-only:
+QA_KUBE_CONTEXT=kind-econ-graph scripts/qa/run-scenarios.sh --target https://econgraph.com \
+    --profile production --only gateway-routes-only
+
+# Exit criterion 1, against a deployed branch, as a user of the branch's realm:
+QA_LAB_TARGET_OK=my-branch.localhost QA_KUBE_CONTEXT=kind-econ-graph \
+    QA_BRANCH_NAMESPACE=<the branch's namespace> QA_USERNAME=<user> QA_PASSWORD_FILE=<file> \
+    scripts/qa/run-scenarios.sh --target http://my-branch.localhost --profile lab --only branch-isolation
+
+# Exit criterion 2, with the crawler scaled to 0 first:
+QA_LAB_TARGET_OK=my-branch.localhost QA_KUBE_CONTEXT=kind-econ-graph \
+    QA_DATA_REDEPLOY_COMMAND='scripts/deploy/deploy-branch.sh up my-branch --context kind-econ-graph ...' \
+    scripts/qa/run-scenarios.sh --target http://my-branch.localhost --profile lab --only data-survives-redeploy
+```
+
+`scripts/deploy/deploy-branch.sh list --context kind-econ-graph` shows the branch namespaces.
+For criterion 2, run `data-survives-redeploy` once per redeploy the criterion names: production,
+UAT, a branch, an app-database recreate and a kind cluster recreate.
 
 The conversion report has this shape:
 
@@ -147,7 +181,8 @@ failed scenario. The JSON report holds the same per scenario:
 The [Release E2E workflow](../../.github/workflows/release-e2e.yml) has a second matrix leg,
 `QA scenarios (ci profile)`. It sets up the same stack as the release suite and first runs the
 runner's unit tests (`python3 -m unittest discover -s scripts/qa/tests`). These tests prove the
-profile guards and run each scenario against a stub site. The leg then runs
+profile guards and run each scenario against a stub site. The cluster scenarios get a stub
+kubectl through `QA_KIND_KUBECTL_HELPER`, which only the tests set. The leg then runs
 `RELEASE_E2E_CONFIG=playwright.qa-stack.config.ts scripts/release-e2e.sh`. That command builds
 and seeds the stack as the release suite does and starts the same backend and frontend
 ([`playwright.qa-stack.config.ts`](../../frontend/playwright.qa-stack.config.ts)). It then runs
