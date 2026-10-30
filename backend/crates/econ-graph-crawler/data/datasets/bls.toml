@@ -150,7 +150,7 @@ label = "Rate or level"
 [[dataset]]
 code = "WP"
 name = "Producer Price Index - Commodity Data"
-description = "BLS PPI commodity data. Series ids are WP, seasonal (1), group (2), item (the rest, empty for a group index), for example WPSFD4 or WPU01"
+description = "BLS PPI commodity data. Series ids are WP, seasonal (1), group (2, or 3 for ID5 and ID6), item (the rest, empty for a group index), for example WPSFD4, WPSID61 or WPU01"
 
 [[dataset.dimensions]]
 name = "seasonal"

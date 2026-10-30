@@ -181,56 +181,110 @@ const DOES_NOT_EXIST: &str = "series does not exist for series ";
 /// Prefix of BLS's informational "no data" message; the series id follows it.
 const NO_DATA_FOR_SERIES: &str = "no data available for series ";
 
-/// Width of a last dimension that takes the rest of the id, which must not be empty.
-pub const REST: usize = 0;
+/// How many characters of a series id one dimension takes, in [`SERIES_ID_LAYOUTS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    /// Exactly this many.
+    Fixed(usize),
+    /// The rest of the id, which must not be empty. Only used last.
+    Rest,
+    /// The rest of the id, which may be empty: a PPI group without an item (`WPU01`) or an
+    /// import/export index without an item (`EIUIR`). Only used last.
+    RestOrEmpty,
+    /// The longest of these codes the id continues with, else `otherwise` characters: PPI's
+    /// group is two characters except for the three-character groups `ID5` and `ID6`
+    /// (`WPSID61` is group `ID6`, item `1`).
+    Longest {
+        codes: &'static [&'static str],
+        otherwise: usize,
+    },
+}
 
-/// Width of a last dimension that takes the rest of the id, which may be empty: a PPI group
-/// without an item (`WPU01`) or an import/export index without an item (`EIUIR`).
-pub const REST_OR_EMPTY: usize = usize::MAX;
+use Width::{Fixed, Longest, Rest, RestOrEmpty};
 
 /// Series id layouts of the surveys that are datasets: the two-letter prefix (also the dataset
-/// code), then each dimension's name and width in id order. [`REST`] and [`REST_OR_EMPTY`] take
-/// the rest of the id and are only used last. See <https://www.bls.gov/help/hlpforma.htm>.
-pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
+/// code), then each dimension's name and [`Width`] in id order. See
+/// <https://www.bls.gov/help/hlpforma.htm>.
+pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, Width)])] = &[
     // CPI-U: CUUR0000SA0.
     (
         "CU",
         &[
-            ("seasonal", 1),
-            ("periodicity", 1),
-            ("area", 4),
-            ("item", REST),
+            ("seasonal", Fixed(1)),
+            ("periodicity", Fixed(1)),
+            ("area", Fixed(4)),
+            ("item", Rest),
         ],
     ),
     // CES national: CES0000000001.
-    ("CE", &[("seasonal", 1), ("industry", 8), ("data_type", 2)]),
+    (
+        "CE",
+        &[
+            ("seasonal", Fixed(1)),
+            ("industry", Fixed(8)),
+            ("data_type", Fixed(2)),
+        ],
+    ),
     // CPS: LNS14000000.
-    ("LN", &[("seasonal", 1), ("series_code", 8)]),
+    ("LN", &[("seasonal", Fixed(1)), ("series_code", Fixed(8))]),
     // LAUS: LASST060000000000003.
-    ("LA", &[("seasonal", 1), ("area", 15), ("measure", 2)]),
+    (
+        "LA",
+        &[
+            ("seasonal", Fixed(1)),
+            ("area", Fixed(15)),
+            ("measure", Fixed(2)),
+        ],
+    ),
     // JOLTS: JTS000000000000000JOR.
     (
         "JT",
         &[
-            ("seasonal", 1),
-            ("industry", 6),
-            ("state", 2),
-            ("area", 5),
-            ("size_class", 2),
-            ("data_element", 2),
-            ("rate_level", 1),
+            ("seasonal", Fixed(1)),
+            ("industry", Fixed(6)),
+            ("state", Fixed(2)),
+            ("area", Fixed(5)),
+            ("size_class", Fixed(2)),
+            ("data_element", Fixed(2)),
+            ("rate_level", Fixed(1)),
         ],
     ),
-    // PPI commodity data: WPSFD4, WPU00000000, WPU01.
+    // PPI commodity data: WPSFD4, WPU00000000, WPU01, WPSID61 (group ID6).
     (
         "WP",
-        &[("seasonal", 1), ("group", 2), ("item", REST_OR_EMPTY)],
+        &[
+            ("seasonal", Fixed(1)),
+            (
+                "group",
+                Longest {
+                    codes: &["ID5", "ID6"],
+                    otherwise: 2,
+                },
+            ),
+            ("item", RestOrEmpty),
+        ],
     ),
     // Import/export price indexes: EIUIR, EIUIQ0, EIUCOCHNTOT.
     (
         "EI",
-        &[("seasonal", 1), ("index", 2), ("item", REST_OR_EMPTY)],
+        &[
+            ("seasonal", Fixed(1)),
+            ("index", Fixed(2)),
+            ("item", RestOrEmpty),
+        ],
     ),
+];
+
+/// Ids of surveys with a layout whose codes are not spelled out in the id, so the layout would
+/// split them wrongly; they go in [`OTHER_DATASET`]. BLS lists these PPI special composites under
+/// groups `PFF`, `ILF` and `IND` (`wp.series`), which their ids don't contain.
+const IDS_OUTSIDE_LAYOUTS: &[&str] = &[
+    "WPS01PLUS02",
+    "WPU01PLUS02",
+    "WPS03T15M05",
+    "WPU03T15M05",
+    "WPS03THRU15",
+    "WPU03THRU15",
 ];
 
 /// Dataset of BLS series without a layout in [`SERIES_ID_LAYOUTS`]: no dimensions, keyed by the
@@ -499,7 +553,9 @@ fn year_windows(start: i32, end: i32, span: i32) -> Vec<(i32, i32)> {
 /// [`SERIES_ID_LAYOUTS`]. `None` for a survey without a layout, an id whose length does not fit
 /// the layout, or an id with characters other than ASCII letters and digits.
 pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
-    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric())
+        || IDS_OUTSIDE_LAYOUTS.contains(&series_id)
+    {
         return None;
     }
     let prefix = series_id.get(..2)?;
@@ -508,9 +564,15 @@ pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
     let mut dimensions = Vec::with_capacity(layout.len());
     for &(name, width) in *layout {
         let width = match width {
-            REST if rest.is_empty() => return None,
-            REST | REST_OR_EMPTY => rest.len(),
-            fixed => fixed,
+            Fixed(n) => n,
+            Rest if rest.is_empty() => return None,
+            Rest | RestOrEmpty => rest.len(),
+            Longest { codes, otherwise } => codes
+                .iter()
+                .filter(|c| rest.starts_with(**c))
+                .map(|c| c.len())
+                .max()
+                .unwrap_or(otherwise),
         };
         if rest.len() < width {
             return None;
@@ -3329,6 +3391,14 @@ mod tests {
                 pairs(&[("group", "FD"), ("item", "49104"), ("seasonal", "S")])
             )
         );
+        // PPI's three-character intermediate demand groups.
+        assert_eq!(
+            dims("WPSID61"),
+            (
+                "WP".to_string(),
+                pairs(&[("group", "ID6"), ("item", "1"), ("seasonal", "S")])
+            )
+        );
         // A PPI group index has no item.
         assert_eq!(
             dims("WPU01"),
@@ -3364,12 +3434,92 @@ mod tests {
             "JTS000000000000000JO",   // one short
             "JTS000000000000000JORX", // one long
             "WPU0",                   // group cut short
+            "WPU01PLUS02",            // group PFF, not in the id
             "EIUI",                   // index cut short
             "cuur0000SA0",            // prefixes are uppercase
             "CUUR 0000SA0",
             "CUUR0000SÄ0",
         ] {
             assert_eq!(series_dataset(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Rows of a recorded series file under `tests/fixtures/bls/layouts`, as column -> value.
+    fn recorded_rows(text: &str) -> Vec<HashMap<&str, &str>> {
+        let mut lines = text.lines();
+        let header: Vec<&str> = lines.next().unwrap().split('\t').collect();
+        lines
+            .filter(|l| !l.is_empty())
+            .map(|l| header.iter().copied().zip(l.split('\t')).collect())
+            .collect()
+    }
+
+    /// The layout's dimension values of `id`, by name, or `None` if it doesn't split.
+    fn split(id: &str) -> Option<BTreeMap<String, String>> {
+        series_dataset(id).map(|d| d.dimensions.0)
+    }
+
+    /// Every series BLS lists in `jt.series`, `wp.series` and `ei.series` splits into the codes
+    /// the file gives it, except the PPI ids in [`IDS_OUTSIDE_LAYOUTS`], which don't split.
+    #[test]
+    fn layouts_reproduce_the_series_files_codes() {
+        let jt = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/jt.series"));
+        assert_eq!(jt.len(), 2060);
+        for row in &jt {
+            let id = row["series_id"];
+            let want: BTreeMap<String, String> = [
+                ("seasonal", "seasonal"),
+                ("industry", "industry_code"),
+                ("state", "state_code"),
+                ("area", "area_code"),
+                ("size_class", "sizeclass_code"),
+                ("data_element", "dataelement_code"),
+                ("rate_level", "ratelevel_code"),
+            ]
+            .iter()
+            .map(|(dim, col)| (dim.to_string(), row[col].to_string()))
+            .collect();
+            assert_eq!(split(id), Some(want), "{id}");
+        }
+
+        let wp = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/wp.series"));
+        assert_eq!(wp.len(), 5312);
+        let mut matched = 0;
+        let mut outside = 0;
+        for row in &wp {
+            let id = row["series_id"];
+            if IDS_OUTSIDE_LAYOUTS.contains(&id) {
+                assert_eq!(split(id), None, "{id}");
+                outside += 1;
+                continue;
+            }
+            // `-` is the file's item for a group index, whose id has no item.
+            let item = match row["item_code"] {
+                "-" => "",
+                item => item,
+            };
+            let want = BTreeMap::from([
+                ("seasonal".to_string(), row["seasonal"].to_string()),
+                ("group".to_string(), row["group_code"].to_string()),
+                ("item".to_string(), item.to_string()),
+            ]);
+            assert_eq!(split(id), Some(want), "{id}");
+            matched += 1;
+        }
+        assert_eq!((matched, outside), (5306, 6));
+
+        let ei = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/ei.series"));
+        assert_eq!(ei.len(), 1593);
+        for row in &ei {
+            let id = row["series_id"];
+            // ei.series has no item column: the item is the rest of the id.
+            let dims = split(id).unwrap_or_else(|| panic!("{id} doesn't split"));
+            assert_eq!(dims["seasonal"], row["seasonal"], "{id}");
+            assert_eq!(dims["index"], row["index_code"], "{id}");
+            assert_eq!(
+                format!("EI{}{}{}", dims["seasonal"], dims["index"], dims["item"]),
+                id
+            );
         }
     }
 
@@ -3417,12 +3567,12 @@ mod tests {
                     .iter()
                     .rev()
                     .skip(1)
-                    .all(|(_, w)| ![REST, REST_OR_EMPTY].contains(w)),
+                    .all(|(_, w)| !matches!(w, Rest | RestOrEmpty)),
                 "{code}: only the last dimension may take the rest"
             );
             // Labelled codes have their field's width, so a mistyped key cannot hide.
             for (&(name, width), dim) in layout.iter().zip(&def.dimensions) {
-                if ![REST, REST_OR_EMPTY].contains(&width) {
+                if let Fixed(width) = width {
                     for c in dim.codes.iter().flatten() {
                         assert_eq!(c.code.len(), width, "{code}.{name}: code {:?}", c.code);
                     }
