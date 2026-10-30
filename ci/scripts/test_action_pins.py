@@ -92,11 +92,27 @@ class ActionPinsTest(unittest.TestCase):
             f"  - uses: owner/repo@{sha}  # v2",
             "  - uses: ./.github/actions/local",
             f"# - uses: owner/repo@{sha}",
+            f"  - uses: owner/repo@{sha} # TODO",
+            f"  - uses: owner/repo@{sha} # 1.99.1",
         ]
         errors = check_version_comments("\n".join(lines), "fixture")
-        self.assertEqual(len(errors), 2)
+        self.assertEqual(len(errors), 3)
         self.assertIn("fixture:3:", errors[0])
         self.assertIn("fixture:4:", errors[1])
+        self.assertIn("fixture:8:", errors[2])
+
+    def test_pinned_references_must_be_block_style_lines(self):
+        """A flow mapping or folded scalar hides the comment from the line check."""
+        sha = "a" * 40
+        for text in (
+            f"steps:\n  - {{uses: owner/repo@{sha}}} # v1\n",
+            f"steps:\n  - uses: >-\n      owner/repo@{sha}\n",
+        ):
+            with self.subTest(text=text):
+                errors = check_version_comments(text, "fixture", yaml.safe_load(text))
+                self.assertTrue(any("block-style" in error for error in errors), errors)
+        text = f"steps:\n  - uses: owner/repo@{sha} # v1\n"
+        self.assertEqual(check_version_comments(text, "fixture", yaml.safe_load(text)), [])
 
 
 if __name__ == "__main__":
