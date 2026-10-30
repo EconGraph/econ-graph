@@ -295,15 +295,20 @@ data:
 
         # A selection rule that matches nothing (a renamed table or release, a retitled family)
         # selects no series while the other rules keep discovery succeeding, so the rule's
-        # series would age out silently. Same process-local gauge handling as above.
+        # series would age out silently. Same process-local gauge handling as above. Editing a
+        # rule changes its label, and the old label's last zero would linger for 8 days, so
+        # alert only while a worker still reports the rule as configured.
         - alert: CrawlerCatalogRuleMatchesNothing
-          expr: last_over_time((min by (source, rule) (crawler_catalog_rule_matches{kubernetes_namespace="econ-graph"}))[8d:5m]) == 0
+          expr: |
+            last_over_time((min by (source, rule) (crawler_catalog_rule_matches{kubernetes_namespace="econ-graph"}))[8d:5m]) == 0
+            and on (source, rule)
+            max by (source, rule) (max_over_time(crawler_catalog_rule_configured{kubernetes_namespace="econ-graph"}[15m]))
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: '{{ $labels.source }} selection rule {{ $labels.rule }} matches nothing upstream'
-            description: The last {{ $labels.source }} discovery found no catalog entries for selection rule {{ $labels.rule }} (position:catalog in data/catalog_selection/). Its previously selected series will be counted as absent; check whether upstream renamed the table or release and update the rule.
+            description: The last {{ $labels.source }} discovery found no catalog entries for selection rule {{ $labels.rule }} (position:catalog in data/catalog_selection/). Its previously selected series may be counted as absent; check whether upstream renamed the table or release and update the rule.
 
         # Tracked series that upstream still lists but the rules no longer select (for example a
         # FRED series retitled out of a title rule). They stay published and scheduled.

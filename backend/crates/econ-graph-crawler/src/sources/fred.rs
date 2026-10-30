@@ -142,6 +142,17 @@ pub fn validate_catalog_rules() -> Result<(), CrawlError> {
     load_catalog_rules().map(|_| ())
 }
 
+/// Metric labels of the configured selection rules (see `crawler_catalog_rule_matches`).
+pub fn configured_rule_labels() -> Result<Vec<String>, CrawlError> {
+    let rules = load_catalog_rules()?;
+    Ok(rules
+        .rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| rule.label(index))
+        .collect())
+}
+
 fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
     let path = data_dir().join(CATALOG_RULES_FILE);
     let text = std::fs::read_to_string(&path)

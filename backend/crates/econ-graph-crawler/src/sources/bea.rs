@@ -60,10 +60,12 @@
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
 //! history is still one modest request. A requested series with no rows in an otherwise
-//! successful response is `Permanent`, not `NotFound`: a response that omits one line or area
-//! is weak evidence, so it records no publication lifecycle evidence, and it isn't retried
-//! (each retry would request the whole table again). The scheduler tries the series again after
-//! its failure backoff, and complete catalog discovery decides whether it was removed.
+//! successful response is `Absent`, not `NotFound`: a response that omits one line or area
+//! is weaker evidence than an explicit "does not exist", and it isn't retried (each retry
+//! would request the whole table again). The scheduler tries the series again after its
+//! failure backoff. Complete catalog discovery decides whether a selected series was removed;
+//! for a series outside the selection rules, six consecutive `Absent` results retire it from
+//! fetching (see [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
 //!
 //! `DataValue` has thousands separators and is scaled by `10^UNIT_MULT`, so values are in base
 //! units (dollars, not millions of dollars). Units come from `CL_UNIT`, or `METRIC_NAME` when
@@ -799,8 +801,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_line.get(line.as_str()) {
-                // Partial response: not NotFound (see the module docs).
-                None => Err(CrawlError::Permanent(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
@@ -882,8 +884,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_geo.get(geo.as_str()) {
-                // Partial response: not NotFound (see the module docs).
-                None => Err(CrawlError::Permanent(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
                 Some(rows) => regional_series(
@@ -2366,10 +2368,10 @@ mod tests {
             "Personal consumption expenditures (GDP, current dollars, quarterly)"
         );
         assert_eq!(out["bea_nipa/T10105.1.Q"].as_ref().unwrap().points.len(), 4);
-        // A line the response omits is a partial result, not lifecycle NotFound evidence.
+        // A line the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_nipa/T10105.99.Q"].as_ref().unwrap_err().kind(),
-            "permanent"
+            "absent"
         );
         mock.server().verify().await;
     }
@@ -2420,13 +2422,13 @@ mod tests {
         let wy = out["bea_regional/SAGDP2.1.56000"].as_ref().unwrap();
         assert_eq!(wy.points.len(), 1);
         assert_eq!(wy.points[0].value, None);
-        // An area the response omits is a partial result, not lifecycle NotFound evidence.
+        // An area the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_regional/SAGDP2.1.72000"]
                 .as_ref()
                 .unwrap_err()
                 .kind(),
-            "permanent"
+            "absent"
         );
         mock.server().verify().await;
     }

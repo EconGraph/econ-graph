@@ -92,6 +92,12 @@ tests:
     values: 1x70
   - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph-branch",pod="b1",source="BEA",rule="1:NIPA:T10105"}
     values: 0x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 1x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="0:NIPA:T10101"}
+    values: 1x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph-branch",pod="b1",source="BEA",rule="1:NIPA:T10105"}
+    values: 1x70
   alert_rule_test:
   - eval_time: 10m
     alertname: CrawlerCatalogRuleMatchesNothing
@@ -107,8 +113,37 @@ tests:
         summary: BEA selection rule 6:Regional:SAGDP2 matches nothing upstream
         description: The last BEA discovery found no catalog entries for selection
           rule 6:Regional:SAGDP2 (position:catalog in data/catalog_selection/). Its
-          previously selected series will be counted as absent; check whether upstream
+          previously selected series may be counted as absent; check whether upstream
           renamed the table or release and update the rule.
+# Fixing the rule renames its label. The old label's last zero lingers in last_over_time,
+# but the alert clears once the restarted worker no longer reports that rule as configured.
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 0x30
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 1x30
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w2",source="BEA",rule="6:Regional:SAGDP2N"}
+    values: _x30 3x60
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w2",source="BEA",rule="6:Regional:SAGDP2N"}
+    values: _x30 1x60
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        rule: 6:Regional:SAGDP2
+      exp_annotations:
+        summary: BEA selection rule 6:Regional:SAGDP2 matches nothing upstream
+        description: The last BEA discovery found no catalog entries for selection
+          rule 6:Regional:SAGDP2 (position:catalog in data/catalog_selection/). Its
+          previously selected series may be counted as absent; check whether upstream
+          renamed the table or release and update the rule.
+  - eval_time: 80m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts: []
 - interval: 1m
   input_series:
   - series: crawler_catalog_unselected_series{kubernetes_namespace="econ-graph",pod="w1",source="FRED"}

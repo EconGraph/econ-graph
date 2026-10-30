@@ -91,7 +91,10 @@ entries each rule matched; `rule` is the rule's position in its file and the cat
 (`6:Regional:SAGDP2`, `0:release:53`). A rule that matches nothing logs a warning and raises
 `CrawlerCatalogRuleMatchesNothing`, even when the other rules keep discovery succeeding. That
 usually means upstream renamed the table or release: the rule's previously selected series
-will start counting as absent, so update the rule.
+may start counting as absent, so update the rule. Each worker also publishes
+`crawler_catalog_rule_configured{source,rule}` for the rules it loaded at startup, and the
+alert fires only while a worker still reports the rule as configured; after a rule is edited
+and the workers restart, the old rule's label stops alerting within 15 minutes.
 
 One atomic data migration creates `series_lifecycle` (including fetch evidence),
 `catalog_lifecycle_scopes`, and `catalog_reference_snapshots`. Apply it with `crawler migrate`
@@ -101,6 +104,10 @@ supply none, and a rule change resets the comparison scope. Three consecutive su
 absences confirm a missing series. A snapshot that drops more than 20% of the series listed
 by the last accepted catalog of the same rules, or an empty snapshot, is guarded rather than
 treated as removal (see [Reviewing a guarded catalog](#reviewing-a-guarded-catalog)).
+The guard compares each snapshot only with the previous accepted one, so a catalog that
+shrinks by less than 20% per refresh is never guarded, however far it shrinks in total.
+This is deliberate: it lets normal gradual retirements through without operator review, and
+the three-absence rule still applies to every series.
 On first adoption, retained BEA histories that match the configured rules establish a
 baseline without counting absence. Members already absent at that baseline were never
 listed by an accepted catalog, so they do not count toward the 20%; three subsequent
@@ -111,13 +118,19 @@ upstream still lists but the rules no longer select (for example a FRED series r
 of a `title_contains` rule, or a BEA table retitled out of a title rule) keeps its
 publication state and stays scheduled. The worker logs a warning, publishes
 `crawler_catalog_unselected_series{source}`, and `CrawlerCatalogSeriesUnselected` (info)
-suggests reviewing the rules.
+suggests reviewing the rules. That gauge changes only when a complete catalog snapshot is
+reconciled; between discoveries it keeps the last snapshot's count.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
 by a successful fetch. Only definite answers count: a FRED 400 "series does not exist" or an
-HTTP 404. A BEA response that omits one requested line or area, or a FRED `/series` response
-with no series, is a failed fetch, not NotFound evidence. Three in a row retire a series; the scheduler still probes it once
-every 12 refresh intervals (a series with no stored history: at most once per queue
-retention), and a successful probe makes it active again. Per-series writers (fetch success,
+HTTP 404. Three in a row retire a series from fetching. A BEA response that successfully
+returns the whole table but omits one requested line or area is weaker evidence with its own
+counter: six in a row retire the series from fetching. This lets lines under tables the rules
+no longer select, and legacy BEA rows outside the rules, stop being fetched on every refresh.
+A FRED `/series` response with no series is a failed fetch and counts as neither. The
+scheduler still probes a fetch-retired series once every 12 refresh intervals (a series with
+no stored history: at most once per queue retention), and a successful probe makes it active
+again. A complete catalog that lists the series again also makes it active and restarts both
+counters. Per-series writers (fetch success,
 NotFound, restriction) serialize only on the same series, so normal fetches and forced
 refetches of one series cannot race while different series persist concurrently; a complete
 catalog reconciliation briefly excludes them for its source. Fetch success never erases
@@ -159,12 +172,16 @@ accepts it. Against the data database, list the series the snapshot would count 
 crawler accept-guarded-catalog --source BEA
 ```
 
-Check those ids upstream (a table rename, a removed release, or an incomplete response). If
-the snapshot is right, apply it:
+The output starts with the time the snapshot was guarded. Check the listed ids upstream (a
+table rename, a removed release, or an incomplete response). If the snapshot is right, apply
+it, passing that time exactly as printed:
 
 ```sh
-crawler accept-guarded-catalog --source BEA --accept
+crawler accept-guarded-catalog --source BEA --accept --guarded-at 2026-10-30T18:02:15.123456+00:00
 ```
+
+If a newer snapshot was guarded after your review, the command refuses and nothing changes;
+review the new one instead.
 
 Accepting records one absence for each listed series, exactly as an unguarded catalog would,
 and makes the snapshot the new comparison baseline. Two further complete catalogs are still

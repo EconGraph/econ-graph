@@ -9,6 +9,8 @@ CREATE TABLE series_lifecycle (
     missing_refreshes INTEGER NOT NULL DEFAULT 0 CHECK (missing_refreshes >= 0),
     -- Successful history fetches reset fetch misses independently of catalog absence.
     fetch_not_found_count INTEGER NOT NULL DEFAULT 0 CHECK (fetch_not_found_count >= 0),
+    -- Consecutive complete whole-table responses that omitted the series: weaker evidence.
+    fetch_absent_count INTEGER NOT NULL DEFAULT 0 CHECK (fetch_absent_count >= 0),
     fetch_retired BOOLEAN NOT NULL DEFAULT FALSE,
     last_seen_at TIMESTAMPTZ,
     proposed_successor_id UUID,
@@ -33,7 +35,7 @@ CREATE TABLE catalog_lifecycle_scopes (
 COMMENT ON COLUMN series_lifecycle.successor_id IS
     'Human-confirmed successor only; no observation histories are merged.';
 COMMENT ON COLUMN series_lifecycle.fetch_retired IS
-    'Retired solely by consecutive fetch NotFound results; a successful fetch may recover it. Catalog, legal and human-confirmed publication states remain authoritative.';
+    'Retired solely by consecutive fetch NotFound (or omitted-from-response) results; a successful fetch may recover it. Catalog, legal and human-confirmed publication states remain authoritative.';
 
 -- Exact, immutable membership snapshots. Dataset labels intentionally keep historical codes;
 -- a conditional GET must not mistake those accumulated labels for the current upstream list.

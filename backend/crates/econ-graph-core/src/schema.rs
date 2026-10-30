@@ -719,6 +719,7 @@ diesel::table! {
         since -> Nullable<Timestamptz>,
         missing_refreshes -> Int4,
         fetch_not_found_count -> Int4,
+        fetch_absent_count -> Int4,
         fetch_retired -> Bool,
         last_seen_at -> Nullable<Timestamptz>,
         proposed_successor_id -> Nullable<Uuid>,

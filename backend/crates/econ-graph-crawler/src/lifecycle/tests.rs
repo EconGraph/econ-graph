@@ -1224,7 +1224,7 @@ async fn operator_accepts_a_reviewed_guarded_catalog() {
     let facts = CatalogLifecycle::default();
     let start = Utc::now();
     assert!(!reconcile_at(pool, &all, &facts, start).await.guarded);
-    let err = review_guarded_catalog(pool, SourceId::Fred, false)
+    let err = review_guarded_catalog(pool, SourceId::Fred, None)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("no guarded catalog snapshot"));
@@ -1234,9 +1234,23 @@ async fn operator_accepts_a_reviewed_guarded_catalog() {
     assert!(guarded.guarded);
     assert!(guarded_snapshot_pending(pool).await);
 
-    let review = review_guarded_catalog(pool, SourceId::Fred, false)
+    let first = review_guarded_catalog(pool, SourceId::Fred, None)
         .await
         .unwrap();
+    // A newer guarded snapshot replaces the reviewed one; accepting the old review refuses.
+    assert!(
+        reconcile_at(pool, half, &facts, start + chrono::Duration::seconds(2))
+            .await
+            .guarded
+    );
+    let err = review_guarded_catalog(pool, SourceId::Fred, Some(first.guarded_at))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("review it again"), "{err}");
+    let review = review_guarded_catalog(pool, SourceId::Fred, None)
+        .await
+        .unwrap();
+    assert!(review.guarded_at > first.guarded_at);
     assert_eq!((review.listed, review.previously_listed), (5, 10));
     assert_eq!(
         review.newly_missing,
@@ -1245,7 +1259,7 @@ async fn operator_accepts_a_reviewed_guarded_catalog() {
     assert_eq!(fetch_evidence(pool, "s9").await.catalog_misses, 0);
     assert!(guarded_snapshot_pending(pool).await);
 
-    let accepted = review_guarded_catalog(pool, SourceId::Fred, true)
+    let accepted = review_guarded_catalog(pool, SourceId::Fred, Some(review.guarded_at))
         .await
         .unwrap();
     assert_eq!(accepted.newly_missing.len(), 5);
@@ -1257,7 +1271,7 @@ async fn operator_accepts_a_reviewed_guarded_catalog() {
 
     // The accepted snapshot is the new baseline: the same catalog is no longer guarded,
     // and the absent series need two more accepted absences.
-    for run in 2..=3 {
+    for run in 3..=4 {
         let next = reconcile_at(pool, half, &facts, start + chrono::Duration::seconds(run)).await;
         assert!(!next.guarded);
     }
@@ -1459,5 +1473,220 @@ async fn rule_drift_is_counted_for_review_and_keeps_publication_state() {
         let e = fetch_evidence(pool, "GDP_0").await;
         assert_eq!((e.status.as_str(), e.catalog_misses), ("active", 0));
     }
+    db.drop().await;
+}
+
+/// The set-based proposal query returns what the former per-series query returned: only a
+/// unique listed, public match on normalized title and frequency.
+#[tokio::test]
+async fn successor_proposals_match_the_per_series_query() {
+    let Some(db) = fetch_counter_db("eco464_successor_set").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let titled = |id: &str, title: &str, frequency: &str| DiscoveredSeries {
+        title: title.into(),
+        frequency: Some(frequency.into()),
+        ..counter_series(id)
+    };
+    persist::persist_discovered(
+        pool,
+        SourceId::Fred,
+        &[
+            titled("old_unique", "Gross output", "Annual"),
+            titled("new_unique", "  gross OUTPUT ", "Annual"),
+            titled("old_dup", "Twice", "Annual"),
+            titled("new_dup1", "Twice", "Annual"),
+            titled("new_dup2", "twice", "Annual"),
+            titled("old_restricted", "Hidden", "Annual"),
+            titled("new_restricted", "Hidden", "Annual"),
+            titled("old_freq", "Rate", "Annual"),
+            titled("new_freq", "Rate", "Monthly"),
+            titled("old_unlisted", "Elsewhere", "Annual"),
+            titled("new_unlisted", "Elsewhere", "Annual"),
+        ],
+    )
+    .await
+    .unwrap();
+    // The stored history's id wins over the metadata id when both exist.
+    persist::persist_series(pool, SourceId::Fred, "new_unique", &successful_history())
+        .await
+        .unwrap();
+    let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,scope_fingerprint) VALUES($1,'new_restricted','restricted','fetch-only')")
+        .bind::<SqlUuid,_>(source_id).execute(&mut conn).await.unwrap();
+    let ended: Vec<String> = [
+        "old_unique",
+        "old_dup",
+        "old_restricted",
+        "old_freq",
+        "old_unlisted",
+    ]
+    .map(String::from)
+    .to_vec();
+    let listed: Vec<String> = [
+        "new_unique",
+        "new_dup1",
+        "new_dup2",
+        "new_restricted",
+        "new_freq",
+    ]
+    .map(String::from)
+    .to_vec();
+    let proposals = successor_proposals(&mut conn, source_id, &ended, &listed)
+        .await
+        .unwrap();
+    let mut per_series = BTreeMap::new();
+    for id in &ended {
+        let candidates: Vec<Uuid> = diesel::sql_query(
+            "SELECT DISTINCT COALESCE(es.id,sm.id) AS id FROM series_metadata old \
+             JOIN series_metadata sm ON sm.source_id=old.source_id \
+                AND lower(trim(sm.title))=lower(trim(old.title)) \
+                AND sm.frequency IS NOT DISTINCT FROM old.frequency \
+             LEFT JOIN economic_series es ON es.source_id=sm.source_id AND es.external_id=sm.external_id \
+             WHERE old.source_id=$1 AND old.external_id=$2 AND sm.external_id<>$2 \
+               AND sm.external_id = ANY($3) AND NOT EXISTS (SELECT 1 FROM series_lifecycle candidate \
+                   WHERE candidate.source_id=sm.source_id AND candidate.external_id=sm.external_id \
+                     AND candidate.status IN ('restricted','superseded')) ORDER BY id LIMIT 2",
+        )
+        .bind::<SqlUuid, _>(source_id)
+        .bind::<Text, _>(id)
+        .bind::<diesel::sql_types::Array<Text>, _>(&listed)
+        .load::<Id>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+        if candidates.len() == 1 {
+            per_series.insert(id.clone(), candidates[0]);
+        }
+    }
+    assert_eq!(proposals, per_series);
+    assert_eq!(
+        proposals.keys().collect::<Vec<_>>(),
+        vec!["old_unique"],
+        "only the unique, public, same-frequency listed match is proposed"
+    );
+    let stored = persist::find_series_id_conn(&mut conn, SourceId::Fred, "new_unique")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(proposals["old_unique"], stored);
+    drop(conn);
+    db.drop().await;
+}
+
+async fn absent_miss(pool: &DatabasePool, id: &str) {
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<(), AppError, _>(async |conn| {
+        record_absent_conn(conn, SourceId::Fred, id).await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+#[derive(QueryableByName)]
+struct AbsentCount {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    n: i32,
+}
+
+async fn absent_count(pool: &DatabasePool, id: &str) -> i32 {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("SELECT fetch_absent_count AS n FROM series_lifecycle WHERE external_id=$1")
+        .bind::<Text, _>(id)
+        .get_result::<AbsentCount>(&mut conn)
+        .await
+        .unwrap()
+        .n
+}
+
+/// A line missing from complete whole-table responses (for example under a table the rules
+/// no longer select) is weaker evidence: six in a row retire it from fetching, it never
+/// touches the NotFound counter, and a later success recovers it.
+#[tokio::test]
+async fn omitted_lines_fetch_retire_only_after_six_responses() {
+    let Some(db) = fetch_counter_db("eco464_absent_lines").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let id = "outside_rules";
+    persist::persist_discovered(pool, SourceId::Fred, &[counter_series(id)])
+        .await
+        .unwrap();
+    for _ in 0..5 {
+        absent_miss(pool, id).await;
+    }
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (
+            state.status.as_str(),
+            state.fetch_misses,
+            state.fetch_retired
+        ),
+        ("active", 0, false)
+    );
+    assert_eq!(absent_count(pool, id).await, 5);
+    absent_miss(pool, id).await;
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (state.status.as_str(), state.fetch_retired),
+        ("retired", true)
+    );
+    persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+        .await
+        .unwrap();
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (state.status.as_str(), state.fetch_retired),
+        ("active", false)
+    );
+    assert_eq!(absent_count(pool, id).await, 0);
+    db.drop().await;
+}
+
+/// When a catalog lists a fetch-retired series again, its fetch evidence restarts, so one
+/// later NotFound does not retire it straight away.
+#[tokio::test]
+async fn catalog_reactivation_resets_fetch_miss_counters() {
+    let Some(db) = fetch_counter_db("eco464_catalog_reactivates").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let id = "comes_back";
+    let listed = vec![counter_series(id)];
+    persist::persist_discovered(pool, SourceId::Fred, &listed)
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        fetch_miss(pool, id).await;
+    }
+    absent_miss(pool, id).await;
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (
+            state.status.as_str(),
+            state.fetch_retired,
+            state.fetch_misses
+        ),
+        ("retired", true, 3)
+    );
+    reconcile_at(pool, &listed, &CatalogLifecycle::default(), Utc::now()).await;
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!(
+        (
+            state.status.as_str(),
+            state.fetch_retired,
+            state.fetch_misses
+        ),
+        ("active", false, 0)
+    );
+    assert_eq!(absent_count(pool, id).await, 0);
+    fetch_miss(pool, id).await;
+    let state = fetch_evidence(pool, id).await;
+    assert_eq!((state.status.as_str(), state.fetch_misses), ("active", 1));
     db.drop().await;
 }

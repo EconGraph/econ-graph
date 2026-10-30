@@ -21,7 +21,7 @@
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
 //! crawler migrate  [--dry-run]   # apply the data migrations
 //! crawler confirm-successor --source FRED --series OLD --successor NEW
-//! crawler accept-guarded-catalog --source BEA [--accept]
+//! crawler accept-guarded-catalog --source BEA [--accept --guarded-at TIME]
 //! ```
 //!
 //! `migrate` applies the data migrations (`backend/migrations/data`) to the data database. No
@@ -93,8 +93,12 @@ pub enum Command {
         #[arg(long)]
         source: SourceId,
         /// Apply the snapshot after reviewing it. Without this flag nothing is written.
-        #[arg(long)]
+        #[arg(long, requires = "guarded_at")]
         accept: bool,
+        /// The guarded-at time the review printed (RFC 3339). Accepting refuses a different,
+        /// newer snapshot.
+        #[arg(long)]
+        guarded_at: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// Confirm a replacement series after reviewing its meaning and units. Records a link;
     /// never merges observations, deletes a series, or moves annotations.
@@ -521,8 +525,13 @@ impl Cli {
                     "confirmed successor for {source} {series}: {successor}; histories unchanged\n"
                 ))
             }
-            Command::AcceptGuardedCatalog { source, accept } => {
-                let review = crate::lifecycle::review_guarded_catalog(&pool, source, accept)
+            Command::AcceptGuardedCatalog {
+                source,
+                accept,
+                guarded_at,
+            } => {
+                let reviewed = if accept { guarded_at } else { None };
+                let review = crate::lifecycle::review_guarded_catalog(&pool, source, reviewed)
                     .await
                     .context("reviewing the guarded catalog snapshot")?;
                 Ok(format_guarded_review(source, &review, accept))
@@ -557,7 +566,11 @@ fn format_guarded_review(
             review.transitions
         );
     } else {
-        out.push_str("nothing written; rerun with --accept to apply this snapshot\n");
+        let _ = writeln!(
+            out,
+            "nothing written; to apply this snapshot: crawler accept-guarded-catalog --source {source} --accept --guarded-at {}",
+            review.guarded_at.to_rfc3339()
+        );
     }
     out
 }
@@ -998,16 +1011,26 @@ mod tests {
                 .command,
             Command::AcceptGuardedCatalog {
                 source: SourceId::Bea,
-                accept: false
+                accept: false,
+                guarded_at: None
             }
         );
+        assert!(parse(&["accept-guarded-catalog", "--source", "BEA", "--accept"]).is_err());
         assert_eq!(
-            parse(&["accept-guarded-catalog", "--source", "BEA", "--accept"])
-                .unwrap()
-                .command,
+            parse(&[
+                "accept-guarded-catalog",
+                "--source",
+                "BEA",
+                "--accept",
+                "--guarded-at",
+                "2026-10-30T18:02:15.123456+00:00"
+            ])
+            .unwrap()
+            .command,
             Command::AcceptGuardedCatalog {
                 source: SourceId::Bea,
-                accept: true
+                accept: true,
+                guarded_at: Some("2026-10-30T18:02:15.123456Z".parse().unwrap())
             }
         );
         assert!(parse(&["accept-guarded-catalog"]).is_err());

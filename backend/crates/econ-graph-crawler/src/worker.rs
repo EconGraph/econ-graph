@@ -1062,12 +1062,16 @@ impl Worker {
             .registry
             .get(source)
             .is_some_and(|a| a.tracks_catalog_lifecycle());
-        if let Err(e) = result
-            && e.kind() == "not_found"
-            && tracks_lifecycle
-            && let Some(status) =
+        let fetch_miss = match result {
+            Err(CrawlError::NotFound(_)) if tracks_lifecycle => {
                 crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
-        {
+            }
+            Err(CrawlError::Absent(_)) if tracks_lifecycle => {
+                crate::lifecycle::record_absent_conn(conn, source, &item.series_id).await?
+            }
+            _ => None,
+        };
+        if let Some(status) = fetch_miss {
             pending_metrics
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -1166,6 +1170,7 @@ impl Worker {
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
             CrawlError::Busy { retry_after, .. } => Some((*retry_after, false)),
             CrawlError::NotFound(_)
+            | CrawlError::Absent(_)
             | CrawlError::Restricted(_)
             | CrawlError::Auth(_)
             | CrawlError::Parse(_)

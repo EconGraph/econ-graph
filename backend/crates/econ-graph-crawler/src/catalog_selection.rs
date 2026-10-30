@@ -76,6 +76,15 @@ impl BeaSelection {
         Ok(rules)
     }
 
+    /// Bounded metric label per rule: its position, dataset and table prefix.
+    pub fn rule_labels(&self) -> Vec<String> {
+        self.rule
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| format!("{index}:{}:{}", rule.dataset, rule.prefix))
+            .collect()
+    }
+
     /// Stable selection scope; changing operational limits preserves absence evidence.
     pub fn fingerprint(&self) -> String {
         let digest = Sha256::digest(serde_json::to_vec(self).expect("serializable selection"));
@@ -90,6 +99,7 @@ impl BeaSelection {
     ) -> Result<Vec<BeaTable>, CrawlError> {
         let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
         let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
+        let labels = self.rule_labels();
         for (index, rule) in self.rule.iter().enumerate() {
             let dataset = if rule.dataset == "NIPA" {
                 BeaDataset::Nipa
@@ -106,11 +116,7 @@ impl BeaSelection {
                 .iter()
                 .filter(|(name, title)| rule.matches_table(name, title, &excluded))
                 .count();
-            record_rule_matches(
-                "BEA",
-                &format!("{index}:{}:{}", rule.dataset, rule.prefix),
-                matched,
-            );
+            record_rule_matches("BEA", &labels[index], matched);
             for (name, title) in catalog {
                 if !rule.matches_table(name, title, &excluded) {
                     continue;
@@ -208,6 +214,17 @@ pub(crate) fn record_rule_matches(source: &str, rule: &str, matched: usize) {
             "catalog selection rule matched nothing in the current upstream catalog; \
              review data/catalog_selection/"
         );
+    }
+}
+
+/// Publish `crawler_catalog_rule_configured` for every rule the worker loaded, so alerts on
+/// `crawler_catalog_rule_matches` ignore rules that were since edited or removed.
+pub fn publish_configured_rules(source: &str, labels: &[String]) {
+    for label in labels {
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_configured
+            .with_label_values(&[source, label])
+            .set(1);
     }
 }
 

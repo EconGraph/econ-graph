@@ -44,8 +44,8 @@
 //!    denominator).
 //!
 //!    A series with a publication state other than active (see [`lifecycle`](crate::lifecycle))
-//!    is not a candidate, except one retired solely by consecutive fetch NotFound results
-//!    (`series_lifecycle.fetch_retired`). That series is probed once
+//!    is not a candidate, except one retired solely by consecutive fetch results (NotFound, or
+//!    a BEA line omitted from the response; `series_lifecycle.fetch_retired`). That series is probed once
 //!    [`FETCH_RETIRED_PROBE_FACTOR`] intervals after its last attempt (a discovered series
 //!    without an `economic_series` row uses its last failed queue row, so at most the queue
 //!    retention), and a successful probe makes it active again.
@@ -107,7 +107,7 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
 /// Default maximum `fetch_series` jobs enqueued per tick.
 pub const DEFAULT_BATCH_LIMIT: i64 = 500;
 
-/// A series retired only by consecutive fetch NotFound results is still probed, once per this
+/// A series retired only by consecutive fetch NotFound (or omitted-line) results is still probed, once per this
 /// many refresh intervals, so a later successful fetch can reactivate it.
 pub const FETCH_RETIRED_PROBE_FACTOR: i64 = 12;
 
