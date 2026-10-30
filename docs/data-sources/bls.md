@@ -11,24 +11,33 @@ For historical API experiments, see [BLS API experimental findings](../technical
 The [curated list](../../backend/crates/econ-graph-crawler/data/bls_series.csv) selects
 291 series: headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN),
 and LAUS state unemployment rates and labor force (LA) for the states and DC. BLS's
-survey series files (`cu.series`, `ce.series`, `la.series` and `ln.series`, under
-`https://download.bls.gov/pub/time.series/`) supply each series' title (`series_title`)
-and frequency (from its latest period, `end_period`). Units come from CPI's `base_period`
-(such as "Index 1982-84=100"), the CE data type label in `ce.datatype`, or the LA measure
-label. LN's flat files provide no units; LN units come only from an API fetch with a key.
+survey series files (`cu.series`, `ce.series`, `la.series`, `ln.series`, `jt.series`,
+`wp.series` and `ei.series`, under `https://download.bls.gov/pub/time.series/`) supply each
+series' title (`series_title`) and frequency (from its latest period, `end_period`).
+`jt.series` has no title column, so a JOLTS (JT) series' title joins BLS's labels of its
+codes, in this order: data element, rate or level, industry, state, area, size class and
+seasonal adjustment (for example "Job openings, Rate, Total nonfarm, Total US, All areas,
+All size classes, Seasonally adjusted"). A fetch with a key replaces it with the API
+catalog's title. Units come from the `base_period` of CPI (such as "Index 1982-84=100") or
+of import/export prices (EI, such as "Index 2000=100"), the CE data type label in
+`ce.datatype`, the LA measure label, or the JT rate/level label in `jt.ratelevel` ("Rate"
+or "Level - In Thousands"). LN's and PPI's (WP) flat files provide no unit wording; their
+units come only from an API fetch with a key.
 
 Before discovery, the worker runs the adapter's reference refresh. The shared
 `reference_file::refresh` mechanism uses conditional GETs (`ETag` or `Last-Modified`)
 and an unchanged-body hash check to avoid reapplying unchanged files. It caches the
-curated series' rows in `reference_file_cache.payload`. The refresh also derives LN's
+curated series' rows in `reference_file_cache.payload`. It also refreshes the code label
+files of CU, CE, LA, JT, WP and EI, which name dimension values and supply JT titles and
+units. The refresh also derives LN's
 `series_code` labels from `ln.series`. Seed migrations supply code lists, but neither
 these series rows nor LN labels, so a new database needs a successful refresh before
 it can list the curated series.
 
 The adapter's discovery method reads the cached rows without making an API request;
 the worker persists the discovered descriptions in `series_metadata`. A curated ID
-whose survey file has not loaded, or that the file does not list, is omitted from that
-discovery with a warning. If no curated series has a cached row, discovery returns a
+whose survey file has not loaded, or that the file does not list, or (JT) one of whose
+codes has no stored label, is omitted from that discovery with a warning. If no curated series has a cached row, discovery returns a
 transient error. The scheduler enqueues the first observation fetch for newly listed
 series; no manual `crawler enqueue` is needed.
 
@@ -140,7 +149,8 @@ for some surveys.
 ## Dataset mapping
 
 Each survey with a known ID layout has its own dataset: CU (CPI-U), CE (CES national),
-LN (CPS) and LA (LAUS). The layouts are in `SERIES_ID_LAYOUTS` in the adapter, and the
+LN (CPS), LA (LAUS), JT (JOLTS), WP (PPI commodity data) and EI (import/export price
+indexes). The layouts are in `SERIES_ID_LAYOUTS` in the adapter, and the
 dataset dimensions are defined in
 [bls.toml](../../backend/crates/econ-graph-crawler/data/datasets/bls.toml). A series ID
 consists of the two-letter survey prefix followed by fixed-width fields that become
@@ -156,6 +166,17 @@ For CPI (CU), ID `CUUR0000SA0` has the following mapping:
 | Measures | `value` (decimal) |
 | Attributes | No persisted footnote attributes |
 | Shape | Long (one value column); `revision_date = date`, so refreshes overwrite observations |
+
+The other layouts split IDs the same way:
+
+| Dataset | Example ID | Dimensions |
+|---|---|---|
+| CE | `CES0000000001` | `seasonal` (1), `industry` (8), `data_type` (2) |
+| LN | `LNS14000000` | `seasonal` (1), `series_code` (8) |
+| LA | `LASST060000000000003` | `seasonal` (1), `area` (15), `measure` (2) |
+| JT | `JTS000000000000000JOR` | `seasonal` (1), `industry` (6), `state` (2), `area` (5), `size_class` (2), `data_element` (2), `rate_level` (1) |
+| WP | `WPSFD4`, `WPU01` | `seasonal` (1), `group` (2), `item` (the rest, empty for a group index such as `WPU01`) |
+| EI | `EIUCOCHNTOT`, `EIUIR` | `seasonal` (1), `index` (2), `item` (the rest, empty for an index's all-commodities series such as `EIUIR`) |
 
 Annual averages are excluded from this mapping. Keeping their separate period codes
 out of the observation dates avoids collisions with regular periods. Footnote codes,

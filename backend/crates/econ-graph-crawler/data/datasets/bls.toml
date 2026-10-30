@@ -2,14 +2,16 @@
 #
 # One dataset per BLS survey the crawler reads, coded by the survey's two-letter series id
 # prefix. A BLS series id is the prefix followed by fixed-width fields, so the adapter splits
-# it into these dimensions (the last dimension of CU takes the rest of the id). Series keep
-# their BLS ids as external ids, since that is the id the BLS API takes.
+# it into these dimensions (the last dimension of CU, WP and EI takes the rest of the id, which
+# for WP and EI may be empty). Series keep their BLS ids as external ids, since that is the id
+# the BLS API takes.
 #
 # `codes` label common values. They are not closed lists.
 # Layouts: https://www.bls.gov/help/hlpforma.htm
 #
 # Dimensions BLS itself publishes a reference file for (CU item/area, CE industry/data_type,
-# LN series_code) carry no `codes` here: `BlsAdapter::refresh_reference_data` fetches and
+# LN series_code, LA area, JT industry/state/area/size_class/data_element/rate_level, WP group,
+# EI index) carry no `codes` here: `BlsAdapter::refresh_reference_data` fetches and
 # caches their labels from BLS on each scheduled re-crawl instead, so a BLS rename or addition
 # shows up without a code change here. Dimensions that are just this series id layout's own
 # fixed encoding (seasonal, periodicity, LA measure) keep their codes inline.
@@ -107,6 +109,85 @@ codes = [
   { code = "05", label = "Employment" },
   { code = "06", label = "Labor force" },
 ]
+
+[[dataset]]
+code = "JT"
+name = "Job Openings and Labor Turnover Survey (JOLTS)"
+description = "BLS JOLTS. Series ids are JT, seasonal (1), industry (6), state (2), area (5), size class (2), data element (2), rate or level (1), for example JTS000000000000000JOR"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "industry"
+label = "Industry"
+
+[[dataset.dimensions]]
+name = "state"
+label = "State"
+
+[[dataset.dimensions]]
+name = "area"
+label = "Area"
+
+[[dataset.dimensions]]
+name = "size_class"
+label = "Establishment size class"
+
+[[dataset.dimensions]]
+name = "data_element"
+label = "Data element"
+
+[[dataset.dimensions]]
+name = "rate_level"
+label = "Rate or level"
+
+[[dataset]]
+code = "WP"
+name = "Producer Price Index - Commodity Data"
+description = "BLS PPI commodity data. Series ids are WP, seasonal (1), group (2), item (the rest, empty for a group index), for example WPSFD4 or WPU01"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "group"
+label = "Commodity group"
+
+[[dataset.dimensions]]
+name = "item"
+label = "Item"
+
+[[dataset]]
+code = "EI"
+name = "Import/Export Price Indexes"
+description = "BLS import/export price indexes. Series ids are EI, seasonal (1), index (2), item (the rest, empty for an index's all-commodities series), for example EIUIR or EIUCOCHNTOT"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "index"
+label = "Index"
+
+[[dataset.dimensions]]
+name = "item"
+label = "Item"
 
 # BLS series of any other survey, or whose id does not fit its survey's layout above: no
 # dimensions, keyed by the BLS series id (like FRED) until the survey gets a layout.
