@@ -123,8 +123,9 @@ All notable changes to EconGraph are documented here. The format follows
 
 ## [4.0.1] - 2026-10-30
 
-Sign-in on https://econgraph.com, the explorer's source links and the privacy policy on phones
-now work, and the deploy scripts reach only the kind cluster.
+Sign-in on https://econgraph.com and the privacy policy on phones now work, the explorer
+follows the header search and other links to another `/explore` URL, and the deploy scripts
+reach only the kind cluster.
 
 ### Changed
 
