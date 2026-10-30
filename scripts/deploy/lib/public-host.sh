@@ -55,6 +55,62 @@ public_host_in_cluster() {
     printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
 }
 
+# The PUBLIC_HOST in the host's deploy config,
+# ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV names
+# another file): a line PUBLIC_HOST=<host name>, the last one when there are
+# several. The file is read, not sourced; surrounding blanks and one pair of
+# matching quotes are dropped and the name is lowercased. Used by
+# release-deploy.sh and set-crawler-keys.sh. Sets DEPLOY_ENV,
+# CONFIGURED_PUBLIC_HOST (empty when none is configured) and
+# PUBLIC_HOST_CONFIGURED (true or false). Returns 1, with the reason in
+# PUBLIC_HOST_CONFIG_ERROR, for a line it can't use: CRLF endings, blanks inside
+# the name, or a name that is not a public DNS name.
+# shellcheck disable=SC2034 # the variables it sets are for the caller
+read_configured_public_host() {
+    local line host
+    DEPLOY_ENV="${ECONGRAPH_DEPLOY_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/econgraph/deploy.env}"
+    CONFIGURED_PUBLIC_HOST=""
+    PUBLIC_HOST_CONFIGURED=false
+    PUBLIC_HOST_CONFIG_ERROR=""
+    [ -f "$DEPLOY_ENV" ] || return 0
+    # The last line wins, as it would if the file were sourced.
+    line="$(grep -E '^[[:space:]]*PUBLIC_HOST=' "$DEPLOY_ENV" | tail -1)" || line=""
+    [ -n "$line" ] || return 0
+    host="${line#*=}"
+    # A CRLF file would otherwise pass silently (the renderer strips a
+    # trailing CR): refuse it.
+    if [[ "$host" == *$'\r'* ]]; then
+        PUBLIC_HOST_CONFIG_ERROR="${DEPLOY_ENV} has a carriage return in its PUBLIC_HOST line (CRLF line endings?); save it with LF endings"
+        return 1
+    fi
+    # Surrounding blanks and one pair of matching quotes; nothing else is
+    # rewritten, so a comment or a typo reaches the checks below.
+    host="${host#"${host%%[![:space:]]*}"}"
+    host="${host%"${host##*[![:space:]]}"}"
+    if [[ "$host" =~ ^\"(.*)\"$ || "$host" =~ ^\'(.*)\'$ ]]; then
+        host="${BASH_REMATCH[1]}"
+    fi
+    # Blanks inside (or inside the quotes): the renderer would strip them,
+    # but deploy.sh's gateway step would not. Refuse, rather than guess.
+    if [[ "$host" == *[[:space:]]* ]]; then
+        PUBLIC_HOST_CONFIG_ERROR="${DEPLOY_ENV} sets PUBLIC_HOST='${host}', with blanks in it; write the host name alone"
+        return 1
+    fi
+    # Host names are case-insensitive; the routes, the certificate and the
+    # comparisons use the lowercase form.
+    if [ "$host" != "${host,,}" ]; then
+        echo "  PUBLIC_HOST     ${host} in ${DEPLOY_ENV} is used as ${host,,}"
+        host="${host,,}"
+    fi
+    if [ -n "$host" ] &&
+        ! "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" "$host" /dev/null >/dev/null; then
+        PUBLIC_HOST_CONFIG_ERROR="${DEPLOY_ENV} sets PUBLIC_HOST='${host}', which is not a public DNS name"
+        return 1
+    fi
+    CONFIGURED_PUBLIC_HOST="$host"
+    [ -z "$host" ] || PUBLIC_HOST_CONFIGURED=true
+}
+
 # Decide PUBLIC_HOST (see above) and validate it. Exits on a bad name, when the
 # cluster cannot be asked, or when it is unset while the cluster serves a
 # public host. Exports it for apply-gateway-routes.sh.

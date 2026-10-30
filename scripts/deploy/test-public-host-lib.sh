@@ -29,7 +29,9 @@
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
 #   - scripts/deploy/set-crawler-keys.sh --facebook (and --google) refuses before it asks
 #     for anything when the cluster's realm ConfigMap is not this checkout's, and renders
-#     the realm-import Job for the public host the cluster serves.
+#     the realm-import Job for the public host the cluster serves; it refuses a cluster
+#     marked production that serves none, and a PUBLIC_HOST (environment or deploy
+#     config) that differs from the served host. Refusals exit non-zero in a dry run too.
 #
 # Usage: scripts/deploy/test-public-host-lib.sh (from anywhere)
 set -euo pipefail
@@ -561,10 +563,15 @@ chmod +x "$kind_dir/bin/kubectl" "$kind_dir/bin/docker" "$stub_dir/yqbin/yq"
 keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
+# The host's deploy config is $keys_deploy_env (absent unless a test writes it), and
+# keys_env adds settings such as PUBLIC_HOST to the script's environment.
+keys_deploy_env="$stub_dir/config/econgraph/deploy.env"
+keys_env=()
 run_keys() {
   printf 'STUB_LOG=%q\nSTUB_REPO=%q\n%s\n' "$log" "$repo_root" "$1" >"$stub_dir/stub.env"
   : >"$log"; rm -f "$log.ctx"
-  printf '%s' "${3:-}" | env XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
+  printf '%s' "${3:-}" | env -u PUBLIC_HOST XDG_CONFIG_HOME="$stub_dir/config" ECONGRAPH_DEPLOY_ENV="$keys_deploy_env" \
+    ${keys_env[@]+"${keys_env[@]}"} XDG_CACHE_HOME="$stub_dir/cache" KUBECONFIG="$kind_dir/kubeconfig-econ-graph" \
     PATH="$kind_dir/bin:$stub_dir/yqbin:$PATH" KUBECTL="$stub_dir/path/kubectl" CLUSTER_ROLE_CONTEXT=prod-elsewhere \
     script -qec "$keys $2" /dev/null >"$out" 2>&1
 }
@@ -626,10 +633,52 @@ if [ "$have_script" = true ]; then
     grep -Eq 'create secret|apply|rollout|delete job' "$log" &&
       fail "set-crawler-keys --facebook: changed the cluster with a $realm realm ConfigMap"
   done
-  run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' ||
-    fail "set-crawler-keys --google --dry-run failed: $(cat "$out")"
+  # A dry run reports the refusal and exits non-zero too.
+  run_keys 'STUB_MARKER=none STUB_REALM=stale' '--google --dry-run' &&
+    fail "set-crawler-keys --google --dry-run: exited 0 on a stale realm ConfigMap"
   grep -q 'would refuse: .*econ-graph-realm.json' "$out" ||
-    fail "set-crawler-keys --google --dry-run: no refusal on a stale realm ConfigMap"
+    fail "set-crawler-keys --google --dry-run: no refusal on a stale realm ConfigMap: $(cat "$out")"
+  grep -q 'release-deploy.sh' "$out" ||
+    fail "set-crawler-keys: the stale realm refusal does not point to release-deploy.sh"
+
+  # keys_refused NAME SETTINGS PATTERN: --facebook refused before the prompt, nothing changed.
+  keys_refused() {
+    if run_keys "$2" --facebook $'facebook-test-app\nfacebook-test-secret\n'; then
+      fail "set-crawler-keys --facebook: accepted $1"
+    fi
+    grep -q 'Enter each key' "$out" && fail "set-crawler-keys --facebook: prompted with $1"
+    grep -q "$3" "$out" || fail "set-crawler-keys --facebook: $1 refused without '$3': $(cat "$out")"
+    if grep -Eq 'create secret|apply|rollout|delete job' "$log"; then
+      fail "set-crawler-keys --facebook: changed the cluster with $1"
+    fi
+  }
+  # Marked production but serving no public host (routes gone after a recreate or a
+  # partial deploy): refused, rather than rendering the realm for localhost only.
+  keys_refused 'a production cluster with no public route' 'STUB_MARKER=production' 'serves no public host'
+  keys_env=(PUBLIC_HOST=econgraph.com)
+  keys_refused 'a production cluster with no public route and PUBLIC_HOST set' 'STUB_MARKER=production' 'serves no public host'
+  keys_refused 'PUBLIC_HOST naming a host the cluster does not serve' 'STUB_MARKER=none' "PUBLIC_HOST='econgraph.com' is set"
+  keys_env=(PUBLIC_HOST=econ-graph.com)
+  keys_refused 'PUBLIC_HOST differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    "PUBLIC_HOST='econ-graph.com' is set"
+  # An explicit PUBLIC_HOST naming the served host (in any case) is accepted.
+  keys_env=(PUBLIC_HOST=EconGraph.com)
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
+    fail "set-crawler-keys --facebook: refused an explicit PUBLIC_HOST matching the served host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
+    fail "set-crawler-keys --facebook: did not render the realm import for the explicit, served host"
+  keys_env=()
+  # The host's deploy config, read as release-deploy.sh reads it.
+  mkdir -p "$(dirname "$keys_deploy_env")"
+  echo 'PUBLIC_HOST=econ-graph.com' >"$keys_deploy_env"
+  keys_refused 'a deploy config differing from the served host' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+    'says PUBLIC_HOST=econ-graph.com'
+  echo 'PUBLIC_HOST="econgraph.com"' >"$keys_deploy_env"
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' --facebook $'facebook-test-app\nfacebook-test-secret\n' ||
+    fail "set-crawler-keys --facebook: refused a deploy config matching the served host: $(cat "$out")"
+  keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
+    'says PUBLIC_HOST=econgraph.com'
+  rm -f "$keys_deploy_env"
 
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
   [ ! -s "$path_log" ] || fail "set-crawler-keys: calls went to the KUBECTL from the environment: $(cat "$path_log")"

@@ -168,7 +168,12 @@ scripts/deploy/set-crawler-keys.sh --facebook
 
 This mode updates only the Facebook credentials, restarts Keycloak, and reapplies
 the realm. It does not start or restart the crawler. Blank input keeps the existing
-value. The retired in-house `facebook-app-*` keys are unrelated and remain removed.
+value. Before asking for anything it checks that the cluster's `keycloak-realm`
+ConfigMap holds this checkout's realm files, so run it from a checkout of the commit
+the cluster runs (for production, the release tag). It renders the realm import for
+the public host the cluster serves, and refuses a production cluster that serves none
+or a `PUBLIC_HOST` (in the environment or `~/.config/econgraph/deploy.env`) that
+differs from it. `--google` does the same for the Google client.
 
 Follow the [Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook).
 Configure Facebook Login on the Meta app with domain `econgraph.com` and redirect URI
@@ -176,7 +181,7 @@ Configure Facebook Login on the Meta app with domain `econgraph.com` and redirec
 Use `https://econgraph.com/privacy` for the privacy policy and
 `https://econgraph.com/privacy#account-deletion` for data-deletion instructions.
 There is no Facebook deletion callback: the instructions explain how to request
-account deletion. The retired `/auth/facebook` endpoints remain unavailable.
+account deletion. The backend serves no `/auth/*` routes; sign-in goes through Keycloak.
 
 Each non-production environment must use its own Meta app or leave Facebook
 unconfigured. Never copy production credentials or its Secret into a development
@@ -187,6 +192,32 @@ button appears, a first login and an existing-account link succeed, and sign-out
 returns to the app. Include accounts that withhold email and verify that linking
 to an existing email requires proof of ownership. This requires the maintainer's Meta app access and a real
 Facebook account; rendering tests cannot verify Meta's configuration or approval.
+
+### Disabling Facebook sign-in
+
+Neither `set-crawler-keys.sh` nor `create-secrets.sh` removes a key, so remove the
+two keys from the Secret by hand, with the kind cluster's kubectl, then restart
+Keycloak and rerun the realm import. Use a checkout of the commit the cluster runs
+(for production, the release tag). A JSON-patch `remove` fails on a key that is
+absent, so remove only the keys the Secret has:
+
+```bash
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
+k -n econ-graph patch secret econ-graph-keycloak --type=json -p='[
+  {"op": "remove", "path": "/data/facebook-idp-client-id"},
+  {"op": "remove", "path": "/data/facebook-idp-client-secret"}]'
+k -n econ-graph rollout restart deployment/keycloak
+k -n econ-graph rollout status deployment/keycloak --timeout=600s
+k -n econ-graph delete job keycloak-realm-import --ignore-not-found
+# On the production cluster, rendered for its public host; elsewhere apply the file as it is.
+scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
+k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
+```
+
+Without both keys the realm import disables the `facebook` provider and the
+Facebook button disappears. Accounts whose only sign-in is Facebook can then no
+longer sign in; their data stays in place. A later deploy keeps the provider
+disabled until the keys are entered again.
 
 ## Catalog access, including anonymous visitors
 

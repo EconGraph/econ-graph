@@ -37,10 +37,19 @@
 # realm files (config/keycloak/econ-graph-realm.json and the two helpers
 # scripts/deploy/deploy.sh puts next to it); if it does not, the script stops
 # before asking for anything, since the import could succeed without the
-# provider. Deploy the checkout with deploy.sh first. The Job is rendered
-# for the public host the cluster serves (render_manifest in
-# scripts/deploy/lib/public-host.sh, as deploy.sh renders it), so the
-# realm keeps that host's redirect URIs and web origins.
+# provider. Run the script from a checkout of the commit the cluster runs
+# (for production, the release tag), or roll out a release with
+# scripts/deploy/release-deploy.sh; scripts/deploy/deploy.sh from a working
+# checkout is only for clusters that are not production.
+# The Job is rendered for the public host the cluster serves (render_manifest
+# in scripts/deploy/lib/public-host.sh, as deploy.sh renders it), so the realm
+# keeps that host's redirect URIs and web origins. A PUBLIC_HOST in the
+# environment, or in the host's deploy config read as release-deploy.sh reads
+# it (${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env), must name the host
+# the cluster serves; and a cluster marked production that serves no public
+# host (its routes missing after a recreate or a partial deploy) is refused,
+# since the realm would then lose the public redirect URIs. Every refusal
+# exits non-zero, in a dry run too.
 #
 # --dry-run prints which keys are currently set (names only) and what would
 # happen (with --tunnel, whether the cluster is marked production: these reads
@@ -56,6 +65,11 @@ set +x
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="${NAMESPACE:-econ-graph}"
+
+# The PUBLIC_HOST the environment had, before the libraries are sourced.
+ENV_PUBLIC_HOST_SET="${PUBLIC_HOST+set}"
+ENV_PUBLIC_HOST="${PUBLIC_HOST-}"
+unset PUBLIC_HOST
 
 DRY_RUN=false
 GOOGLE=false
@@ -208,17 +222,40 @@ if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } &&
     REIMPORT_REALM=true
     realm_mismatch="$(realm_configmap_mismatch)"
     if [ -n "$realm_mismatch" ]; then
-        if [ "$DRY_RUN" = true ]; then
-            echo "==> Dry run: would refuse: ${realm_mismatch}"
-            exit 0
-        fi
+        [ "$DRY_RUN" != true ] || echo "==> Dry run: would refuse: ${realm_mismatch}"
         die "refusing to set sign-in keys: ${realm_mismatch}." \
             "The realm import would apply the cluster's older realm, which may lack this provider." \
-            "Deploy this checkout with scripts/deploy/deploy.sh (with the cluster's PUBLIC_HOST), then run this again." \
-            "Nothing was asked for or written."
+            "Run this script from a checkout of the commit the cluster runs (for production, the release tag)," \
+            "or roll out a release with scripts/deploy/release-deploy.sh; scripts/deploy/deploy.sh is only for" \
+            "clusters that are not production. Nothing was asked for or written."
     fi
+    # The public host the Job is rendered for: the one the cluster serves now.
     PUBLIC_HOST="$(public_host_in_cluster)" ||
         die "could not read the cluster's routes to see which public host it serves; nothing was asked for or written"
+    PUBLIC_HOST="${PUBLIC_HOST,,}"
+    if [ -z "$PUBLIC_HOST" ]; then
+        production=0
+        cluster_is_marked_production || production=$?
+        case "$production" in
+            0) die "refusing to set sign-in keys: this cluster is marked production but serves no public host" \
+                "(no public HTTPRoute or Ingress), so the realm would lose its public redirect URIs." \
+                "Restore its routes with scripts/deploy/release-deploy.sh, then run this again." \
+                "Nothing was asked for or written." ;;
+            1) ;;
+            *) die "refusing to set sign-in keys: ${CLUSTER_ROLE_REASON}. Nothing was asked for or written." ;;
+        esac
+    fi
+    # A host named in the environment or the deploy config must be the one served.
+    if [ "$ENV_PUBLIC_HOST_SET" = set ] && [ "${ENV_PUBLIC_HOST,,}" != "$PUBLIC_HOST" ]; then
+        die "refusing to set sign-in keys: PUBLIC_HOST='${ENV_PUBLIC_HOST}' is set in the environment," \
+            "but the cluster serves '${PUBLIC_HOST:-(no public host)}'. Nothing was asked for or written."
+    fi
+    read_configured_public_host ||
+        die "refusing to set sign-in keys: ${PUBLIC_HOST_CONFIG_ERROR}. Nothing was asked for or written."
+    if [ "$PUBLIC_HOST_CONFIGURED" = true ] && [ "$CONFIGURED_PUBLIC_HOST" != "$PUBLIC_HOST" ]; then
+        die "refusing to set sign-in keys: ${DEPLOY_ENV} says PUBLIC_HOST=${CONFIGURED_PUBLIC_HOST}," \
+            "but the cluster serves '${PUBLIC_HOST:-(no public host)}'. Nothing was asked for or written."
+    fi
 fi
 
 # The tunnel token goes only into the production cluster: refuse before asking
