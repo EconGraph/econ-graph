@@ -9,6 +9,8 @@ the Secret would hold.
 
   STUB_NO_KIND=1        the kubeconfig has no kind-econ-graph context
   STUB_PRODUCTION=false the cluster carries no production marker
+  STUB_IMPORT=running|complete|failed|unreadable  job/keycloak-realm-import's state (default:
+                        no such Job)
 """
 import json
 import os
@@ -43,6 +45,13 @@ if " get configmap econgraph-cluster-role " in joined:
     if os.environ.get("STUB_PRODUCTION", "true") == "true":
         sys.stdout.write("production 11111111-2222-3333-4444-555555555555")
     done()
+if " get job keycloak-realm-import " in joined:
+    state = os.environ.get("STUB_IMPORT", "")
+    if state == "unreadable":
+        print("connection refused", file=sys.stderr)
+        sys.exit(1)
+    done({"": "", "running": "keycloak-realm-import ", "complete": "keycloak-realm-import Complete",
+          "failed": "keycloak-realm-import Failed"}[state])
 if " run " in joined:
     overrides = json.loads(next(a for a in args if a.startswith("--overrides="))[len("--overrides="):])
     container = overrides["spec"]["containers"][0]

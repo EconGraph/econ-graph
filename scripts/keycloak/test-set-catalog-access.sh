@@ -178,6 +178,70 @@ run -- --context kind-econ-graph --make-public catalog.fred:read,catalog.imf:rea
 run -- --context kind-econ-graph --make-public catalog.fred:read
 [ ! -s "$writes" ] || fail "a second --make-public changed Keycloak: $(cat "$writes")"
 
+# Order: --admin-only grants admin before removing anything, so admins never lose the catalog.
+reset
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$(head -1 "$writes")" = "POST /roles/admin/composites catalog.fred:read" ] ||
+  fail "--admin-only did not grant admin first: $(cat "$writes")"
+[ "$(sed -n 2p "$writes")" = "DELETE /roles/catalog-public/composites catalog.fred:read" ] ||
+  fail "--admin-only did not remove catalog-public second: $(cat "$writes")"
+[ "$(sed -n 3p "$writes")" = "DELETE /clients/anon/scope-mappings/clients/api catalog.fred:read" ] ||
+  fail "--admin-only did not remove the anonymous scope last: $(cat "$writes")"
+# --make-public adds both public grants before removing admin's.
+: >"$writes"
+run -- --context kind-econ-graph --make-public catalog.fred:read
+[ "$(tail -1 "$writes")" = "DELETE /roles/admin/composites catalog.fred:read" ] ||
+  fail "--make-public did not remove admin's grant last: $(cat "$writes")"
+
+# A failed second write leaves admins their grant, says to run again, and running again
+# finishes the change.
+reset
+set_state() { python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s.update(json.loads(sys.argv[2])); json.dump(s, open(sys.argv[1], "w"))' "$state" "$1"; }
+set_state '{"fail_write": 2}'
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" != 0 ] || fail "a failed write was not reported"
+grep -q "run the same command again" "$out" || fail "a failed write does not say to run again: $(cat "$out")"
+grep -qxF "add catalog.fred:read to admin" "$out" || fail "the made step is not listed: $(cat "$out")"
+[ "$(field 'composites["admin"]')" = '["admin.users:read", "catalog.fred:read"]' ] ||
+  fail "after a failed second write admin is $(field 'composites["admin"]')"
+[ "$(field '"catalog.fred:read" in composites["catalog-public"]')" = true ] ||
+  fail "the failed removal changed catalog-public anyway"
+set_state '{"fail_write": null}'
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" = 0 ] || fail "running again after a failure failed: $(cat "$out")"
+[ "$(field 'composites["catalog-public"]')" = '["catalog.bls:read", "catalog.ecb:read", "catalog.imf:read"]' ] ||
+  fail "running again left catalog-public $(field 'composites["catalog-public"]')"
+[ "$(field 'scope')" = '["catalog.bls:read", "catalog.ecb:read", "catalog.imf:read"]' ] ||
+  fail "running again left the scope $(field 'scope')"
+
+# A read-back mismatch on any grant fails loudly. The fake drops the admin grant silently.
+reset
+set_state '{"ignore_writes_to": "admin"}'
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" != 0 ] || fail "a grant that did not stick was not reported"
+grep -q "after the change catalog.fred:read is not admin-only: admin lacks it" "$out" ||
+  fail "the read-back mismatch is not named: $(cat "$out")"
+
+# A running realm import (a deploy) would write back its earlier snapshot: refuse.
+reset
+run STUB_IMPORT=running -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" != 0 ] || fail "ran while the realm import was running"
+grep -q "job/keycloak-realm-import is running" "$out" || fail "the running import is not named: $(cat "$out")"
+if grep -q " run keycloak-catalog-access-" "$log"; then fail "started the pod while the import ran"; fi
+unchanged || fail "a running import let a change through"
+run STUB_IMPORT=running -- --context kind-econ-graph --dry-run --admin-only catalog.fred:read
+[ "$status" = 0 ] || fail "a dry run refused while the import ran: $(cat "$out")"
+grep -q "the real run will refuse" "$out" || fail "the dry run does not warn of the import: $(cat "$out")"
+unchanged || fail "a dry run during an import changed Keycloak"
+run STUB_IMPORT=unreadable -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" != 0 ] || fail "ran without knowing whether the import was running"
+unchanged || fail "an unreadable import Job let a change through"
+for done_state in complete failed; do
+  reset
+  run STUB_IMPORT=$done_state -- --context kind-econ-graph --admin-only catalog.fred:read
+  [ "$status" = 0 ] || fail "a $done_state realm import blocked the change: $(cat "$out")"
+done
+
 # Refusals change nothing.
 reset
 run -- --context kind-econ-graph --admin-only catalog.nosuch:read

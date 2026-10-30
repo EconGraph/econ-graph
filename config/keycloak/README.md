@@ -346,6 +346,11 @@ scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --make-public c
   both and removes a direct grant on `admin`, which then reads it through `catalog-public`.
 - `--dry-run` prints each change it would make and changes nothing in Keycloak. Every step
   runs only when needed, so running a command again changes nothing.
+- It adds grants before it removes any, so a failure part way never takes a catalog from
+  admins, and it reads back every grant it set. There is no rollback: if it stops with an
+  error, run the same command again to finish.
+- It refuses while `job/keycloak-realm-import` is running, because that deploy step would
+  write back the catalog policy it read before the change. Don't start a deploy while it runs.
 - It refuses, changing nothing, a role that isn't a `catalog.<source>:read` role or doesn't
   exist, and a realm without `catalog-public` or `admin`. It checks every role before changing
   any.

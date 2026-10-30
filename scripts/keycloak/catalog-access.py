@@ -13,7 +13,9 @@ reader's scope mapping. --admin-only does the same and adds it to the admin comp
 (super_admin includes admin). --make-public is the inverse of both: it adds the role to
 catalog-public and the anonymous scope, and removes a direct grant on admin, which then
 reads it through catalog-public. Each option takes one role and may repeat. Each step
-runs only when needed, so a second run changes nothing. With --dry-run it reads Keycloak and prints what it would change, and changes
+runs only when needed, so a second run changes nothing. Grants are added before any is
+removed, so a failure part way leaves admins their access; there is no rollback, and
+running the same command again finishes the change. With --dry-run it reads Keycloak and prints what it would change, and changes
 nothing. It refuses when the realm, the role or a composite is missing. It prints role and
 composite names only, never a credential, token or response body.
 """
@@ -101,7 +103,6 @@ def check_role(kc, role_name):
 def plan_and_apply(kc, role_name, mode, dry_run, out):
     """Print each change for one role and, unless dry_run, make it. mode is "admin-only",
     "withdraw" or "public". Returns the number of changes."""
-    admin_only = mode != "public"
     api_id, role = check_role(kc, role_name)
     anonymous = kc.call("GET", "/clients?clientId=" + q(ANONYMOUS_CLIENT))
 
@@ -109,33 +110,44 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
         return any(r["name"] == role_name for r in kc.call("GET", path))
 
     edge = [{"id": role["id"], "name": role["name"], "clientRole": True, "containerId": api_id}]
-    steps = []  # (description, method, path)
     public_path = "/roles/%s/composites" % q(PUBLIC_ROLE)
     admin_path = "/roles/%s/composites" % q(ADMIN_ROLE)
-    in_public = holds("/roles/%s/composites/clients/%s" % (q(PUBLIC_ROLE), api_id))
-    in_admin = holds("/roles/%s/composites/clients/%s" % (q(ADMIN_ROLE), api_id))
-    if admin_only:
-        if in_public:
-            steps.append(("remove %s from %s" % (role_name, PUBLIC_ROLE), "DELETE", public_path))
-        if mode == "admin-only" and not in_admin:
-            steps.append(("add %s to %s" % (role_name, ADMIN_ROLE), "POST", admin_path))
-    else:
-        if not in_public:
-            steps.append(("add %s to %s" % (role_name, PUBLIC_ROLE), "POST", public_path))
-        if in_admin:
-            # admin reaches catalog-public through support and user, so the direct grant
-            # would only be left over.
-            steps.append(("remove %s from %s (it reads it through %s)" % (role_name, ADMIN_ROLE, PUBLIC_ROLE),
-                          "DELETE", admin_path))
-    if anonymous:
-        scope_path = "/clients/%s/scope-mappings/clients/%s" % (anonymous[0]["id"], api_id)
-        in_scope = holds(scope_path)
-        if admin_only and in_scope:
-            steps.append(("remove %s from the %s scope" % (role_name, ANONYMOUS_CLIENT), "DELETE", scope_path))
-        if not admin_only and not in_scope:
-            steps.append(("add %s to the %s scope" % (role_name, ANONYMOUS_CLIENT), "POST", scope_path))
-    else:
+    public_read = "/roles/%s/composites/clients/%s" % (q(PUBLIC_ROLE), api_id)
+    admin_read = "/roles/%s/composites/clients/%s" % (q(ADMIN_ROLE), api_id)
+    scope_path = ("/clients/%s/scope-mappings/clients/%s" % (anonymous[0]["id"], api_id)
+                  if anonymous else None)
+    if not anonymous:
         out("note: there is no %s client, so anonymous visitors read no catalog" % ANONYMOUS_CLIENT)
+
+    # Where each grant must end up: None leaves it as it is (--withdraw leaves admin alone).
+    want = {
+        "admin-only": {"public": False, "admin": True, "scope": False},
+        "withdraw": {"public": False, "admin": None, "scope": False},
+        "public": {"public": True, "admin": False, "scope": True},
+    }[mode]
+    grants = {"public": (PUBLIC_ROLE, public_read, public_path),
+              "admin": (ADMIN_ROLE, admin_read, admin_path)}
+    if scope_path:
+        grants["scope"] = ("the %s scope" % ANONYMOUS_CLIENT, scope_path, scope_path)
+    # The order keeps every partial failure safe: grants are added before any is removed, so
+    # admins never lose a catalog midway, and catalog-public changes before the anonymous scope.
+    # There is no rollback; the steps are idempotent, so running the command again finishes it.
+    order = ["admin", "public", "scope"] if mode != "public" else ["public", "scope", "admin"]
+    steps = []  # (description, method, path)
+    for key in order:
+        if key not in grants or want[key] is None:
+            continue
+        name, read_path, write_path = grants[key]
+        if holds(read_path) != want[key]:
+            if want[key]:
+                steps.append(("add %s to %s" % (role_name, name), "POST", write_path))
+            elif key == "admin":
+                # admin reaches catalog-public through support and user, so the direct grant
+                # would only be left over.
+                steps.append(("remove %s from %s (it reads it through %s)" % (role_name, name, PUBLIC_ROLE),
+                              "DELETE", write_path))
+            else:
+                steps.append(("remove %s from %s" % (role_name, name), "DELETE", write_path))
 
     target = {"admin-only": "admin-only", "withdraw": "not public", "public": "public"}[mode]
     if not steps:
@@ -149,11 +161,17 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
             out(description)
     if dry_run:
         return len(steps)
-    # Read back what visitors and signed-in users now get.
-    in_public = holds("/roles/%s/composites/clients/%s" % (q(PUBLIC_ROLE), api_id))
-    if in_public == admin_only:
-        raise RuntimeError("%s still %s %s after the change" % (PUBLIC_ROLE, "holds" if in_public else "lacks", role_name))
-    if anonymous and admin_only:
+    # Read back every grant the change set.
+    wrong = []
+    for key in order:
+        if key in grants and want[key] is not None:
+            name, read_path, _ = grants[key]
+            if holds(read_path) != want[key]:
+                wrong.append("%s %s it" % (name, "lacks" if want[key] else "still holds"))
+    if wrong:
+        raise RuntimeError("after the change %s is not %s: %s; run the command again"
+                           % (role_name, target, "; ".join(wrong)))
+    if anonymous and mode != "public":
         account = kc.call("GET", "/clients/%s/service-account-user" % anonymous[0]["id"], missing_ok=True)
         if account and holds("/users/%s/role-mappings/clients/%s/composite" % (account["id"], api_id)):
             out("note: the %s service account still holds %s through another mapping; its scope no longer "
@@ -205,7 +223,10 @@ def main(argv):
         print("error: %s is not set" % error, file=sys.stderr)
         return 1
     except RuntimeError as error:
-        print("error: %s" % error, file=sys.stderr)
+        # Steps printed above were made; nothing after the failure was. There is no rollback:
+        # every step is idempotent, so running the same command again completes the change.
+        print("error: %s. Only the changes printed above were made; run the same command again "
+              "to finish" % error, file=sys.stderr)
         return 1
     return 0
 

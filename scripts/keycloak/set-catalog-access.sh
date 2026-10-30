@@ -23,7 +23,10 @@
 #
 # The options may repeat; each role may appear once. Every role is checked before anything
 # changes, and every step runs only when needed, so running the same command again changes
-# nothing. It refuses, changing nothing, when a role is not a
+# nothing. Grants are added before any is removed, so a failure part way never takes a catalog
+# from admins; there is no rollback, and running the same command again finishes the change.
+# It refuses while the realm import Job (job/keycloak-realm-import) is running, since that
+# deploy step would write back the policy it read before the change; don't deploy while it runs. It refuses, changing nothing, when a role is not a
 # catalog read or doesn't exist, or when catalog-public or admin doesn't exist.
 #
 # How it reaches Keycloak: like the realm import's catalog-policy step
@@ -47,7 +50,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,48p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -100,6 +103,20 @@ KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 [ -x "$KUBECTL" ] || die "the kind cluster's kubectl is not at ${KUBECTL}"
 export KUBECTL
 cluster_role_operator_context "$context" || die "could not pin context ${context}; nothing changed"
+
+# A realm import that is running took its snapshot of the catalog policy before this change
+# and would write it back, silently undoing it (scripts/keycloak/preserve-catalog-grants.py).
+import_job="keycloak-realm-import"
+import_state="$(kc -n "$NAMESPACE" get job "$import_job" --ignore-not-found \
+    -o 'jsonpath={.metadata.name}{" "}{.status.conditions[?(@.status=="True")].type}')" ||
+    die "could not read job/${import_job} in ${NAMESPACE}; nothing changed"
+if [[ -n "${import_state// /}" && ! "$import_state" =~ (Complete|Failed) ]]; then
+    if $dry_run; then
+        warn "job/${import_job} is running (a deploy is in progress); the real run will refuse until it finishes"
+    else
+        die "job/${import_job} is running (a deploy is in progress): its realm import would write back the catalog policy it read before this change. Wait for it to finish (${KUBECTL} --context ${context} -n ${NAMESPACE} wait --for=condition=complete job/${import_job}), then run this again; nothing changed"
+    fi
+fi
 
 pod="keycloak-catalog-access-$(date +%s)-$RANDOM"
 secret_env() {

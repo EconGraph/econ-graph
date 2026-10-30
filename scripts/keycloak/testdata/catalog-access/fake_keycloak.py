@@ -10,7 +10,9 @@ on every request and rewrites on every change, so a test can set it up and read 
    "realm_roles": ["catalog-public", "admin"],
    "composites": {"catalog-public": [...], "admin": [...]},  # their econ-graph-api roles
    "anonymous": true, "scope": [...],                        # the reader's scope mapping
-   "reader_direct": [...]}                                   # roles mapped to the reader
+   "reader_direct": [...],                                   # roles mapped to the reader
+   "fail_write": N,                                          # optional: the Nth write answers 500
+   "ignore_writes_to": "admin"}                              # optional: writes to it are dropped
 
 Only the password `test-admin-password` signs in. Each change is appended to WRITES_LOG as
 "METHOD PATH ROLE". It listens on 127.0.0.1 on a free port, written to PORT_FILE.
@@ -103,7 +105,13 @@ class Handler(BaseHTTPRequestHandler):
     def edit(self, state, method, edges, path):
         if method == "GET":
             return self.reply(200, [rep(n) for n in edges])
+        state["writes"] = state.get("writes", 0) + 1
+        if state["writes"] == state.get("fail_write"):
+            save(state)
+            return self.reply(500, {"error": "injected"})
         names = [r["name"] for r in json.loads(self.body())]
+        if state.get("ignore_writes_to") and path.startswith("/roles/%s/" % state["ignore_writes_to"]):
+            return self.reply(204)
         for name in names:
             if method == "POST" and name not in edges:
                 edges.append(name)

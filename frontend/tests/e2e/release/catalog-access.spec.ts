@@ -47,8 +47,8 @@ async function graphql(
  * What one reader can see of FRED and of a public source.
  * @param request - The test's request context.
  * @param token - The reader's access token, or none for a visitor.
- * @returns The data sources' names, FRED's GDP and USREC by external id, the external ids
- *   "gross domestic product" finds in order, and BLS's CPI by external id.
+ * @returns The data sources' names, FRED's GDP and USREC by external id, BLS's CPI by
+ *   external id, and whether FRED's GDP is among what "gross domestic product" finds.
  */
 async function view(request: APIRequestContext, token?: string) {
   const byId =
@@ -73,7 +73,11 @@ async function view(request: APIRequestContext, token?: string) {
     gdp: gdp.seriesByExternalId,
     usrec: usrec.seriesByExternalId,
     cpi: cpi.seriesByExternalId,
-    searchTitles: search.searchSeries.series.map((s: { title: string }) => s.title) as string[],
+    // By its external id and title together, not by ranking: a deployed catalog has many GDPs.
+    searchFindsFredGdp: search.searchSeries.series.some(
+      (s: { externalId: string; title: string }) =>
+        s.externalId === SEEDED.fredGdp.externalId && s.title === SEEDED.fredGdp.title
+    ) as boolean,
   };
 }
 
@@ -88,8 +92,9 @@ test.describe('catalog access: FRED is admin-only', () => {
     expect(seen.gdp).toBeNull();
     expect(seen.usrec).toBeNull();
     expect(seen.cpi).toEqual({ externalId: SEEDED.blsCpi.externalId });
-    expect(seen.searchTitles).not.toContain(SEEDED.fredGdp.title);
-    expect(seen.searchTitles).toContain(SEEDED.beaGdp.title);
+    expect(seen.searchFindsFredGdp).toBe(false);
+    // BEA's GDP, by a search within its own source (seededSeriesId), not by overall ranking.
+    await seededSeriesId(request, SEEDED.beaGdp);
 
     // The sources page lists no FRED.
     await page.goto('/sources');
@@ -104,7 +109,7 @@ test.describe('catalog access: FRED is admin-only', () => {
     expect(seen.gdp).toBeNull();
     expect(seen.usrec).toBeNull();
     expect(seen.cpi).toEqual({ externalId: SEEDED.blsCpi.externalId });
-    expect(seen.searchTitles).not.toContain(SEEDED.fredGdp.title);
+    expect(seen.searchFindsFredGdp).toBe(false);
   });
 
   test('an admin reads FRED: its source, series, search results and series page', async ({
@@ -120,7 +125,7 @@ test.describe('catalog access: FRED is admin-only', () => {
     // The recession indicator, by a direct lookup rather than search.
     expect(seen.usrec).toEqual({ externalId: SEEDED.fredUsrec.externalId });
     expect(seen.cpi).toEqual({ externalId: SEEDED.blsCpi.externalId });
-    expect(seen.searchTitles).toContain(SEEDED.fredGdp.title);
+    expect(seen.searchFindsFredGdp).toBe(true);
 
     // FRED's GDP page shows its seeded newest point.
     await readAsDevUser(page, token);
