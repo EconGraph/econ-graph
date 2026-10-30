@@ -74,15 +74,11 @@ Only precision the source still serves can be recovered:
     precise value differs from the stored, rounded one: a new row is written at the current
     release with `is_original_release = false`. The rounded row stays as the earlier vintage.
   - The values are equal: nothing is written.
+  - The date has no stored row at or before the release: it is written as an original release.
 
   Rows of earlier releases keep their stored (possibly rounded) values. If the World Bank has
   published a new release since the last crawl, the re-fetch stores that release's new and
   changed values as a new vintage.
-
-  A crawler that rewrites every World Bank point at each release, without comparing (before
-  ECO-360), instead corrects every date's current-release row in place, so the corrected values
-  stay original releases. To get that result, run the re-fetch with such a crawler before
-  deploying one that compares.
 - **BLS, BEA, Census, FHFA** store one current value per date (revision date = observation
   date), which the re-fetch rewrites with the source's current value, as any refresh does.
   BLS history beyond the adapter's 20-year window is not re-read.

@@ -1928,6 +1928,9 @@ async fn a_value_that_differs_only_in_scale_is_unchanged() {
     assert_eq!((w.points_upserted, w.points_new), (0, 0));
     let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "1")])).await;
     assert_eq!((w.points_upserted, w.points_new), (0, 0));
+    // The same release read again with another scale: the in-place update finds no difference.
+    let w = persist_usa(&db.pool, &wdi_usa(r1, &[(y, "1.0")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (0, 0));
     // The stored row keeps the scale it was first published with.
     let rows = stored_rows(&db.pool, USA).await;
     assert_eq!(rows.len(), 1);
@@ -1997,43 +2000,85 @@ async fn legacy_dates_with_several_original_releases_compare_with_the_newest() {
         ymd(2026, 10, 15),
         ymd(2026, 12, 16),
     );
-    let y = date(2023, 1);
+    let (y, z) = (date(2023, 1), date(2022, 1));
     // Rows as stored before releases were compared: every release wrote every date again, each
-    // one marked an original release.
+    // one marked an original release. `z` also has an original and a revision at the same
+    // `revision_date`.
     let first = persist_usa(&db.pool, &wdi_usa(r0, &[(y, "10")])).await;
     let mut conn = db.pool.get().await.unwrap();
     diesel_async::RunQueryDsl::execute(
         diesel::sql_query(
             "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
-             VALUES ($1, $2, 10, $3, TRUE), ($1, $2, 11, $4, TRUE)",
+             VALUES ($1, $2, 10, $3, TRUE), ($1, $2, 11, $4, TRUE), \
+                 ($1, $5, 20, $4, TRUE), ($1, $5, 21, $4, FALSE)",
         )
         .bind::<diesel::sql_types::Uuid, _>(first.series_id)
         .bind::<diesel::sql_types::Date, _>(y)
         .bind::<diesel::sql_types::Date, _>(ymd(2026, 2, 1))
-        .bind::<diesel::sql_types::Date, _>(r1),
+        .bind::<diesel::sql_types::Date, _>(r1)
+        .bind::<diesel::sql_types::Date, _>(z),
         &mut conn,
     )
     .await
     .unwrap();
     drop(conn);
-    let legacy = vec![
+    let mut legacy = vec![
+        stored(z, r1, "20", true),
+        stored(z, r1, "21", false),
         stored(y, r0, "10", true),
         stored(y, ymd(2026, 2, 1), "10", true),
         stored(y, r1, "11", true),
     ];
-    assert_eq!(stored_rows(&db.pool, USA).await, legacy);
+    let sorted = |mut rows: Vec<StoredRow>| {
+        rows.sort_by_key(|r| (r.date, r.revision_date, r.is_original_release));
+        rows
+    };
+    legacy = sorted(legacy);
+    assert_eq!(sorted(stored_rows(&db.pool, USA).await), legacy);
 
-    // Equal to the newest row (R1's 11, not R0's 10): nothing is written.
-    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "11")])).await;
+    // Equal to the newest row (R1's 11, not R0's 10): nothing is written. For `z`, the revision
+    // at R1 (21) outranks the original at R1 (20), as in the API's revision filter.
+    let w = persist_usa(&db.pool, &wdi_usa(r2, &[(y, "11"), (z, "21")])).await;
     assert_eq!((w.points_upserted, w.points_new), (0, 0));
-    // Back to an older value: it differs from the newest row, so it is a revision.
-    let w = persist_usa(&db.pool, &wdi_usa(r3, &[(y, "10")])).await;
-    assert_eq!((w.points_upserted, w.points_new), (1, 1));
+    // Back to an older value: it differs from the newest row, so it is a revision. `z`'s 20
+    // differs from the revision 21, though it equals the original at the same date.
+    let w = persist_usa(&db.pool, &wdi_usa(r3, &[(y, "10"), (z, "20")])).await;
+    assert_eq!((w.points_upserted, w.points_new), (2, 2));
     let mut expected = legacy;
     expected.push(stored(y, r3, "10", false));
-    assert_eq!(stored_rows(&db.pool, USA).await, expected);
+    expected.push(stored(z, r3, "20", false));
+    let expected = sorted(expected);
+    assert_eq!(sorted(stored_rows(&db.pool, USA).await), expected);
 
     db.drop().await;
+}
+
+/// Waits until some backend of the test database is blocked on a lock (B, at the series upsert
+/// A holds), failing after ten seconds.
+async fn wait_for_a_lock_wait(pool: &econ_graph_core::DatabasePool) {
+    #[derive(diesel::QueryableByName)]
+    struct Waiting {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        n: i64,
+    }
+    let mut conn = pool.get().await.unwrap();
+    for _ in 0..200 {
+        let w: Waiting = diesel_async::RunQueryDsl::get_result(
+            diesel::sql_query(
+                "SELECT COUNT(*) AS n FROM pg_stat_activity \
+                 WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                     AND pid <> pg_backend_pid()",
+            ),
+            &mut conn,
+        )
+        .await
+        .unwrap();
+        if w.n > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("no backend waited on a lock within 10 s");
 }
 
 #[tokio::test]
@@ -2042,18 +2087,20 @@ async fn concurrent_persists_of_one_series_are_serialised() {
     let Some(db) = validator_db("econgraph_wb_release_concurrent").await else {
         return;
     };
-    let (r1, r2) = (ymd(2026, 7, 1), ymd(2026, 10, 15));
+    let (r1, r2, r3) = (ymd(2026, 7, 1), ymd(2026, 10, 15), ymd(2026, 12, 16));
     let (old, new) = (date(2023, 1), date(2024, 1));
     persist_usa(&db.pool, &wdi_usa(r1, &[(old, "5")])).await;
 
-    // A persists R2 (adding 2024) and holds its transaction open. B persists the same R2 on
-    // another connection. Without the series row lock both would see no 2024 row and both
-    // would write it as an original release; with it, B waits and then finds A's row.
+    // A persists R2 (adding 2024) and holds its transaction open. B persists a later release R3
+    // with the same values on another connection, so no data_points key of B's collides with
+    // A's: only the series row lock makes B wait. With it, B compares after A commits, finds
+    // A's 2024 row and writes nothing. Without it, B would see no 2024 row and write
+    // (2024, R3, 7) as a second original release.
     let (a_wrote_tx, a_wrote_rx) = tokio::sync::oneshot::channel::<()>();
     let (commit_tx, commit_rx) = tokio::sync::oneshot::channel::<()>();
     let pool_a = db.pool.clone();
-    let release = wdi_usa(r2, &[(old, "5"), (new, "7")]);
-    let release_a = release.clone();
+    let release_a = wdi_usa(r2, &[(old, "5"), (new, "7")]);
+    let release = wdi_usa(r3, &[(old, "5"), (new, "7")]);
     let a = tokio::spawn(async move {
         let mut conn = pool_a.get().await.unwrap();
         conn.transaction::<_, econ_graph_core::error::AppError, _>(async |conn| {
@@ -2069,7 +2116,7 @@ async fn concurrent_persists_of_one_series_are_serialised() {
     a_wrote_rx.await.unwrap();
     let pool_b = db.pool.clone();
     let b = tokio::spawn(async move { persist_usa(&pool_b, &release).await });
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    wait_for_a_lock_wait(&db.pool).await;
     assert!(!b.is_finished(), "B must wait for A's transaction");
     commit_tx.send(()).unwrap();
     let wa = a.await.unwrap();

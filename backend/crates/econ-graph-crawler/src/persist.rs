@@ -910,6 +910,8 @@ struct PriorPoint {
 ///   `revision_date`s: a fetch whose `lastupdated` is older than what is stored (a stale response,
 ///   or a release the World Bank withdrew) labels such a date an original release at its own,
 ///   earlier vintage, which is when that value was first published as far as the fetch shows.
+///   The date's later row may itself be an original release, so a stale vintage can leave two
+///   original-release rows for one date.
 /// - A row at the same `revision_date` (the same vintage read again): the point keeps that row's
 ///   `is_original_release`, so the upsert updates the row in place if the value differs.
 /// - An older row with the same value: nothing is written; reads at or after the new vintage
