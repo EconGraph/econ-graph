@@ -700,6 +700,9 @@ spec:
         - 'if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}"
           ]; then export KC_GOOGLE_ENABLED=true; fi
 
+          if [ -n "${KC_FACEBOOK_CLIENT_ID:-}" ] && [ -n "${KC_FACEBOOK_CLIENT_SECRET:-}"
+          ]; then export KC_FACEBOOK_ENABLED=true; fi
+
           exec /opt/keycloak/bin/kc.sh start
 
           '
@@ -757,6 +760,18 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: google-idp-client-secret
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-id
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-secret
               optional: true
         ports:
         - containerPort: 8080
@@ -834,6 +849,9 @@ spec:
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}"
           ]; then export KC_GOOGLE_ENABLED=true; fi
 
+          if [ -n "${KC_FACEBOOK_CLIENT_ID:-}" ] && [ -n "${KC_FACEBOOK_CLIENT_SECRET:-}"
+          ]; then export KC_FACEBOOK_ENABLED=true; fi
+
           bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/realm-template.json
 
           python /config/preserve-catalog-grants.py /rendered/realm-template.json
@@ -873,6 +891,18 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: google-idp-client-secret
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-id
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-secret
               optional: true
         volumeMounts:
         - name: realm
