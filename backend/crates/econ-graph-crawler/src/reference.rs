@@ -443,8 +443,9 @@ mod tests {
         );
     }
 
-    /// The shipped file parses, has no duplicates, and is sized like a curated headline list
-    /// (a few hundred series), not an unbounded catalog.
+    /// The shipped file parses, has no duplicates, and is sized like the curated list (about
+    /// 1,500 series, a first crawl in about an hour at FRED's 120 requests a minute), not an
+    /// unbounded catalog. One id from each category stands in for it.
     #[test]
     fn shipped_fred_series_file_is_valid() {
         let ids = load_fred_series(
@@ -454,11 +455,24 @@ mod tests {
         )
         .unwrap();
         assert!(
-            ids.len() >= 100 && ids.len() <= 2000,
-            "expected a curated list of a few hundred to ~2000 ids, got {}",
+            ids.len() >= 1000 && ids.len() <= 2000,
+            "expected a curated list of about 1,500 ids, got {}",
             ids.len()
         );
-        for id in ["GDP", "CPIAUCSL", "UNRATE", "FEDFUNDS", "CAUR", "USREC"] {
+        for id in [
+            "GDP",
+            "CPIAUCSL",
+            "UNRATE",
+            "FEDFUNDS",
+            "CAUR",
+            "USREC",
+            "DPCERL1Q225SBEA",
+            "LNS14000006",
+            "SOFR",
+            "HOUSTNE",
+            "DEXUSEU",
+            "CARQGSP",
+        ] {
             assert!(
                 ids.iter().any(|s| s == id),
                 "{id} missing from {}",

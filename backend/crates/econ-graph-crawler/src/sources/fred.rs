@@ -21,7 +21,7 @@
 //! "most popular" page plus several search terms, each paged to FRED's limit, can find tens of
 //! thousands of ids on the first run), and #214's per-series ALFRED vintage walk makes fetching
 //! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
-//! discovery's own request count equal to its size (under two hundred, not unbounded), while still
+//! discovery's own request count equal to its size (about 1,500, not unbounded), while still
 //! checking each series' live notes against [`is_copyright_restricted`] as a safety net before
 //! it is discovered. [`FredAdapter::fetch`] repeats the same check, so a series id fetched
 //! directly (a manual `triggerCrawl`, or a scheduled refresh of an already-stored series) without
