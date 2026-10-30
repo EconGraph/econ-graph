@@ -30,7 +30,7 @@ The [shell entry point](../scripts/update-cost-analysis.sh) delegates to
 file statistics and validates CSV input before writing outputs. Repeated runs with
 unchanged inputs preserve the generated contents and timestamp.
 
-The [scheduled workflow](../.github/workflows/update-cost-analysis.yml) validates
+The [cost-update workflow](../.github/workflows/update-cost-analysis.yml) validates
 generation and proposes output changes through a pull request. The
 [legacy webhook entry point](../scripts/webhook-cost-update.py) invokes the same
 updater; it does not produce a separate summary.
