@@ -133,3 +133,71 @@ async fn fresh_migration_enables_every_release_source() {
         assert!(c.discovered >= 1, "{source}: {c:?}");
     }
 }
+
+#[derive(diesel::QueryableByName, Debug, PartialEq)]
+struct SourceRow {
+    #[diesel(sql_type = SqlUuid)]
+    id: uuid::Uuid,
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    description: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    rate_limit_per_minute: i32,
+    #[diesel(sql_type = Bool)]
+    is_enabled: bool,
+}
+
+async fn source_row(pool: &DatabasePool, id: uuid::Uuid) -> SourceRow {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT id, description, rate_limit_per_minute, is_enabled FROM data_sources WHERE id = $1",
+    )
+    .bind::<SqlUuid, _>(id)
+    .get_result(&mut conn)
+    .await
+    .unwrap()
+}
+
+/// The Bank of Canada row matches the crawler: a new row comes from `DataSource::boc()`, whose
+/// rate is the crawler's policy, and the `boc_data_source_matches_valet_adapter` data migration
+/// brings a row created from the earlier template to the same description and rate, changing
+/// nothing else.
+#[tokio::test]
+async fn boc_row_matches_the_valet_adapter() {
+    use diesel_async::SimpleAsyncConnection;
+
+    let Some(admin_url) = database_url() else {
+        return;
+    };
+    let db = FreshDb::create(&admin_url, "econgraph_boc_source_row").await;
+    let template = data_source_template(SourceId::Boc);
+    let policy = crate::policy::SourcePolicy::default_for(SourceId::Boc);
+    let policy_per_minute = (policy.requests_per_second * 60.0).round() as i32;
+    assert_eq!(template.rate_limit_per_minute, policy_per_minute);
+
+    let id = data_source_id(&db.pool, SourceId::Boc).await.unwrap();
+    let created = source_row(&db.pool, id).await;
+    assert_eq!(created.description, template.description);
+    assert_eq!(created.rate_limit_per_minute, policy_per_minute);
+
+    // A row from the earlier template, then the migration.
+    {
+        let mut conn = db.pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE data_sources SET description = 'Canadian monetary policy, inflation, GDP, \
+             employment, and financial stability data', rate_limit_per_minute = 1000 \
+             WHERE id = $1",
+        )
+        .bind::<SqlUuid, _>(id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        conn.batch_execute(include_str!(
+            "../../../../migrations/data/2026-10-30-160000_boc_data_source_matches_valet_adapter/up.sql"
+        ))
+        .await
+        .unwrap();
+    }
+    let migrated = source_row(&db.pool, id).await;
+    db.drop().await;
+    assert_eq!(migrated, created);
+}

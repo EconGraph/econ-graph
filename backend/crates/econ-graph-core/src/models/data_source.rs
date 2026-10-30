@@ -342,23 +342,28 @@ impl DataSource {
         }
     }
 
-    /// Create Bank of Canada (BoC) source
+    /// Description of the Bank of Canada source; see [`DataSource::boc`].
+    pub const BOC_DESCRIPTION: &'static str = "Bank of Canada Valet: the policy rate, CORRA, \
+        the prime rate, exchange rates against the Canadian dollar, Government of Canada \
+        benchmark bond yields, core CPI measures (CPI-trim, CPI-median, CPI-common), and the \
+        M2 and M2++ monetary aggregates";
+
+    /// Create Bank of Canada (BoC) source. The description lists what the crawler's Valet
+    /// adapter collects, and the rate matches its policy (1 request/second); the data migration
+    /// `2026-10-30-160000_boc_data_source_matches_valet_adapter` sets the same values on an
+    /// existing row.
     pub fn boc() -> NewDataSource {
         NewDataSource {
             name: "Bank of Canada (BoC)".to_string(),
-            description: Some(
-                "Canadian monetary policy, inflation, GDP, employment, and financial stability data".to_string(),
-            ),
+            description: Some(Self::BOC_DESCRIPTION.to_string()),
             base_url: "https://www.bankofcanada.ca/valet".to_string(),
             api_key_required: false,
-            rate_limit_per_minute: 1000,
+            rate_limit_per_minute: 60,
             is_visible: true,
             is_enabled: true,
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
-            api_documentation_url: Some(
-                "https://www.bankofcanada.ca/valet/docs/".to_string(),
-            ),
+            api_documentation_url: Some("https://www.bankofcanada.ca/valet/docs/".to_string()),
             api_key_name: None,
         }
     }

@@ -16,6 +16,12 @@ description its `description`, and the units and frequency are `metadata.unit` a
 have no units, and their frequency is Valet's `dateFormat` (`monthly`) with its first letter
 capitalised.
 
+Valet gives the aggregates' units nowhere in a structured field. Their series details have empty
+`metadata`, and so does the group that holds them (`/valet/groups/E1_MONTHLY/json`, "Selected
+monetary aggregates and their components"), whose per-series entries carry no metadata at all.
+Only that group's free-text `description`, "Month-end, Millions of dollars", states them. The
+adapter does not parse prose into units, so M2 and M2++ are stored with empty units.
+
 A name Valet doesn't know (HTTP 404) or answers malformed is skipped and reported as a missing
 curated entry; the rest are still discovered. A rate limit or authentication failure stops the
 discovery, and a server error fails it so the queue retries it. The list is the adapter's
@@ -144,6 +150,7 @@ request, and cache data that changes once a day. The site's `robots.txt` disallo
 `/wp-admin/`.
 
 The crawler's Bank of Canada policy is 1 request/second with a burst of 1 and one request in
-flight ([`policy.rs`](../../backend/crates/econ-graph-crawler/src/policy.rs)). A full discovery
+flight ([`policy.rs`](../../backend/crates/econ-graph-crawler/src/policy.rs)). The source's
+`data_sources` row records the same rate, 60 requests/minute. A full discovery
 is one request per listed name, and the scheduler refreshes each daily series at most once a
 day, each weekly or monthly series at most once a week.

@@ -123,11 +123,12 @@ provider-approved rate. See the [Bank of Canada guide](../data-sources/boc.md#te
 ## Source-row metadata and catalog entries
 
 [`data_source.rs`](../../backend/crates/econ-graph-core/src/models/data_source.rs) defines
-`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, and BEA, FHFA,
-World Bank, IMF, ECB, OECD, Bank of England, WTO, Bank of Japan, Reserve Bank of Australia,
-Bank of Canada, Swiss National Bank, UN Statistics Division, and ILO 1000. These defaults
-are neither the main crawler's enforced HTTP policies nor evidence of provider quotas;
-existing database rows can also differ from model defaults.
+`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, Bank of Canada 60,
+and BEA, FHFA, World Bank, IMF, ECB, OECD, Bank of England, WTO, Bank of Japan, Reserve Bank
+of Australia, Swiss National Bank, UN Statistics Division, and ILO 1000. These defaults
+are not the main crawler's enforced HTTP policies (FRED's and the Bank of Canada's equal
+their policies' rates), and none is evidence of a provider quota. Existing database rows can also
+differ from model defaults.
 
 The main crawler provides development-only
 [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs) for
