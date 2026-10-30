@@ -14,22 +14,26 @@ deploy_config_path() {
     printf '%s\n' "${ECONGRAPH_DEPLOY_ENV:-${ECONGRAPH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/econgraph}/deploy.env}"
 }
 
-# deploy_config_value NAME [WHAT]: print NAME's value from the last NAME= line, with
-# surrounding blanks and one pair of matching quotes removed; nothing else is
-# rewritten. Fails, saying why on stderr, on an unreadable file, an `export NAME=`
-# line (refused rather than read differently from a plain one), a carriage return
-# in the NAME line or blanks inside the value (WHAT names the value in that
-# message: "write the WHAT alone").
-deploy_config_value() {
+# deploy_config_read NAME [WHAT]: the one reader of the deploy config. Sets
+# DEPLOY_CONFIG_VALUE to NAME's value from the last NAME= line, with surrounding
+# blanks and one pair of matching quotes removed; nothing else is rewritten (empty
+# without the file or the line). Returns 1, with the reason in DEPLOY_CONFIG_ERROR,
+# on a file that exists but is not a readable regular file, an `export NAME=` line
+# (refused rather than read differently from a plain one), a carriage return in the
+# NAME line or blanks inside the value (WHAT names the value in that message: "write
+# the WHAT alone"). Runs in the caller's shell, so the variables reach it.
+deploy_config_read() {
     local name="$1" what="${2:-value}" file line value
     file="$(deploy_config_path)"
+    DEPLOY_CONFIG_VALUE=""
+    DEPLOY_CONFIG_ERROR=""
     [ -e "$file" ] || return 0
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
-        echo "error: ${file} exists but is not a readable file" >&2
+        DEPLOY_CONFIG_ERROR="${file} exists but is not a readable file"
         return 1
     fi
     if grep -qE "^[[:space:]]*export[[:space:]]+${name}=" "$file"; then
-        echo "error: ${file} has an 'export ${name}=' line; it is read, not sourced: write ${name}=... without export" >&2
+        DEPLOY_CONFIG_ERROR="${file} has an 'export ${name}=' line; it is read, not sourced: write ${name}=... without export"
         return 1
     fi
     # The last line wins, as it would if the file were sourced.
@@ -39,7 +43,7 @@ deploy_config_value() {
     # A CRLF file would otherwise pass silently (the public-host renderer strips a
     # trailing CR): refuse it.
     if [[ "$value" == *$'\r'* ]]; then
-        echo "error: ${file} has a carriage return in its ${name} line (CRLF line endings?); save it with LF endings" >&2
+        DEPLOY_CONFIG_ERROR="${file} has a carriage return in its ${name} line (CRLF line endings?); save it with LF endings"
         return 1
     fi
     value="${value#"${value%%[![:space:]]*}"}"
@@ -47,13 +51,23 @@ deploy_config_value() {
     if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then
         value="${BASH_REMATCH[1]}"
     fi
-    # Blanks inside (or inside the quotes), such as a trailing comment: refuse,
-    # rather than guess.
+    # Blanks inside (or inside the quotes), such as a trailing comment: the renderer
+    # would strip them, but the gateway step would not. Refuse, rather than guess.
     if [[ "$value" == *[[:space:]]* ]]; then
-        echo "error: ${file} sets ${name}='${value}', with blanks in it; write the ${what} alone" >&2
+        DEPLOY_CONFIG_ERROR="${file} sets ${name}='${value}', with blanks in it; write the ${what} alone"
         return 1
     fi
-    printf '%s\n' "$value"
+    DEPLOY_CONFIG_VALUE="$value"
+}
+
+# deploy_config_value NAME [WHAT]: deploy_config_read, printing the value, or the
+# reason on stderr.
+deploy_config_value() {
+    if ! deploy_config_read "$@"; then
+        echo "error: ${DEPLOY_CONFIG_ERROR}" >&2
+        return 1
+    fi
+    printf '%s\n' "$DEPLOY_CONFIG_VALUE"
 }
 
 # gateway_tls_current_issuer: print the ClusterIssuer of certificate

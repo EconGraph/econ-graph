@@ -70,9 +70,11 @@ With a public host, every deploy chooses the issuer the same way (`tls_issuer_ch
 and `restart-k8s-rollout.sh` before they apply anything, and by `release-deploy.sh` before
 any step):
 
-1. `GATEWAY_TLS_ISSUER` in the environment: an explicit choice, which may change the
-   certificate's issuer. `release-deploy.sh --change-tls-issuer` passes the config's line
-   this way.
+1. `GATEWAY_TLS_ISSUER` in the environment: an explicit choice for `deploy.sh`,
+   `restart-k8s-rollout.sh` and `apply-gateway-routes.sh`, which may change the
+   certificate's issuer. `release-deploy.sh` refuses an environment value that differs
+   from the existing issuer unless `--change-tls-issuer` is given, and with that flag
+   passes the environment's value, else the config's line, this way.
 2. The deploy config's line, when it matches the existing certificate's issuer or there
    is no certificate. A line that differs from the existing issuer is refused, so a stale
    or mistyped line never re-issues the certificate from an issuer the tunnel rejects.
@@ -80,7 +82,8 @@ any step):
 4. `econ-graph-selfsigned`.
 
 Without a public host the line is not read. `release-deploy.sh` shows the current and the
-chosen issuer in its plan.
+chosen issuer in its plan. A dry run of `deploy.sh` cannot see the existing certificate, so
+it checks only that the line can be read and says the issuer is chosen when applied.
 
 The leaf covers the public host and `www` name. In the dashboard, use the public host as
 **Origin Server Name** even though the Service URL uses the internal proxy Service DNS.
@@ -181,3 +184,22 @@ to the new issuer: change the deploy config's line and select it explicitly, as 
 rollback. Repeat the positive and negative origin checks before retiring the old root from
 the public bundle. Never mount a signing key into a connector or delete a root Secret as
 part of staging.
+
+Nothing removes a root from the bundle by itself. Each staging run lists the subject,
+SHA-256 fingerprint and expiry of every published root other than the current one. To
+retire the old root once the gateway's certificate is issued from the new CA and the
+checks pass, republish the bundle with only the new CA's public certificate and restart
+the connectors. `NEW_CA_SECRET` is the Secret named in the new ClusterIssuer's `ca.secretName`:
+
+```sh
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl \
+  --context kind-econ-graph "$@"; }
+NEW_CA_SECRET=<new CA Secret>
+k -n cert-manager get secret "$NEW_CA_SECRET" -o 'jsonpath={.data.tls\.crt}' | base64 --decode |
+  k -n econ-graph create configmap cloudflared-origin-ca --from-file=ca.crt=/dev/stdin \
+    --dry-run=client -o yaml | k apply -f -
+k -n econ-graph rollout restart deployment/cloudflared
+k -n econ-graph rollout status deployment/cloudflared --timeout=120s
+```
+
+This reads only the public `tls.crt` field. Then repeat the positive origin check.

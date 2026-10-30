@@ -147,6 +147,10 @@ elif 'patch' in args:
     assert result.returncode == 0, result.stderr
     assert published(logged()) and not patched(logged()) and not restarted(logged())
 
+    def fingerprint(path):
+        """openssl's SHA-256 fingerprint line for a certificate file."""
+        return subprocess.run(['openssl', 'x509', '-in', str(path), '-noout', '-fingerprint', '-sha256'],
+                              check=True, capture_output=True, text=True).stdout.strip()
     def make_root(path, key, subject, days='365', new_key=False):
         """Self-sign a synthetic CA root; reuse key unless new_key."""
         key_args = (['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', str(key)]
@@ -182,6 +186,14 @@ elif 'patch' in args:
         assert result.returncode == 0, result.stderr
         assert 'two-root rotation' in result.stdout, result.stdout
         assert not published(logged()) and not patched(logged()) and not restarted(logged())
+        # Every root other than the current one is listed, so a retired one is noticed.
+        listed = result.stdout.split('roots other than the current one:', 1)[1]
+        assert fingerprint(other_key) in listed and fingerprint(ca) not in listed, result.stdout
+        assert 'expires:     notAfter=' in listed and 'subject:     subject=CN=offline-test-ca' in listed
+    # Only the current root published: nothing is listed.
+    calls.write_text('')
+    result = run('--context','scratch-only','--apply',EXISTING_CA=ca.read_text(),MOUNTED='1')
+    assert result.returncode == 0 and 'other than the current one' not in result.stdout, result.stdout
     # The issued root must itself be a self-signed CA: a certificate with the published
     # root's subject and key, but cross-signed by another CA (fails the self-verify),
     # or self-signed without CA:TRUE (fails the CA check), is never published, even

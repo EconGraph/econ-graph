@@ -9,6 +9,7 @@
 import React from 'react';
 import { Box, Typography, Paper } from '@mui/material';
 import * as d3 from 'd3';
+import type { ColorScaleMode } from './hooks/useCountryData';
 import { formatMapDate, NO_DATA_FILL } from './mapFormat';
 
 interface MapLegendProps {
@@ -18,6 +19,8 @@ interface MapLegendProps {
   unit: string | null;
   frequency: string | null;
   dataRange: { min: number; max: number };
+  scaleMode: ColorScaleMode;
+  valueAtPosition: (position: number) => number;
   /** Earliest and latest value dates; null when no country has a value. */
   dateRange: { earliest: string; latest: string } | null;
   /** Number of countries with a value on the map. */
@@ -34,13 +37,15 @@ const MapLegend: React.FC<MapLegendProps> = ({
   unit,
   frequency,
   dataRange,
+  scaleMode,
+  valueAtPosition,
   dateRange,
   countryCount,
   undrawnCount,
 }) => {
   const numSegments = 20;
   const gradientStops = d3.range(numSegments + 1).map(i => {
-    const value = dataRange.min + (i / numSegments) * (dataRange.max - dataRange.min);
+    const value = valueAtPosition(i / numSegments);
     return `${colorScale(value)} ${(i / numSegments) * 100}%`;
   });
 
@@ -70,7 +75,11 @@ const MapLegend: React.FC<MapLegendProps> = ({
       )}
       {countryCount > 0 ? (
         <>
+          <Typography variant='caption' component='div'>
+            Scale: {scaleMode === 'log' ? 'Logarithmic' : 'Linear'}
+          </Typography>
           <Box
+            data-testid='map-color-ramp'
             sx={{
               mt: 1,
               height: 16,
@@ -78,9 +87,25 @@ const MapLegend: React.FC<MapLegendProps> = ({
               borderRadius: 1,
             }}
           />
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant='caption'>{formatBound(dataRange.min)}</Typography>
-            <Typography variant='caption'>{formatBound(dataRange.max)}</Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: dataRange.min === dataRange.max ? '1fr' : 'repeat(3, 1fr)',
+              mb: 1,
+            }}
+          >
+            {(dataRange.min === dataRange.max ? [0] : [0, 0.5, 1]).map(position => (
+              <Typography
+                key={position}
+                variant='caption'
+                sx={{ textAlign: position === 0 ? 'left' : position === 1 ? 'right' : 'center' }}
+                data-testid='map-scale-tick'
+                data-position={position}
+                data-value={valueAtPosition(position)}
+              >
+                {formatBound(valueAtPosition(position))}
+              </Typography>
+            ))}
           </Box>
         </>
       ) : null}

@@ -4,7 +4,7 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 
 | File | Used by | Contents |
 |---|---|---|
-| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google identity provider |
+| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google and Facebook identity providers |
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
 | `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
@@ -95,6 +95,8 @@ The realm file reads these environment variables when it is imported:
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
 | `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when both the Google client id and secret are configured |
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
+| `KC_FACEBOOK_ENABLED` | `false` | Enabled by the Kubernetes render command only when both Facebook credentials are present |
+| `KC_FACEBOOK_CLIENT_ID`, `KC_FACEBOOK_CLIENT_SECRET` | `unset` | Facebook app credentials, read from the environment-specific Kubernetes Secret |
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
 is first imported; change a value later by recreating the volume. In Kubernetes the
@@ -144,10 +146,72 @@ redeploy — as long as the roles they're mapped to stay in the file. A realm ro
 client or mapper removed from the file is removed from the cluster on the next
 deploy, taking any user's mapping to that role with it.
 
+A maintainer enters the Google client with hidden input with
+`scripts/deploy/set-crawler-keys.sh --google`, which then restarts Keycloak and reruns
+the Job. Before asking for anything it checks that the cluster's `keycloak-realm`
+ConfigMap holds this checkout's realm files, so run it from a checkout of the commit
+the cluster runs (for production, the release tag). It renders the Job for the public
+host the cluster serves, and refuses a production cluster that serves none, or a
+`PUBLIC_HOST` (in the environment or `~/.config/econgraph/deploy.env`) that differs
+from it.
+
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the
 temporary bootstrap admin), update the Secret too, or the next deploy fails at the
 realm import. Its logs: `kubectl -n econ-graph logs job/keycloak-realm-import --all-containers`.
+
+## Facebook sign-in
+
+Facebook sign-in is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)).
+The realm declares an optional `facebook` provider that uses the same
+first-broker-login and account-linking flow as Google, requests only `email` and
+`public_profile`, and stores no upstream token. Facebook emails are not trusted as
+verified: Keycloak handles profile completion and existing-account verification through
+its default first-broker-login flow, rather than automatically linking by email. The
+realm import enables the provider only when `econ-graph-keycloak` holds both
+`facebook-idp-client-id` and `facebook-idp-client-secret`; without them no Facebook
+button appears.
+
+`scripts/deploy/set-crawler-keys.sh --facebook` refuses before any prompt, cluster call
+or write, and exits non-zero, with `--dry-run` too. `scripts/deploy/create-secrets.sh`
+likewise refuses to run, before any cluster call and with `--dry-run` too, while
+`KEYCLOAK_FACEBOOK_CLIENT_ID` or `KEYCLOAK_FACEBOOK_CLIENT_SECRET` is set and non-empty;
+it keeps Facebook keys a Secret already holds (see below to remove them). Local compose
+does not forward Facebook credentials.
+
+The privacy policy at `https://econgraph.com/privacy` covers either provider, and
+`https://econgraph.com/privacy#account-deletion` gives the data-deletion instructions a
+Meta app links to. A Meta app for this realm uses domain `econgraph.com` and redirect
+URI `https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`
+([Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook)).
+There is no Facebook deletion callback: the instructions explain how to request
+account deletion. The backend serves no `/auth/*` routes; sign-in goes through Keycloak.
+
+### Disabling Facebook sign-in
+
+Neither `set-crawler-keys.sh` nor `create-secrets.sh` removes a key, so remove the
+two keys from the Secret by hand, with the kind cluster's kubectl, then restart
+Keycloak and rerun the realm import. Use a checkout of the commit the cluster runs
+(for production, the release tag). A JSON-patch `remove` fails on a key that is
+absent, so remove only the keys the Secret has:
+
+```bash
+k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
+k -n econ-graph patch secret econ-graph-keycloak --type=json -p='[
+  {"op": "remove", "path": "/data/facebook-idp-client-id"},
+  {"op": "remove", "path": "/data/facebook-idp-client-secret"}]'
+k -n econ-graph rollout restart deployment/keycloak
+k -n econ-graph rollout status deployment/keycloak --timeout=600s
+k -n econ-graph delete job keycloak-realm-import --ignore-not-found
+# On the production cluster, rendered for its public host; elsewhere apply the file as it is.
+scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
+k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
+```
+
+Use this on a cluster whose Secret holds either key. Without both keys the realm
+import disables the `facebook` provider and the Facebook button disappears. Accounts
+whose only sign-in is Facebook can then no longer sign in; their data stays in place.
+A later deploy keeps the provider disabled while the keys are absent.
 
 ## Catalog access, including anonymous visitors
 

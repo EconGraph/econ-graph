@@ -167,11 +167,13 @@ certificate, read the same way:
 GATEWAY_TLS_ISSUER=econ-graph-origin-ca
 ```
 
-`GATEWAY_TLS_ISSUER` in the environment is an explicit choice and wins. Otherwise the
-line is used when it matches the certificate's current issuer or the cluster has no
-certificate (a recreated cluster); a line that differs from the current issuer is refused
-unless `--change-tls-issuer` is given, which passes it to `deploy.sh` as an explicit
-choice. With neither, the certificate keeps its current issuer, else
+`GATEWAY_TLS_ISSUER` in the environment wins over the line, but an environment value that
+differs from the certificate's current issuer is refused unless `--change-tls-issuer` is
+given, as for `PUBLIC_HOST`: a shell left over from an earlier change must not re-issue
+the certificate. Otherwise the line is used when it matches the certificate's current
+issuer or the cluster has no certificate (a recreated cluster); a line that differs from
+the current issuer is refused unless `--change-tls-issuer` is given, which passes it to
+`deploy.sh` as an explicit choice. With neither, the certificate keeps its current issuer, else
 `econ-graph-selfsigned`. The plan shows the current and the chosen issuer. A value that
 is not a resource name, an `export GATEWAY_TLS_ISSUER=` line or a config file that exists
 but cannot be read is refused before any step. `deploy.sh` (before it applies anything)

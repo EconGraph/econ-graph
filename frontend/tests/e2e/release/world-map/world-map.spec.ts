@@ -4,8 +4,9 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { OIDC_ISSUER } from '../env';
+import { DEPLOYED, OIDC_ISSUER } from '../env';
 import { SEEDED_WDI } from '../fixtures';
+import { landColorDistribution } from './land-color-distribution';
 
 // Live QA: the world map shows a value for every country World Development Indicators are
 // seeded for, on every indicator, with a working tooltip, and loads its outline from the app's
@@ -43,6 +44,33 @@ const countryPath = (page: Page, isoNumeric: number) =>
   page.locator(`svg path.country[data-iso-numeric="${isoNumeric}"]`);
 
 test.describe('World map release spec', () => {
+  test('seeded GDP colors remain distributed over rendered land area', async ({ page }) => {
+    test.skip(DEPLOYED, 'Uses the deterministic six-country fixture, not live data.');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto('/global');
+    const legend = page.getByTestId('map-legend');
+    await expect(legend).toContainText('GDP per capita (current US$)');
+    await expect(legend).toContainText('6 countries with data.');
+    await expect(page.getByRole('combobox', { name: 'Color scale' })).toHaveText('Logarithmic');
+    await page.getByRole('combobox', { name: 'Projection' }).click();
+    await page.getByRole('option', { name: 'Natural Earth', exact: true }).click();
+    for (const iso of Object.values(ISO_NUMERIC)) {
+      await expect(countryPath(page, iso)).toHaveAttribute('data-has-data', 'true');
+    }
+    const colors = await landColorDistribution(page);
+    // Natural Earth baseline: six recorded countries cover 21.4% of land,
+    // mean L*=63.8, with low/middle/high area shares 8.2%/57.8%/34.0%.
+    // The recorded six-country fixture covers a known subset of world land.
+    // Area weighting must not silently drop most countries as missing joins.
+    expect(colors.dataFraction).toBeGreaterThan(0.12);
+    expect(colors.dataFraction).toBeLessThan(0.4);
+    expect(colors.nearWhiteFraction).toBeLessThan(0.01);
+    expect(colors.meanLightness).toBeGreaterThan(40);
+    expect(colors.meanLightness).toBeLessThan(80);
+    expect(colors.lightnessBands.every(fraction => fraction > 0.05)).toBe(true);
+    expect(colors.averageRgb.every(channel => channel < 230)).toBe(true);
+  });
+
   test('every seeded country has a value for every indicator, with a working tooltip', async ({
     page,
     baseURL,
@@ -95,10 +123,7 @@ test.describe('World map release spec', () => {
 
       // Every seeded country shows a value on the map; none is left as "no data".
       for (const code of countryCodes) {
-        await expect(countryPath(page, ISO_NUMERIC[code])).toHaveAttribute(
-          'data-has-data',
-          'true'
-        );
+        await expect(countryPath(page, ISO_NUMERIC[code])).toHaveAttribute('data-has-data', 'true');
       }
 
       // The values table reaches every seeded country with its exact value and date. Exact cell

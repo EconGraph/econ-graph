@@ -80,9 +80,10 @@ past observations, including Census annual releases, BEA updates and FHFA re-est
 FRED and WDI retain different kinds of vintages. FRED maps ALFRED's `realtime_start`
 to `revision_date` and marks the earliest available vintage of each observation as its
 original release. WDI uses the response's database-level `lastupdated` date and fetches
-the full history. When a fetched response has a new `lastupdated`, its observations are
-stored under that new vintage. WDI therefore retains updates actually fetched; it does
-not recover missed editions or provide an upstream archive comparable to ALFRED.
+the full history. When a fetched response has a new `lastupdated`, each observation whose
+value is new or changed is stored under that new vintage; an unchanged value keeps the
+row of the vintage that first carried it. WDI therefore retains updates actually fetched;
+it does not recover missed editions or provide an upstream archive comparable to ALFRED.
 
 Observation attributes are distinct from dimensions and vintage dates. BLS parses footnotes
 such as `P` (preliminary) and `X` (unavailable), but does not persist them.

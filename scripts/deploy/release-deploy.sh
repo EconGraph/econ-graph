@@ -52,9 +52,10 @@
 #                  deploy a PUBLIC_HOST other than the one the production
 #                  cluster serves now (or one where it serves none)
 #   --change-tls-issuer
-#                  issue the gateway certificate from the deploy config's
-#                  GATEWAY_TLS_ISSUER when it differs from the certificate's current
-#                  issuer (passed to deploy.sh as GATEWAY_TLS_ISSUER)
+#                  issue the gateway certificate from GATEWAY_TLS_ISSUER in the
+#                  environment, else the deploy config's, when it differs from the
+#                  certificate's current issuer (passed to deploy.sh as
+#                  GATEWAY_TLS_ISSUER); without it such a change is refused
 #   --report FILE  append one line per step (step=NAME status=ok|failed|dry-run,
 #                  and unchecked=N on a verify that left N things unchecked),
 #                  the backups taken (backup= and keycloak_backup=), on a
@@ -90,7 +91,8 @@
 #     from the environment, else a GATEWAY_TLS_ISSUER= line in the same config when
 #     it matches the certificate's current issuer or there is no certificate, else
 #     the current issuer, else econ-graph-selfsigned. A configured issuer that
-#     differs from the current one is refused without --change-tls-issuer, so a
+#     differs from the current one, from the config or the environment, is refused
+#     without --change-tls-issuer, so a
 #     stale or mistyped line never re-issues the certificate from an issuer the
 #     tunnel rejects. The plan shows the current and the new issuer.
 #   - It shows the cluster's identity and the plan, and asks once (--yes
@@ -306,25 +308,12 @@ CLUSTER_UID="$(kube_system_uid)" || die "could not read the kube-system UID of $
 UID_PREFIX="${CLUSTER_UID:0:8}"
 
 # --- PUBLIC_HOST, from the host's deploy config ----------------------------------------
-# shellcheck source=scripts/deploy/lib/deploy-config.sh
-source "$DEPLOY_DIR/lib/deploy-config.sh"
-DEPLOY_ENV="$(deploy_config_path)"
-configured=false
-# Read, not sourced: a CRLF file or blanks inside the value are refused.
-PUBLIC_HOST="$(deploy_config_value PUBLIC_HOST "host name")" ||
-    die "could not read PUBLIC_HOST from ${DEPLOY_ENV}"
-# Host names are case-insensitive; the routes, the certificate and the
-# comparison below use the lowercase form.
-if [ "$PUBLIC_HOST" != "${PUBLIC_HOST,,}" ]; then
-    echo "  PUBLIC_HOST     ${PUBLIC_HOST} in ${DEPLOY_ENV} is used as ${PUBLIC_HOST,,}"
-    PUBLIC_HOST="${PUBLIC_HOST,,}"
-fi
-[ -z "$PUBLIC_HOST" ] || configured=true
-# A malformed host is refused here, before any step, not by deploy.sh after the
-# load, the backups and the precheck (the same check, render-public-host.py).
-if [ -n "$PUBLIC_HOST" ] && ! "$DEPLOY_DIR/render-public-host.py" "$PUBLIC_HOST" /dev/null >/dev/null; then
-    die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', which is not a public DNS name"
-fi
+# Read by read_configured_public_host (lib/public-host.sh), which also refuses
+# a malformed host here, before any step, not in deploy.sh after the load, the
+# backups and the precheck.
+read_configured_public_host || die "$PUBLIC_HOST_CONFIG_ERROR"
+PUBLIC_HOST="$CONFIGURED_PUBLIC_HOST"
+configured="$PUBLIC_HOST_CONFIGURED"
 if [ "$ENV_PUBLIC_HOST_SET" = set ] && [ "${ENV_PUBLIC_HOST,,}" != "$PUBLIC_HOST" ]; then
     die "PUBLIC_HOST='${ENV_PUBLIC_HOST}' is set in the environment, but ${DEPLOY_ENV} says '${PUBLIC_HOST}'; the config decides: unset PUBLIC_HOST, or change the config"
 fi
@@ -363,6 +352,13 @@ echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_EN
 if [ -n "$PUBLIC_HOST" ]; then
     current_issuer="$(gateway_tls_current_issuer)" ||
         die "could not read the issuer of certificate econ-graph-tls on ${CONTEXT}"
+    # An inherited GATEWAY_TLS_ISSUER (a shell left over from the cutover) must not
+    # change a live certificate's issuer silently: as for PUBLIC_HOST, a change needs
+    # the flag.
+    if [ -n "${GATEWAY_TLS_ISSUER:-}" ] && [ -n "$current_issuer" ] &&
+        [ "$GATEWAY_TLS_ISSUER" != "$current_issuer" ] && [ "$CHANGE_TLS_ISSUER" != true ]; then
+        die "GATEWAY_TLS_ISSUER=${GATEWAY_TLS_ISSUER} is set in the environment, but certificate econ-graph-tls on ${CONTEXT} is issued by ${current_issuer}. If ${GATEWAY_TLS_ISSUER} is right, pass --change-tls-issuer; otherwise unset GATEWAY_TLS_ISSUER"
+    fi
     if [ "$CHANGE_TLS_ISSUER" = true ] && [ -z "${GATEWAY_TLS_ISSUER:-}" ]; then
         GATEWAY_TLS_ISSUER="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" ||
             die "could not read GATEWAY_TLS_ISSUER from ${DEPLOY_ENV}"

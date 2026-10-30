@@ -91,19 +91,35 @@ root_identity() {
     openssl x509 -in "$1" -noout -subject -nameopt RFC2253 &&
         openssl x509 -in "$1" -noout -pubkey
 }
-# Whether bundle $1 contains certificate $2 (the same SHA-256 fingerprint).
-bundle_contains() {
-    local want cert fingerprint
-    want="$(openssl x509 -in "$2" -noout -fingerprint -sha256)" || return 1
-    rm -rf "$work/bundle" && mkdir "$work/bundle"
-    awk -v dir="$work/bundle" '
-        /-----BEGIN CERTIFICATE-----/ { n++; out = dir "/" n ".pem"; inside = 1 }
-        inside { print > out }
-        /-----END CERTIFICATE-----/ { inside = 0; close(out) }' "$1"
+# Split the published bundle into one file per certificate, in $work/bundle.
+rm -rf "$work/bundle" && mkdir "$work/bundle"
+awk -v dir="$work/bundle" '
+    /-----BEGIN CERTIFICATE-----/ { n++; out = sprintf("%s/%03d.pem", dir, n); inside = 1 }
+    inside { print > out }
+    /-----END CERTIFICATE-----/ { inside = 0; close(out) }' "$work/existing-ca.crt"
+current_fingerprint="$(openssl x509 -in "$work/ca.crt" -noout -fingerprint -sha256)"
+# Nothing removes a root from the bundle by itself: list every published root other
+# than the current one, so a retired root is noticed (TUNNEL_ORIGIN_TLS.md says how
+# to drop it).
+other_roots=0
+for cert in "$work/bundle"/*.pem; do
+    [[ -e "$cert" ]] || continue
+    fingerprint="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null)" ||
+        fingerprint="(unreadable certificate)"
+    [[ "$fingerprint" != "$current_fingerprint" ]] || continue
+    ((other_roots += 1))
+    ((other_roots > 1)) || echo 'Published trust bundle also holds roots other than the current one:'
+    echo "  subject:     $(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null)"
+    echo "  fingerprint: ${fingerprint}"
+    echo "  expires:     $(openssl x509 -in "$cert" -noout -enddate 2>/dev/null)"
+done
+# Whether the published bundle contains the current root (the same SHA-256 fingerprint).
+bundle_contains_current() {
+    local cert fingerprint
     for cert in "$work/bundle"/*.pem; do
         [[ -e "$cert" ]] || continue
         fingerprint="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null)" || continue
-        [[ "$fingerprint" == "$want" ]] && return 0
+        [[ "$fingerprint" == "$current_fingerprint" ]] && return 0
     done
     return 1
 }
@@ -116,7 +132,7 @@ elif ! cmp -s "$work/ca.crt" "$work/existing-ca.crt"; then
         [[ "$new_id" == "$old_id" ]]; then
         echo 'Published root renewed (same subject and public key); replacing it.'
         bundle_changed=true
-    elif bundle_contains "$work/existing-ca.crt" "$work/ca.crt"; then
+    elif bundle_contains_current; then
         echo 'Trust bundle holds this root among others (a two-root rotation); left unchanged.'
     else
         echo 'error: existing trust bundle differs; follow the two-root rotation runbook' >&2

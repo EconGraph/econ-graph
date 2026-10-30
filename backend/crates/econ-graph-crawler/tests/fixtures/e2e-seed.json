@@ -12,6 +12,15 @@
     },
     {
       "source": "FRED",
+      "external_id": "USREC",
+      "routes": [
+        { "method": "GET", "path": "/series", "fixture": "fred/series_usrec.json" },
+        { "method": "GET", "path": "/series/vintagedates", "fixture": "fred/vintagedates_usrec_e2e.json" },
+        { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_usrec_e2e.json" }
+      ]
+    },
+    {
+      "source": "FRED",
       "external_id": "EGE2EMULTIPAGE",
       "routes": [
         { "method": "GET", "path": "/series", "fixture": "fred/series_multipage_e2e.json" },

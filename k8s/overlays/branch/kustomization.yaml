@@ -268,13 +268,15 @@ patches:
     \          image: quay.io/keycloak/keycloak:26.8.1\n          command:\n     \
     \     - /bin/bash\n          - -c\n          args:\n          - 'if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
     \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
-    \ fi\n\n            exec /opt/keycloak/bin/kc.sh start\n\n            '\n    \
-    \      env:\n          - name: KC_BOOTSTRAP_ADMIN_USERNAME\n            valueFrom:\n\
-    \              secretKeyRef:\n                name: econ-graph-keycloak\n    \
-    \            key: admin-username\n          - name: KC_BOOTSTRAP_ADMIN_PASSWORD\n\
-    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
-    \                key: admin-password\n          - name: KC_DB\n            value:\
-    \ postgres\n          - name: KC_DB_URL\n            value: jdbc:postgresql://keycloak-postgres-service:5432/keycloak\n\
+    \ fi\n\n            if [ -n \"${KC_FACEBOOK_CLIENT_ID:-}\" ] && [ -n \"${KC_FACEBOOK_CLIENT_SECRET:-}\"\
+    \n            ]; then export KC_FACEBOOK_ENABLED=true; fi\n\n            exec\
+    \ /opt/keycloak/bin/kc.sh start\n\n            '\n          env:\n          -\
+    \ name: KC_BOOTSTRAP_ADMIN_USERNAME\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-username\n\
+    \          - name: KC_BOOTSTRAP_ADMIN_PASSWORD\n            valueFrom:\n     \
+    \         secretKeyRef:\n                name: econ-graph-keycloak\n         \
+    \       key: admin-password\n          - name: KC_DB\n            value: postgres\n\
+    \          - name: KC_DB_URL\n            value: jdbc:postgresql://keycloak-postgres-service:5432/keycloak\n\
     \          - name: KC_DB_USERNAME\n            value: keycloak\n          - name:\
     \ KC_DB_PASSWORD\n            valueFrom:\n              secretKeyRef:\n      \
     \          name: econ-graph-keycloak\n                key: db-password\n     \
@@ -319,18 +321,20 @@ patches:
     \          command:\n          - /bin/bash\n          - -c\n          args:\n\
     \          - 'set -euo pipefail\n\n            if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
     \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
-    \ fi\n\n            bash /config/render-realm.sh /config/econ-graph-realm.json\
-    \ > /rendered/realm-template.json\n\n            python /config/preserve-catalog-grants.py\
-    \ /rendered/realm-template.json\n            > /rendered/econ-graph-realm.json\n\
-    \n            '\n          env:\n          - name: KEYCLOAK_URL\n            value:\
-    \ http://keycloak-service:8080/idp\n          - name: KEYCLOAK_USER\n        \
-    \    valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
-    \                key: admin-username\n          - name: KEYCLOAK_PASSWORD\n  \
-    \          valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
-    \                key: admin-password\n          - name: KC_ANONYMOUS_CLIENT_SECRET\n\
-    \            valueFrom:\n              secretKeyRef:\n                name: econ-graph-keycloak\n\
-    \                key: anonymous-client-secret\n          - name: KC_WEB_BASE_URL\n\
-    \            value: http://example-50d858e098.localhost\n          - name: KC_WEB_E2E_BASE_URL\n\
+    \ fi\n\n            if [ -n \"${KC_FACEBOOK_CLIENT_ID:-}\" ] && [ -n \"${KC_FACEBOOK_CLIENT_SECRET:-}\"\
+    \n            ]; then export KC_FACEBOOK_ENABLED=true; fi\n\n            bash\
+    \ /config/render-realm.sh /config/econ-graph-realm.json > /rendered/realm-template.json\n\
+    \n            python /config/preserve-catalog-grants.py /rendered/realm-template.json\n\
+    \            > /rendered/econ-graph-realm.json\n\n            '\n          env:\n\
+    \          - name: KEYCLOAK_URL\n            value: http://keycloak-service:8080/idp\n\
+    \          - name: KEYCLOAK_USER\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-username\n\
+    \          - name: KEYCLOAK_PASSWORD\n            valueFrom:\n              secretKeyRef:\n\
+    \                name: econ-graph-keycloak\n                key: admin-password\n\
+    \          - name: KC_ANONYMOUS_CLIENT_SECRET\n            valueFrom:\n      \
+    \        secretKeyRef:\n                name: econ-graph-keycloak\n          \
+    \      key: anonymous-client-secret\n          - name: KC_WEB_BASE_URL\n     \
+    \       value: http://example-50d858e098.localhost\n          - name: KC_WEB_E2E_BASE_URL\n\
     \            value: http://example-50d858e098.localhost\n          volumeMounts:\n\
     \          - name: realm\n            mountPath: /config\n            readOnly:\
     \ true\n          - name: rendered\n            mountPath: /rendered\n       \

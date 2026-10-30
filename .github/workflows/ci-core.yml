@@ -331,14 +331,16 @@ jobs:
       run: scripts/deploy/test-teardown-guards.sh
 
     # teardown.sh and protect-postgres-pv.sh reach only the kind cluster's
-    # kubectl on context kind-econ-graph, never plain kubectl (all stubs here).
-    - name: Check that teardown uses only the kind cluster's context
+    # kubectl on context kind-econ-graph, never plain kubectl, and teardown.sh
+    # dumps the databases before it patches or deletes anything (all stubs here).
+    - name: Check that teardown uses only the kind cluster's context and backs up first
       run: scripts/deploy/test-teardown-kubectl.sh
 
     # recreate-kind-cluster.sh identifies the cluster inside its control plane on
     # the rootful daemon and, before any backup, delete or create, asks for the
     # kube-system UID prefix on a cluster with a production marker (or one that
-    # can't be read), never taking --yes for it (all stubs here).
+    # can't be read), never taking --yes for it, and refuses when a host
+    # directory the kind config bind-mounts is not mounted (all stubs here).
     - name: Check that recreate-kind-cluster confirms before deleting
       run: |
         shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
@@ -398,6 +400,14 @@ jobs:
       run: |
         shellcheck -x scripts/deploy/release-deploy.sh scripts/deploy/test-release-deploy.sh
         scripts/deploy/test-release-deploy.sh
+
+    # tag.sh tags vX.Y.0 with train-N, and a patch release vX.Y.Z only on a
+    # branch that descends from an existing train-N, against a local origin and
+    # a stub git push.
+    - name: Check the release tag script
+      run: |
+        shellcheck -x scripts/release/tag.sh scripts/release/test-tag.sh
+        scripts/release/test-tag.sh
 
     # The full-history re-fetch: every kubectl call pinned to kind-econ-graph, the cluster's
     # identity printed first, and the resume hint keeping the run's options, against stubs.
@@ -2230,7 +2240,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
@@ -2309,9 +2319,10 @@ jobs:
         push: false
         load: true
         tags: econ-graph-frontend:test
-        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        # Keycloak issuer for sign-in, from the repository variable when set, else the
+        # same-origin path scripts/deploy/build-images.sh uses (ECO-728).
         build-args: |
-          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER || '/idp/realms/econ-graph' }}
           VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max

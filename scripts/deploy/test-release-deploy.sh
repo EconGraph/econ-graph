@@ -25,8 +25,8 @@
 #     PUBLIC_HOST that differs from the config, the last config line winning,
 #     and uppercase lowercased); the certificate issuer: the deploy config's
 #     (ECONGRAPH_CONFIG_DIR names its directory) only when it matches the current
-#     one or there is none, a change only with --change-tls-issuer or
-#     GATEWAY_TLS_ISSUER in the environment (never a silent move off
+#     one or there is none, a change (from the config or an environment value)
+#     only with --change-tls-issuer (never a silent move off
 #     econ-graph-origin-ca), current -> new in the plan, a malformed, exported or
 #     unreadable config refused, and the line unread without a public host;
 #     --yes alone is not enough on a production
@@ -1110,8 +1110,14 @@ refused "a configured downgrade off econ-graph-origin-ca" "never changes the iss
 printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-cq\n' >"$CONFIG"
 run env STUB_CERT_ISSUER=econ-graph-origin-ca "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a mistyped configured issuer" "never changes the issuer implicitly"
+# An inherited environment value is no more explicit than the config: the flag decides.
 run env STUB_CERT_ISSUER=econ-graph-origin-ca GATEWAY_TLS_ISSUER=econ-graph-selfsigned "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
-issuer_case "an environment GATEWAY_TLS_ISSUER changes it explicitly" "econ-graph-selfsigned" \
+refused "an environment GATEWAY_TLS_ISSUER that differs from the current one" "pass --change-tls-issuer"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca GATEWAY_TLS_ISSUER=econ-graph-origin-ca "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "an environment GATEWAY_TLS_ISSUER equal to the current one" "econ-graph-origin-ca" \
+    "econ-graph-origin-ca (unchanged; from GATEWAY_TLS_ISSUER in the environment)"
+run env STUB_CERT_ISSUER=econ-graph-origin-ca GATEWAY_TLS_ISSUER=econ-graph-selfsigned "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --change-tls-issuer
+issuer_case "an environment GATEWAY_TLS_ISSUER with --change-tls-issuer changes it" "econ-graph-selfsigned" \
     "econ-graph-origin-ca → econ-graph-selfsigned (from GATEWAY_TLS_ISSUER in the environment)"
 printf 'PUBLIC_HOST=econgraph.com\n' >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --change-tls-issuer
