@@ -14,12 +14,15 @@
 //! - `GET {base}/timeseries/bds/geography.json?key=KEY` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
 //!
 //! Only measures become series ([`is_economic_variable`]): a variable must have a numeric
-//! `predicateType` (`int` or `float`), and its name or label must match one of the old keywords.
-//! The numeric type leaves out the classification codes (`EAGE`, `FAGE`, `EMPSZES`, `NAICS`, ...,
-//! all `string`: a single-series request returns their code, 1, every year), the geography and
-//! predicate variables (`for`, `in`, `time`, `GEO_ID`, `STATE`, ...) and the `string` `YEAR`;
-//! the keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. The measures are
-//! crossed with the geography levels that give single series (annual, units "Count"):
+//! `predicateType` (`int` or `float`), no `*_LABEL` attribute, and a name or label matching one
+//! of the old keywords. The numeric type leaves out the classification codes (`EAGE`, `FAGE`,
+//! `EMPSZES`, `NAICS`, ..., all `string`: a single-series request returns their code, 1, every
+//! year), the geography and predicate variables (`for`, `in`, `time`, `GEO_ID`, `STATE`, ...)
+//! and the `string` `YEAR`. The `*_LABEL` attribute marks a code even if a later release makes
+//! one numeric; the keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. A
+//! `predicateType` outside the known ones fails discovery, so that a renamed numeric type can't
+//! silently drop measures and retire their series. The measures are crossed with the geography
+//! levels that give single series (annual, units "Count"):
 //! - `us`: one national series per variable;
 //! - `state`: one series per variable for each state and DC, from the Census Bureau's state
 //!   reference file ([`STATES_URL`], see [States](#states)).
@@ -654,10 +657,20 @@ fn parse_bds_rows(
 struct BdsVariable {
     name: String,
     label: String,
-    /// The `predicateType` (`int`, `float`, `string`, ...); geography variables such as `CBSA`
-    /// have none.
-    predicate_type: Option<String>,
+    /// Whether the `predicateType` is numeric (`int` or `float`); see [`NUMERIC_TYPES`].
+    numeric: bool,
+    /// Whether `attributes` names a `*_LABEL` variable, as every classification code's does
+    /// (`EAGE` has `EAGE_LABEL`); measures name a `*_F` flag instead.
+    has_code_label: bool,
 }
+
+/// The `predicateType`s of BDS measures.
+const NUMERIC_TYPES: &[&str] = &["int", "float"];
+
+/// The other `predicateType`s `variables.json` uses: codes, labels and `YEAR` (`string`) and the
+/// API's predicates (`for`, `in`, `time`, `ucgid`). Any type in neither list fails the parse, so
+/// a renamed numeric type (`double`, say) can't silently drop measures and retire their series.
+const NON_MEASURE_TYPES: &[&str] = &["string", "fips-for", "fips-in", "datetime", "ucgid"];
 
 /// A BDS geography level from `geography.json`.
 #[derive(Debug, Clone, PartialEq)]
@@ -689,19 +702,32 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                     ))
                 })?
                 .to_string();
-            let predicate_type = match obj.get("predicateType") {
-                None => None,
-                Some(Value::String(t)) => Some(t.clone()),
+            // Geography variables such as `CBSA` have no `predicateType`.
+            let numeric = match obj.get("predicateType") {
+                None => false,
+                Some(Value::String(t)) if NUMERIC_TYPES.contains(&t.as_str()) => true,
+                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => false,
+                Some(t) => {
+                    return Err(CrawlError::Parse(format!(
+                        "Census variables.json: {name:?} has an unknown 'predicateType' {t}"
+                    )))
+                }
+            };
+            // A comma-separated list of variable names, e.g. "EAGE_LABEL" or "NAME".
+            let has_code_label = match obj.get("attributes") {
+                None => false,
+                Some(Value::String(a)) => a.split(',').any(|x| x.trim().ends_with("_LABEL")),
                 Some(_) => {
                     return Err(CrawlError::Parse(format!(
-                        "Census variables.json: {name:?} has a non-string 'predicateType'"
+                        "Census variables.json: {name:?} has a non-string 'attributes'"
                     )))
                 }
             };
             Ok(BdsVariable {
                 name: name.clone(),
                 label,
-                predicate_type,
+                numeric,
+                has_code_label,
             })
         })
         .collect()
@@ -758,7 +784,7 @@ fn is_economic_variable(var: &BdsVariable) -> bool {
         "employment",
         "establishment",
     ];
-    if !matches!(var.predicate_type.as_deref(), Some("int" | "float")) {
+    if !var.numeric || var.has_code_label {
         return false;
     }
     let name = var.name.to_lowercase();
@@ -776,7 +802,8 @@ mod tests {
     const VARIABLES: &str = include_str!("../../tests/fixtures/census/variables.json");
     const GEOGRAPHY: &str = include_str!("../../tests/fixtures/census/geography.json");
     /// The measures in [`VARIABLES`], sorted.
-    const MEASURES: [&str; 6] = [
+    const MEASURES: [&str; 7] = [
+        "EMP",
         "ESTAB",
         "ESTABS_ENTRY_RATE",
         "FIRM",
@@ -872,7 +899,8 @@ mod tests {
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "ESTAB");
         assert_eq!(vars[0].label, "Number of establishments");
-        assert_eq!(vars[0].predicate_type.as_deref(), Some("int"));
+        assert!(vars[0].numeric);
+        assert!(!vars[0].has_code_label);
     }
 
     /// Geography variables such as `CBSA` have no `predicateType`; that is not an error.
@@ -880,13 +908,24 @@ mod tests {
     fn parse_variables_accepts_missing_predicate_type() {
         let body = serde_json::json!({"variables": {"CBSA": {"label": "Metro area"}}});
         let vars = parse_variables(&body).unwrap();
-        assert_eq!(vars[0].predicate_type, None);
+        assert!(!vars[0].numeric);
     }
 
+    /// An unknown or non-string `predicateType`, or non-string `attributes`, fails discovery
+    /// instead of dropping the variable and retiring its series.
     #[test]
-    fn parse_variables_rejects_non_string_predicate_type() {
-        let body = serde_json::json!({"variables": {"ESTAB": {"label": "Establishments", "predicateType": 1}}});
-        assert!(matches!(parse_variables(&body), Err(CrawlError::Parse(_))));
+    fn parse_variables_rejects_unknown_predicate_types_and_bad_attributes() {
+        for entry in [
+            serde_json::json!({"label": "Establishments", "predicateType": "double"}),
+            serde_json::json!({"label": "Establishments", "predicateType": 1}),
+            serde_json::json!({"label": "Establishments", "attributes": ["ESTAB_F"]}),
+        ] {
+            let body = serde_json::json!({"variables": {"ESTAB": entry}});
+            assert!(
+                matches!(parse_variables(&body), Err(CrawlError::Parse(_))),
+                "{entry}"
+            );
+        }
     }
 
     /// Only measures are selected from the recorded metadata: the classification codes (value 1
@@ -902,23 +941,25 @@ mod tests {
             .collect();
         selected.sort_unstable();
         assert_eq!(selected, MEASURES);
-        for code in [
-            "EAGE", "FAGE", "EMPSZES", "EMPSZFI", "NAICS", "CBSA", "YEAR", "for", "in",
+        for other in [
+            "EAGE", "FAGE", "EMPSZES", "EMPSZFI", "NAICS", "INDLEVEL", "DENOM", "CBSA", "YEAR",
+            "for", "in",
         ] {
             assert!(
-                vars.iter().any(|v| v.name == code),
-                "{code} is in the fixture"
+                vars.iter().any(|v| v.name == other),
+                "{other} is in the fixture"
             );
         }
-        let var = |name: &str, predicate_type: Option<&str>| BdsVariable {
-            name: name.into(),
-            label: "Number of establishments".into(),
-            predicate_type: predicate_type.map(Into::into),
+        // A numeric variable with a `*_LABEL` attribute is a code, whatever its label says.
+        let var = |numeric, has_code_label| BdsVariable {
+            name: "ESTAB_SIZE".into(),
+            label: "Establishment size code".into(),
+            numeric,
+            has_code_label,
         };
-        assert!(is_economic_variable(&var("ESTAB", Some("float"))));
-        for t in [None, Some("string"), Some("fips-for"), Some("datetime")] {
-            assert!(!is_economic_variable(&var("ESTAB", t)), "{t:?}");
-        }
+        assert!(is_economic_variable(&var(true, false)));
+        assert!(!is_economic_variable(&var(true, true)));
+        assert!(!is_economic_variable(&var(false, false)));
     }
 
     /// Same reasoning as `parse_variables_rejects_non_object_entry`, for `geography.json`.

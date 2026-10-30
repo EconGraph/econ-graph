@@ -12,9 +12,13 @@ page is also an `Auth` error. Background:
 ## What we fetch today
 
 Discovery requests `GET /data/timeseries/bds/variables.json` and `geography.json`.
-Only measures become series (`is_economic_variable`). A variable must have a numeric
-`predicateType` (`int` or `float`), and its name or label must match a keyword such as
-`estab`, `firm`, `job` or `rate`. The numeric type leaves out:
+Only measures become series (`is_economic_variable`). A variable must have:
+
+- a numeric `predicateType` (`int` or `float`);
+- no `*_LABEL` attribute;
+- a name or label matching a keyword such as `estab`, `firm`, `job` or `rate`.
+
+The numeric type leaves out:
 
 - the classification codes (`EAGE`, `FAGE`, `EMPSZES`, `EMPSZFI`, `EMPSZESI`,
   `EMPSZFII`, `NAICS`, ...), whose `predicateType` is `string`. They are dimensions
@@ -22,9 +26,18 @@ Only measures become series (`is_economic_variable`). A variable must have a num
 - the geography and predicate variables (`for`, `in`, `time`, `GEO_ID`, `STATE`, ...)
   and `YEAR`.
 
-The keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. Discovery then
+Every classification code names a `*_LABEL` attribute (`EAGE` has `EAGE_LABEL`), so the
+attribute rule excludes a code even if a later release makes it numeric. The keywords
+leave out the numeric non-measures `DENOM` and `INDLEVEL`. A `predicateType` that is
+neither numeric nor one of `string`, `fips-for`, `fips-in`, `datetime` and `ucgid`
+fails discovery, so a renamed numeric type cannot silently drop measures. Discovery then
 crosses the measures with the supported `us` and `state` levels listed in the geography
-metadata. This produces one series per variable nationally and one per variable per
+metadata.
+
+Census discovery lists the complete BDS catalog, so the worker marks inactive any stored
+`bds/` series that discovery no longer lists. The rows and data points are kept, and the
+series drop out of browse, search and the series counts. This is how series from
+classification-code variables, which earlier versions discovered, leave the catalog. This produces one series per variable nationally and one per variable per
 state and DC. When the metadata lists `state`, discovery downloads the Census Bureau's
 [FIPS reference file](https://www2.census.gov/geo/docs/reference/state.txt) to obtain
 the 50 states and DC, rather than reading previously stored state codes.
@@ -46,7 +59,7 @@ one returns `Permanent` when the required key is configured.
 Fetching requests `GET /data/timeseries/bds?get={VARIABLE},YEAR&for=us:*` (or
 `state:{FIPS}`), with `key=` on each API request. Each request retrieves all years
 for one variable and geography. The adapter keeps `YEAR` as January 1 and the value,
-and assigns "Count" as the units for every series, rates included. It does not request county,
+and assigns "Count" as the units for every series. It does not request county,
 metro or CBSA series, or breakdowns by industry, firm age or firm size.
 
 ## Samples and fixtures
@@ -72,14 +85,15 @@ uses the same response shape with placeholder establishment counts for Californi
 ```
 
 The trimmed [`variables.json` fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/census/variables.json)
-holds a subset of the public metadata. Discovery selects six of its variables:
-`ESTAB`, `ESTABS_ENTRY_RATE` (`float`), `FIRM`, `JOB_CREATION`,
+holds a subset of the public metadata. Discovery selects seven of its variables:
+`EMP`, `ESTAB`, `ESTABS_ENTRY_RATE` (`float`), `FIRM`, `JOB_CREATION`,
 `JOB_CREATION_CONTINUERS` and `JOB_DESTRUCTION_CONTINUERS`. It leaves out:
 
 - the `string` classification codes `EAGE`, `FAGE`, `EMPSZES`, `EMPSZFI` and `NAICS`;
+- the `string` `YEAR`;
 - `CBSA`, which has no `predicateType`;
 - the predicate-only `for` and `in`;
-- `YEAR`, which is an `int` in this fixture but matches no keyword.
+- the `int` variables `DENOM` and `INDLEVEL`, which match no keyword.
 
 Abridged:
 
@@ -89,7 +103,7 @@ Abridged:
   "ESTAB": {"label": "Number of establishments", "predicateType": "int"},
   "ESTABS_ENTRY_RATE": {"label": "Rate of establishments born during the last 12 months", "predicateType": "float", "attributes": "ESTABS_ENTRY_RATE_F"},
   "JOB_CREATION_CONTINUERS": {"label": "Number of jobs created from expanding establishments during the last 12 months", "predicateType": "int", "attributes": "JOB_CREATION_CONTINUERS_F"},
-  "YEAR": {"label": "Year", "predicateType": "int"}
+  "YEAR": {"label": "Year", "predicateType": "string", "required": "default displayed"}
 }}
 ```
 

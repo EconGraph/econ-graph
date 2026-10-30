@@ -21,6 +21,14 @@
       "group": "N/A",
       "limit": 0
     },
+    "DENOM": {
+      "label": "(DHS) denominator",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "predicateType": "int",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
+      "limit": 0,
+      "attributes": "DENOM_F"
+    },
     "EAGE": {
       "label": "Establishment age code",
       "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023",
@@ -29,6 +37,14 @@
       "group": "BDSEAGEIESIZE,BDSEAGE,BDSEAGEESIZE",
       "limit": 0,
       "attributes": "EAGE_LABEL"
+    },
+    "EMP": {
+      "label": "Number of employees",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "predicateType": "int",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
+      "limit": 0,
+      "attributes": "EMP_F"
     },
     "EMPSZES": {
       "label": "Employment size of establishments code",
@@ -79,6 +95,12 @@
       "group": "N/A",
       "limit": 0
     },
+    "INDLEVEL": {
+      "label": "Industry level",
+      "predicateType": "int",
+      "group": "N/A",
+      "limit": 0
+    },
     "JOB_CREATION": {
       "label": "Number of jobs created from expanding and opening establishments during the last 12 months",
       "concept": "Business Dynamics Statistics",
@@ -111,9 +133,10 @@
     },
     "YEAR": {
       "label": "Year",
-      "concept": "Business Dynamics Statistics",
-      "predicateType": "int",
-      "group": "N/A",
+      "concept": "Business Dynamics Statistics: Establishment Age: 1978-2023;Business Dynamics Statistics: Firm Size: 1978-2023;Business Dynamics Statistics: Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Geography: 1978-2023;Business Dynamics Statistics: Initial Firm Size: 1978-2023;Business Dynamics Statistics: Metro: 1978-2023;Business Dynamics Statistics: NAICS: 1978-2023;Business Dynamics Statistics: Establishment Age by Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Age by Initial Establishment Size: 1978-2023;Business Dynamics Statistics: Establishment Size: 1978-2023;Business Dynamics Statistics: Firm Age: 1978-2023;Business Dynamics Statistics: Firm Age by Firm Size: 1978-2023;Business Dynamics Statistics: Firm Age by Initial Firm Size: 1978-2023",
+      "required": "default displayed",
+      "predicateType": "string",
+      "group": "BDSIFSIZE,BDSGEO,BDSFAGEFSIZE,BDSEAGEIESIZE,BDSFSIZE,BDSFAGEIFSIZE,BDSIESIZE,BDSNAICS,BDSEAGE,BDSMETRO,BDSEAGEESIZE,BDSFAGE,BDSESIZE",
       "limit": 0
     }
   }
