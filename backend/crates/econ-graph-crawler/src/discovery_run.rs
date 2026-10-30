@@ -445,6 +445,11 @@ async fn cancel_jobs_conn(
     .await?)
 }
 
+/// SQL condition: run `r` has an active (pending, processing or retrying) finalize job.
+const ACTIVE_FINALIZE: &str = "EXISTS (SELECT 1 FROM crawl_queue q \
+     WHERE q.kind = 'finalize_discovery' AND split_part(q.series_id, '/', 1) = r.id::text \
+       AND q.source = r.source AND q.status IN ('pending', 'processing', 'retrying'))";
+
 /// Outcome of [`start_run`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunStart {
@@ -490,28 +495,39 @@ pub(crate) async fn start_run(
         .bind::<Text, _>(source)
         .execute(conn)
         .await?;
-        // A finalizing run whose finalize job is still active will commit: leave it alone. One
-        // whose finalize job ended (failed or cancelled without the failure hook) or is gone
-        // can never commit, so fail it and start a new run instead of waiting on it.
-        let finalizing: Vec<IdRow> = diesel::sql_query(
-            "SELECT r.id FROM discovery_runs r \
-             WHERE r.source = $1 AND r.state = 'finalizing' AND EXISTS ( \
-                 SELECT 1 FROM crawl_queue q \
-                 WHERE q.kind = 'finalize_discovery' \
-                   AND split_part(q.series_id, '/', 1) = r.id::text AND q.source = r.source \
-                   AND q.status IN ('pending', 'processing', 'retrying'))",
+        // Lock the source's unfinished runs before deciding anything about them. A chunk commit
+        // locks its run row too, so a last chunk that moves its run from running to finalizing
+        // either commits before this lock is granted (and the statements below see the run
+        // finalizing, with its finalize job) or waits until this transaction ends.
+        diesel::sql_query(
+            "SELECT id FROM discovery_runs \
+             WHERE source = $1 AND state IN ('enumerating', 'running', 'finalizing') \
+             FOR UPDATE",
         )
         .bind::<Text, _>(source)
+        .execute(conn)
+        .await?;
+        // A finalizing run whose finalize job is still active will commit: leave it alone, and
+        // let it settle this discovery job too. One whose finalize job ended (failed or
+        // cancelled without the failure hook) or is gone can never commit, so fail it and start
+        // a new run instead of waiting on it.
+        let finalizing: Vec<IdRow> = diesel::sql_query(format!(
+            "UPDATE discovery_runs r \
+             SET deferred_discovery_job_ids = array_append(deferred_discovery_job_ids, $2) \
+             WHERE r.source = $1 AND r.state = 'finalizing' AND {ACTIVE_FINALIZE} RETURNING id"
+        ))
+        .bind::<Text, _>(source)
+        .bind::<SqlUuid, _>(claim.id)
         .load(conn)
         .await?;
         if let Some(run) = finalizing.into_iter().next() {
             return Ok(RunStart::Finalizing { run_id: run.id });
         }
-        let abandoned = diesel::sql_query(
-            "UPDATE discovery_runs SET state = 'failed', finished_at = NOW(), updated_at = NOW(), \
-                 error_message = 'its finalize job ended without completing' \
-             WHERE source = $1 AND state = 'finalizing'",
-        )
+        let abandoned = diesel::sql_query(format!(
+            "UPDATE discovery_runs r SET state = 'failed', finished_at = NOW(), \
+                 updated_at = NOW(), error_message = 'its finalize job ended without completing' \
+             WHERE r.source = $1 AND r.state = 'finalizing' AND NOT {ACTIVE_FINALIZE}"
+        ))
         .bind::<Text, _>(source)
         .execute(conn)
         .await?;
@@ -930,8 +946,11 @@ pub(crate) async fn fail_run_conn(
 
 /// Fails runs whose jobs ended without the worker's failure hook: a `running` or `finalizing`
 /// run with a chunk or finalize job that is `failed` or `cancelled` (e.g. `release_stuck`
-/// exhausted its retries, or an operator cancelled it), and an `enumerating` run whose source has
-/// no active `discover_catalog` job. Returns the failed runs' sources, one entry per run.
+/// exhausted its retries, or an operator cancelled it); a `running` or `finalizing` run with no
+/// active chunk or finalize job at all (its rows were deleted), which nothing would ever finish;
+/// and an `enumerating` run whose source has no active `discover_catalog` job. A run's jobs are
+/// enqueued in the same transaction that moves it to `running` or `finalizing`, so a run in
+/// progress always has one. Returns the failed runs' sources, one entry per run.
 pub async fn fail_abandoned_runs(pool: &DatabasePool) -> AppResult<Vec<String>> {
     #[derive(QueryableByName)]
     struct Row {
@@ -946,12 +965,18 @@ pub async fn fail_abandoned_runs(pool: &DatabasePool) -> AppResult<Vec<String>> 
             "UPDATE discovery_runs r SET state = 'failed', finished_at = NOW(), updated_at = NOW(), \
                  error_message = CASE WHEN r.state = 'enumerating' \
                      THEN 'its discover_catalog job ended without finishing enumeration' \
-                     ELSE 'a chunk or finalize job ended without completing' END \
+                     ELSE 'its chunk or finalize jobs ended without completing' END \
              WHERE (r.state IN ('running', 'finalizing') AND EXISTS ( \
                      SELECT 1 FROM crawl_queue q \
                      WHERE q.kind IN ('discover_chunk', 'finalize_discovery') \
                        AND split_part(q.series_id, '/', 1) = r.id::text \
                        AND q.source = r.source AND q.status IN ('failed', 'cancelled'))) \
+                OR (r.state IN ('running', 'finalizing') AND NOT EXISTS ( \
+                     SELECT 1 FROM crawl_queue q \
+                     WHERE q.kind IN ('discover_chunk', 'finalize_discovery') \
+                       AND split_part(q.series_id, '/', 1) = r.id::text \
+                       AND q.source = r.source \
+                       AND q.status IN ('pending', 'processing', 'retrying'))) \
                 OR (r.state = 'enumerating' AND NOT EXISTS ( \
                      SELECT 1 FROM crawl_queue q \
                      WHERE q.source = r.source AND q.kind = 'discover_catalog' \

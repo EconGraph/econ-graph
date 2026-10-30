@@ -57,7 +57,8 @@
 //!    successful discovery resets this backoff. Cancellation retains the weekly delay. For an
 //!    adapter that [discovers in chunks](crate::discovery_run), the `discover_catalog` job only
 //!    lists the catalog, so the discovery's outcome is its run's (`discovery_runs.discovery_job_id`
-//!    links them): the job's completion settles nothing, a run that is not final is an active
+//!    links them, and `deferred_discovery_job_ids` the jobs that found a run finalizing and started
+//!    none): the job's completion settles nothing, a run that is not final is an active
 //!    discovery, a complete run is a successful one, and a run that fails after enumeration
 //!    (`enumerated_at` set) is one failed discovery, however many of its chunk jobs failed.
 //!    Consecutive failed runs therefore double the backoff as failed jobs do. A superseded run
@@ -272,7 +273,8 @@ const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
          FROM crawl_queue q WHERE kind = 'discover_catalog' AND source = ANY($1) \
            AND NOT (status = 'completed' AND EXISTS ( \
-                 SELECT 1 FROM discovery_runs r WHERE r.discovery_job_id = q.id)) \
+                 SELECT 1 FROM discovery_runs r WHERE r.source = q.source \
+                   AND (r.discovery_job_id = q.id OR q.id = ANY(r.deferred_discovery_job_ids)))) \
          UNION ALL \
          SELECT source, CASE state WHEN 'complete' THEN 'completed' WHEN 'failed' THEN 'failed' \
                 ELSE 'processing' END, COALESCE(finished_at, updated_at) \
@@ -1661,6 +1663,32 @@ mod tests {
             s.tick().await.unwrap().discover_enqueued,
             1,
             "reset to one hour"
+        );
+    }
+
+    /// A discovery job that found a run finalizing and started none settles nothing itself: its
+    /// outcome is that run's, so a run that then fails keeps the failure backoff instead of the
+    /// job's completion resetting it to the weekly delay.
+    #[tokio::test]
+    async fn a_deferred_discovery_job_takes_its_runs_outcome() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 2, "failed", 130).await;
+        exec(
+            p,
+            "WITH job AS ( \
+                 INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                 VALUES ('FRED', 'catalog', 'discover_catalog', 'completed', \
+                     NOW() - INTERVAL '100 minutes') RETURNING id) \
+             UPDATE discovery_runs SET deferred_discovery_job_ids = ARRAY[(SELECT id FROM job)] \
+             WHERE id = (SELECT id FROM discovery_runs ORDER BY finished_at DESC LIMIT 1)",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "two failures: two hours, and the last was 130 minutes ago"
         );
     }
 

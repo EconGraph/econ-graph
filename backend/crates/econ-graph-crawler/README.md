@@ -99,7 +99,9 @@ re-claimed the job. A worker
 that dies mid-chunk is handled like any other job: `release_stuck` re-queues the chunk, and the
 late result of the dead claim is dropped as a lost lease. The worker's maintenance loop fails
 runs whose chunk or finalize jobs ended without completing (for example, `release_stuck`
-exhausting their retries) and runs left `enumerating` with no active `discover_catalog` job.
+exhausting their retries), `running` or `finalizing` runs with no active chunk or finalize job
+left, and runs left `enumerating` with no active `discover_catalog` job. A discovery that finds
+a run finalizing records itself on that run, and the scheduler gives it that run's outcome.
 For the scheduler, a run that fails after enumeration counts as one failed discovery, however
 many of its chunk jobs failed: the `discover_catalog` job that started it completes at
 enumeration, but the scheduler takes the discovery's outcome from the run. Consecutive failed

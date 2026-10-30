@@ -951,6 +951,123 @@ async fn a_finalizing_run_without_an_active_finalize_job_is_failed_and_replaced(
     }
 }
 
+/// A discovery that starts while the last chunk's commit is in flight waits for it, then finds
+/// the run finalizing with an active finalize job and leaves it alone, recording itself as
+/// deferred to that run, instead of failing a run that is about to commit.
+#[tokio::test]
+async fn a_run_start_racing_the_last_chunk_commit_leaves_the_run_to_finalize() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let settings = ChunkedDiscovery {
+        units_per_chunk: 1,
+        selection_fingerprint: None,
+    };
+    enqueue_discovery(p, 5).await;
+    let claim = CrawlQueueItem::claim_next(p, "t745-w1", None)
+        .await
+        .unwrap()
+        .unwrap();
+    let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &claim)
+        .await
+        .unwrap()
+    else {
+        panic!("run not started");
+    };
+    let mut conn = p.get().await.unwrap();
+    discovery_run::commit_enumeration_conn(
+        &mut conn,
+        run_id,
+        &[DiscoveryUnit::new("t745_a")],
+        1,
+        None,
+        &[],
+        3,
+    )
+    .await
+    .unwrap();
+
+    // The last chunk's commit: stored, run finalizing, finalize job queued, not yet committed.
+    diesel::sql_query("BEGIN").execute(&mut conn).await.unwrap();
+    assert_eq!(
+        discovery_run::commit_chunk_conn(&mut conn, run_id, 0, &ChunkDiscovery::default(), 3)
+            .await
+            .unwrap(),
+        ChunkCommit::StoredLast
+    );
+    let starting = tokio::spawn({
+        let pool = p.clone();
+        let claim = claim.clone();
+        async move {
+            discovery_run::start_run(&pool, SRC, &settings, &claim)
+                .await
+                .unwrap()
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !starting.is_finished(),
+        "the run start waits for the chunk commit"
+    );
+    diesel::sql_query("COMMIT")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+
+    assert_eq!(starting.await.unwrap(), RunStart::Finalizing { run_id });
+    let all = runs(p).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].state, "finalizing");
+    assert_eq!(finalize_jobs(p, run_id).await, 1);
+    assert_eq!(
+        count(
+            p,
+            &format!(
+                "SELECT count(*) AS n FROM discovery_runs \
+                 WHERE '{}' = ANY(deferred_discovery_job_ids)",
+                claim.id
+            )
+        )
+        .await,
+        1
+    );
+}
+
+/// Running and finalizing runs left with no active job at all (rows deleted by hand) are failed
+/// by maintenance, so they don't count as an active discovery forever.
+#[tokio::test]
+async fn runs_without_any_active_job_are_failed_by_maintenance() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    exec(
+        p,
+        &format!(
+            "INSERT INTO discovery_runs (source, state, chunks_total, chunks_done) VALUES \
+             ('{src}', 'running', 2, 1), ('CENSUS', 'finalizing', 1, 1)",
+            src = SRC.as_str()
+        ),
+    )
+    .await;
+    // A run that does have an active job is left alone.
+    exec(
+        p,
+        "INSERT INTO discovery_runs (id, source, state, chunks_total) VALUES \
+         ('00000000-0000-0000-0000-0000000000c1', 'FHFA', 'running', 1)",
+    )
+    .await;
+    exec(
+        p,
+        "INSERT INTO crawl_queue (source, series_id, kind) VALUES \
+         ('FHFA', '00000000-0000-0000-0000-0000000000c1/0', 'discover_chunk')",
+    )
+    .await;
+    let mut failed = discovery_run::fail_abandoned_runs(p).await.unwrap();
+    failed.sort();
+    assert_eq!(failed, vec!["BEA".to_string(), "CENSUS".to_string()]);
+    let states: Vec<String> = runs(p).await.into_iter().map(|r| r.state).collect();
+    assert_eq!(states, vec!["failed", "failed", "running"]);
+}
+
 /// Chunks check the run's selection fingerprint too: after a selection change, the next chunk
 /// fails the run without calling upstream, so chunks discovered under other rules never commit.
 #[tokio::test]

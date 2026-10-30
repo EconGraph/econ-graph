@@ -16,7 +16,7 @@
 --   superseded   a newer run of the same source started first; nothing was committed
 -- At most one run per source is not final (enumerating, running or finalizing).
 --
--- New tables, a wider crawl_queue kind constraint and a partial crawl_queue index: no existing
+-- New tables, a wider crawl_queue kind constraint and two partial crawl_queue indexes: no existing
 -- row changes.
 --
 -- Locking: replacing the kind constraint takes ACCESS EXCLUSIVE on crawl_queue until the
@@ -44,6 +44,12 @@ CREATE INDEX idx_crawl_queue_discovery_run
     ON crawl_queue (split_part(series_id, '/', 1), status)
     WHERE kind IN ('discover_chunk', 'finalize_discovery');
 
+-- The scheduler reads each source's discover_catalog history on every tick; without this it
+-- scans every queue row of the source.
+CREATE INDEX idx_crawl_queue_discover_catalog
+    ON crawl_queue (source)
+    WHERE kind = 'discover_catalog';
+
 CREATE TABLE discovery_runs (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     -- crawl_queue.source of the run's jobs (e.g. FRED).
@@ -67,6 +73,9 @@ CREATE TABLE discovery_runs (
     -- queue rows are purged). The scheduler takes that job's outcome from the run instead of
     -- from the job, which completes as soon as enumeration does.
     discovery_job_id UUID,
+    -- crawl_queue.id of later discover_catalog jobs that found this run finalizing and started
+    -- no run of their own. Their outcome, for the scheduler, is this run's too.
+    deferred_discovery_job_ids UUID[] NOT NULL DEFAULT '{}',
     -- Queue priority of the discover_catalog job that started the run; its chunk and finalize
     -- jobs use the same priority.
     priority INTEGER NOT NULL DEFAULT 5,
