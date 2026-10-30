@@ -1,6 +1,6 @@
 /**
- * REQUIREMENT: The data sources page shows what the API reports for each source, and nothing
- * made up.
+ * REQUIREMENT: Show source identity and series availability without crawler administration
+ * details or invented operational statistics.
  * PURPOSE: Regression tests for ECO-403: the page read snake_case fields the GraphQL API never
  * returns (so every count was 0 and every rate limit 60/min), and showed hard-coded uptime,
  * health, last-crawl and crawl-schedule figures.
@@ -74,17 +74,15 @@ describe('DataSources', () => {
     }
   });
 
-  it("shows each source's series count and rate limit, and their total", () => {
+  it("shows each source's series count and their total", () => {
     mockSources(sources);
     renderWithProviders(<DataSources />);
 
     const fred = within(screen.getByRole('region', { name: sources[0].name }));
     expect(fred.getByText('1,234')).toBeInTheDocument();
-    expect(fred.getByText('120/min')).toBeInTheDocument();
 
     const worldBank = within(screen.getByRole('region', { name: sources[1].name }));
     expect(worldBank.getByText('18')).toBeInTheDocument();
-    expect(worldBank.getByText('1,000/min')).toBeInTheDocument();
     expect(worldBank.getByText('Economic data source')).toBeInTheDocument();
 
     expect(screen.getByText('1,252')).toBeInTheDocument();
@@ -100,6 +98,15 @@ describe('DataSources', () => {
       'href',
       `/explore?source=${encodeURIComponent(sources[0].id)}`
     );
+  });
+
+  it('hides crawler administration details even when the API supplies them', () => {
+    mockSources(sources);
+    renderWithProviders(<DataSources />);
+
+    for (const administrative of [/rate limit/i, /\/min/, /api key/i, /api\.stlouisfed\.org/i]) {
+      expect(screen.queryByText(administrative)).not.toBeInTheDocument();
+    }
   });
 
   it('shows no uptime, health, last-crawl or schedule figures the API does not report', () => {

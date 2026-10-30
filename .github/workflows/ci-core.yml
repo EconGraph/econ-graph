@@ -330,14 +330,16 @@ jobs:
       run: scripts/deploy/test-teardown-guards.sh
 
     # teardown.sh and protect-postgres-pv.sh reach only the kind cluster's
-    # kubectl on context kind-econ-graph, never plain kubectl (all stubs here).
-    - name: Check that teardown uses only the kind cluster's context
+    # kubectl on context kind-econ-graph, never plain kubectl, and teardown.sh
+    # dumps the databases before it patches or deletes anything (all stubs here).
+    - name: Check that teardown uses only the kind cluster's context and backs up first
       run: scripts/deploy/test-teardown-kubectl.sh
 
     # recreate-kind-cluster.sh identifies the cluster inside its control plane on
     # the rootful daemon and, before any backup, delete or create, asks for the
     # kube-system UID prefix on a cluster with a production marker (or one that
-    # can't be read), never taking --yes for it (all stubs here).
+    # can't be read), never taking --yes for it, and refuses when a host
+    # directory the kind config bind-mounts is not mounted (all stubs here).
     - name: Check that recreate-kind-cluster confirms before deleting
       run: |
         shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
@@ -2251,7 +2253,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}

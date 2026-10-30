@@ -12,8 +12,8 @@ title, id prefix and frequency. All pages must agree on count and ordering befor
 snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
 Separate scan and selected-series bounds stop unexpected expansion before observation
 jobs are enqueued. A small include/exclude list handles explicit exceptions.
-The default scope is GDP release series plus headline overrides, including probes for two
-previously curated retired ids. `expected_missing` explicitly exempts those known retired
+The default scope is GDP release series plus headline overrides, including the NBER
+recession indicator (`USREC`) and probes for two previously curated retired ids. `expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
 ordinary included id that disappears still raises the warning. Existing stored series
 outside that scope stay retained and scheduled; changing the discovery scope does not

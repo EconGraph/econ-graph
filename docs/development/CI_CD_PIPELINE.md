@@ -61,7 +61,7 @@ The cache build compiles test binaries; it does not execute tests. Rust test job
 - The scheduled accessibility runtime commands currently mask failures; their green job status is not evidence of successful execution.
 - Scheduled security audit steps include `continue-on-error`; inspect their artifacts and logs.
 
-The [cost-update workflow](../../.github/workflows/update-cost-analysis.yml) validates calculations, failure handling and repeatable output generation on matching PRs, scheduled runs and manual dispatch.
+The [cost-update workflow](../../.github/workflows/update-cost-analysis.yml) validates calculations, failure handling and repeatable output generation on matching PRs and manual dispatch.
 
 Its separate publication job runs only after validation succeeds on a non-PR `main` run. Publication checks that `main` still matches the validated source, then uses `GITHUB_TOKEN` with contents and pull-request write permissions to create or update the generated report PR. Repository settings must also allow GitHub Actions to create pull requests. A successful validation job does not establish that publication succeeded; inspect both job conclusions.
 

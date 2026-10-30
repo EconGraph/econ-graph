@@ -55,8 +55,8 @@ test.describe('Data Sources', () => {
   });
 
   test('should display data source statistics or metadata', async ({ page }) => {
-    // Look for statistics like number of series, last updated, etc.
-    const statsElement = page.getByText(/total series/i).or(page.getByText(/rate limit/i));
+    // Series availability is useful to users; crawler configuration belongs in the admin UI.
+    const statsElement = page.getByText(/total series/i);
 
     await expect(statsElement.first()).toBeVisible();
   });
@@ -77,9 +77,9 @@ test.describe('Data Sources', () => {
     }
   });
 
-  test('shows no invented status, health or uptime figures', async ({ page }) => {
+  test('hides crawler administration details and invented status figures', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
-    for (const invented of [/uptime/i, /healthy/i, /last crawl/i, /crawl schedule/i]) {
+    for (const invented of [/uptime/i, /healthy/i, /last crawl/i, /crawl schedule/i, /rate limit/i]) {
       await expect(page.getByText(invented)).toHaveCount(0);
     }
   });
