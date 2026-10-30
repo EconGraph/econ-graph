@@ -173,8 +173,11 @@ realm import enables the provider only when `econ-graph-keycloak` holds both
 button appears.
 
 `scripts/deploy/set-crawler-keys.sh --facebook` refuses before any prompt, cluster call
-or write, and exits non-zero, with `--dry-run` too. Local compose does not forward
-Facebook credentials.
+or write, and exits non-zero, with `--dry-run` too. `scripts/deploy/create-secrets.sh`
+likewise refuses to run, before any cluster call and with `--dry-run` too, while
+`KEYCLOAK_FACEBOOK_CLIENT_ID` or `KEYCLOAK_FACEBOOK_CLIENT_SECRET` is set and non-empty;
+it keeps Facebook keys a Secret already holds (see below to remove them). Local compose
+does not forward Facebook credentials.
 
 The privacy policy at `https://econgraph.com/privacy` covers either provider, and
 `https://econgraph.com/privacy#account-deletion` gives the data-deletion instructions a

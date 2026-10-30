@@ -44,8 +44,10 @@
 #                                  anonymous-client-secret   KEYCLOAK_ANONYMOUS_CLIENT_SECRET (generated)
 #                                  google-idp-client-id      KEYCLOAK_GOOGLE_CLIENT_ID (optional)
 #                                  google-idp-client-secret  KEYCLOAK_GOOGLE_CLIENT_SECRET (optional)
-#                                  facebook-idp-client-id    KEYCLOAK_FACEBOOK_CLIENT_ID (optional)
-#                                  facebook-idp-client-secret KEYCLOAK_FACEBOOK_CLIENT_SECRET (optional)
+#                                  facebook-idp-client-id    kept as it is; setting
+#                                  facebook-idp-client-secret KEYCLOAK_FACEBOOK_CLIENT_ID or
+#                                                            KEYCLOAK_FACEBOOK_CLIENT_SECRET is
+#                                                            refused: Facebook sign-in is disabled
 #   grafana-admin                  admin-password            GRAFANA_ADMIN_PASSWORD (generated)
 #   monitoring-auth                auth                      MONITORING_BASIC_AUTH (optional,
 #                                                            one htpasswd line, e.g. from
@@ -144,6 +146,15 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Facebook sign-in is disabled: a Facebook credential in the environment is
+# refused before anything else (a dry run included), never silently dropped.
+if [[ -n "${KEYCLOAK_FACEBOOK_CLIENT_ID-}" || -n "${KEYCLOAK_FACEBOOK_CLIENT_SECRET-}" ]]; then
+    echo "create-secrets: error: KEYCLOAK_FACEBOOK_CLIENT_ID or KEYCLOAK_FACEBOOK_CLIENT_SECRET is set," \
+        "but Facebook sign-in is disabled until its email rules are built" \
+        "(https://linear.app/econgraph/issue/ECO-470); unset them. Nothing was read or written." >&2
+    exit 1
+fi
 
 # Refuse before selecting an operator config, reading credentials or prompting.
 # shellcheck source=scripts/deploy/lib/agent-access.sh

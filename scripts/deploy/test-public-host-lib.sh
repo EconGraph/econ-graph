@@ -20,7 +20,8 @@
 #   - deploy.sh and restart-k8s-rollout.sh leave cloudflared.yaml to apply_cloudflared,
 #     and no script applies it or the whole k8s/manifests directory itself.
 # And, with the same stubbed cluster:
-#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster;
+#   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster,
+#     and refuses a Facebook credential in the environment before any kubectl call;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
 #     cloudflared before removing the marker and deletes the token only when told to;
@@ -319,6 +320,23 @@ run_stubbed STUB_MARKER=production CLOUDFLARE_TUNNEL_TOKEN="$fake_token" scripts
   fail "create-secrets: refused the tunnel token on a marked cluster: $(cat "$out")"
 grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
   fail "create-secrets: the tunnel token was not written on a marked cluster"
+# Facebook sign-in is disabled: a Facebook credential in the environment is refused
+# before any kubectl call, in a dry run too; an empty one is not a credential.
+for fb in KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET; do
+  for args in '' --dry-run; do
+    # shellcheck disable=SC2086 # $args is empty or one flag
+    if run_stubbed STUB_MARKER=production "$fb=facebook-test-value" scripts/deploy/create-secrets.sh $args; then
+      fail "create-secrets $args: accepted $fb"
+    fi
+    grep -q 'Facebook sign-in is disabled' "$out" || fail "create-secrets $args: $fb refused without the reason: $(cat "$out")"
+    grep -q 'facebook-test-value' "$out" && fail "create-secrets $args: printed the value of $fb"
+    [ -s "$log" ] && fail "create-secrets $args: called kubectl with $fb set: $(cat "$log")"
+  done
+done
+run_stubbed STUB_MARKER=none KEYCLOAK_FACEBOOK_CLIENT_ID= KEYCLOAK_FACEBOOK_CLIENT_SECRET= scripts/deploy/create-secrets.sh ||
+  fail "create-secrets: refused empty Facebook variables: $(cat "$out")"
+grep -q 'create secret generic econ-graph-keycloak .*--from-file=facebook-idp' "$log" &&
+  fail "create-secrets: wrote a Facebook key from empty variables"
 # No token given: as before on an unmarked cluster; a token already there is reported.
 run_stubbed STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets: failed without a token on an unmarked cluster: $(cat "$out")"
