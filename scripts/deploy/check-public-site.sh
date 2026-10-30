@@ -12,7 +12,8 @@
 #     https://HOST/idp/realms/econ-graph;
 #   - the sign-in page for the web client: Keycloak accepts the public
 #     redirect URI and does not answer "HTTPS required";
-#   - CORS for the public origin, and the www.HOST redirect;
+#   - CORS for the public origin, and the www.HOST redirect: a 301 to
+#     https://HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
 #     neither the issuer, the sign-in form, nor the redirect, and plain http
 #     is redirected to https;
@@ -131,12 +132,6 @@ json() {
         "$tmp/$1" "$2" 2>/dev/null || true
 }
 
-# A redirect target with the default https port dropped, should one spell it
-# out (https://HOST:443/path).
-normalize_location() {
-    printf '%s' "$1" | sed -E 's#^https://([^/:]+):443#https://\1#'
-}
-
 # 1. The frontend.
 status="$(fetch home "${BASE}/")"
 if [ "$status" = 200 ] && grep -q 'id="root"' "$tmp/home"; then
@@ -205,19 +200,26 @@ else
     fail "CORS preflight returned ${status}, Access-Control-Allow-Origin '${allowed}', expected ${PUBLIC_URL}"
 fi
 
-# 6. www redirects to the apex, keeping the path, on https.
-status="$(fetch www "${WWW_BASE}/series/smoke-check")"
-location="$(normalize_location "$(header www Location)")"
-case "$status" in
-    301 | 308)
-        if [ "$location" = "${PUBLIC_URL}/series/smoke-check" ]; then
-            pass "www.${HOST} redirects (${status}) to ${location}"
-        else
-            fail "www.${HOST} redirects (${status}) to '${location}', expected ${PUBLIC_URL}/series/smoke-check"
-        fi
-        ;;
-    *) fail "www.${HOST} returned ${status}, expected a 301/308 redirect to ${PUBLIC_URL}" ;;
-esac
+# 6. www redirects to the apex on https, keeping the path and query, with no port
+# spelled out: econ-graph-www-redirect's 301 (scripts/deploy/render-public-host.py).
+# Any other status means something else answered, such as an old ingress or a
+# Cloudflare redirect rule.
+WWW_TARGET="${PUBLIC_URL}/series/smoke-check?from=www"
+# Until production is cut over to the gateway, and only until then (ECO-800 removes
+# this): ingress-nginx still answers www with a 308 that spells out :443 (ECO-709).
+# That exact response is reported as known; any other one fails. The no-Ingress QA
+# scenario fails if ingress-nginx still serves after the cut-over.
+INGRESS_NGINX_WWW_TARGET="https://${HOST}:443/series/smoke-check?from=www"
+ingress_nginx_www() { [ "$1" = 308 ] && [ "$2" = "$INGRESS_NGINX_WWW_TARGET" ]; }
+status="$(fetch www "${WWW_BASE}/series/smoke-check?from=www")"
+location="$(header www Location)"
+if [ "$status" = 301 ] && [ "$location" = "$WWW_TARGET" ]; then
+    pass "www.${HOST} redirects (301) to ${location}"
+elif ingress_nginx_www "$status" "$location"; then
+    pass "www.${HOST} redirects (308) through ingress-nginx, with :443 (ECO-709: production not yet cut over to the gateway)"
+else
+    fail "www.${HOST} redirects (${status}) to '${location}', expected a 301 to ${WWW_TARGET}"
+fi
 
 # 7. Spoofing. A client's X-Forwarded-Proto/-Host/-Port must not reach anything
 # that builds URLs from them: the gateway drops them and sets the scheme from the
@@ -236,16 +238,18 @@ if [ "$status" = 200 ] && grep -q "action=\"${PUBLIC_URL}/idp/" "$tmp/spoof-logi
 else
     fail "with spoofed X-Forwarded-* headers the sign-in page returned ${status} or changed its form target"
 fi
-status="$(fetch spoof-www "${SPOOF[@]}" "${WWW_BASE}/series/smoke-check")"
-location="$(normalize_location "$(header spoof-www Location)")"
-if [ "$location" = "${PUBLIC_URL}/series/smoke-check" ]; then
+status="$(fetch spoof-www "${SPOOF[@]}" "${WWW_BASE}/series/smoke-check?from=www")"
+location="$(header spoof-www Location)"
+if [ "$location" = "$WWW_TARGET" ]; then
     pass "spoofed X-Forwarded-* headers leave the www redirect on ${PUBLIC_URL}"
+elif ingress_nginx_www "$status" "$location"; then
+    pass "spoofed X-Forwarded-* headers leave ingress-nginx's www redirect on ${HOST}:443 (ECO-709: production not yet cut over to the gateway)"
 else
     fail "with spoofed X-Forwarded-* headers www redirects (${status}) to '${location}'"
 fi
 # Plain http, claiming to be https: still redirected to https, never served.
 status="$(fetch plain -H "X-Forwarded-Proto: https" "${HTTP_BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
-location="$(normalize_location "$(header plain Location)")"
+location="$(header plain Location)"
 case "$status" in
     301 | 302 | 307 | 308)
         case "$location" in
