@@ -256,7 +256,8 @@ impl Query {
 
     /// List datasets, optionally only one source's, grouped by source id (in no particular
     /// order across sources) and by code within a source. Unpaginated: sources publish a
-    /// handful of datasets each.
+    /// handful of datasets each. A `sourceId` that isn't a UUID is rejected with a
+    /// `BAD_USER_INPUT` error.
     async fn datasets(
         &self,
         ctx: &Context<'_>,
@@ -272,8 +273,7 @@ impl Query {
             .filter(datasets::source_id.eq_any(allowed))
             .into_boxed();
         if let Some(source_id) = source_id {
-            let source_id = Uuid::parse_str(&source_id)
-                .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
+            let source_id = parse_id_argument("sourceId", &source_id)?;
             query = query.filter(datasets::source_id.eq(source_id));
         }
 
