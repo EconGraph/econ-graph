@@ -115,6 +115,7 @@ async fn restricted_history_is_kept_but_unreachable_through_public_reads() {
         series(id:"{id}") {{ id }}
         seriesByExternalId(sourceName:{name}, externalId:"SECRET_CATALOG") {{ id }}
         seriesExists(id:"{id}")
+        seriesCatalog(id:"{id}")
         seriesList(filter:{{sourceId:"{source}"}}) {{ totalCount nodes {{ id }} }}
         dataSource(id:"{source}") {{ seriesCount series {{ totalCount nodes {{ id }} }} }}
         seriesData(seriesId:"{id}") {{ totalCount nodes {{ value }} }}
@@ -129,6 +130,7 @@ async fn restricted_history_is_kept_but_unreachable_through_public_reads() {
     assert!(data["series"].is_null());
     assert!(data["seriesByExternalId"].is_null());
     assert_eq!(data["seriesExists"], false);
+    assert!(data["seriesCatalog"].is_null());
     assert_eq!(data["seriesList"]["totalCount"], 0);
     assert_eq!(data["dataSource"]["seriesCount"], 0);
     assert_eq!(data["dataSource"]["series"]["totalCount"], 0);
