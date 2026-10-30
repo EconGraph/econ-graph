@@ -60,27 +60,19 @@ else
     echo "⚠️  Grafana dashboard linter not found, skipping..."
 fi
 
-# Run monitoring stack linter (if available)
-if [ -f "scripts/test-monitoring.sh" ]; then
-    echo "🔧 Running monitoring stack linter..."
-    # Only run the linter part, not the full integration test
-    if ./scripts/test-monitoring.sh --lint-only 2>/dev/null || echo "⚠️  Monitoring linter not available, continuing..."; then
-        echo "✅ Monitoring stack linter passed"
-    else
-        echo "⚠️  Monitoring stack linter not available, continuing..."
-    fi
-    echo ""
-else
-    echo "⚠️  Monitoring stack linter not found, skipping..."
-fi
-
-echo "✅ All linter checks passed - proceeding with deployment"
-echo ""
 
 # Load port configuration
 if [ -f "ports.env" ]; then
     echo "📋 Loading port configuration from ports.env..."
+    # A PUBLIC_HOST the caller set (release-deploy.sh's, from the host's deploy
+    # config) wins over one in ports.env, which only configures ports.
+    caller_public_host_set="${PUBLIC_HOST+set}"
+    caller_public_host="${PUBLIC_HOST-}"
     source ports.env
+    if [ "$caller_public_host_set" = set ]; then
+        PUBLIC_HOST="$caller_public_host"
+        export PUBLIC_HOST
+    fi
 else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
@@ -116,6 +108,7 @@ ensure_kind_kubectl
 # CLUSTER_ROLE_DRY_RUN to false, so only --dry-run, below, turns it on, never
 # a value from the environment.
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
+
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
 # https://econgraph.com through the cloudflared tunnel; empty serves
 # http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
@@ -132,6 +125,57 @@ fi
 if [ "$DRY_RUN" != true ]; then
     kubectl() { kc "$@"; }
 fi
+
+# The pod status printed every 10 seconds while the deploy waits. It is also
+# stopped on exit, so a wait that fails never leaves it running: it would keep
+# printing, and hold the output of whoever runs deploy.sh (release-deploy.sh)
+# open, after deploy.sh has failed.
+MONITOR_PID=""
+start_pod_monitor() {
+  stop_pod_monitor
+  (
+    sleeper=""
+    trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
+    while true; do
+      sleep 10 >/dev/null 2>&1 &
+      sleeper=$!
+      wait "$sleeper"
+      echo "📊 Pod status update:"
+      kubectl get pods -n econ-graph
+      echo ""
+    done
+  ) &
+  MONITOR_PID=$!
+}
+stop_pod_monitor() {
+  if [ -n "$MONITOR_PID" ]; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+    MONITOR_PID=""
+  fi
+}
+add_exit_cleanup stop_pod_monitor
+
+# Monitoring stack linter: static checks only (--lint-only contacts no cluster).
+# Run after the kind cluster's kubectl and context are set, so nothing before
+# this point can reach another cluster. A failure stops the deploy; a checkout
+# without the script skips it.
+if [ -f scripts/test-monitoring.sh ]; then
+    echo "🔧 Running monitoring stack linter..."
+    if ! ./scripts/test-monitoring.sh --lint-only; then
+        echo "❌ Monitoring stack linter failed - aborting deployment"
+        exit 1
+    fi
+else
+    echo "⚠️  scripts/test-monitoring.sh not found, skipping the monitoring stack linter"
+fi
+echo "✅ All linter checks passed - proceeding with deployment"
+echo ""
+
+# Secrets from an earlier version may lack keys this one needs: stop before applying anything.
+# shellcheck source=scripts/deploy/lib/keycloak-secret.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/keycloak-secret.sh"
+require_anonymous_client_secret || exit 1
 
 public_host_init
 
@@ -180,12 +224,12 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
     --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
+    --from-file=preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   render_manifest k8s/manifests/keycloak/deployment.yaml | kubectl apply -f -
-  render_manifest k8s/manifests/keycloak/ingress.yaml | kubectl apply -f -
   # Wait for the new Keycloak pod, so the realm import below talks to the server this
   # deploy just applied, after any schema migration it ran on start. The Deployment
   # uses Recreate, so no old pod stays ready meanwhile. Under --dry-run kubectl only
@@ -209,11 +253,15 @@ fi
 
 # Data migrations: the crawler-migrate Job applies backend/migrations/data and must
 # complete before the backend and crawler-worker are applied; no service applies them at
-# startup. It runs only in a namespace that owns a data database: one whose Secret
-# econ-graph-secrets has the key data-database-url (create-secrets.sh writes it). Without
-# that key the Job is skipped. See k8s/manifests/crawler-migrate-job.yaml.
+# startup. It needs the data database: the Secret econ-graph-secrets's key
+# data-database-url (create-secrets.sh writes it). Without that key the deploy stops, since
+# the backend would refuse to start. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
+# crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
+# deploy (scripts/deploy/precheck-db-migration.sh --stop-crawler) stays stopped while the data
+# migrations run, and stays stopped if the Job fails (a migration that gave up on its table
+# locks, say): the deploy stops here.
 has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
   -o jsonpath='{.data.data-database-url}')"
 if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
@@ -244,7 +292,11 @@ if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
     esac
   fi
 else
-  echo "⚠️  Secret econ-graph-secrets has no data-database-url: no data database here, skipping crawler-migrate."
+  # The backend these manifests deploy has sign-in on and no DATA_GRAPHQL_URL, so without a
+  # data database it refuses to start (it could not apply catalog grants to annotations).
+  echo "❌ Secret econ-graph-secrets has no data-database-url, so the backend would refuse to start."
+  echo "   Run scripts/deploy/create-secrets.sh (it writes the key), then deploy again."
+  exit 1
 fi
 
 # Deploy application
@@ -261,18 +313,11 @@ kubectl apply -f k8s/manifests/frontend-service.yaml
 # (401-on-everything) admin frontend doesn't keep serving traffic.
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
-# ingress.yaml routes /admin to the admin-frontend Service, which isn't deployed
-# above; apply it with that one path filtered out rather than pointing an ingress
-# rule at a nonexistent Service.
-yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
-  k8s/manifests/ingress.yaml | render_manifest - | kubectl apply -f -
-# graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
-# (see the comment in ingress.yaml), so both manifests must be applied together.
-render_manifest k8s/manifests/graphql-ingress.yaml | kubectl apply -f -
-
-# ingress-nginx client-address settings and the public Ingresses, both ways,
-# then the tunnel connector (scripts/deploy/lib/public-host.sh).
-apply_public_edge
+# The gateway: Gateway API CRDs, Envoy Gateway, and its proxy on host ports
+# 80/443 (k8s/manifests/gateway/; idempotent). The routes, with the public
+# host's, follow once cert-manager is installed (apply_public_edge below).
+run_script ./scripts/deploy/install-gateway.sh --context "$CLUSTER_ROLE_CONTEXT"
+# The tunnel connector (scripts/deploy/lib/public-host.sh).
 apply_cloudflared
 
 # Deploy chart API service (internal only)
@@ -285,16 +330,7 @@ echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
 echo ""
 
-# Start background monitoring
-(
-  while true; do
-    sleep 10
-    echo "📊 Pod status update:"
-    kubectl get pods -n econ-graph
-    echo ""
-  done
-) &
-MONITOR_PID=$!
+start_pod_monitor
 
 # Wait for backend deployment
 echo "Waiting for backend deployment..."
@@ -332,7 +368,6 @@ if [ "$KEYCLOAK_DEPLOYED" = true ] && [ "$DRY_RUN" = false ]; then
     *)
       echo "❌ Keycloak realm import did not complete (status: ${realm_import_status:-none}):"
       kubectl -n econ-graph logs job/keycloak-realm-import --all-containers || true
-      kill $MONITOR_PID 2>/dev/null || true
       exit 1
       ;;
   esac
@@ -340,17 +375,37 @@ fi
 
 wait_cloudflared
 
-# Stop monitoring
-kill $MONITOR_PID 2>/dev/null || true
+stop_pod_monitor
 
 # Install cert-manager first: k8s/monitoring/letsencrypt-cloudflare-dns01.yaml
 # defines ClusterIssuer/Certificate resources whose CRDs cert-manager provides.
+# Its Gateway API support (--enable-gateway-api, needed for the gateway's https
+# listener certificate) is switched on in the manifest before it is applied, so
+# the controller starts once with it.
 echo "🔐 Installing cert-manager (provides the CRDs used by k8s/monitoring/)..."
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+cert_manager_manifest="$(mktemp)"
+curl -fsSL --retry 3 -o "$cert_manager_manifest" \
+  https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+awk '{ print } /^ *- --acme-http01-solver-image=/ { sub(/-.*/, "- --enable-gateway-api"); print }' \
+  "$cert_manager_manifest" > "${cert_manager_manifest}.patched"
+grep -q -- '- --enable-gateway-api$' "${cert_manager_manifest}.patched" || {
+  echo "❌ Could not add --enable-gateway-api to the cert-manager manifest"
+  exit 1
+}
+kubectl apply -f "${cert_manager_manifest}.patched"
+rm -f "$cert_manager_manifest" "${cert_manager_manifest}.patched"
 echo "⏳ Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
 kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
+
+# The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
+# public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none})"
+else
+  apply_public_edge
+fi
 
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
@@ -422,23 +477,13 @@ echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
 echo ""
 
-# Start background monitoring
-(
-  while true; do
-    sleep 10
-    echo "📊 Pod status update:"
-    kubectl get pods -n econ-graph
-    echo ""
-  done
-) &
-MONITOR_PID=$!
+start_pod_monitor
 
 kubectl wait --for=condition=ready pod -l app=grafana -n econ-graph --timeout=300s
 kubectl wait --for=condition=ready pod -l app=loki -n econ-graph --timeout=300s
 kubectl wait --for=condition=ready pod -l app=prometheus -n econ-graph --timeout=300s
 
-# Stop monitoring
-kill $MONITOR_PID 2>/dev/null || true
+stop_pod_monitor
 
 # Show final pod status
 echo "📊 Final pod status:"
@@ -451,7 +496,7 @@ if [ -n "$PUBLIC_HOST" ]; then
   echo "  Public:   https://${PUBLIC_HOST} (through the Cloudflare Tunnel; www redirects here)"
   echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} [--via-cloudflare]"
 fi
-# k8s/manifests/ingress.yaml routes on host: localhost, not admin.econ-graph.local.
+# The gateway's routes (k8s/manifests/gateway/routes/) answer on host localhost.
 echo "  Frontend: http://localhost"
 # Admin UI: not deployed here (ECO-242).
 echo "  Backend:  http://localhost/api"

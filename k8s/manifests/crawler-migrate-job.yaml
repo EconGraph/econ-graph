@@ -4,9 +4,9 @@
 # the app migrations, and a run with nothing pending changes nothing.
 #
 # scripts/deploy/deploy.sh deletes the previous Job, applies this one before the backend
-# and crawler-worker, and stops the deploy unless it completes. It runs only in a
-# namespace that owns a data database, i.e. whose Secret econ-graph-secrets has the key
-# data-database-url; elsewhere deploy.sh skips it.
+# and crawler-worker, and stops the deploy unless it completes. It needs the Secret
+# econ-graph-secrets's key data-database-url; without it deploy.sh stops, since the backend
+# would refuse to start.
 #
 # Image: the crawler-worker image (built from backend/Dockerfile with
 # `--target crawler-worker`), which ships /app/crawler; keep the tag in step with
@@ -21,8 +21,18 @@ metadata:
     component: crawler
 spec:
   # Migrations run under an advisory lock and each one in its own transaction, so a retry
-  # after a lost connection is safe; a migration that fails fails the same way again.
+  # after a lost connection is safe; a migration that fails on its SQL fails the same way
+  # again.
+  # A migration that bounds its table locks (20261025000100 gives up after about 10 s when
+  # other transactions hold crawl_queue, data_points or global_indicator_data) fails its pod
+  # with nothing changed. backoffLimit 1 gives it one more pod, after Kubernetes' 10 s
+  # backoff, which covers a transaction that was about to finish; if the tables are still
+  # held, the Job fails within about a minute, and deploy.sh stops with the backend and
+  # crawler-worker not applied and prints the Job's log. Find the session holding the tables
+  # (scripts/deploy/precheck-db-migration.sh --dry-run) and run deploy.sh again. Retrying for
+  # longer would only keep queueing the API's reads of those tables behind each attempt.
   backoffLimit: 1
+  # Bounds the whole Job, initContainer wait included; deploy.sh waits a little longer.
   activeDeadlineSeconds: 1800
   ttlSecondsAfterFinished: 86400
   template:

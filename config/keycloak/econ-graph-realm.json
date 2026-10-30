@@ -19,9 +19,16 @@
         "description": "Granted to every account: the user composite plus Keycloak's defaults",
         "composite": true,
         "composites": {
-          "realm": ["offline_access", "uma_authorization", "user"],
+          "realm": [
+            "offline_access",
+            "uma_authorization",
+            "user"
+          ],
           "client": {
-            "account": ["view-profile", "manage-account"]
+            "account": [
+              "view-profile",
+              "manage-account"
+            ]
           }
         }
       },
@@ -39,8 +46,16 @@
         "composite": true,
         "composites": {
           "client": {
-            "econ-graph-api": ["annotation:create", "annotation:comment", "chart:share", "api:mcp"]
-          }
+            "econ-graph-api": [
+              "annotation:create",
+              "annotation:comment",
+              "chart:share",
+              "api:mcp"
+            ]
+          },
+          "realm": [
+            "catalog-public"
+          ]
         }
       },
       {
@@ -48,9 +63,15 @@
         "description": "Support staff: user plus read-only user, session and system views",
         "composite": true,
         "composites": {
-          "realm": ["user"],
+          "realm": [
+            "user"
+          ],
           "client": {
-            "econ-graph-api": ["admin.users:read", "admin.sessions:read", "admin.system:read"]
+            "econ-graph-api": [
+              "admin.users:read",
+              "admin.sessions:read",
+              "admin.system:read"
+            ]
           }
         }
       },
@@ -59,11 +80,19 @@
         "description": "Senior staff: support plus every other staff role",
         "composite": true,
         "composites": {
-          "realm": ["support"],
+          "realm": [
+            "support"
+          ],
           "client": {
             "econ-graph-api": [
-              "admin.users:create", "admin.users:update", "admin.users:delete", "admin.users:suspend",
-              "admin.sessions:revoke", "admin.crawlers:manage", "admin.security:read", "admin.audit:read"
+              "admin.users:create",
+              "admin.users:update",
+              "admin.users:delete",
+              "admin.users:suspend",
+              "admin.sessions:revoke",
+              "admin.crawlers:manage",
+              "admin.security:read",
+              "admin.audit:read"
             ]
           }
         }
@@ -73,7 +102,37 @@
         "description": "Top staff level: everything in admin, nothing extra yet",
         "composite": true,
         "composites": {
-          "realm": ["admin"]
+          "realm": [
+            "admin"
+          ]
+        }
+      },
+      {
+        "name": "catalog-public",
+        "description": "Default catalog reads for users and the anonymous reader; remove a grant here to withdraw default public access",
+        "composite": true,
+        "composites": {
+          "client": {
+            "econ-graph-api": [
+              "catalog.fred:read",
+              "catalog.bls:read",
+              "catalog.census:read",
+              "catalog.world_bank:read",
+              "catalog.bea:read",
+              "catalog.imf:read",
+              "catalog.fhfa:read",
+              "catalog.ecb:read",
+              "catalog.oecd:read",
+              "catalog.boe:read",
+              "catalog.wto:read",
+              "catalog.boj:read",
+              "catalog.rba:read",
+              "catalog.boc:read",
+              "catalog.snb:read",
+              "catalog.unstats:read",
+              "catalog.ilo:read"
+            ]
+          }
         }
       }
     ],
@@ -138,11 +197,83 @@
         {
           "name": "admin.audit:read",
           "description": "Read the audit log"
+        },
+        {
+          "name": "catalog.fred:read",
+          "description": "Read the Federal Reserve Economic Data (FRED) catalog"
+        },
+        {
+          "name": "catalog.bls:read",
+          "description": "Read the Bureau of Labor Statistics (BLS) catalog"
+        },
+        {
+          "name": "catalog.census:read",
+          "description": "Read the U.S. Census Bureau catalog"
+        },
+        {
+          "name": "catalog.world_bank:read",
+          "description": "Read the World Bank Open Data catalog"
+        },
+        {
+          "name": "catalog.bea:read",
+          "description": "Read the Bureau of Economic Analysis (BEA) catalog"
+        },
+        {
+          "name": "catalog.imf:read",
+          "description": "Read the International Monetary Fund (IMF) catalog"
+        },
+        {
+          "name": "catalog.fhfa:read",
+          "description": "Read the Federal Housing Finance Agency (FHFA) catalog"
+        },
+        {
+          "name": "catalog.ecb:read",
+          "description": "Read the European Central Bank (ECB) catalog"
+        },
+        {
+          "name": "catalog.oecd:read",
+          "description": "Read the OECD (Organisation for Economic Co-operation and Development) catalog"
+        },
+        {
+          "name": "catalog.boe:read",
+          "description": "Read the Bank of England (BoE) catalog"
+        },
+        {
+          "name": "catalog.wto:read",
+          "description": "Read the World Trade Organization (WTO) catalog"
+        },
+        {
+          "name": "catalog.boj:read",
+          "description": "Read the Bank of Japan (BoJ) catalog"
+        },
+        {
+          "name": "catalog.rba:read",
+          "description": "Read the Reserve Bank of Australia (RBA) catalog"
+        },
+        {
+          "name": "catalog.boc:read",
+          "description": "Read the Bank of Canada (BoC) catalog"
+        },
+        {
+          "name": "catalog.snb:read",
+          "description": "Read the Swiss National Bank (SNB) catalog"
+        },
+        {
+          "name": "catalog.unstats:read",
+          "description": "Read the UN Statistics Division catalog"
+        },
+        {
+          "name": "catalog.ilo:read",
+          "description": "Read the International Labour Organization (ILO) catalog"
         }
       ]
     }
   },
-  "defaultRole": {"name": "default-roles-econ-graph", "composite": true, "clientRole": false},
+  "defaultRole": {
+    "name": "default-roles-econ-graph",
+    "composite": true,
+    "clientRole": false
+  },
   "clients": [
     {
       "clientId": "econ-graph-web",
@@ -163,13 +294,25 @@
         "${KC_WEB_E2E_BASE_URL}/auth/callback",
         "${KC_WEB_E2E_BASE_URL}/silent-callback.html"
       ],
-      "webOrigins": ["${KC_WEB_BASE_URL}", "${KC_WEB_E2E_BASE_URL}"],
+      "webOrigins": [
+        "${KC_WEB_BASE_URL}",
+        "${KC_WEB_E2E_BASE_URL}"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "${KC_WEB_BASE_URL}/##${KC_WEB_E2E_BASE_URL}/"
       },
-      "defaultClientScopes": ["web-origins", "acr", "basic", "profile", "email", "roles"],
-      "optionalClientScopes": ["offline_access"],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "basic",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "econ-graph-api audience",
@@ -212,6 +355,52 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "econgraph-anonymous",
+      "name": "Anonymous catalog grant source (server only)",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "${KC_ANONYMOUS_CLIENT_SECRET:anonymous-dev-only}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "protocolMappers": [
+        {
+          "name": "econ-graph-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "econ-graph-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "econ-graph-api roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "econ-graph-api",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "identityProviders": [
@@ -244,6 +433,42 @@
         "defaultScope": "email,public_profile",
         "syncMode": "IMPORT"
       }
+    }
+  ],
+  "clientScopeMappings": {
+    "econ-graph-api": [
+      {
+        "client": "econgraph-anonymous",
+        "roles": [
+          "catalog.fred:read",
+          "catalog.bls:read",
+          "catalog.census:read",
+          "catalog.world_bank:read",
+          "catalog.bea:read",
+          "catalog.imf:read",
+          "catalog.fhfa:read",
+          "catalog.ecb:read",
+          "catalog.oecd:read",
+          "catalog.boe:read",
+          "catalog.wto:read",
+          "catalog.boj:read",
+          "catalog.rba:read",
+          "catalog.boc:read",
+          "catalog.snb:read",
+          "catalog.unstats:read",
+          "catalog.ilo:read"
+        ]
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "service-account-econgraph-anonymous",
+      "enabled": true,
+      "serviceAccountClientId": "econgraph-anonymous",
+      "realmRoles": [
+        "catalog-public"
+      ]
     }
   ]
 }

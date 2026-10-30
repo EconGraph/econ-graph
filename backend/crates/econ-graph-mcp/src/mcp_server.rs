@@ -26,6 +26,7 @@ pub struct EconGraphMcpServer {
         econ_graph_graphql::graphql::mutation::Mutation,
         async_graphql::EmptySubscription,
     >,
+    auth_context: Option<Arc<econ_graph_graphql::graphql::context::GraphQLContext>>,
     /// HTTP client for calling private frontend chart API
     http_client: Client,
     /// Frontend chart API base URL
@@ -46,9 +47,19 @@ impl EconGraphMcpServer {
         Self {
             app,
             schema,
+            auth_context: None,
             http_client,
             frontend_chart_api_url,
         }
+    }
+
+    /// Bind data tools to the authenticated HTTP caller's catalog grants.
+    pub fn with_auth_context(
+        mut self,
+        context: Arc<econ_graph_graphql::graphql::context::GraphQLContext>,
+    ) -> Self {
+        self.auth_context = Some(context);
+        self
     }
 
     /// Execute a GraphQL query
@@ -60,8 +71,23 @@ impl EconGraphMcpServer {
             Request::new(query)
         };
 
+        let request = match &self.auth_context {
+            Some(context) => request.data(context.clone()),
+            None => request,
+        };
         let response = self.schema.execute(request).await;
 
+        if !response.errors.is_empty() {
+            anyhow::bail!(
+                "GraphQL request failed: {}",
+                response
+                    .errors
+                    .iter()
+                    .map(|e| e.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
         // Convert GraphQL response to JSON
         let result = serde_json::to_value(response)?;
         Ok(result)
@@ -215,17 +241,9 @@ impl EconGraphMcpServer {
 
         let graphql_query = r#"
             query SearchSeries($query: String!, $limit: Int!) {
-                searchSeries(query: $query, limit: $limit) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                        description
-                    }
-                    lastUpdated
+                searchSeries(query: $query, first: $limit) {
+                    series { id name: title description frequency units source { name description } lastUpdated }
+                    totalCount
                 }
             }
         "#;
@@ -262,61 +280,12 @@ impl EconGraphMcpServer {
             .and_then(|v| v.as_i64())
             .unwrap_or(100) as i32;
 
-        let mut graphql_query = r#"
-            query GetSeriesData($seriesId: Uuid!, $limit: Int!) {
-                series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    dataPoints(limit: $limit) {
-                        date
-                        value
-                        note
-                    }
-                }
-            }
-        "#
-        .to_string();
-
-        let mut variables = json!({
-            "seriesId": series_id,
-            "limit": limit
-        });
-
-        // Add date filtering if provided
-        if let Some(start) = start_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: $limit)",
-                "dataPoints(limit: $limit, startDate: $startDate)",
-            );
-            variables["startDate"] = json!(start);
-        }
-
-        if let Some(end) = end_date {
-            // Handle both cases: with and without start date
-            if start_date.is_some() {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: $limit, startDate: $startDate)",
-                    "dataPoints(limit: $limit, startDate: $startDate, endDate: $endDate)",
-                );
-            } else {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: $limit)",
-                    "dataPoints(limit: $limit, endDate: $endDate)",
-                );
-            }
-            variables["endDate"] = json!(end);
-        }
-
-        let result = self
-            .execute_graphql_query(&graphql_query, Some(variables))
+        let series = self
+            .get_series_payload(series_id, start_date, end_date, limit)
             .await?;
-
+        let result = json!({"data": {"series": series}});
         Ok(json!({
-            "content": [{
-                "type": "text",
-                "text": serde_json::to_string_pretty(&result)?
-            }],
+            "content": [{"type": "text", "text": serde_json::to_string_pretty(&result)?}],
             "is_error": false
         }))
     }
@@ -329,21 +298,11 @@ impl EconGraphMcpServer {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: series_id"))?;
 
         let graphql_query = r#"
-            query GetSeriesMetadata($seriesId: Uuid!) {
+            query GetSeriesMetadata($seriesId: ID!) {
                 series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                        description
-                        url
-                    }
-                    tags
-                    lastUpdated
-                    createdAt
+                    id name: title description frequency units
+                    source { name description url: baseUrl }
+                    lastUpdated createdAt
                 }
             }
         "#;
@@ -509,8 +468,8 @@ impl EconGraphMcpServer {
                     id
                     name
                     description
-                    url
-                    lastUpdated
+                    url: baseUrl
+                    lastUpdated: updatedAt
                 }
             }
         "#;
@@ -529,15 +488,8 @@ impl EconGraphMcpServer {
     pub async fn get_series_catalog(&self) -> Result<Value> {
         let graphql_query = r#"
             query GetSeriesCatalog {
-                series(limit: 100) {
-                    id
-                    name
-                    description
-                    frequency
-                    units
-                    source {
-                        name
-                    }
+                series: seriesList(pagination: {first: 100}) {
+                    nodes { id name: title description frequency units source { name } }
                 }
             }
         "#;
@@ -552,61 +504,42 @@ impl EconGraphMcpServer {
         }))
     }
 
-    /// Get series data for visualization
+    /// Get metadata and bounded observations for one existing series.
+    async fn get_series_payload(
+        &self,
+        series_id: &str,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        limit: i32,
+    ) -> Result<Value> {
+        let query = r#"
+            query GetSeriesPayload($seriesId: ID!, $limit: Int!, $filter: DataFilter) {
+                series(id: $seriesId) { id name: title description }
+                seriesData(seriesId: $seriesId, first: $limit, filter: $filter) {
+                    nodes { date value }
+                }
+            }
+        "#;
+        let variables = json!({"seriesId": series_id, "limit": limit,
+            "filter": {"startDate": start_date, "endDate": end_date}});
+        let response = self.execute_graphql_query(query, Some(variables)).await?;
+        let mut series = response["data"]["series"].clone();
+        if !series.is_object() {
+            anyhow::bail!("Series not found: {series_id}");
+        }
+        series["dataPoints"] = response["data"]["seriesData"]["nodes"].clone();
+        Ok(series)
+    }
+
+    /// Fetch chart input using the same date filtering as the data tool.
     async fn get_series_data_for_visualization(
         &self,
         series_id: &str,
         start_date: Option<&str>,
         end_date: Option<&str>,
     ) -> Result<Value> {
-        let mut graphql_query = r#"
-            query GetSeriesDataForViz($seriesId: Uuid!) {
-                series(id: $seriesId) {
-                    id
-                    name
-                    description
-                    dataPoints(limit: 1000) {
-                        date
-                        value
-                    }
-                }
-            }
-        "#
-        .to_string();
-
-        let mut variables = json!({
-            "seriesId": series_id
-        });
-
-        // Add date filtering if provided
-        if let Some(start) = start_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: 1000)",
-                "dataPoints(limit: 1000, startDate: $startDate)",
-            );
-            variables["startDate"] = json!(start);
-        }
-
-        if let Some(end) = end_date {
-            // Handle both cases: with and without start date
-            if start_date.is_some() {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: 1000, startDate: $startDate)",
-                    "dataPoints(limit: 1000, startDate: $startDate, endDate: $endDate)",
-                );
-            } else {
-                graphql_query = graphql_query.replace(
-                    "dataPoints(limit: 1000)",
-                    "dataPoints(limit: 1000, endDate: $endDate)",
-                );
-            }
-            variables["endDate"] = json!(end);
-        }
-
-        let result = self
-            .execute_graphql_query(&graphql_query, Some(variables))
-            .await?;
-        Ok(result)
+        self.get_series_payload(series_id, start_date, end_date, 1000)
+            .await
     }
 }
 
@@ -729,13 +662,25 @@ mod tests {
     use econ_graph_core::test_utils::TestContainer;
     use serial_test::serial;
 
+    fn test_server(app: AppPool, data: Option<DataPool>) -> EconGraphMcpServer {
+        let mut context = econ_graph_graphql::graphql::context::GraphQLContext::anonymous();
+        context.principal = Some(econ_graph_auth::Principal::new(
+            Default::default(),
+            econ_graph_auth::Role::all()
+                .iter()
+                .copied()
+                .filter(|role| role.is_catalog() || *role == econ_graph_auth::Role::ApiMcp),
+        ));
+        EconGraphMcpServer::new(app, data).with_auth_context(Arc::new(context))
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_mcp_server_creation() {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test that we can get a connection from the pool
         let connection_result = server.app.get().await;
@@ -795,7 +740,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test that we can execute a simple database query
         let connection_result = server.app.get().await;
@@ -817,7 +762,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test the search tool with a simple query
         let search_args = json!({
@@ -835,13 +780,13 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_get_economic_series_tool() {
+    async fn test_get_series_data_rejects_invalid_series_id() {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test the get series tool with a mock series ID
+        // Invalid IDs must propagate the GraphQL validation error.
         let get_args = json!({
             "series_id": "test-series-id",
             "start_date": "2020-01-01",
@@ -849,11 +794,9 @@ mod tests {
         });
 
         let result = server.get_series_data(get_args).await;
-        assert!(result.is_ok(), "Get series tool failed: {:?}", result.err());
-
-        let response = result.unwrap();
-        assert!(response.get("content").is_some());
-        // Note: This might return an error if the series doesn't exist, which is expected
+        let error = result.expect_err("An invalid UUID must fail").to_string();
+        assert!(error.contains("GraphQL request failed"), "{error}");
+        assert!(error.contains("invalid character"), "{error}");
     }
 
     // test_create_data_visualization_tool moved to integration tests
@@ -868,7 +811,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test tools/list request
         let tools_list_request = json!({
@@ -906,7 +849,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with malformed JSON
         let malformed_json = "{ invalid json }";
@@ -940,7 +883,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with invalid method
         let invalid_request = json!({
@@ -976,7 +919,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with large payload (search with many parameters)
         let large_request = json!({
@@ -1022,7 +965,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = Arc::new(EconGraphMcpServer::new(
+        let server = Arc::new(test_server(
             AppPool(pool.clone()),
             Some(DataPool(pool.clone())),
         ));
@@ -1084,7 +1027,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test empty body
         let empty_body = warp::hyper::body::Bytes::new();
@@ -1116,7 +1059,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test tools/call with search_economic_series
         let tools_call_request = json!({
@@ -1160,7 +1103,7 @@ mod tests {
         // Create a test container that will be kept alive for the duration of the test
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test resources/list request
         let resources_list_request = json!({
@@ -1197,7 +1140,7 @@ mod tests {
     async fn test_get_data_sources() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_data_sources method
         let result = server.get_data_sources().await;
@@ -1213,7 +1156,7 @@ mod tests {
     async fn test_get_series_catalog() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_catalog method
         let result = server.get_series_catalog().await;
@@ -1229,7 +1172,7 @@ mod tests {
     async fn test_create_fallback_visualization() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test fallback visualization with sample data
         let series_data = vec![
@@ -1276,7 +1219,7 @@ mod tests {
     async fn test_get_series_data_for_visualization() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with a valid UUID (this will fail at GraphQL level but tests the function)
         let result = server
@@ -1296,7 +1239,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_start_date_only() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with start date only
         let result = server
@@ -1316,7 +1259,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_end_date_only() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with end date only
         let result = server
@@ -1336,7 +1279,7 @@ mod tests {
     async fn test_get_series_data_for_visualization_no_dates() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test with no date filters
         let result = server
@@ -1352,7 +1295,7 @@ mod tests {
     async fn test_search_economic_series_with_custom_limit() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test search with custom limit
         let arguments = json!({
@@ -1373,7 +1316,7 @@ mod tests {
     async fn test_search_economic_series_missing_query() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test search with missing query parameter
         let arguments = json!({
@@ -1394,7 +1337,7 @@ mod tests {
     async fn test_get_series_data_missing_series_id() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_data with missing series_id
         let arguments = json!({
@@ -1416,7 +1359,7 @@ mod tests {
     async fn test_get_series_data_with_custom_limit() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test get_series_data with custom limit
         let arguments = json!({
@@ -1431,34 +1374,12 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_create_data_visualization_missing_series_id() {
+    async fn test_create_data_visualization_requires_series_ids_array() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
-        // Test create_data_visualization with missing series_id
-        let arguments = json!({
-            "chart_type": "line",
-            "title": "Test Chart"
-        });
-
-        let result = server.create_data_visualization(arguments).await;
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: series_id"));
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_create_data_visualization_missing_chart_type() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
-
-        // Test create_data_visualization with missing chart_type
+        // A singular series_id cannot replace the required series_ids array.
         let arguments = json!({
             "series_id": "550e8400-e29b-41d4-a716-446655440000",
             "title": "Test Chart"
@@ -1468,9 +1389,7 @@ mod tests {
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Missing required parameter: chart_type"));
+        assert_eq!(error.to_string(), "Missing required parameter: series_ids");
     }
 
     #[tokio::test]
@@ -1478,7 +1397,7 @@ mod tests {
     async fn test_create_data_visualization_with_title() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with title
         let arguments = json!({
@@ -1497,7 +1416,7 @@ mod tests {
     async fn test_create_data_visualization_without_title() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization without title
         let arguments = json!({
@@ -1515,7 +1434,7 @@ mod tests {
     async fn test_create_data_visualization_with_date_filters() {
         let container = TestContainer::new().await;
         let pool = container.pool();
-        let server = EconGraphMcpServer::new(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
 
         // Test create_data_visualization with date filters
         let arguments = json!({

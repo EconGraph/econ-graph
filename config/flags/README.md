@@ -12,16 +12,17 @@ project.
 | `schema/` | flagd's JSON schema, vendored so the check needs no network |
 
 A build profile is `release` or `dev`. The `release` profile is
-`flags.flagd.json` alone. The `dev` profile is `flags.flagd.json` with each
-flag that `dev.flagd.json` names replaced by that override, whole, which is
-flagd's own rule for several sources.
+`flags.flagd.json` alone. For the `dev` profile, each entry in `dev.flagd.json`
+replaces the entire matching entry from `flags.flagd.json`, following flagd's
+rule for several sources. The generator takes each flag's `kind` from the base
+definition, so dev overrides do not need metadata.
 
 `node scripts/flags-merge` applies that rule once and writes the resolved values
 to `frontend/flags/<profile>.json` and `backend/flags/<profile>.json`, because
-the frontend and backend Docker builds can't see `config/flags`. The Vite build
-and the backend build (wired in follow-up PRs) read only the generated file for
-their profile, so neither re-implements the merge. The generated files are committed, and CI fails when
-they are stale. Their shape:
+the frontend and backend Docker builds can't see `config/flags`. Vite and the
+Rust build scripts read the generated file for their selected profile, so
+neither re-implements the merge. The generated files are committed, and CI
+fails when they are stale. Their shape, with one flag shown:
 
 ```json
 {
@@ -35,26 +36,38 @@ they are stale. Their shape:
 
 A flag with `"state": "DISABLED"` is left out, which flagd treats as absent.
 
-Each key will map to a name in code: `world_map` becomes `__FLAGS__.world_map` in
-the frontend and `cfg(flag_world_map)` in the backend.
+Each build flag's key maps to a name in code: for example, `world_map` becomes
+`__FLAGS__.world_map` in the frontend and `cfg(flag_world_map)` in Rust. See
+[frontend build flags](../../frontend/docs/build-flags.md) for the import pattern
+that lets Vite remove flagged-off code.
 
 ## How the backend reads it
 
-`econ-graph-backend`'s `build.rs` calls `econ_graph_flags_build::emit()`, which reads
-`FLAGS_PROFILE` (`release` when unset, or `dev`), finds `backend/flags/<profile>.json`,
-and turns each `build` flag that is on there into `cargo::rustc-cfg=flag_<key>` — so
-`#[cfg(flag_world_map)]` gates the module or route, the same way for every crate in the
-workspace. `backend/.cargo/config.toml` sets `FLAGS_PROFILE=dev` for local builds and
-tests (an exported `FLAGS_PROFILE` wins over it); `backend/Dockerfile` sets it to
-`release` and does not copy that file in, so images always build what ships. Note that
-`cargo build --release` selects cargo's own release *profile* (optimizations) and has
-no effect on `FLAGS_PROFILE` — the two are unrelated knobs.
+Each crate using build flags must call `econ_graph_flags_build::emit()` from its
+own `build.rs`; the emitted cfgs apply only to that crate. Both
+[`econ-graph-backend`](../../backend/crates/econ-graph-backend/build.rs) and
+[`econ-graph-crawler`](../../backend/crates/econ-graph-crawler/build.rs) do this.
+The [shared helper](../../backend/crates/econ-graph-flags-build/src/lib.rs) reads
+`FLAGS_PROFILE` (`release` when unset, or `dev`), finds
+`backend/flags/<profile>.json`, and emits `cargo::rustc-cfg=flag_<key>` for each
+enabled build flag. A crate can then gate a module or route with, for example,
+`#[cfg(flag_world_map)]`.
 
-A flag gating a whole route (like `mcp`) needs two things compiled out together: the
-route's module behind `#[cfg(flag_<key>)]`, and a `#[cfg(not(flag_<key>))]` stand-in
-with the same signature that always 404s, so the code that wires up routes doesn't
-itself need a `#[cfg]`. A flag gating one field of a larger GraphQL type follows the
-same pattern with two `#[cfg]`-gated `MergedObject` roots instead of one.
+[`backend/.cargo/config.toml`](../../backend/.cargo/config.toml) sets
+`FLAGS_PROFILE=dev` for local builds and tests; an exported `FLAGS_PROFILE` wins
+over it. [`backend/Dockerfile`](../../backend/Dockerfile) does not copy that
+configuration file and defaults to `FLAGS_PROFILE=release`. Pass
+`--build-arg FLAGS_PROFILE=dev` to build a development image. `cargo build --release`
+selects Cargo's own release profile (optimizations) and has no effect on
+`FLAGS_PROFILE`.
+
+For a flag gating a whole route, such as `mcp`, put the route's module behind
+`#[cfg(flag_<key>)]`. Supply a `#[cfg(not(flag_<key>))]` stand-in with the same
+signature that always returns 404, so the code wiring up routes needs no cfg.
+When adding a field gate to a larger GraphQL type, compose two root variants
+selected by opposite cfg conditions. The enabled root includes both the
+feature's fields and the shared fields; the disabled root retains the shared
+fields and excludes the feature's fields.
 
 ## Adding a flag
 
@@ -120,19 +133,19 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   check, not unfinished work.
 - `mcp` (build, off in release, on in dev, `remove_by: train 3`, owner ECO-123,
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
-  builds while MCP is unfinished. It becomes an ops flag when
-  MCP ships.
+  builds.
 - `static_catalogs` (build, off in release, on in dev, `remove_by: unscheduled`,
   owner ECO-142) registers `econ-graph-crawler`'s ten hardcoded dev-only source
-  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). Unlike the
-  other seeded flags it is meant to stay: these catalogs are a development
-  convenience, not unfinished work, so there is no release to remove it by.
+  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). Like
+  `build_canary`, it is permanent: these catalogs are a development convenience,
+  so there is no release deadline for removing the flag.
 
 ## Updating the vendored schema
 
-`schema/flags.json` and `schema/targeting.json` are copied unchanged from
+[`schema/flags.json`](schema/flags.json) and
+[`schema/targeting.json`](schema/targeting.json) are copied unchanged from
 [open-feature/flagd-schemas](https://github.com/open-feature/flagd-schemas)
-at tag `json/json-schema-v0.2.15` (Apache-2.0, see `schema/LICENSE`). To update,
+at tag `json/json-schema-v0.2.15` (Apache-2.0, see [the license](schema/LICENSE)). To update,
 copy both files from a newer tag's `json/` directory and run the check. The
 check's validator supports only the JSON Schema keywords these files use, and
 fails loudly on any other.

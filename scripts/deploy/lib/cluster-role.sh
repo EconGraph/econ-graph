@@ -49,23 +49,43 @@ kc() {
     fi
 }
 
-# For a script run by hand (create-secrets.sh): when
-# none of KUBECTL, KUBECONFIG and CLUSTER_ROLE_CONTEXT is set, use the kind
-# cluster's own kubectl and kubeconfig if copies are kept in
-# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph).
-# Plain kubectl may be another cluster's: the microk8s snap wrapper ignores
-# ~/.kube/config. Says what it chose, that an exported KUBECONFIG kept it from
-# looking, or which of the two files is missing. An explicit KUBECTL or
-# KUBECONFIG, or a context pinned by the calling script (deploy.sh), always wins.
+# For a script run by hand (create-secrets.sh, the gateway scripts): choose the
+# kubectl, exported as KUBECTL, and say which. Never plain `kubectl` from PATH:
+# on the production host that is the MicroK8s snap wrapper, another cluster,
+# and it ignores KUBECONFIG. The kind cluster's own copies live in
+# ${XDG_CACHE_HOME:-~/.cache}/econgraph (bin/kubectl, kubeconfig-econ-graph),
+# kept by the kind-env.sh scripts (ensure_kind_kubectl).
+#
+#   - KUBECTL set: kept as it is. (deploy.sh exports its KUBECTL with the
+#     context it pins, so scripts it runs keep both.)
+#   - KUBECONFIG set: the kind kubectl binary with that KUBECONFIG; fails when
+#     there is no kind kubectl (set KUBECTL as well).
+#   - neither: the kind kubectl and its kubeconfig; fails, naming the missing
+#     file, when either is missing.
+#
+# A pinned CLUSTER_ROLE_CONTEXT without KUBECTL is kept, and the kubectl is
+# still chosen as above: the context names a cluster, not the kubectl to reach
+# it with.
+#
+# A failure prints how to go on and returns 1, having changed nothing.
 cluster_role_default_kubectl() {
     local dir="${XDG_CACHE_HOME:-$HOME/.cache}/econgraph"
     local bin="$dir/bin/kubectl" config="$dir/kubeconfig-econ-graph"
-    if [ -n "${KUBECTL:-}" ] || [ -n "${CLUSTER_ROLE_CONTEXT:-}" ]; then
+    local fix="reach the kind cluster once with a script that keeps its kubectl there (any kind-env.sh script run for real keeps them, e.g. scripts/deploy/precheck-db-migration.sh, which only reads the cluster without --stop-crawler; a --dry-run keeps nothing; scripts/deploy/recreate-kind-cluster.sh --if-missing creates the cluster), or set KUBECTL (and KUBECONFIG) to choose the cluster explicitly"
+    if [ -n "${KUBECTL:-}" ]; then
         return 0
     fi
     if [ -n "${KUBECONFIG:-}" ]; then
-        echo "KUBECONFIG is set (${KUBECONFIG}): using kubectl with it, not the kind cluster's" \
-            "kubectl in ${dir} (unset KUBECONFIG to use that one)" >&2
+        if [ ! -x "$bin" ]; then
+            echo "error: KUBECONFIG is set (${KUBECONFIG}) but KUBECTL is not, and there is no kind" \
+                "kubectl at ${bin}; plain kubectl may ignore KUBECONFIG (the MicroK8s wrapper does)." \
+                "Set KUBECTL too, or ${fix}" >&2
+            return 1
+        fi
+        KUBECTL="$bin"
+        export KUBECTL KUBECONFIG
+        echo "Using the kind cluster's kubectl ${KUBECTL} with KUBECONFIG=${KUBECONFIG}" \
+            "(from the environment; set KUBECTL to choose another kubectl)" >&2
         return 0
     fi
     if [ -x "$bin" ] && [ -s "$config" ]; then
@@ -74,11 +94,17 @@ cluster_role_default_kubectl() {
         export KUBECTL KUBECONFIG
         echo "Using the kind cluster's kubectl ${KUBECTL} and KUBECONFIG=${KUBECONFIG}" \
             "(set KUBECTL and KUBECONFIG to choose another cluster)" >&2
-    elif [ -x "$bin" ]; then
-        echo "warning: found ${bin} but not ${config}: using plain kubectl" >&2
-    elif [ -s "$config" ]; then
-        echo "warning: found ${config} but not ${bin}: using plain kubectl" >&2
+        return 0
     fi
+    local missing="${bin} and ${config}"
+    if [ -x "$bin" ]; then
+        missing="$config"
+    elif [ -s "$config" ]; then
+        missing="$bin"
+    fi
+    echo "error: no KUBECTL is set and the kind cluster's kubectl is not kept here (no ${missing});" \
+        "plain kubectl may be another cluster's. ${fix^}" >&2
+    return 1
 }
 
 # Pin CLUSTER_ROLE_CONTEXT to the current context, unless it is set already
@@ -108,6 +134,76 @@ cluster_role_use_context() {
     fi
     CLUSTER_ROLE_CONTEXT="$1"
     export CLUSTER_ROLE_CONTEXT
+}
+
+# For an operator script that acts on one named context (the database backup
+# and restore scripts): pin CLUSTER_ROLE_CONTEXT to context $1 without changing
+# the current context of ${KUBECTL:-kubectl}, replacing any inherited one.
+# Fails when ${KUBECTL:-kubectl}'s kubeconfig has no such context. The check is
+# itself a kc call, so it carries the context like every later call.
+cluster_role_pin_named_context() {
+    local server
+    # An empty name would make kc fall back to the current context.
+    [ -n "${1:-}" ] || return 1
+    CLUSTER_ROLE_CONTEXT="$1"
+    export CLUSTER_ROLE_CONTEXT
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" &&
+        [ -n "$server" ] || return 1
+}
+
+# Print, indented, which cluster the pinned context reaches: this host, the
+# kubectl and KUBECONFIG, the context, its API server, its nodes, its
+# kube-system UID (new for every cluster) and whether it carries the production
+# marker. Shown before a script changes anything, so the output says which
+# cluster it acted on. Prints what it could read, and fails when the API
+# server, the nodes or the kube-system UID could not be read: the identity is
+# then not verified.
+cluster_role_show_identity() {
+    local server nodes uid role verified=0
+    server="$(kc config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" ||
+        server=""
+    [ -n "$server" ] || verified=1
+    nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || { nodes="(unknown)"; verified=1; }
+    uid="$(kube_system_uid 2>/dev/null)" || { uid="(unknown)"; verified=1; }
+    if cluster_is_marked_production; then
+        role="PRODUCTION (marked by mark-production-cluster.sh)"
+    else
+        role="not production: ${CLUSTER_ROLE_REASON}"
+    fi
+    echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
+    echo "  kubectl         ${KUBECTL:-kubectl}"
+    echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"
+    echo "  context         ${CLUSTER_ROLE_CONTEXT:-(none)}"
+    echo "  API server      ${server:-(unknown)}"
+    echo "  nodes           ${nodes:-(none)}"
+    echo "  kube-system UID ${uid}"
+    echo "  cluster role    ${role}"
+    return "$verified"
+}
+
+# For an operator script run by hand on one named context: one kubectl and one
+# context for every later call, never a CLUSTER_ROLE_CONTEXT inherited from the
+# environment. Picks the kubectl (cluster_role_default_kubectl), pins context
+# $1 (cluster_role_pin_named_context) and prints the cluster's identity. Fails,
+# having changed nothing, when the kubectl is missing, has no such context, or
+# the identity can't be read.
+cluster_role_operator_context() {
+    unset CLUSTER_ROLE_CONTEXT
+    cluster_role_default_kubectl || return 1
+    export KUBECTL
+    if ! command -v "${KUBECTL}" >/dev/null 2>&1; then
+        echo "${KUBECTL} not found" >&2
+        return 1
+    fi
+    if ! cluster_role_pin_named_context "${1:-}"; then
+        echo "${KUBECTL} has no context ${1:-(empty)} (KUBECONFIG=${KUBECONFIG:-unset})" >&2
+        return 1
+    fi
+    echo "Cluster:"
+    if ! cluster_role_show_identity; then
+        echo "could not read the identity (API server, nodes, kube-system UID) of context $1" >&2
+        return 1
+    fi
 }
 
 # Print the UID of the kube-system namespace. Fails when the cluster cannot be
@@ -167,4 +263,17 @@ cluster_is_marked_production() {
         CLUSTER_ROLE_REASON="the production marker on context ${CLUSTER_ROLE_CONTEXT} was made on another cluster (${CLUSTER_ROLE_NAMESPACE} UID ${marker_uid:-missing}, this cluster's is ${uid}); a copied or restored marker does not count"
         return 1
     fi
+}
+
+# For a script about to destroy a cluster (recreate-kind-cluster.sh): whether
+# the marker text $1, "ROLE UID" as cluster_role_marker prints it, calls for the
+# kube-system UID prefix before the delete. True for any marker with a role
+# other than `none`, whatever its case or UID: a mistyped, copied or stale
+# production marker still asks. Deliberately broader than
+# cluster_is_marked_production, which decides whether a cluster may run the
+# tunnel and so counts only an exact marker made on this cluster.
+cluster_role_marker_guards_delete() {
+    local role
+    read -r role _ <<<"${1:-}" || true
+    [ -n "${role}" ] && [ "${role}" != none ]
 }

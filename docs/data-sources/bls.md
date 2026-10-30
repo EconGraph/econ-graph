@@ -1,46 +1,70 @@
 # BLS (Bureau of Labor Statistics, Public Data API v2)
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/bls.rs`. Fixtures:
-`tests/fixtures/bls/`. Key optional (`BLS_API_KEY`); with a key a request may span 20
-years, without one 10. Background: [BLS API experimental findings](../technical/BLS_API_EXPERIMENTAL_FINDINGS.md).
+The [BLS adapter](../../backend/crates/econ-graph-crawler/src/sources/bls.rs) discovers
+curated series and fetches their observations. `BLS_API_KEY` is optional; it enables
+larger batches, longer request windows and catalog metadata. Test payloads are in the
+[BLS fixture directory](../../backend/crates/econ-graph-crawler/tests/fixtures/bls/).
+For historical API experiments, see [BLS API experimental findings](../technical/BLS_API_EXPERIMENTAL_FINDINGS.md).
 
-## What we fetch today
+## Discovery and fetching
 
-- **Discovery**: the 291 series ids in
-  `backend/crates/econ-graph-crawler/data/bls_series.csv` (headline CPI-U (CU), CES payrolls
-  and earnings (CE), CPS labor force (LN), and LAUS state unemployment rates and labor force
-  (LA) for the states and DC), described from BLS's own survey series files
-  (`https://download.bls.gov/pub/time.series/{cu,ce,la,ln}/*.series`): title
-  (`series_title`), frequency (from the latest period, `end_period`), and units from CPI's
-  `base_period` ("Index 1982-84=100"), the CE data type label (from `ce.datatype`) or the LA
-  measure label. LN's flat files have no units, so LN series have units only after a fetch
-  with a key. Before each scheduled discovery the worker re-fetches each file by conditional
-  GET (`ETag`/`Last-Modified`, or an unchanged body hash) and stores the curated series' rows (`reference_file_cache.payload`);
-  discovery reads those rows and makes no API call. The files go through the shared
-  reference-file refresh (`reference_file::refresh`); no seed migration carries them (seeds
-  hold code lists only), so a new database lists these series after its first successful
-  refresh. `ln.series` also supplies LN's `series_code` labels, so those aren't seeded
-  either. A curated id whose file hasn't loaded yet, or that BLS's file doesn't list, is left
-  out of that discovery with a warning.
-- **Fetch**: `POST /timeseries/data/` with `{"seriesid": [ids..], "startyear", "endyear",
-  "catalog": true, "registrationkey"?: key}`, batched at 50 series per request with a key
-  (25 without), in year windows (20 years per window with a key, 10 without), newest first.
-- **Kept**: `year` + `period` (as the period's start date) and `value`. With a key, the
-  `catalog` gives the series' title, survey name, units (`measure_data_type`) and
-  seasonality; frequency comes from the periods. Without a key there is no catalog: the fetch
-  reports the frequency and the seasonal adjustment the id encodes, and the series keeps the
-  title and units discovery stored from the series files. Each
-  observation's `footnotes` (`{code, text}`) are parsed and logged — a `P` (preliminary)
-  footnote and an `X` ("data unavailable") footnote are recognised — but not stored:
-  `data_points` has no footnote column.
-- **Dropped**: `latest`, `periodName`, the catalog's `area` and `item`; annual averages
-  `M13`, `Q05` and `S03` are skipped.
-- The scheduler fetches a newly listed series on its own once discovery has found it
-  (#228); no manual `crawler enqueue` is needed.
+The [curated list](../../backend/crates/econ-graph-crawler/data/bls_series.csv) selects
+291 series: headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN),
+and LAUS state unemployment rates and labor force (LA) for the states and DC. BLS's
+survey series files (`cu.series`, `ce.series`, `la.series` and `ln.series`, under
+`https://download.bls.gov/pub/time.series/`) supply each series' title (`series_title`)
+and frequency (from its latest period, `end_period`). Units come from CPI's `base_period`
+(such as "Index 1982-84=100"), the CE data type label in `ce.datatype`, or the LA measure
+label. LN's flat files provide no units; LN units come only from an API fetch with a key.
 
-## Sample (recorded)
+Before discovery, the worker runs the adapter's reference refresh. The shared
+`reference_file::refresh` mechanism uses conditional GETs (`ETag` or `Last-Modified`)
+and an unchanged-body hash check to avoid reapplying unchanged files. It caches the
+curated series' rows in `reference_file_cache.payload`. The refresh also derives LN's
+`series_code` labels from `ln.series`. Seed migrations supply code lists, but neither
+these series rows nor LN labels, so a new database needs a successful refresh before
+it can list the curated series.
 
-From `cpi_monthly.json`, trimmed:
+The adapter's discovery method reads the cached rows without making an API request;
+the worker persists the discovered descriptions in `series_metadata`. A curated ID
+whose survey file has not loaded, or that the file does not list, is omitted from that
+discovery with a warning. If no curated series has a cached row, discovery returns a
+transient error. The scheduler enqueues the first observation fetch for newly listed
+series; no manual `crawler enqueue` is needed.
+
+Fetching uses `POST /timeseries/data/`, for example:
+
+```json
+{
+  "seriesid": ["CUUR0000SA0"],
+  "startyear": "2023",
+  "endyear": "2024",
+  "catalog": true
+}
+```
+
+The adapter adds `registrationkey` when `BLS_API_KEY` is set. It batches up to 50 series
+per request with a key or 25 without, splitting history into year windows of up to 20
+years with a key or 10 without, newest first.
+
+With a key, the response's `catalog` supplies the title, survey name, units
+(`measure_data_type`) and seasonality. Frequency comes from the observation periods.
+Without a key, BLS omits the catalog even when requested: the fetch reports frequency
+and the seasonal adjustment encoded in the ID, while persistence retains the title and
+units from discovery. Missing catalog fields also retain existing metadata.
+
+## Test-fixture samples
+
+The following excerpts show response shapes and test cases, not uniformly recorded
+observations. In particular, the November 2023 shutdown entry in
+[cpi_monthly.json](../../backend/crates/econ-graph-crawler/tests/fixtures/bls/cpi_monthly.json)
+is an illustrative missing-value case. A public keyless request for `CUUR0000SA0` for
+2023 returns November's value as `307.051` with `[{}]` footnotes, matching the
+[original November 2023 CPI release](https://www.bls.gov/news.release/archives/cpi_12122023.htm).
+The catalog below is fixture content; that keyless check does not verify keyed catalog
+responses.
+
+Trimmed from `cpi_monthly.json`:
 
 ```json
 {
@@ -66,53 +90,73 @@ From `cpi_monthly.json`, trimmed:
 }
 ```
 
-From `eci_quarterly.json`, a preliminary value:
+From [eci_quarterly.json](../../backend/crates/econ-graph-crawler/tests/fixtures/bls/eci_quarterly.json), a preliminary value used by tests:
 
 ```json
 {"year": "2024", "period": "Q02", "value": "4.1", "footnotes": [{"code": "P", "text": "preliminary"}]}
 ```
 
-Errors come back as HTTP 200 with `status` other than `REQUEST_SUCCEEDED` and a `message`
-array (`not_processed_threshold.json`, `series_does_not_exist.json`).
+BLS can return errors as HTTP 200 with `status` other than `REQUEST_SUCCEEDED` and a
+`message` array, as illustrated by
+[not_processed_threshold.json](../../backend/crates/econ-graph-crawler/tests/fixtures/bls/not_processed_threshold.json)
+and [series_does_not_exist.json](../../backend/crates/econ-graph-crawler/tests/fixtures/bls/series_does_not_exist.json).
 
 ## Frequency and revisions
 
-Monthly (`M01`-`M12`, `M13` annual average), quarterly (`Q01`-`Q04`, `Q05` annual),
-semiannual (`S01`, `S02`, `S03` annual) and annual (`A01`). The API has no vintages: it
-returns current values only, and revised values replace earlier ones. Revisions show up as
-the `P` (preliminary) footnote disappearing and the value changing between crawls, plus
-annual benchmark revisions (payrolls, seasonal factors) that rewrite several years at once.
-The adapter stores `revision_date = date` and overwrites.
+The adapter converts `year` and `period` to the period's start date: monthly codes
+`M01`–`M12` become the first of each month; quarterly codes `Q01`–`Q04` become January 1,
+April 1, July 1 and October 1; semiannual codes `S01` and `S02` become January 1 and July 1;
+and annual code `A01` becomes January 1. It skips annual averages `M13`, `Q05` and `S03`,
+and unknown period codes.
 
-## Flags and footnotes
+The API returns current values rather than historical vintages. A later crawl can
+receive a changed value or a disappearing `P` (preliminary) footnote; annual benchmark
+revisions to payrolls and seasonal factors can change several years at once. The adapter
+sets `revision_date = date` and `is_original_release = true` for every observation, so
+persistence overwrites the same observation on subsequent crawls and retains no revision
+history.
 
-Each observation has a `footnotes` array of `{code, text}`; `[{}]` means none. Codes seen in
-fixtures: `P` preliminary, `X` data unavailable (the value is then `"-"`). Other surveys use
-more codes. The v2 API also offers `calculations`, `annualaverage` and `aspects` request
-options (from public docs; not requested today); aspects carry extra per-observation values
-such as standard errors for some surveys.
+## Parsed and stored observations
 
-Footnotes are now parsed (`code`, `text`) and logged per observation, but `DataPoint`'s
-stored fields are still only `year`, `period` and `value` — there is no footnote column to
-write them to yet. A `"-"` value becomes `NULL` with no stored record of why, beyond the log
-line.
+The raw response's `DataPoint` contains `year`, `period`, `value` and `footnotes`.
+Each footnote has optional `code` and `text` fields; `[{}]` means no footnotes. The
+fixtures include `P` (preliminary) and `X` (data unavailable, paired with a `"-"` value).
+Other surveys use additional codes.
+
+The adapter converts each retained raw point into a `FetchedPoint` with `date`, numeric
+`value` (or a missing value), `revision_date` and `is_original_release`. These become the
+persisted observation fields. A `"-"` value becomes `NULL`. Footnotes are parsed but are
+not persisted because `data_points` has no footnote column. For missing values, the
+adapter debug-logs the raw value and footnote summary; preliminary points contribute to
+a per-series debug count. It does not log every observation's footnotes, and the stored
+missing value does not retain its reason.
+
+The adapter ignores `latest`, `periodName`, and catalog fields such as `area` and `item`.
+BLS also documents `calculations`, `annualaverage` and `aspects` request options in its
+[v2 API signatures](https://www.bls.gov/developers/api_signature_v2.htm). The adapter does
+not request them. Aspects can carry extra observation values such as standard errors
+for some surveys.
 
 ## Dataset mapping
 
-One dataset per survey with a known id layout — CU (CPI-U), CE (CES national), LN (CPS) and
-LA (LAUS) — coded by the two-letter series id prefix and defined in `data/datasets/bls.toml`
-(`SERIES_ID_LAYOUTS` in `bls.rs`). A series id is that prefix followed by fixed-width
-fields, split into the dataset's dimensions; a series of any other survey, or whose id
-doesn't fit its survey's layout, goes in the dimensionless `other` dataset (like FRED). For
-CPI (CU), id `CUUR0000SA0`:
+Each survey with a known ID layout has its own dataset: CU (CPI-U), CE (CES national),
+LN (CPS) and LA (LAUS). The layouts are in `SERIES_ID_LAYOUTS` in the adapter, and the
+dataset dimensions are defined in
+[bls.toml](../../backend/crates/econ-graph-crawler/data/datasets/bls.toml). A series ID
+consists of the two-letter survey prefix followed by fixed-width fields that become
+dimension values. A series from any other survey, or whose ID does not fit its survey's
+layout, belongs to the dimensionless `other` dataset, keyed by its BLS ID like a FRED
+series.
+
+For CPI (CU), ID `CUUR0000SA0` has the following mapping:
 
 | Role | Columns |
 |---|---|
-| Dimensions | `seasonal` (S/U), `periodicity`, `area` (4 chars), `item` (the rest) |
+| Dimensions | `seasonal` = `U` (S/U), `periodicity` = `R`, `area` = `0000` (4 chars), `item` = `SA0` (the rest) |
 | Measures | `value` (decimal) |
-| Attributes | none yet — footnotes are parsed and logged (see above) but not stored |
-| Shape | long (one value column); `revision_date = date` (no vintage column; each refresh overwrites) |
+| Attributes | No persisted footnote attributes |
+| Shape | Long (one value column); `revision_date = date`, so refreshes overwrite observations |
 
-Annual averages (`M13`) are derived; keep skipping them, or store them as a separate
-periodicity rather than colliding with `M01`. A footnote attribute column (codes,
-`preliminary` bool) would let the parsed-but-dropped footnotes above actually be stored.
+Annual averages are excluded from this mapping. Keeping their separate period codes
+out of the observation dates avoids collisions with regular periods. Footnote codes,
+preliminary status and missing-value reasons cannot be retrieved from stored observations.

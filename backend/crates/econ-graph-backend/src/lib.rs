@@ -24,13 +24,12 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use econ_graph_backend::metrics::MetricsCollector;
-//! use econ_graph_backend::integration_tests::TestRunner;
+//! use econ_graph_backend::metrics::AppMetrics;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize metrics collection
-//!     let metrics = MetricsCollector::new();
+//!     let metrics = AppMetrics::new()?;
 //!
 //!     // Start backend server
 //!     Ok(())

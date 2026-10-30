@@ -53,10 +53,17 @@ async fn search_series_db_error_is_generic_and_logged() {
     let Some(pool) = broken_pool().await else {
         return;
     };
+    // Isolate the search service's database error from the earlier catalog-scope lookup.
+    // The production HTTP path obtains this request-local scope from verified grants.
+    let context = GraphQLContext::for_test_user(None, false);
+    context
+        .catalog_sources
+        .set(vec![uuid::Uuid::new_v4()])
+        .unwrap();
     let schema = create_schema_with_data(
         econ_graph_core::database::AppPool(pool.clone()),
         Some(econ_graph_core::database::DataPool(pool)),
-        Arc::new(GraphQLContext::for_test_user(None, false)),
+        Arc::new(context),
     );
     let (_guard, logs) = capture_logs();
     let response = schema

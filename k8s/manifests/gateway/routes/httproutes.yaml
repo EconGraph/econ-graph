@@ -1,0 +1,281 @@
+# The app's routes on Gateway econ-graph-gateway (k8s/manifests/gateway/),
+# applied by scripts/deploy/apply-gateway-routes.sh. Production is namespace
+# econ-graph, host localhost on listener http. For a public host
+# (PUBLIC_HOST), scripts/deploy/render-public-host.py adds a copy of each,
+# named <name>-public, for that host on listener https. The namespace must
+# carry the label
+# econgraph.io/gateway-access: "true" (namespace.yaml), or the Gateway
+# refuses these routes.
+#
+# Precedence between routes and rules follows the Gateway API: an Exact
+# match beats any prefix, and a longer prefix beats a shorter one, so
+# /auth/callback goes to the frontend while the rest of /auth goes to the
+# backend, and /graphql and /data/graphql never fall through to /.
+# PathPrefix matches whole path segments: /idp/realms/econ-graph matches
+# /idp/realms/econ-graph/... but not /idp/realms/econ-graph-other.
+#
+# CORS is enforced by the backend (CORS_ALLOWED_ORIGINS) and by Keycloak
+# (each client's web origins), not here.
+#
+# Not routed: the admin frontend (/admin), /playground (the backend serves it
+# only with ENABLE_GRAPHQL_PLAYGROUND=true), Keycloak's admin console
+# (/idp/admin) and master realm (/idp/realms/master).
+#
+# The rate limits on econ-graph-graphql and econ-graph-data-graphql are in
+# ratelimit-policies.yaml. The backend and GraphQL routes set
+# X-Content-Type-Options, X-Frame-Options and Strict-Transport-Security on
+# their responses, like the frontend route.
+#
+# Every rule sets X-Forwarded-For to the client address the gateway settled
+# on (the %DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% of Envoy; see
+# ../client-traffic-policy.yaml), so the services never see an entry a
+# client wrote.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-frontend
+  namespace: econ-graph
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - localhost
+  rules:
+  # Security headers on every frontend response, replacing the frontend
+  # nginx's own X-Frame-Options. Browsers ignore Strict-Transport-Security on
+  # plain-HTTP responses (RFC 6797, section 8.1), so it takes effect only
+  # where the site is served over HTTPS. Sign-in needs the Keycloak issuer
+  # reachable: 'self' covers it while Keycloak is served on this host under
+  # /idp; a separate Keycloak origin must be added to connect-src and to a
+  # frame-src directive before that issuer is used.
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    - path:
+        type: Exact
+        value: /auth/callback
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Frame-Options
+          value: DENY
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-XSS-Protection
+          value: 1; mode=block
+        - name: Referrer-Policy
+          value: strict-origin-when-cross-origin
+        - name: Permissions-Policy
+          value: geolocation=(), microphone=(), camera=()
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+        - name: Content-Security-Policy
+          value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' wss:; frame-ancestors 'none';"
+    backendRefs:
+    - name: econ-graph-frontend-service
+      port: 3000
+  # The Keycloak silent sign-in page loads in a hidden iframe on the app's own
+  # pages, so it alone may be framed, and only by this origin.
+  - matches:
+    - path:
+        type: Exact
+        value: /silent-callback.html
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Frame-Options
+          value: SAMEORIGIN
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-XSS-Protection
+          value: 1; mode=block
+        - name: Referrer-Policy
+          value: strict-origin-when-cross-origin
+        - name: Permissions-Policy
+          value: geolocation=(), microphone=(), camera=()
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+        - name: Content-Security-Policy
+          value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' wss:; frame-ancestors 'self';"
+    backendRefs:
+    - name: econ-graph-frontend-service
+      port: 3000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-backend
+  namespace: econ-graph
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - localhost
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    - path:
+        type: PathPrefix
+        value: /auth
+    - path:
+        type: PathPrefix
+        value: /health
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+    timeouts:
+      request: 30s
+    backendRefs:
+    - name: econ-graph-backend-service
+      port: 9876
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-graphql
+  namespace: econ-graph
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - localhost
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /graphql
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+    timeouts:
+      request: 30s
+    backendRefs:
+    - name: econ-graph-backend-service
+      port: 9876
+---
+# Data operations (frontend/src/utils/graphql.ts) go to /data/graphql, which
+# is the backend's /graphql without credentials: Authorization and Cookie are
+# removed, so every request reaches the backend anonymous, whatever the
+# browser sends.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-data-graphql
+  namespace: econ-graph
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - localhost
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /data/graphql
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /graphql
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+        remove:
+        - Authorization
+        - Cookie
+    - type: ResponseHeaderModifier
+      responseHeaderModifier:
+        set:
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: X-Frame-Options
+          value: DENY
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains; preload
+    timeouts:
+      request: 30s
+    backendRefs:
+    - name: econ-graph-backend-service
+      port: 9876
+---
+# Keycloak's public paths under /idp (see keycloak/deployment.yaml): the
+# econ-graph realm (login, tokens, discovery) and the login pages' assets.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-idp
+  namespace: econ-graph
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - localhost
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /idp/realms/econ-graph
+    - path:
+        type: PathPrefix
+        value: /idp/resources
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-For
+          value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+    backendRefs:
+    - name: keycloak-service
+      port: 8080

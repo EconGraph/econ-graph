@@ -1,0 +1,126 @@
+# Static mode is visible only with complete, explicitly disabled primary telemetry.
+rule_files:
+- crawler.rules.yml
+evaluation_interval: 1m
+tests:
+- name: Static primary stays visible with an enabled branch worker.
+  interval: 1m
+  input_series:
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: '0x5'
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph-br-test", instance="branch"}
+    values: 1x5
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts:
+    - exp_labels:
+        severity: info
+      exp_annotations:
+        summary: Primary crawler automatic scheduling is disabled
+        description: Primary crawler workers report CRAWLER_SCHEDULER=false. Queued jobs still drain, but automatic
+          refresh is disabled; check that static mode is intentional.
+- name: Enabled primary ignores a disabled branch worker.
+  interval: 1m
+  input_series:
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x5
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph-br-test", instance="branch"}
+    values: '0x5'
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: An enabled primary replica prevents the all-disabled alert.
+  interval: 1m
+  input_series:
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: '0x5'
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-1"}
+    values: 1x5
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph-br-test", instance="branch"}
+    values: '0x5'
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x10
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-1"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: Missing primary mode does not infer static mode from a branch.
+  interval: 1m
+  input_series:
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph-br-test", instance="branch"}
+    values: '0x5'
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: No scheduler telemetry does not infer static mode.
+  interval: 1m
+  input_series: []
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: Re-enabling the primary clears static mode immediately.
+  interval: 1m
+  input_series:
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 0x4 1x5
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts:
+    - exp_labels:
+        severity: info
+      exp_annotations:
+        summary: Primary crawler automatic scheduling is disabled
+        description: Primary crawler workers report CRAWLER_SCHEDULER=false. Queued jobs still drain, but automatic
+          refresh is disabled; check that static mode is intentional.
+  - eval_time: 5m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: A primary worker without a mode metric prevents a static-mode claim.
+  interval: 1m
+  input_series:
+  - &id001
+    series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: '0x5'
+  - &id002
+    series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-0"}
+    values: 1x5
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-1"}
+    values: 1x5
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: A failed primary scrape prevents a static-mode claim even with a retained mode.
+  interval: 1m
+  input_series:
+  - *id001
+  - *id002
+  - series: up{job="kubernetes-pods", app="crawler-worker", kubernetes_namespace="econ-graph", instance="worker-1"}
+    values: '0x5'
+  - series: crawler_scheduler_enabled{job="kubernetes-pods", kubernetes_namespace="econ-graph", instance="worker-1"}
+    values: '0x5'
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []
+- name: A disabled gauge without discovered primary scrape targets is insufficient.
+  interval: 1m
+  input_series:
+  - *id001
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: CrawlerSchedulerDisabled
+    exp_alerts: []

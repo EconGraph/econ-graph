@@ -2,13 +2,14 @@
 # The scripts given to run_lib are expanded in its subshell, not here.
 # The yq stub is called by the sourced library.
 # shellcheck disable=SC2016,SC2329
-# Tests for scripts/deploy/lib/public-host.sh against a stub kubectl, no cluster:
-#   - PUBLIC_HOST unset on a cluster that serves a public host (public Ingresses, or the
-#     retired econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
-#   - a public host sets only the real-ip settings in the ingress-nginx ConfigMap and
-#     removes use-forwarded-headers; no public host removes all of them again and
-#     deletes the public Ingresses; the retired econ-graph-ssl-ingress goes either way,
-#     before any Ingress is applied (in public_host_init);
+# Tests for scripts/deploy/lib/public-host.sh against a stub kubectl and a stub
+# apply-gateway-routes.sh, no cluster:
+#   - PUBLIC_HOST unset on a cluster that serves a public host (public HTTPRoutes, or on a
+#     cluster still on ingress-nginx the public Ingresses or the retired
+#     econ-graph-ssl-ingress) stops the deploy, and so does a failed lookup;
+#   - apply_public_edge hands the public host, or `none` without one, to
+#     apply-gateway-routes.sh on the pinned context; nothing touches ingress-nginx; the
+#     retired econ-graph-ssl-ingress goes either way (in public_host_init);
 #   - cloudflared gets 0 replicas without its Secret or without a public host;
 #   - only a cluster marked production (scripts/deploy/lib/cluster-role.sh) runs
 #     cloudflared or takes a PUBLIC_HOST: unmarked or a marker copied from another cluster
@@ -56,6 +57,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        another cluster), other-role, none, or fails (the lookup fails)
 #   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
 #   STUB_NO_CONTEXT=1    there is no current context
+#   STUB_ROUTE_HOST      the host the public HTTPRoutes serve; STUB_NO_GATEWAY_API=1 the
+#                        cluster has no HTTPRoute CRD
 #   STUB_PUBLIC_HOST     the host the public Ingresses serve; STUB_SSL_HOSTS the retired one's
 #   STUB_SECRET=1        cloudflare-tunnel exists (with a fake token); STUB_SECRET_FAILS=1
 #                        looking it up fails
@@ -83,6 +86,8 @@ case "$*" in
   *"get namespace econ-graph"*)
     [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
+  *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
+  *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
   *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
   *"delete ingress econ-graph-ssl-ingress"*) [ "${STUB_DELETE_FAILS:-0}" != 1 ] || exit 1 ;;
@@ -111,10 +116,21 @@ printf '#!/usr/bin/env bash\necho "kubectl on PATH: $*" >>%q\nexit 1\n' "$path_l
 chmod +x "$stub_dir/path/kubectl"
 export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 
-# run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out.
+# run_lib SCRIPT: runs SCRIPT in a subshell with the library; output to $out. It runs in
+# a copy of the files the library uses, where apply-gateway-routes.sh is a stub that
+# appends its PUBLIC_HOST and arguments to $log.
+lib_root="$stub_dir/lib-root"
+mkdir -p "$lib_root/scripts/deploy/lib" "$lib_root/k8s/manifests"
+cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh "$lib_root/scripts/deploy/lib/"
+cp scripts/deploy/render-public-host.py "$lib_root/scripts/deploy/"
+cp k8s/manifests/cloudflared.yaml "$lib_root/k8s/manifests/"
+printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
+  >"$lib_root/scripts/deploy/apply-gateway-routes.sh"
+chmod +x "$lib_root/scripts/deploy/apply-gateway-routes.sh"
 run_lib() {
   : >"$log"; rm -f "$log.ctx"
   (
+    cd "$lib_root"
     # Only the '.spec.replicas = N' form apply_cloudflared uses.
     yq() {
       python3 -c 'import re, sys, yaml
@@ -133,6 +149,15 @@ print(yaml.safe_dump(d))' "$1" "$2"
 if (unset PUBLIC_HOST; STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a public cluster did not stop"
 fi
+# Unset on a cluster whose public HTTPRoutes serve econgraph.com: stop.
+if (unset PUBLIC_HOST; STUB_ROUTE_HOST=econgraph.com run_lib public_host_init); then
+  fail "PUBLIC_HOST unset on a cluster with public HTTPRoutes did not stop"
+fi
+# Without the HTTPRoute CRD (still on ingress-nginx): the public Ingresses count.
+if (unset PUBLIC_HOST; STUB_NO_GATEWAY_API=1 STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init); then
+  fail "PUBLIC_HOST unset on a cluster without the gateway, serving econgraph.com, did not stop"
+fi
+grep -q 'get httproute' "$log" && fail "HTTPRoutes looked up without their CRD"
 # Unset on a legacy cluster whose retired econ-graph-ssl-ingress serves the public host: stop.
 if (unset PUBLIC_HOST; STUB_SSL_HOSTS=$'www.econgraph.com\necongraph.com' run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a cluster with econ-graph-ssl-ingress did not stop"
@@ -162,22 +187,21 @@ if PUBLIC_HOST='' STUB_DELETE_FAILS=1 run_lib public_host_init; then
   fail "public_host_init went on after failing to delete econ-graph-ssl-ingress"
 fi
 
-# With a public host: real-ip settings only, use-forwarded-headers removed.
+# With a public host: apply-gateway-routes.sh gets it, on the pinned context.
 PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge' ||
   fail "public host: deploy failed: $(cat "$out")"
-grep -q 'patch configmap ingress-nginx-controller' "$log" || fail "public host: ConfigMap not patched"
-grep -q '"enable-real-ip":"true","forwarded-for-header":"CF-Connecting-IP","proxy-real-ip-cidr":"10.244.0.0/24,10.244.1.0/24","use-forwarded-headers":null' "$log" ||
-  fail "public host: wrong ingress-nginx settings: $(grep patch "$log")"
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=econgraph.com --context kind-test' "$log" ||
+  fail "public host: apply-gateway-routes.sh not given it: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public host: econ-graph-ssl-ingress not deleted"
-grep -q 'delete ingress -l' "$log" && fail "public host: public Ingresses deleted"
 
-# Without one: every setting removed, public Ingresses deleted.
+# Without one: `none`, so a public host served before is removed.
 PUBLIC_HOST='' run_lib 'public_host_init; apply_public_edge' ||
   fail "no public host: deploy failed: $(cat "$out")"
-grep -q '"enable-real-ip":null,"forwarded-for-header":null,"proxy-real-ip-cidr":null,"use-forwarded-headers":null' "$log" ||
-  fail "no public host: settings not removed: $(grep patch "$log")"
-grep -q 'delete ingress -l econgraph.io/public-host=true' "$log" || fail "no public host: public Ingresses kept"
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=none --context kind-test' "$log" ||
+  fail "no public host: apply-gateway-routes.sh not told none: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "no public host: econ-graph-ssl-ingress not deleted"
+# Nothing patches ingress-nginx any more.
+grep -q 'ingress-nginx' "$log" && fail "the library still touches ingress-nginx"
 
 # cloudflared on a marked cluster: 0 replicas without the Secret or without a public
 # host, 1 with both.
@@ -755,6 +779,111 @@ grep -q 'went on' "$out" && fail "mark_if_was_production: went on to the restore
 run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true || fail "mark_if_was_production (dry run) failed"
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
+# require_recreate_confirmation: before the downtime, a cluster that
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
+# but none, one that can't be read, or one noted as production) needs the prefix: a
+# matching --confirm-production, or typed at a terminal, then passed on to
+# recreate-kind-cluster.sh. rrc runs it with stdin /dev/null (no terminal); rrc_tty under a
+# pseudo-terminal (run_migrate_tty).
+# shellcheck disable=SC2016 # expanded by run_migrate's bash
+rrc_setup='source scripts/deploy/lib/cluster-role.sh
+  kube_system_uid() { [ -z "${STUB_UID_FAILS:-}" ] || return 1; echo uid-kind-cluster; }
+  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  recreate_flags=()
+  CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"'
+# shellcheck disable=SC2016
+rrc="$rrc_setup"'
+  require_recreate_confirmation </dev/null && echo "went on, flags: ${recreate_flags[*]}"'
+# shellcheck disable=SC2016
+rrc_tty="$rrc_setup"'
+  require_recreate_confirmation && echo "went on, flags: ${recreate_flags[*]}"'
+# run_migrate_tty INPUT SCRIPT [VAR=value ...]: run_migrate under a pseudo-terminal, with
+# INPUT typed ahead; killed after a minute if it waits for more.
+run_migrate_tty() {
+  local input="$1" script="$2"
+  shift 2
+  : >"$log"; rm -f "$stub_dir/mig/state.env"
+  env "$@" timeout 60 python3 -c '
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[2], sys.argv[2:])
+os.write(fd, sys.argv[1].encode())
+out = b""
+while True:
+    try:
+        data = os.read(fd, 4096)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(status))
+' "$input" bash -c '
+    log() { echo "==> $*"; }
+    die() { echo "error: $*" >&2; exit 1; }
+    kind_cluster_is_production() { CLUSTER_ROLE_REASON="stub reason"; return "$STUB_RC"; }
+    KIND_CLUSTER=econ-graph PROJECT_ROOT="$MIG_ROOT" STATE_FILE="$MIG_ROOT/state.env" DRY_RUN="${DRY_RUN:-false}"
+    eval "$MIGRATE_SRC"
+    eval "$1"' _ "$script" >"$out" 2>&1
+}
+for marker in "production uid-kind-cluster" "Production uid-other" "None uid-kind-cluster" "staging uid-kind-cluster"; do
+  if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker"; then
+    fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
+  fi
+  grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_WAS=true; then
+  fail "require_recreate_confirmation: went on without a terminal for a cluster noted as production"
+fi
+if run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind STUB_UID_FAILS=1; then
+  fail "require_recreate_confirmation: went on when the kube-system UID can't be read"
+fi
+for marker in "" "none uid-kind-cluster"; do
+  run_migrate "$rrc" STUB_RC=1 STUB_MARKER="$marker" ||
+    fail "require_recreate_confirmation: refused a cluster without a production marker ('$marker'): $(cat "$out")"
+  grep -q 'went on, flags: $' "$out" || fail "require_recreate_confirmation: passed a prefix on for '$marker': $(cat "$out")"
+done
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" STUB_CONFIRM=uid-kind ||
+  fail "require_recreate_confirmation: refused a matching --confirm-production: $(cat "$out")"
+if run_migrate "$rrc" STUB_RC=1 STUB_CONFIRM=uid-othe; then
+  fail "require_recreate_confirmation: took a --confirm-production that doesn't match"
+fi
+grep -q 'does not match' "$out" || fail "require_recreate_confirmation: the mismatch was not reported: $(cat "$out")"
+run_migrate "$rrc" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" DRY_RUN=true ||
+  fail "require_recreate_confirmation: refused a dry run"
+# At a terminal: the prefix is asked and checked here, then passed on; --yes plays no part.
+run_migrate_tty $'uid-kind\n' "$rrc_tty" STUB_RC=1 STUB_MARKER="production uid-kind-cluster" ||
+  fail "require_recreate_confirmation: refused the right prefix typed at a terminal: $(cat "$out")"
+grep -q 'Type the first 8 characters of the kube-system UID above' "$out" ||
+  fail "require_recreate_confirmation: no prompt at a terminal: $(cat "$out")"
+grep -q 'went on, flags: --confirm-production uid-kind' "$out" ||
+  fail "require_recreate_confirmation: the typed prefix is not passed on to recreate-kind-cluster.sh: $(cat "$out")"
+if run_migrate_tty $'yes\n' "$rrc_tty" STUB_RC=1 STUB_MARKER_FAILS=1; then
+  fail "require_recreate_confirmation: went on with a wrong answer typed at a terminal"
+fi
+grep -q 'confirmation did not match' "$out" ||
+  fail "require_recreate_confirmation: the wrong answer was not reported: $(cat "$out")"
+run_migrate_tty '' "$rrc_tty" STUB_RC=1 STUB_MARKER="none uid-kind-cluster" ||
+  fail "require_recreate_confirmation: asked at a terminal for a cluster without a production marker: $(cat "$out")"
+grep -q 'Type the first 8' "$out" && fail "require_recreate_confirmation: prompted for a cluster without a production marker"
+# ...and both forward() and rollback() call it before their downtime confirmation and before
+# stopping the writers.
+for fn in forward rollback; do
+  body="$(sed -n "/^${fn}() {\$/,/^}\$/p" scripts/deploy/migrate-to-host-storage.sh)"
+  check_at="$(grep -n '^ *require_recreate_confirmation$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  confirm_at="$(grep -n '^ *confirm "This stops econ-graph' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  stop_at="$(grep -n '^ *stop_writers$' <<<"$body" | head -1 | cut -d: -f1 || true)"
+  if [ -z "$check_at" ] || [ -z "$confirm_at" ] || [ -z "$stop_at" ] ||
+    [ "$check_at" -gt "$confirm_at" ] || [ "$check_at" -gt "$stop_at" ]; then
+    fail "migrate-to-host-storage.sh ${fn}(): require_recreate_confirmation (line ${check_at:-none}) is not before the downtime confirmation (${confirm_at:-none}) and stop_writers (${stop_at:-none})"
+  fi
+done
 
 # --- which kubectl when run by hand: create-secrets.sh detection, KUBECONFIG, one file ---
 # A second cache (not the kind-env layout above) with tagging stub kubectls: the cached
@@ -791,39 +920,74 @@ detected="Using the kind cluster's kubectl $cache2/bin/kubectl and KUBECONFIG=$c
 run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (bare) failed: $(cat "$out")"
 grep -qF "$detected" "$out" || fail "create-secrets (bare): did not say it uses the kind kubectl: $(cat "$out")"
 used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets (bare)"
-# An exported KUBECONFIG skips the detection, and says so, for both scripts.
+# An exported KUBECONFIG is used with the kind kubectl binary (never plain kubectl, which
+# may ignore it), and that is said, for both scripts.
+with_config="Using the kind cluster's kubectl $cache2/bin/kubectl with KUBECONFIG=$stub_dir/other-kubeconfig"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "create-secrets with KUBECONFIG: skipping detection was not said"
-used_only plain "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
+grep -qF "$with_config" "$out" || fail "create-secrets with KUBECONFIG: the choice was not said: $(cat "$out")"
+used_only cache "$stub_dir/other-kubeconfig" "create-secrets with KUBECONFIG"
 run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run ||
   fail "mark with KUBECONFIG failed: $(cat "$out")"
-grep -q "KUBECONFIG is set ($stub_dir/other-kubeconfig)" "$out" || fail "mark with KUBECONFIG: skipping the kind kubectl was not said"
+grep -qF "$with_config" "$out" || fail "mark with KUBECONFIG: the choice was not said"
 grep -qE "KUBECONFIG +$stub_dir/other-kubeconfig" "$out" || fail "mark with KUBECONFIG: the kubeconfig in use is not shown"
 grep -qE "context +kind-test" "$out" || fail "mark with KUBECONFIG: the context in use is not shown"
-used_only plain "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
-# An explicit KUBECTL wins silently; a context pinned by deploy.sh keeps deploy.sh's kubectl.
+used_only cache "$stub_dir/other-kubeconfig" "mark with KUBECONFIG"
+# An explicit KUBECTL wins silently, also with a context pinned by deploy.sh (which
+# exports both).
 run_bare KUBECTL="$stub_dir/plain/kubectl" STUB_MARKER=none scripts/deploy/create-secrets.sh ||
   fail "create-secrets with KUBECTL failed: $(cat "$out")"
 grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with KUBECTL: detection spoke"
 used_only plain "" "create-secrets with KUBECTL"
-run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
-  fail "create-secrets with a pinned context failed: $(cat "$out")"
-grep -qE "Using the kind cluster|KUBECONFIG is set|warning: found" "$out" && fail "create-secrets with a pinned context: detection spoke"
+run_bare KUBECTL="$stub_dir/plain/kubectl" CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with KUBECTL and a pinned context failed: $(cat "$out")"
 grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" || fail "create-secrets with a pinned context: did not write on it"
-used_only plain "" "create-secrets with a pinned context"
-# Only one of the two cached files: plain kubectl, with a warning naming what is missing.
+used_only plain "" "create-secrets with KUBECTL and a pinned context"
+# A pinned context alone doesn't choose the kubectl: the kind kubectl, on that context.
+run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh ||
+  fail "create-secrets with only a pinned context failed: $(cat "$out")"
+grep -qF "$detected" "$out" || fail "create-secrets with only a pinned context: did not say it uses the kind kubectl"
+grep -q -- '--context kind-test -n econ-graph create secret generic' "$log" ||
+  fail "create-secrets with only a pinned context: did not write on it"
+used_only cache "$cache2/kubeconfig-econ-graph" "create-secrets with only a pinned context"
+# Without KUBECTL and a complete kind cache nothing runs: plain kubectl may be another
+# cluster's. Each case fails before any kubectl call, naming what is missing.
+# refused_bare LABEL STATUS MESSAGE: the last run_bare exited STATUS (non-zero), said
+# MESSAGE, and ran no kubectl.
+refused_bare() {
+  if [ "$2" -eq 0 ]; then
+    fail "$1: succeeded"
+  elif grep -q '^\[' "$log"; then
+    fail "$1: ran a kubectl: $(grep '^\[' "$log" | sort -u)"
+  elif ! grep -qF -- "$3" "$out"; then
+    fail "$1: no '$3' in: $(cat "$out")"
+  fi
+}
 mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubectl only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/bin/kubectl but not $cache2/kubeconfig-econ-graph: using plain kubectl" "$out" ||
-  fail "create-secrets (kubectl only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubectl only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubectl only)" "$rc" "no $cache2/kubeconfig-econ-graph"
 mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl" "$cache2/bin/kubectl.away"
-run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || fail "create-secrets (kubeconfig only) failed: $(cat "$out")"
-grep -qF "warning: found $cache2/kubeconfig-econ-graph but not $cache2/bin/kubectl: using plain kubectl" "$out" ||
-  fail "create-secrets (kubeconfig only): no warning: $(cat "$out")"
-used_only plain "" "create-secrets (kubeconfig only)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (kubeconfig only)" "$rc" "no $cache2/bin/kubectl"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+rc=0; run_bare KUBECONFIG="$stub_dir/other-kubeconfig" STUB_MARKER=none "$mark" --dry-run || rc=$?
+refused_bare "mark with KUBECONFIG and no kind kubectl" "$rc" "Set KUBECTL too"
+mv "$cache2/kubeconfig-econ-graph" "$cache2/kubeconfig-econ-graph.away"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare CLUSTER_ROLE_CONTEXT=kind-test STUB_MARKER=none scripts/deploy/create-secrets.sh || rc=$?
+refused_bare "create-secrets with only a pinned context (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/protect-postgres-pv.sh --dry-run || rc=$?
+refused_bare "protect-postgres-pv (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/install-gateway.sh --dry-run || rc=$?
+refused_bare "install-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/apply-gateway-routes.sh --dry-run || rc=$?
+refused_bare "apply-gateway-routes (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+rc=0; run_bare STUB_MARKER=none scripts/deploy/cutover-to-gateway.sh --dry-run || rc=$?
+refused_bare "cutover-to-gateway (no kind cache)" "$rc" "or set KUBECTL (and KUBECONFIG)"
+mv "$cache2/kubeconfig-econ-graph.away" "$cache2/kubeconfig-econ-graph"
 mv "$cache2/bin/kubectl.away" "$cache2/bin/kubectl"
 [ ! -s "$path_log" ] || fail "detection tests: called the failing kubectl on PATH: $(cat "$path_log")"
 

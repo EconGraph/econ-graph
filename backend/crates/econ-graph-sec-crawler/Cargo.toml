@@ -74,7 +74,7 @@ backoff = "0.4"
 indicatif = "0.18"
 
 # Compression
-zstd = "0.14"
+zstd = "0.14.3"
 
 # Hashing for file integrity
 sha2.workspace = true

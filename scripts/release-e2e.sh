@@ -15,6 +15,8 @@
 #      outside its local mock upstreams refused.
 #   5. Runs Playwright, which starts the backend and a release build of the frontend.
 # Extra arguments go to `playwright test`, e.g. `scripts/release-e2e.sh smoke.spec.ts --headed`.
+# RELEASE_E2E_CONFIG picks another Playwright config on the same stack, relative to frontend/:
+# playwright.qa-stack.config.ts runs the QA scenario suite (docs/release/qa-scenarios.md).
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,4 +60,4 @@ env -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
 export RELEASE_BACKEND_BIN="${RELEASE_BACKEND_BIN:-$target/release/econ-graph-backend}"
 
 cd "$repo/frontend"
-exec npx playwright test --config=playwright.release.config.ts "$@"
+exec npx playwright test --config="${RELEASE_E2E_CONFIG:-playwright.release.config.ts}" "$@"

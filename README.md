@@ -1,6 +1,6 @@
 # 🏛️ EconGraph - Economic Data Intelligence Platform
 
-> **Democratizing economic intelligence through modern, affordable, open-source technology that delivers 90% cost savings vs. Bloomberg Terminal**
+> **Economic intelligence made accessible: discover, visualize, and analyze public economic data in one place.**
 
 [![Tests](https://img.shields.io/badge/Tests-Unit%20%7C%20Integration%20%7C%20E2E-blue)](https://github.com/EconGraph/econ-graph/actions)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Warp-orange)](https://github.com/EconGraph/econ-graph/tree/main/backend)
@@ -9,129 +9,45 @@
 
 ## 🎯 **What EconGraph Does**
 
-EconGraph is an **economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use, it provides:
+EconGraph brings economic data discovery, interactive charts, and analysis into a
+single responsive interface for economists, analysts, and researchers. It offers
+a focused alternative to switching between source websites and spreadsheets for
+economic-series research, with a GraphQL API for integrating data into your own
+analysis tools.
 
 ### 📊 **Core Capabilities**
-- **🌍 Global Data Access**: Unified interface to FRED, BLS, Census, World Bank, OECD, ECB, BOE data sources
-- **📈 Advanced Visualization**: Interactive charts with hover tooltips, zoom, and professional-grade time series visualization
-- **🔄 Data Transformations**: Instant YoY, QoQ, MoM calculations for trend analysis and comparative studies
-- **🔍 Intelligent Search**: AI-powered search with autocomplete, filtering, and relevance ranking across all data sources
-- **🤝 Collaboration Tools**: Team workspaces, chart annotations, and shared analysis environments
-- **📱 Modern Interface**: Responsive React frontend with Material-UI design system
 
-### 💼 **Business Value**
-- **90% Cost Savings**: Delivers Bloomberg Terminal-level functionality at a fraction of the cost
-- **Open Source**: Full customization and source code access for enterprise needs
-- **Deployment Foundation**: Kubernetes support provides a base for scaling and improving availability as deployments mature
-- **API-First Design**: Comprehensive GraphQL API for programmatic access and integrations
-- **Real-time Updates**: Automated data synchronization with source systems
+- **Global data access**: Explore series from FRED, BLS, Census, World Bank, BEA,
+  and FHFA through a unified interface.
+- **Interactive visualization**: Inspect time series with hover tooltips and custom
+  date ranges. Tooltips include revision dates when available.
+- **Data transformations**: Compare year-over-year (YoY), quarter-over-quarter
+  (QoQ), and month-over-month (MoM) changes to study trends.
+- **Search and discovery**: Find series with typo-tolerant search, abbreviation
+  expansion, autocomplete, and relevance ranking. Filter by source and frequency.
+  Search uses PostgreSQL full-text matching and trigram similarity.
+- **Annotations and comments**: Signed-in users can add public or private notes to
+  series charts and discuss public annotations in comment threads.
+- **Data exports**: Export Series Explorer results as CSV or JSON and download
+  series observations as CSV for further analysis.
+- **Programmatic access**: Query series and observations through the GraphQL API.
+  Crawler jobs fetch source data and track revisions; data freshness depends on
+  source releases and the configured crawl schedule.
 
-### 🎯 **Who It's For**
-- **Economic Researchers & Academics** - Unified data access for research and publication
-- **Financial Analysts & Portfolio Managers** - Real-time data for investment decisions
-- **Government Agencies & Policy Makers** - Data transparency and regulatory compliance
-- **Business Intelligence Teams** - Strategic planning and market analysis
+Source code is available for reference under the repository's stated license
+restrictions. See [License & Usage](#license--usage) for the terms and commercial
+licensing contact.
 
+### 👥 **Who It's For**
 
----
-
-## ✨ **Actually Implemented Features:**
-- **🌍 React Frontend** - Working React application with Material-UI components
-- **📊 Interactive Charts** - Chart.js integration with hover tooltips and zoom
-- **🔄 Data Transformations** - Year-over-Year (YoY), Quarter-over-Quarter (QoQ), Month-over-Month (MoM)
-- **🗃️ GraphQL API** - Rust backend with GraphQL endpoint for data queries
-- **🔍 Search & Filtering** - Full-text search with autocomplete and filtering
-- **📈 Time Series Visualization** - Economic data plotting with date range selection
-- **🏗️ Database Integration** - PostgreSQL with Diesel ORM for data persistence
-
----
-
-## 🎯 **Product Overview**
-
-EconGraph is an **economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use.
-
-### 💼 **Product Value**
-- **Modern User Experience**: Intuitive interface with responsive design
-- **Open Source Transparency**: Full customization and source code access
-- **Real-time Data Access**: Live updates from FRED, BLS, Census, World Bank, OECD
-- **Deployment Foundation**: Kubernetes support provides a base for scaling and improving availability as deployments mature
-- **Comprehensive API**: GraphQL API for programmatic access and integrations
-
-### 🎯 **Core Product Features**
-
-#### 📊 **Advanced Data Visualization**
-- **Interactive Charts**: Professional-grade time series visualization with hover tooltips
-- **Data Transformations**: Instant YoY, QoQ, MoM calculations for trend analysis
-- **Comparative Analysis**: Side-by-side original vs. revised data for accuracy tracking
-- **Custom Date Ranges**: Flexible time period selection for historical analysis
-- **Export Capabilities**: PDF, PNG, SVG chart exports for reports and presentations
-
-#### 🔍 **Intelligent Search & Discovery**
-- **Unified Search**: Single search interface across all economic data sources
-- **Smart Suggestions**: AI-powered autocomplete with contextual recommendations
-- **Advanced Filtering**: Multi-dimensional filtering by source, frequency, category
-- **Relevance Ranking**: Machine learning-powered search result optimization
-- **Saved Searches**: Personal search history and favorite series management
-
-#### 🌍 **Global Data Coverage**
-- **Multi-Source Integration**: FRED, BLS, Census, World Bank, OECD, ECB, BOE
-- **Real-time Updates**: Automated data synchronization with source systems
-- **Data Quality Assurance**: Validation, cleaning, and standardization processes
-- **Historical Coverage**: Comprehensive historical data with revision tracking
-- **API Access**: Programmatic access for developers and integrations
-
-#### 🤝 **Collaboration & Sharing**
-- **Team Workspaces**: Shared analysis environments for research teams
-- **Chart Annotations**: Collaborative commenting and note-taking on visualizations
-- **Export & Sharing**: Easy sharing of analysis and insights
-- **Version Control**: Track changes and maintain analysis history
-- **Permission Management**: Role-based access control for enterprise security
-
----
-
-## 👥 **Target Users & Use Cases**
-
-### 🏛️ **Primary User Personas**
-
-#### **Economic Researchers & Academics**
-- **Use Cases**: Academic research, policy analysis, economic modeling, publication support
-- **Value**: Unified data access, modern collaboration features, comprehensive API
-- **Success Metrics**: Research productivity, publication quality, time to insights
-
-#### **Financial Analysts & Portfolio Managers**
-- **Use Cases**: Investment decisions, risk assessment, market analysis, client reporting
-- **Value**: Real-time data, customizable dashboards, API integration
-- **Success Metrics**: Decision speed, analysis accuracy, client satisfaction
-
-#### **Government Agencies & Policy Makers**
-- **Use Cases**: Policy formulation, economic monitoring, public reporting, regulatory compliance
-- **Value**: Data transparency, audit trails, secure access controls
-- **Success Metrics**: Policy effectiveness, public trust, regulatory compliance
-
-#### **Business Intelligence & Strategic Planning**
-- **Use Cases**: Strategic planning, market analysis, competitive intelligence, forecasting
-- **Value**: Integrated economic data, customizable analysis, programmatic access
-- **Success Metrics**: Strategic insights, planning accuracy, competitive advantage
-
-### 🔧 **Technical Advantages**
-
-#### **Modern Architecture**
-- **Performance**: High-performance Rust backend with async processing
-- **User Experience**: Modern React frontend with Material-UI design system
-- **Integration**: API-first design with comprehensive GraphQL API
-- **Scalability**: Containerized deployment with Kubernetes support
-
-#### **Data Integration**
-- **Multi-Source**: Unified access to FRED, BLS, Census, World Bank, OECD data
-- **Real-time**: Automated data synchronization and updates
-- **Quality**: Data validation, cleaning, and standardization
-- **History**: Comprehensive historical data with revision tracking
-
-#### **Developer Experience**
-- **Open Source**: Full source code access and customization
-- **API Access**: Comprehensive GraphQL API for programmatic access
-- **Documentation**: Extensive technical documentation and examples
-- **Testing**: Unit, database integration, component, and browser E2E tests
+- **Economic researchers and academics**: Find historical series, examine trends,
+  and retrieve data for economic modeling and publication.
+- **Financial analysts and portfolio managers**: Monitor economic indicators for
+  investment research, risk assessment, and client reporting.
+- **Government agencies and policy makers**: Explore economic indicators for
+  policy analysis, monitoring, and public reporting.
+- **Business intelligence teams**: Bring economic data into strategic planning,
+  market analysis, and existing tools through the API.
 
 ---
 
@@ -152,47 +68,41 @@ and rolling updates, making it easier to develop scaling and availability capabi
 Capacity and uptime depend on the deployed configuration and measured workloads;
 the architecture alone does not establish a capacity benchmark or uptime guarantee.
 
+---
+
+## 🏗️ **Architecture**
+
+The Rust backend uses Warp for asynchronous HTTP handling and exposes a GraphQL
+API, so clients can select the fields they need. PostgreSQL stores economic data
+and application state, with Diesel providing typed database operations and
+connection pooling.
+
+The React and TypeScript frontend uses Material-UI for its responsive interface,
+Chart.js for time series visualization, and React Query to cache fetched data.
+Docker images and Kubernetes deployment scripts support containerized operation.
+GitHub Actions runs automated builds, tests, and dependency and container security
+scans; see the [development documentation](docs/development/) for the workflow.
 
 ---
 
-## 🏗️ **Technology Leadership**
-
-### **🚀 Modern Architecture Advantages**
-
-#### **Backend Performance & Reliability**
-- **Rust + Warp**: Memory-safe language with asynchronous request handling
-- **PostgreSQL + Diesel**: Enterprise-grade database with type-safe operations and ACID compliance
-- **GraphQL API**: Clients select the fields they need in each request
-- **Async Processing**: Non-blocking operations provide a foundation for handling concurrent requests
-
-#### **Frontend User Experience**
-- **React + TypeScript**: Modern, maintainable UI with full type safety
-- **Chart.js Integration**: Professional-grade data visualization with smooth animations
-- **Material-UI Design**: Consistent, accessible design system meeting enterprise standards
-- **React Query**: Client-side caching helps reuse fetched data
-
-#### **Enterprise DevOps**
-- **Docker Containerization**: Consistent deployment across all environments
-- **GitHub Actions CI/CD**: Automated build and test workflows
-- **Comprehensive Testing**: Component and browser E2E tests exercise application behavior before changes ship
-- **Security Scanning**: Automated vulnerability detection and compliance monitoring
-
----
+<a id="getting-started"></a>
 
 ## 🚀 **Getting Started**
 
 ### **💼 For Business Users**
 
 #### **Live Demo Access**
+
 - **🌐 Web**: [econgraph.com](https://econgraph.com)
-- **📱 Mobile Demo**: Responsive design works on all devices
+- **📱 Mobile Demo**: Responsive layouts for desktop and mobile screens
 - **✉️ Contact**: support@econgraph.com
 
 #### **Quick Evaluation**
+
 1. **Explore Features**: Browse economic data and test visualization tools
 2. **Compare Data Sources**: Access FRED, BLS, Census, World Bank data
 3. **Test Transformations**: Try YoY, QoQ, MoM calculations
-4. **Export Charts**: Download professional-quality visualizations
+4. **Export Data**: Download Explorer results as CSV or JSON, or series observations as CSV
 5. **API Testing**: Test GraphQL API with provided examples
 
 #### Series CSV exports
@@ -208,6 +118,7 @@ them unchanged. Numeric observation values remain numbers in series CSV files.
 ### **🛠️ For Technical Teams**
 
 #### **Prerequisites**
+
 - Node.js 26 and npm (Active LTS from October 28, 2026; version in `.nvmrc`)
   - With nvm: run `nvm install && nvm use` from the repository root.
   - CI reads `.nvmrc`; `node scripts/check-node-version.mjs` checks package engines and Docker images against it.
@@ -256,7 +167,9 @@ them unchanged. Numeric observation values remain numbers in series CSV files.
 
 5. **🎉 Open your browser** to `http://localhost:3000`
 
-This starts an empty local database. The backend treats callers as anonymous while
+This starts an empty local database. Catalog reads additionally need the Keycloak anonymous
+grant settings in [backend configuration](backend/README.md#configuration); Docker Compose wires
+these automatically. The backend treats callers as anonymous while
 `OIDC_ISSUER` is unset; protected operations require a configured identity provider.
 Vite's development frontend defaults to the Keycloak realm at
 `http://localhost:8081/realms/econ-graph`. Sign-in requires that realm to be reachable
@@ -265,8 +178,6 @@ and matching frontend (`VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`) and backend
 [backend development setup](backend/README.md#development-workflow) for configuration
 and the [crawler deployment guide](docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md) to load data.
 The explicit `BACKEND_URL` aligns Vite's proxy with the backend's default port.
-
----
 
 ---
 
@@ -297,7 +208,7 @@ econ-graph/
 │   │   └── utils/           # Utility functions and GraphQL client
 │   └── __tests__/           # Frontend test suites
 │
-├── 🏗️ terraform/           # Infrastructure as Code (deployment ready)
+├── 🏗️ terraform/           # Infrastructure as Code
 │   ├── modules/             # Reusable Terraform modules
 │   └── environments/       # Environment-specific configurations
 │
@@ -317,77 +228,43 @@ econ-graph/
 ```
 
 ### 📚 **Documentation**
+
 - **[📖 Complete Documentation Index](./docs/README.md)** - Comprehensive documentation guide
 - **[🏢 Business Documentation](./docs/business/)** - Privacy policy
 - **[🔧 Technical Documentation](./docs/technical/)** - Architecture, implementation, APIs
 - **[🚀 Deployment Guide](./docs/deployment/)** - Infrastructure and deployment procedures
 - **[💻 Development Guide](./docs/development/)** - Setup, workflow, and CI/CD
 
-### 🚀 **Quick Start Development**
+### 🚀 **Kubernetes Development**
 
-#### **MicroK8s (Recommended for Production-like Development)**
-```bash
-# Install MicroK8s
-sudo snap install microk8s --classic
-sudo usermod -aG microk8s $USER
-newgrp microk8s
+Choose the setup guide for your cluster type:
 
-# Deploy application
-./scripts/deploy/restart-k8s-rollout.sh
-```
+- **MicroK8s**: Follow the [MicroK8s deployment guide](docs/deployment/MICROK8S_DEPLOYMENT.md)
+  for prerequisites, installation, required addons, and deployment with
+  `scripts/deploy/restart-k8s-rollout.sh`. That script targets MicroK8s.
+- **kind (Kubernetes in Docker)**: Follow the prerequisites and manual setup in the
+  [kind deployment guide](k8s/README.md#prerequisites) to install the pinned kind
+  version, create the cluster with Terraform, build images, and deploy with
+  `scripts/deploy/deploy.sh`.
 
-**Access URLs:**
-- Frontend: http://localhost, and https://econgraph.com when deployed with `PUBLIC_HOST=econgraph.com`
-- Backend: the same host, under `/api`
-- Grafana: not on the public ingress; `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
-
-#### **Kind (Alternative for Docker-based Development)**
-```bash
-# kind v0.33.0, which the deploy scripts run (once; no sudo), and kubectl
-./scripts/deploy/install-kind.sh
-# Deploy application
-./scripts/deploy/restart-k8s-rollout.sh
-```
-
-**For detailed setup instructions, see**: [Kubernetes Deployment Guide](./docs/deployment/KUBERNETES_DEPLOYMENT.md)
+See the [Kubernetes deployment guide](docs/deployment/KUBERNETES_DEPLOYMENT.md)
+for additional configuration and troubleshooting.
 
 ---
 
-## 📊 **Performance**
-
-### **Performance Foundation**
-- **⚡ API**: Asynchronous request handling and database connection pooling
-- **📊 Charts**: Time series visualization with data transformations
-- **🔍 Search**: PostgreSQL full-text search and indexing
-- **💾 Measurement**: Query latency, rendering time, and resource use depend on the workload and deployment
-
-### **Data Handling**
-- **📈 Time Series**: Handles thousands of data points per series
-- **🔄 Transformations**: Fast YoY/QoQ/MoM calculations
-- **📊 Database**: PostgreSQL with proper indexing
-- **🗃️ Storage**: Efficient data models for economic time series
-
----
+<a id="license--usage"></a>
 
 ## 📄 **License & Usage**
 
-This project is licensed under the **Microsoft Reference Source License (MS-RSL)**. This license allows you to view the source code for reference purposes only.
+The [LICENSE](LICENSE) file is titled **Microsoft Reference Source License
+(MS-RSL)**. Its Use Restrictions section states that the source is for reference
+purposes only and prohibits commercial use, modification or derivative works,
+distribution, copying except for viewing, use in a product or service, and
+competitive reverse engineering or creation of competing products or services.
+Read the full license for its grants, conditions, and restrictions.
 
-### **License Restrictions**
-- ✅ **Viewing**: You may view the source code for educational and reference purposes
-- ❌ **Commercial Use**: Commercial use is prohibited without a separate commercial license
-- ❌ **Modification**: You may not modify or create derivative works
-- ❌ **Distribution**: You may not distribute the software or any portion of it
-- ❌ **Copying**: You may not copy the source code except for viewing purposes
-
-### **Commercial Licensing**
-For commercial use, enterprise licensing, or any questions about usage rights, please contact: **support@econgraph.com**
-
----
-
-## 📄 **License Details**
-
-This project is licensed under the Microsoft Reference Source License (MS-RSL) - see the [LICENSE](LICENSE) file for complete terms and conditions.
+For commercial use, enterprise licensing, or questions about usage rights,
+contact **support@econgraph.com**.
 
 ---
 
@@ -410,7 +287,4 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 
 **Built with Rust and React**
 
-</div># PostgreSQL 18 Environment
-# Trigger CI test
-# Package-lock.json sync fix
-# CI Trigger
+</div>

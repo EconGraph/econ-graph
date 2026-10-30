@@ -1,9 +1,9 @@
 # Series Search
 
 How the backend finds economic series by text: `searchSeries` and `searchSuggestions` in the
-GraphQL API, both served by `SearchService`
-(`backend/crates/econ-graph-services/src/services/search_service.rs`). Series metadata lives in
-Postgres, so search runs there against indexes on `economic_series`.
+GraphQL API, both served by
+[`SearchService`](../../backend/crates/econ-graph-services/src/services/search_service.rs).
+Series metadata lives in Postgres, so search runs there against indexes on `economic_series`.
 
 ## What it matches
 
@@ -14,12 +14,24 @@ Postgres, so search runs there against indexes on `economic_series`.
 - **Web-search syntax** through `websearch_to_tsquery`: `"quoted phrases"`, `or`, and `-excluded`
   words.
 
-Results can be filtered by source, frequency and active status, and are paged with `limit` and
-`offset`.
+Both search and suggestions require `end_date IS NOT NULL`. This is a metadata eligibility
+check; it does not verify that observation rows exist.
+
+GraphQL `searchSeries` returns active series and accepts `source` and `frequency` filters. It
+pages with `first` and `after`: `first` sets the page size, and `after` is the number of results
+already read, encoded as a string. `totalCount` counts all matching series, including those
+outside the current page. See [search pagination](../api/GRAPHQL_API.md#search-with-pagination)
+and the [GraphQL resolvers](../../backend/crates/econ-graph-graphql/src/graphql/query.rs).
+
+The service uses
+[`SearchParams`](../../backend/crates/econ-graph-core/src/models/search.rs), with `limit` and
+`offset` for paging. Internal callers can also include inactive series or change the similarity
+threshold; GraphQL fixes those settings to active series only and 0.3, respectively.
 
 ## Schema
 
-Schema (in the v4.0.0 baseline migration, `backend/migrations/data/2026-10-21-000100_v4_0_baseline`):
+The [v4.0.0 data baseline](../../backend/migrations/data/2026-10-21-000100_v4_0_baseline/up.sql)
+defines the search column and indexes:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -37,50 +49,66 @@ CREATE INDEX idx_economic_series_title_trgm ON economic_series USING GIN (title 
 
 - `search_vector` is a stored generated column, so Postgres keeps it current on every insert and
   update. There is no trigger or backfill job.
-- Title and external id carry weight A and description weight B, so a title hit outranks a
-  description hit.
-- The trigram index serves `similarity()` / `%` for typo tolerance, and `ILIKE` on titles.
+- Title and external id carry weight A and description weight B, giving title and ID terms
+  greater weight in full-text relevance. Final ordering also uses exact-ID priority and title
+  similarity.
+- The trigram index supports the `%` similarity predicate for typo tolerance and `ILIKE` on
+  titles.
 
 ## Queries
 
-`search_series`:
+`search_series_page` returns a page and the total match count; `search_series` returns only
+the page. The SQL below abbreviates the filters and selected columns. `$1` is the original
+query and `$7` is the normalized full-text input: whitespace-separated tokens made entirely of
+`-` are removed before parsing. Thus `Number of establishments - United States` does not exclude
+its own area, while an attached exclusion such as `-rate` keeps its meaning. Similarity and the
+comparison with the whole external ID still use the original query. The expanded input is
+NULL when no abbreviation is expanded, so `coalesce` repeats an existing disjunct.
 
 ```sql
 WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
-    SELECT websearch_to_tsquery('english', $1) || websearch_to_tsquery('simple', $1)
-        || websearch_to_tsquery('english', <query with abbreviations spelled out>) AS tsq
+    SELECT websearch_to_tsquery('english', $7) || websearch_to_tsquery('simple', $7)
+        || coalesce(websearch_to_tsquery('english', <expanded full-text input>),
+                    websearch_to_tsquery('simple', $7)) AS tsq
 ) parsed)
 SELECT ...,
        (ts_rank_cd(es.search_vector, q.tsq, 32) + similarity(es.title, $1))::float4 AS rank,
-       similarity(es.title, $1)::float4 AS similarity_score
+       similarity(es.title, $1)::float4 AS similarity_score,
+       count(*) OVER () AS total_count
 FROM economic_series es, q
 WHERE NOT q.vacuous
   AND (es.search_vector @@ q.tsq
        OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
+  AND es.end_date IS NOT NULL
   AND <source, frequency and active filters>
 ORDER BY lower(es.external_id) IN (lower(btrim($1)), lower(<one-word term>)) DESC,
          rank DESC, es.title ASC, es.id ASC
 LIMIT $5 OFFSET $6
 ```
 
-- The `WHERE` runs as a bitmap OR of the two GIN indexes.
+- Both match predicates have supporting GIN indexes. Postgres chooses the execution plan for
+  the query and data.
 - The query is parsed with both configurations: `english` for stemmed title and description words,
   `simple` for external ids, which are indexed unstemmed.
 - The trigram fallback is off when the parsed query contains a NOT (`-rate`, `(-rate)`,
   `"phrase"-rate`), so a near-miss title can't bring back what the exclusion removed. The check
   looks for `!` in the parsed query's text. Apart from the NOT operator, `!` survives only inside a
   quoted URL-like phrase (`"x.com/a!b"`), where it just turns typo matching off.
-- Abbreviations listed in `econ-graph-core/data/search_abbreviations.csv` are also searched
+- Abbreviations listed in the
+  [abbreviation CSV](../../backend/crates/econ-graph-core/data/search_abbreviations.csv) are also searched
   spelled out as quoted phrases, so `gdp` finds a title that only says "gross domestic product".
   Quoted, excluded (`-gdp`) and punctuated words in a longer query are left as typed.
 - A series whose external id is the whole query ranks first (FRED's `GDP` for `gdp`).
-- A one-word query is expanded and compared with external ids without the quotes (ASCII or
-  typographic, double or single) and brackets around it, matched or not, or the sentence
-  punctuation after it (`. , ; : ! ? *`). So `"gdp"`, `“gdp”`, `'gdp'`, `(gdp)`, `GDP.` and
-  `gdp*` rank as `gdp` does. Other symbols are part of the word (`C++` stays `C++`), a leading
-  `-` is kept, and a word that would shrink to one character or nothing (`A.`, `...`) is used
-  as typed.
-- `es.id` breaks ties, so `limit`/`offset` paging never repeats or skips a row.
+- For a one-word query, the service strips surrounding quotes and brackets and trailing sentence
+  punctuation before abbreviation expansion and exact-ID prioritization. Quotes may be ASCII
+  or typographic, single or double; brackets may be `()[]{}`. The wrappers need not be paired.
+  Thus `"gdp"`, `“gdp”`, `'gdp'`, `(gdp)`, `GDP.` and `gdp*` expand and receive ID priority as
+  `gdp` does. Trailing punctuation is `. , ; : ! ? *`. Other symbols remain part of the term
+  (`C++` stays `C++`), and a leading `-` is kept. If stripping would leave fewer than two
+  characters (`A.`, `...`), the query is used as typed. The original query still supplies
+  trigram similarity and the whole-query exact-ID comparison.
+- `es.id` breaks remaining ties, giving an unchanged result set a deterministic order. Changes
+  to matching data between page requests can still shift offsets.
 - A query with no positive requirement (`-rate`, `-a -b`, `a OR -b`) is satisfied by an empty
   document, so it's rejected outright (`vacuous`) instead of matching every series that happens to
   lack the excluded word.
@@ -89,39 +117,37 @@ LIMIT $5 OFFSET $6
 - `SearchParams.similarity_threshold` (default 0.3) is applied by setting
   `pg_trgm.similarity_threshold` for the query's transaction only.
 
-`get_suggestions` returns up to 20 distinct active titles: titles starting with the typed text
-first, as completions, then the closest titles by trigram similarity, as spelling corrections. The
-similarity is reported as the suggestion's confidence. `%`, `_` and `\` in the typed text are
-escaped, so they match literally in the prefix `ILIKE`.
+`get_suggestions` returns up to 20 distinct active titles with non-null `end_date`. Titles starting
+with the typed text come first, as completions, followed by the closest titles by trigram similarity,
+as spelling corrections. Similarity is reported as the suggestion's confidence. `%`, `_` and `\`
+in the typed text are escaped, so they match literally in the prefix `ILIKE`.
 
 ## Tests
 
-`search_service.rs` has DB-backed tests covering word, description, external-id, typo and
-excluded-word, and vacuous-query (all-NOT) matches, and completions, corrections and literal
-`%`/`_` in suggestions. They remove
-their fixture rows when they finish. They run when `DATABASE_URL` points at a Postgres 18 database
-and are skipped otherwise.
+The [search service tests](../../backend/crates/econ-graph-services/src/services/search_service.rs)
+cover word, description, external-ID, typo, excluded-word and vacuous-query (all-NOT) matches,
+standalone dashes, missing `end_date`, and suggestion completions, corrections and literal `%`/`_`.
+They apply migrations and load fixtures in the database supplied by `DATABASE_URL`, removing
+fixture rows when they finish. Use a disposable PostgreSQL 18-or-newer database; see
+[database testing](../testing/DATABASE_TESTING.md). The tests skip when `DATABASE_URL` is unset.
+With it set, migration or connection setup failures fail the tests.
 
-## Not built
+## Limitations
 
-An earlier version of this document described a larger design. These parts of it were never
-implemented:
+Abbreviation expansion supports listed terms such as GDP; search does not perform general
+synonym matching or semantic (vector) matching. The
+[synonym list](../../backend/migrations/data/economic_synonyms.syn) is not used by any text search
+configuration. Search does not use `unaccent` or `fuzzystrmatch`.
 
-- **Synonyms** ("GDP" finding "Gross Domestic Product", "jobless" finding "unemployment"). A
-  synonym list exists at `backend/migrations/data/economic_synonyms.syn`, but no text search
-  configuration uses it. Wiring it in needs the file installed into the server's
-  `tsearch_data` directory, which managed Postgres services generally don't allow; a synonym
-  table expanded in the query is the more portable route.
-- **`unaccent` and `fuzzystrmatch`**. Series titles are English, so neither has been needed.
-- **Units in the search vector**, and trigram matching on descriptions and external ids.
-- **Mixing an external id with other words** in one query. The `english` and `simple` parses are
-  OR'ed as whole queries, so `UNRATE labor` needs every word to match under one configuration and
-  finds nothing by full text (a close title can still match by trigram similarity).
-- **`SearchParams.sort_by`**. Results are always ordered by relevance.
-- **Semantic (vector) search**, listed there as a future enhancement: embeddings of series
-  metadata (for example with pgvector) so a query can match by meaning ("jobless" finding
-  "Unemployment Rate"). It would complement this search, not replace it, since exact ids and typos
-  still need lexical matching.
+The search vector covers external IDs, titles and descriptions, excluding units. Trigram
+matching covers titles only. The `english` and `simple` parses are OR'ed as whole queries against
+the same vector. A mixed query can therefore fail to match by full text when an ID requires the
+`simple` parse and another word requires English stemming: neither whole-query parse supplies
+both required lexemes. Mixing IDs and words can work when one parse matches all required terms.
 
-The paged `series` listing (`series_service::list_series`) still filters its optional `query` with
-`ILIKE` on title and description, not with `search_vector`.
+`SearchParams.sort_by` does not change the ordering: results always use the exact-ID priority,
+relevance, title and ID ordering shown above.
+
+The paged GraphQL `series` listing uses
+[`series_service::list_series`](../../backend/crates/econ-graph-services/src/services/series_service.rs).
+Its optional `query` filters title and description with `ILIKE`, independently of full-text search.

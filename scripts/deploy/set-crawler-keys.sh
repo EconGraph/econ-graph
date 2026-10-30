@@ -71,6 +71,11 @@ for arg in "$@"; do
     esac
 done
 
+# Refuse before selecting an operator config, reading credentials or prompting.
+# shellcheck source=scripts/deploy/lib/agent-access.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
+require_operator_session
+
 # shellcheck source=scripts/deploy/lib/kind-env.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/kind-env.sh"
 check_docker_daemon
@@ -266,7 +271,7 @@ if [ "$TUNNEL" = true ] && [ "$entered" -gt 0 ]; then
         # the way deploy.sh starts it, apply_cloudflared, which checks the
         # production marker, the Secret and the public host again.
         PUBLIC_HOST="$(public_host_in_cluster)" ||
-            die "could not read the cluster's Ingresses to see which public host it serves"
+            die "could not read the cluster's routes to see which public host it serves"
         if [ -z "$PUBLIC_HOST" ]; then
             echo "==> cloudflared stays at 0 replicas: this cluster serves no public host yet."
             echo "    Deploy with PUBLIC_HOST=econgraph.com scripts/deploy/deploy.sh to start it."

@@ -45,6 +45,10 @@ crawler-worker serves the same numbers on `:9102/metrics`, refreshed every 5 min
 `crawler_coverage_oldest_success_timestamp_seconds`, all labelled by `source`, and
 `crawler_coverage_last_refresh_timestamp_seconds`, when they were last refreshed. The queue
 poller, which runs every 30 seconds, adds `crawler_last_failure_timestamp_seconds{source}`.
+The worker also exports `crawler_scheduler_enabled`: 1 when automatic scheduling is on,
+0 when it was explicitly disabled. The value describes startup configuration, not whether
+scheduler ticks are succeeding. It defaults to 1 until startup configuration explicitly
+sets the mode to 0.
 
 The alerts are in `k8s/monitoring/prometheus-rules-crawler.yaml` (a ConfigMap that
 Prometheus mounts at `/etc/prometheus/rules`; `scripts/deploy/restart-k8s-rollout.sh`
@@ -55,8 +59,9 @@ seen in Prometheus, not notified: open `/alerts` on the Prometheus service
 
 | Alert | Fires when |
 |---|---|
+| `CrawlerSchedulerDisabled` | Every discovered primary worker reports scheduling disabled with a successful scrape (info, no delay) |
 | `CrawlerCoverageLow` | A source's coverage has been under 95% for 6 hours |
-| `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes |
+| `CrawlerSourceNotRefreshed` | A source has had overdue series for 30 minutes and automatic scheduling is not explicitly disabled |
 | `CrawlerCrawlFailed` | A crawl job of the source failed for good within the last hour |
 | `CrawlerCoverageStale` | The worker runs but the coverage gauges haven't been refreshed for 15 minutes, for 30 minutes |
 
@@ -77,6 +82,60 @@ UPDATE economic_series SET is_active = FALSE WHERE id = '<id>';
 To check the rules and run their unit tests locally, with promtool and PyYAML installed:
 `k8s/monitoring/check-prometheus-rules.sh`. CI runs it in the "Prometheus Rules" job.
 
+## Holding a crawl static and running a deliberate refresh
+
+A persistent primary can hold a completed crawl static with
+`CRAWLER_SCHEDULER=false`. Record this setting in the deployment configuration so the
+next deploy preserves it; for an operator-controlled temporary change:
+
+```sh
+kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=false
+kubectl -n econ-graph rollout status deploy/crawler-worker
+```
+
+Disabling the scheduler stops automatic enqueueing. It does not cancel queued work:
+the worker continues draining the queue, and its queue and coverage pollers keep running.
+Confirm `crawler status` has no pending, processing or retrying jobs before considering
+the crawl static. Startup reference-data refreshes still run; this setting is not a
+read-only database mode.
+
+On the primary (`kubernetes_namespace="econ-graph"`), `CrawlerNoTraffic` and
+`CrawlerSourceNotRefreshed` are suppressed only when every discovered worker scrape
+target reports `crawler_scheduler_enabled=0`: idle traffic and aging observations are
+expected. An enabled worker, an old image without the mode metric, or a failed scrape
+prevents suppression of idle/freshness warnings while measurements are available.
+If a failed scrape makes those measurements stale, `CrawlerMetricsMissing` and
+`CrawlerCoverageStale` report the missing telemetry instead; absent data cannot establish
+no traffic or overdue series. Branch schedulers do not affect the primary's mode or these
+two alerts. `CrawlerNoCompletions` stays active when jobs are queued, because manual work must
+still complete. `CrawlerCoverageStale`, low coverage, job failures and worker/scrape
+failures also remain active: the independent metric pollers must stay healthy.
+`CrawlerSchedulerDisabled` remains visible at info level while every discovered primary
+worker reports static mode and has a successful scrape. Missing mode metrics or a failed
+scrape prevent this all-disabled indication, just as they prevent suppression above. All crawler alerts select the primary namespace (`econ-graph`); branch
+worker traffic, coverage and failures do not affect them.
+No blanket Alertmanager silence is required.
+
+A deliberate refresh uses a selected source and series on the converted data plane,
+a tagged release image, and a verified host backup. For example, two existing FRED
+series can be refreshed without enabling the automatic scheduler:
+
+```sh
+kubectl -n econ-graph exec deploy/crawler-worker -- \
+  /app/crawler enqueue --source FRED --series GDP,UNRATE
+kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler status
+kubectl -n econ-graph exec deploy/crawler-worker -- /app/crawler coverage --fail-under 95
+```
+
+The refresh is complete when those jobs have completed; coverage is a separate check,
+not proof of an empty queue. `crawler discover --source FRED` refreshes the source catalog
+but is not itself a full crawl of every series. A full-source refresh uses a selected set
+of series or a deliberate temporary scheduler run. Both paths preserve the data database and existing series rows: prior series IDs
+remain present and match the stable-ID function. The static deployment retains a verified
+backup of the completed crawl, with `CrawlerSchedulerDisabled` showing its mode and
+the failure and telemetry alerts showing its health. The rule tests simulate alert
+behavior; they do not verify a live refresh or backup.
+
 ## Forcing the alerts (QA)
 
 The coverage stale alert and `CrawlerMetricsMissing` also need kube-state-metrics
@@ -84,8 +143,8 @@ The coverage stale alert and `CrawlerMetricsMissing` also need kube-state-metric
 old operator-based `PrometheusRule` (`kubectl -n econ-graph get prometheusrule crawler-alerts`),
 delete it, or its alerts fire twice.
 
-The SQL below runs against the application database. The worker image has no `psql`, so run
-it from the Postgres pod (`kubectl -n econ-graph exec -it <postgres pod> -- psql -U <user>
+The SQL below runs against the data database, on a disposable QA deployment. The worker
+image has no `psql`, so run it from the Postgres pod (`kubectl -n econ-graph exec -it <postgres pod> -- psql -U <user>
 <database>`) or through `kubectl port-forward` with the `DATA_DATABASE_URL` from the
 crawler-worker's Secret.
 
@@ -106,7 +165,7 @@ FRED key the job fails as well, because of the key error.
 
 ### Stale source
 
-Stop the scheduler, then backdate one series:
+On a disposable QA deployment, stop the scheduler and backdate one series:
 
 ```sh
 kubectl -n econ-graph set env deploy/crawler-worker CRAWLER_SCHEDULER=false
@@ -116,13 +175,13 @@ psql -c "UPDATE economic_series SET last_crawled_at = NOW() - INTERVAL '90 days'
                 AND es.end_date IS NOT NULL LIMIT 1)"
 ```
 
-`crawler coverage` shows `OVERDUE` 1 for FRED at once. `CrawlerSourceNotRefreshed` fires
-30 minutes after the next gauge refresh. `kubectl set env` rolls the pod, and a GitOps sync
-may revert it, so undo it explicitly with `CRAWLER_SCHEDULER=true`: the next tick re-crawls
-the series and the alert clears.
-
-If the scheduler keeps running, it re-crawls the backdated series on its next tick (within
-5 minutes). The alert then never fires, which shows that refresh works.
+`crawler coverage` shows an increased `OVERDUE` count for FRED after the edit, but
+`CrawlerSourceNotRefreshed` stays quiet while the scheduler is explicitly disabled.
+The promtool tests verify that overdue data alerts after 30 minutes when scheduling is
+enabled or its mode metric is missing. Restore the original scheduler setting after QA;
+`kubectl set env` rolls the pod, and a GitOps sync may revert it. Enabling the scheduler
+re-crawls the backdated series on the next tick (normally within 5 minutes), so a healthy
+scheduler can repair the fixture before an alert fires.
 
 ### Low coverage
 
