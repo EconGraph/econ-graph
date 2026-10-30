@@ -24,6 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
+use bigdecimal::BigDecimal;
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::{
@@ -874,6 +875,116 @@ struct WrittenPoint {
     inserted: bool,
 }
 
+/// Whether every fetch from `source` restates each observation at the source's newest vintage,
+/// so [`persist_series`] stores only the values that moved ([`keep_changed_points`]).
+///
+/// The World Bank stamps every point of a WDI release with the release's `lastupdated`. Stored
+/// as-is, each release would append the whole history of every series again, though most
+/// values are the same as the release before.
+fn appends_only_changed_values(source: SourceId) -> bool {
+    matches!(source, SourceId::WorldBank)
+}
+
+/// The newest stored row for a point's date at or before the point's `revision_date`.
+#[derive(QueryableByName)]
+struct PriorPoint {
+    /// The fetched point's date.
+    #[diesel(sql_type = Date)]
+    date: NaiveDate,
+    /// The fetched point's `revision_date` (not the stored row's).
+    #[diesel(sql_type = Date)]
+    revision_date: NaiveDate,
+    #[diesel(sql_type = Nullable<Numeric>)]
+    stored_value: Option<BigDecimal>,
+    #[diesel(sql_type = Date)]
+    stored_revision_date: NaiveDate,
+    #[diesel(sql_type = Bool)]
+    stored_is_original_release: bool,
+}
+
+/// What [`persist_series`] writes of `points` for a source that
+/// [appends only changed values](appends_only_changed_values). Each point is compared with the
+/// newest stored row for its date whose `revision_date` is not after the point's, ordered as the
+/// API's revision filter orders them (`revision_date`, then a revision over an original release,
+/// then `id`):
+///
+/// - No such row: the point is written as the date's original release
+///   (`is_original_release = true`). This holds even when the date has rows at later
+///   `revision_date`s: a fetch whose `lastupdated` is older than what is stored (a stale response,
+///   or a release the World Bank withdrew) labels such a date an original release at its own,
+///   earlier vintage, which is when that value was first published as far as the fetch shows.
+///   The date's later row may itself be an original release, so a stale vintage can leave two
+///   original-release rows for one date.
+/// - A row at the same `revision_date` (the same vintage read again): the point keeps that row's
+///   `is_original_release`, so the upsert updates the row in place if the value differs.
+/// - An older row with the same value: nothing is written; reads at or after the new vintage
+///   still get the value from that row.
+/// - An older row with a different value: the point is appended as a revision
+///   (`is_original_release = false`).
+///
+/// Points are only compared with stored rows, not with each other, so a fetch carrying several
+/// vintages of one date writes each one that differs from what is stored; two points for the
+/// same date and `revision_date` keep the last. One indexed lookup per
+/// [`INSERT_CHUNK`] points, inside the caller's transaction.
+///
+/// The caller must hold the series' `economic_series` row lock, so that two concurrent persists
+/// of one series can't both compare against the same stored rows (and, say, both write a new
+/// date as its original release). [`persist_series_conn`] takes it with its upsert of that row,
+/// which runs first and holds the lock until the transaction ends; a second persist of the
+/// series waits at its own upsert, and its comparison (a later statement at READ COMMITTED)
+/// then sees the first one's rows.
+async fn keep_changed_points(
+    conn: &mut AsyncPgConnection,
+    series_id: Uuid,
+    points: &[&FetchedPoint],
+) -> QueryResult<Vec<FetchedPoint>> {
+    // Keyed by (date, revision_date): the flag set below is part of the conflict key, so two
+    // inputs for one vintage of a date must not both survive into one INSERT.
+    let mut kept = BTreeMap::new();
+    for chunk in points.chunks(INSERT_CHUNK) {
+        let prior: Vec<PriorPoint> = diesel::sql_query(
+            "SELECT t.date, t.revision_date, s.value AS stored_value, \
+                 s.revision_date AS stored_revision_date, \
+                 s.is_original_release AS stored_is_original_release \
+             FROM UNNEST($2::date[], $3::date[]) AS t(date, revision_date) \
+             CROSS JOIN LATERAL ( \
+                 SELECT dp.value, dp.revision_date, dp.is_original_release \
+                 FROM data_points dp \
+                 WHERE dp.series_id = $1 AND dp.date = t.date \
+                     AND dp.revision_date <= t.revision_date \
+                 ORDER BY dp.revision_date DESC, dp.is_original_release ASC, dp.id DESC \
+                 LIMIT 1) s",
+        )
+        .bind::<SqlUuid, _>(series_id)
+        .bind::<Array<Date>, _>(chunk.iter().map(|p| p.date).collect::<Vec<_>>())
+        .bind::<Array<Date>, _>(chunk.iter().map(|p| p.revision_date).collect::<Vec<_>>())
+        .load(conn)
+        .await?;
+        let prior: HashMap<(NaiveDate, NaiveDate), PriorPoint> = prior
+            .into_iter()
+            .map(|p| ((p.date, p.revision_date), p))
+            .collect();
+        for &point in chunk {
+            let is_original_release = match prior.get(&(point.date, point.revision_date)) {
+                None => true,
+                Some(s) if s.stored_revision_date == point.revision_date => {
+                    s.stored_is_original_release
+                }
+                Some(s) if s.stored_value == point.value => continue,
+                Some(_) => false,
+            };
+            kept.insert(
+                (point.date, point.revision_date),
+                FetchedPoint {
+                    is_original_release,
+                    ..point.clone()
+                },
+            );
+        }
+    }
+    Ok(kept.into_values().collect())
+}
+
 /// Upserts one chunk of points for `series_id` and returns one row per point actually written.
 ///
 /// A conflicting row is only rewritten when its value changed, so re-crawling unchanged data
@@ -923,7 +1034,10 @@ async fn upsert_points(
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
 ///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
 ///   only if it differs.
-///   Duplicate keys in the input keep the last occurrence.
+///   Duplicate keys in the input keep the last occurrence. For a source that
+///   [appends only changed values](appends_only_changed_values) (the World Bank), a point equal
+///   to the newest stored row for its date is not written at all, and `is_original_release` is
+///   set from what is stored ([`keep_changed_points`]).
 /// - `start_date` / `end_date` are recomputed from the stored points.
 /// - Dataset: `dataset_id` (from the synced `datasets` row) and `dimensions` are written from
 ///   `fetched.dataset`. `default_measure` is a per-series override and is left alone, so the
@@ -1024,6 +1138,15 @@ pub(crate) async fn persist_series_conn(
     set_series_validators_conn(conn, series_id, fetched.validators.as_ref()).await?;
 
     let points: Vec<&FetchedPoint> = unique.values().copied().collect();
+    // The series upsert above holds the row lock that keep_changed_points relies on: keep it
+    // first in this transaction.
+    let changed;
+    let points: Vec<&FetchedPoint> = if appends_only_changed_values(source) {
+        changed = keep_changed_points(conn, series_id, &points).await?;
+        changed.iter().collect()
+    } else {
+        points
+    };
     let (mut upserted, mut new) = (0usize, 0usize);
     for chunk in points.chunks(INSERT_CHUNK) {
         let written = upsert_points(conn, series_id, chunk).await?;

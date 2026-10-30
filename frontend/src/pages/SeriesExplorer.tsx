@@ -32,7 +32,7 @@ import {
   Tune as AdvancedIcon,
   Clear as ClearIcon,
 } from '@mui/icons-material';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
 import { useSeriesSearch, useSeriesBrowse, useDataSources } from '../hooks/useSeriesData';
 import { buildSearchResultsCsv, buildSearchResultsJson } from '../utils/searchResultsExport';
 import SeriesLifecycleNotice from '../components/SeriesLifecycleNotice';
@@ -164,6 +164,31 @@ const SeriesExplorer: React.FC = () => {
   );
   const [currentPage, setCurrentPage] = React.useState(1);
 
+  // Send the search once typing pauses, not on every keystroke
+  const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
+
+  // The form follows the URL when something else changes it while the page stays mounted: a
+  // link to another /explore URL (the sidebar's FRED Data), back and forward. The URL writes
+  // the form makes below are marked in their history state and skipped here, so a write that
+  // lands after more typing doesn't put the older text back in the box.
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  const [syncedLocationKey, setSyncedLocationKey] = React.useState(location.key);
+  if (location.key !== syncedLocationKey) {
+    setSyncedLocationKey(location.key);
+    const formWrite =
+      navigationType === 'REPLACE' &&
+      (location.state as { explorerForm?: boolean } | null)?.explorerForm === true;
+    if (!formWrite) {
+      const query = searchParams.get('q') || '';
+      setSearchQuery(query);
+      setDebouncedQuery(query.trim());
+      setSelectedSource(searchParams.get('source') || '');
+      setSelectedFrequency(searchParams.get('frequency') || '');
+      setCurrentPage(1);
+    }
+  }
+
   // Advanced search state
   const [showAdvancedSearch, setShowAdvancedSearch] = React.useState(false);
   const [sortBy, setSortBy] = React.useState('relevance');
@@ -192,8 +217,6 @@ const SeriesExplorer: React.FC = () => {
   const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isPending);
   const activeSource = sourceListed ? resolvedSourceId : waitingForSources ? selectedSource : '';
 
-  // Send the search once typing pauses, not on every keystroke
-  const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
   React.useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -296,13 +319,16 @@ const SeriesExplorer: React.FC = () => {
   // not the resolved id: a link that arrived with a source name (the sidebar's, say) keeps
   // that same name in the URL rather than having it silently rewritten to the id it resolved
   // to — a same-site navigation is expected to keep every query parameter it arrived with.
+  // Nothing is written when the URL already says the same, as it does right after the form
+  // took a navigation's values above.
   React.useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
     if (selectedSource) params.set('source', selectedSource);
     if (selectedFrequency) params.set('frequency', selectedFrequency);
-    setSearchParams(params, { replace: true });
-  }, [searchQuery, selectedSource, selectedFrequency, setSearchParams]);
+    if (params.toString() === searchParams.toString()) return;
+    setSearchParams(params, { replace: true, state: { explorerForm: true } });
+  }, [searchQuery, selectedSource, selectedFrequency, searchParams, setSearchParams]);
 
   // Keyboard shortcuts
   React.useEffect(() => {

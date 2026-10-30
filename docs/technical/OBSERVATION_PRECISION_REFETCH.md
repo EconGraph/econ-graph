@@ -64,10 +64,21 @@ is_original_release)`:
 Only precision the source still serves can be recovered:
 
 - **FRED** serves every vintage through ALFRED, so all stored vintages are corrected.
-- **World Bank** serves only the current database release. Points carry the release's
-  `lastupdated` as their revision date: points of the current release are corrected; points of
-  earlier releases keep their stored (possibly rounded) values. If the World Bank has published
-  a new release since the last crawl, the re-fetch stores it as a new vintage.
+- **World Bank** serves only the current database release, and points carry the release's
+  `lastupdated` as their revision date. The crawler compares each re-fetched value with the
+  newest stored row for its date at or before that release
+  ([World Bank revisions](../data-sources/world-bank.md#frequency-and-revisions)):
+  - The newest row belongs to the current release: it is corrected in place and keeps its
+    `is_original_release`.
+  - The newest row belongs to an earlier release (the value was carried over unchanged) and the
+    precise value differs from the stored, rounded one: a new row is written at the current
+    release with `is_original_release = false`. The rounded row stays as the earlier vintage.
+  - The values are equal: nothing is written.
+  - The date has no stored row at or before the release: it is written as an original release.
+
+  Rows of earlier releases keep their stored (possibly rounded) values. If the World Bank has
+  published a new release since the last crawl, the re-fetch stores that release's new and
+  changed values as a new vintage.
 - **BLS, BEA, Census, FHFA** store one current value per date (revision date = observation
   date), which the re-fetch rewrites with the source's current value, as any refresh does.
   BLS history beyond the adapter's 20-year window is not re-read.

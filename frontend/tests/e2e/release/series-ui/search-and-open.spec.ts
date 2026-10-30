@@ -64,6 +64,53 @@ test.describe('browse a source', () => {
     await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
+
+  // ECO-511: on /explore?q=GDP, FRED Data changed nothing: the explorer wrote its GDP search
+  // back over the link's URL. Each URL's query and source now reach the form and the results.
+  test('FRED Data from a GDP search browses FRED, and back and forward follow', async ({
+    page,
+  }) => {
+    const searchBox = page.getByPlaceholder(
+      'Search economic series (e.g., GDP, unemployment, inflation)'
+    );
+    const sourceSelect = page.getByRole('combobox', { name: 'Source' });
+    const cardSources = () =>
+      page
+        .locator('.MuiCard-root [title^="Data Source: "]')
+        .evaluateAll(chips => chips.map(chip => chip.getAttribute('title')));
+    const fredUrl = /\/explore\?source=Federal(\+|%20)Reserve(\+|%20)Economic(\+|%20)Data$/;
+
+    const expectGdpSearch = async () => {
+      await expect(page).toHaveURL(/\/explore\?q=GDP$/);
+      await expect(searchBox).toHaveValue('GDP');
+      await expect(sourceSelect).not.toContainText(SEEDED.fredGdp.sourceName);
+      await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toBeVisible();
+    };
+    const expectFredBrowse = async () => {
+      await expect(page).toHaveURL(fredUrl);
+      await expect(searchBox).toHaveValue('');
+      await expect(sourceSelect).toContainText(SEEDED.fredGdp.sourceName);
+      await expect(page.getByText(/series, by title/)).toBeVisible();
+      await expect(page.getByText(SEEDED.beaGdp.title, { exact: true })).toHaveCount(0);
+      const sources = await cardSources();
+      expect(sources.length).toBeGreaterThan(0);
+      expect(new Set(sources)).toEqual(new Set([`Data Source: ${SEEDED.fredGdp.sourceName}`]));
+    };
+
+    await page.goto('/explore?q=GDP');
+    await expectGdpSearch();
+    // Survives only while the page stays loaded: the link must navigate within the app
+    await page.evaluate(() => Object.assign(window, { eco511SamePage: true }));
+
+    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+    await expectFredBrowse();
+
+    await page.goBack();
+    await expectGdpSearch();
+    await page.goForward();
+    await expectFredBrowse();
+    expect(await page.evaluate(() => 'eco511SamePage' in window)).toBe(true);
+  });
 });
 
 // ECO-414: at 1400px the result cards started flush at the sidebar edge, varied from 423 to

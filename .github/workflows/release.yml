@@ -201,9 +201,10 @@ jobs:
         labels: ${{ steps.meta-frontend.outputs.labels }}
         # Same build args as ci-core.yml's docker-build job (AUTH-7, ECO-220/225
         # review): VITE_API_URL/GRAPHQL_URL/WS_URL stay unset so the frontend
-        # uses relative paths; sign-in hides itself if VITE_OIDC_ISSUER is unset.
+        # uses relative paths. The issuer defaults to the same-origin Keycloak
+        # path, as in scripts/deploy/build-images.sh (ECO-728).
         build-args: |
-          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER || '/idp/realms/econ-graph' }}
           VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
           NODE_ENV=production
         cache-from: type=gha

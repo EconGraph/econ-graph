@@ -1,7 +1,15 @@
 #!/bin/bash
-# Tags a release: the version tag (vX.Y.Z) and its train tag (train-N) together,
-# after checks that are cheap to run before a push but expensive to undo after
-# one (a pushed tag is effectively permanent, see docs/development/RELEASE_PROCESS.md).
+# Tags a release after checks that are cheap to run before a push but expensive
+# to undo after one (a pushed tag is effectively permanent, see
+# docs/development/RELEASE_PROCESS.md).
+#
+# - A train's first release (X.Y.0) gets the version tag (vX.Y.0) and the train
+#   tag (train-N), pushed together.
+# - A patch release (X.Y.Z with Z > 0) gets only the version tag. Train N must
+#   already have shipped: its tag train-N must exist on origin, and the commit it
+#   marks must be an ancestor of HEAD, so the patch is tagged on the branch that
+#   train shipped from. vX.Y.0 must exist on origin on the same commit as
+#   train-N, so the train number matches the X.Y being patched.
 #
 # - Working tree must be clean, and HEAD must already be pushed to origin.
 # - backend/Cargo.toml's workspace version, frontend/package.json's version and
@@ -23,7 +31,8 @@
 # be able to see that an rc tag exists, not that its build actually succeeded).
 #
 # Usage: scripts/release/tag.sh <version> <train-number>
-#   e.g. scripts/release/tag.sh 4.0.0 1
+#   e.g. scripts/release/tag.sh 4.0.0 1   (tags v4.0.0 and train-1)
+#        scripts/release/tag.sh 4.0.1 1   (tags v4.0.1; train-1 must exist)
 
 set -euo pipefail
 
@@ -52,6 +61,38 @@ git fetch origin --tags --quiet
 if ! git branch -r --contains HEAD 2>/dev/null | grep -q '^  origin/'; then
   echo "tag.sh: HEAD isn't on any origin branch; push it first so the pushed tags and the rc-built images point at a commit everyone else can see." >&2
   exit 1
+fi
+
+patch="${version##*.}"
+v_tag="v${version}"
+train_tag="train-${train}"
+
+if [ "$patch" != 0 ]; then
+  echo "tag.sh: ${version} is a patch release; checking that ${train_tag} has shipped and HEAD descends from it..."
+  if ! git ls-remote --exit-code --tags origin "refs/tags/${train_tag}" >/dev/null 2>&1; then
+    echo "tag.sh: ${version} is a patch release, but ${train_tag} doesn't exist on origin. A train is patched only after its X.Y.0 release is tagged." >&2
+    exit 1
+  fi
+  if ! train_commit="$(git rev-parse --verify --quiet "refs/tags/${train_tag}^{commit}")"; then
+    echo "tag.sh: ${train_tag} exists on origin but not locally after fetching tags." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "$train_commit" HEAD; then
+    echo "tag.sh: ${train_tag} (${train_commit}) is not an ancestor of HEAD; tag a patch for train ${train} on the release branch it shipped from." >&2
+    exit 1
+  fi
+  # The train must be the one that shipped X.Y.0, so a train number that
+  # doesn't match X.Y (4.1.1 with train 1, when train 1 shipped 4.0.0) is refused.
+  base_tag="v${version%.*}.0"
+  if ! git ls-remote --exit-code --tags origin "refs/tags/${base_tag}" >/dev/null 2>&1 ||
+    ! base_commit="$(git rev-parse --verify --quiet "refs/tags/${base_tag}^{commit}")"; then
+    echo "tag.sh: ${version} is a patch release, but ${base_tag} doesn't exist on origin." >&2
+    exit 1
+  fi
+  if [ "$base_commit" != "$train_commit" ]; then
+    echo "tag.sh: ${base_tag} (${base_commit}) is not ${train_tag} (${train_commit}); train ${train} didn't ship ${base_tag}, so ${version} isn't a patch of it." >&2
+    exit 1
+  fi
 fi
 
 cargo_version="$(grep -m1 '^version' backend/Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
@@ -88,10 +129,13 @@ fi
 echo "tag.sh: checking config/flags for flags due for removal by train-${train}..."
 node scripts/check-flags --shipped-train "$train"
 
-v_tag="v${version}"
-train_tag="train-${train}"
+if [ "$patch" = 0 ]; then
+  new_tags=("$v_tag" "$train_tag")
+else
+  new_tags=("$v_tag")
+fi
 
-for t in "$v_tag" "$train_tag"; do
+for t in "${new_tags[@]}"; do
   if git show-ref --verify --quiet "refs/tags/${t}"; then
     echo "tag.sh: tag ${t} already exists locally." >&2
     exit 1
@@ -103,12 +147,15 @@ for t in "$v_tag" "$train_tag"; do
 done
 
 git tag -a "$v_tag" -m "Release ${v_tag}"
-git tag -a "$train_tag" -m "Train ${train} shipped as ${v_tag}"
-
-echo "tag.sh: pushing ${v_tag} and ${train_tag} together..."
-if ! git push --atomic origin "$v_tag" "$train_tag"; then
+if [ "$patch" = 0 ]; then
+  git tag -a "$train_tag" -m "Train ${train} shipped as ${v_tag}"
+  echo "tag.sh: pushing ${v_tag} and ${train_tag} together..."
+else
+  echo "tag.sh: pushing ${v_tag}, a patch release of train ${train} (${train_tag} is unchanged)..."
+fi
+if ! git push --atomic origin "${new_tags[@]}"; then
   echo "tag.sh: push failed; deleting the local tags so a retry starts clean." >&2
-  git tag -d "$v_tag" "$train_tag" >/dev/null
+  git tag -d "${new_tags[@]}" >/dev/null
   exit 1
 fi
 
