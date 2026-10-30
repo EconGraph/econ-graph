@@ -199,7 +199,8 @@ async fn search_total_count_counts_every_match() {
 }
 
 /// A source id that isn't a UUID (or is empty) is a `BAD_USER_INPUT` error naming the
-/// argument, on both fields, and never a result set without the filter.
+/// argument, on `searchSeries`, `seriesList` and `datasets`, and never a result set without
+/// the filter. So is a malformed `dataset(id:)`.
 #[tokio::test]
 #[serial]
 async fn malformed_source_id_is_rejected() {
@@ -241,6 +242,10 @@ async fn malformed_source_id_is_rejected() {
         (
             r#"{ datasets(sourceId: "") { id } }"#.to_string(),
             "`sourceId`",
+        ),
+        (
+            r#"{ dataset(id: "not-a-uuid") { id } }"#.to_string(),
+            "`id`",
         ),
     ] {
         let response = run(&pool, &query).await;

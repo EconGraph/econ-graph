@@ -290,15 +290,14 @@ impl Query {
             .collect())
     }
 
-    /// Get a dataset by ID
+    /// Get a dataset by ID. An `id` that isn't a UUID is rejected with a `BAD_USER_INPUT` error.
     async fn dataset(
         &self,
         ctx: &Context<'_>,
         id: ID,
     ) -> Result<Option<crate::graphql::datasets::DatasetType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let id =
-            Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
+        let id = parse_id_argument("id", &id)?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
         // A dataset in a catalog the caller can't read is null, exactly like an unknown id.
         let Some(dataset) = dataset else {

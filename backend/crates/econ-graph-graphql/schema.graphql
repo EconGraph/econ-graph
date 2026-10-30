@@ -836,7 +836,7 @@ type Query {
 	"""
 	datasets(sourceId: ID): [Dataset!]!
 	"""
-	Get a dataset by ID
+	Get a dataset by ID. An `id` that isn't a UUID is rejected with a `BAD_USER_INPUT` error.
 	"""
 	dataset(id: ID!): Dataset
 	"""
