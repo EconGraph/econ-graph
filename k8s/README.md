@@ -369,6 +369,12 @@ Add `--via-cloudflare` to go through Cloudflare the way a visitor does. The Prom
 **Google sign-in** needs `https://econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
 as an authorized redirect URI of the Google OAuth client (ECO-13).
 
+**Facebook sign-in** is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)):
+`scripts/deploy/set-crawler-keys.sh --facebook` refuses, and the realm's `facebook`
+provider stays off while `econ-graph-keycloak` lacks its two keys. See
+[Facebook sign-in](../config/keycloak/README.md#facebook-sign-in) for the provider, the
+Meta app URLs and how to remove keys a cluster still holds.
+
 ### Production marker
 
 Only the production cluster may run cloudflared or hold the tunnel token. The tunnel is
@@ -559,7 +565,7 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | the data database (`postgresql`), its init script |
 | `econ-graph-app-postgres` | `postgres-password` (`APP_POSTGRES_PASSWORD`, generated), `app-password` (`APP_POSTGRES_APP_PASSWORD`, generated) | the app database (`app-postgres`), its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
-| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, `anonymous-client-secret`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords and the anonymous client secret are generated on the first run, the username defaults to `admin` | Keycloak, the realm import and the backend (`anonymous-client-secret`) |
+| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, `anonymous-client-secret`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`), and `facebook-idp-client-id`, `facebook-idp-client-secret`, kept if present but never written: Facebook sign-in is disabled and `KEYCLOAK_FACEBOOK_*` is refused; the passwords and the anonymous client secret are generated on the first run, the username defaults to `admin` | Keycloak, the realm import and the backend (`anonymous-client-secret`) |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
 | `cloudflare-tunnel` | optional `token` (`CLOUDFLARE_TUNNEL_TOKEN`, or hidden input with `--prompt-tunnel-token`), the Cloudflare Tunnel connector token | `cloudflared` (see [Public site](#-public-site-cloudflare-tunnel)) |

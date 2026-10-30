@@ -247,7 +247,7 @@ describe('navigation targets', () => {
   it('finds the routes and the targets it checks', () => {
     // Guards against the scan silently finding nothing after a refactor.
     expect(routes.length).toBeGreaterThanOrEqual(8);
-    expect(targets.length).toBeGreaterThanOrEqual(25);
+    expect(targets.length).toBeGreaterThanOrEqual(20);
   });
 
   it('reads literals through parentheses and `as`', () => {

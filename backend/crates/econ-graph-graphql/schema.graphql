@@ -839,11 +839,12 @@ type Query {
 	"""
 	List datasets, optionally only one source's, grouped by source id (in no particular
 	order across sources) and by code within a source. Unpaginated: sources publish a
-	handful of datasets each.
+	handful of datasets each. A `sourceId` that isn't a UUID is rejected with a
+	`BAD_USER_INPUT` error.
 	"""
 	datasets(sourceId: ID): [Dataset!]!
 	"""
-	Get a dataset by ID
+	Get a dataset by ID. An `id` that isn't a UUID is rejected with a `BAD_USER_INPUT` error.
 	"""
 	dataset(id: ID!): Dataset
 	"""

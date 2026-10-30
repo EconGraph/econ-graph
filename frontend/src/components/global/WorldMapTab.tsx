@@ -2,12 +2,14 @@
  * WorldMapTab Component.
  *
  * The Global Analysis page's map: pick a World Development Indicator and see each country's
- * latest value on a world map. Clicking a country opens its series.
+ * latest value on a world map. Clicking a country opens its series. The picked indicator is the
+ * URL's `indicator` parameter (a WDI code such as `SP.POP.TOTL`), so Back from a country's
+ * series, a reload or a shared link shows the same indicator.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -27,7 +29,7 @@ import MapValuesTable from './MapValuesTable';
 import WorldMapControls from './WorldMapControls';
 import { worldAtlasQuery } from './worldAtlas';
 import { DEFAULT_PROJECTION } from './hooks/useWorldMap';
-import { useCountryData } from './hooks/useCountryData';
+import { useCountryData, type ColorScaleMode } from './hooks/useCountryData';
 import {
   DEFAULT_INDICATOR,
   useMapCrossSection,
@@ -42,20 +44,34 @@ const NO_VALUES: MapCountryValue[] = [];
 
 const WorldMapTab: React.FC = () => {
   const navigate = useNavigate();
-  const [pickedIndicator, setPickedIndicator] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pickedIndicator = searchParams.get('indicator');
+  const pickIndicator = useCallback(
+    (code: string) =>
+      setSearchParams(
+        previous => {
+          const next = new URLSearchParams(previous);
+          next.set('indicator', code);
+          return next;
+        },
+        { replace: true }
+      ),
+    [setSearchParams]
+  );
   const [projection, setProjection] = useState(DEFAULT_PROJECTION);
   const [colorScheme, setColorScheme] = useState('viridis');
+  const [pickedScales, setPickedScales] = useState<Record<string, ColorScaleMode>>({});
 
   const datasetQuery = useMapDataset();
   const dataset = datasetQuery.data;
   const indicators = dataset?.indicators ?? [];
 
-  // Until the user picks one: GDP per capita when the dataset has it, else its first indicator.
+  // The URL's indicator when the dataset has it. Otherwise (none picked yet, or a code the
+  // dataset doesn't have): GDP per capita when the dataset has it, else its first indicator.
+  const listed = (code: string | null) => indicators.some(c => c.code === code);
   const indicator =
-    pickedIndicator ??
-    (indicators.some(c => c.code === DEFAULT_INDICATOR)
-      ? DEFAULT_INDICATOR
-      : indicators[0]?.code) ??
+    (listed(pickedIndicator) ? pickedIndicator : null) ??
+    (listed(DEFAULT_INDICATOR) ? DEFAULT_INDICATOR : indicators[0]?.code) ??
     '';
   const indicatorLabel = indicators.find(c => c.code === indicator)?.label ?? indicator;
 
@@ -82,11 +98,20 @@ const WorldMapTab: React.FC = () => {
   const {
     valuesByIsoNumeric,
     colorScale,
+    scaleMode,
+    logUnavailableReason,
+    valueAtPosition,
     dataRange,
     dateRange,
     countriesWithData,
     countriesWithoutData,
-  } = useCountryData(values, colorScheme, drawableIds);
+  } = useCountryData(
+    values,
+    colorScheme,
+    drawableIds,
+    (shown && pickedScales[shown.indicator]) ??
+      (shown?.indicator === DEFAULT_INDICATOR ? 'log' : 'linear')
+  );
 
   // Stable, so the map's click handler never changes.
   const openSeries = useCallback(
@@ -105,7 +130,7 @@ const WorldMapTab: React.FC = () => {
                 labelId='indicator-select-label'
                 value={indicator}
                 label='Indicator'
-                onChange={event => setPickedIndicator(event.target.value)}
+                onChange={event => pickIndicator(event.target.value)}
                 MenuProps={{ slotProps: { paper: { sx: { maxHeight: 400 } } } }}
               >
                 {indicators.map(code => (
@@ -120,6 +145,11 @@ const WorldMapTab: React.FC = () => {
               onProjectionChange={setProjection}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
+              scaleMode={scaleMode}
+              logUnavailableReason={logUnavailableReason}
+              onScaleModeChange={mode => {
+                if (shown) setPickedScales(previous => ({ ...previous, [shown.indicator]: mode }));
+              }}
             />
           </Box>
 
@@ -201,6 +231,8 @@ const WorldMapTab: React.FC = () => {
             unit={unit}
             frequency={frequency}
             dataRange={dataRange}
+            scaleMode={scaleMode}
+            valueAtPosition={valueAtPosition}
             dateRange={dateRange}
             countryCount={countriesWithData.length}
             undrawnCount={countriesWithoutData.length}
