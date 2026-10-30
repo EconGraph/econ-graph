@@ -84,9 +84,12 @@ progress reporting, see the [re-fetch guide](../../../docs/technical/OBSERVATION
 
 ## Licence gate
 
-Some providers' terms of use forbid the way the crawler would use them. The
-[licence gate](src/licence.rs) keeps those sources from being crawled unless a build enables
-them. Each gated source has a `crawl_<source>` build flag in
+The [licence gate](src/licence.rs) keeps the crawler from downloading a source that the
+maintainer has not decided to download. Sources whose terms restrict them are not all gated:
+FRED and WTO are downloaded and stored, and their catalogs are hidden from users through
+Keycloak catalog roles instead. The gate covers IMF, which the maintainer decided not to
+download, and SNB, BOJ and UN_STATS, which have restrictive or unclear terms, no adapter and no
+decision to download them. Each gated source has a `crawl_<source>` build flag in
 [`flags.flagd.json`](../../../config/flags/flags.flagd.json), off in both the `release` and
 `dev` profiles:
 
@@ -97,20 +100,25 @@ them. Each gated source has a `crawl_<source>` build flag in
 | SNB | `crawl_snb` | Use is permitted for non-commercial purposes only | [ECO-742](https://linear.app/econgraph/issue/ECO-742) |
 | UN_STATS | `crawl_un_stats` | The SDG Global Database states no terms; the generic UN terms allow personal, non-commercial use only | [ECO-182](https://linear.app/econgraph/issue/ECO-182) |
 
-The verdicts come from the
+The restrictions come from the
 [data source terms of use](https://linear.app/econgraph/document/data-source-terms-of-use-42433ce643db)
 register. Sources that aren't listed are not gated. While a source's flag is off:
 
-- `crawler-worker` never claims its jobs. Jobs already queued stay `pending`, untouched: they
-  aren't failed, retried or deleted. The worker logs why once per process, and `crawler status`
-  marks the source `disabled: licence (<ticket>); not claimed`.
+- `crawler-worker` registers no adapter for it, so its startup reference-data refresh, job
+  dispatch, scheduler and coverage never reach the source.
+- The worker never claims its jobs, whatever the case of their `source` value. Jobs already
+  queued stay `pending`, untouched: they aren't failed, retried or deleted. The worker logs why
+  once per process, and `crawler status` marks the source
+  `disabled: licence (<ticket>); not claimed`. A job claimed some other way is never fetched:
+  the worker returns it to `retrying` with the refusal as its error, without spending a retry.
 - The refresh scheduler neither refreshes nor re-discovers it.
 - `crawler enqueue`, `discover`, `fetch`, `refetch` and `record-reference-seeds`, and GraphQL
   `triggerCrawl`, refuse it with the restriction and the ticket link.
 - `crawler sources` shows `disabled: licence (<ticket>)` in its `CRAWL` column.
 
-To crawl a gated source, first settle its licence question (written permission, or a revised
-verdict in the register). Then set the flag's `defaultVariant` to `on` in
+To crawl a gated source, first settle its licence question: written permission, a revised
+verdict in the register, or a maintainer decision to download it and restrict who sees it.
+Then set the flag's `defaultVariant` to `on` in
 [`flags.flagd.json`](../../../config/flags/flags.flagd.json), or in `dev.flagd.json` for
 development builds only, and run `node scripts/flags-merge`
 (see [feature flags](../../../config/flags/README.md)). The flag is compiled in, so the

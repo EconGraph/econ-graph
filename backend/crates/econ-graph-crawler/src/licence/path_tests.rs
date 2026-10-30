@@ -15,10 +15,13 @@ use econ_graph_core::DatabasePool;
 
 use super::{testing, LICENCE_GATES};
 use crate::adapter::{AdapterRegistry, CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
-use crate::cli::{enqueue_all, format_sources, new_job, Cli, CATALOG_SERIES_ID};
+use crate::cli::{
+    enqueue_all, format_sources, format_status, new_job, Cli, SourceSelection, CATALOG_SERIES_ID,
+};
 use crate::error::CrawlError;
 use crate::scheduler::{RefreshScheduler, SchedulerConfig};
 use crate::source::SourceId;
+use crate::status::{CrawlerStatusSnapshot, SourceQueueStatus};
 use crate::testkit::{lazy_pool, test_ctx, test_keys};
 use crate::worker::{JobOutcome, Worker, WorkerConfig};
 
@@ -105,6 +108,7 @@ fn cli_commands(source: &str) -> Vec<Vec<String>> {
         vec!["discover", "--source", source],
         vec!["fetch", "--source", source, "--series", "X"],
         vec!["refetch", "--source", source],
+        vec!["record-reference-seeds", "--source", source],
     ]
     .into_iter()
     .map(|c| c.into_iter().map(str::to_string).collect())
@@ -156,15 +160,97 @@ fn sources_lists_gated_sources_as_disabled_by_licence() {
     assert!(!out.contains("licence"), "{out}");
 }
 
+#[test]
+fn refetch_all_leaves_out_gated_sources() {
+    let all = SourceSelection {
+        source: Vec::new(),
+        all: true,
+    };
+    let registry = counting_registry(&Arc::new(AtomicUsize::new(0)));
+    let resolved = all.resolve(&registry).unwrap();
+    for source in gated() {
+        assert!(!resolved.contains(&source), "{source}");
+    }
+    assert!(resolved.contains(&SourceId::Fred));
+    // IMF has no static catalog, so it is refetchable once unlocked.
+    let _unlocked = unlock_all();
+    assert!(all.resolve(&registry).unwrap().contains(&SourceId::Imf));
+}
+
+#[test]
+fn status_notes_that_gated_jobs_are_not_claimed() {
+    let row = |source: &str| SourceQueueStatus {
+        source: source.to_string(),
+        pending: 3,
+        processing: 0,
+        retrying: 0,
+        failed_24h: 0,
+        last_success: None,
+        last_failure: None,
+    };
+    let snapshot = CrawlerStatusSnapshot {
+        active_workers: 1,
+        is_running: true,
+        last_crawl: None,
+        next_scheduled_crawl: None,
+        per_source: vec![row("FRED"), row("IMF")],
+    };
+    let out = format_status(&snapshot);
+    let line = |source: &str| {
+        out.lines()
+            .find(|l| l.starts_with(source))
+            .unwrap()
+            .to_string()
+    };
+    assert!(
+        line("IMF").ends_with("(disabled: licence (ECO-175); not claimed)"),
+        "{out}"
+    );
+    assert!(!line("FRED").contains("licence"), "{out}");
+    let _unlocked = unlock_all();
+    assert!(!format_status(&snapshot).contains("licence"));
+}
+
 // ---------------------------------------------------------------------------
-// Worker claim
+// Worker registry and claim
 // ---------------------------------------------------------------------------
+
+/// The worker's registry has no adapter for a gated source, so its startup reference-data
+/// refresh (every registry source, as in `crawler-worker`'s main) never reaches one.
+#[tokio::test]
+async fn ungated_registry_drops_gated_adapters_so_startup_refresh_skips_them() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refreshes = Arc::new(AtomicUsize::new(0));
+    let registry = super::ungated_registry(counting_registry_with(&calls, &refreshes));
+    for source in gated() {
+        assert!(registry.get(source).is_none(), "{source}");
+    }
+    assert_eq!(registry.ids(), ungated());
+    let ctx = test_ctx();
+    for id in registry.ids() {
+        registry
+            .get(id)
+            .unwrap()
+            .refresh_reference_data(&ctx)
+            .await
+            .unwrap();
+    }
+    // One refresh per ungated source, none for a gated one.
+    assert_eq!(refreshes.load(Ordering::SeqCst), ungated().len());
+
+    let _unlocked = unlock_all();
+    let registry = super::ungated_registry(counting_registry(&calls));
+    assert_eq!(registry.ids(), SourceId::ALL.to_vec());
+}
 
 /// An adapter that counts every upstream call and fails each fetch, so a test can tell whether the
 /// worker claimed and dispatched a job.
 struct Counting {
     id: SourceId,
+    /// `discover` and `fetch_series` calls.
     calls: Arc<AtomicUsize>,
+    /// `refresh_reference_data` calls.
+    refreshes: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -191,16 +277,35 @@ impl SourceAdapter for Counting {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(CrawlError::Permanent("counting adapter".into()))
     }
+
+    async fn refresh_reference_data(&self, _ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        self.refreshes.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
-fn counting_worker(pool: &DatabasePool, calls: &Arc<AtomicUsize>) -> Worker {
+/// A [`Counting`] adapter for every source, all sharing `calls` and `refreshes`.
+fn counting_registry_with(
+    calls: &Arc<AtomicUsize>,
+    refreshes: &Arc<AtomicUsize>,
+) -> AdapterRegistry {
     let mut registry = AdapterRegistry::new();
     for id in SourceId::ALL {
         registry.register(Arc::new(Counting {
             id,
             calls: calls.clone(),
+            refreshes: refreshes.clone(),
         }));
     }
+    registry
+}
+
+fn counting_registry(calls: &Arc<AtomicUsize>) -> AdapterRegistry {
+    counting_registry_with(calls, &Arc::new(AtomicUsize::new(0)))
+}
+
+fn counting_worker(pool: &DatabasePool, calls: &Arc<AtomicUsize>) -> Worker {
+    let registry = counting_registry(calls);
     let mut ctx = test_ctx();
     ctx.pool = pool.clone();
     Worker::new(

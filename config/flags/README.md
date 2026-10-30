@@ -144,9 +144,9 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   `remove_by: unscheduled`, each owned by its source's licence review: ECO-175, ECO-743,
   ECO-742 and ECO-182) are the crawler's
   [licence gate](../../backend/crates/econ-graph-crawler/README.md#licence-gate). Each one
-  allows the crawler to crawl a source whose terms of use restrict automated or commercial use.
-  They are permanent: a flag is turned on only once that source's licence question is settled,
-  and none is overridden in `dev.flagd.json`.
+  lets the crawler download a source that has restrictive or unclear terms and no maintainer
+  decision to download it. They are permanent: a flag is turned on only once that source's
+  licence question is settled, and none is overridden in `dev.flagd.json`.
 
 ## Updating the vendored schema
 

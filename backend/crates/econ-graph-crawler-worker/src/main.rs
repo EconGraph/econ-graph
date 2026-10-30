@@ -142,7 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = econ_graph_core::config::data_database_url()?;
     let pool = DataPool(econ_graph_core::create_pool(&database_url).await?);
 
-    let registry = default_registry();
+    // Licence-gated sources get no adapter, so nothing below (startup reference-data refresh,
+    // scheduler, coverage, job dispatch) can reach their upstream.
+    let registry = econ_graph_crawler::licence::ungated_registry(default_registry());
     // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
     // their first job (BLS reads `bls_series`; FRED reads `fred_series`).
     let bls_series = econ_graph_crawler::reference::bls_series()?;

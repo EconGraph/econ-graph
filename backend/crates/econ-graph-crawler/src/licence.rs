@@ -2,7 +2,12 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! **Licence gate**: sources whose terms of use forbid the way the crawler would use them.
+//! **Licence gate**: sources the crawler does not download.
+//!
+//! A source is gated when its terms restrict our use and the maintainer has not decided to
+//! download it. FRED and WTO have restrictive terms but are downloaded and stored, with their
+//! catalogs hidden through Keycloak catalog roles, so they are not gated. IMF is gated because
+//! the decision is not to download it; SNB, BOJ and UN_STATS have no adapter and no decision.
 //!
 //! Each entry of [`LICENCE_GATES`] names a source, the restriction in its terms, the Linear
 //! ticket holding the full review, and the `crawl_<source>` build flag
@@ -10,11 +15,15 @@
 //! gated source is never crawled unless a build turns its flag on. While a gated source is
 //! disabled:
 //!
-//! - the [worker](crate::worker) never claims its jobs (see [`claim_exclusions`]); jobs already in
-//!   the queue stay there untouched, neither failed nor deleted, and the worker logs why once;
+//! - `crawler-worker` builds its registry with [`ungated_registry`], so no adapter of the source
+//!   exists for its startup reference-data refresh, dispatch, scheduler or coverage;
+//! - the [worker](crate::worker) never claims its jobs (see [`claim_exclusions`]; the claim
+//!   compares names case-insensitively); jobs already in the queue stay there untouched, neither
+//!   failed nor deleted, and the worker logs why once. A job claimed some other way is handed
+//!   back unfetched, without spending a retry;
 //! - the [scheduler](crate::scheduler) neither refreshes nor re-discovers it;
-//! - `crawler enqueue`, `discover`, `fetch` and `refetch`, and GraphQL `triggerCrawl`, refuse it
-//!   with the [`LicenceRefusal`] message;
+//! - `crawler enqueue`, `discover`, `fetch`, `refetch` and `record-reference-seeds`, and GraphQL
+//!   `triggerCrawl`, refuse it with the [`LicenceRefusal`] message;
 //! - `crawler sources` lists it as `disabled: licence (<ticket>)`.
 //!
 //! The terms register is the Linear document "Data source terms of use" in the Data sources
@@ -22,8 +31,15 @@
 
 use std::fmt;
 use std::sync::Once;
+use std::time::Duration;
 
+use econ_graph_core::models::{CrawlQueueItem, QueueTransition};
+use econ_graph_core::DatabasePool;
+
+use crate::adapter::AdapterRegistry;
+use crate::error::CrawlError;
 use crate::source::SourceId;
+use crate::worker::JobOutcome;
 
 /// One licence-gated source.
 #[derive(Debug)]
@@ -151,6 +167,50 @@ pub fn claim_exclusions() -> Vec<String> {
         }
     });
     disabled.iter().map(|s| s.as_str().to_string()).collect()
+}
+
+/// `registry` without the adapters of sources this build may not crawl. The worker builds its
+/// registry with this, so its startup reference-data refresh, scheduler, coverage and job
+/// dispatch never reach a gated source's upstream.
+pub fn ungated_registry(registry: AdapterRegistry) -> AdapterRegistry {
+    let mut out = AdapterRegistry::new();
+    for source in registry.ids().into_iter().filter(|&s| allows(s)) {
+        if let Some(adapter) = registry.get(source) {
+            out.register(adapter);
+        }
+    }
+    out
+}
+
+/// How long a job handed back by `hand_back` waits before it is due again.
+pub const HAND_BACK_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Returns a claimed job of a gated source to the queue unfetched: `retrying`, due again after
+/// [`HAND_BACK_DELAY`], with the refusal as its error and no retry spent. For rows the claim
+/// filter misses; the worker never fetches them.
+pub(crate) async fn hand_back(
+    pool: &DatabasePool,
+    item: &CrawlQueueItem,
+    gate: &'static LicenceGate,
+) -> JobOutcome {
+    let refusal = LicenceRefusal(gate).to_string();
+    tracing::warn!(id = %item.id, source = %item.source, "job handed back unfetched: {refusal}");
+    match CrawlQueueItem::retry_later(pool, item, &refusal, HAND_BACK_DELAY, false).await {
+        Ok(QueueTransition::Rescheduled { at }) => JobOutcome::Retrying {
+            error: CrawlError::Permanent(refusal),
+            at,
+        },
+        Ok(QueueTransition::Failed) => JobOutcome::Failed { error: refusal },
+        Ok(QueueTransition::LostLease) => JobOutcome::LeaseLost {
+            error: Some(refusal),
+        },
+        Err(e) => {
+            tracing::warn!(id = %item.id, error = %e, "handing back a licence-gated job failed");
+            JobOutcome::LeaseLost {
+                error: Some(refusal),
+            }
+        }
+    }
 }
 
 /// A gated source was asked for while its licence flag is off.

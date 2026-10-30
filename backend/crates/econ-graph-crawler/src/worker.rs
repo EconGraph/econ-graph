@@ -517,7 +517,8 @@ impl Worker {
     ) -> Option<(SourceId, Arc<dyn SourceAdapter>, Vec<CrawlQueueItem>)> {
         let source = SourceId::from_str(&lead.source).ok()?;
         let kind = JobKind::from_str(&lead.kind).ok()?;
-        if !matches!(kind, JobKind::FetchSeries | JobKind::RefetchSeries)
+        if crate::licence::blocking(source).is_some()
+            || !matches!(kind, JobKind::FetchSeries | JobKind::RefetchSeries)
             || self.handlers.contains_key(&(source, kind))
         {
             return None;
@@ -588,6 +589,10 @@ impl Worker {
                     .await
             }
         };
+        // A licence-gated job that got past the claim filter goes back unfetched.
+        if let Some(gate) = crate::licence::blocking(source) {
+            return crate::licence::hand_back(&self.ctx.pool, &item, gate).await;
+        }
         let kind = match JobKind::from_str(&item.kind) {
             Ok(k) => k,
             Err(_) => {

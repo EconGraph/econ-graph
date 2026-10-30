@@ -611,7 +611,8 @@ async fn test_claim_priority_order_and_source_filter() {
 async fn test_claim_next_except_leaves_excluded_sources_untouched() {
     let pool = test_pool().await;
     let kept = unique_source("EXCA");
-    let excluded = unique_source("EXCB");
+    // Upper case, like the canonical source names the worker excludes.
+    let excluded = unique_source("EXCB").to_uppercase();
     let skipped = CrawlQueueItem::enqueue(
         &pool,
         &NewCrawlQueueItem {
@@ -647,6 +648,21 @@ async fn test_claim_next_except_leaves_excluded_sources_untouched() {
     assert_eq!(left.status, "pending");
     assert_eq!(left.locked_by, None);
     assert_eq!(left.retry_count, 0);
+
+    // The exclusion holds upper-case names and matches `source` in any case.
+    let lower = excluded.to_lowercase();
+    let lower_item = CrawlQueueItem::enqueue(&pool, &new_item(&lower, "LOWER"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        CrawlQueueItem::claim_next_except(&pool, "w", Some(&[lower.clone()]), &except)
+            .await
+            .unwrap()
+            .is_none(),
+        "a lower-case row of an excluded source was claimed"
+    );
+    assert_eq!(reload(&pool, lower_item.id).await.status, "pending");
 
     // An empty exclusion is plain claim_next.
     let only_excluded = vec![excluded.clone()];

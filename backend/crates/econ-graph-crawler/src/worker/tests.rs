@@ -4183,3 +4183,104 @@ async fn shutdown_mid_request_finishes_the_job_and_claims_no_more() {
     assert_eq!(item(&db.pool, second).await.status, "pending");
     assert!(series_row(&db.pool, "t5_shutdown_b").await.is_none());
 }
+
+/// A [`BatchAdapter`] registered under another source.
+struct AsSource(SourceId, Arc<BatchAdapter>);
+
+#[async_trait]
+impl SourceAdapter for AsSource {
+    fn id(&self) -> SourceId {
+        self.0
+    }
+
+    fn datasets(&self) -> &[&str] {
+        self.1.datasets()
+    }
+
+    async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        self.1.discover(ctx).await
+    }
+
+    async fn fetch_series(
+        &self,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        since: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        self.1.fetch_series(ctx, external_id, since).await
+    }
+
+    fn batch_key(&self, external_id: &str) -> Option<String> {
+        self.1.batch_key(external_id)
+    }
+
+    async fn fetch_batch(
+        &self,
+        ctx: &CrawlCtx,
+        external_ids: &[String],
+        since: Option<NaiveDate>,
+    ) -> Result<crate::adapter::BatchFetch, CrawlError> {
+        self.1.fetch_batch(ctx, external_ids, since).await
+    }
+}
+
+/// A gated source's rows are excluded from claiming whatever the case of their `source`, and a
+/// row that is claimed anyway is never batched or fetched: it goes back to the queue with the
+/// licence refusal and no retry spent.
+#[tokio::test]
+async fn licence_gated_rows_in_any_case_are_never_fetched() {
+    let Some(db) = db().await else { return };
+    let gated = SourceId::Imf;
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        ..Default::default()
+    });
+    let mut ctx = test_ctx_with(HashMap::from([(
+        gated,
+        SourcePolicy {
+            max_batch: 3,
+            ..slow_backoff(gated)
+        },
+    )]));
+    ctx.pool = db.pool.clone();
+    let mut registry = AdapterRegistry::new();
+    registry.register(Arc::new(AsSource(gated, adapter.clone())));
+    let w = Worker::new(ctx, registry, config("t5-gated-worker")).with_datasets(test_catalog());
+
+    let mut ids = Vec::new();
+    for series in ["t5_ka_1", "t5_ka_2", "t5_ka_3"] {
+        ids.push(enqueue(&db.pool, "imf", series, JobKind::FetchSeries, 9).await);
+    }
+    assert!(
+        w.run_batch_once().await.is_none(),
+        "a lower-case gated row was claimed"
+    );
+
+    // Past the claim filter (here: claimed by id), the worker still refuses it.
+    let lead = CrawlQueueItem::claim_by_id(&db.pool, ids[0], "t5-gated-worker")
+        .await
+        .unwrap()
+        .expect("claimed");
+    assert!(w.batch_mates(&lead).await.is_none());
+    let outcome = w.process(lead).await;
+    assert!(
+        matches!(outcome, JobOutcome::Retrying { .. }),
+        "{outcome:?}"
+    );
+    let it = item(&db.pool, ids[0]).await;
+    assert_eq!(it.status, "retrying");
+    assert_eq!(it.retry_count, 0);
+    assert_eq!(it.locked_by, None);
+    assert!(
+        it.error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("disabled: licence (ECO-175)")),
+        "{:?}",
+        it.error_message
+    );
+    for id in &ids[1..] {
+        assert_eq!(item(&db.pool, *id).await.status, "pending");
+    }
+    assert!(adapter.batch_calls().is_empty());
+    assert!(adapter.series_calls().is_empty());
+}

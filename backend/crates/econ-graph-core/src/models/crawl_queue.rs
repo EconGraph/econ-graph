@@ -381,8 +381,8 @@ impl CrawlQueueItem {
         Self::claim_next_except(pool, worker_id, sources, &[]).await
     }
 
-    /// [`claim_next`](Self::claim_next), never claiming an item whose `source` is in `except`.
-    /// Excluded items are left as they are.
+    /// [`claim_next`](Self::claim_next), never claiming an item whose upper-cased `source` is in
+    /// `except` (which holds upper-case names). Excluded items are left as they are.
     pub async fn claim_next_except(
         pool: &DatabasePool,
         worker_id: &str,
@@ -399,7 +399,7 @@ impl CrawlQueueItem {
                  WHERE status IN ('pending', 'retrying') \
                    AND (scheduled_for IS NULL OR scheduled_for <= NOW()) \
                    AND ($2::text[] IS NULL OR source = ANY($2::text[])) \
-                   AND NOT (source = ANY($3::text[])) \
+                   AND NOT (upper(source) = ANY($3::text[])) \
                  ORDER BY priority DESC, created_at ASC \
                  FOR UPDATE SKIP LOCKED \
                  LIMIT 1 \

@@ -206,7 +206,12 @@ impl Command {
             | Command::Fetch { source, .. }
             | Command::RecordReferenceSeeds { source, .. } => vec![*source],
             Command::Refetch { sources, .. } => sources.source.clone(),
-            _ => Vec::new(),
+            // Read-only, or no upstream: nothing to gate.
+            Command::RefetchStatus { .. }
+            | Command::Status { .. }
+            | Command::Coverage { .. }
+            | Command::Sources
+            | Command::Migrate { .. } => Vec::new(),
         }
     }
 }
