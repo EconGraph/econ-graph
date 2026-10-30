@@ -2,8 +2,8 @@
 
 Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Selection rules:
 `backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml`. Fixtures: `tests/fixtures/bea/`
-(`GetData` for every curated NIPA table and frequency, SAGDP2 line codes, areas and line 1,
-and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
+(`GetData` for each NIPA table and frequency the default selection rules match, BEA's NIPA
+and Regional table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
 any request.
 
 ## What we fetch today

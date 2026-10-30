@@ -935,18 +935,21 @@ pub async fn persist_series(
     fetched: &FetchedSeries,
 ) -> AppResult<SeriesWrite> {
     let mut conn = pool.get().await.map_err(conn_err)?;
+    // Without the adapter registry, take the lifecycle lock as a tracking source would.
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
-        persist_series_conn(conn, source, external_id, fetched).await
+        persist_series_conn(conn, source, external_id, fetched, true).await
     })
     .await
 }
 
 /// Connection form; caller must wrap all related writes in a transaction.
+/// `tracks_lifecycle` is the adapter's [`tracks_catalog_lifecycle`](crate::SourceAdapter::tracks_catalog_lifecycle).
 pub(crate) async fn persist_series_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
     fetched: &FetchedSeries,
+    tracks_lifecycle: bool,
 ) -> AppResult<SeriesWrite> {
     let source_id = data_source_id_conn(conn, source).await?;
     let meta = fetched.metadata.as_ref();
@@ -958,7 +961,8 @@ pub(crate) async fn persist_series_conn(
     let external_id = clip(external_id, 255);
     // A successful historical fetch resets only its consecutive fetch misses. Catalog
     // disappearance, legal restrictions and confirmed successor links remain authoritative.
-    crate::lifecycle::record_fetch_success_conn(conn, source_id, &external_id).await?;
+    crate::lifecycle::record_fetch_success_conn(conn, source_id, &external_id, tracks_lifecycle)
+        .await?;
     let id = stable_series_id(source, &external_id);
 
     // Last occurrence wins for duplicate keys (one INSERT can't touch a row twice).

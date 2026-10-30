@@ -91,16 +91,22 @@ One atomic data migration creates `series_lifecycle` (including fetch evidence),
 before deploying code that reads lifecycle state. A complete successful
 catalog under unchanged selection rules supplies absence evidence. Failed or partial catalogs
 supply none, and a rule change resets the comparison scope. Three consecutive successful
-absences confirm a missing series. A snapshot that suddenly loses more than 20% of the
-previously present scope, or an empty scope, is guarded rather than treated as removal.
+absences confirm a missing series. A snapshot that drops more than 20% of the series listed
+by the last accepted catalog of the same rules, or an empty snapshot, is guarded rather than
+treated as removal (see [Reviewing a guarded catalog](#reviewing-a-guarded-catalog)).
 On first adoption, retained BEA histories that match the configured rules establish a
-baseline without counting absence. Three subsequent complete snapshots are required for
-a missing badge. Histories outside those rules are not enrolled or retired by that scope.
+baseline without counting absence. Members already absent at that baseline were never
+listed by an accepted catalog, so they do not count toward the 20%; three subsequent
+complete snapshots are required for their missing badge. Histories outside those rules are
+not enrolled or retired by that scope.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
-by a successful fetch. Successful persistence shares the source lock with missing-result
-writes so normal fetches and forced refetches cannot race; upstream HTTP stays concurrent.
-Fetch success never erases catalog absence evidence: a delisted
-series can still serve historical observations.
+by a successful fetch. Three in a row retire a series; the scheduler still probes it once
+every 12 refresh intervals (a series with no stored history: at most once per queue
+retention), and a successful probe makes it active again. Per-series writers (fetch success,
+NotFound, restriction) serialize only on the same series, so normal fetches and forced
+refetches of one series cannot race while different series persist concurrently; a complete
+catalog reconciliation briefly excludes them for its source. Fetch success never erases
+catalog absence evidence: a delisted series can still serve historical observations.
 
 | Status | Public behavior |
 |---|---|
@@ -121,6 +127,29 @@ crawler confirm-successor --source FRED --series OLD_ID --successor NEW_ID
 
 This command records the reviewed link. It never merges histories, moves annotations or
 deletes either series. Keeping values separate avoids joining numbers with different bases.
+
+### Reviewing a guarded catalog
+
+A guarded snapshot changes no absence evidence; the worker keeps the newest one for review
+and warns `catalog mass-disappearance guard`. Every later snapshot is compared with the last
+accepted catalog, so a real upstream removal of more than 20% stays guarded until an operator
+accepts it. Against the data database, list the series the snapshot would count as absent:
+
+```sh
+crawler accept-guarded-catalog --source BEA
+```
+
+Check those ids upstream (a table rename, a removed release, or an incomplete response). If
+the snapshot is right, apply it:
+
+```sh
+crawler accept-guarded-catalog --source BEA --accept
+```
+
+Accepting records one absence for each listed series, exactly as an unguarded catalog would,
+and makes the snapshot the new comparison baseline. Two further complete catalogs are still
+needed before those series show as missing. Nothing is deleted. If the snapshot was
+incomplete, do not accept it; the next complete catalog that passes the guard replaces it.
 
 The worker publishes `crawler_series_lifecycle{source,status}` counts and
 `crawler_series_lifecycle_transitions_total{source,status}` transition counters.

@@ -267,7 +267,7 @@ data:
             severity: warning
           annotations:
             summary: '{{ $labels.source }} catalog rejected by {{ $labels.reason }} guard'
-            description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying.
+            description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying. For mass_disappearance, review and accept a correct snapshot with `crawler accept-guarded-catalog` (crawler coverage runbook).
 
         - alert: CrawlerSeriesPublicationChanged
           expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
