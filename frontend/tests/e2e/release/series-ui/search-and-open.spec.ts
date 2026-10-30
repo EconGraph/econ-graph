@@ -2,7 +2,7 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { SEEDED } from '../fixtures';
 
@@ -52,33 +52,47 @@ test.describe('search by abbreviation', () => {
   });
 });
 
-// ECO-405: the sidebar's FRED Data (and Browse series on /sources) used to open an empty
-// explorer asking for a query. It lists the source's series instead.
+// ECO-405: Browse Series on /sources used to open an empty explorer asking for a query. It
+// lists the source's series instead.
 test.describe('browse a source', () => {
-  test("FRED Data lists FRED's series without a query", async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+  /**
+   * Opens FRED's listing the way a visitor does: its Browse Series link on /sources.
+   * @param page - The page to drive.
+   */
+  const browseFredFromSources = async (page: Page) => {
+    await page.goto('/sources');
+    await page
+      .getByRole('region', { name: SEEDED.fredGdp.sourceName })
+      .getByRole('link', { name: 'Browse Series' })
+      .click();
+    await expect(page).toHaveURL(/\/explore\?source=[^&]+$/);
+  };
 
-    await expect(page).toHaveURL(/\/explore\?source=/);
+  test("Browse Series lists FRED's series without a query", async ({ page }) => {
+    await browseFredFromSources(page);
+
     await expect(page.getByText(/series, by title/)).toBeVisible();
     await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
 
-  // ECO-511: on /explore?q=GDP, FRED Data changed nothing: the explorer wrote its GDP search
+  // ECO-511: a link to another /explore URL changed nothing: the explorer wrote its own form
   // back over the link's URL. Each URL's query and source now reach the form and the results.
-  test('FRED Data from a GDP search browses FRED, and back and forward follow', async ({
+  // The header search is the same-route link here: from FRED's listing it opens a GDP search.
+  test('the header search from a source listing searches, and back and forward follow', async ({
     page,
   }) => {
     const searchBox = page.getByPlaceholder(
       'Search economic series (e.g., GDP, unemployment, inflation)'
     );
+    const headerSearch = page.getByPlaceholder('Search economic series...', { exact: true });
     const sourceSelect = page.getByRole('combobox', { name: 'Source' });
     const cardSources = () =>
       page
         .locator('.MuiCard-root [title^="Data Source: "]')
         .evaluateAll(chips => chips.map(chip => chip.getAttribute('title')));
-    const fredUrl = /\/explore\?source=Federal(\+|%20)Reserve(\+|%20)Economic(\+|%20)Data$/;
+    // Where FRED's Browse Series link lands, read once the test has followed it
+    let fredUrl = '';
 
     const expectGdpSearch = async () => {
       await expect(page).toHaveURL(/\/explore\?q=GDP$/);
@@ -97,18 +111,20 @@ test.describe('browse a source', () => {
       expect(new Set(sources)).toEqual(new Set([`Data Source: ${SEEDED.fredGdp.sourceName}`]));
     };
 
-    await page.goto('/explore?q=GDP');
-    await expectGdpSearch();
-    // Survives only while the page stays loaded: the link must navigate within the app
+    await browseFredFromSources(page);
+    fredUrl = page.url();
+    await expectFredBrowse();
+    // Survives only while the page stays loaded: the search must navigate within the app
     await page.evaluate(() => Object.assign(window, { eco511SamePage: true }));
 
-    await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
-    await expectFredBrowse();
+    await headerSearch.fill('GDP');
+    await headerSearch.press('Enter');
+    await expectGdpSearch();
 
     await page.goBack();
-    await expectGdpSearch();
-    await page.goForward();
     await expectFredBrowse();
+    await page.goForward();
+    await expectGdpSearch();
     expect(await page.evaluate(() => 'eco511SamePage' in window)).toBe(true);
   });
 });

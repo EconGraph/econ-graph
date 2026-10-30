@@ -23,8 +23,33 @@ test.describe('release smoke', () => {
     // Through the frontend's own origin, so this also checks the /graphql proxy. By search rather
     // than the plain series list, so it also holds against a deployed build's full catalog.
     for (const s of Object.values(SEEDED)) {
+      // A deployed build has USREC only once its crawler has fetched it; the next test checks
+      // it there, softly.
+      if (DEPLOYED && s === SEEDED.fredUsrec) continue;
       await seededSeriesId(request, s);
     }
+  });
+
+  test('the recession indicator is reachable by its external id', async ({ request }) => {
+    // A direct lookup by source name and external id, not by search.
+    const { sourceName, externalId } = SEEDED.fredUsrec;
+    const response = await request.post('/graphql', {
+      data: {
+        query:
+          'query($s: String!, $e: String!) { seriesByExternalId(sourceName: $s, externalId: $e) { externalId } }',
+        variables: { s: sourceName, e: externalId },
+      },
+    });
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    // The seed always loads it. On a deployed build, null means it hasn't been crawled yet or
+    // sits in a catalog anonymous readers can't see: skip, not fail.
+    test.skip(
+      DEPLOYED && body.data.seriesByExternalId === null,
+      `${externalId} not found on the deployed build: not crawled yet, or not visible to anonymous readers`
+    );
+    expect(body.data.seriesByExternalId).toEqual({ externalId });
   });
 
   test('the backend is a release-profile build', async ({ request }) => {

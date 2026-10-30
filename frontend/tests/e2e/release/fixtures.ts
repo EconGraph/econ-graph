@@ -52,6 +52,21 @@ export const SEEDED = {
       { label: 'None', description: '', latestShown: { date: '2026 Q2', value: '32,101.60' } },
     ],
   },
+  fredUsrec: {
+    source: 'FRED',
+    sourceName: 'Federal Reserve Economic Data (FRED)',
+    externalId: 'USREC',
+    title:
+      'NBER based Recession Indicators for the United States from the Period following the Peak through the Trough',
+    units: '+1 or 0',
+    /**
+     * Monthly 0/1 recession indicator (1 in recession months, 0 otherwise).
+     * fred/observations_usrec_e2e.json (made by fred/make_observations_usrec.py) has every month
+     * in this window, with FRED's published values.
+     */
+    firstDate: '1854-12-01',
+    lastDate: '2026-09-01',
+  },
   blsCpi: {
     source: 'BLS',
     sourceName: 'Bureau of Labor Statistics (BLS)',

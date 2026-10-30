@@ -133,8 +133,9 @@ All notable changes to EconGraph are documented here. The format follows
 
 ## [4.0.1] - 2026-10-30
 
-Sign-in on https://econgraph.com, the explorer's source links and the privacy policy on phones
-now work, and the deploy scripts reach only the kind cluster.
+Sign-in on https://econgraph.com and the privacy policy on phones now work, the explorer
+follows the header search and other links to another `/explore` URL, and the deploy scripts
+reach only the kind cluster.
 
 ### Changed
 
@@ -155,6 +156,11 @@ now work, and the deploy scripts reach only the kind cluster.
   `train-N` on origin with its commit an ancestor of `HEAD` and the same as `vX.Y.0`'s, and
   pushes only `vX.Y.Z`.
 
+### Removed
+
+- The navigation sidebar's FRED Data item. Data Sources lists all six sources, each with a
+  Browse Series link (ECO-751).
+
 ### Fixed
 
 - Sign-in shows on https://econgraph.com. Release and CI frontend images were built with an
@@ -162,8 +168,8 @@ now work, and the deploy scripts reach only the kind cluster.
   `/idp/realms/econ-graph` (a `VITE_OIDC_ISSUER` repository variable or build argument still
   overrides it), and an image build with an empty issuer fails unless
   `VITE_OIDC_SIGN_IN_DISABLED=true` is also passed (ECO-728).
-- The explorer follows a link to another `/explore` URL: the sidebar's FRED Data link from a
-  search shows FRED's series with the Source filter set, and back and forward restore each
+- The explorer follows a link to another `/explore` URL: the header search from a source's
+  listing shows that search with the Source filter cleared, and back and forward restore each
   entry's search, source and frequency (ECO-511).
 - The navigation drawer has a Privacy Policy item, so the privacy policy can be reached on a
   phone, where the header hides its Privacy button (ECO-730).

@@ -5,6 +5,7 @@
 # Names and descriptions are not shipped here: the crawler fetches them from the World
 # Bank's own /indicator/{id} endpoint on each crawl (see sources/world_bank.rs).
 id,unit
+# Output, prices, labor, population, public finance, external accounts and money
 NY.GDP.MKTP.CD,current US$
 NY.GDP.MKTP.KD,constant 2015 US$
 NY.GDP.MKTP.KD.ZG,% change
@@ -58,3 +59,113 @@ FS.AST.PRVT.GD.ZS,% of GDP
 FM.LBL.BMNY.GD.ZS,% of GDP
 SI.POV.GINI,index 0-100
 SI.POV.DDAY,% of population
+# Trade
+TX.VAL.MRCH.CD.WT,current US$
+TM.VAL.MRCH.CD.WT,current US$
+TG.VAL.TOTL.GD.ZS,% of GDP
+NE.EXP.GNFS.CD,current US$
+NE.IMP.GNFS.CD,current US$
+NE.EXP.GNFS.KD.ZG,% change
+NE.IMP.GNFS.KD.ZG,% change
+TX.VAL.SERV.CD.WT,current US$
+TM.VAL.SERV.CD.WT,current US$
+TX.VAL.TECH.MF.ZS,% of manufactured exports
+TX.VAL.FUEL.ZS.UN,% of merchandise exports
+TX.VAL.FOOD.ZS.UN,% of merchandise exports
+TX.VAL.MANF.ZS.UN,% of merchandise exports
+TM.VAL.FUEL.ZS.UN,% of merchandise imports
+TM.VAL.FOOD.ZS.UN,% of merchandise imports
+TM.TAX.MRCH.WM.AR.ZS,%
+TM.TAX.MRCH.SM.AR.ZS,%
+TT.PRI.MRCH.XD.WD,index 2015=100
+BX.KLT.DINV.CD.WD,current US$
+BM.KLT.DINV.WD.GD.ZS,% of GDP
+BX.TRF.PWKR.CD.DT,current US$
+DT.ODA.ODAT.GN.ZS,% of GNI
+# Health
+SH.XPD.CHEX.GD.ZS,% of GDP
+SH.XPD.CHEX.PC.CD,current US$ per person
+SH.XPD.GHED.GD.ZS,% of GDP
+SH.XPD.OOPC.CH.ZS,% of current health expenditure
+SP.DYN.LE00.FE.IN,years
+SP.DYN.LE00.MA.IN,years
+SP.DYN.IMRT.IN,per 1000 live births
+SH.DYN.MORT,per 1000 live births
+SH.STA.MMRT,per 100000 live births
+SP.DYN.CBRT.IN,per 1000 people
+SP.DYN.CDRT.IN,per 1000 people
+SP.ADO.TFRT,births per 1000 women ages 15-19
+SH.IMM.MEAS,% of children ages 12-23 months
+SH.IMM.IDPT,% of children ages 12-23 months
+SH.STA.STNT.ZS,% of children under 5
+SN.ITK.DEFC.ZS,% of population
+SH.STA.DIAB.ZS,% of population ages 20-79
+SH.PRV.SMOK,% of adults
+SH.DYN.AIDS.ZS,% of population ages 15-49
+SH.TBS.INCD,per 100000 people
+SH.DYN.NCOM.ZS,%
+SH.STA.SUIC.P5,per 100000 people
+SH.MED.PHYS.ZS,per 1000 people
+SH.MED.NUMW.P3,per 1000 people
+SH.MED.BEDS.ZS,per 1000 people
+SH.H2O.BASW.ZS,% of population
+SH.STA.BASS.ZS,% of population
+# Education and research
+SE.XPD.TOTL.GD.ZS,% of GDP
+SE.XPD.TOTL.GB.ZS,% of government expenditure
+SE.PRE.ENRR,% gross
+SE.PRM.ENRR,% gross
+SE.SEC.ENRR,% gross
+SE.TER.ENRR,% gross
+SE.PRM.CMPT.ZS,% of relevant age group
+SE.SEC.CMPT.LO.ZS,% of relevant age group
+SE.PRM.UNER.ZS,% of primary school age
+SE.ADT.LITR.ZS,% of people ages 15+
+SE.ADT.1524.LT.ZS,% of people ages 15-24
+SE.SEC.CUAT.UP.ZS,% of population ages 25+
+SE.TER.CUAT.BA.ZS,% of population ages 25+
+SL.UEM.NEET.ZS,% of youth population
+GB.XPD.RSDV.GD.ZS,% of GDP
+SP.POP.SCIE.RD.P6,per million people
+IT.NET.USER.ZS,% of population
+# Energy
+EG.ELC.ACCS.ZS,% of population
+EG.ELC.ACCS.UR.ZS,% of urban population
+EG.ELC.ACCS.RU.ZS,% of rural population
+EG.CFT.ACCS.ZS,% of population
+EG.FEC.RNEW.ZS,% of total final energy consumption
+EG.EGY.PRIM.PP.KD,MJ per 2021 PPP $ of GDP
+EG.USE.PCAP.KG.OE,kg of oil equivalent per capita
+EG.USE.ELEC.KH.PC,kWh per capita
+EG.IMP.CONS.ZS,% of energy use
+EG.ELC.FOSL.ZS,% of total electricity production
+EG.ELC.COAL.ZS,% of total electricity production
+EG.ELC.NUCL.ZS,% of total electricity production
+EG.ELC.HYRO.ZS,% of total electricity production
+EG.ELC.LOSS.ZS,% of output
+NY.GDP.TOTL.RT.ZS,% of GDP
+NY.GDP.PETR.RT.ZS,% of GDP
+NY.GDP.NGAS.RT.ZS,% of GDP
+# Environment
+EN.GHG.ALL.MT.CE.AR5,Mt CO2e
+EN.GHG.ALL.PC.CE.AR5,t CO2e per capita
+EN.GHG.ALL.LU.MT.CE.AR5,Mt CO2e
+EN.GHG.CO2.MT.CE.AR5,Mt CO2e
+EN.GHG.CO2.PC.CE.AR5,t CO2e per capita
+EN.GHG.CO2.RT.GDP.PP.KD,kg CO2e per 2021 PPP $ of GDP
+EN.GHG.CH4.MT.CE.AR5,Mt CO2e
+EN.GHG.N2O.MT.CE.AR5,Mt CO2e
+EN.ATM.PM25.MC.M3,micrograms per cubic meter
+AG.LND.FRST.ZS,% of land area
+AG.LND.AGRI.ZS,% of land area
+AG.LND.ARBL.ZS,% of land area
+ER.PTD.TOTL.ZS,% of total territorial area
+ER.LND.PTLD.ZS,% of land area
+ER.MRN.PTMR.ZS,% of territorial waters
+ER.H2O.FWTL.ZS,% of internal resources
+ER.H2O.FWST.ZS,% of available freshwater
+ER.H2O.INTR.PC,cubic meters per capita
+AG.YLD.CREL.KG,kg per hectare
+AG.PRD.FOOD.XD,index 2014-2016=100
+AG.CON.FERT.ZS,kg per hectare of arable land
+EN.POP.DNST,people per sq. km of land area
