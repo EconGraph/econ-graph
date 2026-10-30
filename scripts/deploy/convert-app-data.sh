@@ -44,7 +44,10 @@
 #      its dry run, then the copy (a new verified backup under the backup root; an empty
 #      app database first gets the app schema as the backend's role econgraph, in the
 #      same transaction), then, with --drop-source-app, the removal; or the rollback
-#      with --restore-source-app.
+#      with --restore-source-app. After a removal commits, app-database-url is rewritten to
+#      the app database (APP_DATABASE=separate through create-secrets.sh, with a cut-down
+#      environment), and back to the data database after a rollback, so the Secret records
+#      where the app tables are and a plain deploy starts the backend on the right one.
 #
 # The run holds database locks for the length of each step; writers are stopped first.
 # Nothing under the backup root is ever deleted. Run it inside tmux or screen: a dropped
@@ -200,13 +203,15 @@ if [ "$DRY" = true ]; then
     echo "  no removal or rollback succeeded; otherwise it stays at 0 until its database setting changes."
     if [ -n "$RESTORE" ]; then
         echo "+ split-app-data.py ${ARGS[*]}"
-        echo "  (the backend stays at 0 afterwards: point it back at the combined database first)"
+        echo "+ APP_DATABASE=shared scripts/deploy/create-secrets.sh --context=${CONTEXT}   (app-database-url back to econ_graph)"
+        echo "  (the backend stays at 0 afterwards; deploy.sh starts it)"
     else
         echo "+ split-app-data.py ${ARGS[*]} --dry-run   (locks both databases while it hashes them)"
         echo "+ split-app-data.py ${ARGS[*]} --writers-stopped   (new verified backup, then the copy)"
         if [ "$DROP" = true ]; then
             echo "+ split-app-data.py ${ARGS[*]} --writers-stopped --drop-source-app   (asks for the typed phrase)"
-            echo "  (the backend stays at 0 afterwards: point it at the app database first)"
+            echo "+ APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=${CONTEXT}   (app-database-url to econ_graph_app)"
+            echo "  (the backend stays at 0 afterwards; deploy.sh starts it)"
         fi
     fi
     exit 0
@@ -245,12 +250,13 @@ cleanup() {
     declare -A result
     # The CronJob and the crawler first: they do not depend on where the app tables are.
     for c in "${CRONJOBS_PRESENT[@]}"; do
-        kctl patch cronjob "$c" --type=merge -p "{\"spec\":{\"suspend\":${SUSPENDED[$c]}}}" >/dev/null 2>&1
+        kctl patch cronjob "$c" --type=merge -p "{\"spec\":{\"suspend\":${SUSPENDED[$c]}}}" \
+            --request-timeout=30s >/dev/null 2>&1
         result[cronjob/$c]=$?
     done
     for d in "${WRITER_DEPLOYMENTS[@]}"; do
         [ -n "${REPLICAS[$d]}" ] && [ "$d" != econ-graph-backend ] || continue
-        kctl scale deployment "$d" --replicas="${REPLICAS[$d]}" >/dev/null 2>&1
+        kctl scale deployment "$d" --replicas="${REPLICAS[$d]}" --request-timeout=30s >/dev/null 2>&1
         result[deployment/$d]=$?
     done
     # The backend only when econ_graph certainly still holds the app tables.
@@ -261,7 +267,8 @@ cleanup() {
         why="econ_graph no longer holds the app tables, or that could not be checked within ${DB_CHECK_TIMEOUT}s. Check before starting the backend on it: if the tables are gone, roll back with --restore-source-app <the removal's backup directory>, or start it on the app database with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/deploy.sh (docs/deployment/APP_DATA_CONVERSION.md)"
     fi
     if [ -n "${REPLICAS[econ-graph-backend]}" ] && [ "$restart_backend" = true ]; then
-        kctl scale deployment econ-graph-backend --replicas="${REPLICAS[econ-graph-backend]}" >/dev/null 2>&1
+        kctl scale deployment econ-graph-backend --replicas="${REPLICAS[econ-graph-backend]}" \
+            --request-timeout=30s >/dev/null 2>&1
         result[deployment/econ-graph-backend]=$?
     fi
     for c in "${CRONJOBS_PRESENT[@]}"; do
@@ -367,14 +374,36 @@ export PATH="$WORK/bin:$PATH"
 # --- 5. the conversion ----------------------------------------------------------------
 
 SPLIT=("$PYTHON" "${PROJECT_ROOT}/scripts/deploy/split-app-data.py")
+
+# switch_app_database_url separate|shared: rewrite app-database-url through create-secrets.sh,
+# whose guard checks the direction against the databases, so the Secret records where the app
+# tables are. Its environment is cut down to the basics (as set-crawler-keys.sh does), so no
+# credential exported in the operator's shell is written; it never prints values.
+switch_app_database_url() {
+    (
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG "
+        while IFS= read -r name; do
+            case "$keep" in
+                *" $name "*) ;;
+                *) [[ "$name" == LC_* ]] || unset "$name" 2>/dev/null || true ;;
+            esac
+        done < <(compgen -e)
+        KUBECTL="$(command -v kubectl)"
+        export APP_DATABASE="$1" NAMESPACE KUBECTL
+        exec "${PROJECT_ROOT}/scripts/deploy/create-secrets.sh" --context="${CONTEXT}"
+    )
+}
 NEXT_STEP=""
 PUBLIC_HINT=""
 [ "$PRODUCTION" = false ] || PUBLIC_HINT="PUBLIC_HOST=<the public host> "
 if [ -n "$RESTORE" ]; then
     log "Restoring the app tables into the combined database from $RESTORE"
     "${SPLIT[@]}" "${ARGS[@]}"
-    NEXT_STEP="the app tables are back in econ_graph; point the backend at it and start it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=shared ${PUBLIC_HINT}scripts/deploy/deploy.sh"
     KEEP_BACKEND_STOPPED=true
+    NEXT_STEP="the app tables are back in econ_graph, but app-database-url could not be pointed at it; run KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=shared scripts/deploy/create-secrets.sh --context=${CONTEXT}, then start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh"
+    log "Pointing app-database-url back at econ_graph"
+    switch_app_database_url shared
+    NEXT_STEP="the app tables are back in econ_graph and app-database-url names it; start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh"
     log "Done." || true
     exit 0
 fi
@@ -385,7 +414,10 @@ log "Verified backup and copy"
 if [ "$DROP" = true ]; then
     log "Removing the app tables from the combined database (typed confirmation)"
     "${SPLIT[@]}" "${ARGS[@]}" --writers-stopped --drop-source-app
-    NEXT_STEP="the app tables are now only in econ_graph_app; point the backend at it and start it with KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate ${PUBLIC_HINT}scripts/deploy/deploy.sh. Until then the nightly CronJob dumps econ_graph only; nothing writes app rows while the backend is stopped"
     KEEP_BACKEND_STOPPED=true
+    NEXT_STEP="the app tables are now only in econ_graph_app, but app-database-url still names econ_graph and could not be changed; run KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=${CONTEXT} before anything starts the backend (create-secrets.sh refuses shared from now on)"
+    log "Pointing app-database-url at the app database"
+    switch_app_database_url separate
+    NEXT_STEP="the app tables are now only in econ_graph_app and app-database-url names it; start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh (APP_DATABASE unset or separate)"
     log "Done." || true
 fi

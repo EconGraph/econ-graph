@@ -22,6 +22,9 @@
 # create-secrets.sh runs with an environment cut down to the basics plus the
 # keys of the selected mode, so credentials exported in your shell for other
 # keys (another mode's keys, database or Grafana passwords) are not written.
+# APP_DATABASE (shared or separate, not a credential) is passed on: on a cluster
+# whose econ-graph-secrets has no app-database-url yet, create-secrets.sh needs
+# it (docs/deployment/APP_DATA_CONVERSION.md).
 #
 # Afterwards the crawler worker is scaled to one replica and restarted so it
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
@@ -200,7 +203,7 @@ else
     # on any command line). KUBECTL and CLUSTER_ROLE_CONTEXT are kept, so
     # create-secrets.sh uses the same kind kubectl and context as this script.
     (
-        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT ${vars[*]} "
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT APP_DATABASE ${vars[*]} "
         while IFS= read -r name; do
             case "$keep" in
                 *" $name "*) ;;

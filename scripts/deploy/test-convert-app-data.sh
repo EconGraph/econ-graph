@@ -77,6 +77,8 @@ STUB
 #   STUB_RESTORE_PATCH_FAILS=1  un-suspending the CronJob fails
 cat >"$STUB_KUBECTL" <<'STUB'
 #!/usr/bin/env bash
+# Under create-secrets.sh's cut-down environment the settings come from the file convert() writes.
+[ -n "${STUB_LOG:-}" ] || { set -a; . "${0%/*}/stub.env"; set +a; }
 echo "kubectl $*" >>"$STUB_LOG"
 args=("$@")
 [ "${args[0]}" = --context ] && args=("${args[@]:2}")
@@ -112,6 +114,34 @@ case "$*" in
   "exec "*" -- psql "*"to_regclass"*) echo t ;;
   "exec "*" -- psql "*) echo 3 ;;
   "get secret "*" -o name --ignore-not-found") ;;
+  # create-secrets.sh, run by the wrapper to rewrite app-database-url. The URL it writes is
+  # recorded without its password (host, port and database) in $STUB_LOG.app_url.
+  "config get-contexts -o name"*) printf 'kind-econ-graph\nkind-kg-test\n' ;;
+  "config current-context") echo kind-kg-test ;;
+  "get namespace econ-graph") echo namespace/econ-graph ;;
+  "config view --minify -o jsonpath={.clusters[0].cluster.server}") printf 'https://127.0.0.1:6443' ;;
+  "config use-context "*) ;;
+  "get secret econ-graph-secrets --ignore-not-found -o jsonpath={.data.app-database-url}")
+    printf '%s' "${STUB_APP_URL:-postgresql://econgraph:x@data-postgres-service:5432/econ_graph}" | base64 -w0 ;;
+  "get secret econ-graph-secrets --ignore-not-found -o name") echo secret/econ-graph-secrets ;;
+  "get secret "*" --ignore-not-found -o jsonpath="*) ;;
+  "get secret "*" --ignore-not-found -o name") ;;
+  "get persistentvolumeclaim "* | "get persistentvolumeclaim" | "get pvc "*) ;;
+  "get pod postgresql-0 --ignore-not-found -o name") echo pod/postgresql-0 ;;
+  "get pod app-postgres-0 --ignore-not-found -o name") echo pod/app-postgres-0 ;;
+  "create secret generic econ-graph-secrets "*)
+    for a in "$@"; do
+      case "$a" in --from-file=app-database-url=*) sed 's/.*@//' "${a#--from-file=app-database-url=}" >>"$STUB_LOG.app_url"; echo >>"$STUB_LOG.app_url" ;; esac
+    done
+    ;&
+  "create secret generic "*)
+    # A credential from the caller's shell must never be written.
+    for a in "$@"; do
+      case "$a" in --from-file=*) ! grep -qF operator-shell-credential "${a#*=*=}" || echo "LEAKED ${a%%=*}" >>"$STUB_LOG" ;; esac
+    done
+    echo "kind: Secret" ;;
+  "apply --server-side "*) cat >/dev/null ;;
+  "annotate secret "*) ;;
   *) echo "stub kubectl: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -147,9 +177,20 @@ chmod +x "$tmp/bin/docker" "$tmp/bin/kind" "$STUB_KUBECTL" "$PYTHON"
 
 map="$tmp/source-map.json"
 echo '{}' >"$map"
-convert() { ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" scripts/deploy/convert-app-data.sh "$@" >"$tmp/out" 2>&1; }
+# stub_env: the STUB_ settings of this call, for the stubs that run without them.
+stub_env() {
+  local v
+  for v in ${!STUB_@}; do printf '%s=%q\n' "$v" "${!v}"; done >"$tmp/stub.env.new"
+  for d in "$tmp" "$XDG_CACHE_HOME/econgraph/bin"; do
+    mkdir -p "$d"; cp "$tmp/stub.env.new" "$d/stub.env"
+  done
+}
+convert() {
+  stub_env
+  ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" scripts/deploy/convert-app-data.sh "$@" >"$tmp/out" 2>&1
+}
 reset() {
-  sleep 1; : >"$STUB_LOG"; rm -f "$STUB_LOG.sleeping"
+  sleep 1; : >"$STUB_LOG"; rm -f "$STUB_LOG.sleeping" "$STUB_LOG.app_url"
   unset STUB_MARKER STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT STUB_SCALE_FAILS \
     STUB_SOURCE_USERS STUB_KILL_READER STUB_PY_SLEEP_ON STUB_RESTORE_PATCH_FAILS
 }
@@ -223,13 +264,31 @@ leftovers "copy run"
 
 # --drop-source-app: the removal runs last and the backend stays stopped.
 reset
-convert --cluster kg-test --source-map "$map" --drop-source-app || { fail "drop run failed"; cat "$tmp/out"; }
+STUB_SOURCE_USERS=f POSTGRES_PASSWORD=operator-shell-credential GRAFANA_ADMIN_PASSWORD=operator-shell-credential \
+  convert --cluster kg-test --source-map "$map" --drop-source-app || { fail "drop run failed"; cat "$tmp/out"; }
 [ "$(grep -c '^python ' "$STUB_LOG")" = 3 ] || fail "drop run: expected dry run, copy, removal"
-tail -n 20 "$STUB_LOG" | grep -q "^python .*--writers-stopped --drop-source-app$" || fail "no removal"
+[ "$(tail -n1 "$STUB_LOG.app_url" 2>/dev/null)" = "app-postgres-service:5432/econ_graph_app" ] ||
+  fail "drop run: app-database-url not pointed at the app database: $(cat "$STUB_LOG.app_url" 2>/dev/null)"
+removal="$(grep -n -- '--drop-source-app$' "$STUB_LOG" | tail -1 | cut -d: -f1)"
+switch="$(grep -n 'create secret generic econ-graph-secrets' "$STUB_LOG" | tail -1 | cut -d: -f1)"
+[ -n "$switch" ] && [ "$switch" -gt "$removal" ] || fail "drop run: app-database-url not rewritten after the removal"
+never "^LEAKED" "drop run: a credential from the operator's shell was written"
+grep -q "app-database-url names it" "$tmp/out" || fail "drop run: the next step does not say the Secret was switched"
+grep -q "^python .*--writers-stopped --drop-source-app$" "$STUB_LOG" || fail "no removal"
 never "scale deployment econ-graph-backend --replicas=2" "backend restarted after the removal"
 has "scale deployment crawler-worker --replicas=1" "crawler not put back after the removal"
-grep -q "APP_DATABASE=separate" "$tmp/out" || fail "no next step after the removal"
+grep -q "KIND_CLUSTER=kg-test .*scripts/deploy/deploy.sh" "$tmp/out" || fail "no next step after the removal"
 leftovers "drop run"
+
+# A switch that create-secrets.sh refuses (econ_graph still answers it has the app tables):
+# the run fails, the backend stays stopped, and the message says what to run.
+reset
+STUB_SOURCE_USERS=t convert --cluster kg-test --source-map "$map" --drop-source-app &&
+  fail "refused switch reported success"
+never "scale deployment econ-graph-backend --replicas=2" "refused switch: backend restarted"
+grep -q "APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=kind-kg-test" "$tmp/out" ||
+  fail "refused switch: no instruction naming the cluster"
+leftovers "refused switch"
 
 # A failed conversion puts every writer back.
 reset
@@ -255,9 +314,11 @@ mkdir -p "$dir"; echo x >"$dir/combined.dump"; echo '{}' >"$dir/evidence.json"
 convert --cluster kg-test --restore-source-app "$dir" --source-map "$map" && fail "rollback with --source-map accepted"
 convert --cluster kg-test --restore-source-app "$dir" || { fail "rollback failed"; cat "$tmp/out"; }
 [ "$(grep -c '^python ' "$STUB_LOG")" = 1 ] || fail "rollback: expected one conversion call"
+[ "$(tail -n1 "$STUB_LOG.app_url" 2>/dev/null)" = "data-postgres-service:5432/econ_graph" ] ||
+  fail "rollback: app-database-url not pointed back at econ_graph: $(cat "$STUB_LOG.app_url" 2>/dev/null)"
 has "^python .*--restore-source-app $dir --writers-stopped$" "no rollback call"
 never "scale deployment econ-graph-backend --replicas=2" "backend restarted after the rollback"
-grep -q "APP_DATABASE=shared" "$tmp/out" || fail "no next step after the rollback"
+grep -q "app-database-url names it; start the backend with KIND_CLUSTER=kg-test" "$tmp/out" || fail "no next step after the rollback"
 leftovers "rollback"
 
 # A failure after the source lost its app tables: the backend stays stopped, the rest comes back.
