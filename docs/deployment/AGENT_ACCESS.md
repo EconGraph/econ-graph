@@ -77,8 +77,13 @@ Bootstrap refuses an output directory that is a symlink, is not yours, or is
 inside a git work tree. It also refuses when any directory on the way to it can be
 changed by another user: writable by others without the sticky bit, by a group
 other than your own private group, or by another user or group through an ACL.
+Your private group is your primary group when it has your user name, no listed
+members, and is no other user's primary group. An ACL that cannot be read, for a
+reason other than there being none or the filesystem not supporting them, is
+refused. NFSv4 ACLs are not read, so keep the output directory off NFSv4 mounts.
 That walk follows symlinks one component at a time, so the directory holding a
-symlink is checked as well as where it points. Never attach or paste the
+symlink is checked as well as where it points. Inside a sticky directory such as
+`/tmp`, a symlink must be yours or root's. Never attach or paste the
 kubeconfig in an issue, terminal output or chat.
 
 The launcher runs nothing from the directory unless these checks still pass. It
