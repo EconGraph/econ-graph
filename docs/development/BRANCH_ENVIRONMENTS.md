@@ -61,9 +61,15 @@ pod per shared-data branch and assumes the frontend image retains nginx.
 The deployer creates namespaces atomically, acquires a namespace lock and checks
 ownership and data mode again under that lock. A competing creator fails closed.
 Lock cleanup checks its owner token and deletes the inspected object with
-UID/resourceVersion preconditions. Teardown requires the exact typed namespace.
+UID/resourceVersion preconditions. Teardown requires the exact typed namespace,
+pins its initial UID across confirmation, and deletes only the inspected UID and
+resource version. It waits up to 120 seconds for that incarnation to disappear;
+a newly created namespace is neither deleted nor included in the wait.
 If the namespace is absent, an exactly owned orphan grant can be removed after
 confirmation and another absence check; grant deletion uses preconditions.
+Every grant deployment records the actual namespace UID, so a recreated
+namespace adopting an orphan grant changes its resource version and invalidates
+an older cleanup request. Normal teardown also checks this binding when present.
 Listing includes branch-labelled grants so orphan resources remain visible.
 Job polling reports terminal failure immediately; cluster commands and restores
 have bounded timeouts.

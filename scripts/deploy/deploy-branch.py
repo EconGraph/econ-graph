@@ -77,6 +77,17 @@ def freshen_mutable_images(docs):
             template['metadata'].setdefault('annotations', {})['econgraph.io/redeploy-token'] = secrets.token_hex(8)
 
 
+def wait_namespace_deleted(lookup, namespace, uid, seconds=120):
+    """Wait only for this incarnation; never wait for or delete a replacement."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        current = lookup('namespace', namespace)
+        if not current or current['metadata']['uid'] != uid:
+            return
+        time.sleep(2)
+    raise ValueError(f'namespace {namespace} deletion did not complete within {seconds}s')
+
+
 def default_kubectl(environ=os.environ):
     """The kubectl to run, as cluster_role_default_kubectl in lib/cluster-role.sh chooses it.
 
@@ -216,7 +227,7 @@ def main():
         if args.action == 'up':
             docs = renderer.render(args.branch, args.backend_image, args.frontend_image, args.local_data, args.data_image)
             print(f'Probe NetworkPolicy enforcement before credentials/workloads; apply {len(docs)} branch resources only if it passes.')
-            print('Local data: verify/seed dump, migrate, then start worker.' if args.local_data else
+            print('Local data: verify/seed dump and migrate; worker stays stopped for review.' if args.local_data else
                   f'Create only ReferenceGrant data-graphql-from-{slug} in econ-graph; no primary database credentials.')
         else:
             print('Require matching branch ownership labels and typed namespace confirmation; delete only namespace and its ReferenceGrant.')
@@ -238,16 +249,29 @@ def main():
                 delete_grant(ref)
             print('Branch namespace absent; removed its owned orphan grant if present.')
             return
+        confirmed_uid = existing['metadata']['uid']
         if not sys.stdin.isatty() or input(f'Type {namespace} to delete its disposable users and databases: ') != namespace:
             raise ValueError('typed namespace confirmation required')
         with lock(namespace):
-            verify_ownership(lookup('namespace', namespace), slug, args.branch)
+            current_namespace = lookup('namespace', namespace)
+            verify_ownership(current_namespace, slug, args.branch)
+            meta = current_namespace['metadata']
+            if meta['uid'] != confirmed_uid:
+                raise ValueError('branch namespace was replaced during confirmation; refusing deletion')
             ref = lookup('referencegrant', 'data-graphql-from-' + slug, 'econ-graph')
             if ref and ref.get('metadata', {}).get('labels', {}).get('econgraph.io/branch') != slug:
                 raise ValueError('ReferenceGrant ownership differs; refusing deletion')
             if ref:
+                bound_uid = ref.get('metadata', {}).get('annotations', {}).get('econgraph.io/namespace-uid')
+                if bound_uid and bound_uid != confirmed_uid:
+                    raise ValueError('ReferenceGrant belongs to another namespace incarnation; refusing deletion')
+            if ref:
                 delete_grant(ref)
-            k('delete', 'namespace', namespace)
+            options = {'apiVersion': 'v1', 'kind': 'DeleteOptions',
+                       'preconditions': {'uid': confirmed_uid, 'resourceVersion': meta['resourceVersion']}}
+            k('delete', '--raw', '/api/v1/namespaces/' + namespace,
+              '-f', '-', data=json.dumps(options))
+            wait_namespace_deleted(lookup, namespace, confirmed_uid)
         return
     # Confirm gateway dependency exists before creating disposable resources.
     k('-n', 'econ-graph-gateway', 'get', 'gateway', 'econ-graph-gateway', capture=True)
@@ -257,7 +281,9 @@ def main():
     if not existing:
         k('create', '-f', '-', data=yaml.safe_dump(docs[0]))
     with lock(namespace):
-        verify_ownership(lookup('namespace', namespace), slug, args.branch, args.local_data)
+        current_namespace = lookup('namespace', namespace)
+        verify_ownership(current_namespace, slug, args.branch, args.local_data)
+        namespace_uid = current_namespace['metadata']['uid']
         apply([d for d in docs if d['kind'] == 'NetworkPolicy'])
         network_spec = importlib.util.spec_from_file_location('branch_network_check', Path(__file__).with_name('branch-network-check.py'))
         network = importlib.util.module_from_spec(network_spec)
@@ -317,6 +343,10 @@ def main():
         wait_job(k, namespace, 'keycloak-realm-import', 900)
         if not args.local_data:
             ref = renderer.grant(args.branch)
+            # An orphan cleanup may already hold the previous grant's deletion
+            # preconditions. Stamp this namespace incarnation so reusing a grant
+            # changes resourceVersion before the new environment relies on it.
+            ref['metadata']['annotations'] = {'econgraph.io/namespace-uid': namespace_uid}
             current = lookup('referencegrant', ref['metadata']['name'], 'econ-graph')
             if current and current.get('metadata', {}).get('labels', {}).get('econgraph.io/branch') != slug:
                 raise ValueError('ReferenceGrant already exists with different ownership')

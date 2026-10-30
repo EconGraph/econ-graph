@@ -283,8 +283,7 @@ class GuardTests(unittest.TestCase):
 
     def test_down_requires_terminal_and_matching_typed_name(self):
         slug, ns = r.identity('one')
-        existing = {'metadata': {'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug},
-                                 'annotations': {'econgraph.io/branch-name': 'one'}}}
+        existing = {'metadata': self.owned()}
         with patch.object(sys.stdin, 'isatty', return_value=False), self.assertRaisesRegex(ValueError, 'typed'):
             self.invoke(['down', 'one', '--context', 'scratch'], lambda cmd: json.dumps(existing))
 
@@ -392,12 +391,20 @@ class GuardTests(unittest.TestCase):
                     for script in set(re.findall(r'/config/([\w.-]+)', text)):
                         self.assertIn(script, set(realm), (d['metadata']['name'], c['name']))
 
-    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None):
+    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None, delete_namespace_immediately=False):
         """Run deploy-branch.py against a fake cluster; return (error, calls, sent documents)."""
         calls, sent = [], []
         created = {}
+        namespace_gone = False
         def fake(command, **kwargs):
+            nonlocal namespace_gone
             calls.append(command)
+            if 'delete' in command and '--raw' in command:
+                target = command[command.index('--raw') + 1]
+                if re.fullmatch(r'/api/v1/namespaces/[^/]+', target):
+                    namespace_gone = True
+                    if delete_namespace_immediately:
+                        created.clear()
             if kwargs.get('input'):
                 objects = [d for d in yaml.safe_load_all(kwargs['input']) if d]
                 sent.extend(objects)
@@ -417,6 +424,10 @@ class GuardTests(unittest.TestCase):
                          'pod': {'status': {'podIP': '10.244.1.3'}},
                          'service': {'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
                              'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}.get(name)}}}.get(kind)
+                if callable(found):
+                    found = found()
+                if namespace_gone and (kind == 'namespace' or (delete_namespace_immediately and kind == 'configmap')):
+                    found = None
                 out = json.dumps(found) if found else ''
             elif 'get' in command and 'secret' in command:
                 name = command[command.index('secret') + 1]
@@ -448,7 +459,8 @@ class GuardTests(unittest.TestCase):
 
     def owned(self, branch='one', mode='primary', **meta):
         slug, _ = r.identity(branch)
-        return dict({'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
+        return dict({'uid': 'namespace-uid', 'resourceVersion': '23',
+                     'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
                      'annotations': {'econgraph.io/branch-name': branch}}, **meta)
 
     UP = ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']
@@ -461,6 +473,17 @@ class GuardTests(unittest.TestCase):
         error, calls, sent = self.cluster(self.UP, namespace={'metadata': self.owned()})
         self.assertIsNone(error)
         self.assertTrue(any(d['kind'] == 'ReferenceGrant' for d in sent))
+
+    def test_up_stamps_reused_orphan_grant_with_new_namespace_identity(self):
+        grant = r.grant('one')
+        grant['metadata'].update(uid='grant-uid', resourceVersion='42',
+                                 annotations={'econgraph.io/namespace-uid': 'old-namespace-uid'})
+        error, _, sent = self.cluster(self.UP, namespace={'metadata': self.owned(uid='new-namespace-uid')}, grant=grant)
+        self.assertIsNone(error)
+        applied = next(d for d in sent if d['kind'] == 'ReferenceGrant')
+        self.assertEqual(applied['metadata']['annotations']['econgraph.io/namespace-uid'], 'new-namespace-uid')
+        self.assertNotEqual(applied['metadata']['annotations'], grant['metadata']['annotations'],
+                            'reusing an old grant must force an API resourceVersion change')
 
     def test_up_refuses_a_terminating_namespace_before_mutations(self):
         error, calls, _ = self.cluster(self.UP, namespace={'metadata': self.owned(deletionTimestamp='2026-10-28T00:00:00Z')})
@@ -478,9 +501,34 @@ class GuardTests(unittest.TestCase):
         error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace + 'x')
         self.assertRegex(str(error), 'typed namespace confirmation')
         self.assertEqual(self.mutations(calls), [])
-        error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace)
+        error, calls, sent = self.cluster(['down', 'one'], namespace=existing, typed=namespace)
         self.assertIsNone(error)
-        self.assertIn(['stub-kubectl', '--context', 'scratch', 'delete', 'namespace', namespace], calls)
+        self.assertIn(['stub-kubectl', '--context', 'scratch', 'delete', '--raw',
+                       '/api/v1/namespaces/' + namespace, '-f', '-'], calls)
+        options = next(d for d in sent if d.get('kind') == 'DeleteOptions')
+        self.assertEqual(options['preconditions'], {'uid': 'namespace-uid', 'resourceVersion': '23'})
+        self.assertFalse(any('delete' in c and 'namespace' in c for c in calls))
+
+    def test_down_refuses_namespace_replaced_during_confirmation_even_with_same_labels(self):
+        _, namespace = r.identity('one')
+        versions = iter([{'metadata': self.owned()}, {'metadata': self.owned(uid='replacement-uid')}])
+        error, calls, sent = self.cluster(['down', 'one'], namespace=lambda: next(versions), typed=namespace)
+        self.assertRegex(str(error), 'replaced during confirmation')
+        self.assertFalse(any('delete' in c and any('/api/v1/namespaces/' + namespace == arg for arg in c)
+                             for c in calls))
+        self.assertFalse(any(d.get('kind') == 'DeleteOptions' and d['preconditions']['uid'] == 'replacement-uid'
+                             for d in sent))
+        lock_deletes = [c for c in calls if '--raw' in c and any(arg.endswith('/configmaps/branch-deploy-lock') for arg in c)]
+        self.assertEqual(len(lock_deletes), 1, 'own lock is still cleaned up after refusal')
+
+    def test_down_tolerates_lock_disappearing_with_deleted_namespace(self):
+        _, namespace = r.identity('one')
+        error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()},
+                                       typed=namespace, delete_namespace_immediately=True)
+        self.assertIsNone(error)
+        self.assertTrue(any('--raw' in c and '/api/v1/namespaces/' + namespace in c for c in calls))
+        self.assertFalse(any('--raw' in c and any(arg.endswith('/configmaps/branch-deploy-lock') for arg in c)
+                             for c in calls))
 
     def test_down_refuses_a_reference_grant_it_does_not_own(self):
         _, namespace = r.identity('one')
@@ -488,6 +536,16 @@ class GuardTests(unittest.TestCase):
         error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()}, grant=foreign, typed=namespace)
         self.assertRegex(str(error), 'ReferenceGrant ownership differs')
         self.assertFalse([c for c in calls if 'delete' in c and ('referencegrant' in c or 'namespace' in c)])
+
+    def test_down_refuses_grant_bound_to_another_namespace_incarnation(self):
+        _, namespace = r.identity('one')
+        grant = r.grant('one')
+        grant['metadata']['annotations'] = {'econgraph.io/namespace-uid': 'different-namespace'}
+        error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()}, grant=grant, typed=namespace)
+        self.assertRegex(str(error), 'another namespace incarnation')
+        self.assertFalse(any('--raw' in c and any(arg.startswith('/apis/gateway.networking.k8s.io/')
+                                                  or arg == '/api/v1/namespaces/' + namespace for arg in c)
+                             for c in calls))
 
     def test_up_refuses_a_reference_grant_it_does_not_own(self):
         foreign = {'metadata': {'labels': {'econgraph.io/branch': 'other'}}}
@@ -656,6 +714,21 @@ class SeedRestoreTests(unittest.TestCase):
 
 
 class JobWaitTests(unittest.TestCase):
+    def test_namespace_wait_observes_only_confirmed_uid_and_never_mutates_replacement(self):
+        for result in [None, {'metadata': {'uid': 'replacement'}}]:
+            calls = []
+            def lookup(*args):
+                calls.append(args)
+                return result
+            with patch.object(deploy.time, 'sleep', side_effect=AssertionError('slept')):
+                deploy.wait_namespace_deleted(lookup, 'branch', 'confirmed')
+            self.assertEqual(calls, [('namespace', 'branch')])
+
+    def test_namespace_wait_has_a_bounded_gc_deadline(self):
+        with patch.object(deploy.time, 'monotonic', side_effect=[0, 0, 121]), patch.object(deploy.time, 'sleep'):
+            with self.assertRaisesRegex(ValueError, 'deletion did not complete within 120s'):
+                deploy.wait_namespace_deleted(lambda *a: {'metadata': {'uid': 'confirmed'}}, 'branch', 'confirmed')
+
     def test_failed_job_stops_without_waiting_out_deadline(self):
         def k(*cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({'status': {'conditions': [
