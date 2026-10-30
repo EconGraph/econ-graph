@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject mutable action references and persisted checkout credentials."""
+"""Reject mutable or uncommented action references and persisted checkout credentials."""
 
 from pathlib import Path
 import re
@@ -37,6 +37,19 @@ def check_document(document, location):
     return errors
 
 
+PINNED_USES = re.compile(r"""^\s*(?:-\s+)?["']?uses["']?\s*:\s*["']?([^\s"'#]+@[0-9a-f]{40})["']?\s*(#.*)?$""")
+
+
+def check_version_comments(text, location):
+    """Require a version comment after every SHA-pinned uses line."""
+    errors = []
+    for number, line in enumerate(text.splitlines(), 1):
+        match = PINNED_USES.match(line)
+        if match and not (match.group(2) or "").strip("# \t"):
+            errors.append(f"{location}:{number}: pinned action needs a version comment: {match.group(1)}")
+    return errors
+
+
 def main():
     """Validate workflow and composite-action YAML, returning a CI exit code."""
     root = Path(__file__).resolve().parents[2]
@@ -48,7 +61,10 @@ def main():
     errors = []
     for path in files:
         try:
-            errors.extend(check_document(yaml.safe_load(path.read_text()), str(path.relative_to(root))))
+            text = path.read_text()
+            location = str(path.relative_to(root))
+            errors.extend(check_document(yaml.safe_load(text), location))
+            errors.extend(check_version_comments(text, location))
         except yaml.YAMLError as error:
             errors.append(f"{path.relative_to(root)}: {error}")
     for error in errors:

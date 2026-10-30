@@ -5,7 +5,7 @@ import unittest
 
 import yaml
 
-from check_action_pins import check_document
+from check_action_pins import check_document, check_version_comments
 
 
 class ActionPinsTest(unittest.TestCase):
@@ -81,6 +81,22 @@ class ActionPinsTest(unittest.TestCase):
                 self.assertEqual(len(errors), 1)
                 self.assertIn("fixture.runs.steps[0].with.persist-credentials", errors[0])
 
+    def test_pinned_references_need_version_comments(self):
+        """A SHA alone does not say which release it is, so require a comment."""
+        sha = "a" * 40
+        lines = [
+            "steps:",
+            f"  - uses: owner/repo@{sha} # v1.2.3",
+            f"  - uses: owner/repo@{sha}   ",
+            f'  - "uses": "owner/repo@{sha}"   #',
+            f"  - uses: owner/repo@{sha}  # v2",
+            "  - uses: ./.github/actions/local",
+            f"# - uses: owner/repo@{sha}",
+        ]
+        errors = check_version_comments("\n".join(lines), "fixture")
+        self.assertEqual(len(errors), 2)
+        self.assertIn("fixture:3:", errors[0])
+        self.assertIn("fixture:4:", errors[1])
 
 
 if __name__ == "__main__":
