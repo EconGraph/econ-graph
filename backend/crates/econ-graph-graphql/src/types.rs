@@ -133,16 +133,28 @@ impl EconomicSeriesType {
     async fn parsed_unit(&self, ctx: &Context<'_>) -> Result<Option<ParsedUnitType>> {
         let fields = self.load_units_fields(ctx).await?;
         let units = self.units.as_deref();
-        // Text parsed now uses the series' source currency, as a fetch would.
+        // Text parsed now uses the series' source currency, as a fetch would. A source that
+        // can't be loaded (a failed batch query, or no such row) parses with no currency
+        // rather than failing the response.
         let source_ctx = if fields.parses_text(units) {
             let loaders = crate::graphql::context::data_loaders(ctx)?;
-            let source = loaders
+            match loaders
                 .data_source_loader
-                .load(Uuid::parse_str(&self.source_id)?)
-                .await;
-            source.map_or(econ_graph_crawler::units::UnitsContext::NONE, |s| {
-                econ_graph_crawler::units::UnitsContext::for_data_source_name(&s.name)
-            })
+                .try_load(Uuid::parse_str(&self.source_id)?)
+                .await
+            {
+                Ok(Some(s)) => {
+                    econ_graph_crawler::units::UnitsContext::for_data_source_name(&s.name)
+                }
+                Ok(None) | Err(_) => {
+                    tracing::debug!(
+                        series = %self.id.as_str(),
+                        source = %self.source_id.as_str(),
+                        "parsedUnit: source not loaded; parsing units with no source currency"
+                    );
+                    econ_graph_crawler::units::UnitsContext::NONE
+                }
+            }
         } else {
             econ_graph_crawler::units::UnitsContext::NONE
         };
