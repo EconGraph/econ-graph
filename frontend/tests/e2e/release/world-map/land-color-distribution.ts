@@ -39,13 +39,29 @@ export async function landColorDistribution(page: Page) {
       clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       clone.setAttribute('width', String(width));
       clone.setAttribute('height', String(height));
-      // Inline computed fills and opacity so the measurement includes actual styles.
-      clone.querySelectorAll('path').forEach((path, i) => {
-        const original = svg.querySelectorAll('path')[i];
-        const style = getComputedStyle(original);
-        path.style.setProperty('fill', style.fill, 'important');
-        path.style.setProperty('stroke', style.stroke, 'important');
-        path.style.setProperty('opacity', style.opacity, 'important');
+      // Inline rendering styles on groups as well as paths. External CSS can
+      // change group opacity or fill-opacity without changing a path's fill.
+      const originals = [svg, ...svg.querySelectorAll<SVGElement>('*')];
+      const copies = [clone, ...clone.querySelectorAll<SVGElement>('*')];
+      const properties = [
+        'fill',
+        'fill-opacity',
+        'fill-rule',
+        'stroke',
+        'stroke-opacity',
+        'stroke-width',
+        'opacity',
+        'display',
+        'visibility',
+        'filter',
+        'mix-blend-mode',
+        'background-color',
+      ];
+      copies.forEach((copy, i) => {
+        const style = getComputedStyle(originals[i]);
+        for (const property of properties) {
+          copy.style.setProperty(property, style.getPropertyValue(property), 'important');
+        }
       });
       const picture = new Image();
       picture.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`;

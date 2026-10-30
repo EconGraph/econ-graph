@@ -129,5 +129,9 @@ test.describe('World map land color distribution (mocked)', () => {
     const white = await landColorDistribution(page);
     expect(white.dataPixels).toBe(large.dataPixels);
     expect(white.nearWhiteFraction).toBeGreaterThan(0.15);
+    await page.addStyleTag({ content: '.countries { opacity: 0 !important; }' });
+    const invisible = await landColorDistribution(page);
+    expect(invisible.dataPixels).toBe(large.dataPixels);
+    expect(invisible.nearWhiteFraction).toBeGreaterThan(0.99);
   });
 });
