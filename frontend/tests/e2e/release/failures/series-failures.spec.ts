@@ -61,8 +61,11 @@ test.describe('search failures', () => {
     async ({ page }) => {
       test.slow();
       const fault = await failGraphQL(page, 'GetSeriesList');
-      await page.goto('/');
-      await page.getByRole('button', { name: /Navigate to FRED Data/ }).click();
+      await page.goto('/sources');
+      await page
+        .getByRole('region', { name: SEEDED.fredGdp.sourceName })
+        .getByRole('link', { name: 'Browse Series' })
+        .click();
       const alert = page.getByRole('alert').filter({ hasText: 'Could not list series' });
       await expect(alert).toBeVisible({ timeout: QUERY_ERROR_TIMEOUT });
 

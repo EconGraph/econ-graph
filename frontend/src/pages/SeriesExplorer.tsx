@@ -94,7 +94,7 @@ const BACKEND_FREQUENCIES = new Set([
 
 /**
  * Resolves a `source` URL parameter to a listed source's id. The parameter is normally
- * already an id, but older links (the sidebar, the data sources page) put the source's
+ * already an id, but older links and bookmarks put the source's
  * display name in the URL instead, and that name doesn't always match exactly (it may
  * be missing a "(FRED)"-style suffix) — so a name match falls back to a prefix match.
  * @param param - The raw `source` URL parameter, if any.
@@ -164,7 +164,7 @@ const SeriesExplorer: React.FC = () => {
   const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
 
   // The form follows the URL when something else changes it while the page stays mounted: a
-  // link to another /explore URL (the sidebar's FRED Data), back and forward. The URL writes
+  // link to another /explore URL (the header search), back and forward. The URL writes
   // the form makes below are marked in their history state and skipped here, so a write that
   // lands after more typing doesn't put the older text back in the box.
   const location = useLocation();
@@ -205,9 +205,8 @@ const SeriesExplorer: React.FC = () => {
   );
 
   // Only a source the backend listed is used, so an old link that put the source name in
-  // the URL (the sidebar, the data sources page) resolves to that source's id instead of
-  // matching nothing. While the list is loading, the source from the URL is held and the
-  // search waits for it.
+  // the URL resolves to that source's id instead of matching nothing. While the list is
+  // loading, the source from the URL is held and the search waits for it.
   const resolvedSourceId = resolveSourceId(selectedSource, dataSources);
   const sourceListed = resolvedSourceId !== undefined;
   const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isLoading);
@@ -230,8 +229,8 @@ const SeriesExplorer: React.FC = () => {
     },
     !waitingForSources
   );
-  // With no query but a source picked (the data sources page's Browse series, the sidebar's
-  // FRED Data), list what that source has instead of an empty page. Only a source the backend
+  // With no query but a source picked (the data sources page's Browse series), list what
+  // that source has instead of an empty page. Only a source the backend
   // listed counts, so an unknown name in the URL still asks for a search; a frequency alone
   // isn't browsed, as it would sort the whole catalog.
   const browsing = debouncedQuery.length < 2 && Boolean(activeSource) && !waitingForSources;
@@ -311,7 +310,7 @@ const SeriesExplorer: React.FC = () => {
   const paginatedSeries = filteredSeries.slice(startIndex, endIndex);
 
   // Update URL parameters when filters change. `source` is written back as `selectedSource`,
-  // not the resolved id: a link that arrived with a source name (the sidebar's, say) keeps
+  // not the resolved id: a link that arrived with a source name (an old bookmark, say) keeps
   // that same name in the URL rather than having it silently rewritten to the id it resolved
   // to — a same-site navigation is expected to keep every query parameter it arrived with.
   // Nothing is written when the URL already says the same, as it does right after the form
