@@ -67,8 +67,9 @@
 #     every step, on context kind-<cluster>. On the production host plain
 #     `kubectl` is the MicroK8s snap wrapper.
 #   - PUBLIC_HOST comes from the host's deploy config,
-#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_DEPLOY_ENV
-#     names another file), a line PUBLIC_HOST=<host name> (the last one, when
+#     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_CONFIG_DIR
+#     names another directory, ECONGRAPH_DEPLOY_ENV another file; see
+#     lib/deploy-config.sh), a line PUBLIC_HOST=<host name> (the last one, when
 #     there are several); the file is read, not sourced, and the name is
 #     lowercased. On the production cluster it is econgraph.com. A cluster
 #     marked production (scripts/deploy/mark-production-cluster.sh) with no
@@ -79,6 +80,10 @@
 #     (deploy.sh would refuse it after the load and backups), a cluster whose
 #     marker can't be read, and a PUBLIC_HOST in the environment that differs
 #     from the config.
+#   - GATEWAY_TLS_ISSUER, the gateway certificate's ClusterIssuer, comes from the
+#     environment, else a GATEWAY_TLS_ISSUER= line in the same config; it is
+#     checked to be a resource name and passed to deploy.sh. With neither, the
+#     certificate keeps its current issuer (scripts/deploy/apply-gateway-routes.sh).
 #   - It shows the cluster's identity and the plan, and asks once (--yes
 #     answers, except on a cluster marked production, which needs the UID
 #     prefix typed or --confirm-production; a dry run doesn't ask).
@@ -116,7 +121,7 @@
 # scales down a running worker, deploy.sh applies, verify restarts and checks),
 # so after a failure, fix the cause and run the same command again.
 #
-# Environment: ECONGRAPH_DEPLOY_ENV, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
+# Environment: ECONGRAPH_CONFIG_DIR, ECONGRAPH_DEPLOY_ENV, GATEWAY_TLS_ISSUER, ECONGRAPH_DOCKER_HOST, ECONGRAPH_RELEASES_DIR
 # (the load records and this script's), ECONGRAPH_BACKUP_ROOT.
 
 set -euo pipefail
@@ -290,38 +295,20 @@ CLUSTER_UID="$(kube_system_uid)" || die "could not read the kube-system UID of $
 UID_PREFIX="${CLUSTER_UID:0:8}"
 
 # --- PUBLIC_HOST, from the host's deploy config ----------------------------------------
-DEPLOY_ENV="${ECONGRAPH_DEPLOY_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/econgraph/deploy.env}"
+# shellcheck source=scripts/deploy/lib/deploy-config.sh
+source "$DEPLOY_DIR/lib/deploy-config.sh"
+DEPLOY_ENV="$(deploy_config_path)"
 configured=false
-PUBLIC_HOST=""
-if [ -f "$DEPLOY_ENV" ]; then
-    # The last line wins, as it would if the file were sourced.
-    line="$(grep -E '^[[:space:]]*PUBLIC_HOST=' "$DEPLOY_ENV" | tail -1)" || line=""
-    if [ -n "$line" ]; then
-        PUBLIC_HOST="${line#*=}"
-        # A CRLF file would otherwise pass silently (the renderer strips a
-        # trailing CR): refuse it.
-        [[ "$PUBLIC_HOST" != *$'\r'* ]] ||
-            die "${DEPLOY_ENV} has a carriage return in its PUBLIC_HOST line (CRLF line endings?); save it with LF endings"
-        # Surrounding blanks and one pair of matching quotes; nothing else is
-        # rewritten, so a comment or a typo reaches the check below.
-        PUBLIC_HOST="${PUBLIC_HOST#"${PUBLIC_HOST%%[![:space:]]*}"}"
-        PUBLIC_HOST="${PUBLIC_HOST%"${PUBLIC_HOST##*[![:space:]]}"}"
-        if [[ "$PUBLIC_HOST" =~ ^\"(.*)\"$ || "$PUBLIC_HOST" =~ ^\'(.*)\'$ ]]; then
-            PUBLIC_HOST="${BASH_REMATCH[1]}"
-        fi
-        # Blanks inside (or inside the quotes): the renderer would strip them,
-        # but deploy.sh's gateway step would not. Refuse, rather than guess.
-        [[ "$PUBLIC_HOST" != *[[:space:]]* ]] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST='${PUBLIC_HOST}', with blanks in it; write the host name alone"
-        # Host names are case-insensitive; the routes, the certificate and the
-        # comparison below use the lowercase form.
-        if [ "$PUBLIC_HOST" != "${PUBLIC_HOST,,}" ]; then
-            echo "  PUBLIC_HOST     ${PUBLIC_HOST} in ${DEPLOY_ENV} is used as ${PUBLIC_HOST,,}"
-            PUBLIC_HOST="${PUBLIC_HOST,,}"
-        fi
-        [ -z "$PUBLIC_HOST" ] || configured=true
-    fi
+# Read, not sourced: a CRLF file or blanks inside the value are refused.
+PUBLIC_HOST="$(deploy_config_value PUBLIC_HOST "host name")" ||
+    die "could not read PUBLIC_HOST from ${DEPLOY_ENV}"
+# Host names are case-insensitive; the routes, the certificate and the
+# comparison below use the lowercase form.
+if [ "$PUBLIC_HOST" != "${PUBLIC_HOST,,}" ]; then
+    echo "  PUBLIC_HOST     ${PUBLIC_HOST} in ${DEPLOY_ENV} is used as ${PUBLIC_HOST,,}"
+    PUBLIC_HOST="${PUBLIC_HOST,,}"
 fi
+[ -z "$PUBLIC_HOST" ] || configured=true
 # A malformed host is refused here, before any step, not by deploy.sh after the
 # load, the backups and the precheck (the same check, render-public-host.py).
 if [ -n "$PUBLIC_HOST" ] && ! "$DEPLOY_DIR/render-public-host.py" "$PUBLIC_HOST" /dev/null >/dev/null; then
@@ -360,6 +347,24 @@ if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] &
 fi
 export PUBLIC_HOST
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
+# The gateway certificate's issuer: the environment's, else the config's, else
+# apply-gateway-routes.sh keeps the certificate's current one.
+if [ -n "${GATEWAY_TLS_ISSUER:-}" ]; then
+    issuer_source="the environment"
+else
+    GATEWAY_TLS_ISSUER="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" ||
+        die "could not read GATEWAY_TLS_ISSUER from ${DEPLOY_ENV}"
+    issuer_source="$DEPLOY_ENV"
+fi
+if [ -n "$GATEWAY_TLS_ISSUER" ]; then
+    [[ "$GATEWAY_TLS_ISSUER" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
+        die "GATEWAY_TLS_ISSUER='${GATEWAY_TLS_ISSUER}' (from ${issuer_source}) is not a resource name"
+    export GATEWAY_TLS_ISSUER
+    echo "  TLS issuer      ${GATEWAY_TLS_ISSUER} (from ${issuer_source})"
+else
+    unset GATEWAY_TLS_ISSUER
+    echo "  TLS issuer      the gateway certificate's current one, else econ-graph-selfsigned"
+fi
 
 # --- what earlier runs of this tag recorded -------------------------------------------
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"

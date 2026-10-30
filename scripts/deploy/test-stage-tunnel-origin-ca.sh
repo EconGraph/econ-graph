@@ -5,7 +5,9 @@
 # exists, replacement of a renewed root (same subject and key) and refusal of any
 # other root; and apply-gateway-routes.sh staging the CA before it selects issuer
 # econ-graph-origin-ca, printing it under --dry-run and not changing the certificate
-# when staging fails.
+# when staging fails; its issuer precedence (environment, then the host's deploy
+# config, then the certificate's current issuer, then self-signed), with HOME and
+# ECONGRAPH_CONFIG_DIR in a scratch directory, never the real ~/.config/econgraph.
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 - "$project_root" <<'PY'
@@ -184,18 +186,26 @@ with tempfile.TemporaryDirectory() as folder:
     log = Path(folder) / 'log'
     deploy = tree / 'scripts/deploy'
     (deploy / 'lib').mkdir(parents=True)
-    for name in ['apply-gateway-routes.sh', 'render-public-host.py', 'lib/cluster-role.sh']:
+    for name in ['apply-gateway-routes.sh', 'render-public-host.py', 'lib/cluster-role.sh',
+                 'lib/deploy-config.sh']:
         shutil.copy2(root / 'scripts/deploy' / name, deploy / name)
     shutil.copytree(root / 'k8s/manifests/gateway', tree / 'k8s/manifests/gateway')
     stage = deploy / 'stage-tunnel-origin-ca.sh'
     stage.write_text('#!/usr/bin/env bash\necho "stage $*" >>"$LOG"\nexit "${STAGE_RC:-0}"\n')
     stage.chmod(0o755)
+    home = Path(folder) / 'home'
+    config_dir = Path(folder) / 'config'
+    config_dir.mkdir()
+    deploy_env = config_dir / 'deploy.env'
     kubectl = Path(folder) / 'kubectl'
     kubectl.write_text('''#!/usr/bin/env bash
 echo "kubectl $*" >>"$LOG"
 case "$*" in
     *"config current-context"*) echo kind-current ;;
     *"get certificate econ-graph-tls"*) printf '%s' "${CURRENT_ISSUER:-}" ;;
+    *--field-manager*)
+        all="$*"; file="${all##* -f }"
+        echo "issuer $(sed -n '/issuerRef:/,/name:/s/^ *name: //p' "$file")" >>"$LOG" ;;
 esac
 exit 0
 ''')
@@ -203,8 +213,10 @@ exit 0
     def routes(*args, **updates):
         """Run the copied apply-gateway-routes.sh against the stub kubectl."""
         log.write_text('')
-        environment = dict(os.environ, KUBECTL=str(kubectl), LOG=str(log), PUBLIC_HOST='econgraph.com')
-        environment.pop('GATEWAY_TLS_ISSUER', None)
+        environment = dict(os.environ, KUBECTL=str(kubectl), LOG=str(log), PUBLIC_HOST='econgraph.com',
+                           HOME=str(home), ECONGRAPH_CONFIG_DIR=str(config_dir))
+        for name in ['GATEWAY_TLS_ISSUER', 'ECONGRAPH_DEPLOY_ENV', 'XDG_CONFIG_HOME']:
+            environment.pop(name, None)
         environment.update(updates)
         result = subprocess.run([str(deploy / 'apply-gateway-routes.sh'), *args], env=environment,
                                 text=True, capture_output=True)
@@ -236,5 +248,35 @@ exit 0
     for updates in [{}, {'GATEWAY_TLS_ISSUER': 'letsencrypt-test'}]:
         result, lines = routes('--context', 'kind-test', **updates)
         assert result.returncode == 0 and not any(line.startswith('stage') for line in lines)
+
+    def chosen(**updates):
+        """The issuer the certificate was applied with, and whether staging ran."""
+        result, lines = routes('--context', 'kind-test', **updates)
+        assert result.returncode == 0, result.stderr
+        issuers = [line.split(' ', 1)[1] for line in lines if line.startswith('issuer ')]
+        assert len(issuers) == 1, lines
+        return issuers[0], 'stage --context kind-test --apply' in lines
+    # Precedence: environment, deploy config, current certificate, self-signed.
+    assert chosen() == ('econ-graph-selfsigned', False)
+    assert chosen(CURRENT_ISSUER='letsencrypt-test') == ('letsencrypt-test', False)
+    # After a recreate (no certificate), the deploy config keeps the CA issuer and stages it.
+    deploy_env.write_text('PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-ca\n')
+    assert chosen() == ('econ-graph-origin-ca', True)
+    assert chosen(CURRENT_ISSUER='econ-graph-selfsigned') == ('econ-graph-origin-ca', True)
+    assert chosen(GATEWAY_TLS_ISSUER='econ-graph-selfsigned') == ('econ-graph-selfsigned', False)
+    # An empty environment value falls through to the config.
+    assert chosen(GATEWAY_TLS_ISSUER='') == ('econ-graph-origin-ca', True)
+    # The last line wins; quotes are removed.
+    deploy_env.write_text('GATEWAY_TLS_ISSUER=econ-graph-origin-ca\nGATEWAY_TLS_ISSUER="letsencrypt-test"\n')
+    assert chosen() == ('letsencrypt-test', False)
+    # A malformed line stops before anything is applied.
+    for text in ['GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n', 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\r\n']:
+        deploy_env.write_text(text)
+        result, lines = routes('--context', 'kind-test')
+        assert result.returncode != 0 and 'GATEWAY_TLS_ISSUER' in result.stderr, result
+        assert not any(line.startswith(('stage', 'issuer')) for line in lines)
+    deploy_env.unlink()
+    assert chosen() == ('econ-graph-selfsigned', False)
+    assert not home.exists(), 'the scratch HOME must not be written'
 print('PASS: offline tunnel origin CA staging checks')
 PY

@@ -23,7 +23,9 @@
 #     one that serves another host than the configured one, a cluster not
 #     marked production with one, a marker that can't be read, an environment
 #     PUBLIC_HOST that differs from the config, the last config line winning,
-#     and uppercase lowercased); --yes alone is not enough on a production
+#     and uppercase lowercased); GATEWAY_TLS_ISSUER from the environment, else
+#     the deploy config (ECONGRAPH_CONFIG_DIR names its directory), else unset,
+#     and a malformed one refused; --yes alone is not enough on a production
 #     cluster (--confirm-production);
 #   - --dry-run passes --dry-run to every step it runs and does not run verify;
 #   - without a terminal and without --yes it refuses before any step;
@@ -170,7 +172,7 @@ for step in load-release-images backup-postgres-now backup-keycloak-db precheck-
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0" .sh)"
-echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD" >>"$TEST_LOGS/steps.log"
+echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD ISSUER=${GATEWAY_TLS_ISSUER-<unset>}" >>"$TEST_LOGS/steps.log"
 stamp="${STUB_STAMP:-20261028T080000Z}"
 case "$name" in
     backup-postgres-now)
@@ -292,7 +294,7 @@ RELEASE_DEPLOY="$TREE/scripts/deploy/release-deploy.sh"
 # DOCKER_HOST and PUBLIC_HOST set (a case sets one with `env X=y` first).
 ENV=(env -u KUBECTL -u KUBECONFIG -u DOCKER_HOST -u DOCKER_CONTEXT -u ECONGRAPH_DOCKER_HOST
     -u ECONGRAPH_KUBE_DIR -u CLUSTER_ROLE_CONTEXT -u KIND_CLUSTER -u NAMESPACE -u PUBLIC_HOST
-    -u ECONGRAPH_DEPLOY_ENV -u ECONGRAPH_SCRATCH_STORAGE -u XDG_CACHE_HOME -u XDG_DATA_HOME
+    -u ECONGRAPH_DEPLOY_ENV -u ECONGRAPH_CONFIG_DIR -u GATEWAY_TLS_ISSUER -u ECONGRAPH_SCRATCH_STORAGE -u XDG_CACHE_HOME -u XDG_DATA_HOME
     -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u DRY_RUN -u ASSUME_YES -u KIND_FALLBACK_WARNED
     HOME="$HOME_DIR" TMPDIR="$WORK/tmp" XDG_RUNTIME_DIR="$WORK/run" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
     ECONGRAPH_BACKUP_ROOT="$WORK/backups" ECONGRAPH_RELEASES_DIR="$WORK/releases"
@@ -1065,6 +1067,35 @@ if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST= " "$LOGS/steps.log"; then
 else
     fail "a test cluster without a deploy config: exit $rc, $(cat "$LOGS/steps.log")"
 fi
+echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
+
+# --- GATEWAY_TLS_ISSUER: the environment, else the deploy config, else unset ---------------
+issuer_case() { # NAME EXPECTED: the last run deployed with GATEWAY_TLS_ISSUER EXPECTED
+    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2\$" "$LOGS/steps.log"; then
+        echo "ok   $1"
+    else
+        fail "$1: exit $rc, $(grep '^deploy ' "$LOGS/steps.log" || true)"
+    fi
+}
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "no GATEWAY_TLS_ISSUER configured leaves it unset" "<unset>"
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER="econ-graph-origin-ca"\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "GATEWAY_TLS_ISSUER from the deploy config reaches deploy.sh" "econ-graph-origin-ca"
+has "econ-graph-origin-ca (from $CONFIG)" || fail "the configured issuer is not shown with its source"
+run env GATEWAY_TLS_ISSUER=econ-graph-selfsigned "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "an environment GATEWAY_TLS_ISSUER wins over the config" "econ-graph-selfsigned"
+# ECONGRAPH_CONFIG_DIR names another directory, as the backup scripts' does.
+mkdir -p "$WORK/other-config"
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=letsencrypt-test\n' >"$WORK/other-config/deploy.env"
+run env ECONGRAPH_CONFIG_DIR="$WORK/other-config" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+issuer_case "ECONGRAPH_CONFIG_DIR's deploy.env is read" "letsencrypt-test"
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a GATEWAY_TLS_ISSUER with a trailing comment" "with blanks in it"
+printf 'PUBLIC_HOST=econgraph.com\nGATEWAY_TLS_ISSUER=Bad_Issuer\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a GATEWAY_TLS_ISSUER that is not a resource name" "is not a resource name"
 echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
 # --- confirmation -------------------------------------------------------------------------------

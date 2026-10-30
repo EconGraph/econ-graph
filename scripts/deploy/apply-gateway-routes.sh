@@ -24,8 +24,10 @@
 #                       one served before is removed. Unset: keep what the
 #                       cluster serves now (its public routes).
 #   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate
-#                       (default: the certificate's current one, else
-#                       econ-graph-selfsigned, k8s/manifests/gateway/selfsigned-issuer.yaml,
+#                       (default: a GATEWAY_TLS_ISSUER= line in the host's deploy
+#                       config, ~/.config/econgraph/deploy.env, see
+#                       lib/deploy-config.sh; else the certificate's current one;
+#                       else econ-graph-selfsigned, k8s/manifests/gateway/selfsigned-issuer.yaml,
 #                       which the tunnel connector accepts unverified). For
 #                       econ-graph-origin-ca, the private CA and the connector's
 #                       public trust bundle are staged first
@@ -109,7 +111,17 @@ else
 fi
 current_issuer="$(kc -n econ-graph-gateway get certificate econ-graph-tls \
     -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
-issuer="${GATEWAY_TLS_ISSUER:-${current_issuer:-econ-graph-selfsigned}}"
+# The environment wins, then the host's deploy config, then the certificate's
+# current issuer, then the self-signed default. The config keeps the choice
+# across a cluster recreate, which loses the certificate.
+# shellcheck source=scripts/deploy/lib/deploy-config.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/deploy-config.sh"
+configured_issuer=""
+if [ -z "${GATEWAY_TLS_ISSUER:-}" ]; then
+    configured_issuer="$(deploy_config_value GATEWAY_TLS_ISSUER "issuer name")" ||
+        die "could not read GATEWAY_TLS_ISSUER from $(deploy_config_path)"
+fi
+issuer="${GATEWAY_TLS_ISSUER:-${configured_issuer:-${current_issuer:-econ-graph-selfsigned}}}"
 if [ -n "$host" ]; then
     # Validates the name, as the deploy scripts do.
     "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$host" /dev/null >/dev/null ||

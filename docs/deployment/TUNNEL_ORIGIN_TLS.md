@@ -57,6 +57,20 @@ without running it. On later deploys the certificate's existing issuer is retain
 `GATEWAY_TLS_ISSUER` overrides it, and the retained `econ-graph-origin-ca` is staged again
 the same way.
 
+Then record the selection in the host's deploy config, `~/.config/econgraph/deploy.env`
+(the file that holds `PUBLIC_HOST`; `ECONGRAPH_CONFIG_DIR` or `ECONGRAPH_DEPLOY_ENV` name
+another), by adding this line:
+
+```sh
+GATEWAY_TLS_ISSUER=econ-graph-origin-ca
+```
+
+The issuer is chosen in this order: `GATEWAY_TLS_ISSUER` in the environment, then that
+line, then the certificate's existing issuer, then `econ-graph-selfsigned`.
+`apply-gateway-routes.sh`, `deploy.sh` and `release-deploy.sh` all read the line through
+`scripts/deploy/lib/deploy-config.sh`, and `release-deploy.sh` shows the issuer and its
+source in its plan.
+
 The leaf covers the public host and `www` name. In the dashboard, use the public host as
 **Origin Server Name** even though the Service URL uses the internal proxy Service DNS.
 Do not override the HTTP Host header: public HTTPRoutes match the visitor's host.
@@ -121,25 +135,23 @@ does not prove its origin TLS is verified.
 ## After a cluster recreate
 
 A recreated cluster has none of the CA, its ClusterIssuer, the trust ConfigMap or the
-gateway certificate, and its first deploy has no existing issuer to retain. Without
-`GATEWAY_TLS_ISSUER` it issues the certificate from `econ-graph-selfsigned`, which
-connectors verifying the origin reject. Once the remote routes verify the origin, run the
-first deploy of a recreated cluster (`deploy.sh`, or `release-deploy.sh`, which passes the
-variable through) with `GATEWAY_TLS_ISSUER=econ-graph-origin-ca` in its environment. The
-gateway step then stages a new CA and trust bundle before issuing the certificate from it.
-CA Pool names the connector-local file, so the new root needs no dashboard change. Wait for
-the certificate as above and repeat the positive origin check.
+gateway certificate. With `GATEWAY_TLS_ISSUER=econ-graph-origin-ca` in the deploy config,
+its first normal deploy stages a new CA and trust bundle and then issues the certificate
+from it. CA Pool names the connector-local file, so the new root needs no dashboard
+change. Wait for the certificate as above and repeat the positive origin check.
 
-If the cluster was already deployed without it, rerun `apply-gateway-routes.sh` with the
-issuer as in the previous section, or turn No TLS Verify back on for the public routes
-until the certificate is issued from the CA.
+Without that line, the first deploy has no existing issuer to retain and issues the
+certificate from `econ-graph-selfsigned`, which connectors verifying the origin reject.
+Add the line and rerun `apply-gateway-routes.sh` as in the previous section, or turn No
+TLS Verify back on for the public routes until the certificate is issued from the CA.
 
 ## Rollback and CA rotation
 
 If public requests fail during cutover, first restore the dashboard's prior No TLS Verify
 setting. This restores the earlier behavior while investigating. Retain the CA, trust
 bundle and signing Secret; no database, backup or token changes are involved. If needed,
-select the prior gateway issuer explicitly with `GATEWAY_TLS_ISSUER`; changing the issuer
+select the prior gateway issuer explicitly with `GATEWAY_TLS_ISSUER`, and remove or change
+the deploy config's `GATEWAY_TLS_ISSUER` line so later deploys keep it; changing the issuer
 can renew the leaf, so wait for readiness and retest.
 
 cert-manager renews leaf certificates using the CA. The root has a ten-year lifetime and

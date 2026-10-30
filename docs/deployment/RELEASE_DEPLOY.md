@@ -129,7 +129,8 @@ the run: before any step, or at the step whose result it was recording. A record
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
-`ECONGRAPH_DEPLOY_ENV` names another file), one line:
+`ECONGRAPH_CONFIG_DIR` names another directory, `ECONGRAPH_DEPLOY_ENV` another file), one
+line:
 
 ```sh
 PUBLIC_HOST=econgraph.com
@@ -155,6 +156,22 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
   it too, but only after the load and the backups);
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
+
+## GATEWAY_TLS_ISSUER
+
+The same file may hold the ClusterIssuer of the gateway's https certificate, read the same
+way:
+
+```sh
+GATEWAY_TLS_ISSUER=econ-graph-origin-ca
+```
+
+`GATEWAY_TLS_ISSUER` in the environment wins over the file; with neither, the certificate
+keeps its current issuer, else `econ-graph-selfsigned`. The plan shows the issuer and
+where it came from, and a value that is not a resource name is refused before any step.
+`apply-gateway-routes.sh`, and so `deploy.sh`, read the line too
+(`scripts/deploy/lib/deploy-config.sh`), so a recreated cluster gets the configured issuer
+on its first deploy. See [Tunnel origin TLS](TUNNEL_ORIGIN_TLS.md) for the CA issuer.
 
 ## Dry run
 
