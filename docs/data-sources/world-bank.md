@@ -9,7 +9,7 @@ and [integration post-mortem](../archive/technical/WORLD_BANK_INTEGRATION_POST_M
 
 ## Coverage and requests
 
-The adapter crawls the 53 curated World Development Indicators in
+The adapter crawls the 158 curated World Development Indicators in
 [wdi_indicators.csv](../../backend/crates/econ-graph-crawler/data/wdi_indicators.csv).
 Discovery lists supported areas with at least one non-null value for each indicator.
 Each series belongs to dataset `wdi`, defined in
