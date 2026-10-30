@@ -27,7 +27,7 @@ import MapValuesTable from './MapValuesTable';
 import WorldMapControls from './WorldMapControls';
 import { worldAtlasQuery } from './worldAtlas';
 import { DEFAULT_PROJECTION } from './hooks/useWorldMap';
-import { useCountryData } from './hooks/useCountryData';
+import { useCountryData, type ColorScaleMode } from './hooks/useCountryData';
 import {
   DEFAULT_INDICATOR,
   useMapCrossSection,
@@ -45,6 +45,7 @@ const WorldMapTab: React.FC = () => {
   const [pickedIndicator, setPickedIndicator] = useState<string | null>(null);
   const [projection, setProjection] = useState(DEFAULT_PROJECTION);
   const [colorScheme, setColorScheme] = useState('viridis');
+  const [pickedScales, setPickedScales] = useState<Record<string, ColorScaleMode>>({});
 
   const datasetQuery = useMapDataset();
   const dataset = datasetQuery.data;
@@ -82,11 +83,20 @@ const WorldMapTab: React.FC = () => {
   const {
     valuesByIsoNumeric,
     colorScale,
+    scaleMode,
+    logUnavailableReason,
+    valueAtPosition,
     dataRange,
     dateRange,
     countriesWithData,
     countriesWithoutData,
-  } = useCountryData(values, colorScheme, drawableIds);
+  } = useCountryData(
+    values,
+    colorScheme,
+    drawableIds,
+    (shown && pickedScales[shown.indicator]) ??
+      (shown?.indicator === DEFAULT_INDICATOR ? 'log' : 'linear')
+  );
 
   // Stable, so the map's click handler never changes.
   const openSeries = useCallback(
@@ -120,6 +130,11 @@ const WorldMapTab: React.FC = () => {
               onProjectionChange={setProjection}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
+              scaleMode={scaleMode}
+              logUnavailableReason={logUnavailableReason}
+              onScaleModeChange={mode => {
+                if (shown) setPickedScales(previous => ({ ...previous, [shown.indicator]: mode }));
+              }}
             />
           </Box>
 
@@ -201,6 +216,8 @@ const WorldMapTab: React.FC = () => {
             unit={unit}
             frequency={frequency}
             dataRange={dataRange}
+            scaleMode={scaleMode}
+            valueAtPosition={valueAtPosition}
             dateRange={dateRange}
             countryCount={countriesWithData.length}
             undrawnCount={countriesWithoutData.length}
