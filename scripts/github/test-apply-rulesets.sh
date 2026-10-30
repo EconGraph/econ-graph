@@ -7,11 +7,14 @@
 #   - the first apply gives the rulesets of docs/development/MERGE_QUEUE.md and
 #     keeps every live field, rule and required check;
 #   - a re-run is a no-op ("already applied");
-#   - the release ruleset is created once, then updated in place;
+#   - the release ruleset has no merge queue, and is created once, then
+#     updated in place;
 #   - it refuses without admin rights, when gh is logged out, on a missing or
 #     unexpected main ruleset, on duplicate release rulesets, and without a
 #     terminal or --yes;
-#   - it fails when the re-read rulesets don't match.
+#   - it fails when the re-read rulesets don't match;
+#   - a write GitHub rejects prints the ruleset and GitHub's error body and
+#     exits non-zero.
 #
 # Usage: scripts/github/test-apply-rulesets.sh (from anywhere; needs jq)
 
@@ -27,8 +30,10 @@ failed=0
 # --- Stub gh -----------------------------------------------------------------
 #
 # State in $STUB_STATE: rulesets/<id>.json, calls.log (every call), writes.log
-# (PUT, POST, PATCH, DELETE). STUB_ADMIN (true/false), STUB_AUTH_RC, and
-# STUB_DROP_ON_WRITE (a rule type the stub silently drops when it stores a write).
+# (PUT, POST, PATCH, DELETE). STUB_ADMIN (true/false), STUB_AUTH_RC,
+# STUB_DROP_ON_WRITE (a rule type the stub silently drops when it stores a
+# write), and STUB_REJECT (a method, PUT or POST, answered with GitHub's
+# HTTP 422 validation error instead of being stored).
 mkdir -p "$WORK/bin"
 cat >"$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -50,6 +55,15 @@ while [ $# -gt 0 ]; do
 done
 repo="repos/EconGraph/econ-graph"
 [ "$method" = GET ] || echo "$method $path" >>"$state/writes.log"
+if [ "$method" = "${STUB_REJECT:-}" ]; then
+    # What gh does on an error response: the body on stdout, a summary on stderr.
+    jq -n '{message: "Validation Failed",
+            errors: [{resource: "Repository", code: "custom", field: "rules", message: "Merge queue cannot be used with wildcard branch patterns"}],
+            documentation_url: "https://docs.github.com/rest/repos/rules#create-a-repository-ruleset",
+            status: "422"}'
+    echo "gh: Validation Failed (HTTP 422)" >&2
+    exit 1
+fi
 store() { # store ID FILE: what GitHub keeps from a write (read-only fields stay)
     local old="$state/rulesets/$1.json"
     [ -f "$old" ] || echo '{}' >"$old"
@@ -121,7 +135,7 @@ reset() {
     : >"$STUB_STATE/calls.log"
     : >"$STUB_STATE/writes.log"
     printf '%s\n' "${1:-$live_main}" >"$STUB_STATE/rulesets/8429203.json"
-    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE
+    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE STUB_REJECT
 }
 
 ok() { echo "ok   $1"; }
@@ -152,9 +166,11 @@ expect_refusal() {
     fi
 }
 
-# What MERGE_QUEUE.md's jq computes from the live main ruleset, before any
-# release ruleset exists: the reference for the first apply.
-jq '(.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
+# What MERGE_QUEUE.md describes, computed from the live main ruleset before
+# any release ruleset exists: the reference for the first apply. The release
+# ruleset has no merge queue and no Lint workflows check.
+jq 'map(select(.type != "merge_queue"))
+    | (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
       map(select(.context != "Lint workflows"))' "$rules" >"$WORK/release-new-rules.json"
 jq --slurpfile new "$rules" '{name, target, enforcement, conditions, bypass_actors,
       rules: ([.rules[] | select(.type as $t | [$new[0][].type] | index($t) | not)] + $new[0])}' \
@@ -218,6 +234,15 @@ if [ "$(wc -w <<<"$release_file")" = 1 ]; then
 else
     fail "first apply: one release ruleset" "$release_file"
 fi
+# GitHub rejects a merge queue on a wildcard branch pattern; main keeps its own.
+if jq -e '[.rules[].type] | (index("merge_queue") | not) and index("deletion")
+          and index("required_status_checks") and index("pull_request") and index("non_fast_forward")' \
+    "$release_file" >/dev/null &&
+    jq -e '[.rules[].type] | index("merge_queue")' "$STUB_STATE/rulesets/8429203.json" >/dev/null; then
+    ok "first apply: release has no merge_queue rule, main has one"
+else
+    fail "first apply: merge_queue rules" "$(jq -c '.rules | map(.type)' "$release_file")"
+fi
 # Every live field of main is still there, unchanged.
 if jq -e --argjson live "$live_main" '
     . as $now
@@ -249,7 +274,8 @@ fi
 # --- Release ruleset updated in place -----------------------------------------
 
 release_id="$(jq -r .id "$release_file")"
-jq '.rules |= map(if .type == "merge_queue" then .parameters.max_entries_to_build = 2 else . end
+jq '.rules |= map(if .type == "required_status_checks"
+                  then .parameters.strict_required_status_checks_policy = true else . end
                   | select(.type != "deletion"))
     | .rules += [{"type": "required_signatures"}]
     | .conditions.ref_name.include += ["refs/heads/hotfix/*"]' "$release_file" >"$WORK/r.json"
@@ -264,7 +290,9 @@ else
 fi
 if jq -e '
     (.rules | map(.type) | index("required_signatures") and index("deletion"))
-    and (.rules[] | select(.type == "merge_queue") | .parameters.max_entries_to_build == 5)
+    and (.rules | map(.type) | index("merge_queue") | not)
+    and (.rules[] | select(.type == "required_status_checks")
+         | .parameters.strict_required_status_checks_policy == false)
     and (.conditions.ref_name.include == ["refs/heads/release/*", "refs/heads/hotfix/*"])' \
     "$release_file" >/dev/null; then
     ok "release update keeps its own rules and refs and restores the managed values"
@@ -372,6 +400,35 @@ if [ "$rc" -ne 0 ] && grep -qF 'does not match what was applied' <<<"$out"; then
     ok "fails when the re-read ruleset doesn't match"
 else
     fail "verification (exit $rc)" "$out"
+fi
+
+# --- Rejected writes -----------------------------------------------------------
+
+reset
+export STUB_REJECT=POST
+run --yes
+if [ "$rc" -ne 0 ] &&
+    grep -qF 'GitHub rejected the write of new ruleset "release branches by pr" (POST repos/EconGraph/econ-graph/rulesets)' <<<"$out" &&
+    grep -qF 'gh: Validation Failed (HTTP 422)' <<<"$out" &&
+    grep -qF 'message: Validation Failed' <<<"$out" &&
+    grep -qF "error: Merge queue cannot be used with wildcard branch patterns" <<<"$out" &&
+    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out" &&
+    ! grep -qF 'Created ruleset' <<<"$out" && ! grep -qF 'Verified' <<<"$out"; then
+    ok "a rejected release POST prints GitHub's error, says main was written, exits non-zero"
+else
+    fail "rejected release POST (exit $rc)" "$out"
+fi
+
+reset
+export STUB_REJECT=PUT
+run --yes
+if [ "$rc" -ne 0 ] &&
+    grep -qF 'GitHub rejected the write of ruleset 8429203 "main only by pr"' <<<"$out" &&
+    grep -qF 'message: Validation Failed' <<<"$out" && grep -qF 'Nothing was written.' <<<"$out" &&
+    [ "$(cat "$STUB_STATE/writes.log")" = "PUT repos/EconGraph/econ-graph/rulesets/8429203" ]; then
+    ok "a rejected main PUT prints GitHub's error and stops before the release ruleset"
+else
+    fail "rejected main PUT (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"
 fi
 
 exit "$failed"

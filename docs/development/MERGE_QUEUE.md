@@ -1,11 +1,19 @@
 # Merge queue
 
-`main` and the `release/*` branches take changes through GitHub's merge queue. A
-PR that is approved and green is added to the queue; GitHub merges it onto the
-tip of the branch (after the PRs ahead of it) on a temporary
-`gh-readonly-queue/...` branch, runs the required checks on that merge group,
-and merges the PR only when they pass. So the branch only ever gets commits
-whose combined result was tested, not just each PR on its own base.
+`main` takes changes through GitHub's merge queue. A PR that is approved and
+green is added to the queue; GitHub merges it onto the tip of the branch
+(after the PRs ahead of it) on a temporary `gh-readonly-queue/...` branch,
+runs the required checks on that merge group, and merges the PR only when
+they pass. So the branch only ever gets commits whose combined result was
+tested, not just each PR on its own base.
+
+The `release/*` branches have no merge queue. GitHub does not allow a merge
+queue on a ruleset whose branch name pattern has a wildcard (`*`), and one
+ruleset covers every release branch. They are protected the same way
+otherwise: a PR with an approving review, the required checks, no force
+pushes and no deletion. A PR into a release branch is merged directly once it
+is approved and its checks pass, so it is tested on its own base, not on the
+branch tip.
 
 ## Required checks
 
@@ -52,6 +60,10 @@ no trigger-level path filter on `pull_request`, and a result job with
    are re-tested without it. Read the run (`gh run list --event merge_group`),
    fix the PR, and queue it again.
 
+A PR into a `release/*` branch skips steps 2 to 4: there is no queue, so once
+it is approved and its required checks pass, merge it with **Squash and
+merge** or `gh pr merge <number> --squash`.
+
 To take a PR out of the queue: **Remove from queue** on the PR page, or on the
 branch's merge queue page (**...** next to the PR). GitHub CLI has no command
 for it; the API's GraphQL mutation is `dequeuePullRequest`
@@ -60,13 +72,12 @@ with the node id from `gh pr view <number> --json id`). A PR still waiting for
 its checks (auto-merge on, not yet queued) is stopped with **Disable
 auto-merge**, or `gh pr merge <number> --disable-auto`.
 
-A stacked PR is queued only after it is retargeted onto `main` or the release
-branch; the queue only merges into the branches the rulesets name.
+A stacked PR is queued only after it is retargeted onto `main`; the queue only
+merges into the branch the main ruleset names.
 
 Sources: GitHub's [merging a pull request with a merge queue](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/merging-a-pull-request-with-a-merge-queue)
 and [`gh pr merge`](https://cli.github.com/manual/gh_pr_merge); the mutation is
-in the GraphQL schema. Not yet tried on this repository: the rulesets below
-are not applied.
+in the GraphQL schema.
 
 ### When a new advisory blocks the queue
 
@@ -108,12 +119,14 @@ rule exactly as it is (including
 
 - `deletion`: the branch can't be deleted;
 - the required checks, all from GitHub Actions (integration id 15368);
-- the merge queue, with squash merges.
+- the merge queue, with squash merges (main only; see the release ruleset
+  below).
 
 Both keep the live `bypass_actors`: organization admins, always. An admin can
-therefore bypass the queue, merging a PR directly ("Merge without waiting for
+therefore bypass the rules, merging a PR directly ("Merge without waiting for
 requirements to be met"), or `gh pr merge --admin`, and push to the branch
-without the queue's checks. Everyone else lands through the queue.
+without the required checks. Everyone else lands on `main` through the queue,
+and on a release branch through an approved, green PR.
 
 The script reads the live rulesets with `gh api` and merges by rule type, so
 nothing a live ruleset sets is lost:
@@ -128,12 +141,18 @@ The release ruleset copies the main ruleset's live `non_fast_forward` and
 `pull_request` rules and `bypass_actors`, for `refs/heads/release/*`. Its
 required checks leave out `Lint workflows`: `release/v4.0` has no Actionlint
 workflow, and a required check that no workflow reports keeps every PR
-waiting. The script finds it by name and target, so a re-run updates it
-rather than creating another.
+waiting. It has no `merge_queue` rule: GitHub rejects a merge queue on a
+ruleset whose branch name pattern has a wildcard, as `refs/heads/release/*`
+does (HTTP 422, "Validation Failed"). The script finds it by name and target,
+so a re-run updates it rather than creating another.
 
 Before writing, the script refuses when the account has no admin rights or
 the main ruleset is missing or not the expected one (another id, name, target
-or branch condition, or without its pull-request rule). After writing, it
+or branch condition, or without its pull-request rule). When GitHub rejects a
+write, the script prints which ruleset failed and GitHub's error (its
+`message` and `errors`), says whether the main ruleset was already updated,
+and exits non-zero; a re-run after fixing the cause picks up from there,
+since an applied ruleset shows as already applied. After writing, it
 re-reads both rulesets and fails unless they match. When they already match,
 it prints "already applied" and writes nothing. `--yes` skips the prompt.
 [test-apply-rulesets.sh](../../scripts/github/test-apply-rulesets.sh) checks

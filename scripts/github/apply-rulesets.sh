@@ -9,7 +9,8 @@
 #   - create, or update, the ruleset `release branches by pr` for
 #     refs/heads/release/*: main's live `non_fast_forward` and `pull_request`
 #     rules and `bypass_actors`, plus the same rules without the
-#     `Lint workflows` check.
+#     `Lint workflows` check and without the merge queue (GitHub refuses a
+#     merge queue on a ruleset whose branch pattern has a wildcard).
 #
 # Usage: scripts/github/apply-rulesets.sh [--dry-run] [--yes]
 #
@@ -28,8 +29,11 @@
 #
 # It refuses before writing anything when `gh` is not logged in, the account
 # has no admin rights on the repository, or the main ruleset is missing or not
-# the expected one (id, name, target, source, branch condition, rules). After
-# writing it re-reads both rulesets and fails unless they match.
+# the expected one (id, name, target, source, branch condition, rules). When
+# GitHub rejects a write, it prints which ruleset failed, whether the main
+# ruleset was already written, and GitHub's error message and errors, then
+# exits non-zero. After writing it re-reads both rulesets and fails unless
+# they match.
 #
 # Needs gh (logged in as a repository admin), jq and diff. Reads and writes
 # only through `gh api`; temporary files go under $TMPDIR and are removed.
@@ -181,8 +185,13 @@ fi
 
 # --- Desired rulesets --------------------------------------------------------
 
+# No merge queue on the release ruleset: GitHub rejects (HTTP 422) a merge
+# queue on a ruleset whose branch name pattern has a wildcard, and
+# refs/heads/release/* has one. Release branches stay protected (PR, checks,
+# no force push, no deletion) and merge without a queue.
 jq --arg skip "$RELEASE_SKIPPED_CHECK" '
-  (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
+  map(select(.type != "merge_queue"))
+  | (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
     map(select(.context != $skip))' "$RULES_FILE" >"$work/release-new-rules.json"
 
 jq "$JQ_LIB"' writable | .rules |= merge_rules($new[0])' \
@@ -257,16 +266,52 @@ if ! $assume_yes; then
     esac
 fi
 
+main_written=false
+
+# write_ruleset LABEL METHOD PATH INPUT OUTPUT: write a ruleset with gh api. On an
+# error, print which ruleset failed and GitHub's error body (gh writes it to
+# stdout as JSON: `message`, and `errors` for a validation failure), and exit.
+write_ruleset() {
+    local label="$1" method="$2" path="$3" input="$4" output="$5"
+    if gh api -X "$method" "$path" --input "$input" >"$output" 2>"$work/write-err"; then
+        return 0
+    fi
+    {
+        echo "apply-rulesets: GitHub rejected the write of ${label} (${method} ${path})."
+        sed 's/^/  /' "$work/write-err"
+        if jq -e 'type == "object"' "$output" >/dev/null 2>&1; then
+            jq -r '
+              (select(.message) | "  message: \(.message)"),
+              (.errors // [] | if type == "array" then .[] else . end
+                 | "  error: \(if type == "string" then . else (.message // tojson) end)"),
+              (select(.documentation_url) | "  see: \(.documentation_url)")' "$output"
+        elif [ -s "$output" ]; then
+            sed 's/^/  /' "$output"
+        fi
+        if $main_written; then
+            echo "Ruleset ${MAIN_ID} \"${MAIN_NAME}\" was already updated; ${label} was not."
+            echo "Fix the cause and re-run: the main ruleset will show as already applied."
+        else
+            echo "Nothing was written."
+        fi
+    } >&2
+    exit 1
+}
+
 if $main_changes; then
-    gh api -X PUT "repos/${REPO}/rulesets/${MAIN_ID}" --input "$work/main-desired.json" >/dev/null
+    write_ruleset "ruleset ${MAIN_ID} \"${MAIN_NAME}\"" PUT "repos/${REPO}/rulesets/${MAIN_ID}" \
+        "$work/main-desired.json" "$work/main-written.json"
+    main_written=true
     echo "Updated ruleset ${MAIN_ID} \"${MAIN_NAME}\"."
 fi
 if $release_changes; then
     if [ -n "$release_id" ]; then
-        gh api -X PUT "repos/${REPO}/rulesets/${release_id}" --input "$work/release-desired.json" >/dev/null
+        write_ruleset "ruleset ${release_id} \"${RELEASE_NAME}\"" PUT "repos/${REPO}/rulesets/${release_id}" \
+            "$work/release-desired.json" "$work/release-written.json"
         echo "Updated ruleset ${release_id} \"${RELEASE_NAME}\"."
     else
-        gh api -X POST "repos/${REPO}/rulesets" --input "$work/release-desired.json" >"$work/created.json"
+        write_ruleset "new ruleset \"${RELEASE_NAME}\"" POST "repos/${REPO}/rulesets" \
+            "$work/release-desired.json" "$work/created.json"
         release_id="$(jq -r '.id' "$work/created.json")"
         [[ "$release_id" =~ ^[0-9]+$ ]] || die "the create returned no ruleset id"
         echo "Created ruleset ${release_id} \"${RELEASE_NAME}\"."
