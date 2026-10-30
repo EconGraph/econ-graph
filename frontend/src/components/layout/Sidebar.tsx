@@ -9,6 +9,7 @@ import {
   TrendingUp as TrendingUpIcon,
   // Assessment as AssessmentIcon, // Unused but kept for future features
   Public as GlobalIcon,
+  PrivacyTip as PrivacyTipIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -80,6 +81,12 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
       path: '/about',
       icon: <InfoIcon />,
       description: 'About EconGraph',
+    },
+    {
+      text: 'Privacy Policy',
+      path: '/privacy',
+      icon: <PrivacyTipIcon />,
+      description: 'What we collect and why',
     },
   ];
 
