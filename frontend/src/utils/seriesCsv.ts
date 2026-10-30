@@ -2,9 +2,13 @@
  * CSV export of the points a series chart shows, built in the browser.
  *
  * The file opens with one `label,value` row per piece of metadata (title, source, units,
- * transformation, retrieval time), then a `date,value` header and one row per point, so
- * every row has two fields. Lines end in CRLF (RFC 4180).
+ * transformation, retrieval time, and the source's required citation and notice), then a
+ * `date,value` header and one row per point, so every row has two fields. Lines end in CRLF
+ * (RFC 4180).
  */
+
+import type { SourceNotice } from '../hooks/useSeriesData';
+import { derivedValuesNote, retrievalDate } from './sourceNotice';
 
 /** What goes into a series CSV. */
 export interface SeriesCsvInput {
@@ -17,6 +21,10 @@ export interface SeriesCsvInput {
   transformation: string;
   /** When the values were fetched from the API; null when unknown. */
   retrievedAt: Date | null;
+  /** The source's required notice; null or absent for a source without one. */
+  notice?: SourceNotice | null;
+  /** When EconGraph last retrieved the series from its source (`lastUpdated`); null when unknown. */
+  fetchedFromSource?: string | null;
   /**
    * Points to write, in the order given. `exactValue`, the API's decimal string, is written
    * when present so the file keeps every digit; otherwise `value`.
@@ -76,6 +84,17 @@ export function buildSeriesCsv(input: SeriesCsvInput): string {
     ['Transformation', input.transformation || 'None'],
     ['Retrieved at', input.retrievedAt?.toISOString() ?? ''],
   ];
+  const derived = derivedValuesNote(input.transformation, input.source);
+  if (derived) meta.push(['Derived values', derived]);
+  const notice = input.notice;
+  if (notice) {
+    if (notice.citation) meta.push(['Citation', notice.citation]);
+    meta.push(['Notice', notice.notice]);
+    if (notice.retrievalDateRequired) {
+      meta.push(['Retrieved from source', retrievalDate(input.fetchedFromSource ?? null) ?? '']);
+    }
+    meta.push(['Terms of use', notice.termsUrl]);
+  }
   const lines = meta.map(([label, value]) => `${label},${csvTextField(value)}`);
   lines.push('date,value');
   for (const point of input.points) {

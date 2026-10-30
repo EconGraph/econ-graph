@@ -201,7 +201,8 @@ const WorldMapTab: React.FC = () => {
             }}
           >
             Hover over a country for its value; click it (tap twice on a touch screen) to open its
-            series. Source: {dataset?.name ?? 'World Development Indicators'}, World Bank.
+            series. {/* The World Bank's dataset terms prescribe this attribution format. */}
+            The World Bank: {dataset?.name ?? 'World Development Indicators'}.
           </Typography>
           {values.length > 0 && (
             <MapValuesTable values={values} unit={unit} frequency={frequency} />

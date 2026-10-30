@@ -47,6 +47,7 @@ import {
 } from '../utils/transformations';
 import { formatObservationDate } from '../utils/dates';
 import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
+import { SourceNoticePanel } from '../components/common/SourceNoticePanel';
 
 /**
  * Series page: one economic series' metadata, chart and latest observations, read from
@@ -222,6 +223,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         units: transformedUnits(shownTransformation, units),
         transformation: transformationLabel,
         retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
+        notice: series.source?.notice,
+        fetchedFromSource: series.lastUpdated,
         points: exportedPoints,
       });
       downloadCsv(seriesCsvFileName(series.externalId, shownTransformation), csv);
@@ -329,7 +332,15 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       </Box>
 
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, lg: 8 }}>{chart}</Grid>
+        <Grid size={{ xs: 12, lg: 8 }}>
+          {chart}
+          <SourceNoticePanel
+            sourceName={series.source?.name ?? ''}
+            notice={series.source?.notice}
+            lastUpdated={series.lastUpdated}
+            transformationLabel={transformationLabel}
+          />
+        </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
           <Box sx={{ mb: 3 }}>

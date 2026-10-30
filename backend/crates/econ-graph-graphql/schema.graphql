@@ -467,6 +467,11 @@ type DataSourceType {
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	"""
+	The citation and notice this source's terms require wherever its data are shown or
+	exported; null for a source without one.
+	"""
+	notice: SourceNotice
+	"""
 	Fetch all series for this data source using DataLoader
 	"""
 	series(first: Int! = 50, after: String): SeriesConnection!
@@ -1110,6 +1115,30 @@ input ShareChartInput {
 	Permission level (view, comment, edit, admin)
 	"""
 	permissionLevel: String!
+}
+
+"""
+The attribution a data source's terms require.
+"""
+type SourceNotice {
+	"""
+	The citation to show with the data, such as "Source: FHFA HPI®"; null when the terms
+	prescribe none.
+	"""
+	citation: String
+	"""
+	The statement the terms require, such as a no-endorsement notice.
+	"""
+	notice: String!
+	"""
+	The provider's terms of use.
+	"""
+	termsUrl: String!
+	"""
+	Whether the terms require the date the data were retrieved from the source to be shown
+	alongside the data (BLS).
+	"""
+	retrievalDateRequired: Boolean!
 }
 
 """
