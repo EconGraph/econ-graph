@@ -57,11 +57,21 @@ KC_IMAGE="$(sed -n 's/^ *image: *\(quay.io\/keycloak\/keycloak:[^ ]*\).*/\1/p' \
     "${ROOT}/k8s/manifests/keycloak/deployment.yaml" | head -n 1)"
 [[ -n "${KC_IMAGE}" ]] || { echo "cannot read the Keycloak image from deployment.yaml" >&2; exit 1; }
 
-export FIXTURE_DOCKER_HOST="${FIXTURE_DOCKER_HOST:-${DOCKER_HOST:-unix:///run/user/$(id -u)/docker.sock}}"
+# CI runners have only the system's rootful daemon; anywhere else the test, like the builder,
+# uses the rootless one and refuses a rootful daemon (here, the one the clusters run on).
+if [[ "${CI:-}" == true ]]; then
+    default_host=unix:///var/run/docker.sock
+else
+    default_host="unix:///run/user/$(id -u)/docker.sock"
+fi
+export FIXTURE_DOCKER_HOST="${FIXTURE_DOCKER_HOST:-${DOCKER_HOST:-${default_host}}}"
 export DOCKER_HOST="${FIXTURE_DOCKER_HOST}"
 unset DOCKER_CONTEXT
 if ! docker info --format '{{json .SecurityOptions}}' | grep -q rootless; then
-    # CI runners have only a rootful daemon.
+    if [[ "${CI:-}" != true ]]; then
+        echo "${DOCKER_HOST} is not a rootless Docker daemon; outside CI this test runs only on one" >&2
+        exit 1
+    fi
     export FIXTURE_ALLOW_ROOTFUL_DOCKER=true
 fi
 
@@ -84,7 +94,7 @@ BOOTDB="${ID}-bootdb"
 BOOT="${ID}-boot"
 
 cleanup() {
-    docker rm -f "${SRC}" "${KCDB}" "${KC}" "${BOOTDB}" "${BOOT}" >/dev/null 2>&1 || true
+    docker rm -fv "${SRC}" "${KCDB}" "${KC}" "${BOOTDB}" "${BOOT}" >/dev/null 2>&1 || true
     docker network rm "${NET}" >/dev/null 2>&1 || true
     if [[ -z "${FIXTURE_TEST_KEEP:-}" ]]; then
         chmod -R u+w "${W}" 2>/dev/null || true
@@ -390,21 +400,29 @@ FIX="${HOME}/econgraph-fixtures"
 LOG="${W}/log"
 mkdir -p "${LOG}"
 run_build() { local name="$1"; shift; "${BUILD}" "$@" </dev/null >"${LOG}/${name}.log" 2>&1; }
+# No scratch container, data volume (it holds the unsanitized restore) or build directory left
 no_scratch_left() {
     [[ -z "$(docker ps -aq --filter name=econgraph-fixture-)" ]] &&
+        [[ -z "$(docker volume ls -q --filter label=econgraph.fixture-scratch=1)" ]] &&
+        [[ -z "$(docker volume ls -q --filter name=econgraph-fixture-)" ]] &&
         [[ -z "$(find "${FIX}" "${W}/out" -maxdepth 1 -name '.build-*' 2>/dev/null)" ]]
 }
-# The text of every dump in DIR (pg_restore to SQL), to grep.
+# The text of every dump in DIR (pg_restore to SQL, the archive on stdin), to grep.
 dump_text() {
     local f
     for f in "$1"/*.dump; do
-        docker run --rm -i --network none "${PG_IMAGE}" pg_restore --file=- - <"${f}"
+        docker run --rm -i --network none "${PG_IMAGE}" pg_restore --file=- <"${f}"
     done
 }
-# Planted values found in the dumps of DIR, one per line.
+# Planted values found in the dumps of DIR, one per line. Fails when the dumps read back as no
+# text at all, so an empty read can't pass as "nothing found".
 leaks_in() {
     local text p
     text="$(dump_text "$1")"
+    if [[ "${text}" != *"PostgreSQL database dump"* ]]; then
+        echo "dump_text read nothing from $1" >&2
+        return 1
+    fi
     for p in "${PLANTED[@]}"; do
         if grep -qiF -- "${p}" <<<"${text}"; then echo "${p}"; fi
     done
@@ -453,6 +471,12 @@ fi
 
 # ------------------------------------------------------------ full build, shared
 
+# The scan itself works: on the unsanitized source dumps it finds every planted value.
+FOUND="$(leaks_in "${HOSTDIR}" | sort -u)" || FOUND=""
+MISSED="$(comm -23 <(printf '%s\n' "${PLANTED[@]}" | sort -u) <(printf '%s\n' "${FOUND}"))"
+check "the leak scan finds every planted value in the unsanitized dumps${MISSED:+ (not found: ${MISSED//$'\n'/, })}" \
+    test -z "${MISSED}"
+
 echo "== full build, host layout (APP_DATABASE=shared)"
 if run_build full-shared --from-dir "${HOSTDIR}"; then ok "full build (shared) succeeds"; else bad "full build (shared) succeeds"; cat "${LOG}/full-shared.log"; fi
 OUT_SHARED="$(find "${FIX}" -mindepth 1 -maxdepth 1 -type d -name '2*' | head -n 1)"
@@ -470,7 +494,7 @@ check "MANIFEST records row counts per table" \
              grep -q '^rows.econ_graph.public.user_sessions=0$' '${OUT_SHARED}/MANIFEST' &&
              grep -q '^rows.keycloak.public.credential=0$' '${OUT_SHARED}/MANIFEST' &&
              grep -q '^rows.econ_graph.public.data_points=' '${OUT_SHARED}/MANIFEST'"
-LEAKS="$(leaks_in "${OUT_SHARED}")"
+LEAKS="$(leaks_in "${OUT_SHARED}")" || LEAKS="the dumps could not be read"
 check "no planted value is left in the shared fixture${LEAKS:+ (left: ${LEAKS//$'\n'/, })}" test -z "${LEAKS}"
 check "the pseudonym key was created 0600" \
     test "$(stat -c %a "${XDG_CONFIG_HOME}/econgraph/fixture-salt")" = 600
@@ -517,7 +541,7 @@ check "the service account keeps its name" \
     test "$(q keycloak "select count(*) from user_entity where username = 'service-account-econ-graph-batch'")" = 1
 
 echo "== Keycloak on the sanitized keycloak.dump"
-docker rm -f "${KCDB}" >/dev/null
+docker rm -fv "${KCDB}" >/dev/null
 if BOOTURL="$(start_keycloak "${BOOT}" "${BOOTDB}" "${KC_IMAGE}" start-dev)"; then
     ok "Keycloak starts on the sanitized database"
     check "it serves the realm with new signing keys" \
@@ -527,7 +551,7 @@ if BOOTURL="$(start_keycloak "${BOOT}" "${BOOTDB}" "${KC_IMAGE}" start-dev)"; th
 else
     bad "Keycloak starts on the sanitized database"
 fi
-docker rm -f "${BOOT}" >/dev/null 2>&1 || true
+docker rm -fv "${BOOT}" >/dev/null 2>&1 || true
 
 # ------------------------------------------------------------ idempotence
 
@@ -556,7 +580,7 @@ else
 fi
 check "it holds the three dumps" \
     test -s "${W}/out/separate/econ_graph.dump" -a -s "${W}/out/separate/econ_graph_app.dump" -a -s "${W}/out/separate/keycloak.dump"
-LEAKS="$(leaks_in "${W}/out/separate")"
+LEAKS="$(leaks_in "${W}/out/separate")" || LEAKS="the dumps could not be read"
 check "no planted value is left in the separate fixture${LEAKS:+ (left: ${LEAKS//$'\n'/, })}" test -z "${LEAKS}"
 check "the same key gives the same pseudonyms in both layouts" \
     test "$(manifest "${W}/out/separate" output.keycloak.sha256)" != "" -a \
@@ -601,7 +625,7 @@ check "it is under ~/econgraph-fixtures/<UTC stamp>-ci-subset" test -n "${OUT_SU
 SUB_KIB="$(manifest "${OUT_SUB}" total_kib)"
 echo "     CI subset size: ${SUB_KIB} KiB ($(du -sh "${OUT_SUB}" | cut -f1) on disk)"
 check "it reports its size" grep -q "fixture OK: .* (ci-subset, ${SUB_KIB} KiB)" "${LOG}/subset.log"
-LEAKS="$(leaks_in "${OUT_SUB}")"
+LEAKS="$(leaks_in "${OUT_SUB}")" || LEAKS="the dumps could not be read"
 check "no planted value is left in the subset${LEAKS:+ (left: ${LEAKS//$'\n'/, })}" test -z "${LEAKS}"
 psql_in "${BOOTDB}" keycloak keycloak -c "CREATE DATABASE subset" >/dev/null
 docker exec -i "${BOOTDB}" pg_restore --no-owner --exit-on-error -U keycloak -d subset <"${OUT_SUB}/econ_graph.dump"
