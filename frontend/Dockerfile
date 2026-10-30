@@ -20,7 +20,11 @@ ARG VITE_GRAPHQL_URL
 ARG VITE_DATA_GRAPHQL_AUTH
 ARG VITE_DATA_GRAPHQL_URL
 ARG VITE_WS_URL
-ARG VITE_OIDC_ISSUER
+# Keycloak issuer for sign-in. A path is resolved against the app's own origin at runtime
+# (src/auth/oidcConfig.ts). An empty issuer hides sign-in, so the build fails on one unless
+# VITE_OIDC_SIGN_IN_DISABLED=true says that is intended.
+ARG VITE_OIDC_ISSUER=/idp/realms/econ-graph
+ARG VITE_OIDC_SIGN_IN_DISABLED=false
 ARG VITE_OIDC_CLIENT_ID
 ARG NODE_ENV
 
@@ -39,7 +43,11 @@ ENV NODE_ENV=$NODE_ENV
 ENV FLAGS_PROFILE=$FLAGS_PROFILE
 
 # Build the application (Vite)
-RUN npm run build
+RUN if [ -z "$(echo "$VITE_OIDC_ISSUER" | tr -d '[:space:]')" ] && [ "$VITE_OIDC_SIGN_IN_DISABLED" != "true" ]; then \
+      echo "VITE_OIDC_ISSUER is empty, which would hide sign-in; set it, or set VITE_OIDC_SIGN_IN_DISABLED=true to build without sign-in." >&2; \
+      exit 1; \
+    fi \
+    && npm run build
 
 # Production stage
 FROM nginx:1.30-alpine
