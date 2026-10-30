@@ -1075,6 +1075,7 @@ impl Worker {
                     guarded: false,
                     transitions: 1,
                     transition_statuses: vec![status],
+                    ..Default::default()
                 });
         }
         if matches!(result, Err(CrawlError::Restricted(_)))
@@ -1088,6 +1089,7 @@ impl Worker {
                     guarded: false,
                     transitions: 1,
                     transition_statuses: vec![status],
+                    ..Default::default()
                 });
         }
         let series_id = match result {

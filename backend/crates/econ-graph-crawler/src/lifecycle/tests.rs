@@ -116,8 +116,7 @@ fn explicit_restrictions_and_discontinued_titles_are_distinct_from_absence() {
     let facts = CatalogLifecycle {
         restricted_ids: vec!["r".into()],
         discontinued_ids: vec!["d".into()],
-        confirmed_missing_ids: vec![],
-        scope_ids: vec![],
+        ..Default::default()
     };
     let (states, guarded) = plan(
         &[],
@@ -1303,5 +1302,162 @@ async fn successful_fetches_of_different_series_do_not_wait_for_each_other() {
     .unwrap();
     assert_eq!(fetch_evidence(pool, "other").await.fetch_misses, 0);
     drop(conn);
+    db.drop().await;
+}
+
+/// The reviewed case: 50 old series enrolled at adoption without being listed upstream (a
+/// renamed table family), 50 renamed and 10 other listed series. No refresh may be guarded,
+/// and the old series reach `missing_from_catalog` after three refreshes.
+#[test]
+fn a_fifty_series_rename_enrolled_at_adoption_is_badged_not_guarded() {
+    let now = Utc::now();
+    let old: Vec<String> = (0..50)
+        .map(|i| format!("bea_regional/SAGDP2N.{i}.06000"))
+        .collect();
+    let current: Vec<_> = (0..50)
+        .map(|i| found(&format!("bea_regional/SAGDP2.{i}.06000")))
+        .chain((0..10).map(|i| found(&format!("bea_nipa/T10101.{i}.A"))))
+        .collect();
+    let facts = CatalogLifecycle {
+        scope_ids: old.clone(),
+        ..Default::default()
+    };
+    let (mut states, guarded) = plan(
+        &[],
+        &current,
+        &facts,
+        false,
+        now,
+        LifecyclePolicy::default(),
+    );
+    assert!(!guarded);
+    assert_eq!(states.len(), 110);
+    let mut guarded_runs = 0;
+    for refresh in 1..=3 {
+        let (next, guarded) = plan(
+            &states,
+            &current,
+            &facts,
+            true,
+            now,
+            LifecyclePolicy::default(),
+        );
+        guarded_runs += usize::from(guarded);
+        states = next;
+        for id in &old {
+            let s = states.iter().find(|s| &s.external_id == id).unwrap();
+            assert_eq!(s.missing_refreshes, refresh);
+        }
+    }
+    assert_eq!(guarded_runs, 0);
+    for id in &old {
+        let s = states.iter().find(|s| &s.external_id == id).unwrap();
+        assert_eq!(s.status, "missing_from_catalog");
+    }
+    assert!(current.iter().all(|d| {
+        states
+            .iter()
+            .find(|s| s.external_id == d.external_id)
+            .is_some_and(|s| s.status == "active")
+    }));
+}
+
+/// Rule drift: a tracked series the walked catalog still lists, but the rules no longer
+/// select (exact ids for FRED, table prefixes for BEA), is never absent and never trips the
+/// guard; a series missing from the whole walked catalog still is.
+#[test]
+fn a_series_listed_upstream_but_outside_the_rules_is_never_absent() {
+    let now = Utc::now();
+    let baseline: Vec<_> = (0..5).map(|i| tracked(&i.to_string())).collect();
+    let selected: Vec<_> = (2..5).map(|i| found(&i.to_string())).collect();
+    for facts in [
+        CatalogLifecycle {
+            unselected_ids: vec!["0".into(), "1".into(), "not-tracked".into()],
+            ..Default::default()
+        },
+        CatalogLifecycle {
+            unselected_prefixes: vec!["0".into(), "1".into()],
+            ..Default::default()
+        },
+    ] {
+        let mut states = baseline.clone();
+        states[0].status = "missing_from_catalog".into();
+        states[0].missing_refreshes = 3;
+        states[0].since = Some(now);
+        for refresh in 1..=4 {
+            // Two of five drifting out of the rules would trip the 20% guard if counted.
+            let (next, guarded) = plan(
+                &states,
+                &selected,
+                &facts,
+                true,
+                now,
+                LifecyclePolicy::default(),
+            );
+            assert!(!guarded, "refresh {refresh} was guarded");
+            states = next;
+            for id in ["0", "1"] {
+                let s = states.iter().find(|s| s.external_id == id).unwrap();
+                assert_eq!(
+                    (
+                        s.status.as_str(),
+                        s.missing_refreshes,
+                        s.since,
+                        s.in_accepted_catalog
+                    ),
+                    ("active", 0, None, true)
+                );
+            }
+        }
+        assert!(states.iter().all(|s| s.external_id != "not-tracked"));
+    }
+    // Once the walked catalog no longer lists it at all, absence counts again.
+    let mut states = baseline.clone();
+    let listed: Vec<_> = (1..5).map(|i| found(&i.to_string())).collect();
+    for _ in 0..3 {
+        let (next, guarded) = plan(
+            &states,
+            &listed,
+            &CatalogLifecycle::default(),
+            true,
+            now,
+            LifecyclePolicy::default(),
+        );
+        assert!(!guarded);
+        states = next;
+    }
+    assert_eq!(states[0].status, "missing_from_catalog");
+}
+
+#[tokio::test]
+async fn rule_drift_is_counted_for_review_and_keeps_publication_state() {
+    let Some(db) = fetch_counter_db("eco464_rule_drift").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let all: Vec<_> = (0..5)
+        .map(|i| counter_series(&format!("GDP_{i}")))
+        .collect();
+    persist::persist_discovered(pool, SourceId::Fred, &all)
+        .await
+        .unwrap();
+    let start = Utc::now();
+    reconcile_at(pool, &all, &CatalogLifecycle::default(), start).await;
+    let drifted = CatalogLifecycle {
+        unselected_ids: vec!["GDP_0".into()],
+        ..Default::default()
+    };
+    for run in 1..=4 {
+        let result = reconcile_at(
+            pool,
+            &all[1..],
+            &drifted,
+            start + chrono::Duration::seconds(run),
+        )
+        .await;
+        assert_eq!(result.unselected_tracked, Some(1));
+        let e = fetch_evidence(pool, "GDP_0").await;
+        assert_eq!((e.status.as_str(), e.catalog_misses), ("active", 0));
+    }
     db.drop().await;
 }

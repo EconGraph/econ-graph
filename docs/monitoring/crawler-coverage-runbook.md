@@ -86,6 +86,13 @@ Selection limits bound expansion before observation jobs are enqueued. A rejecte
 raises `CrawlerCatalogGuardRejected`; inspect the upstream catalog and worker warning before
 increasing limits. Do not blindly raise a limit to silence an alert.
 
+Every discovery publishes `crawler_catalog_rule_matches{source,rule}`, the number of catalog
+entries each rule matched; `rule` is the rule's position in its file and the catalog it walks
+(`6:Regional:SAGDP2`, `0:release:53`). A rule that matches nothing logs a warning and raises
+`CrawlerCatalogRuleMatchesNothing`, even when the other rules keep discovery succeeding. That
+usually means upstream renamed the table or release: the rule's previously selected series
+will start counting as absent, so update the rule.
+
 One atomic data migration creates `series_lifecycle` (including fetch evidence),
 `catalog_lifecycle_scopes`, and `catalog_reference_snapshots`. Apply it with `crawler migrate`
 before deploying code that reads lifecycle state. A complete successful
@@ -99,8 +106,16 @@ baseline without counting absence. Members already absent at that baseline were 
 listed by an accepted catalog, so they do not count toward the 20%; three subsequent
 complete snapshots are required for their missing badge. Histories outside those rules are
 not enrolled or retired by that scope.
+Absence counts only for series the whole walked catalog no longer lists. A series that
+upstream still lists but the rules no longer select (for example a FRED series retitled out
+of a `title_contains` rule, or a BEA table retitled out of a title rule) keeps its
+publication state and stays scheduled. The worker logs a warning, publishes
+`crawler_catalog_unselected_series{source}`, and `CrawlerCatalogSeriesUnselected` (info)
+suggests reviewing the rules.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
-by a successful fetch. Three in a row retire a series; the scheduler still probes it once
+by a successful fetch. Only definite answers count: a FRED 400 "series does not exist" or an
+HTTP 404. A BEA response that omits one requested line or area, or a FRED `/series` response
+with no series, is a failed fetch, not NotFound evidence. Three in a row retire a series; the scheduler still probes it once
 every 12 refresh intervals (a series with no stored history: at most once per queue
 retention), and a successful probe makes it active again. Per-series writers (fetch success,
 NotFound, restriction) serialize only on the same series, so normal fetches and forced
@@ -116,6 +131,11 @@ catalog absence evidence: a delisted series can still serve historical observati
 | `retired` | Confirmed missing upstream; stored history stays public |
 | `restricted` | Hidden from public series and observation reads; retained internally |
 | `superseded` | History stays separate, with a human-confirmed successor link |
+
+`restricted` is sticky. Once a catalog or a fetch reports a legal restriction, no later
+catalog, rule change, successful fetch or accepted guarded catalog clears it; the series stays
+hidden even if upstream lifts the restriction. Lifting it is a reviewed manual change in the
+data database: the series' `series_lifecycle` status and its `is_active` flags.
 
 Data Sources shows lifecycle counts. Series pages distinguish proposed successors from
 confirmed successors. A proposed match is a review hint: compare source definitions, units

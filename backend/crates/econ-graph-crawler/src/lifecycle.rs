@@ -41,6 +41,36 @@ pub struct CatalogLifecycle {
     pub discontinued_ids: Vec<String>,
     /// Explicitly configured entries whose upstream lookup confirmed NotFound.
     pub confirmed_missing_ids: Vec<String>,
+    /// Ids the complete catalog walk listed upstream that the selection rules did not select,
+    /// for example a FRED series retitled out of a `title_contains` rule. They are still
+    /// published, so they never count as absent and keep being fetched.
+    #[serde(default)]
+    pub unselected_ids: Vec<String>,
+    /// External-id prefixes of listed upstream tables the rules did not select (BEA
+    /// `bea_nipa/T10101.`). Same meaning as `unselected_ids`, for sources whose catalog lists
+    /// tables rather than series.
+    #[serde(default)]
+    pub unselected_prefixes: Vec<String>,
+}
+
+impl CatalogLifecycle {
+    /// Ids, among `ids`, that upstream still lists outside the selection rules.
+    fn unselected<'a>(
+        &self,
+        listed: &BTreeSet<&str>,
+        ids: impl Iterator<Item = &'a str>,
+    ) -> BTreeSet<&'a str> {
+        let exact: BTreeSet<&str> = self.unselected_ids.iter().map(String::as_str).collect();
+        ids.filter(|id| {
+            !listed.contains(id)
+                && (exact.contains(id)
+                    || self
+                        .unselected_prefixes
+                        .iter()
+                        .any(|p| id.starts_with(p.as_str())))
+        })
+        .collect()
+    }
 }
 
 /// Durable evidence requirements, independent of worker replica/process lifetime.
@@ -65,6 +95,9 @@ pub struct Reconciled {
     pub guarded: bool,
     pub transitions: usize,
     pub(crate) transition_statuses: Vec<String>,
+    /// Tracked series listed upstream but no longer selected by the rules, when this result
+    /// came from a catalog snapshot.
+    pub(crate) unselected_tracked: Option<usize>,
 }
 
 #[derive(Debug, Clone, QueryableByName, Serialize)]
@@ -282,6 +315,18 @@ async fn apply_snapshot(
         .map(|s| s.status.clone())
         .collect();
     write_states(conn, source_id, fingerprint, &states, !guarded).await?;
+    let listed: BTreeSet<&str> = snapshot.listed.iter().map(String::as_str).collect();
+    let unselected_tracked = facts
+        .unselected(&listed, existing.iter().map(|s| s.external_id.as_str()))
+        .len();
+    if unselected_tracked > 0 {
+        tracing::warn!(
+            %source,
+            series = unselected_tracked,
+            "tracked series are still listed upstream but no longer match the selection rules; \
+             they stay published and scheduled; review the catalog_selection rules"
+        );
+    }
     // A guarded snapshot is kept for review; any accepted one discards it. The refresh time
     // advances either way so an older snapshot cannot be applied after a newer one.
     let pending = if guarded {
@@ -306,6 +351,7 @@ async fn apply_snapshot(
         guarded,
         transitions: transition_statuses.len(),
         transition_statuses,
+        unselected_tracked: Some(unselected_tracked),
     })
 }
 
@@ -383,13 +429,19 @@ pub async fn review_guarded_catalog(
             let listed: BTreeSet<&str> = snapshot.listed.iter().map(String::as_str).collect();
             let previously: Vec<&State> =
                 existing.iter().filter(|s| s.in_accepted_catalog).collect();
+            let unselected = snapshot
+                .facts
+                .unselected(&listed, previously.iter().map(|s| s.external_id.as_str()));
             let mut review = GuardedReview {
                 guarded_at,
                 listed: listed.len(),
                 previously_listed: previously.len(),
                 newly_missing: previously
                     .iter()
-                    .filter(|s| !listed.contains(s.external_id.as_str()))
+                    .filter(|s| {
+                        !listed.contains(s.external_id.as_str())
+                            && !unselected.contains(s.external_id.as_str())
+                    })
                     .map(|s| s.external_id.clone())
                     .collect(),
                 transitions: 0,
@@ -457,9 +509,13 @@ fn plan_listed(
     // make every later snapshot look like a mass disappearance.
     let previously_listed: Vec<&State> =
         existing.iter().filter(|s| s.in_accepted_catalog).collect();
+    // Listed upstream but outside the rules: still published, so never absent.
+    let unselected = facts.unselected(&listed, existing.iter().map(|s| s.external_id.as_str()));
     let newly_missing = previously_listed
         .iter()
-        .filter(|s| !listed.contains(s.external_id.as_str()))
+        .filter(|s| {
+            !listed.contains(s.external_id.as_str()) && !unselected.contains(s.external_id.as_str())
+        })
         .count();
     if same_scope
         && (listed.is_empty()
@@ -507,13 +563,16 @@ fn plan_listed(
             state.missing_refreshes = 0;
         }
         let present = listed.contains(state.external_id.as_str());
-        state.in_accepted_catalog = present;
+        let drifted = unselected.contains(state.external_id.as_str());
+        state.in_accepted_catalog = present || drifted;
         if restricted.contains(state.external_id.as_str()) || state.status == "restricted" {
             state.status = "restricted".into();
         } else if state.successor_id.is_some() {
             state.status = "superseded".into();
-        } else if present {
-            state.status = if discontinued.contains(state.external_id.as_str()) {
+        } else if present || drifted {
+            state.status = if discontinued.contains(state.external_id.as_str())
+                || (drifted && state.status == "discontinued")
+            {
                 "discontinued"
             } else {
                 "active"
@@ -536,7 +595,7 @@ fn plan_listed(
                 .into();
             }
         }
-        if present {
+        if present || drifted {
             state.missing_refreshes = 0;
             state.last_seen_at = Some(now);
             state.proposed_successor_id = None;
@@ -674,6 +733,12 @@ impl Reconciled {
                 .transitions_total
                 .with_label_values(&[source.as_str(), status])
                 .inc();
+        }
+        if let Some(n) = self.unselected_tracked {
+            CRAWLER_CATALOG_METRICS
+                .unselected_series
+                .with_label_values(&[source.as_str()])
+                .set(i64::try_from(n).unwrap_or(i64::MAX));
         }
     }
 }
