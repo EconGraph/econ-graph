@@ -23,6 +23,9 @@ test.describe('release smoke', () => {
     // Through the frontend's own origin, so this also checks the /graphql proxy. By search rather
     // than the plain series list, so it also holds against a deployed build's full catalog.
     for (const s of Object.values(SEEDED)) {
+      // A deployed build has USREC only once its crawler has fetched it; the next test checks
+      // it there, softly.
+      if (DEPLOYED && s === SEEDED.fredUsrec) continue;
       await seededSeriesId(request, s);
     }
   });
@@ -40,6 +43,11 @@ test.describe('release smoke', () => {
     expect(response.ok()).toBe(true);
     const body = await response.json();
     expect(body.errors).toBeUndefined();
+    // The seed always loads it. A deployed build may not have crawled it yet: skip, not fail.
+    test.skip(
+      DEPLOYED && body.data.seriesByExternalId === null,
+      `${externalId} is not in the deployed catalog yet (the FRED crawler has not fetched it)`
+    );
     expect(body.data.seriesByExternalId).toEqual({ externalId });
   });
 
