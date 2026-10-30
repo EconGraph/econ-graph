@@ -274,8 +274,16 @@ SALT="$(tr -dc '0-9a-f' <"${SALT_FILE}")"
 
 WORK="$(mktemp -d "${OUT_PARENT}/.build-${STAMP}-XXXXXX")"
 CONTAINER="econgraph-fixture-${STAMP,,}-$$"
+# The scratch server's data directory: a named volume, labelled, so it is removed with the
+# container rather than left behind as the anonymous volume postgres:18's VOLUME would make.
+# It holds the restored, unsanitized databases.
+VOLUME="${CONTAINER}-data"
+remove_scratch() {
+    docker rm -fv "${CONTAINER}" >/dev/null 2>&1 || true
+    docker volume rm -f "${VOLUME}" >/dev/null 2>&1 || true
+}
 cleanup() {
-    docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+    remove_scratch
     # Only this run's scratch directory: what it holds was never verified.
     rm -rf -- "${WORK}"
 }
@@ -286,7 +294,9 @@ for role in "${ROLES[@]}"; do
     mounts+=(-v "${INPUT[${role}]}:/in/${role}.dump:ro")
 done
 log "starting scratch container ${CONTAINER} (${PG_IMAGE}, no network)"
+docker volume create --label econgraph.fixture-scratch=1 "${VOLUME}" >/dev/null
 docker run -d --name "${CONTAINER}" --network none \
+    --mount "type=volume,src=${VOLUME},dst=/var/lib/postgresql" \
     -e POSTGRES_HOST_AUTH_METHOD=trust \
     "${mounts[@]}" "${PG_IMAGE}" \
     -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
@@ -306,7 +316,8 @@ log "scratch server: $(psql_db postgres -At -c 'show server_version')"
 
 declare -A ARCHIVE_CREATED=() ARCHIVE_DBNAME=() KINDS=()
 for role in "${ROLES[@]}"; do
-    header="$(pg pg_restore --list "/in/${role}.dump" | head -n 20)" || die "${role}: ${INPUT[${role}]} is not a pg_dump archive"
+    # sed reads the whole listing, so pipefail never sees pg_restore cut off by a closed pipe
+    header="$(pg pg_restore --list "/in/${role}.dump" | sed -n '1,20p')" || die "${role}: ${INPUT[${role}]} is not a pg_dump archive"
     ARCHIVE_CREATED[${role}]="$(sed -n 's/^;[[:space:]]*Archive created at //p' <<<"${header}")"
     ARCHIVE_DBNAME[${role}]="$(sed -n 's/^;[[:space:]]*dbname: //p' <<<"${header}")"
     log "${role}: restoring ${INPUT[${role}]} (dumped from ${ARCHIVE_DBNAME[${role}]:-?} at ${ARCHIVE_CREATED[${role}]:-?})"
@@ -428,7 +439,7 @@ fi
 (cd "${WORK}" && sha256sum -- *.dump MANIFEST >SHA256SUMS)
 
 mv -T -- "${WORK}" "${OUT}"
-trap 'docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true' EXIT
+trap remove_scratch EXIT
 log "fixture OK: ${OUT} (${MODE}, ${total_kb} KiB)"
 for role in "${ROLES[@]}"; do
     log "  ${role}.dump $(stat -c %s "${OUT}/${role}.dump") bytes"
