@@ -6,7 +6,7 @@ include recorded series metadata and illustrative observation responses.
 
 ## What we fetch today
 
-Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the 1,533 IDs in
+Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the roughly 1,500 IDs in
 the [curated series list](../../backend/crates/econ-graph-crawler/data/fred_series.csv):
 national accounts and PCE detail, prices, employment detail, rates and spreads, money and
 credit, housing, production and sales, international headline series (exchange rates, dollar

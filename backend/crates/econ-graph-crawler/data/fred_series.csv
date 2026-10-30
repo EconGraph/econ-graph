@@ -14,9 +14,8 @@
 # minute. Series with more than 1,000 vintage dates take one more observations request per
 # 1,000.
 #
-# Each id was checked against its public FRED series page when it was added: the series exists,
-# is not discontinued, has a recent observation, FRED classifies it as public domain or
-# "citation required" (not "pre-approval required"), and its notes carry none of the phrases
+# Listed ids are FRED series that FRED still updates, that FRED classifies as public domain or
+# "citation required" (not "pre-approval required"), and whose notes carry none of the phrases
 # is_copyright_restricted looks for, so discovery keeps every id listed here. #252's notes
 # filter still runs on each id's live metadata at discovery as a safety net, in case FRED
 # restricts a series later.

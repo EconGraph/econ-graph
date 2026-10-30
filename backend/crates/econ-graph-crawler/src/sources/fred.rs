@@ -16,8 +16,9 @@
 //! # Discovery
 //!
 //! `discover()` looks up the live metadata for each id in [`crate::reference::fred_series`] (a
-//! curated headline list read from `data/fred_series.csv`), rather than walking
-//! `/series/search`. A search-term crawl has no bound on how many series it turns up (one
+//! curated list of about 1,500 headline and detail series read from `data/fred_series.csv`),
+//! rather than walking `/series/search`. A search-term crawl has no bound on how many series it
+//! turns up (one
 //! "most popular" page plus several search terms, each paged to FRED's limit, can find tens of
 //! thousands of ids on the first run), and #214's per-series ALFRED vintage walk makes fetching
 //! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
