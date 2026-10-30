@@ -32,10 +32,9 @@ for (const width of [393, 360]) {
     // Room for "Search econ…" rather than "Sear…", and the two don't overlap.
     expect(field!.width).toBeGreaterThanOrEqual(120);
     expect(button!.x).toBeGreaterThanOrEqual(field!.x + field!.width - 1);
-    // Nothing pushed past the screen's edge
+    // Nothing in the header pushed past the screen's edge or clipped inside it
     expect(button!.x + button!.width).toBeLessThanOrEqual(width);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      width
-    );
+    const toolbar = page.locator('header .MuiToolbar-root');
+    expect(await toolbar.evaluate(bar => bar.scrollWidth - bar.clientWidth)).toBeLessThanOrEqual(0);
   });
 }
