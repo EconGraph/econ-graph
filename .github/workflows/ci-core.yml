@@ -317,6 +317,7 @@ jobs:
         scripts/deploy/test-public-host-lib.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
       run: |

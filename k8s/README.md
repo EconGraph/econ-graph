@@ -898,3 +898,18 @@ above-limit GraphQL requests receive 429s and that each route's BackendTrafficPo
 is accepted; the shared Gateway's burst policy applies to branch routes too.
 Finally remove one branch and confirm the other branch and primary row counts are
 unchanged. Offline rendering/guard tests cannot replace these runtime checks.
+
+## Tunnel origin certificate verification
+
+The optional private-CA flow authenticates the tunnel connector's TLS connection to the
+gateway. Stage only its public trust certificate with
+`scripts/deploy/stage-tunnel-origin-ca.sh --context <context> --dry-run`, then follow
+[Tunnel origin TLS](../docs/deployment/TUNNEL_ORIGIN_TLS.md) for issuer selection,
+certificate checks, the remote dashboard transition and rollback. Staging does not change
+the gateway issuer or disable the dashboard's existing No TLS Verify setting. A deploy whose
+gateway issuer is `econ-graph-origin-ca` runs the staging itself before issuing the
+certificate. The issuer comes from `GATEWAY_TLS_ISSUER` in the environment, else the
+host's deploy config (`ECONGRAPH_DEPLOY_ENV`, else `$ECONGRAPH_CONFIG_DIR/deploy.env`, else
+`~/.config/econgraph/deploy.env`) when it matches the existing
+certificate's issuer or there is none, else the existing issuer; a config line that would
+change the issuer is refused without an explicit choice.
