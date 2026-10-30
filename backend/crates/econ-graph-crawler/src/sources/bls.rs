@@ -10,19 +10,24 @@
 //! ([`crate::reference::bls_series`], read at runtime) lists their ids (headline CPI-U, CES
 //! payrolls and earnings, CPS labor force measures, and LAUS state unemployment rates and labor
 //! force). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
-//! `la.series`, `ln.series` under [`DEFAULT_DOWNLOAD_URL`], see [`SERIES_FILES`]) gives the title,
-//! the frequency (from the latest period, `end_period`) and, for CPI, the index base. Units come
-//! from the index base (CU), or from the label of the series' own data type (CE) or measure (LA)
-//! code; LN's flat files carry none, so LN series have units only after a fetch with a key (from
-//! the API catalog), and none at all on an install without `BLS_API_KEY`.
+//! `la.series`, `ln.series`, `jt.series`, `wp.series`, `ei.series` under
+//! [`DEFAULT_DOWNLOAD_URL`], see [`SERIES_FILES`]) gives the title, the frequency (from the latest
+//! period, `end_period`) and, for CPI and import/export prices, the index base. `jt.series` has no
+//! title column, so a JOLTS series' title joins BLS's labels of its own codes (data element, rate
+//! or level, industry, state, area, size class, seasonal adjustment), from the JOLTS code files
+//! in [`CODE_FILES`]. Units come from the index base (CU, EI), or from the label of the series'
+//! own data type (CE), measure (LA) or rate/level (JT) code; LN's and WP's flat files carry none,
+//! so those series have units only after a fetch with a key (from the API catalog), and none at
+//! all on an install without `BLS_API_KEY`.
 //!
 //! [`refresh_reference_data`](SourceAdapter::refresh_reference_data), which the worker runs just
 //! before each scheduled discovery, re-fetches each series file by conditional GET and stores the
 //! rows of the curated series with the file's `ETag` (`reference_file_cache.payload`). A `304`
 //! keeps the stored rows. [`discover`](SourceAdapter::discover) then reads only the stored rows,
 //! so it makes no API request and costs none of BLS's daily quota. A curated series whose
-//! survey file has never loaded, or that BLS's file doesn't list, is left out of that discovery
-//! (with a warning) rather than listed with a made-up title. An unloaded file's series are
+//! survey file has never loaded, or that BLS's file doesn't list, or (JOLTS) one of whose codes
+//! has no stored label yet, is left out of that discovery (with a warning) rather than listed
+//! with a made-up title. An unloaded file's series are
 //! listed once it loads; a series the file doesn't list, once BLS publishes a file that does.
 //!
 //! # Fetching
@@ -172,26 +177,110 @@ const DOES_NOT_EXIST: &str = "series does not exist for series ";
 /// Prefix of BLS's informational "no data" message; the series id follows it.
 const NO_DATA_FOR_SERIES: &str = "no data available for series ";
 
+/// How many characters of a series id one dimension takes, in [`SERIES_ID_LAYOUTS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    /// Exactly this many.
+    Fixed(usize),
+    /// The rest of the id, which must not be empty. Only used last.
+    Rest,
+    /// The rest of the id, which may be empty: a PPI group without an item (`WPU01`) or an
+    /// import/export index without an item (`EIUIR`). Only used last.
+    RestOrEmpty,
+    /// The longest of these codes the id continues with, else `otherwise` characters: PPI's
+    /// group is two characters except for the three-character groups `ID5` and `ID6`
+    /// (`WPSID61` is group `ID6`, item `1`).
+    Longest {
+        codes: &'static [&'static str],
+        otherwise: usize,
+    },
+}
+
+use Width::{Fixed, Longest, Rest, RestOrEmpty};
+
 /// Series id layouts of the surveys that are datasets: the two-letter prefix (also the dataset
-/// code), then each dimension's name and width in id order. A width of 0 takes the rest of the
-/// id and is only used last. See <https://www.bls.gov/help/hlpforma.htm>.
-pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
+/// code), then each dimension's name and [`Width`] in id order. See
+/// <https://www.bls.gov/help/hlpforma.htm>.
+pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, Width)])] = &[
     // CPI-U: CUUR0000SA0.
     (
         "CU",
         &[
-            ("seasonal", 1),
-            ("periodicity", 1),
-            ("area", 4),
-            ("item", 0),
+            ("seasonal", Fixed(1)),
+            ("periodicity", Fixed(1)),
+            ("area", Fixed(4)),
+            ("item", Rest),
         ],
     ),
     // CES national: CES0000000001.
-    ("CE", &[("seasonal", 1), ("industry", 8), ("data_type", 2)]),
+    (
+        "CE",
+        &[
+            ("seasonal", Fixed(1)),
+            ("industry", Fixed(8)),
+            ("data_type", Fixed(2)),
+        ],
+    ),
     // CPS: LNS14000000.
-    ("LN", &[("seasonal", 1), ("series_code", 8)]),
+    ("LN", &[("seasonal", Fixed(1)), ("series_code", Fixed(8))]),
     // LAUS: LASST060000000000003.
-    ("LA", &[("seasonal", 1), ("area", 15), ("measure", 2)]),
+    (
+        "LA",
+        &[
+            ("seasonal", Fixed(1)),
+            ("area", Fixed(15)),
+            ("measure", Fixed(2)),
+        ],
+    ),
+    // JOLTS: JTS000000000000000JOR.
+    (
+        "JT",
+        &[
+            ("seasonal", Fixed(1)),
+            ("industry", Fixed(6)),
+            ("state", Fixed(2)),
+            ("area", Fixed(5)),
+            ("size_class", Fixed(2)),
+            ("data_element", Fixed(2)),
+            ("rate_level", Fixed(1)),
+        ],
+    ),
+    // PPI commodity data: WPSFD4, WPU00000000, WPU01, WPSID61 (group ID6).
+    (
+        "WP",
+        &[
+            ("seasonal", Fixed(1)),
+            (
+                "group",
+                Longest {
+                    codes: &["ID5", "ID6"],
+                    otherwise: 2,
+                },
+            ),
+            ("item", RestOrEmpty),
+        ],
+    ),
+    // Import/export price indexes: EIUIR, EIUIQ0, EIUCOCHNTOT.
+    (
+        "EI",
+        &[
+            ("seasonal", Fixed(1)),
+            ("index", Fixed(2)),
+            ("item", RestOrEmpty),
+        ],
+    ),
+];
+
+/// Ids of surveys with a layout whose codes are not spelled out in the id, so the layout would
+/// split them wrongly; they go in [`OTHER_DATASET`]. BLS lists these PPI special composites under
+/// groups `PFF`, `ILF` and `IND` (`wp.series`), which their ids don't contain.
+const IDS_OUTSIDE_LAYOUTS: &[&str] = &[
+    "WPS01PLUS02",
+    "WPU01PLUS02",
+    "WPS03T15M05",
+    "WPU03T15M05",
+    "WPS03THRU15",
+    "WPU03THRU15",
 ];
 
 /// Dataset of BLS series without a layout in [`SERIES_ID_LAYOUTS`]: no dimensions, keyed by the
@@ -199,7 +288,7 @@ pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
 pub const OTHER_DATASET: &str = "other";
 
 /// The codes in [`SERIES_ID_LAYOUTS`] and [`OTHER_DATASET`], for [`SourceAdapter::datasets`].
-const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA", OTHER_DATASET];
+const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA", "JT", "WP", "EI", OTHER_DATASET];
 
 /// BLS adapter. See the module docs for request shape, batching, windowing and error mapping.
 #[derive(Debug, Clone)]
@@ -460,7 +549,9 @@ fn year_windows(start: i32, end: i32, span: i32) -> Vec<(i32, i32)> {
 /// [`SERIES_ID_LAYOUTS`]. `None` for a survey without a layout, an id whose length does not fit
 /// the layout, or an id with characters other than ASCII letters and digits.
 pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
-    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric())
+        || IDS_OUTSIDE_LAYOUTS.contains(&series_id)
+    {
         return None;
     }
     let prefix = series_id.get(..2)?;
@@ -468,8 +559,18 @@ pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
     let mut rest = &series_id[2..];
     let mut dimensions = Vec::with_capacity(layout.len());
     for &(name, width) in *layout {
-        let width = if width == 0 { rest.len() } else { width };
-        if width == 0 || rest.len() < width {
+        let width = match width {
+            Fixed(n) => n,
+            Rest if rest.is_empty() => return None,
+            Rest | RestOrEmpty => rest.len(),
+            Longest { codes, otherwise } => codes
+                .iter()
+                .filter(|c| rest.starts_with(**c))
+                .map(|c| c.len())
+                .max()
+                .unwrap_or(otherwise),
+        };
+        if rest.len() < width {
             return None;
         }
         let (value, tail) = rest.split_at(width);
@@ -494,7 +595,8 @@ struct CodeFileSpec<'a> {
 
 /// `series_code` (LN) isn't here: CPS has no small per-field code file like the others (its
 /// value is effectively a series' own identity), so its labels come from `ln.series`, BLS's CPS
-/// series catalog (see [`SERIES_FILES`]).
+/// series catalog (see [`SERIES_FILES`]). Neither is PPI's `item`: `wp.item` codes are unique only
+/// within their group, so they can't label the `item` dimension on its own.
 const CODE_FILES: &[CodeFileSpec<'static>] = &[
     CodeFileSpec {
         url: "https://download.bls.gov/pub/time.series/cu/cu.item",
@@ -531,6 +633,62 @@ const CODE_FILES: &[CodeFileSpec<'static>] = &[
         code_col: "area_code",
         label_col: "area_text",
     },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.industry",
+        dataset: "JT",
+        dimension: "industry",
+        code_col: "industry_code",
+        label_col: "industry_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.state",
+        dataset: "JT",
+        dimension: "state",
+        code_col: "state_code",
+        label_col: "state_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.area",
+        dataset: "JT",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.sizeclass",
+        dataset: "JT",
+        dimension: "size_class",
+        code_col: "sizeclass_code",
+        label_col: "sizeclass_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.dataelement",
+        dataset: "JT",
+        dimension: "data_element",
+        code_col: "dataelement_code",
+        label_col: "dataelement_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/jt/jt.ratelevel",
+        dataset: "JT",
+        dimension: "rate_level",
+        code_col: "ratelevel_code",
+        label_col: "ratelevel_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/wp/wp.group",
+        dataset: "WP",
+        dimension: "group",
+        code_col: "group_code",
+        label_col: "group_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/ei/ei.index",
+        dataset: "EI",
+        dimension: "index",
+        code_col: "index_code",
+        label_col: "index_name",
+    },
 ];
 
 /// Where discovery takes a survey's units from: BLS's `.series` files have no units column.
@@ -550,11 +708,26 @@ enum UnitsFrom {
     CatalogOnly,
 }
 
+/// Where discovery takes a survey's titles from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TitleFrom {
+    /// The file's `series_title` column.
+    File,
+    /// The stored labels of the series' own values of these dataset dimensions, in this order,
+    /// joined by `", "` (e.g. `Job openings, Rate, Total nonfarm, ...`). For a survey whose series
+    /// file has no title column (JOLTS's `jt.series`); the labels come from BLS's own code files
+    /// ([`CODE_FILES`]) or the dataset file. A keyed fetch replaces the title with the API
+    /// catalog's.
+    Dimensions(&'static [&'static str]),
+}
+
 /// One survey's series catalog, `{download_url}/{survey}/{survey}.series`: one tab-delimited
-/// row per series with its `series_title`, `begin_period` and survey-specific code columns.
+/// row per series with its `begin_period`, `end_period`, survey-specific code columns and, for
+/// most surveys, `series_title`.
 struct SeriesFileSpec {
     /// Two-letter survey prefix (also the dataset code), e.g. `CU`.
     survey: &'static str,
+    title: TitleFrom,
     units: UnitsFrom,
     /// The dataset dimension whose code labels are this file's series titles (LN's
     /// `series_code`, see [`parse_ln_series_titles`]), merged on each fresh copy.
@@ -565,22 +738,54 @@ struct SeriesFileSpec {
 const SERIES_FILES: &[SeriesFileSpec] = &[
     SeriesFileSpec {
         survey: "CU",
+        title: TitleFrom::File,
         units: UnitsFrom::IndexBase,
         title_labels: None,
     },
     SeriesFileSpec {
         survey: "CE",
+        title: TitleFrom::File,
         units: UnitsFrom::Dimension("data_type"),
         title_labels: None,
     },
     SeriesFileSpec {
         survey: "LN",
+        title: TitleFrom::File,
         units: UnitsFrom::CatalogOnly,
         title_labels: Some("series_code"),
     },
     SeriesFileSpec {
         survey: "LA",
+        title: TitleFrom::File,
         units: UnitsFrom::Dimension("measure"),
+        title_labels: None,
+    },
+    SeriesFileSpec {
+        survey: "JT",
+        title: TitleFrom::Dimensions(&[
+            "data_element",
+            "rate_level",
+            "industry",
+            "state",
+            "area",
+            "size_class",
+            "seasonal",
+        ]),
+        units: UnitsFrom::Dimension("rate_level"),
+        title_labels: None,
+    },
+    // `wp.series` has an index base date (`base_date`, e.g. `198200`) but no wording for it, so
+    // PPI units come from the API catalog.
+    SeriesFileSpec {
+        survey: "WP",
+        title: TitleFrom::File,
+        units: UnitsFrom::CatalogOnly,
+        title_labels: None,
+    },
+    SeriesFileSpec {
+        survey: "EI",
+        title: TitleFrom::File,
+        units: UnitsFrom::IndexBase,
         title_labels: None,
     },
 ];
@@ -600,11 +805,15 @@ struct SeriesFilePayload {
 /// One series' row in a survey series file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SeriesFileRow {
+    /// `series_title`; empty for a survey whose titles aren't in its file
+    /// ([`TitleFrom::Dimensions`]).
+    #[serde(default)]
     title: String,
     /// From `end_period` (`M01` -> `Monthly`, ...), else `begin_period`.
     #[serde(default)]
     frequency: Option<String>,
-    /// CPI's index base (`base_period`, e.g. `1982-84=100`).
+    /// The index base (`base_period`: CPI's `1982-84=100`, import/export prices'
+    /// `December 2020=100`).
     #[serde(default)]
     base_period: Option<String>,
 }
@@ -641,14 +850,16 @@ fn parse_bls_code_file(
 }
 
 /// The rows of a survey series file for the series in `wanted`. Columns are found by header
-/// name: `series_id` and `series_title` are required, `end_period`, `begin_period` and
-/// `base_period` are read when present. The frequency is read from the latest period
-/// (`end_period`), which is how the series is published today even if its history starts at
-/// another frequency; `begin_period` only when there is no `end_period`. Rows with an empty
-/// title are skipped. `Err` only if a required column is missing.
+/// name: `series_id` is required, and so is `series_title` when titles come from the file
+/// ([`TitleFrom::File`]); `end_period`, `begin_period` and `base_period` are read when present.
+/// The frequency is read from the latest period (`end_period`), which is how the series is
+/// published today even if its history starts at another frequency; `begin_period` only when
+/// there is no `end_period`. With [`TitleFrom::File`], rows with an empty title are skipped;
+/// otherwise every row's title is left empty. `Err` only if a required column is missing.
 fn parse_series_file(
     text: &str,
     wanted: &BTreeSet<String>,
+    title_from: TitleFrom,
 ) -> Result<BTreeMap<String, SeriesFileRow>, CrawlError> {
     let mut lines = text.lines();
     let header = lines
@@ -662,7 +873,10 @@ fn parse_series_file(
         })
     };
     let id_idx = required("series_id")?;
-    let title_idx = required("series_title")?;
+    let title_idx = match title_from {
+        TitleFrom::File => Some(required("series_title")?),
+        TitleFrom::Dimensions(_) => None,
+    };
     let begin_idx = find("begin_period");
     let end_idx = find("end_period");
     let base_idx = find("base_period");
@@ -672,8 +886,12 @@ fn parse_series_file(
         let Some(id) = fields.get(id_idx).filter(|id| wanted.contains(**id)) else {
             continue;
         };
-        let Some(title) = fields.get(title_idx).filter(|t| !t.is_empty()) else {
-            continue;
+        let title = match title_idx {
+            Some(i) => match fields.get(i).filter(|t| !t.is_empty()) {
+                Some(title) => title,
+                None => continue,
+            },
+            None => "",
         };
         let field = |idx: Option<usize>| {
             idx.and_then(|i| fields.get(i))
@@ -713,6 +931,36 @@ fn discovered_units(
         }
         UnitsFrom::CatalogOnly => None,
     }
+}
+
+/// Discovery's title for curated series `id` from its own values of `dimensions` (see
+/// [`TitleFrom::Dimensions`]), given each dimension's stored codes. `None` if the id doesn't fit
+/// its layout or a value has no stored label.
+fn composed_title(
+    dimensions: &[&str],
+    id: &str,
+    codes: &HashMap<&str, BTreeMap<String, Code>>,
+) -> Option<String> {
+    let values = series_dataset(id)?.dimensions.0;
+    let labels = dimensions
+        .iter()
+        .map(|d| Some(codes.get(d)?.get(values.get(*d)?)?.label.as_str()))
+        .collect::<Option<Vec<_>>>()?;
+    Some(labels.join(", "))
+}
+
+/// The dataset dimensions whose stored codes discovery reads for `spec`: its units dimension
+/// and its title dimensions.
+fn discovery_dimensions(spec: &SeriesFileSpec) -> Vec<&'static str> {
+    let mut dims: Vec<&'static str> = match spec.title {
+        TitleFrom::Dimensions(dims) => dims.to_vec(),
+        TitleFrom::File => Vec::new(),
+    };
+    match spec.units {
+        UnitsFrom::Dimension(d) if !dims.contains(&d) => dims.push(d),
+        _ => {}
+    }
+    dims
 }
 
 fn db_err(e: AppError) -> CrawlError {
@@ -841,7 +1089,7 @@ impl BlsAdapter {
         let url = url.as_str();
         reference_file::refresh(ctx, &file, |body| {
             Box::pin(async move {
-                let series = parse_series_file(&body, wanted)?;
+                let series = parse_series_file(&body, wanted, spec.title)?;
                 let mut labels_landed = true;
                 if let Some(dimension) = spec.title_labels {
                     let labels = parse_ln_series_titles(&body)?;
@@ -1031,11 +1279,11 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
 
 /// Seasonal adjustment as the id encodes it, for the surveys in the series list: the letter after
 /// the two-letter survey prefix is `S` (adjusted) or `U` (not), as in `CUSR`/`CUUR`,
-/// `CES`/`CEU`, `LNS`/`LNU` and `LASST`/`LAUST`.
+/// `CES`/`CEU`, `LNS`/`LNU`, `LASST`/`LAUST`, `JTS`/`JTU`, `WPS`/`WPU` and `EIS`/`EIU`.
 fn seasonal_adjustment_from_id(external_id: &str) -> Option<&'static str> {
     match external_id.get(..3)? {
-        "CUS" | "CES" | "LNS" | "LAS" => Some("Seasonally Adjusted"),
-        "CUU" | "CEU" | "LNU" | "LAU" => Some("Not Seasonally Adjusted"),
+        "CUS" | "CES" | "LNS" | "LAS" | "JTS" | "WPS" | "EIS" => Some("Seasonally Adjusted"),
+        "CUU" | "CEU" | "LNU" | "LAU" | "JTU" | "WPU" | "EIU" => Some("Not Seasonally Adjusted"),
         _ => None,
     }
 }
@@ -1362,39 +1610,56 @@ impl SourceAdapter for BlsAdapter {
                 left_out += ids.len();
                 continue;
             };
-            let codes = match spec.units {
-                UnitsFrom::Dimension(dimension) => {
-                    let codes = persist::dataset_dimension_codes(
-                        &ctx.pool,
-                        SourceId::Bls,
-                        spec.survey,
+            let mut codes = HashMap::new();
+            for dimension in discovery_dimensions(spec) {
+                let stored = persist::dataset_dimension_codes(
+                    &ctx.pool,
+                    SourceId::Bls,
+                    spec.survey,
+                    dimension,
+                )
+                .await
+                .map_err(db_err)?;
+                if stored.is_empty() {
+                    warn!(
+                        survey = spec.survey,
                         dimension,
-                    )
-                    .await
-                    .map_err(db_err)?;
-                    if codes.is_empty() {
-                        warn!(
-                            survey = spec.survey,
-                            dimension,
-                            "BLS: units dimension has no stored codes; series listed without units"
-                        );
-                    }
-                    codes
+                        "BLS: dimension has no stored codes; its series are listed without units, \
+                         or left out if it is part of their title"
+                    );
                 }
-                _ => BTreeMap::new(),
+                codes.insert(dimension, stored);
+            }
+            let no_codes = BTreeMap::new();
+            let unit_codes = match spec.units {
+                UnitsFrom::Dimension(d) => codes.get(d).unwrap_or(&no_codes),
+                _ => &no_codes,
             };
             let mut not_in_file = 0usize;
+            let mut untitled = 0usize;
             for id in ids {
                 let Some(row) = payload.series.get(id) else {
                     debug!(series = id, %url, "BLS: series not in its series file; left out");
                     not_in_file += 1;
                     continue;
                 };
+                let title = match spec.title {
+                    TitleFrom::File => Some(row.title.clone()),
+                    TitleFrom::Dimensions(dims) => composed_title(dims, id, &codes),
+                };
+                let Some(title) = title else {
+                    debug!(
+                        series = id,
+                        "BLS: no stored label for a title dimension; left out"
+                    );
+                    untitled += 1;
+                    continue;
+                };
                 found.push(DiscoveredSeries {
                     external_id: id.to_string(),
-                    title: row.title.clone(),
+                    title,
                     description: None,
-                    units: discovered_units(spec.units, id, row, &codes),
+                    units: discovered_units(spec.units, id, row, unit_codes),
                     frequency: row.frequency.clone(),
                     data_url: Some(format!("{}/timeseries/data/{id}", self.base_url)),
                     dataset: dataset_of(id),
@@ -1407,6 +1672,14 @@ impl SourceAdapter for BlsAdapter {
                     "BLS: curated series not in the survey's series file are left out"
                 );
                 left_out += not_in_file;
+            }
+            if untitled > 0 {
+                warn!(
+                    survey = spec.survey,
+                    series = untitled,
+                    "BLS: curated series without stored labels for their title are left out"
+                );
+                left_out += untitled;
             }
         }
         // Every curated id has a survey in SERIES_FILES (a test checks it); this catches one
@@ -1458,7 +1731,7 @@ impl SourceAdapter for BlsAdapter {
         bls_code_lists()
     }
 
-    /// Refreshes CU/CE/LA's code labels from BLS's own flat files ([`code_lists`](Self::code_lists)),
+    /// Refreshes CU/CE/LA/JT/WP/EI's code labels from BLS's own flat files ([`code_lists`](Self::code_lists)),
     /// then each survey's series
     /// file ([`SERIES_FILES`]): the curated series' titles, frequencies and index bases for
     /// [`discover`](SourceAdapter::discover), and LN's code labels. Every file is fetched by
@@ -1837,6 +2110,12 @@ mod tests {
             ("LNU04000000", Some("Not Seasonally Adjusted")),
             ("LASST060000000000003", Some("Seasonally Adjusted")),
             ("LAUST060000000000003", Some("Not Seasonally Adjusted")),
+            ("JTS000000000000000JOR", Some("Seasonally Adjusted")),
+            ("JTU000000000000000JOR", Some("Not Seasonally Adjusted")),
+            ("WPSFD4", Some("Seasonally Adjusted")),
+            ("WPU01", Some("Not Seasonally Adjusted")),
+            ("EISIQ", Some("Seasonally Adjusted")),
+            ("EIUIR", Some("Not Seasonally Adjusted")),
             ("CIU1010000000000A", None),
             ("X", None),
         ] {
@@ -2099,6 +2378,9 @@ mod tests {
     const CE_SERIES: &str = include_str!("../../tests/fixtures/bls/series/ce.series");
     const LA_SERIES: &str = include_str!("../../tests/fixtures/bls/series/la.series");
     const LN_SERIES: &str = include_str!("../../tests/fixtures/bls/series/ln.series");
+    const JT_SERIES: &str = include_str!("../../tests/fixtures/bls/series/jt.series");
+    const WP_SERIES: &str = include_str!("../../tests/fixtures/bls/series/wp.series");
+    const EI_SERIES: &str = include_str!("../../tests/fixtures/bls/series/ei.series");
 
     fn wanted(ids: &[&str]) -> BTreeSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
@@ -2106,8 +2388,12 @@ mod tests {
 
     #[test]
     fn parse_series_file_keeps_wanted_rows_with_title_frequency_and_base() {
-        let rows =
-            parse_series_file(CU_SERIES, &wanted(&["CUUR0000SA0", "CUSR0000SA0", "CUXX"])).unwrap();
+        let rows = parse_series_file(
+            CU_SERIES,
+            &wanted(&["CUUR0000SA0", "CUSR0000SA0", "CUXX"]),
+            TitleFrom::File,
+        )
+        .unwrap();
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert_eq!(
             rows["CUUR0000SA0"],
@@ -2123,7 +2409,8 @@ mod tests {
         // skipped.
         let text = "series_id\tseries_title\tbegin_period\tend_period\n\
                     X1\tA\tA01\tM03\nX2\t\tM01\tM01\nX3\tC\t\t\nX4\tD\tQ01\t\n";
-        let rows = parse_series_file(text, &wanted(&["X1", "X2", "X3", "X4"])).unwrap();
+        let rows =
+            parse_series_file(text, &wanted(&["X1", "X2", "X3", "X4"]), TitleFrom::File).unwrap();
         assert_eq!(rows.keys().collect::<Vec<_>>(), ["X1", "X3", "X4"]);
         assert_eq!(rows["X1"].frequency.as_deref(), Some("Monthly"));
         assert_eq!(rows["X1"].base_period, None);
@@ -2135,11 +2422,104 @@ mod tests {
     fn parse_series_file_requires_id_and_title_columns() {
         for text in ["", "series_id\tbegin_period\n", "series_title\n"] {
             assert_eq!(
-                parse_series_file(text, &wanted(&["X"])).unwrap_err().kind(),
+                parse_series_file(text, &wanted(&["X"]), TitleFrom::File)
+                    .unwrap_err()
+                    .kind(),
                 "parse",
                 "{text:?}"
             );
         }
+        // Titles composed from dimensions: no series_title column needed, but still a series_id.
+        let jt = TitleFrom::Dimensions(&["data_element"]);
+        assert!(parse_series_file("series_id\tend_period\n", &wanted(&["X"]), jt).is_ok());
+        assert_eq!(
+            parse_series_file("end_period\n", &wanted(&["X"]), jt)
+                .unwrap_err()
+                .kind(),
+            "parse"
+        );
+    }
+
+    /// The JOLTS, PPI and import/export price series files: JOLTS rows have no title (it is
+    /// composed from code labels at discovery), PPI and import/export rows keep theirs, and the
+    /// import/export index base is read for units.
+    #[test]
+    fn parse_series_file_for_jt_wp_and_ei() {
+        let jt_spec = SERIES_FILES.iter().find(|f| f.survey == "JT").unwrap();
+        let rows = parse_series_file(
+            JT_SERIES,
+            &wanted(&["JTS000000000000000JOR", "JTS000000000000000JOL"]),
+            jt_spec.title,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows["JTS000000000000000JOR"],
+            SeriesFileRow {
+                title: String::new(),
+                frequency: Some("Monthly".into()),
+                base_period: None,
+            }
+        );
+
+        let rows =
+            parse_series_file(WP_SERIES, &wanted(&["WPSFD4", "WPU01"]), TitleFrom::File).unwrap();
+        assert_eq!(
+            rows["WPSFD4"].title,
+            "PPI Commodity data for Final demand, seasonally adjusted"
+        );
+        assert_eq!(rows["WPU01"].frequency.as_deref(), Some("Monthly"));
+
+        let rows = parse_series_file(EI_SERIES, &wanted(&["EIUIR"]), TitleFrom::File).unwrap();
+        let ei = SERIES_FILES.iter().find(|f| f.survey == "EI").unwrap();
+        assert_eq!(
+            discovered_units(ei.units, "EIUIR", &rows["EIUIR"], &BTreeMap::new()).as_deref(),
+            Some("Index 2000=100")
+        );
+    }
+
+    /// A JOLTS title joins the stored labels of the id's own values, in the spec's order; a value
+    /// without a stored label leaves the series untitled.
+    #[test]
+    fn composed_title_joins_dimension_labels() {
+        let codes = |pairs: &[(&str, &str)]| -> BTreeMap<String, Code> {
+            pairs
+                .iter()
+                .map(|&(c, l)| (c.to_string(), Code::new(c, l)))
+                .collect()
+        };
+        let mut stored = HashMap::from([
+            ("data_element", codes(&[("JO", "Job openings")])),
+            (
+                "rate_level",
+                codes(&[("R", "Rate"), ("L", "Level - In Thousands")]),
+            ),
+            ("industry", codes(&[("000000", "Total nonfarm")])),
+            ("seasonal", codes(&[("S", "Seasonally adjusted")])),
+        ]);
+        let dims = &["data_element", "rate_level", "industry", "seasonal"];
+        assert_eq!(
+            composed_title(dims, "JTS000000000000000JOR", &stored).as_deref(),
+            Some("Job openings, Rate, Total nonfarm, Seasonally adjusted")
+        );
+        assert_eq!(
+            composed_title(dims, "JTS000000000000000JOL", &stored).as_deref(),
+            Some("Job openings, Level - In Thousands, Total nonfarm, Seasonally adjusted")
+        );
+        // Unknown industry, a dimension with no stored codes, an id that doesn't fit.
+        assert_eq!(composed_title(dims, "JTS230000000000000JOR", &stored), None);
+        stored.remove("seasonal");
+        assert_eq!(composed_title(dims, "JTS000000000000000JOR", &stored), None);
+        assert_eq!(composed_title(dims, "JTS0000000JOR", &stored), None);
+
+        let jt = SERIES_FILES.iter().find(|f| f.survey == "JT").unwrap();
+        let wanted_dims = discovery_dimensions(jt);
+        assert!(wanted_dims.contains(&"rate_level"));
+        assert_eq!(
+            wanted_dims.iter().filter(|d| **d == "rate_level").count(),
+            1,
+            "units dimension listed once"
+        );
     }
 
     #[test]
@@ -2261,6 +2641,9 @@ mod tests {
             ("/ce/ce.series", CE_SERIES),
             ("/la/la.series", LA_SERIES),
             ("/ln/ln.series", LN_SERIES),
+            ("/jt/jt.series", JT_SERIES),
+            ("/wp/wp.series", WP_SERIES),
+            ("/ei/ei.series", EI_SERIES),
         ] {
             mock.mount(
                 &Route::get(path),
@@ -2806,6 +3189,58 @@ mod tests {
                 pairs(&[("seasonal", "U"), ("series_code", "04000000")])
             )
         );
+        assert_eq!(
+            dims("JTS000000000000000JOR"),
+            (
+                "JT".to_string(),
+                pairs(&[
+                    ("area", "00000"),
+                    ("data_element", "JO"),
+                    ("industry", "000000"),
+                    ("rate_level", "R"),
+                    ("seasonal", "S"),
+                    ("size_class", "00"),
+                    ("state", "00"),
+                ])
+            )
+        );
+        assert_eq!(
+            dims("WPSFD49104"),
+            (
+                "WP".to_string(),
+                pairs(&[("group", "FD"), ("item", "49104"), ("seasonal", "S")])
+            )
+        );
+        // PPI's three-character intermediate demand groups.
+        assert_eq!(
+            dims("WPSID61"),
+            (
+                "WP".to_string(),
+                pairs(&[("group", "ID6"), ("item", "1"), ("seasonal", "S")])
+            )
+        );
+        // A PPI group index has no item.
+        assert_eq!(
+            dims("WPU01"),
+            (
+                "WP".to_string(),
+                pairs(&[("group", "01"), ("item", ""), ("seasonal", "U")])
+            )
+        );
+        assert_eq!(
+            dims("EIUCOCHNTOT"),
+            (
+                "EI".to_string(),
+                pairs(&[("index", "CO"), ("item", "CHNTOT"), ("seasonal", "U")])
+            )
+        );
+        assert_eq!(
+            dims("EIUIR"),
+            (
+                "EI".to_string(),
+                pairs(&[("index", "IR"), ("item", ""), ("seasonal", "U")])
+            )
+        );
         for bad in [
             "",
             "C",
@@ -2815,12 +3250,96 @@ mod tests {
             "CES00000000011", // one long
             "LNS1400000",     // one short
             "LASST06000000000003",
-            "CIU1010000000000A", // no layout for ECI
-            "cuur0000SA0",       // prefixes are uppercase
+            "CIU1010000000000A",      // no layout for ECI
+            "JTS000000000000000JO",   // one short
+            "JTS000000000000000JORX", // one long
+            "WPU0",                   // group cut short
+            "WPU01PLUS02",            // group PFF, not in the id
+            "EIUI",                   // index cut short
+            "cuur0000SA0",            // prefixes are uppercase
             "CUUR 0000SA0",
             "CUUR0000SÄ0",
         ] {
             assert_eq!(series_dataset(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Rows of a recorded series file under `tests/fixtures/bls/layouts`, as column -> value.
+    fn recorded_rows(text: &str) -> Vec<HashMap<&str, &str>> {
+        let mut lines = text.lines();
+        let header: Vec<&str> = lines.next().unwrap().split('\t').collect();
+        lines
+            .filter(|l| !l.is_empty())
+            .map(|l| header.iter().copied().zip(l.split('\t')).collect())
+            .collect()
+    }
+
+    /// The layout's dimension values of `id`, by name, or `None` if it doesn't split.
+    fn split(id: &str) -> Option<BTreeMap<String, String>> {
+        series_dataset(id).map(|d| d.dimensions.0)
+    }
+
+    /// Every series BLS lists in `jt.series`, `wp.series` and `ei.series` splits into the codes
+    /// the file gives it, except the PPI ids in [`IDS_OUTSIDE_LAYOUTS`], which don't split.
+    #[test]
+    fn layouts_reproduce_the_series_files_codes() {
+        let jt = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/jt.series"));
+        assert_eq!(jt.len(), 2060);
+        for row in &jt {
+            let id = row["series_id"];
+            let want: BTreeMap<String, String> = [
+                ("seasonal", "seasonal"),
+                ("industry", "industry_code"),
+                ("state", "state_code"),
+                ("area", "area_code"),
+                ("size_class", "sizeclass_code"),
+                ("data_element", "dataelement_code"),
+                ("rate_level", "ratelevel_code"),
+            ]
+            .iter()
+            .map(|(dim, col)| (dim.to_string(), row[col].to_string()))
+            .collect();
+            assert_eq!(split(id), Some(want), "{id}");
+        }
+
+        let wp = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/wp.series"));
+        assert_eq!(wp.len(), 5312);
+        let mut matched = 0;
+        let mut outside = 0;
+        for row in &wp {
+            let id = row["series_id"];
+            if IDS_OUTSIDE_LAYOUTS.contains(&id) {
+                assert_eq!(split(id), None, "{id}");
+                outside += 1;
+                continue;
+            }
+            // `-` is the file's item for a group index, whose id has no item.
+            let item = match row["item_code"] {
+                "-" => "",
+                item => item,
+            };
+            let want = BTreeMap::from([
+                ("seasonal".to_string(), row["seasonal"].to_string()),
+                ("group".to_string(), row["group_code"].to_string()),
+                ("item".to_string(), item.to_string()),
+            ]);
+            assert_eq!(split(id), Some(want), "{id}");
+            matched += 1;
+        }
+        assert_eq!((matched, outside), (5306, 6));
+
+        let ei = recorded_rows(include_str!("../../tests/fixtures/bls/layouts/ei.series"));
+        assert_eq!(ei.len(), 1593);
+        for row in &ei {
+            let id = row["series_id"];
+            // ei.series has no item column: the item is the rest of the id.
+            let dims = split(id).unwrap_or_else(|| panic!("{id} doesn't split"));
+            assert_eq!(dims["seasonal"], row["seasonal"], "{id}");
+            assert_eq!(dims["index"], row["index_code"], "{id}");
+            assert_eq!(
+                format!("EI{}{}{}", dims["seasonal"], dims["index"], dims["item"]),
+                id
+            );
         }
     }
 
@@ -2864,12 +3383,16 @@ mod tests {
         );
         for ((code, layout), def) in SERIES_ID_LAYOUTS.iter().zip(&defs) {
             assert!(
-                layout.iter().rev().skip(1).all(|(_, w)| *w > 0),
+                layout
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .all(|(_, w)| !matches!(w, Rest | RestOrEmpty)),
                 "{code}: only the last dimension may take the rest"
             );
             // Labelled codes have their field's width, so a mistyped key cannot hide.
             for (&(name, width), dim) in layout.iter().zip(&def.dimensions) {
-                if width > 0 {
+                if let Fixed(width) = width {
                     for c in dim.codes.iter().flatten() {
                         assert_eq!(c.code.len(), width, "{code}.{name}: code {:?}", c.code);
                     }
