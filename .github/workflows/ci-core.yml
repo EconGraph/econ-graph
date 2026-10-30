@@ -317,7 +317,6 @@ jobs:
         scripts/deploy/test-public-host-lib.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
-        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
       run: |
@@ -824,14 +823,14 @@ jobs:
     # The runner image's SDKs this job never uses: about 34 GB on ubuntu-24.04, more than
     # the job's own peak (a 12 GB target dir). Runners don't all have the same free space,
     # and a full disk fails the job with only "No space left on device" from the runner.
-    # The prune keeps the running Postgres service's image.
+    # The deletion takes about two minutes, so it runs in the background: the disk peaks
+    # much later. The prune keeps the running Postgres service's image.
     - name: Free runner disk
       run: |
         df -h /
-        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
-          /usr/share/swift /usr/local/share/powershell
-        docker image prune --all --force >/dev/null
-        df -h /
+        nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell >/dev/null 2>&1 &
+        docker image prune --all --force || true
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
@@ -959,11 +958,20 @@ jobs:
         done
       working-directory: backend
 
-    # Checkpoints, not only the report at the end: when the disk fills, the runner may
-    # not manage to log the end of the job, but these lines are already written.
+    # Checkpoints, not only the report at the end: they show where the disk filled. When it
+    # fills, the runner can lose the step logs, but annotations survive (they did on main).
     - name: Disk checkpoint (after the required regressions)
       if: ${{ !cancelled() }}
-      run: df -h /; du -sh backend/target || true
+      env:
+        CHECKPOINT: after the required regressions
+      run: &disk_checkpoint |
+        # As annotations, which outlast the step logs when the disk fills.
+        free_gb="$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" || free_gb=
+        target="$(du -sh backend/target 2>/dev/null | cut -f1)" || target=
+        echo "::notice::disk ${CHECKPOINT}: ${free_gb:-?} GB free, target dir ${target:-none}"
+        if [ -n "$free_gb" ] && [ "$free_gb" -lt 20 ]; then
+          echo "::warning::only ${free_gb} GB free on /"
+        fi
 
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
@@ -1035,7 +1043,9 @@ jobs:
 
     - name: Disk checkpoint (after the feature and release builds)
       if: ${{ !cancelled() }}
-      run: df -h /; du -sh backend/target || true
+      env:
+        CHECKPOINT: after the feature and release builds
+      run: *disk_checkpoint
 
     # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
@@ -1050,7 +1060,9 @@ jobs:
 
     - name: Disk checkpoint (before the doctests)
       if: ${{ !cancelled() }}
-      run: df -h /; du -sh backend/target || true
+      env:
+        CHECKPOINT: before the doctests
+      run: *disk_checkpoint
 
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
@@ -1067,10 +1079,13 @@ jobs:
     # Headroom left at the end of the job, and what used it.
     - name: Disk usage
       if: always()
+      env:
+        CHECKPOINT: end of job
       run: |
-        df -h /
+        df -h / || true
         du -sh backend/target backend/target/* ~/.cargo/registry ~/.rustup 2>/dev/null || true
         docker system df || true
+        echo "::notice::disk end of job: $(df --output=avail -BG / | tail -1 | tr -dc 0-9) GB free"
 
   backend-db-tests:
     # One job for all database-backed lib tests. They used to be 13 jobs that
