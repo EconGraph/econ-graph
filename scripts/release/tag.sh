@@ -8,7 +8,8 @@
 # - A patch release (X.Y.Z with Z > 0) gets only the version tag. Train N must
 #   already have shipped: its tag train-N must exist on origin, and the commit it
 #   marks must be an ancestor of HEAD, so the patch is tagged on the branch that
-#   train shipped from.
+#   train shipped from. vX.Y.0 must exist on origin on the same commit as
+#   train-N, so the train number matches the X.Y being patched.
 #
 # - Working tree must be clean, and HEAD must already be pushed to origin.
 # - backend/Cargo.toml's workspace version, frontend/package.json's version and
@@ -78,6 +79,18 @@ if [ "$patch" != 0 ]; then
   fi
   if ! git merge-base --is-ancestor "$train_commit" HEAD; then
     echo "tag.sh: ${train_tag} (${train_commit}) is not an ancestor of HEAD; tag a patch for train ${train} on the release branch it shipped from." >&2
+    exit 1
+  fi
+  # The train must be the one that shipped X.Y.0, so a train number that
+  # doesn't match X.Y (4.1.1 with train 1, when train 1 shipped 4.0.0) is refused.
+  base_tag="v${version%.*}.0"
+  if ! git ls-remote --exit-code --tags origin "refs/tags/${base_tag}" >/dev/null 2>&1 ||
+    ! base_commit="$(git rev-parse --verify --quiet "refs/tags/${base_tag}^{commit}")"; then
+    echo "tag.sh: ${version} is a patch release, but ${base_tag} doesn't exist on origin." >&2
+    exit 1
+  fi
+  if [ "$base_commit" != "$train_commit" ]; then
+    echo "tag.sh: ${base_tag} (${base_commit}) is not ${train_tag} (${train_commit}); train ${train} didn't ship ${base_tag}, so ${version} isn't a patch of it." >&2
     exit 1
   fi
 fi

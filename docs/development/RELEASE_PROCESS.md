@@ -106,8 +106,9 @@ scripts/release/tag.sh 4.0.1 1
 ```
 
 The script refuses a patch release unless `train-N` already exists on `origin` and its commit is
-an ancestor of the checked-out commit, so the patch is on the branch that train shipped from. It
-creates and pushes only the `vX.Y.Z` tag; `train-N` stays on the train's first release.
+an ancestor of the checked-out commit, so the patch is on the branch that train shipped from, and
+unless `vX.Y.0` exists on `origin` on that same commit, so the train number matches the `X.Y`
+being patched. It creates and pushes only the `vX.Y.Z` tag; `train-N` stays on the train's first release.
 
 The script does not check image publication. The final version tag triggers Release Images,
 which requires existing `sha-<full-commit-SHA>` images for that commit and fails if any is

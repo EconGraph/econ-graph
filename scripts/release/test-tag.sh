@@ -6,11 +6,13 @@
 #
 # - X.Y.0: tags vX.Y.0 and train-N and pushes both together.
 # - X.Y.Z with Z > 0 (a patch release): needs train-N on origin, with its commit
-#   an ancestor of HEAD, and tags and pushes only vX.Y.Z.
+#   an ancestor of HEAD and vX.Y.0 on the same commit, and tags and pushes
+#   only vX.Y.Z.
 #
 # Also that a patch is refused without train-N on origin (including a train-N
 # that exists only locally) or on a branch that doesn't descend from it, and
-# that a failed push deletes the local tag.
+# that a failed push deletes the local tag. A train number that does not match
+# X.Y (4.1.1 with train 1, which shipped 4.0.0) is refused too.
 #
 # Runs offline. tag.sh and changelog-section.sh are copied into a scratch git
 # repository whose origin is a local bare repository, next to minimal version
@@ -189,6 +191,34 @@ else
     fail "4.0.1 failed: $(cat "$LOGS/out")"
 fi
 rgit tag -d v4.0.1 >/dev/null 2>&1
+
+# --- a train number that doesn't match X.Y: refused ---
+# 4.1.1 with train 1 on a branch that contains train-1, but train 1 shipped
+# 4.0.0: first with no v4.1.0, then with a v4.1.0 on another commit.
+set_version 4.1.1
+commit_all "4.1.1 with the wrong train"
+rgit push -q origin HEAD:refs/heads/release/v4.0 || exit 1
+if run_tag 4.1.1 1; then
+    fail "4.1.1 was tagged as a patch of train 1, which shipped 4.0.0"
+elif ! grep -q "v4.1.0 doesn't exist on origin" "$LOGS/out"; then
+    fail "4.1.1 for train 1 failed, but not on the missing v4.1.0: $(cat "$LOGS/out")"
+elif [ -n "$(pushes)" ]; then
+    fail "4.1.1 for train 1 pushed '$(pushes)'"
+else
+    pass "a patch whose X.Y.0 has no tag is refused"
+fi
+rgit tag -a v4.1.0 -m "Release v4.1.0" "$release_head"
+rgit push -q origin v4.1.0 || exit 1
+if run_tag 4.1.1 1; then
+    fail "4.1.1 was tagged as a patch of train 1, whose commit isn't v4.1.0's"
+elif ! grep -q "v4.1.0 (.*) is not train-1" "$LOGS/out"; then
+    fail "4.1.1 for train 1 failed, but not on v4.1.0 differing from train-1: $(cat "$LOGS/out")"
+elif [ -n "$(pushes)" ]; then
+    fail "4.1.1 for train 1 pushed '$(pushes)'"
+else
+    pass "a patch whose X.Y.0 isn't train-N's commit is refused"
+fi
+has_tag v4.1.1 && fail "a refused patch left a local v4.1.1"
 
 # --- patch on a branch that doesn't contain train-1: refused ---
 rgit checkout -q -b side "$base_commit"
