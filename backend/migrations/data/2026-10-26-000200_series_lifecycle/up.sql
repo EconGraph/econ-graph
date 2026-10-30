@@ -19,6 +19,9 @@ CREATE TABLE series_lifecycle (
     -- Listed by the last accepted (unguarded) catalog of scope_fingerprint. Only these rows
     -- form the mass-disappearance guard's denominator.
     in_accepted_catalog BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Listed outright by that catalog (not merely still published upstream outside the rules).
+    -- Only these rows ignore weaker omitted-from-response fetch evidence.
+    listed_in_accepted_catalog BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (source_id, external_id),
     CHECK (status <> 'superseded' OR successor_id IS NOT NULL)
 );

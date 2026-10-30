@@ -59,10 +59,13 @@
 //! Every fetch asks for the whole history (`Year` `X` for NIPA, `ALL` for Regional) and ignores
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
-//! history is still one modest request. A response with no rows at all is `Transient`: BEA
-//! briefly serves empty tables around its updates, and that says nothing about any one line. A
-//! requested series with no rows in an otherwise non-empty response is `Absent`, not
-//! `NotFound`: omitting one line or area is weaker evidence than an explicit "does not exist".
+//! history is still one modest request. A requested series with no rows in a successful
+//! response is `Absent`, not `NotFound`: omitting a line or area is weaker evidence than an
+//! explicit "does not exist". That includes an empty response: a Regional request is filtered
+//! to the batch's areas, so it is empty when every requested area is gone (legacy counties),
+//! and BEA answers a NIPA table it no longer publishes at that frequency with no rows. A
+//! briefly empty table during a BEA update cannot retire anything: six misses about ten
+//! refresh intervals apart are needed, and listed series are not counted.
 //! It isn't retried (each retry would request the whole table again); the scheduler tries again
 //! after the same long backoff as NotFound. For a series the current accepted catalog lists,
 //! `Absent` is not counted at all: catalog discovery alone decides whether it was removed. For
@@ -785,14 +788,6 @@ impl BeaAdapter {
                 ],
             )
             .await?;
-        // An empty table says nothing about any one line (BEA briefly serves empty tables
-        // around its annual updates), so it fails the whole group as Transient, not Absent.
-        if rows.is_empty() {
-            return Err(CrawlError::Transient(format!(
-                "BEA {table_name} ({}): GetData returned no rows",
-                frequency.code()
-            )));
-        }
         let mut by_line: HashMap<&str, Vec<&NipaRow>> = HashMap::new();
         for row in &rows {
             by_line
@@ -881,12 +876,6 @@ impl BeaAdapter {
                 ],
             )
             .await?;
-        // As for NIPA: an empty response is not evidence about any one area.
-        if rows.is_empty() {
-            return Err(CrawlError::Transient(format!(
-                "BEA {table_name} line {line}: GetData returned no rows"
-            )));
-        }
         let mut by_geo: HashMap<&str, Vec<&RegionalRow>> = HashMap::new();
         for row in &rows {
             by_geo.entry(row.geo_fips.as_str()).or_default().push(row);
@@ -2392,10 +2381,11 @@ mod tests {
         mock.server().verify().await;
     }
 
-    /// An empty table (as BEA briefly serves around an annual update) is Transient for the
-    /// whole group, never Absent for each requested line or area.
+    /// An empty response (every requested Regional area gone, or a NIPA table BEA no longer
+    /// publishes at that frequency) is `Absent` for each requested id, which lifecycle counts
+    /// only for series the accepted catalog does not list.
     #[tokio::test]
-    async fn fetch_batch_treats_an_empty_table_as_transient() {
+    async fn fetch_batch_marks_every_id_of_an_empty_response_absent() {
         const EMPTY: &str = r#"{"BEAAPI":{"Results":{"Data":[]}}}"#;
         let mock = MockSource::start().await;
         mock.mount(&nipa_route("T10105", "Q"), Reply::json_str(EMPTY))
@@ -2408,14 +2398,17 @@ mod tests {
         .await;
         for ids in [
             vec!["bea_nipa/T10105.1.Q", "bea_nipa/T10105.2.Q"],
-            vec!["bea_regional/SAGDP2.1.06000", "bea_regional/SAGDP2.1.01000"],
+            vec!["bea_regional/SAGDP2.1.09001", "bea_regional/SAGDP2.1.09003"],
         ] {
             let ids: Vec<String> = ids.into_iter().map(String::from).collect();
-            let e = adapter(&mock)
+            let out = adapter(&mock)
                 .fetch_batch(&test_ctx(), &ids, None)
                 .await
-                .unwrap_err();
-            assert_eq!(e.kind(), "transient", "{e}");
+                .unwrap();
+            assert_eq!(out.len(), ids.len());
+            for id in &ids {
+                assert_eq!(out[id].as_ref().unwrap_err().kind(), "absent", "{id}");
+            }
         }
     }
 

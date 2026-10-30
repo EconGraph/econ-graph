@@ -4744,3 +4744,80 @@ async fn concurrent_fetch_and_refetch_success_resets_the_other_kinds_new_miss() 
         db.drop().await;
     }
 }
+
+/// An Absent fetch error, through the worker, records crawl_status 'absent' (the long
+/// backoff) and counts omitted-line evidence only for a series the accepted catalog does not
+/// list.
+#[tokio::test]
+async fn absent_fetch_records_absent_status_and_spares_listed_series() {
+    let Some(db) = review_worker_db("eco464_worker_absent").await else {
+        return;
+    };
+    let (listed, legacy) = ("t5_absent_listed", "t5_absent_legacy");
+    create_series(&db.pool, &[listed, legacy]).await;
+    let mut conn = db.pool.get().await.unwrap();
+    let catalog = vec![DiscoveredSeries {
+        external_id: listed.into(),
+        title: "Listed".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: flat(),
+    }];
+    diesel_async::AsyncConnection::transaction::<_, AppError, _>(&mut *conn, async |conn| {
+        crate::lifecycle::reconcile_conn(
+            conn,
+            SRC,
+            &catalog,
+            &crate::lifecycle::CatalogLifecycle::default(),
+            "rules",
+            Utc::now(),
+        )
+        .await
+    })
+    .await
+    .unwrap();
+    let adapter = Arc::new(BatchAdapter {
+        lifecycle_tracking: true,
+        series_errors: HashMap::from([
+            (listed.into(), CrawlError::Absent("no line".into())),
+            (legacy.into(), CrawlError::Absent("no line".into())),
+        ]),
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 1);
+    enqueue_fetch(&db.pool, &[listed, legacy]).await;
+    for _ in 0..2 {
+        assert!(matches!(
+            w.run_once().await,
+            Some(JobOutcome::Failed { .. })
+        ));
+    }
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type=diesel::sql_types::Text)]
+        crawl_status: String,
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        absent: i32,
+    }
+    for (id, absent) in [(listed, 0), (legacy, 1)] {
+        let row: Row = diesel::sql_query(
+            "SELECT es.crawl_status, l.fetch_absent_count AS absent FROM economic_series es \
+             JOIN series_lifecycle l ON l.source_id=es.source_id AND l.external_id=es.external_id \
+             WHERE es.external_id=$1",
+        )
+        .bind::<diesel::sql_types::Text, _>(id)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(
+            (row.crawl_status.as_str(), row.absent),
+            ("absent", absent),
+            "{id}"
+        );
+    }
+    drop(conn);
+    drop(w);
+    db.drop().await;
+}

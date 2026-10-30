@@ -726,6 +726,7 @@ diesel::table! {
         successor_id -> Nullable<Uuid>,
         scope_fingerprint -> Text,
         in_accepted_catalog -> Bool,
+        listed_in_accepted_catalog -> Bool,
     }
 }
 

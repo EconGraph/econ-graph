@@ -307,7 +307,15 @@ async fn apply_snapshot(
         })
         .map(|s| s.status.clone())
         .collect();
-    write_states(conn, source_id, fingerprint, &states, !guarded).await?;
+    write_states(
+        conn,
+        source_id,
+        fingerprint,
+        &states,
+        &snapshot.listed,
+        !guarded,
+    )
+    .await?;
     let listed: BTreeSet<&str> = snapshot.listed.iter().map(String::as_str).collect();
     let unselected_tracked = facts
         .unselected(&listed, existing.iter().map(|s| s.external_id.as_str()))
@@ -661,6 +669,7 @@ async fn write_states(
     source_id: Uuid,
     fingerprint: &str,
     states: &[State],
+    listed: &[String],
     accepted: bool,
 ) -> AppResult<()> {
     let payload =
@@ -669,15 +678,19 @@ async fn write_states(
     // legal evidence alone and leaves in_accepted_catalog as the last accepted catalog set it.
     diesel::sql_query(
         "INSERT INTO series_lifecycle(source_id,external_id,status,since,missing_refreshes,last_seen_at, \
-            proposed_successor_id,successor_id,scope_fingerprint,in_accepted_catalog) \
+            proposed_successor_id,successor_id,scope_fingerprint,in_accepted_catalog, \
+            listed_in_accepted_catalog) \
          SELECT $1,x.external_id,x.status,x.since,x.missing_refreshes,x.last_seen_at, \
-            x.proposed_successor_id,x.successor_id,$2,x.in_accepted_catalog AND $4 \
+            x.proposed_successor_id,x.successor_id,$2,x.in_accepted_catalog AND $4, \
+            x.external_id = ANY($5) AND $4 \
          FROM jsonb_to_recordset($3) AS x(external_id text,status text,since timestamptz, \
             missing_refreshes integer,last_seen_at timestamptz,proposed_successor_id uuid,successor_id uuid, \
             in_accepted_catalog boolean) \
          ON CONFLICT(source_id,external_id) DO UPDATE SET status=EXCLUDED.status,since=EXCLUDED.since, \
             in_accepted_catalog=CASE WHEN $4 THEN EXCLUDED.in_accepted_catalog \
                 ELSE series_lifecycle.in_accepted_catalog END, \
+            listed_in_accepted_catalog=CASE WHEN $4 THEN EXCLUDED.listed_in_accepted_catalog \
+                ELSE series_lifecycle.listed_in_accepted_catalog END, \
             missing_refreshes=EXCLUDED.missing_refreshes,last_seen_at=EXCLUDED.last_seen_at, \
             proposed_successor_id=EXCLUDED.proposed_successor_id,successor_id=EXCLUDED.successor_id, \
             scope_fingerprint=EXCLUDED.scope_fingerprint, \
@@ -690,7 +703,8 @@ async fn write_states(
                 AND NOT (EXCLUDED.status='retired' AND EXCLUDED.missing_refreshes<3) \
                 THEN 0 ELSE series_lifecycle.fetch_absent_count END")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint).bind::<Jsonb,_>(payload)
-        .bind::<diesel::sql_types::Bool,_>(accepted).execute(&mut *conn).await?;
+        .bind::<diesel::sql_types::Bool,_>(accepted)
+        .bind::<diesel::sql_types::Array<Text>,_>(listed).execute(&mut *conn).await?;
     // A lifecycle badge must not remove historical data from normal series browsing.
     // Only a verified legal restriction makes a row inactive; the API additionally
     // checks restricted status so includeInactive cannot bypass that restriction.
@@ -846,7 +860,7 @@ impl FetchMiss {
         match self {
             Self::NotFound => "TRUE",
             Self::Absent => {
-                "NOT (in_accepted_catalog AND scope_fingerprint IS NOT DISTINCT FROM \
+                "NOT (listed_in_accepted_catalog AND scope_fingerprint IS NOT DISTINCT FROM \
                  (SELECT fingerprint FROM catalog_lifecycle_scopes s WHERE s.source_id=$1))"
             }
         }

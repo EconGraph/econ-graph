@@ -1768,3 +1768,92 @@ const _: () = {
             > (NOT_FOUND_RETIRE_AFTER as i64 - 1) * NOT_FOUND_BACKOFF_FACTOR
     );
 };
+
+async fn reconcile_scope(
+    pool: &DatabasePool,
+    listed: &[DiscoveredSeries],
+    facts: &CatalogLifecycle,
+    fingerprint: &str,
+    at: DateTime<Utc>,
+) {
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<_, AppError, _>(async |conn| {
+        reconcile_conn(conn, SourceId::Fred, listed, facts, fingerprint, at).await
+    })
+    .await
+    .unwrap();
+}
+
+/// A series still published upstream under a table the rules no longer select stays in the
+/// guard's baseline but is not listed, so omitted-line evidence still counts for it.
+#[tokio::test]
+async fn unselected_series_still_count_absent_evidence() {
+    let Some(db) = fetch_counter_db("eco464_absent_unselected").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let kept = counter_series("kept");
+    persist::persist_discovered(
+        pool,
+        SourceId::Fred,
+        &[kept.clone(), counter_series("drifted")],
+    )
+    .await
+    .unwrap();
+    let start = Utc::now();
+    let both = vec![kept.clone(), counter_series("drifted")];
+    reconcile_scope(pool, &both, &CatalogLifecycle::default(), "rules", start).await;
+    let facts = CatalogLifecycle {
+        unselected_ids: vec!["drifted".into()],
+        ..Default::default()
+    };
+    reconcile_scope(
+        pool,
+        std::slice::from_ref(&kept),
+        &facts,
+        "rules",
+        start + chrono::Duration::seconds(1),
+    )
+    .await;
+    absent_miss(pool, "drifted").await;
+    absent_miss(pool, "kept").await;
+    assert_eq!(absent_count(pool, "drifted").await, 1);
+    assert_eq!(absent_count(pool, "kept").await, 0);
+    db.drop().await;
+}
+
+/// Listing by an older accepted catalog under different rules does not protect a series.
+#[tokio::test]
+async fn listing_under_older_rules_does_not_exempt_absent_evidence() {
+    let Some(db) = fetch_counter_db("eco464_absent_old_scope").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let old = counter_series("old_rules");
+    let new = counter_series("new_rules");
+    persist::persist_discovered(pool, SourceId::Fred, &[old.clone(), new.clone()])
+        .await
+        .unwrap();
+    let start = Utc::now();
+    reconcile_scope(
+        pool,
+        std::slice::from_ref(&old),
+        &CatalogLifecycle::default(),
+        "v1",
+        start,
+    )
+    .await;
+    reconcile_scope(
+        pool,
+        std::slice::from_ref(&new),
+        &CatalogLifecycle::default(),
+        "v2",
+        start + chrono::Duration::seconds(1),
+    )
+    .await;
+    absent_miss(pool, "old_rules").await;
+    absent_miss(pool, "new_rules").await;
+    assert_eq!(absent_count(pool, "old_rules").await, 1);
+    assert_eq!(absent_count(pool, "new_rules").await, 0);
+    db.drop().await;
+}
