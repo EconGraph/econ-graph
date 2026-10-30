@@ -44,7 +44,8 @@
 //! `superseded` and cancels its queued chunk jobs. A chunk of a superseded run that is already in
 //! flight finds its run no longer `running` when it commits, and discards its result. A
 //! `finalizing` run has every chunk stored, so it is never superseded: a `discover_catalog` job
-//! that finds one starts no run. Only the job's current claim can start a run (the claim row is
+//! that finds one starts no run, unless the run's finalize job has ended (failed or cancelled)
+//! or is gone: such a run can never commit, so it is failed and a new run starts. Only the job's current claim can start a run (the claim row is
 //! locked in the same transaction), so a worker whose lease expired cannot supersede the run of
 //! the worker that re-claimed the job. At most one run per source is not final (a partial
 //! unique index).
@@ -447,8 +448,13 @@ async fn cancel_jobs_conn(
 /// Outcome of [`start_run`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunStart {
-    /// A new run in state `enumerating`, after superseding this many older runs.
-    Started { run_id: Uuid, superseded: usize },
+    /// A new run in state `enumerating`, after superseding this many older runs and failing
+    /// `abandoned` finalizing runs whose finalize job had ended or was gone.
+    Started {
+        run_id: Uuid,
+        superseded: usize,
+        abandoned: usize,
+    },
     /// The `discover_catalog` claim is no longer current (its lease expired and the job may have
     /// been claimed again): nothing changed, and the caller must not start a run.
     ClaimLost,
@@ -484,8 +490,16 @@ pub(crate) async fn start_run(
         .bind::<Text, _>(source)
         .execute(conn)
         .await?;
+        // A finalizing run whose finalize job is still active will commit: leave it alone. One
+        // whose finalize job ended (failed or cancelled without the failure hook) or is gone
+        // can never commit, so fail it and start a new run instead of waiting on it.
         let finalizing: Vec<IdRow> = diesel::sql_query(
-            "SELECT id FROM discovery_runs WHERE source = $1 AND state = 'finalizing'",
+            "SELECT r.id FROM discovery_runs r \
+             WHERE r.source = $1 AND r.state = 'finalizing' AND EXISTS ( \
+                 SELECT 1 FROM crawl_queue q \
+                 WHERE q.kind = 'finalize_discovery' \
+                   AND split_part(q.series_id, '/', 1) = r.id::text AND q.source = r.source \
+                   AND q.status IN ('pending', 'processing', 'retrying'))",
         )
         .bind::<Text, _>(source)
         .load(conn)
@@ -493,6 +507,14 @@ pub(crate) async fn start_run(
         if let Some(run) = finalizing.into_iter().next() {
             return Ok(RunStart::Finalizing { run_id: run.id });
         }
+        let abandoned = diesel::sql_query(
+            "UPDATE discovery_runs SET state = 'failed', finished_at = NOW(), updated_at = NOW(), \
+                 error_message = 'its finalize job ended without completing' \
+             WHERE source = $1 AND state = 'finalizing'",
+        )
+        .bind::<Text, _>(source)
+        .execute(conn)
+        .await?;
         let superseded: Vec<IdRow> = diesel::sql_query(
             "UPDATE discovery_runs SET state = 'superseded', finished_at = NOW(), \
                  updated_at = NOW(), error_message = 'superseded by a newer run' \
@@ -510,17 +532,20 @@ pub(crate) async fn start_run(
         )
         .await?;
         let run: IdRow = diesel::sql_query(
-            "INSERT INTO discovery_runs (source, state, selection_fingerprint, priority) \
-             VALUES ($1, 'enumerating', $2, $3) RETURNING id",
+            "INSERT INTO discovery_runs \
+                 (source, state, selection_fingerprint, priority, discovery_job_id) \
+             VALUES ($1, 'enumerating', $2, $3, $4) RETURNING id",
         )
         .bind::<Text, _>(source)
         .bind::<Nullable<Text>, _>(fingerprint)
         .bind::<Integer, _>(priority)
+        .bind::<SqlUuid, _>(claim.id)
         .get_result(conn)
         .await?;
         Ok(RunStart::Started {
             run_id: run.id,
             superseded: superseded.len(),
+            abandoned,
         })
     })
     .await

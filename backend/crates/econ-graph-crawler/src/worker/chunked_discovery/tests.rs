@@ -899,6 +899,58 @@ async fn a_finalizing_run_is_not_superseded() {
     assert_eq!(metadata(p).await.len(), IDS.len());
 }
 
+/// A finalizing run whose finalize job ended without the failure hook, or is gone, can never
+/// commit: a new discovery fails it and starts a run instead of waiting on it.
+#[tokio::test]
+async fn a_finalizing_run_without_an_active_finalize_job_is_failed_and_replaced() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let settings = ChunkedDiscovery {
+        units_per_chunk: 1,
+        selection_fingerprint: None,
+    };
+    for finalize_job in ["failed", "cancelled", "gone"] {
+        exec(p, "DELETE FROM crawl_queue").await;
+        exec(p, "DELETE FROM discovery_runs").await;
+        exec(
+            p,
+            &format!(
+                "INSERT INTO discovery_runs (id, source, state, enumerated_at) VALUES \
+                 ('00000000-0000-0000-0000-0000000000f1', '{}', 'finalizing', NOW())",
+                SRC.as_str()
+            ),
+        )
+        .await;
+        if finalize_job != "gone" {
+            exec(
+                p,
+                &format!(
+                    "INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                     VALUES ('{}', '00000000-0000-0000-0000-0000000000f1', \
+                         'finalize_discovery', '{finalize_job}', NOW())",
+                    SRC.as_str()
+                ),
+            )
+            .await;
+        }
+        enqueue_discovery(p, 5).await;
+        let claim = CrawlQueueItem::claim_next(p, "t745-w1", None)
+            .await
+            .unwrap()
+            .unwrap();
+        let start = discovery_run::start_run(p, SRC, &settings, &claim)
+            .await
+            .unwrap();
+        assert!(
+            matches!(start, RunStart::Started { abandoned: 1, .. }),
+            "{finalize_job}: {start:?}"
+        );
+        let all = runs(p).await;
+        assert_eq!(all[0].state, "failed", "{finalize_job}");
+        assert_eq!(all[1].state, "enumerating", "{finalize_job}");
+    }
+}
+
 /// Chunks check the run's selection fingerprint too: after a selection change, the next chunk
 /// fails the run without calling upstream, so chunks discovered under other rules never commit.
 #[tokio::test]

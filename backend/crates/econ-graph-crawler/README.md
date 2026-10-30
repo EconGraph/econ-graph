@@ -92,7 +92,8 @@ when its last chunks finish together on different workers. Starting a run supers
 `enumerating` or `running` run of the source and cancels that run's queued jobs; a chunk of it
 that is already in flight finds the run superseded when it commits and discards its result. A
 `finalizing` run already has every chunk stored, so it is never superseded: a discovery that
-finds one starts no run and completes. Only the current claim of a `discover_catalog` job can
+finds one starts no run and completes, unless that run's finalize job has ended or is gone, in
+which case the run can never commit, so the discovery fails it and starts a new run. Only the current claim of a `discover_catalog` job can
 start a run, so a worker whose lease expired cannot supersede the run of the worker that
 re-claimed the job. A worker
 that dies mid-chunk is handled like any other job: `release_stuck` re-queues the chunk, and the
@@ -100,8 +101,11 @@ late result of the dead claim is dropped as a lost lease. The worker's maintenan
 runs whose chunk or finalize jobs ended without completing (for example, `release_stuck`
 exhausting their retries) and runs left `enumerating` with no active `discover_catalog` job.
 For the scheduler, a run that fails after enumeration counts as one failed discovery, however
-many of its chunk jobs failed, with the usual one-hour backoff; a superseded run counts as
-nothing.
+many of its chunk jobs failed: the `discover_catalog` job that started it completes at
+enumeration, but the scheduler takes the discovery's outcome from the run. Consecutive failed
+runs double the backoff from one hour up to one day, as failed jobs do, and a complete run
+resets it. A run that is not final counts as an active discovery, and a superseded run counts
+as nothing.
 
 An adapter may give a `selection_fingerprint` of its catalog selection rules. It is recorded
 when a run starts, and a chunk or finalize job fails the run if the adapter's fingerprint

@@ -97,7 +97,20 @@ impl Worker {
                 .await
                 .map_err(db_error)?
             {
-                RunStart::Started { run_id, superseded } => (run_id, superseded),
+                RunStart::Started {
+                    run_id,
+                    superseded,
+                    abandoned,
+                } => {
+                    for _ in 0..abandoned {
+                        discovery_run::publish(source, &RunEvent::Failed);
+                    }
+                    if abandoned > 0 {
+                        tracing::warn!(%source, abandoned,
+                            "failed finalizing discovery runs whose finalize job ended");
+                    }
+                    (run_id, superseded)
+                }
                 // The result commit finds the claim gone too and reports the lost lease.
                 RunStart::ClaimLost => {
                     return Err(CrawlError::Transient(

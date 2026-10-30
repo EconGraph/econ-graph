@@ -63,6 +63,10 @@ CREATE TABLE discovery_runs (
     -- The adapter's fingerprint of its catalog selection when the run started, if it has one.
     -- Finalize fails the run if the adapter's fingerprint has changed since.
     selection_fingerprint TEXT,
+    -- crawl_queue.id of the discover_catalog job that started the run (no foreign key: finished
+    -- queue rows are purged). The scheduler takes that job's outcome from the run instead of
+    -- from the job, which completes as soon as enumeration does.
+    discovery_job_id UUID,
     -- Queue priority of the discover_catalog job that started the run; its chunk and finalize
     -- jobs use the same priority.
     priority INTEGER NOT NULL DEFAULT 5,
@@ -91,6 +95,9 @@ CREATE UNIQUE INDEX uq_discovery_runs_one_active_per_source
 
 CREATE INDEX idx_discovery_runs_source_started
     ON discovery_runs (source, started_at DESC);
+
+CREATE INDEX idx_discovery_runs_discovery_job
+    ON discovery_runs (discovery_job_id);
 
 COMMENT ON TABLE discovery_runs IS
     'One chunked catalog discovery of a source: enumerate, chunk jobs, then one finalize';

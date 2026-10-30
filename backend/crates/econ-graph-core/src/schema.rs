@@ -415,6 +415,7 @@ diesel::table! {
         chunks_done -> Int4,
         chunks_failed -> Int4,
         selection_fingerprint -> Nullable<Text>,
+        discovery_job_id -> Nullable<Uuid>,
         priority -> Int4,
         validator -> Nullable<Jsonb>,
         curated_missing -> Jsonb,
