@@ -24,7 +24,9 @@
 DATA_MIGRATION_CHECK_JOB="crawler-migrate-check"
 
 # The check Job: crawler-migrate-job.yaml renamed and relabelled, running
-# `crawler migrate --dry-run`, kept an hour after it finishes.
+# `crawler migrate --dry-run` with RUST_LOG=info (so it logs how many are pending, which
+# pending_data_migrations requires), ended by Kubernetes after 9 minutes (before the wait
+# for it gives up) and kept an hour after it finishes.
 render_data_migration_check_job() {
     python3 - "$PROJECT_ROOT/k8s/manifests/crawler-migrate-job.yaml" "$DATA_MIGRATION_CHECK_JOB" <<'PY'
 import sys
@@ -36,19 +38,24 @@ with open(path) as f:
 job["metadata"]["name"] = name
 job["metadata"]["labels"]["app"] = name
 job["spec"]["ttlSecondsAfterFinished"] = 3600
+job["spec"]["activeDeadlineSeconds"] = 540
 template = job["spec"]["template"]
 template["metadata"]["labels"]["app"] = name
 container = template["spec"]["containers"][0]
 assert container["command"] == ["/app/crawler", "migrate"], container["command"]
 container["command"] = ["/app/crawler", "migrate", "--dry-run"]
+env = [e for e in container.get("env", []) if e["name"] != "RUST_LOG"]
+container["env"] = env + [{"name": "RUST_LOG", "value": "info"}]
 yaml.safe_dump(job, sys.stdout, sort_keys=False)
 PY
 }
 
 # pending_data_migrations: the versions the check Job lists, one per line (none: nothing
-# pending). Fails, saying why, when the Job can't be run or doesn't complete.
+# pending). Fails, saying why, when the Job can't be run or doesn't complete, or its answer
+# can't be read for certain: a missed version would leave the worker writing during the
+# migrations, so anything short of the succeeded pod's own count fails.
 pending_data_migrations() {
-    local manifest status="" logs
+    local manifest status="" logs pod counted count versions found
     manifest="$(render_data_migration_check_job)" || {
         echo "❌ could not render the ${DATA_MIGRATION_CHECK_JOB} Job from k8s/manifests/crawler-migrate-job.yaml" >&2
         return 1
@@ -64,17 +71,48 @@ pending_data_migrations() {
         case "$status" in *Complete* | *Failed*) break ;; esac
         sleep "${DATA_MIGRATION_CHECK_POLL:-5}"
     done
-    logs="$(kubectl -n econ-graph logs "job/${DATA_MIGRATION_CHECK_JOB}" -c crawler-migrate 2>&1)" || logs=""
     case "$status" in
         *Complete*) ;;
         *)
+            logs="$(kubectl -n econ-graph logs "job/${DATA_MIGRATION_CHECK_JOB}" -c crawler-migrate 2>&1)" || true
             echo "❌ ${DATA_MIGRATION_CHECK_JOB} (crawler migrate --dry-run) did not complete (status: ${status:-none}):" >&2
             printf '%s\n' "$logs" | sed 's/^/   /' >&2
             return 1
             ;;
     esac
-    # The versions are 14-digit lines; anything else in the log is logging.
-    grep -E '^[0-9]{14}$' <<<"$logs" || true
+    # The log of the pod that succeeded: after a retry the Job has a failed pod too, whose
+    # log lists no versions.
+    pod="$(kubectl -n econ-graph get pods -l "job-name=${DATA_MIGRATION_CHECK_JOB}" \
+        --field-selector=status.phase=Succeeded -o name)" || {
+        echo "❌ could not list the pods of ${DATA_MIGRATION_CHECK_JOB}" >&2
+        return 1
+    }
+    pod="$(head -n 1 <<<"$pod")"
+    [ -n "$pod" ] || {
+        echo "❌ ${DATA_MIGRATION_CHECK_JOB} completed, but no pod of it succeeded to read" >&2
+        return 1
+    }
+    logs="$(kubectl -n econ-graph logs "$pod" -c crawler-migrate)" || {
+        echo "❌ could not read the log of ${pod} (${DATA_MIGRATION_CHECK_JOB})" >&2
+        return 1
+    }
+    # The versions are 14-digit lines on stdout; the count, "N data migration(s) pending",
+    # is logged on stderr. Both must agree.
+    counted="$(grep -oE '[0-9]+ data migration\(s\) pending' <<<"$logs" | tail -n 1)"
+    [ -n "$counted" ] || {
+        echo "❌ ${pod} (${DATA_MIGRATION_CHECK_JOB}) logged no \"N data migration(s) pending\" line:" >&2
+        printf '%s\n' "$logs" | sed 's/^/   /' >&2
+        return 1
+    }
+    count="${counted%% *}"
+    versions="$(grep -E '^[0-9]{14}$' <<<"$logs" || true)"
+    found=0
+    [ -z "$versions" ] || found="$(wc -l <<<"$versions")"
+    [ "$found" -eq "$count" ] || {
+        echo "❌ ${pod} (${DATA_MIGRATION_CHECK_JOB}) says ${count} data migration(s) pending but lists ${found}" >&2
+        return 1
+    }
+    [ -z "$versions" ] || printf '%s\n' "$versions"
 }
 
 # stop_crawler_for_pending_migrations: with any data migration pending, stop crawler-worker
@@ -90,7 +128,7 @@ stop_crawler_for_pending_migrations() {
     echo "🔎 Checking for pending data migrations (crawler migrate --dry-run)..."
     pending="$(pending_data_migrations)" || return 1
     if [ -z "$pending" ]; then
-        echo "✅ No data migrations pending; crawler-worker keeps running"
+        echo "✅ No data migrations pending; crawler-worker is left as it is"
         return 0
     fi
     count="$(wc -l <<<"$pending")"
