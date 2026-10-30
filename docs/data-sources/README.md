@@ -114,14 +114,23 @@ Problems, each of which makes the command exit nonzero:
   as nonexistent, a BLS id absent from its survey's series file, a World Bank indicator the API
   rejects), or a rule that matches nothing in the current catalog;
 - **discontinued**: a FRED include override titled `(DISCONTINUED)`, a BLS series whose latest
-  period is before last year, a World Bank indicator moved out of WDI (source 2), or a BEA table
-  that BEA lists but serves no rows or lines for;
+  period is too old, a World Bank indicator whose source is an archive, or a BEA table that BEA
+  lists but serves no rows or lines for (the BLS and World Bank rules are heuristics, below);
 - **restricted**: a FRED include override whose notes carry a copyright restriction;
 - **over-broad**: a rule that matches more catalog entries than its optional `max_matches`;
 - **over-cap**: a selection past `max_series`, `max_tables` or `max_catalog_series`, which would
   stop discovery;
 - **over-quota**: a refresh needing more requests than the source's daily quota (BLS: 500 a day
   with a key, 25 without).
+
+BLS and World Bank publish no discontinued flag, so the check infers one:
+
+- **BLS**: the series file's `end_year`, the year of the latest published period, is before
+  last year. Annual and semi-annual series, which BLS publishes with a lag, get one more year.
+- **World Bank**: `/indicator/{id}` names an archive as the indicator's source (a source whose
+  name contains "Archive", such as 57, "WDI Database Archives"). The adapter requests each
+  indicator without naming a source, so it crawls from the API's default source. An indicator
+  reported under another live source, such as International Debt Statistics, is a notice.
 
 Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired include
 probes (`expected_missing`), are reported as notices: discovery keeps them on purpose. Each

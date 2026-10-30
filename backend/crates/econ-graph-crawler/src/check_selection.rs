@@ -18,6 +18,17 @@
 //! Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired
 //! include probes (`expected_missing`), are notices: discovery keeps them on purpose.
 //!
+//! Discontinued, where the source has no explicit flag, is a heuristic:
+//!
+//! - **BLS**: the series file's `end_year` (the year of the latest published period) is before
+//!   last year; for an annual or semi-annual series, which BLS publishes with a lag, before the
+//!   year before last.
+//! - **World Bank**: `/indicator/{id}` names an archive as the indicator's source (its name
+//!   contains "Archive", such as 57 "WDI Database Archives"). The adapter requests every
+//!   indicator without a source, so the API's own default source is the one it crawls from; an
+//!   indicator reported under another live source (International Debt Statistics, ...) is a
+//!   notice, not a problem.
+//!
 //! | Source     | Catalog checked                                     | Selection                       |
 //! |------------|-----------------------------------------------------|---------------------------------|
 //! | FRED       | release/category series pages, `/series` overrides  | `catalog_selection/fred.toml`   |
@@ -128,6 +139,8 @@ pub enum FindingKind {
     OverQuota,
     /// A known-retired include probe, absent as expected.
     ExpectedMissing,
+    /// A World Bank indicator listed under a live source other than WDI.
+    OtherSource,
 }
 
 /// One problem or notice.
@@ -668,12 +681,11 @@ impl Checker {
                         id,
                         format!("not in BLS's series file {url}"),
                     ),
-                    Some(row) if row.end_year().is_some_and(|y| y < self.today.year() - 1) => check
-                        .problem(
-                            FindingKind::Discontinued,
-                            id,
-                            format!("latest period is in {}", row.end_year().unwrap_or_default()),
-                        ),
+                    Some(row) if bls_discontinued(row, self.today) => check.problem(
+                        FindingKind::Discontinued,
+                        id,
+                        format!("latest period is in {}", row.end_year().unwrap_or_default()),
+                    ),
                     Some(_) => listed.push(id.clone()),
                 }
             }
@@ -716,12 +728,21 @@ impl Checker {
                 Err(e) => Err(e),
             };
             match source {
-                Ok((source_id, _)) if source_id == WDI_SOURCE_ID => listed += 1,
-                Ok((source_id, name)) => check.problem(
+                Ok((source_id, name)) if world_bank::is_archive_source(&name) => check.problem(
                     FindingKind::Discontinued,
                     id,
-                    format!("moved out of WDI to source {source_id} ({name})"),
+                    format!("moved to archive source {source_id} ({name})"),
                 ),
+                Ok((source_id, name)) => {
+                    if source_id != WDI_SOURCE_ID {
+                        check.notice(
+                            FindingKind::OtherSource,
+                            id,
+                            format!("listed under source {source_id} ({name})"),
+                        );
+                    }
+                    listed += 1;
+                }
                 Err(CrawlError::NotFound(_)) => check.problem(
                     FindingKind::Missing,
                     id,
@@ -764,6 +785,15 @@ impl Checker {
         check.refresh(estimate(adapter, policy, &ids, |_| 1));
         Ok(())
     }
+}
+
+/// Whether a BLS series' latest published period is too old for it to be current: before last
+/// year, or before the year before last for an annual or semi-annual series (published with a
+/// lag). A row without an `end_year` is taken as current.
+fn bls_discontinued(row: &bls::SeriesFileRow, today: NaiveDate) -> bool {
+    let lagged = matches!(row.frequency(), Some("Annual" | "Semi-Annual"));
+    let oldest_current = today.year() - if lagged { 2 } else { 1 };
+    row.end_year().is_some_and(|year| year < oldest_current)
 }
 
 /// The body of an unconditional GET of one of `source`'s reference files, through the shared

@@ -54,6 +54,8 @@ const WB_CURRENT: &str =
     include_str!("../../tests/fixtures/world_bank/indicator_ny_gdp_pcap_cd.json");
 const WB_ARCHIVED: &str =
     include_str!("../../tests/fixtures/world_bank/indicator_archived_ag_agr_trac_no.json");
+const WB_IDS: &str =
+    include_str!("../../tests/fixtures/world_bank/indicator_ids_dt_amt_mltc_gg_cd.json");
 const WB_UNKNOWN: &str = include_str!("../../tests/fixtures/world_bank/indicator_unknown.json");
 const CENSUS_VARIABLES: &str = include_str!("../../tests/fixtures/census/variables.json");
 const CENSUS_GEOGRAPHY: &str = include_str!("../../tests/fixtures/census/geography.json");
@@ -472,12 +474,31 @@ async fn bls_reports_missing_discontinued_and_over_quota() {
     assert_eq!(check.selected, Some(2));
 }
 
+#[test]
+fn bls_discontinued_allows_annual_series_a_year_of_lag() {
+    let text = "series_id\tseries_title\tend_year\tend_period\n\
+                M24\tm\t2024\tM12\nM23\tm\t2023\tM12\nA23\ta\t2023\tA01\n\
+                A22\ta\t2022\tA01\nS23\ts\t2023\tS02\nNONE\tn\t\tM01\n";
+    let wanted = ["M24", "M23", "A23", "A22", "S23", "NONE"]
+        .map(String::from)
+        .into_iter()
+        .collect();
+    let rows = bls::parse_series_file(text, &wanted).unwrap();
+    let today = date("2025-02-01");
+    let stale: Vec<&str> = ["M24", "M23", "A23", "A22", "S23", "NONE"]
+        .into_iter()
+        .filter(|id| bls_discontinued(&rows[*id], today))
+        .collect();
+    assert_eq!(stale, ["M23", "A22"]);
+}
+
 // --- World Bank ------------------------------------------------------------------------
 
 async fn mount_world_bank(mock: &MockSource) {
     for (id, body) in [
         ("NY.GDP.PCAP.CD", WB_CURRENT),
         ("AG.AGR.TRAC.NO", WB_ARCHIVED),
+        ("DT.AMT.MLTC.GG.CD", WB_IDS),
         ("NOT.A.REAL.ID", WB_UNKNOWN),
     ] {
         mock.mount(
@@ -493,11 +514,18 @@ async fn world_bank_clean_list_and_missing_or_archived_indicators() {
     let mock = MockSource::start().await;
     mount_world_bank(&mock).await;
     let mut checker = checker(&mock);
-    checker.wdi_indicators = Some(vec!["NY.GDP.PCAP.CD".into()]);
+    // An International Debt Statistics indicator is current, under its own live source.
+    checker.wdi_indicators = Some(vec!["NY.GDP.PCAP.CD".into(), "DT.AMT.MLTC.GG.CD".into()]);
     let check = check_one(&checker, SourceId::WorldBank).await;
     assert_eq!(check.status, CheckStatus::Ok, "{check:#?}");
-    assert_eq!(check.selected, Some(1));
-    assert_eq!(check.refresh.as_ref().unwrap().requests, 1);
+    assert_eq!(check.selected, Some(2));
+    assert_eq!(check.refresh.as_ref().unwrap().requests, 2);
+    assert_eq!(check.notices.len(), 1, "{check:#?}");
+    assert_eq!(check.notices[0].kind, FindingKind::OtherSource);
+    assert_eq!(check.notices[0].entry, "DT.AMT.MLTC.GG.CD");
+    assert!(check.notices[0]
+        .detail
+        .contains("International Debt Statistics"));
 
     checker.wdi_indicators = Some(vec![
         "NY.GDP.PCAP.CD".into(),

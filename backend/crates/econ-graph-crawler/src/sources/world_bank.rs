@@ -1057,9 +1057,14 @@ pub fn classify_world_bank_message(what: &str, messages: &Value) -> CrawlError {
     }
 }
 
-/// The World Bank's source id for the World Development Indicators. An indicator the World Bank
-/// moves out of WDI (for example to source 57, "WDI Database Archives") is no longer updated.
+/// The World Bank's source id for the World Development Indicators.
 pub const WDI_SOURCE_ID: &str = "2";
+
+/// Whether a World Bank source, by name, is an archive of indicators no longer updated (57
+/// "WDI Database Archives", 93 "FPN Datahub Archive").
+pub(crate) fn is_archive_source(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("archive")
+}
 
 /// The `source` (id and name) an `/indicator/{id}?format=json` response gives indicator `id`.
 /// `NotFound` when the World Bank doesn't know the indicator (its error message 120 or 175, see

@@ -638,6 +638,11 @@ impl SeriesFileRow {
     pub(crate) fn end_year(&self) -> Option<i32> {
         self.end_year
     }
+
+    /// The series' frequency, from its latest period (`Monthly`, `Annual`, ...).
+    pub(crate) fn frequency(&self) -> Option<&str> {
+        self.frequency.as_deref()
+    }
 }
 
 /// Parses a BLS flat reference file: a header row naming tab-delimited columns, then one data

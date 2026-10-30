@@ -21,11 +21,18 @@
 # the same name lets that pod reach public HTTPS (a branch namespace otherwise allows it only
 # to crawler-worker); both are deleted afterwards.
 #
+# In a branch namespace:
+#   - Only a namespace deployed with local data has a crawler-worker. For any other, pass
+#     --image (a crawler-worker image the cluster has loaded).
+#   - Branch namespaces have no crawler-api-keys Secret, so FRED, BEA and Census are reported
+#     as skipped (exit 3 when nothing else is wrong); BLS, World Bank and FHFA need no key.
+#
 # Idempotent: it deletes a Job and NetworkPolicy left by an earlier run, creates them, waits for
 # the Job to finish (--timeout seconds, default 1800), prints the Job's log, deletes both and
 # exits with the check's exit status: 0 clean, 1 problems, 2 a source's check could not finish,
 # 3 a source was skipped for a missing API key (and nothing worse). 4: the Job did not finish
-# in time or its exit status could not be read. With --json the log carries only the JSON
+# in time or its exit status could not be read. They are deleted on every exit, including a
+# failure partway and an interrupt (Ctrl-C, SIGTERM). With --json the log carries only the JSON
 # report and errors.
 #
 # Every kubectl call goes to the kind cluster's own kubectl and kubeconfig
@@ -34,12 +41,13 @@
 # context, kube-system UID and production marker are printed before anything is created. It may
 # first install the kind cluster's kubectl and kubeconfig under ~/.cache/econgraph.
 #
-# Environment: KIND_CLUSTER (default econ-graph), POLL_SECONDS (default 5).
+# Environment: KIND_CLUSTER (default econ-graph), POLL_SECONDS (default 5), GRACE_SECONDS
+# (default 60: how long past --timeout to wait for the Job's status).
 
 set -euo pipefail
 
 usage() {
-    sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -160,6 +168,9 @@ cleanup() {
 kc -n "$target_ns" delete job "$JOB" --ignore-not-found --wait=true >&2
 kc -n "$target_ns" delete networkpolicy "$JOB" --ignore-not-found >&2
 trap cleanup EXIT
+# An interrupt exits through the EXIT trap too.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 kc -n "$target_ns" apply -f - >&2 <<EOF
 # Public HTTPS for the check's pod only. DNS comes from the namespace's own policies.
@@ -246,7 +257,8 @@ $(key_env CENSUS_API_KEY census-api-key)
 EOF
 
 echo "Waiting for job/${JOB} (up to ${timeout}s)..." >&2
-deadline=$((SECONDS + timeout + 60))
+# The Job itself fails at activeDeadlineSeconds; the grace covers its status catching up.
+deadline=$((SECONDS + timeout + ${GRACE_SECONDS:-60}))
 finished=false
 while [[ $SECONDS -lt $deadline ]]; do
     state="$(kc -n "$target_ns" get job "$JOB" -o 'jsonpath={.status.succeeded}/{.status.failed}')" ||

@@ -8,7 +8,8 @@
 #     keys through optional secretKeyRefs to crawler-api-keys, gets no database URL, and passes
 #     --source and --json to `crawler check-selection`;
 #   - a leftover Job and NetworkPolicy are deleted before the new ones are applied, and both are
-#     deleted afterwards, also when the Job fails or times out;
+#     deleted afterwards, also when the Job fails or times out, the script fails partway or it
+#     is interrupted with SIGTERM or SIGINT;
 #   - the Job's log is printed, and the script exits with the check's exit status (4 when the
 #     Job doesn't finish or its status can't be read).
 #
@@ -50,6 +51,7 @@ EOF
 #   STUB_NO_DEPLOYMENT=1  the namespace has no crawler-worker Deployment
 #   STUB_NO_NAMESPACE=1   the namespace doesn't exist
 #   STUB_JOB=done|failed|running  the Job's state (default done)
+#   STUB_JOB_READ_FAILS=1 reading the Job's state fails
 #   STUB_EXIT=N           the check's exit status (default 0); "none" for no status
 cat >"$work/kind-kubectl" <<EOF
 #!/bin/sh
@@ -71,6 +73,7 @@ case " \$* " in
     esac ;;
   *" apply -f - "*) cat >>"$applied"; echo "---" >>"$applied" ;;
   *" get job crawler-check-selection "*)
+    [ "\${STUB_JOB_READ_FAILS:-0}" = 1 ] && { echo "connection refused" >&2; exit 1; }
     case "\${STUB_JOB:-done}" in
       done) echo "1/" ;;
       failed) echo "/1" ;;
@@ -221,7 +224,7 @@ grep -qF 'command: ["/app/crawler", "check-selection"]' "$applied" ||
 grep -qF "value: warn" "$applied" || fail "the default log level is not warn"
 
 # A Job that never finishes: 4, log printed, cleaned up.
-run STUB_JOB=running -- --namespace econ-graph --timeout 1
+run STUB_JOB=running POLL_SECONDS=0.2 GRACE_SECONDS=0 -- --namespace econ-graph --timeout 1
 [ "$status" = 4 ] || fail "a Job that never finishes: status $status, want 4"
 grep -q "did not finish" "$out" || fail "the timeout is not explained: $(cat "$out")"
 [ "$(grep -cF "delete job crawler-check-selection" "$log")" = 2 ] || fail "a timed-out Job is not deleted"
@@ -239,6 +242,42 @@ run STUB_NO_DEPLOYMENT=1 -- --namespace econ-graph-br-x --image econ-graph-crawl
 [ "$status" = 0 ] || fail "--image run: status $status: $(cat "$out")"
 grep -qF "imagePullPolicy: IfNotPresent" "$applied" || fail "--image does not use IfNotPresent"
 called "get deployment" && fail "--image still read the Deployment"
+
+# Cleaned up after: deleted twice (before apply, and on exit).
+cleaned_up() {
+  [ "$(grep -cF "delete job crawler-check-selection" "$log")" = 2 ] &&
+    [ "$(grep -cF "delete networkpolicy crawler-check-selection" "$log")" = 2 ]
+}
+
+# A failure partway (the Job's state can't be read) still deletes both.
+run STUB_JOB_READ_FAILS=1 -- --namespace econ-graph
+[ "$status" = 1 ] || fail "unreadable Job state: status $status, want 1"
+cleaned_up || fail "a failure partway left the Job or NetworkPolicy: $(cat "$log")"
+
+# An interrupt while waiting still deletes both.
+for signal in TERM INT; do
+  : >"$log"
+  : >"$applied"
+  # A background job starts with SIGINT ignored; --default-signal restores it, as at a terminal.
+  env --default-signal=INT -u KUBECONFIG -u ECONGRAPH_KUBE_DIR -u KIND_CLUSTER \
+    -u ECONGRAPH_DOCKER_HOST \
+    KUBECTL="$work/bin/kubectl" CLUSTER_ROLE_CONTEXT=other POLL_SECONDS=1 STUB_JOB=running \
+    HOME="$work/home" XDG_DATA_HOME="$work/home/.local/share" XDG_CACHE_HOME="$work/cache" \
+    TMPDIR="$work/tmp" PATH="$work/bin:/usr/local/bin:/usr/bin:/bin" \
+    "$script" --namespace econ-graph --timeout 5 </dev/null >"$out" 2>&1 &
+  pid=$!
+  for _ in $(seq 100); do
+    grep -qF "get job crawler-check-selection" "$log" && break
+    sleep 0.1
+  done
+  kill -s "$signal" "$pid"
+  status=0
+  wait "$pid" || status=$?
+  want=143
+  [ "$signal" = INT ] && want=130
+  [ "$status" = "$want" ] || fail "SIG$signal: status $status, want $want: $(cat "$out")"
+  cleaned_up || fail "SIG$signal left the Job or NetworkPolicy: $(cat "$log")"
+done
 
 # A namespace that doesn't exist stops it before anything is created.
 run STUB_NO_NAMESPACE=1 -- --namespace econ-graph-br-gone
