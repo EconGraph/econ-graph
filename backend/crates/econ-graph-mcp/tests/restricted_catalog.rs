@@ -146,25 +146,25 @@ async fn bank_of_canada_is_hidden_until_its_catalog_role_is_granted() {
     let pool = econ_graph_core::database::create_pool(&db.url)
         .await
         .unwrap();
-    let fred = DataSource::find_by_name(&pool, &DataSource::fred().name)
+    let bea = DataSource::find_by_name(&pool, &DataSource::bea().name)
         .await
         .unwrap()
         .unwrap();
     let boc = DataSource::create(&pool, DataSource::boc()).await.unwrap();
-    let fred_series = seed(&pool, &fred, "FRED-PUBLIC").await;
+    let bea_series = seed(&pool, &bea, "BEA-PUBLIC").await;
     let boc_series = seed(&pool, &boc, "BOC-RESTRICTED").await;
-    let (fred_id, boc_id) = (fred.id.to_string(), boc.id.to_string());
+    let (bea_id, boc_id) = (bea.id.to_string(), boc.id.to_string());
 
     let defaults = anonymous_default_roles();
-    assert!(defaults.contains(&Role::CatalogFredRead));
+    assert!(defaults.contains(&Role::CatalogBeaRead));
     assert!(!defaults.contains(&Role::CatalogBankOfCanadaRead));
 
-    // Anonymous defaults: the Bank of Canada is invisible everywhere, FRED is not.
+    // Anonymous defaults: the Bank of Canada is hidden everywhere; BEA (public) is not.
     let hidden = read_everything(&pool, &defaults, &boc, &boc_series).await;
     let g = &hidden.graphql;
     let sources = ids(&g["dataSources"]);
     assert!(
-        sources.contains(&fred_id) && !sources.contains(&boc_id),
+        sources.contains(&bea_id) && !sources.contains(&boc_id),
         "{sources:?}"
     );
     for (path, list) in [
@@ -172,7 +172,7 @@ async fn bank_of_canada_is_hidden_until_its_catalog_role_is_granted() {
         ("searchSeries", &g["searchSeries"]["series"]),
     ] {
         let found = ids(list);
-        assert!(found.contains(&fred_series), "{path}: {found:?}");
+        assert!(found.contains(&bea_series), "{path}: {found:?}");
         assert!(!found.contains(&boc_series), "{path}: {found:?}");
     }
     assert_eq!(g["searchSeries"]["totalCount"], 1);
@@ -183,7 +183,7 @@ async fn bank_of_canada_is_hidden_until_its_catalog_role_is_granted() {
     assert!(g["byExternalId"].is_null());
     assert_eq!(
         ids(&hidden.mcp_search["data"]["searchSeries"]["series"]),
-        std::slice::from_ref(&fred_series)
+        std::slice::from_ref(&bea_series)
     );
     assert!(!ids(&hidden.mcp_sources["data"]["dataSources"]).contains(&boc_id));
     assert!(!hidden.mcp_series_data_ok, "MCP served a restricted series");
