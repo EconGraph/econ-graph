@@ -8,6 +8,8 @@
 # The file is ECONGRAPH_DEPLOY_ENV, else deploy.env in ECONGRAPH_CONFIG_DIR, else
 # in ${XDG_CONFIG_HOME:-~/.config}/econgraph. A missing file or line is no value; a
 # file that exists but cannot be read is an error.
+# ECONGRAPH_CONFIG_DIR is also the backup scripts' variable (scripts/backup/lib.sh), so
+# exporting it for a backup run redirects this lookup too.
 
 # Print the deploy config's path.
 deploy_config_path() {

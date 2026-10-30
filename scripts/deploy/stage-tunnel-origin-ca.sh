@@ -13,7 +13,15 @@
 # It does not switch the gateway issuer or Cloudflare dashboard TLS settings;
 # apply-gateway-routes.sh runs it when that issuer is econ-graph-origin-ca.
 #
-# Usage: stage-tunnel-origin-ca.sh --context NAME [--dry-run | --apply]
+# --retire-other-roots ends a two-root rotation: it republishes the bundle with
+# only the root that the gateway certificate econ-graph-tls is issued from (its
+# ClusterIssuer's CA Secret, public tls.crt only) and restarts cloudflared. Before
+# changing anything it refuses an empty or multi-certificate root, one that is not
+# a self-signed CA, a gateway certificate that does not verify against it, and a
+# bundle that does not already contain it. Its dry run (the default) reads the
+# cluster, makes the same checks and lists the roots it would drop.
+#
+# Usage: stage-tunnel-origin-ca.sh --context NAME [--retire-other-roots] [--dry-run | --apply]
 set -euo pipefail
 umask 077
 
@@ -21,6 +29,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 resources="$project_root/k8s/manifests/tunnel-trust"
 context=""
 apply=false
+retire=false
 while (($#)); do
     case "$1" in
         --context)
@@ -30,6 +39,7 @@ while (($#)); do
             context="$2"; shift ;;
         --dry-run) apply=false ;;
         --apply) apply=true ;;
+        --retire-other-roots) retire=true ;;
         -h|--help) sed -n '2,/^set /{ /^set /d; s/^# \{0,1\}//; p; }' "$0"; exit 0 ;;
         *) echo "error: unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -37,7 +47,7 @@ while (($#)); do
 done
 [[ -n "$context" ]] || { echo 'error: choose an explicit --context' >&2; exit 2; }
 
-if [[ "$apply" != true ]]; then
+if [[ "$apply" != true && "$retire" != true ]]; then
     printf 'Dry run on context %q: apply %q\n' "$context" "$resources/ca.yaml"
     echo 'Wait for cert-manager CA readiness; copy only Secret tls.crt to ConfigMap econ-graph/cloudflared-origin-ca.'
     echo 'Refuse a different published root unless it is a renewal (same subject and public key).'
@@ -62,13 +72,106 @@ kc() { command "$KUBECTL" --context "$context" "$@"; }
 for tool in "$KUBECTL" openssl base64; do
     command -v "$tool" >/dev/null || { echo "error: missing tool: $tool" >&2; exit 1; }
 done
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# split_bundle FILE: one file per certificate in FILE, in $work/bundle.
+split_bundle() {
+    rm -rf "$work/bundle" && mkdir "$work/bundle"
+    awk -v dir="$work/bundle" '
+        /-----BEGIN CERTIFICATE-----/ { n++; out = sprintf("%s/%03d.pem", dir, n); inside = 1 }
+        inside { print > out }
+        /-----END CERTIFICATE-----/ { inside = 0; close(out) }' "$1"
+}
+fingerprint_of() { openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null; }
+# bundle_has FINGERPRINT: whether the split bundle holds that certificate.
+bundle_has() {
+    local cert
+    for cert in "$work/bundle"/*.pem; do
+        [[ -e "$cert" ]] || continue
+        [[ "$(fingerprint_of "$cert" || true)" == "$1" ]] && return 0
+    done
+    return 1
+}
+# list_other_roots FINGERPRINT HEADING: print the subject, fingerprint and expiry of
+# every certificate in the split bundle other than FINGERPRINT, under HEADING; sets
+# other_roots to their number.
+list_other_roots() {
+    local cert fingerprint
+    other_roots=0
+    for cert in "$work/bundle"/*.pem; do
+        [[ -e "$cert" ]] || continue
+        fingerprint="$(fingerprint_of "$cert")" || fingerprint="(unreadable certificate)"
+        [[ "$fingerprint" != "$1" ]] || continue
+        ((other_roots += 1))
+        ((other_roots > 1)) || echo "$2"
+        echo "  subject:     $(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null)"
+        echo "  fingerprint: ${fingerprint}"
+        echo "  expires:     $(openssl x509 -in "$cert" -noout -enddate 2>/dev/null)"
+    done
+}
+# is_self_signed_ca FILE: exactly one certificate, CA:TRUE, verifying against itself.
+is_self_signed_ca() {
+    [[ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$1")" == 1 ]] &&
+        openssl x509 -in "$1" -noout -ext basicConstraints 2>/dev/null | grep -q 'CA:TRUE' &&
+        openssl verify -CAfile "$1" "$1" >/dev/null 2>&1
+}
+publish_and_restart() { # FILE: publish FILE as the bundle, restart and wait.
+    kc -n econ-graph create configmap cloudflared-origin-ca --from-file="ca.crt=$1" \
+        --dry-run=client -o yaml | kc apply -f -
+    kc -n econ-graph rollout restart deployment/cloudflared
+    kc -n econ-graph rollout status deployment/cloudflared --timeout=120s
+}
+
+if [[ "$retire" == true ]]; then
+    refuse() { echo "error: $*; nothing was changed" >&2; exit 1; }
+    # The root the live gateway certificate is issued from: its ClusterIssuer's CA Secret.
+    issuer_kind="$(kc -n econ-graph-gateway get certificate econ-graph-tls -o 'jsonpath={.spec.issuerRef.kind}')"
+    issuer="$(kc -n econ-graph-gateway get certificate econ-graph-tls -o 'jsonpath={.spec.issuerRef.name}')"
+    [[ "$issuer_kind" == ClusterIssuer && -n "$issuer" ]] ||
+        refuse "certificate econ-graph-tls is not issued by a ClusterIssuer (${issuer_kind:-no kind}/${issuer:-no name})"
+    ca_secret="$(kc get clusterissuer "$issuer" -o 'jsonpath={.spec.ca.secretName}')"
+    [[ -n "$ca_secret" ]] || refuse "ClusterIssuer ${issuer} is not a CA issuer (no spec.ca.secretName)"
+    # Only the public certificate field, decoded to a file; an empty one is refused.
+    kc -n cert-manager get secret "$ca_secret" -o 'jsonpath={.data.tls\.crt}' |
+        base64 --decode >"$work/root.crt" ||
+        refuse "could not read the public certificate of Secret cert-manager/${ca_secret}"
+    [[ -s "$work/root.crt" ]] || refuse "Secret cert-manager/${ca_secret} has no public certificate"
+    is_self_signed_ca "$work/root.crt" ||
+        refuse "Secret cert-manager/${ca_secret} does not hold exactly one self-signed CA certificate"
+    # The live gateway certificate (public tls.crt only) must verify against it.
+    kc -n econ-graph-gateway get secret econ-graph-tls -o 'jsonpath={.data.tls\.crt}' |
+        base64 --decode >"$work/gateway.crt" ||
+        refuse "could not read the public certificate of Secret econ-graph-gateway/econ-graph-tls"
+    [[ -s "$work/gateway.crt" ]] || refuse "Secret econ-graph-gateway/econ-graph-tls has no certificate"
+    openssl verify -CAfile "$work/root.crt" "$work/gateway.crt" >/dev/null 2>&1 ||
+        refuse "the gateway certificate econ-graph-tls does not verify against the root of ClusterIssuer ${issuer}"
+    kc -n econ-graph get configmap cloudflared-origin-ca --ignore-not-found \
+        -o 'jsonpath={.data.ca\.crt}' >"$work/existing-ca.crt"
+    split_bundle "$work/existing-ca.crt"
+    keep="$(fingerprint_of "$work/root.crt")"
+    bundle_has "$keep" ||
+        refuse "the published bundle does not contain the root of ClusterIssuer ${issuer}; connectors do not trust it yet"
+    echo "Keeping the root of ClusterIssuer ${issuer} (${keep})."
+    list_other_roots "$keep" 'Roots to drop from the published trust bundle:'
+    if ((other_roots == 0)); then
+        echo 'The bundle holds only that root; nothing to retire.'
+        exit 0
+    fi
+    if [[ "$apply" != true ]]; then
+        echo 'Dry run: would publish only that root to ConfigMap econ-graph/cloudflared-origin-ca, restart cloudflared and wait for its rollout. Rerun with --apply.'
+        exit 0
+    fi
+    publish_and_restart "$work/root.crt"
+    echo 'Retired the other roots. Repeat the positive origin check (docs/deployment/TUNNEL_ORIGIN_TLS.md).'
+    exit 0
+fi
+
 # A failed lookup stops staging; a missing Deployment only skips the mount and restart.
 connector="$(kc -n econ-graph get deployment cloudflared --ignore-not-found -o name)"
 kc apply -f "$resources/ca.yaml"
 kc -n cert-manager wait --for=condition=Ready certificate/econ-graph-origin-ca --timeout=120s
 kc wait --for=condition=Ready clusterissuer/econ-graph-origin-ca --timeout=120s
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 # Fetch only the public certificate field. Never request the full Secret or tls.key.
 kc -n cert-manager get secret econ-graph-origin-ca -o 'jsonpath={.data.tls\.crt}' |
     base64 --decode >"$work/ca.crt"
@@ -91,38 +194,8 @@ root_identity() {
     openssl x509 -in "$1" -noout -subject -nameopt RFC2253 &&
         openssl x509 -in "$1" -noout -pubkey
 }
-# Split the published bundle into one file per certificate, in $work/bundle.
-rm -rf "$work/bundle" && mkdir "$work/bundle"
-awk -v dir="$work/bundle" '
-    /-----BEGIN CERTIFICATE-----/ { n++; out = sprintf("%s/%03d.pem", dir, n); inside = 1 }
-    inside { print > out }
-    /-----END CERTIFICATE-----/ { inside = 0; close(out) }' "$work/existing-ca.crt"
-current_fingerprint="$(openssl x509 -in "$work/ca.crt" -noout -fingerprint -sha256)"
-# Nothing removes a root from the bundle by itself: list every published root other
-# than the current one, so a retired root is noticed (TUNNEL_ORIGIN_TLS.md says how
-# to drop it).
-other_roots=0
-for cert in "$work/bundle"/*.pem; do
-    [[ -e "$cert" ]] || continue
-    fingerprint="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null)" ||
-        fingerprint="(unreadable certificate)"
-    [[ "$fingerprint" != "$current_fingerprint" ]] || continue
-    ((other_roots += 1))
-    ((other_roots > 1)) || echo 'Published trust bundle also holds roots other than the current one:'
-    echo "  subject:     $(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null)"
-    echo "  fingerprint: ${fingerprint}"
-    echo "  expires:     $(openssl x509 -in "$cert" -noout -enddate 2>/dev/null)"
-done
-# Whether the published bundle contains the current root (the same SHA-256 fingerprint).
-bundle_contains_current() {
-    local cert fingerprint
-    for cert in "$work/bundle"/*.pem; do
-        [[ -e "$cert" ]] || continue
-        fingerprint="$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null)" || continue
-        [[ "$fingerprint" == "$current_fingerprint" ]] && return 0
-    done
-    return 1
-}
+split_bundle "$work/existing-ca.crt"
+current_fingerprint="$(fingerprint_of "$work/ca.crt")"
 bundle_changed=false
 if [[ ! -s "$work/existing-ca.crt" ]]; then
     bundle_changed=true
@@ -132,8 +205,12 @@ elif ! cmp -s "$work/ca.crt" "$work/existing-ca.crt"; then
         [[ "$new_id" == "$old_id" ]]; then
         echo 'Published root renewed (same subject and public key); replacing it.'
         bundle_changed=true
-    elif bundle_contains_current; then
+    elif bundle_has "$current_fingerprint"; then
         echo 'Trust bundle holds this root among others (a two-root rotation); left unchanged.'
+        # Nothing removes a root from the bundle by itself: list the others, so a
+        # retired one is noticed (--retire-other-roots drops them).
+        list_other_roots "$current_fingerprint" \
+            'Published trust bundle also holds roots other than the current one:'
     else
         echo 'error: existing trust bundle differs; follow the two-root rotation runbook' >&2
         exit 1

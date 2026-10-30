@@ -57,9 +57,23 @@ from pathlib import Path
 args=sys.argv[1:]
 assert args[:2] == ['--context', 'scratch-only'], args
 with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(args)+'\\n')
+def public_cert(variable):
+    print(base64.b64encode(Path(os.environ[variable]).read_bytes()).decode(), end='')
 if 'secret' in args:
-    assert args == ['--context','scratch-only','-n','cert-manager','get','secret','econ-graph-origin-ca','-o','jsonpath={.data.tls\\\\.crt}'], args
-    print(base64.b64encode(Path(os.environ['CA']).read_bytes()).decode(), end='')
+    # Only ever the public certificate field.
+    assert args[-2:] == ['-o','jsonpath={.data.tls\\\\.crt}'], args
+    if args[2:7] == ['-n','cert-manager','get','secret','econ-graph-origin-ca']:
+        public_cert('CA')
+    elif args[2:7] == ['-n','cert-manager','get','secret',os.environ.get('RET_SECRET_PRESENT', os.environ.get('RET_SECRET'))]:
+        public_cert('RET_ROOT')
+    elif args[2:7] == ['-n','econ-graph-gateway','get','secret','econ-graph-tls']:
+        public_cert('RET_LEAF')
+    else:
+        sys.exit('no such secret: ' + ' '.join(args))
+elif 'certificate' in args and 'econ-graph-tls' in args:
+    print(os.environ.get('RET_KIND', 'ClusterIssuer') if 'kind' in args[-1] else os.environ.get('RET_ISSUER', ''), end='')
+elif 'clusterissuer' in args and 'get' in args:
+    print(os.environ.get('RET_SECRET', ''), end='')
 elif 'get' in args and 'configmap' in args:
     print(os.environ.get('EXISTING_CA', ''),end='')
 elif 'get' in args and 'deployment' in args:
@@ -71,6 +85,7 @@ elif 'create' in args and 'configmap' in args:
     certarg=next(arg for arg in args if arg.startswith('--from-file='))
     cert=Path(certarg.split('=',2)[2]).read_text()
     assert 'PRIVATE KEY' not in cert
+    if os.environ.get('PUBLISHED'): Path(os.environ['PUBLISHED']).write_text(cert)
     print(json.dumps({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'cloudflared-origin-ca','namespace':'econ-graph'},'data':{'ca.crt':cert}}))
 elif args[-1] == '-':
     document=json.load(sys.stdin)
@@ -167,6 +182,8 @@ elif 'patch' in args:
     result = run('--context','scratch-only','--apply',EXISTING_CA=published_root.read_text(),MOUNTED='1')
     assert result.returncode == 0, result.stderr
     assert 'renewed' in result.stdout and published(logged()) and restarted(logged())
+    # The replaced root is not listed as another root: it is replaced, not kept.
+    assert 'other than the current one' not in result.stdout, result.stdout
     # Anything else is refused before publishing or patching.
     other_key = work / 'other.crt'
     make_root(other_key, work / 'other.key', '/CN=offline-test-ca', new_key=True)
@@ -225,6 +242,76 @@ elif 'patch' in args:
     calls.write_text('')
     assert run('--context','scratch-only','--apply').returncode != 0
     assert not any('patch' in json.loads(line) for line in calls.read_text().splitlines())
+
+    # --retire-other-roots: keep only the root the gateway certificate is issued from.
+    new_root = work / 'new-root.crt'
+    make_root(new_root, work / 'new-root.key', '/CN=offline-new-ca', new_key=True)
+    def leaf_from(signer_crt, signer_key, name):
+        """A gateway certificate (leaf plus its CA, as cert-manager writes tls.crt)."""
+        leaf = work / f'{name}.crt'
+        subprocess.run(['openssl', 'req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
+                        '-nodes', '-keyout', str(work / f'{name}.key'), '-subj', '/CN=econgraph.com',
+                        '-out', str(work / f'{name}.csr')], check=True, capture_output=True)
+        subprocess.run(['openssl', 'x509', '-req', '-in', str(work / f'{name}.csr'), '-CA', str(signer_crt),
+                        '-CAkey', str(signer_key), '-CAcreateserial', '-days', '90', '-out', str(leaf)],
+                       check=True, capture_output=True)
+        leaf.write_text(leaf.read_text() + signer_crt.read_text())
+        return leaf
+    good_leaf = leaf_from(new_root, work / 'new-root.key', 'good-leaf')
+    stray_leaf = leaf_from(other_key, work / 'other.key', 'stray-leaf')
+    empty = work / 'empty.crt'
+    empty.write_text('')
+    two_roots = work / 'two-roots.crt'
+    two_roots.write_text(new_root.read_text() + other_key.read_text())
+    published_file = work / 'published-bundle.crt'
+    rotation = ca.read_text() + new_root.read_text()
+    retire_env = dict(RET_ISSUER='econ-graph-origin-ca-2', RET_SECRET='econ-graph-origin-ca-2',
+                      RET_ROOT=str(new_root), RET_LEAF=str(good_leaf), EXISTING_CA=rotation,
+                      PUBLISHED=str(published_file), MOUNTED='1')
+    def retire(*args, **updates):
+        calls.write_text('')
+        if published_file.exists():
+            published_file.unlink()
+        return run('--context', 'scratch-only', '--retire-other-roots', *args, **dict(retire_env, **updates))
+    # Dry run: the checks and the roots it would drop; nothing written.
+    result = retire()
+    assert result.returncode == 0, result.stderr
+    dropped = result.stdout.split('Roots to drop from the published trust bundle:', 1)[1]
+    assert fingerprint(ca) in dropped and fingerprint(new_root) not in dropped, result.stdout
+    assert 'Dry run' in result.stdout
+    assert not published(logged()) and not restarted(logged()) and not published_file.exists()
+    # Apply: exactly the new root is published, then cloudflared restarts and is awaited.
+    result = retire('--apply')
+    assert result.returncode == 0, result.stderr
+    assert published_file.read_text() == new_root.read_text()
+    commands = logged()
+    publish_at = next(i for i, command in enumerate(commands) if command[-3:] == ['apply', '-f', '-'])
+    restart_at = next(i for i, command in enumerate(commands) if 'restart' in command)
+    status_at = next(i for i, command in enumerate(commands) if 'status' in command)
+    assert publish_at < restart_at < status_at
+    assert not patched(commands) and not any('delete' in command for command in commands)
+    # Only the new root published already: nothing to retire, nothing restarted.
+    result = retire('--apply', EXISTING_CA=new_root.read_text())
+    assert result.returncode == 0 and 'nothing to retire' in result.stdout, result
+    assert not published(logged()) and not restarted(logged())
+    # Each refusal changes nothing, in a dry run and with --apply.
+    for message, updates in [
+            ('has no public certificate', dict(RET_ROOT=str(empty))),
+            ('exactly one self-signed CA', dict(RET_ROOT=str(two_roots))),
+            ('exactly one self-signed CA', dict(RET_ROOT=str(cross_signed))),
+            ('exactly one self-signed CA', dict(RET_ROOT=str(not_ca))),
+            ('does not verify against the root', dict(RET_LEAF=str(stray_leaf))),
+            ('has no certificate', dict(RET_LEAF=str(empty))),
+            ('does not contain the root', dict(EXISTING_CA=ca.read_text())),
+            ('not issued by a ClusterIssuer', dict(RET_KIND='Issuer')),
+            ('not a CA issuer', dict(RET_SECRET='')),
+            ('could not read the public certificate',
+             dict(RET_SECRET='mistyped-secret-name', RET_SECRET_PRESENT='econ-graph-origin-ca-2'))]:
+        for args in [(), ('--apply',)]:
+            result = retire(*args, **updates)
+            assert result.returncode != 0 and message in result.stderr, (message, args, result)
+            assert 'nothing was changed' in result.stderr
+            assert not published(logged()) and not restarted(logged()) and not published_file.exists(), message
 
 # apply-gateway-routes.sh, in a copy of the files it uses where staging is a stub.
 with tempfile.TemporaryDirectory() as folder:

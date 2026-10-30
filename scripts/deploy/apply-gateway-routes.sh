@@ -26,7 +26,8 @@
 #   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate. An
 #                       explicit choice: it may change the certificate's issuer.
 #                       Without it: a GATEWAY_TLS_ISSUER= line in the host's deploy
-#                       config (~/.config/econgraph/deploy.env), only when it matches
+#                       config (ECONGRAPH_DEPLOY_ENV, else ECONGRAPH_CONFIG_DIR/deploy.env,
+#                       else ~/.config/econgraph/deploy.env), only when it matches
 #                       the certificate's current issuer or there is no certificate
 #                       (a recreated cluster), and refused when it differs; else the
 #                       current issuer; else econ-graph-selfsigned

@@ -185,21 +185,20 @@ rollback. Repeat the positive and negative origin checks before retiring the old
 the public bundle. Never mount a signing key into a connector or delete a root Secret as
 part of staging.
 
-Nothing removes a root from the bundle by itself. Each staging run lists the subject,
-SHA-256 fingerprint and expiry of every published root other than the current one. To
-retire the old root once the gateway's certificate is issued from the new CA and the
-checks pass, republish the bundle with only the new CA's public certificate and restart
-the connectors. `NEW_CA_SECRET` is the Secret named in the new ClusterIssuer's `ca.secretName`:
+Nothing removes a root from the bundle by itself. When staging leaves a two-root bundle
+unchanged, it lists the subject, SHA-256 fingerprint and expiry of every published root
+other than the current one. To retire the old root once the gateway's certificate is
+issued from the new CA and the checks pass, run the dry run, then the same command with
+`--apply` in place of `--dry-run`:
 
 ```sh
-k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl \
-  --context kind-econ-graph "$@"; }
-NEW_CA_SECRET=<new CA Secret>
-k -n cert-manager get secret "$NEW_CA_SECRET" -o 'jsonpath={.data.tls\.crt}' | base64 --decode |
-  k -n econ-graph create configmap cloudflared-origin-ca --from-file=ca.crt=/dev/stdin \
-    --dry-run=client -o yaml | k apply -f -
-k -n econ-graph rollout restart deployment/cloudflared
-k -n econ-graph rollout status deployment/cloudflared --timeout=120s
+scripts/deploy/stage-tunnel-origin-ca.sh --retire-other-roots --context kind-econ-graph --dry-run
 ```
 
-This reads only the public `tls.crt` field. Then repeat the positive origin check.
+It keeps only the root of the ClusterIssuer that certificate `econ-graph-tls` names
+(the public `tls.crt` of that issuer's CA Secret), lists the roots it drops, and changes
+nothing unless that root is exactly one self-signed CA certificate, the gateway
+certificate verifies against it, and the published bundle already contains it. With
+`--apply` it then publishes the one-root bundle, restarts cloudflared and waits for the
+rollout. Its dry run reads the cluster but writes nothing. Then repeat the positive origin
+check.

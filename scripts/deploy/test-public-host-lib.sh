@@ -754,6 +754,21 @@ if [ "$have_script" = true ]; then
     fail "set-crawler-keys --google: refused a deploy config matching the served host: $(cat "$out")"
   keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
     'says PUBLIC_HOST=econgraph.com'
+  # The shared reader's refusals (lib/deploy-config.sh) reach this path too: an
+  # exported line and a file that exists but cannot be read are refused, not read as
+  # "no host configured".
+  echo 'export PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  keys_refused 'an exported PUBLIC_HOST line in the deploy config' \
+    'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' 'without export'
+  echo 'PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  chmod 000 "$keys_deploy_env"
+  if [ -r "$keys_deploy_env" ]; then
+    echo "skip: an unreadable deploy config (this user can read any file)"
+  else
+    keys_refused 'an unreadable deploy config' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+      'is not a readable file'
+  fi
+  chmod 600 "$keys_deploy_env"
   rm -f "$keys_deploy_env"
 
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.

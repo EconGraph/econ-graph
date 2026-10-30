@@ -129,7 +129,9 @@ the run: before any step, or at the step whose result it was recording. A record
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
-`ECONGRAPH_CONFIG_DIR` names another directory, `ECONGRAPH_DEPLOY_ENV` another file), one
+`ECONGRAPH_CONFIG_DIR` names another directory; `ECONGRAPH_DEPLOY_ENV` names another file
+and wins over both). `ECONGRAPH_CONFIG_DIR` is also the backup scripts' variable
+(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too. One
 line:
 
 ```sh
