@@ -33,7 +33,7 @@ External actions and reusable workflows are pinned to full commit SHAs, with ver
 
 Every `actions/checkout` must set `persist-credentials: false`. Steps that need authenticated Git or GitHub API access must receive credentials explicitly for that step. The same validation script enforces this for workflows and composite actions.
 
-The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
+The manual crawler workflow accepts only source and series inputs. A maintainer configures its free-tier credentials with `gh secret set FRED_API_KEY`, `gh secret set BLS_API_KEY`, `gh secret set BEA_API_KEY` and `gh secret set CENSUS_API_KEY`, entering values at the hidden prompt. FRED, BEA and Census require their keys; BLS can run without one. Keep paid-source and production authentication credentials out of these repository secrets. Never pass keys as dispatch inputs, which appear in workflow metadata.
 
 ## Validation
 
