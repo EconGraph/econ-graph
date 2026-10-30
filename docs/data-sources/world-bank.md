@@ -126,12 +126,14 @@ A WDI release therefore adds rows only for the values it changes or adds, rather
 whole history of every series. A value the World Bank drops from a release keeps its last
 stored row.
 
-Each series and date has one original release, its earliest stored vintage, which is what
-`originalOnly` reads return. Rows stored before these rules each marked every release as
-original. The data migration `2026-11-01-000100_world_bank_first_release` keeps the
-earliest of those as the original release and marks the later ones as revisions. It
-deletes no row and changes no value. Synthetic legacy rows dated at their observation
-date are left as they are; reads already skip them.
+A date's original release is normally its earliest stored vintage, which `originalOnly`
+reads return. A stale response, whose `lastupdated` is older than what is stored, writes
+its values as original releases at that older vintage (see the first row of the table), so
+such a date can have two original rows. Rows stored before these rules marked every release
+as original. The data migration `2026-11-01-000100_world_bank_first_release` keeps the
+earliest real vintage of each date as the original release and marks the later ones as
+revisions. It deletes no row and changes no value. Synthetic legacy rows dated at their
+observation date are left as they are; reads already skip them.
 
 When a download is needed, `since` does not trim the requested history. Returning earlier
 years preserves their revised values under the new release date, subject to the ten-page

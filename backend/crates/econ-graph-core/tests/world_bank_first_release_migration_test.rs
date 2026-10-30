@@ -10,6 +10,7 @@
 //! nothing changed.
 
 use chrono::NaiveDate;
+use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Bool, Date, Text};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -331,4 +332,33 @@ async fn first_release_refuses_without_the_world_bank_source() {
     let err = run_first_release(&mut conn).expect_err("no World Bank source fails it");
     assert!(err.to_string().contains("found 0"), "{err}");
     assert_eq!(rows(&mut conn, WB_SERIES), before);
+}
+
+/// A World Bank write in progress (its transaction holds a series' economic_series row lock,
+/// as persist_series does) makes the migration wait at most lock_timeout and fail with
+/// nothing changed, so no fetch can compare against a label the migration is changing.
+#[tokio::test]
+async fn first_release_waits_for_a_world_bank_write_and_fails_cleanly() {
+    let (_container, url) = start_postgres().await;
+    let mut conn = connect(&url);
+    migrate_to_before(&mut conn, FIRST_RELEASE);
+    populate(&mut conn);
+    let before = rows(&mut conn, WB_SERIES);
+
+    let mut writer = connect(&url);
+    writer.batch_execute("BEGIN").expect("begin");
+    diesel::sql_query("UPDATE economic_series SET title = title WHERE external_id = $1")
+        .bind::<Text, _>(WB_SERIES)
+        .execute(&mut writer)
+        .expect("lock the series row");
+
+    let started = std::time::Instant::now();
+    let err = run_first_release(&mut conn).expect_err("a locked series fails the migration");
+    assert!(err.to_string().contains("lock timeout"), "{err}");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(9));
+    writer.batch_execute("ROLLBACK").expect("rollback");
+    assert_eq!(rows(&mut conn, WB_SERIES), before);
+
+    // Once the write is done, the migration runs.
+    run_first_release(&mut conn).expect("migration");
 }

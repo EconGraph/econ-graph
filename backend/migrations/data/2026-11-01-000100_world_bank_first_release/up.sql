@@ -4,7 +4,8 @@
 -- new row with is_original_release = true, so a date can hold one "original" row per
 -- release, and originalOnly reads returned every one of them (or, with asOf, the newest).
 -- Compare-and-skip stores a changed value as a revision (is_original_release = false), so
--- the dates it wrote already have one original row.
+-- the dates it wrote have one original row, unless a stale fetch (an older lastupdated than
+-- stored) added an earlier one; those dates are relabelled the same way.
 --
 -- For each World Bank (series, date), this keeps is_original_release = true on the row with
 -- the earliest revision_date (then the lowest id) and sets it to false on the later ones.
@@ -24,11 +25,16 @@
 -- - afterwards, no other source's rows changed, the row count is unchanged, and every
 --   relabelled World Bank (series, date) has exactly one real original left.
 --
--- Locking: the UPDATE takes row locks on the rows it relabels only, so API reads continue.
--- Run it with the crawler worker stopped (the release's pre-deploy check stops it), so no
--- World Bank fetch writes the same rows meanwhile. lock_timeout bounds the wait for any row a
--- straggling transaction holds; statement_timeout is lifted because the UPDATE's run time
--- grows with the number of legacy rows.
+-- Locking: before reading anything, the migration takes a share lock on every World Bank
+-- economic_series row. The crawler locks a series' row before it reads and writes that
+-- series' points (persist_series' upsert of economic_series), so a World Bank write in
+-- progress makes the migration fail after lock_timeout with nothing changed, and writes that
+-- start later wait for the migration and then see the new labels; no fetch can compare
+-- against a label the migration is changing. Stop the crawler worker first all the same
+-- (scripts/deploy/precheck-db-migration.sh --stop-crawler), so the migration doesn't fail on
+-- a busy worker. The UPDATE also locks the rows it relabels; API reads continue.
+-- lock_timeout bounds each lock wait; statement_timeout is lifted because the UPDATE's run
+-- time grows with the number of legacy rows.
 --
 -- Forward-only: there is no down migration that could restore the old labels, and none is
 -- needed; the old labels were wrong.
@@ -55,6 +61,9 @@ BEGIN
             world_bank_rows;
     END IF;
     SELECT id INTO world_bank FROM data_sources WHERE name = 'World Bank Open Data';
+
+    -- Keep World Bank writes out until commit (see Locking above).
+    PERFORM 1 FROM economic_series WHERE source_id = world_bank FOR SHARE;
 
     SELECT COUNT(*) INTO rows_before FROM data_points;
     SELECT COUNT(*) INTO other_originals_before
