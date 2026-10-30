@@ -852,20 +852,6 @@ jobs:
         diesel migration run --migration-dir migrations/app
       working-directory: backend
 
-    # TEMPORARY (ECO-798): the graphql suite 10 times in parallel and 10 times serially.
-    - name: Repeat the graphql suite (ECO-798, temporary)
-      run: |
-        set -euo pipefail
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test -p econ-graph-graphql --no-run
-        for i in $(seq 1 10); do
-          echo "::group::parallel run $i"; cargo test -p econ-graph-graphql; echo "::endgroup::"
-        done
-        for i in $(seq 1 10); do
-          echo "::group::serial run $i"; cargo test -p econ-graph-graphql -- --test-threads=1; echo "::endgroup::"
-        done
-      working-directory: backend
-
     # Fail closed: only the focused user-admin regressions become required, while
     # the unrelated full GraphQL/workspace suite below remains advisory.
     - name: Run user administration authorization regressions (required)
