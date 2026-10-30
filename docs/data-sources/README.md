@@ -40,7 +40,9 @@ The other ten sources in `SourceId` (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN
 are [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs):
 fixed series lists without HTTP requests, whose `fetch_series` always fails. They are
 disabled in release builds by the `static_catalogs` build flag and available in development
-builds. There is no IMF adapter.
+builds. There is no IMF adapter. IMF, BOJ, SNB and UN_STATS are also
+[licence-gated](../../backend/crates/econ-graph-crawler/README.md#licence-gate): no build
+crawls them unless its `crawl_<source>` flag is on.
 
 ## Publisher shapes and stored datasets
 

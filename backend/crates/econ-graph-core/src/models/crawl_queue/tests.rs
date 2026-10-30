@@ -608,6 +608,57 @@ async fn test_claim_priority_order_and_source_filter() {
 
 #[tokio::test]
 #[serial]
+async fn test_claim_next_except_leaves_excluded_sources_untouched() {
+    let pool = test_pool().await;
+    let kept = unique_source("EXCA");
+    let excluded = unique_source("EXCB");
+    let skipped = CrawlQueueItem::enqueue(
+        &pool,
+        &NewCrawlQueueItem {
+            priority: 10,
+            ..new_item(&excluded, "SKIPPED")
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let claimable = CrawlQueueItem::enqueue(&pool, &new_item(&kept, "CLAIMED"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let both = vec![kept.clone(), excluded.clone()];
+    let except = vec![excluded.clone()];
+    let first = CrawlQueueItem::claim_next_except(&pool, "w", Some(&both), &except)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        first.id, claimable.id,
+        "the excluded item's higher priority is ignored"
+    );
+    assert!(
+        CrawlQueueItem::claim_next_except(&pool, "w", Some(&both), &except)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let left = reload(&pool, skipped.id).await;
+    assert_eq!(left.status, "pending");
+    assert_eq!(left.locked_by, None);
+    assert_eq!(left.retry_count, 0);
+
+    // An empty exclusion is plain claim_next.
+    let only_excluded = vec![excluded.clone()];
+    let item = CrawlQueueItem::claim_next_except(&pool, "w", Some(&only_excluded), &[])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(item.id, skipped.id);
+}
+
+#[tokio::test]
+#[serial]
 async fn test_release_and_changeset_clear_lock() {
     // Bug 2: UpdateCrawlQueueItem skipped `None`, so locks were never cleared.
     let pool = test_pool().await;

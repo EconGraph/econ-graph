@@ -366,6 +366,8 @@ impl RefreshScheduler {
         config: SchedulerConfig,
     ) -> Self {
         let mut registry_sources = registry_sources;
+        // Licence-gated sources are neither refreshed nor re-discovered.
+        registry_sources.retain(|&s| crate::licence::allows(s));
         registry_sources.sort_unstable();
         registry_sources.dedup();
         Self {

@@ -1283,9 +1283,11 @@ async fn unknown_source_and_missing_adapter_fail() {
     let mock = MockSource::start().await;
     let w = worker(&db.pool, &mock);
     let bogus = enqueue(&db.pool, "NOT_A_SOURCE", "t5_x", JobKind::FetchSeries, 9).await;
+    // SEC has no adapter in this registry (IMF, which has none anywhere, is licence-gated and
+    // never claimed).
     let unregistered = enqueue(
         &db.pool,
-        SourceId::Imf.as_str(),
+        SourceId::Sec.as_str(),
         "t5_y",
         JobKind::FetchSeries,
         5,

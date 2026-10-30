@@ -464,10 +464,12 @@ impl Worker {
     /// then its batch mates' in claim order.
     pub async fn run_batch_once(&self) -> Option<Vec<JobOutcome>> {
         let filter = self.claim_filter()?;
-        let item = match CrawlQueueItem::claim_next(
+        // Licence-gated sources are never claimed; their queued jobs stay as they are.
+        let item = match CrawlQueueItem::claim_next_except(
             &self.ctx.pool,
             &self.config.worker_id,
             filter.as_deref(),
+            &crate::licence::claim_exclusions(),
         )
         .await
         {

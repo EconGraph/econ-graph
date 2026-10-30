@@ -140,6 +140,14 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   `build_canary`, it is permanent: these catalogs are a development convenience,
   so there is no release deadline for removing the flag.
 
+- `crawl_imf`, `crawl_boj`, `crawl_snb` and `crawl_un_stats` (build, off in both profiles,
+  `remove_by: unscheduled`, each owned by its source's licence review: ECO-175, ECO-743,
+  ECO-742 and ECO-182) are the crawler's
+  [licence gate](../../backend/crates/econ-graph-crawler/README.md#licence-gate). Each one
+  allows the crawler to crawl a source whose terms of use restrict automated or commercial use.
+  They are permanent: a flag is turned on only once that source's licence question is settled,
+  and none is overridden in `dev.flagd.json`.
+
 ## Updating the vendored schema
 
 [`schema/flags.json`](schema/flags.json) and
