@@ -158,8 +158,10 @@ it prints "already applied" and writes nothing. `--yes` skips the prompt.
 [test-apply-rulesets.sh](../../scripts/github/test-apply-rulesets.sh) checks
 it against a stub `gh`, in the Lint workflows job.
 
-Apply each ruleset only once the branches it covers have these workflows: the
-queue runs the workflows of the branch it merges into.
+Apply each ruleset only once the branches it covers have these workflows: a
+required check that no workflow on the branch reports keeps every PR into it
+waiting, and on `main` the queue runs the branch's workflows on each merge
+group.
 
 ### Notes on the values
 

@@ -279,12 +279,16 @@ write_ruleset() {
     {
         echo "apply-rulesets: GitHub rejected the write of ${label} (${method} ${path})."
         sed 's/^/  /' "$work/write-err"
+        # The body is GitHub's: print it whatever its shape, and never let a
+        # surprise in it stop the summary below.
         if jq -e 'type == "object"' "$output" >/dev/null 2>&1; then
             jq -r '
-              (select(.message) | "  message: \(.message)"),
+              (select(.message) | "  message: \(.message | tostring)"),
               (.errors // [] | if type == "array" then .[] else . end
-                 | "  error: \(if type == "string" then . else (.message // tojson) end)"),
-              (select(.documentation_url) | "  see: \(.documentation_url)")' "$output"
+                 | "  error: \(if type == "object" then (.message // tojson | tostring)
+                               elif type == "string" then . else tojson end)"),
+              (select(.documentation_url) | "  see: \(.documentation_url | tostring)")' "$output" 2>/dev/null ||
+                sed 's/^/  /' "$output"
         elif [ -s "$output" ]; then
             sed 's/^/  /' "$output"
         fi

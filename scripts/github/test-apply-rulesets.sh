@@ -32,8 +32,9 @@ failed=0
 # State in $STUB_STATE: rulesets/<id>.json, calls.log (every call), writes.log
 # (PUT, POST, PATCH, DELETE). STUB_ADMIN (true/false), STUB_AUTH_RC,
 # STUB_DROP_ON_WRITE (a rule type the stub silently drops when it stores a
-# write), and STUB_REJECT (a method, PUT or POST, answered with GitHub's
-# HTTP 422 validation error instead of being stored).
+# write), STUB_REJECT (a method, PUT or POST, answered with GitHub's HTTP 422
+# validation error instead of being stored) and STUB_REJECT_BODY (the body of
+# that error, when not the default one).
 mkdir -p "$WORK/bin"
 cat >"$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -57,6 +58,12 @@ repo="repos/EconGraph/econ-graph"
 [ "$method" = GET ] || echo "$method $path" >>"$state/writes.log"
 if [ "$method" = "${STUB_REJECT:-}" ]; then
     # What gh does on an error response: the body on stdout, a summary on stderr.
+    # STUB_REJECT_BODY replaces the body.
+    if [ -n "${STUB_REJECT_BODY:-}" ]; then
+        printf '%s\n' "$STUB_REJECT_BODY"
+        echo "gh: Validation Failed (HTTP 422)" >&2
+        exit 1
+    fi
     jq -n '{message: "Validation Failed",
             errors: [{resource: "Repository", code: "custom", field: "rules", message: "Merge queue cannot be used with wildcard branch patterns"}],
             documentation_url: "https://docs.github.com/rest/repos/rules#create-a-repository-ruleset",
@@ -135,7 +142,7 @@ reset() {
     : >"$STUB_STATE/calls.log"
     : >"$STUB_STATE/writes.log"
     printf '%s\n' "${1:-$live_main}" >"$STUB_STATE/rulesets/8429203.json"
-    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE STUB_REJECT
+    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE STUB_REJECT STUB_REJECT_BODY
 }
 
 ok() { echo "ok   $1"; }
@@ -429,6 +436,30 @@ if [ "$rc" -ne 0 ] &&
     ok "a rejected main PUT prints GitHub's error and stops before the release ruleset"
 else
     fail "rejected main PUT (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"
+fi
+
+# Bodies of an unexpected shape still print, and the summary line follows.
+reset
+export STUB_REJECT=POST
+export STUB_REJECT_BODY='{"message": "Odd", "errors": [1, {"code": "x"}, "plain"]}'
+run --yes
+if [ "$rc" -ne 0 ] && grep -qF 'message: Odd' <<<"$out" && grep -qxF '  error: 1' <<<"$out" &&
+    grep -qxF '  error: {"code":"x"}' <<<"$out" && grep -qxF '  error: plain' <<<"$out" &&
+    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out"; then
+    ok "a rejected write with non-object errors entries prints them and the summary"
+else
+    fail "rejected write, non-object errors (exit $rc)" "$out"
+fi
+
+reset
+export STUB_REJECT=POST
+export STUB_REJECT_BODY='<html>502 Bad Gateway</html>'
+run --yes
+if [ "$rc" -ne 0 ] && grep -qxF '  <html>502 Bad Gateway</html>' <<<"$out" &&
+    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out"; then
+    ok "a rejected write with a non-JSON body prints it and the summary"
+else
+    fail "rejected write, non-JSON body (exit $rc)" "$out"
 fi
 
 exit "$failed"
