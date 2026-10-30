@@ -38,6 +38,19 @@ test.describe('phone navigation', () => {
     await expect(page.getByRole('combobox', { name: 'Projection' })).toBeVisible();
   });
 
+  test('the drawer reaches the Privacy Policy', async ({ page }) => {
+    // ECO-730: the header's Privacy button is hidden at this width, so the drawer is the way there.
+    await page.goto('/');
+    await page.getByRole('button', { name: 'open drawer' }).click();
+
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    await nav.getByRole('button', { name: /^Navigate to Privacy Policy/ }).click();
+
+    await expect(page).toHaveURL(/\/privacy$/);
+    await expect(nav).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Privacy Policy', level: 1 })).toBeVisible();
+  });
+
   test("the map's zoom controls leave the map uncovered", async ({ page }) => {
     // Overlaid on the map they covered Europe at this width, so countries there could not be
     // hovered or tapped; on a phone they sit in a bar under the map.
