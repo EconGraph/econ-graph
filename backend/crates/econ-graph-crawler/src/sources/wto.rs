@@ -27,9 +27,10 @@
 //!
 //! Rows name the reporting economy by the WTO's numeric code (`ReportingEconomyCode`, UN M49
 //! style). A country's code is looked up as an ISO 3166-1 numeric code in the shared country
-//! table; the world (`000`) and the European Union (`918`) map to the table's `WLD` and `EUU`
-//! aggregates. Other economies (regional and economic groups, customs territories the table
-//! doesn't list) are skipped with one warning per request naming them.
+//! table, except Serbia (`892`), Montenegro (`893`) and Sudan (`736`), whose WTO codes differ from
+//! their ISO codes; the world (`000`) and the European Union (`918`) map to the table's `WLD` and
+//! `EUU` aggregates. Other economies (regional and economic groups, customs territories the table
+//! doesn't list, historical entities) are skipped with one warning per request naming them.
 //!
 //! # Requests
 //!
@@ -47,8 +48,11 @@
 //!   single economy sends that economy's code as `r` instead of `all`.
 //!
 //! Discovery makes both requests for each listed indicator and lists every economy with at least
-//! one value; it is complete ([`SourceAdapter::discovery_is_complete`]), so series of an
-//! indicator or economy the WTO stops publishing are retired. Fetching is batched by indicator
+//! one value; it is complete ([`SourceAdapter::discovery_is_complete`]), so series of an economy
+//! the WTO stops publishing for an indicator are retired. An indicator the WTO no longer lists, or
+//! lists with no data at all (a `204` or an empty `Dataset`), is skipped and reported by
+//! [`SourceAdapter::curated_missing`] instead, so the worker retires none of its series (nor
+//! anything else in that discovery). Fetching is batched by indicator
 //! ([`SourceAdapter::batch_key`]): one pair of requests serves every economy of an indicator.
 //! A parse error quoting the `/data` body has the key removed (that body bypasses the HTTP
 //! layer's error scrubbing).
@@ -139,6 +143,11 @@ const AREA_DIMENSION: &str = "area";
 
 /// WTO economy codes of the aggregates the shared country table carries, and their keys there.
 const AGGREGATES: [(&str, &str); 2] = [("000", "WLD"), ("918", "EUU")];
+
+/// Current countries whose WTO economy code is not their ISO 3166-1 numeric code, and their keys
+/// in the shared country table: Serbia (ISO 688), Montenegro (ISO 499) and Sudan (the WTO keeps
+/// 736, the code before South Sudan's independence; ISO now has 729).
+const NON_ISO_COUNTRIES: [(&str, &str); 3] = [("892", "SRB"), ("893", "MNE"), ("736", "SDN")];
 
 /// WTO Timeseries adapter. See the module docs for requests, ids and error mapping.
 #[derive(Debug, Clone)]
@@ -316,6 +325,15 @@ impl SourceAdapter for WtoAdapter {
                 Err(e) => return Err(e),
             };
             let rows = self.fetch_rows(ctx, key, indicator, None).await?;
+            if rows.is_empty() {
+                // Listed but without data for any economy: likely a passing gap upstream, or a
+                // product or partner the WTO no longer publishes. Retiring every series of the
+                // indicator on that would be wrong either way.
+                tracing::warn!(indicator = %indicator.id,
+                    "WTO lists this indicator of wto_indicators.csv but returned no data; skipping it");
+                missing.push(indicator.id.clone());
+                continue;
+            }
             for (area, series) in resolve(indicator, rows, areas)? {
                 let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
                 let meta = series_metadata(&info, indicator, area, &series);
@@ -801,9 +819,17 @@ struct EconomySeries {
     points: BTreeMap<NaiveDate, BigDecimal>,
 }
 
-/// The area of the shared country table a WTO economy code names, if any.
+/// The WTO's own codes for these economies and their keys in the shared country table: the
+/// aggregates, then the countries whose WTO code is not their ISO 3166-1 numeric code.
+fn wto_codes() -> impl Iterator<Item = &'static (&'static str, &'static str)> {
+    AGGREGATES.iter().chain(NON_ISO_COUNTRIES.iter())
+}
+
+/// The area of the shared country table a WTO economy code names, if any. Codes of historical
+/// entities (the Federal Republic of Germany 280, Serbia and Montenegro 891, the USSR 810, the
+/// Netherlands Antilles 530) name no area, so their rows are skipped.
 fn lookup<'a>(areas: &'a Areas, economy: &str) -> Option<&'a Area> {
-    if let Some((_, key)) = AGGREGATES.iter().find(|(code, _)| *code == economy) {
+    if let Some((_, key)) = wto_codes().find(|(code, _)| *code == economy) {
         return areas.by_key(key);
     }
     economy
@@ -815,9 +841,10 @@ fn lookup<'a>(areas: &'a Areas, economy: &str) -> Option<&'a Area> {
 }
 
 /// The WTO economy code of an area of the country table (the reverse of [`lookup`]): `000` or
-/// `918` for the two aggregates, a country's ISO numeric code written with three digits.
+/// `918` for the two aggregates, the WTO's own code for the countries in [`NON_ISO_COUNTRIES`],
+/// any other country's ISO numeric code written with three digits.
 fn wto_economy_code(area: &Area) -> Option<String> {
-    if let Some((code, _)) = AGGREGATES.iter().find(|(_, key)| *key == area.key) {
+    if let Some((code, _)) = wto_codes().find(|(_, key)| *key == area.key) {
         return Some((*code).to_string());
     }
     (area.kind == AreaKind::Country)

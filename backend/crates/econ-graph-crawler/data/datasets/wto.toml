@@ -23,8 +23,8 @@ name = "area"
 label = "Reporting economy"
 codelist = "countries"
 
-# The API's ValueFlagCode (for example an estimate or a break in series), declared so the schema
-# is ready; there is no attribute column on data_points, so the adapter does not write it.
+# The API's ValueFlagCode (for example an estimate or a break in series). data_points has no
+# attribute column, so the adapter does not store it.
 [[dataset.attributes]]
 name = "value_flag"
 label = "Value flag"

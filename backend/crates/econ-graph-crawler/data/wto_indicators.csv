@@ -10,7 +10,8 @@
 #
 # ITS_MTV_AX / ITS_MTV_AM  merchandise exports / imports, annual values
 # ITS_CS_AX6 / ITS_CS_AM6  services exports / imports by sector and partner, annual values (BPM6)
-# TP_A_0010 / TP_A_0030    tariff profile headline averages over all products
+# TP_A_0010                simple average MFN applied tariff, all products
+# TP_A_0030                trade-weighted average MFN applied tariff, all products
 id,product,partner
 ITS_MTV_AX,TO,000
 ITS_MTV_AM,TO,000

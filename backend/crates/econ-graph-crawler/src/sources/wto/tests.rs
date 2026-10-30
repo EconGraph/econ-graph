@@ -388,6 +388,66 @@ fn economy_codes_round_trip_to_areas() {
     assert_eq!(wto_economy_code(areas.by_key("EMU").unwrap()), None);
 }
 
+/// Serbia, Montenegro and Sudan have WTO codes that are not their ISO codes; historical entities
+/// map to no area.
+#[test]
+fn wto_specific_country_codes() {
+    let areas = areas().unwrap();
+    for (code, key) in [("892", "SRB"), ("893", "MNE"), ("736", "SDN")] {
+        assert_eq!(
+            lookup(areas, code).map(|a| a.key.as_str()),
+            Some(key),
+            "{code}"
+        );
+        assert_eq!(
+            wto_economy_code(areas.by_key(key).unwrap()).as_deref(),
+            Some(code),
+            "{key}"
+        );
+    }
+    for historical in ["280", "891", "810", "530"] {
+        assert!(lookup(areas, historical).is_none(), "{historical}");
+    }
+    // The rows resolve: a Serbian row becomes a SRB series.
+    let body = r#"{"Dataset": [
+        {"ReportingEconomyCode": "892", "Year": 2024, "Value": 1},
+        {"ReportingEconomyCode": "891", "Year": 2000, "Value": 2}
+    ]}"#;
+    let unpinned = WtoIndicator {
+        id: "T".into(),
+        product: String::new(),
+        partner: String::new(),
+    };
+    let resolved = resolve(&unpinned, parse_rows("t", body).unwrap(), areas).unwrap();
+    let keys: Vec<&str> = resolved.iter().map(|(a, _)| a.key.as_str()).collect();
+    assert_eq!(keys, ["SRB"]);
+}
+
+/// An indicator the WTO lists but answers with no data (a 204, or an empty `Dataset`) is skipped
+/// and reported, so the worker retires none of its series.
+#[tokio::test]
+async fn a_listed_indicator_without_data_is_curated_missing() {
+    for reply in [Reply::status(204), Reply::json_str(r#"{"Dataset": []}"#)] {
+        let mock = MockSource::start().await;
+        mock.mount(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS))
+            .await;
+        mock.mount(&data_route("ITS_MTV_AX"), reply).await;
+        mock.mount(&info_route("TP_A_0010"), Reply::json_str(INFO_TARIFF))
+            .await;
+        mock.mount(&data_route("TP_A_0010"), Reply::json_str(DATA_TARIFF))
+            .await;
+        mock.mount(&Route::get("/indicators"), Reply::json_str("[]"))
+            .await;
+        let a = WtoAdapter::new(mock.base_url());
+        let found = a.discover(&test_ctx()).await.unwrap();
+        assert!(found
+            .iter()
+            .all(|s| s.external_id.starts_with("timeseries/TP_A_0010.")));
+        assert!(!found.is_empty());
+        assert!(a.curated_missing().contains(&"ITS_MTV_AX".to_string()));
+    }
+}
+
 #[test]
 fn metadata_comes_from_the_indicator_and_names_the_selection() {
     let info: Vec<IndicatorInfo> = serde_json::from_str(INFO_EXPORTS).unwrap();

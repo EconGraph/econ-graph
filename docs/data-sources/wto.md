@@ -79,8 +79,8 @@ with the product/sector and partner economy that select its headline series:
 | `ITS_MTV_AM` | `TO`, total merchandise | `000`, World | Merchandise imports, annual value |
 | `ITS_CS_AX6` | `S`, total services | `000`, World | Services exports (BPM6), annual value |
 | `ITS_CS_AM6` | `S`, total services | `000`, World | Services imports (BPM6), annual value |
-| `TP_A_0010` | none | none | Tariff profile headline average, all products |
-| `TP_A_0030` | none | none | Tariff profile headline average, all products |
+| `TP_A_0010` | none | none | Simple average MFN applied tariff, all products |
+| `TP_A_0030` | none | none | Trade-weighted average MFN applied tariff, all products |
 
 The last column is a summary. Each series' title, unit, frequency and description come from
 the WTO's own indicator metadata, never from this file.
@@ -94,7 +94,9 @@ For each indicator, discovery and fetching make two requests:
 - `GET /data?i={indicator}&r=all&ps=all&fmt=json&mode=full&head=M&lang=1&max=1000000`, plus
   `pc` and `p` where the list gives them, returns every reporting economy's full history in one
   response. The adapter allows that request 180 seconds, longer than the crawler's ordinary
-  timeout, because the API can be slow to produce it. An empty `204` response means no data.
+  timeout, because the API can be slow to produce it, and makes it once, leaving retries to the
+  queue. An empty `204` response means no data. A fetch for a single economy sends that
+  economy's WTO code as `r` instead of `all`.
 
 Every series belongs to dataset `timeseries`, defined in
 [wto.toml](../../backend/crates/econ-graph-crawler/data/datasets/wto.toml), with dimensions
@@ -103,7 +105,10 @@ Every series belongs to dataset `timeseries`, defined in
 canonical external ID is `timeseries/{indicator}.{area}`, for example
 `timeseries/ITS_MTV_AX.USA`. Fetching is batched by indicator: one pair of requests serves
 every economy. Discovery lists every economy with at least one value and is complete, so
-series of an economy or indicator the WTO stops publishing are retired.
+series of an economy the WTO stops publishing for an indicator are retired. An indicator is
+never retired: one the WTO no longer lists, or lists with no data at all (an empty `204` or an
+empty `Dataset`), is skipped with a warning and counted in `crawler_curated_missing`, and the
+worker then retires nothing for that discovery.
 
 Discovery also merges each indicator's name, unit and description into the dataset's
 `indicator` codes, and the WTO's names for the world and the European Union into its `area`
@@ -112,10 +117,12 @@ codes.
 ## Reporting economies
 
 Rows name the reporting economy by the WTO's numeric code (`ReportingEconomyCode`). The adapter
-looks a code up as an ISO 3166-1 numeric code among the shared reference's countries, and maps
+looks a code up as an ISO 3166-1 numeric code among the shared reference's countries, except
+for the WTO's own codes for Serbia (`892`), Montenegro (`893`) and Sudan (`736`), and maps
 `000` (World) to `WLD` and `918` (European Union) to `EUU`. Rows for other economies, such as
-regional and economic groups or territories the reference doesn't list, are skipped with one
-warning per request naming them.
+regional and economic groups, territories the reference doesn't list, and historical entities
+(for example Serbia and Montenegro, `891`), are skipped with one warning per request naming
+them.
 
 A series title is the indicator's name and the economy's: the shared reference's name for a
 country, the WTO's name (`ReportingEconomy`) for an aggregate. The description adds the
