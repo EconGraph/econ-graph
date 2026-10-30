@@ -45,10 +45,7 @@ const WorldMapTab: React.FC = () => {
   const [pickedIndicator, setPickedIndicator] = useState<string | null>(null);
   const [projection, setProjection] = useState(DEFAULT_PROJECTION);
   const [colorScheme, setColorScheme] = useState('viridis');
-  const [pickedScale, setPickedScale] = useState<{
-    indicator: string;
-    mode: ColorScaleMode;
-  } | null>(null);
+  const [pickedScales, setPickedScales] = useState<Record<string, ColorScaleMode>>({});
 
   const datasetQuery = useMapDataset();
   const dataset = datasetQuery.data;
@@ -97,11 +94,8 @@ const WorldMapTab: React.FC = () => {
     values,
     colorScheme,
     drawableIds,
-    pickedScale && pickedScale.indicator === shown?.indicator
-      ? pickedScale.mode
-      : shown?.indicator === DEFAULT_INDICATOR
-        ? 'log'
-        : 'linear'
+    (shown && pickedScales[shown.indicator]) ??
+      (shown?.indicator === DEFAULT_INDICATOR ? 'log' : 'linear')
   );
 
   // Stable, so the map's click handler never changes.
@@ -139,7 +133,7 @@ const WorldMapTab: React.FC = () => {
               scaleMode={scaleMode}
               logUnavailableReason={logUnavailableReason}
               onScaleModeChange={mode => {
-                if (shown) setPickedScale({ indicator: shown.indicator, mode });
+                if (shown) setPickedScales(previous => ({ ...previous, [shown.indicator]: mode }));
               }}
             />
           </Box>

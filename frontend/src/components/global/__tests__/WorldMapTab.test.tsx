@@ -182,7 +182,9 @@ describe('WorldMapTab', () => {
     renderTab();
     await waitForColors();
     const atlas = await loadWorldAtlas();
-    const germany = feature(atlas, atlas.objects.countries).features.find(country => Number(country.id) === 276)!;
+    const germany = feature(atlas, atlas.objects.countries).features.find(
+      country => Number(country.id) === 276
+    )!;
     const expectedPath = geoPath(geoEqualEarth().fitSize([960, 500], { type: 'Sphere' }))(germany);
     expect(screen.getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Equal Earth');
     expect(countryPath('276')).toHaveAttribute('d', expectedPath);
@@ -322,6 +324,32 @@ describe('WorldMapTab', () => {
     expect(
       mockGraphQL.mock.calls.filter(([r]) => r.operationName === 'GetMapCrossSection')
     ).toHaveLength(calls);
+  });
+
+  it('remembers a separately chosen scale for each indicator', async () => {
+    renderTab();
+    await waitForColors();
+    const chooseScale = (name: string) => {
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+    const chooseIndicator = (name: string) => {
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+    chooseScale('Linear');
+    chooseIndicator('Inflation, consumer prices (annual %)');
+    await waitFor(() => expect(screen.getByTestId('map-legend')).toHaveTextContent('Inflation'));
+    chooseScale('Logarithmic');
+    chooseIndicator('GDP per capita (current US$)');
+    await waitFor(() =>
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('GDP per capita')
+    );
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Linear');
+    expect(screen.getByTestId('map-legend')).toHaveTextContent('Scale: Linear');
+    chooseIndicator('Inflation, consumer prices (annual %)');
+    await waitFor(() => expect(screen.getByTestId('map-legend')).toHaveTextContent('Inflation'));
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Logarithmic');
   });
 
   it('keeps signed observations and explains why Log is disabled', async () => {
