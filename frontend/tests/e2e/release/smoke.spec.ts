@@ -27,6 +27,22 @@ test.describe('release smoke', () => {
     }
   });
 
+  test('the recession indicator is reachable by its external id', async ({ request }) => {
+    // Recession shading looks USREC up this way, not by search.
+    const { sourceName, externalId } = SEEDED.fredUsrec;
+    const response = await request.post('/graphql', {
+      data: {
+        query:
+          'query($s: String!, $e: String!) { seriesByExternalId(sourceName: $s, externalId: $e) { externalId } }',
+        variables: { s: sourceName, e: externalId },
+      },
+    });
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    expect(body.data.seriesByExternalId).toEqual({ externalId });
+  });
+
   test('the backend is a release-profile build', async ({ request }) => {
     // The `mcp` build flag is off in release, so nothing answers at /mcp (config/flags). Straight
     // to the backend: the frontend doesn't proxy /mcp. A deployed run has no local backend.
