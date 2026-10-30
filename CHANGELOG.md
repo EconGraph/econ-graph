@@ -12,7 +12,8 @@ All notable changes to EconGraph are documented here. The format follows
   17 series: the policy rate, CORRA, the prime rate, five exchange rates against the Canadian
   dollar, four benchmark bond yields, the three core inflation measures, and M2 and M2++,
   with titles, units and frequencies taken from Valet. Bank of Canada is no longer a
-  development-only static catalog. See `docs/data-sources/boc.md`. The data migration
+  development-only static catalog, and its catalog read role is `catalog.bank_of_canada:read`.
+  See `docs/data-sources/boc.md`. The data migration
   `2026-10-30-160000_boc_data_source_matches_valet_adapter` updates an existing Bank of Canada
   `data_sources` row to the new description and a `rate_limit_per_minute` of 60.
 - The frontend can send data operations (series, search, data sources, the dashboard cards and
@@ -55,9 +56,6 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Changed
 
-- The Bank of Canada catalog role is `catalog.bank_of_canada:read` (was `catalog.boc:read`). The
-  next deploy's realm import moves every live grant of the old role, revoked ones staying
-  revoked, to the new name and deletes the old role.
 - The kind cluster's HTTP entry point is a Gateway API gateway (Envoy Gateway v1.9.2, Gateway
   API v1.6.3 standard channel) instead of ingress-nginx, which no longer gets security fixes.
   `deploy.sh` installs it with `scripts/deploy/install-gateway.sh` (pinned, checksummed release
