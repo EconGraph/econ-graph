@@ -512,7 +512,7 @@ impl BeaAdapter {
         Ok(())
     }
 
-    /// The selection rules: the ones given with [`with_selection`](Self::with_selection), else
+    /// The selection rules: the ones a test gave with `with_selection`, else
     /// `catalog_selection/bea.toml`.
     pub(crate) fn selection(&self) -> Result<&BeaSelection, CrawlError> {
         match self.selection.as_ref() {

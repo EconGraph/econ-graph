@@ -198,9 +198,10 @@ ns="-n econ-graph-br-x-0123456789"
 delete_job="$(line_of "$ns delete job crawler-check-selection --ignore-not-found --cascade=foreground --wait=true")"
 delete_policy="$(line_of "$ns delete networkpolicy crawler-check-selection")"
 apply="$(line_of "$ns apply -f -")"
-[ -n "$delete_job" ] && [ -n "$delete_policy" ] && [ -n "$apply" ] &&
-  [ "$delete_job" -lt "$apply" ] && [ "$delete_policy" -lt "$apply" ] ||
+if ! { [ -n "$delete_job" ] && [ -n "$delete_policy" ] && [ -n "$apply" ] &&
+  [ "$delete_job" -lt "$apply" ] && [ "$delete_policy" -lt "$apply" ]; }; then
   fail "a leftover Job or NetworkPolicy is not deleted before apply: $(cat "$log")"
+fi
 [ "$(grep -cF -- "$ns delete job crawler-check-selection" "$log")" = 2 ] ||
   fail "the Job is not deleted afterwards: $(cat "$log")"
 [ "$(grep -cF -- "$ns delete networkpolicy crawler-check-selection" "$log")" = 2 ] ||

@@ -208,7 +208,7 @@ key_env() {
 EOF
 }
 
-# shellcheck disable=SC2329 # run by the EXIT trap
+# shellcheck disable=SC2317,SC2329 # run by the EXIT trap
 cleanup() {
     kc -n "$target_ns" delete job "$JOB" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     kc -n "$target_ns" delete networkpolicy "$JOB" --ignore-not-found >/dev/null 2>&1 || true
