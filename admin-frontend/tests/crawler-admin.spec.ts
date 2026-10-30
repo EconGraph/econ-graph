@@ -18,26 +18,27 @@ test.describe("Crawler Admin Interface", () => {
     await page.addInitScript(() => {
       // Mock crypto functions that might be missing
       if (!window.crypto?.randomUUID) {
-        Object.defineProperty(window.crypto || {}, 'randomUUID', {
-          value: () => 'mock-uuid-' + Math.random().toString(36).substr(2, 9),
+        Object.defineProperty(window.crypto || {}, "randomUUID", {
+          value: () => "mock-uuid-" + Math.random().toString(36).substr(2, 9),
           writable: false,
-          configurable: false
+          configurable: false,
         });
       }
 
       if (!window.crypto?.random) {
-        Object.defineProperty(window.crypto || {}, 'random', {
+        Object.defineProperty(window.crypto || {}, "random", {
           value: () => new Uint8Array([1, 2, 3, 4, 5]),
           writable: false,
-          configurable: false
+          configurable: false,
         });
       }
 
       // Ensure crypto object exists
       if (!window.crypto) {
         (window as any).crypto = {
-          randomUUID: () => 'mock-uuid-' + Math.random().toString(36).substr(2, 9),
-          random: () => new Uint8Array([1, 2, 3, 4, 5])
+          randomUUID: () =>
+            "mock-uuid-" + Math.random().toString(36).substr(2, 9),
+          random: () => new Uint8Array([1, 2, 3, 4, 5]),
         };
       }
     });

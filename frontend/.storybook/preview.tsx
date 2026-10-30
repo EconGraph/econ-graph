@@ -33,7 +33,6 @@ const queryClient = new QueryClient({
   },
 });
 
-
 const preview: Preview = {
   parameters: {
     actions: { argTypesRegex: '^on[A-Z].*' },
@@ -75,11 +74,11 @@ const preview: Preview = {
     },
   },
   decorators: [
-    (Story) => {
+    Story => {
       // Initialize MSW for this story synchronously
       console.log('🔧 Storybook preview: Setting up MSW synchronously...');
       setupSimpleMSW();
-      
+
       return (
         <StyledEngineProvider injectFirst>
           <ThemeProvider theme={theme}>

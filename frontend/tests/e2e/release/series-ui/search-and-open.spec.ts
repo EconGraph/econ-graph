@@ -89,7 +89,12 @@ test.describe('browse a source', () => {
     await browseBlsFromSources(page);
 
     await expect(page.getByText(/series, by title/)).toBeVisible();
-    await expect(page.getByText(SEEDED.blsCpi.title, { exact: true })).toBeVisible();
+    await expect(page.locator('.MuiCard-root').first()).toBeVisible();
+    // The listing comes 20 at a time by title: the fixtures' BLS series include CPI on the first
+    // page, a deployed catalog's first page is whatever sorts first.
+    if (!DEPLOYED) {
+      await expect(page.getByText(SEEDED.blsCpi.title, { exact: true })).toBeVisible();
+    }
     await expect(page.getByText(/Type at least 2 characters/)).toHaveCount(0);
   });
 

@@ -9,11 +9,20 @@
 //! # Discovery
 //!
 //! Two requests, both required (as in the old code):
-//! - `GET {base}/timeseries/bds/variables.json?key=KEY` -> `{"variables": {NAME: {"label": ..}, ..}}`
+//! - `GET {base}/timeseries/bds/variables.json?key=KEY` ->
+//!   `{"variables": {NAME: {"label": .., "predicateType": ..}, ..}}`
 //! - `GET {base}/timeseries/bds/geography.json?key=KEY` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
 //!
-//! Variables are filtered with the old keyword rules ([`is_economic_variable`]) and crossed with
-//! the geography levels that give single series (annual, units "Count"):
+//! Only measures become series ([`is_economic_variable`]): a variable must have a numeric
+//! `predicateType` (`int` or `float`), no `*_LABEL` attribute, and a name or label matching one
+//! of the old keywords. The numeric type leaves out the classification codes (`EAGE`, `FAGE`,
+//! `EMPSZES`, `NAICS`, ..., all `string`: a single-series request returns their code, 1, every
+//! year), the geography and predicate variables (`for`, `in`, `time`, `GEO_ID`, `STATE`, ...)
+//! and the `string` `YEAR`. The `*_LABEL` attribute marks a code even if a later release makes
+//! one numeric; the keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. A
+//! `predicateType` outside the known ones fails discovery, so that a renamed numeric type can't
+//! silently drop measures and retire their series. The measures are crossed with the geography
+//! levels that give single series (annual, units "Count"):
 //! - `us`: one national series per variable;
 //! - `state`: one series per variable for each state and DC, from the Census Bureau's state
 //!   reference file ([`STATES_URL`], see [States](#states)).
@@ -648,7 +657,20 @@ fn parse_bds_rows(
 struct BdsVariable {
     name: String,
     label: String,
+    /// Whether the `predicateType` is numeric (`int` or `float`); see [`NUMERIC_TYPES`].
+    numeric: bool,
+    /// Whether `attributes` names a `*_LABEL` variable, as every classification code's does
+    /// (`EAGE` has `EAGE_LABEL`); measures name a `*_F` flag instead.
+    has_code_label: bool,
 }
+
+/// The `predicateType`s of BDS measures.
+const NUMERIC_TYPES: &[&str] = &["int", "float"];
+
+/// The other `predicateType`s `variables.json` uses: codes, labels and `YEAR` (`string`) and the
+/// API's predicates (`for`, `in`, `time`, `ucgid`). Any type in neither list fails the parse, so
+/// a renamed numeric type (`double`, say) can't silently drop measures and retire their series.
+const NON_MEASURE_TYPES: &[&str] = &["string", "fips-for", "fips-in", "datetime", "ucgid"];
 
 /// A BDS geography level from `geography.json`.
 #[derive(Debug, Clone, PartialEq)]
@@ -680,9 +702,32 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                     ))
                 })?
                 .to_string();
+            // Geography variables such as `CBSA` have no `predicateType`.
+            let numeric = match obj.get("predicateType") {
+                None => false,
+                Some(Value::String(t)) if NUMERIC_TYPES.contains(&t.as_str()) => true,
+                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => false,
+                Some(t) => {
+                    return Err(CrawlError::Parse(format!(
+                        "Census variables.json: {name:?} has an unknown 'predicateType' {t}"
+                    )))
+                }
+            };
+            // A comma-separated list of variable names, e.g. "EAGE_LABEL" or "NAME".
+            let has_code_label = match obj.get("attributes") {
+                None => false,
+                Some(Value::String(a)) => a.split(',').any(|x| x.trim().ends_with("_LABEL")),
+                Some(_) => {
+                    return Err(CrawlError::Parse(format!(
+                        "Census variables.json: {name:?} has a non-string 'attributes'"
+                    )))
+                }
+            };
             Ok(BdsVariable {
                 name: name.clone(),
                 label,
+                numeric,
+                has_code_label,
             })
         })
         .collect()
@@ -719,11 +764,9 @@ fn parse_geographies(body: &Value) -> Result<Vec<BdsGeography>, CrawlError> {
     Ok(out)
 }
 
-/// The old `filter_economic_indicators` rules.
+/// Whether a variable is a measure to discover: numeric, and matching the old
+/// `filter_economic_indicators` keywords (see [Discovery](self#discovery)).
 fn is_economic_variable(var: &BdsVariable) -> bool {
-    const EXCLUDE: &[&str] = &[
-        "for", "in", "year", "time", "geo", "state", "county", "metro", "cbsa", "nation",
-    ];
     const KEYWORDS: &[&str] = &[
         "estab",
         "firm",
@@ -741,11 +784,11 @@ fn is_economic_variable(var: &BdsVariable) -> bool {
         "employment",
         "establishment",
     ];
-    let name = var.name.to_lowercase();
-    let label = var.label.to_lowercase();
-    if name.is_empty() || label.is_empty() || EXCLUDE.iter().any(|x| name.contains(x)) {
+    if !var.numeric || var.has_code_label {
         return false;
     }
+    let name = var.name.to_lowercase();
+    let label = var.label.to_lowercase();
     KEYWORDS
         .iter()
         .any(|k| name.contains(k) || label.contains(k))
@@ -758,6 +801,16 @@ mod tests {
 
     const VARIABLES: &str = include_str!("../../tests/fixtures/census/variables.json");
     const GEOGRAPHY: &str = include_str!("../../tests/fixtures/census/geography.json");
+    /// The measures in [`VARIABLES`], sorted.
+    const MEASURES: [&str; 7] = [
+        "EMP",
+        "ESTAB",
+        "ESTABS_ENTRY_RATE",
+        "FIRM",
+        "JOB_CREATION",
+        "JOB_CREATION_CONTINUERS",
+        "JOB_DESTRUCTION_CONTINUERS",
+    ];
     const ESTAB_US: &str = include_str!("../../tests/fixtures/census/bds_estab_us.json");
     const ESTAB_STATE_06: &str =
         include_str!("../../tests/fixtures/census/bds_estab_state_06.json");
@@ -840,12 +893,73 @@ mod tests {
     #[test]
     fn parse_variables_accepts_well_formed_entries() {
         let body = serde_json::json!({
-            "variables": {"ESTAB": {"label": "Number of establishments"}}
+            "variables": {"ESTAB": {"label": "Number of establishments", "predicateType": "int"}}
         });
         let vars = parse_variables(&body).unwrap();
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "ESTAB");
         assert_eq!(vars[0].label, "Number of establishments");
+        assert!(vars[0].numeric);
+        assert!(!vars[0].has_code_label);
+    }
+
+    /// Geography variables such as `CBSA` have no `predicateType`; that is not an error.
+    #[test]
+    fn parse_variables_accepts_missing_predicate_type() {
+        let body = serde_json::json!({"variables": {"CBSA": {"label": "Metro area"}}});
+        let vars = parse_variables(&body).unwrap();
+        assert!(!vars[0].numeric);
+    }
+
+    /// An unknown or non-string `predicateType`, or non-string `attributes`, fails discovery
+    /// instead of dropping the variable and retiring its series.
+    #[test]
+    fn parse_variables_rejects_unknown_predicate_types_and_bad_attributes() {
+        for entry in [
+            serde_json::json!({"label": "Establishments", "predicateType": "double"}),
+            serde_json::json!({"label": "Establishments", "predicateType": 1}),
+            serde_json::json!({"label": "Establishments", "attributes": ["ESTAB_F"]}),
+        ] {
+            let body = serde_json::json!({"variables": {"ESTAB": entry}});
+            assert!(
+                matches!(parse_variables(&body), Err(CrawlError::Parse(_))),
+                "{entry}"
+            );
+        }
+    }
+
+    /// Only measures are selected from the recorded metadata: the classification codes (value 1
+    /// every year, ECO-729) are not, and names containing an excluded word such as "in"
+    /// (`JOB_CREATION_CONTINUERS`) are no longer dropped by substring.
+    #[test]
+    fn selects_measures_not_classification_codes() {
+        let vars = parse_variables(&serde_json::from_str(VARIABLES).unwrap()).unwrap();
+        let mut selected: Vec<&str> = vars
+            .iter()
+            .filter(|v| is_economic_variable(v))
+            .map(|v| v.name.as_str())
+            .collect();
+        selected.sort_unstable();
+        assert_eq!(selected, MEASURES);
+        for other in [
+            "EAGE", "FAGE", "EMPSZES", "EMPSZFI", "NAICS", "INDLEVEL", "DENOM", "CBSA", "YEAR",
+            "for", "in",
+        ] {
+            assert!(
+                vars.iter().any(|v| v.name == other),
+                "{other} is in the fixture"
+            );
+        }
+        // A numeric variable with a `*_LABEL` attribute is a code, whatever its label says.
+        let var = |numeric, has_code_label| BdsVariable {
+            name: "ESTAB_SIZE".into(),
+            label: "Establishment size code".into(),
+            numeric,
+            has_code_label,
+        };
+        assert!(is_economic_variable(&var(true, false)));
+        assert!(!is_economic_variable(&var(true, true)));
+        assert!(!is_economic_variable(&var(false, false)));
     }
 
     /// Same reasoning as `parse_variables_rejects_non_object_entry`, for `geography.json`.
@@ -906,10 +1020,10 @@ mod tests {
         )
         .await;
         let found = adapter(&mock).await.discover(&test_ctx()).await.unwrap();
-        // 3 economic variables x (national + 50 states + DC).
+        // The measures x (national + 50 states + DC).
         let states = &fixture_states();
         assert_eq!(states.len(), 51);
-        assert_eq!(found.len(), 3 * (1 + states.len()));
+        assert_eq!(found.len(), MEASURES.len() * (1 + states.len()));
         let ids: HashSet<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
         assert_eq!(ids.len(), found.len(), "external ids are unique");
         let by_id = |id: &str| {
@@ -923,7 +1037,7 @@ mod tests {
             assert_eq!(ds.code, BDS_DATASET, "{}", s.external_id);
             ["geo_level", "state", "variable"].map(|k| ds.dimensions.0[k].clone())
         };
-        for var in ["ESTAB", "FIRM", "JOB_CREATION"] {
+        for var in MEASURES {
             let national = by_id(&format!("bds/national..{var}"));
             assert_eq!(dims(national), ["national", "", var]);
             for s in states {
@@ -1108,14 +1222,7 @@ mod tests {
         let found = adapter(&mock).await.discover(&test_ctx()).await.unwrap();
         let mut ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
         ids.sort_unstable();
-        assert_eq!(
-            ids,
-            [
-                "bds/national..ESTAB",
-                "bds/national..FIRM",
-                "bds/national..JOB_CREATION",
-            ]
-        );
+        assert_eq!(ids, MEASURES.map(|v| format!("bds/national..{v}")));
         // No state level, so the state file is not requested.
         let paths: Vec<String> = mock
             .received_requests()
@@ -1303,10 +1410,10 @@ mod tests {
         mock.mount(
             &Route::get("/timeseries/bds/variables.json"),
             Reply::json(serde_json::json!({"variables": {
-                "ESTAB": {"label": "Number of establishments"},
-                "EMP.X": {"label": "Employment, dotted"},
-                "EMP/X": {"label": "Employment, slashed"},
-                "EMP-X": {"label": "Employment, dashed"},
+                "ESTAB": {"label": "Number of establishments", "predicateType": "int"},
+                "EMP.X": {"label": "Employment, dotted", "predicateType": "int"},
+                "EMP/X": {"label": "Employment, slashed", "predicateType": "int"},
+                "EMP-X": {"label": "Employment, dashed", "predicateType": "int"},
             }})),
         )
         .await;
