@@ -656,7 +656,7 @@ async fn test_claim_next_except_leaves_excluded_sources_untouched() {
         .unwrap()
         .unwrap();
     assert!(
-        CrawlQueueItem::claim_next_except(&pool, "w", Some(&[lower.clone()]), &except)
+        CrawlQueueItem::claim_next_except(&pool, "w", Some(std::slice::from_ref(&lower)), &except)
             .await
             .unwrap()
             .is_none(),
