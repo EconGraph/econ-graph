@@ -56,7 +56,10 @@ trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 # host storage under /srv/econgraph is never written: every script that could
 # (apply-host-storage.sh and the other deploy helpers) is a stub wherever deploy.sh runs.
 export HOME="$stub_dir/home" XDG_CACHE_HOME="$stub_dir/xdg-cache" ECONGRAPH_BACKUP_ROOT="$stub_dir/backups"
-mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
+# The deploy config (lib/deploy-config.sh) too: never the operator's ~/.config/econgraph.
+unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER
+export ECONGRAPH_CONFIG_DIR="$stub_dir/config"
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_DIR"
 
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
@@ -73,6 +76,9 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT"
 #                        STUB_SCALE_FAILS=1 scaling it fails
 #   STUB_LOOKUP_FAILS=1, STUB_NO_NAMESPACE=1, STUB_DELETE_FAILS=1  the econ-graph namespace
 #                        lookup fails / finds nothing; deleting the retired Ingress fails
+#   STUB_CERT_ISSUER     cert-manager is installed and certificate econ-graph-tls has this
+#                        issuer (empty: no certificate); unset: no cert-manager.
+#                        STUB_CERT_FAILS=1 the certificate lookup fails
 #   STUB_REALM           ConfigMap keycloak-realm: current (this checkout's files, read from
 #                        $STUB_REPO; the default), stale (an older realm) or missing
 cat >"$stub_dir/kubectl" <<'STUB'
@@ -95,6 +101,8 @@ case "$*" in
   *"get namespace econ-graph"*)
     [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
+  *"get crd certificates.cert-manager.io"*) [ -z "${STUB_CERT_ISSUER+x}" ] || echo customresourcedefinition/certificates.cert-manager.io ;;
+  *"get certificate econ-graph-tls"*) [ "${STUB_CERT_FAILS:-0}" != 1 ] || exit 1; printf '%s' "${STUB_CERT_ISSUER:-}" ;;
   *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
   *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
@@ -141,7 +149,8 @@ export PATH="$stub_dir/path:$PATH" KUBECTL="$stub_dir/kubectl" STUB_LOG="$log"
 # appends its PUBLIC_HOST and arguments to $log.
 lib_root="$stub_dir/lib-root"
 mkdir -p "$lib_root/scripts/deploy/lib" "$lib_root/k8s/manifests"
-cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh "$lib_root/scripts/deploy/lib/"
+cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh scripts/deploy/lib/deploy-config.sh \
+  "$lib_root/scripts/deploy/lib/"
 cp scripts/deploy/render-public-host.py "$lib_root/scripts/deploy/"
 cp k8s/manifests/cloudflared.yaml "$lib_root/k8s/manifests/"
 printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
@@ -196,6 +205,44 @@ fi
 if PUBLIC_HOST="not a host" run_lib public_host_init; then
   fail "a bad PUBLIC_HOST was accepted"
 fi
+
+# The certificate issuer is chosen in public_host_init, before anything is applied, and
+# only with a public host (tls_issuer_choose, lib/deploy-config.sh).
+config="$ECONGRAPH_CONFIG_DIR/deploy.env"
+no_apply() { ! grep -qE 'kubectl .*(apply|create|patch|scale)' "$log"; }
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$config"
+if PUBLIC_HOST=econgraph.com run_lib public_host_init; then
+  fail "a GATEWAY_TLS_ISSUER line with a comment was accepted"
+fi
+if ! { grep -q 'with blanks in it' "$out" && no_apply; }; then fail "a bad issuer line: $(cat "$out")"; fi
+PUBLIC_HOST='' run_lib public_host_init ||
+  fail "a bad issuer line stopped a deploy without a public host: $(cat "$out")"
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\r\n' >"$config"
+PUBLIC_HOST='' run_lib public_host_init || fail "a CRLF issuer line stopped a deploy without a public host"
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$config"
+# The configured issuer differs from the live certificate's: refused, both ways.
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-selfsigned run_lib public_host_init; then
+  fail "a configured issuer that differs from the certificate's was accepted"
+fi
+if ! { grep -q 'never changes the issuer implicitly' "$out" && no_apply; }; then fail "issuer conflict: $(cat "$out")"; fi
+printf 'GATEWAY_TLS_ISSUER=econ-graph-selfsigned\n' >"$config"
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-origin-ca run_lib public_host_init; then
+  fail "a stale config moved the certificate off econ-graph-origin-ca implicitly"
+fi
+# Explicit in the environment: allowed.
+GATEWAY_TLS_ISSUER=econ-graph-selfsigned PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=econ-graph-origin-ca \
+  run_lib public_host_init || fail "an explicit GATEWAY_TLS_ISSUER was refused: $(cat "$out")"
+grep -q 'Certificate issuer: econ-graph-selfsigned (from GATEWAY_TLS_ISSUER in the environment)' "$out" ||
+  fail "explicit issuer not shown: $(cat "$out")"
+# No certificate yet (a recreated cluster): the config's issuer.
+printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$config"
+PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER='' run_lib public_host_init || fail "recreated cluster: $(cat "$out")"
+grep -q "Certificate issuer: econ-graph-origin-ca (from $config)" "$out" || fail "recreated cluster: $(cat "$out")"
+# A failed certificate lookup stops.
+if PUBLIC_HOST=econgraph.com STUB_CERT_ISSUER=x STUB_CERT_FAILS=1 run_lib public_host_init; then
+  fail "a failed certificate lookup did not stop"
+fi
+rm -f "$config"
 
 # The retired Ingress goes in public_host_init, before anything applies an Ingress.
 PUBLIC_HOST=econgraph.com run_lib public_host_init ||
@@ -707,6 +754,21 @@ if [ "$have_script" = true ]; then
     fail "set-crawler-keys --google: refused a deploy config matching the served host: $(cat "$out")"
   keys_refused 'a deploy config naming a host on a cluster serving none' 'STUB_MARKER=none' \
     'says PUBLIC_HOST=econgraph.com'
+  # The shared reader's refusals (lib/deploy-config.sh) reach this path too: an
+  # exported line and a file that exists but cannot be read are refused, not read as
+  # "no host configured".
+  echo 'export PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  keys_refused 'an exported PUBLIC_HOST line in the deploy config' \
+    'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' 'without export'
+  echo 'PUBLIC_HOST=econgraph.com' >"$keys_deploy_env"
+  chmod 000 "$keys_deploy_env"
+  if [ -r "$keys_deploy_env" ]; then
+    echo "skip: an unreadable deploy config (this user can read any file)"
+  else
+    keys_refused 'an unreadable deploy config' 'STUB_MARKER=production STUB_ROUTE_HOST=econgraph.com' \
+      'is not a readable file'
+  fi
+  chmod 600 "$keys_deploy_env"
   rm -f "$keys_deploy_env"
 
   # Every one of these went to the kind kubectl, none to the KUBECTL from the environment.
@@ -778,6 +840,9 @@ echo "helper ran: %s $*" >>"$STUB_LOG"
 echo econ-graph
 ' >"$kind_dir/bin/kind"
   chmod +x "$kind_dir/bin/kind"
+  # A configured issuer: a dry run cannot see the cluster's certificate, so it must not
+  # name a concrete issuer (which would look like the result of the conflict check).
+  printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca\n' >"$ECONGRAPH_CONFIG_DIR/deploy.env"
   for host in '' econgraph.com; do
     printf 'STUB_LOG=%q\nSTUB_MARKER=none\n' "$log" >"$stub_dir/stub.env"
     : >"$log"; rm -f "$log.ctx"
@@ -793,8 +858,13 @@ echo econ-graph
     if [ -n "$host" ]; then
       grep -q '\[dry-run\] check that context kind-econ-graph is marked production' "$out" ||
         fail "deploy.sh --dry-run: the production check was not reported"
+      grep -q 'Certificate issuer: chosen when applied; not checked against the cluster in a dry run' "$out" ||
+        fail "deploy.sh --dry-run: the issuer note was not shown: $(grep -i issuer "$out" || true)"
     fi
+    grep -qE 'Certificate issuer: econ-graph|ClusterIssuer econ-graph' "$out" &&
+      fail "deploy.sh --dry-run (PUBLIC_HOST=$host) printed a concrete issuer: $(grep -i issuer "$out")"
   done
+  rm -f "$ECONGRAPH_CONFIG_DIR/deploy.env"
 
   # A stray CLUSTER_ROLE_DRY_RUN=true in the environment does not turn a real deploy into a
   # half dry run (kc printing while helper scripts run): kc runs for real from the start.

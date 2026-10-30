@@ -27,6 +27,7 @@ const sources: DataSource[] = [
     seriesCount: 1234,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
+    notice: null,
   },
   {
     id: '0199a0e0-0000-7000-8000-000000000002',
@@ -38,6 +39,7 @@ const sources: DataSource[] = [
     seriesCount: 18,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
+    notice: null,
   },
 ];
 

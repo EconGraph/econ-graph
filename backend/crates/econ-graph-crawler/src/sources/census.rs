@@ -22,7 +22,8 @@
 //! one numeric; the keywords leave out the numeric non-measures `DENOM` and `INDLEVEL`. A
 //! `predicateType` outside the known ones fails discovery, so that a renamed numeric type can't
 //! silently drop measures and retire their series. The measures are crossed with the geography
-//! levels that give single series (annual, units "Count"):
+//! levels that give single series (annual; units "Count" for `int` measures and "Percent" for
+//! the `float` rates, see [`NumericType::units`]):
 //! - `us`: one national series per variable;
 //! - `state`: one series per variable for each state and DC, from the Census Bureau's state
 //!   reference file ([`STATES_URL`], see [States](#states)).
@@ -400,7 +401,8 @@ impl SourceAdapter for CensusAdapter {
                         "Business Dynamics Statistics: {} for {area}",
                         var.label
                     )),
-                    units: Some("Count".into()),
+                    // `valid` holds only measures, which are numeric.
+                    units: var.numeric.map(|t| t.units().to_string()),
                     frequency: Some("Annual".into()),
                     data_url: None,
                     dataset,
@@ -657,15 +659,32 @@ fn parse_bds_rows(
 struct BdsVariable {
     name: String,
     label: String,
-    /// Whether the `predicateType` is numeric (`int` or `float`); see [`NUMERIC_TYPES`].
-    numeric: bool,
+    /// The numeric `predicateType`; `None` for any other type, or none.
+    numeric: Option<NumericType>,
     /// Whether `attributes` names a `*_LABEL` variable, as every classification code's does
     /// (`EAGE` has `EAGE_LABEL`); measures name a `*_F` flag instead.
     has_code_label: bool,
 }
 
 /// The `predicateType`s of BDS measures.
-const NUMERIC_TYPES: &[&str] = &["int", "float"];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NumericType {
+    /// `int`: counts (firms, establishments, employees, jobs).
+    Int,
+    /// `float`: every BDS `float` measure is a rate in percent, such as `ESTABS_ENTRY_RATE`
+    /// (10.608 for 2023).
+    Float,
+}
+
+impl NumericType {
+    /// The units a series of this type is stored with.
+    fn units(self) -> &'static str {
+        match self {
+            NumericType::Int => "Count",
+            NumericType::Float => "Percent",
+        }
+    }
+}
 
 /// The other `predicateType`s `variables.json` uses: codes, labels and `YEAR` (`string`) and the
 /// API's predicates (`for`, `in`, `time`, `ucgid`). Any type in neither list fails the parse, so
@@ -704,9 +723,10 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                 .to_string();
             // Geography variables such as `CBSA` have no `predicateType`.
             let numeric = match obj.get("predicateType") {
-                None => false,
-                Some(Value::String(t)) if NUMERIC_TYPES.contains(&t.as_str()) => true,
-                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => false,
+                None => None,
+                Some(Value::String(t)) if t == "int" => Some(NumericType::Int),
+                Some(Value::String(t)) if t == "float" => Some(NumericType::Float),
+                Some(Value::String(t)) if NON_MEASURE_TYPES.contains(&t.as_str()) => None,
                 Some(t) => {
                     return Err(CrawlError::Parse(format!(
                         "Census variables.json: {name:?} has an unknown 'predicateType' {t}"
@@ -723,6 +743,20 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                     )))
                 }
             };
+            // Every `float` measure is a rate and every rate a `float`, which is what makes
+            // `NumericType::units` right; fail rather than mislabel a variable that breaks it.
+            let named_rate = name.ends_with("_RATE")
+                || name.contains("_RATE_")
+                || label.to_lowercase().starts_with("rate of");
+            if !has_code_label
+                && numeric.is_some()
+                && (numeric == Some(NumericType::Float)) != named_rate
+            {
+                return Err(CrawlError::Parse(format!(
+                    "Census variables.json: {name:?} is a {numeric:?} but {} named as a rate",
+                    if named_rate { "is" } else { "isn't" }
+                )));
+            }
             Ok(BdsVariable {
                 name: name.clone(),
                 label,
@@ -784,7 +818,7 @@ fn is_economic_variable(var: &BdsVariable) -> bool {
         "employment",
         "establishment",
     ];
-    if !var.numeric || var.has_code_label {
+    if var.numeric.is_none() || var.has_code_label {
         return false;
     }
     let name = var.name.to_lowercase();
@@ -812,6 +846,8 @@ mod tests {
         "JOB_DESTRUCTION_CONTINUERS",
     ];
     const ESTAB_US: &str = include_str!("../../tests/fixtures/census/bds_estab_us.json");
+    const ESTABS_ENTRY_RATE_US: &str =
+        include_str!("../../tests/fixtures/census/bds_estabs_entry_rate_us.json");
     const ESTAB_STATE_06: &str =
         include_str!("../../tests/fixtures/census/bds_estab_state_06.json");
     const STATES: &str = include_str!("../../tests/fixtures/census/state.txt");
@@ -899,7 +935,7 @@ mod tests {
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "ESTAB");
         assert_eq!(vars[0].label, "Number of establishments");
-        assert!(vars[0].numeric);
+        assert_eq!(vars[0].numeric, Some(NumericType::Int));
         assert!(!vars[0].has_code_label);
     }
 
@@ -908,7 +944,7 @@ mod tests {
     fn parse_variables_accepts_missing_predicate_type() {
         let body = serde_json::json!({"variables": {"CBSA": {"label": "Metro area"}}});
         let vars = parse_variables(&body).unwrap();
-        assert!(!vars[0].numeric);
+        assert_eq!(vars[0].numeric, None);
     }
 
     /// An unknown or non-string `predicateType`, or non-string `attributes`, fails discovery
@@ -957,9 +993,9 @@ mod tests {
             numeric,
             has_code_label,
         };
-        assert!(is_economic_variable(&var(true, false)));
-        assert!(!is_economic_variable(&var(true, true)));
-        assert!(!is_economic_variable(&var(false, false)));
+        assert!(is_economic_variable(&var(Some(NumericType::Int), false)));
+        assert!(!is_economic_variable(&var(Some(NumericType::Int), true)));
+        assert!(!is_economic_variable(&var(None, false)));
     }
 
     /// Same reasoning as `parse_variables_rejects_non_object_entry`, for `geography.json`.
@@ -1058,6 +1094,8 @@ mod tests {
         assert_eq!(estab_us.title, "Number of establishments - United States");
         assert_eq!(estab_us.units.as_deref(), Some("Count"));
         assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
+        let entry_rate_ca = by_id("bds/state.06.ESTABS_ENTRY_RATE");
+        assert_eq!(entry_rate_ca.units.as_deref(), Some("Percent"));
         let estab_ca = by_id("bds/state.06.ESTAB");
         assert_eq!(estab_ca.title, "Number of establishments - California");
         assert_eq!(
@@ -1156,6 +1194,165 @@ mod tests {
             .points
             .iter()
             .all(|p| p.revision_date == p.date && p.is_original_release));
+        mock.server().verify().await;
+    }
+
+    /// Counts are stored as "Count" and the `float` rates as "Percent", from `predicateType`:
+    /// the rates are percents (`bds_estabs_entry_rate_us.json`: 10.608 for 2023), not fractions.
+    #[test]
+    fn units_follow_the_predicate_type() {
+        let vars = parse_variables(&serde_json::from_str(VARIABLES).unwrap()).unwrap();
+        let units = |name: &str| {
+            vars.iter()
+                .find(|v| v.name == name)
+                .and_then(|v| v.numeric)
+                .map(NumericType::units)
+        };
+        assert_eq!(units("ESTAB"), Some("Count"));
+        assert_eq!(units("JOB_CREATION_CONTINUERS"), Some("Count"));
+        assert_eq!(units("ESTABS_ENTRY_RATE"), Some("Percent"));
+        assert_eq!(units("EAGE"), None);
+    }
+
+    /// A `float` that isn't named as a rate, or a rate that isn't a `float`, fails the parse
+    /// rather than getting the wrong units.
+    #[test]
+    fn parse_variables_rejects_rates_and_floats_that_disagree() {
+        for (name, label, t) in [
+            ("AVG_EMP", "Average employment", "float"),
+            ("ENTRY_RATE", "Rate of entry", "int"),
+            ("CHURN", "Rate of churn", "int"),
+        ] {
+            let body =
+                serde_json::json!({"variables": {name: {"label": label, "predicateType": t}}});
+            assert!(
+                matches!(parse_variables(&body), Err(CrawlError::Parse(_))),
+                "{name} {t}"
+            );
+        }
+        // Codes are left to the code rule, whatever their names.
+        let body = serde_json::json!({"variables": {"EMPSZES": {
+            "label": "Employment size code", "predicateType": "float",
+            "attributes": "EMPSZES_LABEL"}}});
+        assert!(parse_variables(&body).is_ok());
+    }
+
+    /// A stored "Count" on a rate series becomes "Percent" through the normal crawl: discovery
+    /// writes the new units, and the next fetch (which carries no metadata) copies them.
+    #[tokio::test]
+    async fn rediscovered_units_replace_stored_ones_on_the_next_fetch() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_census_rate_units",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Census,
+                &[BDS_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/census.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds").query("get", "ESTABS_ENTRY_RATE,YEAR"),
+            Reply::json_str(ESTABS_ENTRY_RATE_US),
+        )
+        .await;
+        let adapter = adapter(&mock).await;
+        let id = "bds/national..ESTABS_ENTRY_RATE";
+        let (_, dataset) = series_key(Area::National, "ESTABS_ENTRY_RATE").unwrap();
+        let discovered = |units: &str| DiscoveredSeries {
+            external_id: id.into(),
+            title: "Rate of establishments born during the last 12 months - United States".into(),
+            description: None,
+            units: Some(units.into()),
+            frequency: Some("Annual".into()),
+            data_url: None,
+            dataset: dataset.clone(),
+        };
+        let stored_units = || async {
+            #[derive(diesel::QueryableByName)]
+            struct Row {
+                #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+                units: Option<String>,
+            }
+            use diesel_async::RunQueryDsl;
+            let mut conn = db.pool.get().await.unwrap();
+            diesel::sql_query("SELECT units FROM economic_series WHERE external_id = $1")
+                .bind::<diesel::sql_types::Text, _>(id)
+                .get_result::<Row>(&mut conn)
+                .await
+                .unwrap()
+                .units
+        };
+
+        // As stored before: discovered and fetched as "Count".
+        crate::persist::persist_discovered(&db.pool, SourceId::Census, &[discovered("Count")])
+            .await
+            .unwrap();
+        let fetched = adapter.fetch_series(&test_ctx(), id, None).await.unwrap();
+        assert_eq!(fetched.metadata, None);
+        crate::persist::persist_series(&db.pool, SourceId::Census, id, &fetched)
+            .await
+            .unwrap();
+        assert_eq!(stored_units().await.as_deref(), Some("Count"));
+
+        // Rediscovered as "Percent": the next fetch takes the new units.
+        crate::persist::persist_discovered(&db.pool, SourceId::Census, &[discovered("Percent")])
+            .await
+            .unwrap();
+        let fetched = adapter.fetch_series(&test_ctx(), id, None).await.unwrap();
+        crate::persist::persist_series(&db.pool, SourceId::Census, id, &fetched)
+            .await
+            .unwrap();
+        assert_eq!(stored_units().await.as_deref(), Some("Percent"));
+    }
+
+    /// A rate's values pass through as published: percents, such as 10.608, not fractions.
+    #[tokio::test]
+    async fn fetch_keeps_rate_values_as_published_percents() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/timeseries/bds")
+                .query("get", "ESTABS_ENTRY_RATE,YEAR")
+                .query("for", "us:*"),
+            Reply::json_str(ESTABS_ENTRY_RATE_US),
+            1,
+        )
+        .await;
+        let s = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTABS_ENTRY_RATE", None)
+            .await
+            .unwrap();
+        let got: Vec<(NaiveDate, Option<String>)> = s
+            .points
+            .iter()
+            .map(|p| (p.date, p.value.as_ref().map(ToString::to_string)))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (d("2021-01-01"), Some("10.845".into())),
+                (d("2022-01-01"), Some("11.651".into())),
+                (d("2023-01-01"), Some("10.608".into())),
+            ]
+        );
         mock.server().verify().await;
     }
 

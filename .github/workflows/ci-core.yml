@@ -285,11 +285,13 @@ jobs:
 
     # The postgres-backup CronJob's backup, sync and restore scripts, in its
     # images, against scratch econ_graph, econ_graph_app and keycloak databases
-    # and an S3 mock.
+    # and an S3 mock; and backup-postgres-now.sh, which starts one, against a stub
+    # kubectl.
     - name: Check the backup and restore scripts
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-postgres-backup-scripts.sh
+        scripts/deploy/test-backup-postgres-now.sh
 
   deploy-manifests:
     name: Deploy Manifest Rendering
@@ -308,15 +310,18 @@ jobs:
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
-    # rendering against the manifests, and the library and the cut-over's rollback
-    # NetworkPolicy step against a stub kubectl.
+    # rendering against the manifests, the library and the cut-over's rollback
+    # NetworkPolicy step against a stub kubectl, and check-public-site.sh's www
+    # redirect checks against a stub curl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
+        scripts/deploy/test-check-public-site.sh
         scripts/deploy/test-public-host-lib.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
       run: |

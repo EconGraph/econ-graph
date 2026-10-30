@@ -124,15 +124,33 @@ describe('Dashboard', () => {
     expect(await within(fedFundsCard).findByText('4.33')).toBeInTheDocument();
   });
 
+  test("shows each value's source notice with a terms link, outside the card's link", async () => {
+    mockResponses();
+    renderDashboard();
+
+    const gdpCard = card('Gross Domestic Product');
+    await within(gdpCard).findByText('29,723.9');
+    const notice = within(gdpCard).getByTestId('source-notice');
+    expect(notice).toHaveTextContent(
+      'This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.'
+    );
+    expect(within(notice).getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
+      'href',
+      'https://fred.stlouisfed.org/docs/api/terms_of_use.html'
+    );
+    expect(
+      within(gdpCard).getByRole('link', { name: 'Gross Domestic Product' })
+    ).not.toContainElement(notice);
+  });
+
   test('links each card to its series page', async () => {
     mockResponses();
     renderDashboard();
 
     await screen.findByText('29,723.9');
-    expect(within(card('Gross Domestic Product')).getByRole('link')).toHaveAttribute(
-      'href',
-      `/series/${gdp.data.seriesByExternalId.id}`
-    );
+    expect(
+      within(card('Gross Domestic Product')).getByRole('link', { name: 'Gross Domestic Product' })
+    ).toHaveAttribute('href', `/series/${gdp.data.seriesByExternalId.id}`);
     expect(within(card('Federal Funds Rate')).getByRole('link')).toHaveAttribute(
       'href',
       `/series/${fedfunds.data.seriesByExternalId.id}`

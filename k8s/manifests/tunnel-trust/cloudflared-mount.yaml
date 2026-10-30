@@ -1,0 +1,18 @@
+# Strategic merge patch: leaves replicas, token references and image unchanged.
+spec:
+  template:
+    spec:
+      containers:
+        - name: cloudflared
+          volumeMounts:
+            - name: origin-ca
+              mountPath: /etc/cloudflared/origin-ca
+              readOnly: true
+      volumes:
+        - name: origin-ca
+          configMap:
+            name: cloudflared-origin-ca
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt

@@ -393,6 +393,12 @@ export const QUERIES = {
         description
         source {
           name
+          notice {
+            citation
+            notice
+            termsUrl
+            retrievalDateRequired
+          }
         }
         frequency
         units
@@ -524,6 +530,12 @@ export const QUERIES = {
         lifecycleCounts { discontinued missingFromCatalog retired superseded }
         createdAt
         updatedAt
+        notice {
+          citation
+          notice
+          termsUrl
+          retrievalDateRequired
+        }
       }
     }
   `,

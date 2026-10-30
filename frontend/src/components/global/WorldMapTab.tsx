@@ -26,6 +26,7 @@ import {
 import InteractiveWorldMap from './InteractiveWorldMap';
 import MapLegend from './MapLegend';
 import MapValuesTable from './MapValuesTable';
+import { SourceNoticePanel } from '../common/SourceNoticePanel';
 import WorldMapControls from './WorldMapControls';
 import { worldAtlasQuery } from './worldAtlas';
 import { DEFAULT_PROJECTION } from './hooks/useWorldMap';
@@ -216,8 +217,20 @@ const WorldMapTab: React.FC = () => {
             }}
           >
             Hover over a country for its value; click it (tap twice on a touch screen) to open its
-            series. Source: {dataset?.name ?? 'World Development Indicators'}, World Bank.
+            series.{' '}
+            {/* The World Bank's dataset terms prescribe this attribution format; the source
+                notice below carries it when the API returns one. */}
+            {!dataset?.source?.notice &&
+              `The World Bank: ${dataset?.name ?? 'World Development Indicators'}.`}
           </Typography>
+          {dataset?.source && (
+            <SourceNoticePanel
+              sourceName={dataset.source.name}
+              notice={dataset.source.notice}
+              lastUpdated={null}
+              transformationLabel=''
+            />
+          )}
           {values.length > 0 && (
             <MapValuesTable values={values} unit={unit} frequency={frequency} />
           )}
