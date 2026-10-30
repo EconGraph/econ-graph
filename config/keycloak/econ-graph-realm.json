@@ -418,6 +418,21 @@
         "defaultScope": "openid profile email",
         "syncMode": "IMPORT"
       }
+    },
+    {
+      "alias": "facebook",
+      "displayName": "Facebook",
+      "providerId": "facebook",
+      "enabled": "${KC_FACEBOOK_ENABLED:false}",
+      "trustEmail": false,
+      "storeToken": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${KC_FACEBOOK_CLIENT_ID:unset}",
+        "clientSecret": "${KC_FACEBOOK_CLIENT_SECRET:unset}",
+        "defaultScope": "email,public_profile",
+        "syncMode": "IMPORT"
+      }
     }
   ],
   "clientScopeMappings": {
