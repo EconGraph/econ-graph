@@ -16,12 +16,15 @@ Inputs:
                                   database is econ_graph in pod postgresql-0.
   QA_DATA_REDEPLOY_TIMEOUT_SECONDS
                                   how long the command may run (default 2400).
-  QA_DATA_ALLOW_RUNNING_CRAWLER   1 to go on while crawler-worker is scaled above 0, before
-                                  or after the command. Otherwise that fails: a crawl changes
-                                  the rows being compared. A redeploy that starts the crawler
-                                  (deploy.sh sets it to 1 replica) therefore fails unless the
-                                  command scales it back to 0 itself, and a crawl in between
-                                  can still show as a change.
+
+Run it in a quiet window, with the crawler in static mode (CRAWLER_SCHEDULER=false; see
+docs/monitoring/crawler-coverage-runbook.md). Before each reading the data plane must be
+quiet: crawler-worker scaled to 0 or with CRAWLER_SCHEDULER=false set as a plain value on
+its deployment (one from a ConfigMap or Secret can't be read here and counts as on), and no
+crawl_queue job
+pending, processing, retrying or locked by a worker. When it isn't, before or after the
+command, the scenario ends inconclusive (a skip whose reason starts "inconclusive:"),
+neither a pass nor a failure, saying what to wait for.
 
 Each reading lists the base tables of the data database's public schema (except
 __diesel_schema_migrations) and, per table, its row count and a checksum: the sum of a hash
@@ -41,7 +44,6 @@ from qa import run as run_bounded
 COMMAND = os.environ.get('QA_DATA_REDEPLOY_COMMAND', '')
 NAMESPACE = os.environ.get('QA_DATA_NAMESPACE', 'econ-graph')
 TIMEOUT = float(os.environ.get('QA_DATA_REDEPLOY_TIMEOUT_SECONDS', '2400'))
-ALLOW_CRAWLER = os.environ.get('QA_DATA_ALLOW_RUNNING_CRAWLER') == '1'
 POD, CONTAINER, DATABASE = 'postgresql-0', 'postgresql', 'econ_graph'
 # A whole table's checksum can take minutes on data_points.
 READ_TIMEOUT = 1200
@@ -73,20 +75,37 @@ def reading():
     return {name: (int(count), checksum) for name, count, checksum in rows}
 
 
-def crawler_stopped(name, when):
-    """Record whether crawler-worker is scaled to 0 (its spec, so a starting or crash-looping
-    worker counts as running); end the scenario when it isn't and that isn't allowed."""
+ACTIVE_JOBS = """
+SELECT count(*) FROM crawl_queue
+WHERE status IN ('pending', 'processing', 'retrying') OR locked_by IS NOT NULL"""
+
+
+def quiet(when):
+    """Record that the data plane is quiet; end the scenario inconclusive when it isn't."""
     workers = kube.items('deployments', '-n', NAMESPACE, '-l', 'app=crawler-worker')
-    replicas = sum((d.get('spec') or {}).get('replicas', 1) for d in workers)
-    if replicas and not ALLOW_CRAWLER:
-        fail(name, f'crawler-worker is scaled to {replicas} in {NAMESPACE} {when}; it must be 0 for an '
-             'exact comparison (or set QA_DATA_ALLOW_RUNNING_CRAWLER=1)')
-    check(name, True, f'crawler-worker scaled to {replicas} {when}'
-          + (' (allowed by QA_DATA_ALLOW_RUNNING_CRAWLER)' if replicas else ''))
+    scheduling = []
+    for worker in workers:
+        spec = worker.get('spec') or {}
+        if spec.get('replicas', 1) == 0:
+            continue
+        env = {e.get('name'): e.get('value') for c in spec['template']['spec']['containers']
+               for e in c.get('env') or []}
+        if (env.get('CRAWLER_SCHEDULER') or '').strip().lower() != 'false':
+            scheduling.append(worker['metadata']['name'])
+    jobs = int(kube.psql(NAMESPACE, POD, CONTAINER, DATABASE, ACTIVE_JOBS)[0][0])
+    if scheduling or jobs:
+        why = []
+        if scheduling:
+            why.append(f'{", ".join(scheduling)} runs with its scheduler on; set CRAWLER_SCHEDULER=false '
+                       '(docs/monitoring/crawler-coverage-runbook.md)')
+        if jobs:
+            why.append(f'crawl_queue has {jobs} pending, processing, retrying or locked jobs; wait for it to drain')
+        skip(f'inconclusive: the crawler is active {when}: {"; ".join(why)}. Run it again in a quiet window')
+    check(f'quiet {when}', True, 'crawler in static mode or stopped, crawl_queue drained')
 
 
 try:
-    crawler_stopped('crawler stopped', 'before the redeploy')
+    quiet('before the redeploy')
     before = reading()
     check('before', True, f'{len(before)} tables, {sum(r for r, _ in before.values())} rows',
           tables={name: rows for name, (rows, _) in before.items()})
@@ -106,7 +125,7 @@ kube = Kube()
 try:
     # Unlike waiting on the pod, this also waits while the pod is still being recreated.
     kube.run('rollout', 'status', '-n', NAMESPACE, 'statefulset/postgresql', '--timeout=600s', timeout=660)
-    crawler_stopped('crawler still stopped', 'after the redeploy')
+    quiet('after the redeploy')
     after = reading()
 except KubeError as error:
     fail('after', str(error))

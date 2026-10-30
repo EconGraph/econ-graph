@@ -222,29 +222,38 @@ TABLES_SQL = 'information_schema.tables'
 COUNTS_SQL = 'UNION ALL'
 
 
-class DataSurvivesRedeployTest(ClusterScenarioTest):
-    def data_state(self, counts, crawler_replicas=0):
-        # spec.replicas, not ready ones: a starting or crash-looping worker still counts.
-        return {'resources': {'deployments': [meta('crawler-worker', 'econ-graph', {'app': 'crawler-worker'},
-                                                   spec={'replicas': crawler_replicas},
-                                                   status={'readyReplicas': 0})]},
-                'sql': [['econ-graph', TABLES_SQL, 'data_points\neconomic_series\ncountries'],
-                        ['econ-graph', COUNTS_SQL, counts]]}
+QUEUE_SQL = 'FROM crawl_queue'
 
+
+class DataSurvivesRedeployTest(ClusterScenarioTest):
     BEFORE = 'data_points|1000|123456\neconomic_series|10|987\ncountries|3|55'
 
-    def redeploy_to(self, counts, crawler_replicas=0):
+    def data_state(self, counts, scheduler='false', replicas=1, queued=0):
+        env = [] if scheduler is None else [{'name': 'CRAWLER_SCHEDULER', 'value': scheduler}]
+        worker = meta('crawler-worker', 'econ-graph', {'app': 'crawler-worker'}, spec={
+            'replicas': replicas,
+            'template': {'spec': {'containers': [{'name': 'crawler-worker', 'env': env}]}}})
+        return {'resources': {'deployments': [worker]},
+                'sql': [['econ-graph', QUEUE_SQL, str(queued)],
+                        ['econ-graph', TABLES_SQL, 'data_points\neconomic_series\ncountries'],
+                        ['econ-graph', COUNTS_SQL, counts]]}
+
+    def redeploy_to(self, counts, **after_state):
         after = self.dir / 'after.json'
-        after.write_text(json.dumps(self.data_state(counts, crawler_replicas)))
+        after.write_text(json.dumps(self.data_state(counts, **after_state)))
         return {'QA_DATA_REDEPLOY_COMMAND': f'echo redeployed >> "{self.dir}/redeploy.log"; '
                                             f'cp "{after}" "{self.state}"'}
+
+    def redeployed(self):
+        log = self.dir / 'redeploy.log'
+        return log.exists()
 
     def test_unchanged_rows_pass(self):
         self.set_state(**self.data_state(self.BEFORE))
         code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(self.BEFORE))
         self.assertEqual(code, 0, result)
-        self.assertEqual(checks, {'crawler stopped': True, 'before': True, 'redeploy': True,
-                                  'crawler still stopped': True, 'same tables': True,
+        self.assertEqual(checks, {'quiet before the redeploy': True, 'before': True, 'redeploy': True,
+                                  'quiet after the redeploy': True, 'same tables': True,
                                   'countries unchanged': True, 'data_points unchanged': True,
                                   'economic_series unchanged': True})
         self.assertEqual((self.dir / 'redeploy.log').read_text(), 'redeployed\n')
@@ -257,7 +266,19 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
         for table in ('data_points', 'economic_series', 'countries'):
             self.assertIn(f'hashtextextended("{table}"::text, 0)', counts[0])
         self.assertNotIn('.id::text', counts[0])
+        # The queue is read before each reading, and counts every kind of unfinished job.
+        queue = [s for s in sql if QUEUE_SQL in s]
+        self.assertEqual(len(queue), 2)
+        for state in ("'pending'", "'processing'", "'retrying'", 'locked_by IS NOT NULL'):
+            self.assertIn(state, queue[0])
         self.assert_only_the_context()
+
+    def test_a_stopped_crawler_is_quiet(self):
+        state = dict(scheduler=None, replicas=0)
+        self.set_state(**self.data_state(self.BEFORE, **state))
+        code, result, _ = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(self.BEFORE, **state))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'pass')
 
     def test_a_changed_count_or_checksum_or_table_fails(self):
         for label, after, failing in (
@@ -268,25 +289,44 @@ class DataSurvivesRedeployTest(ClusterScenarioTest):
                 self.set_state(**self.data_state(self.BEFORE))
                 code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(after))
                 self.assertEqual(code, 1, result)
+                self.assertEqual(result['status'], 'fail')
                 self.assertEqual({k for k, ok in checks.items() if not ok}, failing)
 
-    def test_a_redeploy_that_starts_the_crawler_fails(self):
-        self.set_state(**self.data_state(self.BEFORE))
-        code, result, checks = self.run_scenario('data-survives-redeploy',
-                                                 extra=self.redeploy_to(self.BEFORE, crawler_replicas=1))
-        self.assertEqual(code, 1)
-        self.assertFalse(checks['crawler still stopped'])
-        self.assertNotIn('same tables', checks)
+    def test_an_active_crawler_before_the_redeploy_is_inconclusive(self):
+        for label, state, says in (
+                ('scheduler on', dict(scheduler='true'), 'CRAWLER_SCHEDULER=false'),
+                ('scheduler unset', dict(scheduler=None), 'CRAWLER_SCHEDULER=false'),
+                ('jobs queued', dict(queued=3), '3 pending, processing, retrying or locked jobs')):
+            with self.subTest(label):
+                self.set_state(**self.data_state(self.BEFORE, **state))
+                code, result, checks = self.run_scenario('data-survives-redeploy',
+                                                         extra=self.redeploy_to(self.BEFORE))
+                self.assertEqual(code, 0, result)
+                self.assertEqual(result['status'], 'skip')
+                self.assertTrue(result['reason'].startswith('inconclusive: the crawler is active before'),
+                                result['reason'])
+                self.assertIn(says, result['reason'])
+                self.assertIn('quiet window', result['reason'])
+                self.assertFalse(self.redeployed())
+                self.assertNotIn(False, checks.values())
 
-    def test_a_running_crawler_fails_before_the_redeploy(self):
-        self.set_state(**self.data_state(self.BEFORE, crawler_replicas=1))
-        code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(self.BEFORE))
-        self.assertEqual(code, 1)
-        self.assertEqual(checks, {'crawler stopped': False})
-        self.assertFalse((self.dir / 'redeploy.log').exists())
-        code, result, checks = self.run_scenario('data-survives-redeploy', extra=dict(
-            self.redeploy_to(self.BEFORE), QA_DATA_ALLOW_RUNNING_CRAWLER='1'))
+    def test_an_active_crawler_after_the_redeploy_is_inconclusive_not_a_failure(self):
+        # The rows changed too, but with the crawler active that proves nothing either way.
+        self.set_state(**self.data_state(self.BEFORE))
+        code, result, checks = self.run_scenario('data-survives-redeploy', extra=self.redeploy_to(
+            self.BEFORE.replace('1000|', '1200|'), scheduler='true', queued=5))
         self.assertEqual(code, 0, result)
+        self.assertEqual(result['status'], 'skip')
+        self.assertTrue(result['reason'].startswith('inconclusive: the crawler is active after'), result['reason'])
+        self.assertTrue(self.redeployed())
+        self.assertNotIn('data_points unchanged', checks)
+
+    def test_inconclusive_does_not_satisfy_require_pass(self):
+        self.set_state(**self.data_state(self.BEFORE, queued=1))
+        env = dict(self.env, **self.redeploy_to(self.BEFORE))
+        code, _, _ = run_main(['--target', 'http://lab.example', '--profile', 'lab', '--only',
+                               'data-survives-redeploy', '--require-pass', 'data-survives-redeploy'], env)
+        self.assertEqual(code, 1)
 
     def test_a_failed_redeploy_fails(self):
         self.set_state(**self.data_state(self.BEFORE))
