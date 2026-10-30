@@ -256,6 +256,7 @@ pub fn api_key_env_var(source: SourceId) -> Option<&'static str> {
         SourceId::Bls => Some("BLS_API_KEY"),
         SourceId::Bea => Some("BEA_API_KEY"),
         SourceId::Census => Some("CENSUS_API_KEY"),
+        SourceId::Wto => Some("WTO_API_KEY"),
         _ => None,
     }
 }
@@ -1199,6 +1200,7 @@ mod tests {
         assert!(out.contains("FRED_API_KEY set (required)"), "{out}");
         assert!(out.contains("BEA_API_KEY NOT SET (required)"), "{out}");
         assert!(out.contains("CENSUS_API_KEY NOT SET (required)"), "{out}");
+        assert!(out.contains("WTO_API_KEY NOT SET (required)"), "{out}");
         assert!(!out.contains("secret-value"), "never print key values");
     }
 

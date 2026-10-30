@@ -14,7 +14,7 @@ the defaults; adapters can override them.
 and concurrency limit for each source within one process. Separate worker processes do not
 share these limits.
 
-The [production registry](../../backend/crates/econ-graph-crawler/src/sources/mod.rs) has six
+The [production registry](../../backend/crates/econ-graph-crawler/src/sources/mod.rs) has seven
 live adapters. Their effective policies are:
 
 | Source | Sustained request rate | Burst | Maximum concurrent requests |
@@ -25,9 +25,11 @@ live adapters. Their effective policies are:
 | BEA | 30 requests/minute | 1 | 1 |
 | World Bank | 1 request/second | 1 | 2 |
 | FHFA | 1 request/second | 1 | 2 |
+| WTO | 1 request/second | 1 | 1 |
 
 The FRED, BLS, Census, and BEA rates were inherited from the legacy scheduler, as recorded in
-`policy.rs`. World Bank and FHFA use the general default. The BLS, World Bank, and FHFA
+`policy.rs`. World Bank and FHFA use the general default. WTO follows the provider's published limit
+(below). The BLS, World Bank, and FHFA
 adapter overrides change batching without changing these request rates. These values govern
 HTTP attempts, including retries; they do not count series or enforce daily or data-volume
 quotas. A sustained rate and burst capacity do not guarantee compliance with a provider's
@@ -89,6 +91,18 @@ The [World Bank API call structures guide](https://datahelpdesk.worldbank.org/kn
 describes API requests but does not state a numerical request-rate quota. The crawler's
 1 request/second is an application default, not a quota established by that guide.
 
+### WTO
+
+The WTO Timeseries API's only subscription product on the
+[WTO API portal](https://apiportal.wto.org/products), "Standard" (free), allows 10 calls/second
+and at most 10,000 calls/hour per key, and 1 call/second for the time-series data endpoints
+(`/data` and `/data_count`). The crawler holds every WTO request to 1 request/second with no
+burst and one request at a time, which also keeps the hourly total at 3,600. The
+[WTO adapter](../../backend/crates/econ-graph-crawler/src/sources/wto.rs) makes two requests per
+indicator for a discovery or a fetch batch, so a full crawl of its curated indicators takes a
+few dozen requests. The portal answers an exhausted quota with HTTP 403; the adapter treats a
+403 that mentions the quota as rate limiting rather than an authentication failure.
+
 ### FHFA
 
 FHFA publishes the [HPI master data as downloadable files](https://www.fhfa.gov/data/hpi/datasets).
@@ -106,15 +120,15 @@ these file requests.
 ## Source-row metadata and catalog entries
 
 [`data_source.rs`](../../backend/crates/econ-graph-core/src/models/data_source.rs) defines
-`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, and BEA, FHFA,
-World Bank, IMF, ECB, OECD, Bank of England, WTO, Bank of Japan, Reserve Bank of Australia,
+`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, WTO 60, and BEA,
+FHFA, World Bank, IMF, ECB, OECD, Bank of England, Bank of Japan, Reserve Bank of Australia,
 Bank of Canada, Swiss National Bank, UN Statistics Division, and ILO 1000. These defaults
 are neither the main crawler's enforced HTTP policies nor evidence of provider quotas;
 existing database rows can also differ from model defaults.
 
 The main crawler provides development-only
 [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs) for
-ECB, OECD, Bank of England, WTO, Bank of Japan, Reserve Bank of Australia, Bank of Canada,
+ECB, OECD, Bank of England, Bank of Japan, Reserve Bank of Australia, Bank of Canada,
 Swiss National Bank, UN Statistics Division, and ILO when `flag_static_catalogs` is enabled.
 They do not make live provider requests. IMF has no adapter in the registry. A model row or
 a default `SourcePolicy` for one of these sources does not imply HTTP traffic to that provider.

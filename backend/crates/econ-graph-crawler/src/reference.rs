@@ -10,8 +10,8 @@
 //! `CRAWLER_DATA_DIR` to it.
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
-//! worker checks them at startup ([`bls_series`], [`fred_series`], [`wdi_indicators`]) rather
-//! than on its first job.
+//! worker checks them at startup ([`bls_series`], [`fred_series`], [`wdi_indicators`],
+//! [`wto_indicators`]) rather than on its first job.
 //!
 //! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
 //! through [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load).
@@ -38,6 +38,9 @@ pub const BLS_SERIES_FILE: &str = "bls_series.csv";
 
 /// File name of the curated FRED series list in the data directory.
 pub const FRED_SERIES_FILE: &str = "fred_series.csv";
+
+/// File name of the curated WTO Timeseries indicator list in the data directory.
+pub const WTO_INDICATORS_FILE: &str = "wto_indicators.csv";
 
 /// A BLS series the crawler discovers and fetches. Only the id is curated here: its title, units
 /// and frequency come from BLS (see [`crate::sources::bls`]).
@@ -113,6 +116,84 @@ fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
         }
         if row.unit.is_empty() {
             return Err(format!("indicator {id}: empty unit"));
+        }
+        if !seen.insert(id.clone()) {
+            return Err(format!("indicator {id} is listed twice"));
+        }
+        out.push(row);
+    }
+    if out.is_empty() {
+        return Err("no indicators".into());
+    }
+    Ok(out)
+}
+
+/// One WTO Timeseries indicator the WTO adapter crawls, with the product/sector and partner
+/// economy that select its headline series. Its name, unit and frequency are not shipped here:
+/// [`crate::sources::wto`] reads them from the WTO's own `/indicators` endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WtoIndicator {
+    /// WTO indicator code, e.g. `ITS_MTV_AX`.
+    pub id: String,
+    /// Product/sector code sent as `pc` (e.g. `TO`, total merchandise), or empty for an indicator
+    /// requested without one (the API's default).
+    pub product: String,
+    /// Partner economy code sent as `p` (e.g. `000`, the world), or empty for an indicator
+    /// requested without one (the API's default).
+    pub partner: String,
+}
+
+/// The indicators from `wto_indicators.csv` in [`data_dir`], read on first use and cached.
+///
+/// A missing, malformed or empty file, a duplicate id, or an id, product or partner that is not
+/// made of ASCII letters, digits and `_` (so it can break neither a request nor a canonical
+/// series id) is a `Permanent` error, with the path in the message.
+pub fn wto_indicators() -> Result<&'static [WtoIndicator], CrawlError> {
+    static INDICATORS: OnceLock<Result<Vec<WtoIndicator>, String>> = OnceLock::new();
+    INDICATORS
+        .get_or_init(|| load_wto_indicators(&data_dir().join(WTO_INDICATORS_FILE)))
+        .as_deref()
+        .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+fn load_wto_indicators(path: &Path) -> Result<Vec<WtoIndicator>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
+    parse_wto_indicators(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Parses `id,product,partner` rows after a header line (`#` comment lines skipped; product and
+/// partner may be empty) and checks them.
+fn parse_wto_indicators(text: &str) -> Result<Vec<WtoIndicator>, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .trim(csv::Trim::All)
+        .from_reader(text.as_bytes());
+    let header = reader.headers().map_err(|e| e.to_string())?.clone();
+    if header.iter().ne(["id", "product", "partner"]) {
+        return Err(format!(
+            "expected header id,product,partner, got {}",
+            header.iter().collect::<Vec<_>>().join(",")
+        ));
+    }
+    let code_like = |s: &str| s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for record in reader.deserialize::<WtoIndicator>() {
+        let row = record.map_err(|e| e.to_string())?;
+        let id = &row.id;
+        if id.is_empty() || !code_like(id) {
+            return Err(format!(
+                "indicator id {id:?} is empty or not letters, digits and _"
+            ));
+        }
+        for (what, v) in [("product", &row.product), ("partner", &row.partner)] {
+            if !code_like(v) {
+                return Err(format!(
+                    "indicator {id}: {what} {v:?} is not letters, digits and _"
+                ));
+            }
         }
         if !seen.insert(id.clone()) {
             return Err(format!("indicator {id} is listed twice"));
@@ -328,6 +409,64 @@ mod tests {
                 id: "A".into(),
                 unit: "u".into(),
             }]
+        );
+    }
+
+    /// The shipped WTO list parses and holds the headline trade and tariff indicators.
+    #[test]
+    fn shipped_wto_indicators_file_is_valid() {
+        let list = load_wto_indicators(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("data")
+                .join(WTO_INDICATORS_FILE),
+        )
+        .unwrap();
+        for id in [
+            "ITS_MTV_AX",
+            "ITS_MTV_AM",
+            "ITS_CS_AX6",
+            "ITS_CS_AM6",
+            "TP_A_0010",
+        ] {
+            assert!(list.iter().any(|i| i.id == id), "{id}");
+        }
+        let exports = list.iter().find(|i| i.id == "ITS_MTV_AX").unwrap();
+        assert_eq!(
+            (exports.product.as_str(), exports.partner.as_str()),
+            ("TO", "000")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_wto_indicators() {
+        const H: &str = "id,product,partner\n";
+        for (text, needle) in [
+            ("id,unit\n".to_string(), "expected header"),
+            (H.to_string(), "no indicators"),
+            (format!("{H}A/B,,\n"), "not letters"),
+            (format!("{H}A B,,\n"), "not letters"),
+            (format!("{H}A,T.O,\n"), "product"),
+            (format!("{H}A,,0,0\n"), "found record with 4 fields"),
+            (format!("{H}A,,\nA,TO,\n"), "twice"),
+        ] {
+            let e = parse_wto_indicators(&text).unwrap_err();
+            assert!(e.contains(needle), "{text:?}: {e}");
+        }
+        let ok = parse_wto_indicators(&format!("# c\n{H} A , TO , 000 \nB,,\n")).unwrap();
+        assert_eq!(
+            ok,
+            [
+                WtoIndicator {
+                    id: "A".into(),
+                    product: "TO".into(),
+                    partner: "000".into(),
+                },
+                WtoIndicator {
+                    id: "B".into(),
+                    product: String::new(),
+                    partner: String::new(),
+                },
+            ]
         );
     }
 

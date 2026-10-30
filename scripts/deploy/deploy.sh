@@ -303,7 +303,8 @@ fi
 render_manifest k8s/manifests/backend-deployment.yaml | kubectl apply -f -
 kubectl apply -f k8s/manifests/backend-service.yaml
 # Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
-# written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
+# written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY,
+# WTO_API_KEY.
 kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml

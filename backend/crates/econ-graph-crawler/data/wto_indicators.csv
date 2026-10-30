@@ -1,0 +1,20 @@
+# WTO Timeseries API indicators the WTO adapter crawls (sources/wto.rs): one request per
+# indicator for every reporting economy. Names, units and frequencies are not shipped here: the
+# adapter reads them from the WTO's own /indicators endpoint on every crawl.
+#
+# `product` and `partner` pick the headline series of an indicator that has those dimensions
+# (sent as the API's `pc` and `p` parameters); leave them empty for an indicator without them.
+#   TO   total merchandise (SITC Rev.3 classification of the merchandise trade indicators)
+#   S    total services (EBOPS 2010 classification of the BPM6 services indicators)
+#   000  World, as partner: a reporter's trade with every partner
+#
+# ITS_MTV_AX / ITS_MTV_AM  merchandise exports / imports, annual values
+# ITS_CS_AX6 / ITS_CS_AM6  services exports / imports by sector and partner, annual values (BPM6)
+# TP_A_0010 / TP_A_0030    tariff profile headline averages over all products
+id,product,partner
+ITS_MTV_AX,TO,000
+ITS_MTV_AM,TO,000
+ITS_CS_AX6,S,000
+ITS_CS_AM6,S,000
+TP_A_0010,,
+TP_A_0030,,
