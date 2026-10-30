@@ -6,14 +6,14 @@ include recorded series metadata and illustrative observation responses.
 
 ## What we fetch today
 
-Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the 1,540 IDs in
+Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the 1,533 IDs in
 the [curated series list](../../backend/crates/econ-graph-crawler/data/fred_series.csv):
 national accounts and PCE detail, prices, employment detail, rates and spreads, money and
 credit, housing, production and sales, international headline series (exchange rates, dollar
 indexes, trade by partner, World Bank GDP and inflation), state-level regional series, and the
 NBER recession indicator (`USREC`). A first crawl makes about four requests per ID (discovery's
 `/series`, then fetch's `/series`, `/series/vintagedates` and one `/series/observations` page),
-about 6,200 requests, under an hour at the adapter's 120 requests a minute. Discovery excludes
+about 6,100 requests, under an hour at the adapter's 120 requests a minute. Discovery excludes
 series whose `notes` match known copyright or reproduction-restriction phrases, such as those on
 Coinbase and S&P/Case-Shiller series. The curated list bounds discovery; the earlier
 `/series/search` crawl had no bound on how many series it could find.

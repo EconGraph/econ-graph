@@ -10,16 +10,16 @@
 # spreads, money and credit, housing, production and sales, international headline series and
 # state-level regional series. That keeps a first crawl bounded and predictable: about four FRED
 # requests per id (discovery's /series lookup, then fetch's /series, /series/vintagedates and one
-# /series/observations page), about 6,200 requests, under an hour at the adapter's 120 requests a
+# /series/observations page), about 6,100 requests, under an hour at the adapter's 120 requests a
 # minute. Series with more than 1,000 vintage dates take one more observations request per
 # 1,000.
 #
 # Each id was checked against its public FRED series page when it was added: the series exists,
 # is not discontinued, has a recent observation, FRED classifies it as public domain or
 # "citation required" (not "pre-approval required"), and its notes carry none of the phrases
-# is_copyright_restricted looks for. The exceptions are the few series whose comments below say
-# they are kept on purpose. #252's notes filter still runs on each id's live metadata at
-# discovery as a safety net, in case FRED restricts a series later.
+# is_copyright_restricted looks for, so discovery keeps every id listed here. #252's notes
+# filter still runs on each id's live metadata at discovery as a safety net, in case FRED
+# restricts a series later.
 series_id
 #
 # --- GDP and national accounts ---
@@ -184,11 +184,6 @@ PPIFIS
 T10YIE
 T5YIE
 T5YIFR
-# University of Michigan Surveys of Consumers series carry a "used with permission"/copyright
-# notice on FRED; the copyright-notes safety net (is_copyright_restricted) may drop this one as
-# an over-inclusive false positive until ECO-201's tag-based check lands. Kept curated so it's
-# picked up once that check is more precise.
-MICH
 #
 # --- Price detail: CPI components, expectations, PPI, trade, energy, average prices ---
 CPIAPPSL
@@ -543,14 +538,6 @@ T10Y2Y
 T10Y3M
 T10YFF
 TB3MS
-# The next five (Freddie Mac mortgage rates, Moody's corporate bond yields) also carry
-# copyright/attribution notices on FRED; see the MICH comment above for why they're still
-# curated even though the safety net may currently drop them.
-MORTGAGE30US
-MORTGAGE15US
-AAA
-BAA
-BAA10Y
 DPRIME
 #
 # --- Rates and spreads detail: Treasury, TIPS, bills, paper, money markets, loans ---
@@ -738,10 +725,6 @@ HOUST1F
 PERMIT
 MSPUS
 MSPNHSUS
-# NAR (National Association of Realtors) series carry a "used with permission" notice on FRED;
-# see the MICH comment above for why it's still curated even though the safety net may currently
-# drop it.
-EXHOSLUSM495S
 MSACSR
 RRVRUSQ156N
 USSTHPI
