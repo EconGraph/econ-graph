@@ -111,8 +111,9 @@ impl Drop for ScratchDatabase {
 /// Test container for database testing
 pub struct TestContainer {
     pool: DatabasePool,
+    database_url: String,
     #[cfg(test)]
-    _container: ContainerAsync<GenericImage>,
+    _container: Arc<ContainerAsync<GenericImage>>,
 }
 
 impl TestContainer {
@@ -149,7 +150,8 @@ impl TestContainer {
 
             Self {
                 pool,
-                _container: container,
+                database_url,
+                _container: Arc::new(container),
             }
         } else {
             println!("DEBUG: Using testcontainers for ephemeral database");
@@ -184,7 +186,8 @@ impl TestContainer {
 
             Self {
                 pool,
-                _container: container,
+                database_url,
+                _container: Arc::new(container),
             }
         }
     }
@@ -200,7 +203,21 @@ impl TestContainer {
             .expect("Failed to connect to test database. Set DATABASE_URL to a reachable Postgres instance.");
 
         // Don't run migrations automatically - let tests handle this after cleaning
-        Self { pool }
+        Self { pool, database_url }
+    }
+
+    /// The same database (and container) with a pool of its own, opened on the calling
+    /// runtime.
+    async fn with_own_pool(&self) -> Self {
+        let pool = crate::database::create_pool(&self.database_url)
+            .await
+            .expect("Failed to connect to test database");
+        Self {
+            pool,
+            database_url: self.database_url.clone(),
+            #[cfg(test)]
+            _container: self._container.clone(),
+        }
     }
 
     /// Get the database pool
@@ -317,15 +334,20 @@ pub async fn insert_series_without_observations(
     .id
 }
 
-/// Global test database instance
+/// The test database every test shares: its server, and container, start once.
 static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
 
-/// Get or create the global test database
+/// The shared test database, with a connection pool of the caller's own.
+///
+/// The pool isn't shared: each `#[tokio::test]` runs on a runtime of its own, and a
+/// diesel-async connection's driver task lives on the runtime that opened it. A pool shared
+/// across tests hands one test connections that die when another test's runtime ends, and
+/// their queries fail with "connection closed" (or the pool times out replacing them).
 pub async fn get_test_db() -> Arc<TestContainer> {
-    TEST_DB
+    let shared = TEST_DB
         .get_or_init(|| async { Arc::new(TestContainer::new().await) })
-        .await
-        .clone()
+        .await;
+    Arc::new(shared.with_own_pool().await)
 }
 
 /// Test database function for compatibility
