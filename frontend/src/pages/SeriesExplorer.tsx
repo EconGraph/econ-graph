@@ -59,6 +59,34 @@ const SEARCH_LIMIT = 100;
 /** How long typing must pause before the search is sent. */
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** Results per page. */
+const PAGE_SIZE = 20;
+
+/** Highest page a `page` URL parameter can ask for. A page past the last shows the last. */
+const MAX_PAGE = 100_000;
+
+/** The result orders, as the `sort` URL parameter names them. */
+const SORT_ORDERS = ['relevance', 'title', 'lastUpdated'] as const;
+type SortOrder = (typeof SORT_ORDERS)[number];
+
+/**
+ * Reads the `page` URL parameter: a positive whole number, or page 1 for anything else.
+ * @param value - The raw `page` URL parameter, if any.
+ * @returns The 1-based page.
+ */
+export const parsePageParam = (value: string | null): number => {
+  if (!value || !/^\d+$/.test(value)) return 1;
+  return Math.min(Math.max(Number(value), 1), MAX_PAGE);
+};
+
+/**
+ * Reads the `sort` URL parameter: one of the result orders, or relevance for anything else.
+ * @param value - The raw `sort` URL parameter, if any.
+ * @returns The sort order.
+ */
+export const parseSortParam = (value: string | null): SortOrder =>
+  SORT_ORDERS.find(order => order === value) ?? 'relevance';
+
 export interface DataSourceOption {
   id: string;
   name: string;
@@ -127,20 +155,20 @@ const toBackendFrequency = (frequency: string): string | undefined =>
 /**
  * What the result count says while browsing a source without a query.
  * @param shown - Series left after the page's own frequency filter.
- * @param loaded - Series the backend returned (the first page, by title).
+ * @param loaded - Series the backend returned for this page, by title.
+ * @param offset - Series in title order before this page.
  * @param total - Series the source has under the backend's filters.
  * @returns The message.
  */
-const browseMessage = (shown: number, loaded: number, total: number): string => {
+const browseMessage = (shown: number, loaded: number, offset: number, total: number): string => {
   const n = (x: number) => x.toLocaleString();
-  if (shown < loaded) {
-    return total > loaded
-      ? `${n(shown)} matching series among the first ${n(loaded)} of ${n(total)}, by title. Search to narrow them.`
-      : `${n(shown)} matching series of ${n(total)}, by title`;
+  if (total <= loaded) {
+    return shown < loaded
+      ? `${n(shown)} matching series of ${n(total)}, by title`
+      : `${n(total)} series, by title`;
   }
-  return total > loaded
-    ? `Showing the first ${n(loaded)} of ${n(total)} series, by title. Search to narrow them.`
-    : `${n(total)} series, by title`;
+  const range = `${n(offset + 1)}–${n(offset + loaded)} of ${n(total)} series, by title`;
+  return shown < loaded ? `${n(shown)} matching series among ${range}` : range;
 };
 
 /**
@@ -159,7 +187,12 @@ const SeriesExplorer: React.FC = () => {
   const [selectedFrequency, setSelectedFrequency] = React.useState(
     searchParams.get('frequency') || ''
   );
-  const [currentPage, setCurrentPage] = React.useState(1);
+  const [currentPage, setCurrentPage] = React.useState(() =>
+    parsePageParam(searchParams.get('page'))
+  );
+  const [sortBy, setSortBy] = React.useState<SortOrder>(() =>
+    parseSortParam(searchParams.get('sort'))
+  );
 
   // Send the search once typing pauses, not on every keystroke
   const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
@@ -182,13 +215,13 @@ const SeriesExplorer: React.FC = () => {
       setDebouncedQuery(query.trim());
       setSelectedSource(searchParams.get('source') || '');
       setSelectedFrequency(searchParams.get('frequency') || '');
-      setCurrentPage(1);
+      setCurrentPage(parsePageParam(searchParams.get('page')));
+      setSortBy(parseSortParam(searchParams.get('sort')));
     }
   }
 
   // Advanced search state
   const [showAdvancedSearch, setShowAdvancedSearch] = React.useState(false);
-  const [sortBy, setSortBy] = React.useState('relevance');
 
   // Export and UI state
   const [exportMenuAnchor, setExportMenuAnchor] = React.useState<null | HTMLElement>(null);
@@ -233,10 +266,17 @@ const SeriesExplorer: React.FC = () => {
   // With no query but a source picked (the data sources page's Browse series), list what
   // that source has instead of an empty page. Only a source the backend
   // listed counts, so an unknown name in the URL still asks for a search; a frequency alone
-  // isn't browsed, as it would sort the whole catalog.
+  // isn't browsed, as it would sort the whole catalog. The backend pages through the source
+  // in title order, so every series in it can be reached.
   const browsing = debouncedQuery.length < 2 && Boolean(activeSource) && !waitingForSources;
+  const browseOffset = (currentPage - 1) * PAGE_SIZE;
   const browseResult = useSeriesBrowse(
-    { sourceId: activeSource || undefined, frequency: backendFrequency, limit: SEARCH_LIMIT },
+    {
+      sourceId: activeSource || undefined,
+      frequency: backendFrequency,
+      limit: PAGE_SIZE,
+      offset: browseOffset,
+    },
     browsing
   );
   const activeResult = browsing ? browseResult : searchResult;
@@ -288,7 +328,8 @@ const SeriesExplorer: React.FC = () => {
       });
     }
 
-    // Relevance keeps the backend's order
+    // Relevance keeps the backend's order, as does browsing (by title, a page at a time)
+    if (browsing) return filtered;
     if (sortBy === 'title') {
       filtered = [...filtered].sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === 'lastUpdated') {
@@ -299,16 +340,25 @@ const SeriesExplorer: React.FC = () => {
     }
 
     return filtered;
-  }, [selectedFrequency, backendFrequency, sortBy, allSeries]);
+  }, [selectedFrequency, backendFrequency, sortBy, browsing, allSeries]);
 
-  // Pagination
-  const itemsPerPage = 20;
-  const totalPages = Math.ceil(filteredSeries.length / itemsPerPage);
-  // A refetch can return fewer results, so never stay past the last page
-  const page = Math.min(currentPage, Math.max(totalPages, 1));
-  const startIndex = (page - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedSeries = filteredSeries.slice(startIndex, endIndex);
+  // Pagination. A search's results are paged here; a browse is paged by the backend, which
+  // returns just this page.
+  const totalPages = Math.ceil((browsing ? browseTotal : filteredSeries.length) / PAGE_SIZE);
+  const lastPage = Math.max(totalPages, 1);
+  const page = Math.min(currentPage, lastPage);
+  const startIndex = (page - 1) * PAGE_SIZE;
+  const paginatedSeries = browsing
+    ? filteredSeries
+    : filteredSeries.slice(startIndex, startIndex + PAGE_SIZE);
+
+  // A page past the last (an old link, a refetch with fewer results, or a viewer who can read
+  // fewer series than whoever shared the link) moves to the last page once the results are in.
+  // A browse then fetches that page, so until then the results show as loading. Adjusted
+  // during render, like the form's sync with the URL above.
+  const resultsSettled = Boolean(activeResult?.data) && !activeResult?.isFetching;
+  const pastLastPage = resultsSettled && currentPage > lastPage;
+  if (pastLastPage) setCurrentPage(lastPage);
 
   // Update URL parameters when filters change. `source` is written back as `selectedSource`,
   // not the resolved id: a link that arrived with a source name (an old bookmark, say) keeps
@@ -316,14 +366,30 @@ const SeriesExplorer: React.FC = () => {
   // to — a same-site navigation is expected to keep every query parameter it arrived with.
   // Nothing is written when the URL already says the same, as it does right after the form
   // took a navigation's values above.
+  // The sort and page are written only when they aren't the defaults (relevance, page 1).
   React.useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
     if (selectedSource) params.set('source', selectedSource);
     if (selectedFrequency) params.set('frequency', selectedFrequency);
+    if (sortBy !== 'relevance') params.set('sort', sortBy);
+    if (currentPage > 1) params.set('page', String(currentPage));
     if (params.toString() === searchParams.toString()) return;
     setSearchParams(params, { replace: true, state: { explorerForm: true } });
-  }, [searchQuery, selectedSource, selectedFrequency, searchParams, setSearchParams]);
+  }, [
+    searchQuery,
+    selectedSource,
+    selectedFrequency,
+    sortBy,
+    currentPage,
+    searchParams,
+    setSearchParams,
+  ]);
+
+  // A result opens with this page's URL in its history state, so the series page's links back
+  // to the explorer return to these results rather than an empty explorer.
+  const openSeries = (id: string) =>
+    navigate(`/series/${id}`, { state: { explorerUrl: `${location.pathname}${location.search}` } });
 
   // Keyboard shortcuts
   React.useEffect(() => {
@@ -417,7 +483,7 @@ const SeriesExplorer: React.FC = () => {
             boxShadow: 4,
           },
         }}
-        onClick={() => navigate(`/series/${series.id}`)}
+        onClick={() => openSeries(series.id)}
       >
         <CardContent sx={{ flexGrow: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
@@ -476,7 +542,7 @@ const SeriesExplorer: React.FC = () => {
             size='small'
             onClick={e => {
               e.stopPropagation();
-              navigate(`/series/${series.id}`);
+              openSeries(series.id);
             }}
           >
             View Details
@@ -624,11 +690,14 @@ const SeriesExplorer: React.FC = () => {
             <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel id='sort-by-label'>Sort By</InputLabel>
+                {/* A source's listing comes a page at a time in title order, so it can't be
+                    reordered here */}
                 <Select
                   labelId='sort-by-label'
-                  value={sortBy}
+                  value={browsing ? 'title' : sortBy}
+                  disabled={browsing}
                   onChange={e => {
-                    setSortBy(e.target.value);
+                    setSortBy(parseSortParam(e.target.value));
                     setCurrentPage(1);
                   }}
                   label='Sort By'
@@ -672,10 +741,10 @@ const SeriesExplorer: React.FC = () => {
       )}
 
       {/* Result count */}
-      {searchResults && hasQuery && !showLoading && !searchError && (
+      {searchResults && hasQuery && !showLoading && !pastLastPage && !searchError && (
         <Alert severity='info' sx={{ mb: 3 }}>
           {browsing
-            ? browseMessage(filteredSeries.length, searchResults.length, browseTotal)
+            ? browseMessage(filteredSeries.length, searchResults.length, browseOffset, browseTotal)
             : searchResults.length >= SEARCH_LIMIT
               ? `Showing matches among the first ${SEARCH_LIMIT} results. Refine the search to narrow them.`
               : `Found ${filteredSeries.length.toLocaleString()} ${
@@ -685,7 +754,7 @@ const SeriesExplorer: React.FC = () => {
       )}
 
       {/* Results */}
-      {showLoading ? (
+      {showLoading || pastLastPage ? (
         <Grid container spacing={3}>
           {Array.from({ length: 8 }).map((_, index) => (
             <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
@@ -739,7 +808,10 @@ const SeriesExplorer: React.FC = () => {
               <Pagination
                 count={totalPages}
                 page={page}
-                onChange={(_, page) => setCurrentPage(page)}
+                onChange={(_, page) => {
+                  setCurrentPage(page);
+                  window.scrollTo(0, 0);
+                }}
                 color='primary'
                 size='large'
               />
