@@ -7,7 +7,7 @@ All notable changes to EconGraph are documented here. The format follows
 ## [4.0.1] - 2026-10-30
 
 Sign-in on https://econgraph.com, the explorer's source links and the privacy policy on phones
-work again, and the deploy scripts reach only the kind cluster.
+now work, and the deploy scripts reach only the kind cluster.
 
 ### Changed
 
@@ -25,7 +25,8 @@ work again, and the deploy scripts reach only the kind cluster.
   `--confirm-production`. It never writes `~/.kube/config` or switches its current context, and
   gains `--if-missing` and `--dry-run` (ECO-719, ECO-721).
 - `scripts/release/tag.sh` tags patch releases: for `X.Y.Z` with `Z` greater than 0 it requires
-  `train-N` on origin with its commit an ancestor of `HEAD`, and pushes only `vX.Y.Z`.
+  `train-N` on origin with its commit an ancestor of `HEAD` and the same as `vX.Y.0`'s, and
+  pushes only `vX.Y.Z`.
 
 ### Fixed
 

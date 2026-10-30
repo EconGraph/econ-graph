@@ -66,8 +66,9 @@ A patch release (`vX.Y.Z` with `Z` greater than 0) is tagged the same way, from 
 branch, with the train number the branch shipped as (`scripts/release/tag.sh 4.0.1 1`). It needs a
 dated `## [X.Y.Z]` CHANGELOG section and the version bumped in `backend/Cargo.toml`,
 `frontend/package.json` and `frontend/package-lock.json`, like any release. `tag.sh` refuses it
-unless `train-N` already exists on origin and its commit is an ancestor of the tagged commit,
-and then pushes only `vX.Y.Z`; `train-N` stays on the train's first release.
+unless `train-N` already exists on origin, its commit is an ancestor of the tagged commit, and
+`vX.Y.0` exists on origin on that same commit, so the train number matches the `X.Y` being
+patched. It then pushes only `vX.Y.Z`; `train-N` stays on the train's first release.
 
 ## Scoping the next release
 
