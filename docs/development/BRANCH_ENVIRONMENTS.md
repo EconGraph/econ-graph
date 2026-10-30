@@ -10,11 +10,36 @@ platform.
 
 Pass an explicit context, backend image and hostname-specific frontend image.
 Use a full `sha-<40 lowercase hex commit>` tag or `@sha256:<64 lowercase hex>`
-digest for candidate images. Immutable candidate images use `IfNotPresent` so
-they can be loaded into a scratch kind node. Other application tags use
-`Always` and receive a fresh rollout token on each deployment; they must be
-available from the registry. Rebuilding a mutable local
-tag is not a supported way to update a branch.
+digest for candidate images. Immutable candidate images use `IfNotPresent`.
+Unqualified local names such as `econ-graph-frontend:branch-example` also retain
+`IfNotPresent`, so Kubernetes never tries to fetch locally built images from
+Docker Hub. An explicit registry hostname, such as
+`ghcr.io/econgraph/frontend:branch-example`, selects registry behavior; mutable
+registry tags use `Always`.
+
+For local names, `up` requires an explicit `kind-<cluster-name>` context and
+reloads the backend/frontend and optional local-data images with
+`kind load docker-image` before applying workloads. This includes immutable
+local names. Loading uses the same `ECONGRAPH_DOCKER_HOST` selection as
+`build-frontend` (default `unix:///var/run/docker.sock`); inherited rootless
+`DOCKER_HOST` does not select a different source daemon. Local images must
+already exist there. A failed load stops deployment. Every mutable candidate
+gets a fresh rollout token, so rebuilding, reloading and deploying a local tag
+restarts pods with the newly loaded image. No registry or push is required.
+Qualified immutable images are fetched when missing; an operator can also load
+those exact image references into the scratch kind cluster beforehand.
+
+For example, after building the backend on that daemon, build a hostname-specific
+frontend and inspect a deployment plan:
+
+```sh
+python3 scripts/deploy/deploy-branch.py build-frontend train3-workspace \
+  --context kind-train3-scratch --frontend-image econ-graph-frontend:train3-workspace
+python3 scripts/deploy/deploy-branch.py up train3-workspace \
+  --context kind-train3-scratch --dry-run \
+  --backend-image econ-graph-backend:train3-candidate \
+  --frontend-image econ-graph-frontend:train3-workspace
+```
 
 Only `--local-data` accepts `--data-image`; a release tag, full commit tag or
 digest is required. A mutable `latest`, branch name or short SHA is rejected.
@@ -30,7 +55,8 @@ database is never overwritten.
 
 Seeds are bounded to 128 MiB compressed and 256 MiB expanded SQL. Before restore,
 the branch database filesystem must have at least 4 GiB free plus four times the
-expanded archive size. Expansion runs with an operating-system file-size limit
+expanded archive size. Free space is checked on the mounted `/data` volume
+containing `PGDATA=/data/pgdata`. Expansion runs with an operating-system file-size limit
 and a timeout. Restore is transactional and bounded by a timeout. These checks
 are admission safeguards: kind local-path PVC sizes are **not disk quotas**.
 Keep workers stopped except for bounded recorded-fixture operations, and run
@@ -42,9 +68,9 @@ A deployment plan contacts no cluster or credentials:
 ```sh
 python3 scripts/deploy/deploy-branch.py up train3-storage \
   --context kind-train3-scratch --dry-run \
-  --backend-image registry/backend:sha-<full-candidate-commit> \
-  --frontend-image registry/frontend-storage:sha-<full-candidate-commit> \
-  --local-data --data-image registry/worker:sha-<full-candidate-commit> \
+  --backend-image registry.example/backend:sha-<full-candidate-commit> \
+  --frontend-image registry.example/frontend-storage:sha-<full-candidate-commit> \
+  --local-data --data-image registry.example/worker:sha-<full-candidate-commit> \
   --seed-dir /reviewed/fixture --seed-sha256 <reviewed-archive-hash>
 ```
 

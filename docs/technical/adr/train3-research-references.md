@@ -6,7 +6,13 @@ versions and unknown fields are rejected. At trust boundaries use `from_json`, w
 also validates identities and periods. These references confer no access rights.
 
 A series reference uses its **stored** UUID, including a pre-derived legacy UUID.
-Never recompute a stored note target from source/external ID. A company uses its
+Never recompute a stored note target from source/external ID. Although the legacy
+`chart_annotations.series_id` column is VARCHAR, the collaboration creation API
+has accepted a UUID and stored its string representation since its original
+implementation, including before the crate split. Provider keys such as `GDP`
+are not valid stored series targets. The compatibility adapter reports an explicit
+error for a non-UUID row and leaves that note unchanged, even if it also has a
+chart association; it never guesses a series UUID or falls back to another target. A company uses its
 canonical ten-digit SEC CIK, rather than a ticker or database row UUID. A filing
 uses issuer CIK and SEC accession in its dashed 10-2-6 form. The accession prefix
 may belong to a filing agent, so it need not equal the issuer CIK. Amendments have

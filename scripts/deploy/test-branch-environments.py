@@ -141,14 +141,18 @@ class RenderTests(unittest.TestCase):
         for image in ['crawler:latest', 'crawler:main', 'crawler:sha-abcdef', 'crawler',
                       'crawler@sha256:' + 'b' * 63]:
             with self.assertRaises(ValueError):
-                r.render('local', 'b:x', 'f:x', True, image)
+                r.render('local', 'registry.example/b:x', 'registry.example/f:x', True, image)
         with self.assertRaisesRegex(ValueError, 'only allowed'):
-            r.render('shared', 'b:x', 'f:x', False, 'crawler:sha-' + 'a' * 40)
+            r.render('shared', 'registry.example/b:x', 'registry.example/f:x', False, 'crawler:sha-' + 'a' * 40)
 
     def test_mutable_tags_are_pulled_again_and_commit_images_can_be_loaded_locally(self):
-        self.assertEqual(r.pull_policy('backend:branch-one'), 'Always')
+        self.assertEqual(r.pull_policy('backend:branch-one'), 'IfNotPresent')
+        self.assertEqual(r.pull_policy('registry.example/backend:branch-one'), 'Always')
         self.assertEqual(r.pull_policy('backend:sha-' + 'a' * 40), 'IfNotPresent')
         self.assertEqual(r.pull_policy('backend@sha256:' + 'a' * 64), 'IfNotPresent')
+        self.assertEqual(r.pull_policy('localhost:5000/backend:branch-one'), 'Always')
+        self.assertTrue(r.local_image('backend:branch-one'))
+        self.assertFalse(r.local_image('registry.example/backend:branch-one'))
         docs = r.render('mutable', 'backend:branch-one', 'frontend:sha-' + 'a' * 40)
         backend = by_name(docs, 'Deployment', 'econ-graph-backend')['spec']['template']
         frontend = by_name(docs, 'Deployment', 'econ-graph-frontend')['spec']['template']
@@ -248,7 +252,7 @@ class GuardTests(unittest.TestCase):
 
     def test_dryrun_up_down_list_and_build_contact_nothing(self):
         common = ['--context', 'scratch', '--dry-run']
-        for argv in [['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x'], ['down', 'one'], ['list'], ['build-frontend', 'one']]:
+        for argv in [['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'], ['down', 'one'], ['list'], ['build-frontend', 'one']]:
             self.assertEqual(self.invoke(argv+common), [])
             # No kubectl is chosen either, so a dry run needs none.
             with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HOME': home}, clear=True), \
@@ -264,7 +268,7 @@ class GuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             Path(home, 'kubectl').write_text('#!/bin/sh\nexit 0\n')
             Path(home, 'kubectl').chmod(0o755)
-            for action in [['list'], ['down', 'one'], ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']]:
+            for action in [['list'], ['down', 'one'], ['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']]:
                 with patch.dict(os.environ, {'HOME': home, 'PATH': home}, clear=True), \
                         patch.object(sys, 'argv', ['deploy-branch.py']+action+['--context', 'kind-econ-graph']), \
                         patch.object(subprocess, 'run', side_effect=AssertionError('contacted')), \
@@ -273,7 +277,7 @@ class GuardTests(unittest.TestCase):
 
     def test_up_rejects_unowned_existing_namespace_before_mutations(self):
         with self.assertRaisesRegex(ValueError, 'ownership'):
-            self.invoke(['up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x'],
+            self.invoke(['up', 'one', '--context', 'scratch', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'],
                         lambda cmd: json.dumps({'metadata': {'labels': {'econgraph.io/env': 'production'}}}))
 
     def test_down_absent_namespace_does_not_delete_anything(self):
@@ -370,7 +374,7 @@ class GuardTests(unittest.TestCase):
                     out = json.dumps({'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
                         'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}[name]}})
             return subprocess.CompletedProcess(command, code, stdout=out)
-        argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+        argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']
         with patch.object(sys, 'argv', argv), patch.object(subprocess, 'run', side_effect=fake), \
                 patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             deploy.main()
@@ -391,7 +395,8 @@ class GuardTests(unittest.TestCase):
                     for script in set(re.findall(r'/config/([\w.-]+)', text)):
                         self.assertIn(script, set(realm), (d['metadata']['name'], c['name']))
 
-    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None, delete_namespace_immediately=False):
+    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None, delete_namespace_immediately=False,
+                context='scratch'):
         """Run deploy-branch.py against a fake cluster; return (error, calls, sent documents)."""
         calls, sent = [], []
         created = {}
@@ -434,7 +439,7 @@ class GuardTests(unittest.TestCase):
                 out = 'secret/' + name if name in present else ''
             return subprocess.CompletedProcess(command, code, stdout=out)
         error = None
-        with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', 'scratch']), \
+        with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', context]), \
                 patch.object(subprocess, 'run', side_effect=fake), patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             if typed is None:
                 try:
@@ -463,7 +468,7 @@ class GuardTests(unittest.TestCase):
                      'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
                      'annotations': {'econgraph.io/branch-name': branch}}, **meta)
 
-    UP = ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+    UP = ['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']
 
     @staticmethod
     def mutations(calls):
@@ -473,6 +478,18 @@ class GuardTests(unittest.TestCase):
         error, calls, sent = self.cluster(self.UP, namespace={'metadata': self.owned()})
         self.assertIsNone(error)
         self.assertTrue(any(d['kind'] == 'ReferenceGrant' for d in sent))
+
+    def test_local_only_up_loads_images_before_workloads_and_keeps_node_pull_policy(self):
+        argv = ['up', 'one', '--backend-image', 'backend:branch-one', '--frontend-image', 'frontend:branch-one']
+        error, calls, sent = self.cluster(argv, namespace={'metadata': self.owned()}, context='kind-scratch')
+        self.assertIsNone(error)
+        load = ['kind', 'load', 'docker-image', '--name', 'scratch', 'backend:branch-one', 'frontend:branch-one']
+        self.assertIn(load, calls)
+        self.assertLess(calls.index(load), next(i for i, cmd in enumerate(calls) if 'apply' in cmd))
+        for name in ['econ-graph-backend', 'econ-graph-frontend', 'branch-data-proxy']:
+            template = by_name(sent, 'Deployment', name)['spec']['template']
+            self.assertIn('econgraph.io/redeploy-token', template['metadata']['annotations'])
+            self.assertTrue(all(c['imagePullPolicy'] == 'IfNotPresent' for c in template['spec']['containers']))
 
     def test_up_stamps_reused_orphan_grant_with_new_namespace_identity(self):
         grant = r.grant('one')
@@ -573,7 +590,7 @@ class GuardTests(unittest.TestCase):
     def test_build_frontend_uses_the_kind_docker_daemon_not_the_callers(self):
         for override, expected in [(None, 'unix:///var/run/docker.sock'), ('', 'unix:///var/run/docker.sock'),
                                    ('unix:///run/other.sock', 'unix:///run/other.sock')]:
-            env = {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock'}
+            env = {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock', 'DOCKER_CONTEXT': 'unrelated-daemon'}
             if override is not None:
                 env['ECONGRAPH_DOCKER_HOST'] = override
             runs = []
@@ -583,15 +600,52 @@ class GuardTests(unittest.TestCase):
             (cmd, kwargs), = runs
             self.assertEqual(cmd[:2], ['docker', 'build'])
             self.assertEqual(kwargs['env']['DOCKER_HOST'], expected)
+            self.assertNotIn('DOCKER_CONTEXT', kwargs['env'])
             with patch.dict(os.environ, env), patch.object(sys, 'argv', ['deploy-branch.py', 'build-frontend', 'one', '--context', 'x', '--dry-run']), \
                     patch('sys.stdout', new_callable=io.StringIO) as out:
                 deploy.main()
             self.assertTrue(out.getvalue().startswith('DOCKER_HOST=' + expected + ' docker build '))
 
+    def test_kind_load_uses_build_daemon_and_includes_immutable_local_data(self):
+        args = type('Args', (), {'context': 'kind-scratch', 'backend_image': 'backend:branch-one',
+                                 'frontend_image': 'frontend:sha-' + 'a' * 40,
+                                 'local_data': True, 'data_image': 'worker:sha-' + 'b' * 40})()
+        runs = []
+        with patch.dict(os.environ, {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock', 'DOCKER_CONTEXT': 'unrelated-daemon',
+                                      'ECONGRAPH_DOCKER_HOST': 'unix:///var/run/docker.sock'}), \
+                patch.object(subprocess, 'run', side_effect=lambda cmd, **kw: runs.append((cmd, kw))):
+            deploy.load_local_images(args)
+        (command, options), = runs
+        self.assertEqual(command, ['kind', 'load', 'docker-image', '--name', 'scratch',
+                                   args.backend_image, args.frontend_image, args.data_image])
+        self.assertEqual(options['env']['DOCKER_HOST'], 'unix:///var/run/docker.sock')
+        self.assertNotIn('DOCKER_CONTEXT', options['env'])
+        self.assertEqual(options['timeout'], 900)
+        args.context = 'primary'
+        with patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+            with self.assertRaisesRegex(ValueError, 'explicit kind-'):
+                deploy.load_local_images(args)
+        args.backend_image = 'registry.example/backend:branch-one'
+        args.frontend_image = 'ghcr.io/econgraph/frontend:sha-' + 'a' * 40
+        args.data_image = 'localhost:5000/worker:sha-' + 'b' * 40
+        with patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+            deploy.load_local_images(args)
+
+    def test_selected_docker_environment_preserves_credentials_and_explicit_tcp_tls(self):
+        source = {'DOCKER_CONTEXT': 'unrelated-daemon', 'DOCKER_HOST': 'unix:///wrong.sock',
+                  'ECONGRAPH_DOCKER_HOST': 'tcp://scratch:2376', 'DOCKER_CONFIG': '/trusted/config',
+                  'DOCKER_TLS_VERIFY': '1', 'DOCKER_CERT_PATH': '/trusted/certs', 'UNCHANGED': 'value'}
+        selected = deploy.selected_docker_env(source)
+        self.assertEqual(selected['DOCKER_HOST'], 'tcp://scratch:2376')
+        self.assertNotIn('DOCKER_CONTEXT', selected)
+        for key in ['DOCKER_CONFIG', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'UNCHANGED']:
+            self.assertEqual(selected[key], source[key])
+        self.assertEqual(source['DOCKER_CONTEXT'], 'unrelated-daemon', 'do not mutate the caller environment')
+
     def test_local_data_rejects_untagged_crawler(self):
         with self.assertRaises(SystemExit):
             self.invoke(['up', 'one', '--context', 'scratch', '--dry-run', '--local-data', '--data-image', 'worker:latest',
-                         '--seed-dir', '/absent', '--seed-sha256', 'a' * 64, '--backend-image', 'b:x', '--frontend-image', 'f:x'])
+                         '--seed-dir', '/absent', '--seed-sha256', 'a' * 64, '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'])
 
     def test_seed_rejects_missing_verification_and_checksum_mismatch_before_cluster_access(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -696,6 +750,16 @@ class SeedRestoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'insufficient node disk'):
                     deploy.seed_local(args, 'branch', k, lambda *a: None, lambda docs: None)
             self.assertFalse(any('exec' in c and 'pg_restore' in c for c in commands))
+
+    def test_disk_preflight_uses_rendered_postgres_data_volume(self):
+        docs = r.render('local', 'backend:branch', 'frontend:branch', True, 'worker:sha-' + 'a' * 40)
+        pod = by_name(docs, 'StatefulSet', 'postgresql')['spec']['template']['spec']
+        postgres = next(c for c in pod['containers'] if c['name'] == 'postgresql')
+        pgdata = next(e['value'] for e in postgres['env'] if e['name'] == 'PGDATA')
+        mount = next(v['mountPath'] for v in postgres['volumeMounts'] if pgdata.startswith(v['mountPath'] + '/'))
+        _, execs, _ = self.seed()
+        command = next(cmd for cmd in execs if 'df -Pk' in ' '.join(cmd))
+        self.assertIn('df -Pk ' + mount + ' |', command[-1])
 
     def test_archive_size_limit_stops_before_archive_or_cluster_commands(self):
         with tempfile.TemporaryDirectory() as temp:

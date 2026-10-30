@@ -234,11 +234,42 @@ ROLLBACK;
         event_path = self.repo / "event.json"
         event_path.write_text(json.dumps({"pull_request": {"base": {"sha": "pr-tip"}},
                                           "merge_group": {"base_sha": "queue-tip"},
-                                          "before": "push-parent"}))
+                                          "before": "push-parent", "ref": "refs/heads/main"}))
         self.assertEqual(checker.event_base_ref(str(event_path), "pull_request"), "pr-tip")
         self.assertEqual(checker.event_base_ref(str(event_path), "merge_group"), "queue-tip")
         self.assertEqual(checker.event_base_ref(str(event_path), "push"), "push-parent")
         self.assertIsNone(checker.event_base_ref(str(event_path), "workflow_dispatch"))
+
+    def test_push_history_only_protects_serialized_integration_branches(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.baseline)
+        self.git("checkout", "-b", "optimize/ci-core-primary")
+        migration = self.migration("app", "2026-10-22-000100_unmerged")
+        self.commit()
+        previous_feature_tip = self.git("rev-parse", "HEAD").strip()
+        # This migration has only appeared on the feature branch. Renumbering it
+        # remains allowed even though CI also runs on pushes to that branch.
+        migration.rename(migration.with_name("2026-10-23-000100_unmerged"))
+        event_path = self.repo / "event.json"
+        for ref in ("refs/heads/optimize/ci-core-primary", "refs/heads/feat/train3"):
+            with self.subTest(ref=ref):
+                event_path.write_text(json.dumps({"ref": ref, "before": previous_feature_tip}))
+                selected = checker.event_base_ref(str(event_path), "push")
+                self.assertIsNone(selected)
+                self.assertTrue(self.check(selected or "origin/main")[0])
+        # The same edit would rewrite merged history on an integration branch.
+        for ref in ("refs/heads/main", "refs/heads/develop", "refs/heads/release/v4.1"):
+            with self.subTest(ref=ref):
+                event_path.write_text(json.dumps({"ref": ref, "before": previous_feature_tip}))
+                selected = checker.event_base_ref(str(event_path), "push")
+                self.assertEqual(selected, previous_feature_tip)
+                ok, output = self.check(selected)
+                self.assertFalse(ok)
+                self.assertIn("Protected merged migration was edited or removed", output)
+
+    def test_initial_integration_push_has_no_previous_history(self):
+        event_path = self.repo / "event.json"
+        event_path.write_text(json.dumps({"ref": "refs/heads/main", "before": "0" * 40}))
+        self.assertIsNone(checker.event_base_ref(str(event_path), "push"))
 
     def test_exact_diesel_versions_with_sequence_suffix(self):
         first = self.migration("data", "2026-10-22-000100-0001_first")

@@ -73,8 +73,37 @@ def freshen_mutable_images(docs):
         if doc['kind'] != 'Deployment':
             continue
         template = doc['spec']['template']
-        if any(c.get('imagePullPolicy') == 'Always' for c in template['spec']['containers']):
+        if any(c['name'] in ('backend', 'frontend', 'proxy', 'crawler-worker')
+               and not renderer.immutable_image(c['image']) for c in template['spec']['containers']):
             template['metadata'].setdefault('annotations', {})['econgraph.io/redeploy-token'] = secrets.token_hex(8)
+
+
+def local_candidate_images(args):
+    candidates = [args.backend_image, args.frontend_image]
+    if args.local_data:
+        candidates.append(args.data_image)
+    return list(dict.fromkeys(image for image in candidates if image and renderer.local_image(image)))
+
+
+def selected_docker_env(environ=os.environ):
+    selected = dict(environ)
+    # DOCKER_CONTEXT overrides DOCKER_HOST even when the latter is explicit.
+    # Preserve credentials/TLS settings while selecting the intended daemon.
+    selected.pop('DOCKER_CONTEXT', None)
+    selected['DOCKER_HOST'] = environ.get('ECONGRAPH_DOCKER_HOST') or 'unix:///var/run/docker.sock'
+    return selected
+
+
+def load_local_images(args):
+    images = local_candidate_images(args)
+    if not images:
+        return
+    # Context is explicit and validated before cluster access. Never infer a
+    # kind cluster from current-context or silently load a different daemon.
+    if not args.context.startswith('kind-') or len(args.context) <= len('kind-'):
+        raise ValueError('local candidate images require an explicit kind-<cluster-name> context')
+    subprocess.run(['kind', 'load', 'docker-image', '--name', args.context[len('kind-'):], *images],
+                   check=True, timeout=900, env=selected_docker_env())
 
 
 def wait_namespace_deleted(lookup, namespace, uid, seconds=120):
@@ -151,6 +180,9 @@ def main():
             p.error(str(error))
     elif args.data_image or args.seed_dir or args.seed_sha256:
         p.error('--data-image, --seed-dir and --seed-sha256 require --local-data')
+    if args.action == 'up' and local_candidate_images(args) and (
+            not args.context.startswith('kind-') or len(args.context) <= len('kind-')):
+        p.error('local candidate images require an explicit kind-<cluster-name> context')
     base = []
     def kubectl():
         # Chosen on first use: a dry run and build-frontend contact no cluster.
@@ -216,17 +248,20 @@ def main():
         # Build on the daemon the kind cluster runs on, as lib/kind-env.sh does: the
         # operator's DOCKER_HOST is a rootless daemon, and `kind load` from the rootful one
         # would otherwise load a stale image under the same tag.
-        docker_host = os.environ.get('ECONGRAPH_DOCKER_HOST') or 'unix:///var/run/docker.sock'
+        docker_env = selected_docker_env()
         if args.dry_run:
-            print('DOCKER_HOST=' + docker_host + ' ' + ' '.join(cmd))
+            print('DOCKER_HOST=' + docker_env['DOCKER_HOST'] + ' ' + ' '.join(cmd))
         else:
-            subprocess.run(cmd, check=True, env=dict(os.environ, DOCKER_HOST=docker_host))
+            subprocess.run(cmd, check=True, env=docker_env)
         return
     if args.dry_run:
         print(f'{args.action}: namespace={namespace} host={origin} context={args.context}')
         if args.action == 'up':
             docs = renderer.render(args.branch, args.backend_image, args.frontend_image, args.local_data, args.data_image)
             print(f'Probe NetworkPolicy enforcement before credentials/workloads; apply {len(docs)} branch resources only if it passes.')
+            if local_candidate_images(args):
+                print('Reload locally built candidate images into ' + args.context + ' before rolling pods: ' +
+                      ', '.join(local_candidate_images(args)))
             print('Local data: verify/seed dump and migrate; worker stays stopped for review.' if args.local_data else
                   f'Create only ReferenceGrant data-graphql-from-{slug} in econ-graph; no primary database credentials.')
         else:
@@ -284,6 +319,7 @@ def main():
         current_namespace = lookup('namespace', namespace)
         verify_ownership(current_namespace, slug, args.branch, args.local_data)
         namespace_uid = current_namespace['metadata']['uid']
+        load_local_images(args)
         apply([d for d in docs if d['kind'] == 'NetworkPolicy'])
         network_spec = importlib.util.spec_from_file_location('branch_network_check', Path(__file__).with_name('branch-network-check.py'))
         network = importlib.util.module_from_spec(network_spec)
@@ -392,7 +428,7 @@ def seed_local(args, namespace, k, lookup, apply):
         raise ValueError('unmarked local data database is nonempty; refusing overwrite')
     expanded = inspect_seed_size(dump)
     free = k('-n', namespace, 'exec', 'postgresql-0', '--', 'sh', '-ec',
-             "df -Pk /var/lib/postgresql/data | awk 'NR==2 {print $4}'", capture=True)
+             "df -Pk /data | awk 'NR==2 {print $4}'", capture=True)
     if not free.stdout.strip().isdigit() or int(free.stdout.strip()) * 1024 < MIN_FREE_BYTES + expanded * 4:
         raise ValueError('insufficient node disk reserve for bounded local seed (4GiB plus 4x expanded archive)')
     # Stream only into the explicitly owned branch pod. No primary connection

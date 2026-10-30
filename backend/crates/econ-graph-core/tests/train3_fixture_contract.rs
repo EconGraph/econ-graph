@@ -104,7 +104,7 @@ fn backup_roundtrip(db: &ScratchDatabase) {
     assert_eq!(
         all_table_rows(&mut db.connect()),
         all_table_rows(&mut restored.connect()),
-        "a full database backup must retain user content, grants and references"
+        "a full database backup must retain every table and row"
     );
 }
 async fn check_shape(combined: bool) {
@@ -143,6 +143,9 @@ async fn check_shape(combined: bool) {
     assert_eq!(value(&mut data.connect(), "SELECT value::text AS value FROM data_points WHERE id = '30000000-0000-4000-8000-000000000004'"), "123456789012345678901234567890.123456789012345678901234567890");
     assert_eq!(value(&mut data.connect(), "SELECT count(*)::text AS value FROM data_points WHERE series_id = '30000000-0000-4000-8000-000000000003' AND value IS NULL"), "1");
     backup_roundtrip(app);
+    if !combined {
+        backup_roundtrip(&data);
+    }
     diesel::sql_query("DELETE FROM data_sources WHERE id = '30000000-0000-4000-8000-000000000001'")
         .execute(&mut data.connect())
         .unwrap();

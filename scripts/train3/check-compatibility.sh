@@ -35,7 +35,7 @@ container="$(docker_local run --detach --name "$identity" --label "econgraph.tra
   postgres:18)"
 ready=0
 for ((attempt=0; attempt<60; attempt++)); do
-  if docker_local exec "$container" pg_isready -U postgres >/dev/null 2>&1; then ready=1; break; fi
+  if docker_local exec "$container" pg_isready -h 127.0.0.1 -U postgres -d train3 >/dev/null 2>&1; then ready=1; break; fi
   sleep 1
 done
 [[ "$ready" == 1 ]] || { docker_local logs "$container"; exit 1; }
@@ -77,8 +77,12 @@ seed_database "postgres://postgres:password@127.0.0.1:$port/train3_repeat"
 snapshot train3_repeat > "$work/semantic-repeat.json"
 cmp --silent "$work/semantic.json" "$work/semantic-repeat.json" || { echo 'two fresh recorded seeds have different identities/content' >&2; exit 1; }
 # A populated database must be refused before migrations or any identity writes.
-if seed_database "$DATA_DATABASE_URL" > "$work/refusal.log" 2>&1; then
-  echo 'deterministic-empty accepted a populated database' >&2; exit 1
+seed_status=0
+seed_database "$DATA_DATABASE_URL" > "$work/refusal.log" 2>&1 || seed_status=$?
+if [[ "$seed_status" != 1 ]] || ! grep -Fq -- '--deterministic-empty requires an entirely empty disposable database; no migrations or identity changes were applied' "$work/refusal.log"; then
+  echo 'populated seed did not fail through the expected deterministic-empty guard' >&2
+  cat "$work/refusal.log" >&2
+  exit 1
 fi
 snapshot train3 > "$work/semantic-after-refusal.json"
 cmp --silent "$work/semantic.json" "$work/semantic-after-refusal.json" || { echo 'refusing a populated database changed its contents' >&2; exit 1; }

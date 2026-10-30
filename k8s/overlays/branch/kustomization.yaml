@@ -36,8 +36,8 @@ patches:
     \              drop:\n              - ALL\n            seccompProfile:\n     \
     \         type: RuntimeDefault\n        containers:\n        - name: backend\n\
     \          image: econ-graph-backend:branch-example\n          imagePullPolicy:\
-    \ Always\n          ports:\n          - containerPort: 9876\n            name:\
-    \ http\n          env:\n          - name: BACKEND_PORT\n            valueFrom:\n\
+    \ IfNotPresent\n          ports:\n          - containerPort: 9876\n          \
+    \  name: http\n          env:\n          - name: BACKEND_PORT\n            valueFrom:\n\
     \              configMapKeyRef:\n                name: econ-graph-config\n   \
     \             key: BACKEND_PORT\n          - name: FRONTEND_PORT\n           \
     \ valueFrom:\n              configMapKeyRef:\n                name: econ-graph-config\n\
@@ -97,12 +97,12 @@ patches:
     \ matchLabels:\n        app: econ-graph-frontend\n    template:\n      metadata:\n\
     \        labels:\n          app: econ-graph-frontend\n          component: frontend\n\
     \      spec:\n        containers:\n        - name: frontend\n          image:\
-    \ econ-graph-frontend:branch-example\n          imagePullPolicy: Always\n    \
-    \      ports:\n          - containerPort: 3000\n            name: http\n     \
-    \     env: []\n          resources:\n            requests:\n              memory:\
-    \ 128Mi\n              cpu: 50m\n            limits:\n              memory: 256Mi\n\
-    \              cpu: 200m\n          livenessProbe:\n            httpGet:\n   \
-    \           path: /\n              port: 3000\n            initialDelaySeconds:\
+    \ econ-graph-frontend:branch-example\n          imagePullPolicy: IfNotPresent\n\
+    \          ports:\n          - containerPort: 3000\n            name: http\n \
+    \         env: []\n          resources:\n            requests:\n             \
+    \ memory: 128Mi\n              cpu: 50m\n            limits:\n              memory:\
+    \ 256Mi\n              cpu: 200m\n          livenessProbe:\n            httpGet:\n\
+    \              path: /\n              port: 3000\n            initialDelaySeconds:\
     \ 30\n            periodSeconds: 10\n          readinessProbe:\n            httpGet:\n\
     \              path: /\n              port: 3000\n            initialDelaySeconds:\
     \ 5\n            periodSeconds: 5\n          volumeMounts:\n          - name:\

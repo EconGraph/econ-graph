@@ -408,7 +408,11 @@ def event_base_ref(event_path: Optional[str], event_name: Optional[str]) -> Opti
         return event["pull_request"]["base"]["sha"]
     if event_name == "merge_group":
         return event["merge_group"]["base_sha"]
-    if event_name == "push" and event.get("before") and set(event["before"]) != {"0"}:
+    # Feature pushes can legitimately edit or renumber their unmerged migrations.
+    # Only serialized integration branches establish merged-history protection.
+    ref = event.get("ref", "")
+    integration_push = ref in {"refs/heads/main", "refs/heads/develop"} or ref.startswith("refs/heads/release/")
+    if event_name == "push" and integration_push and event.get("before") and set(event["before"]) != {"0"}:
         return event["before"]
     return None
 

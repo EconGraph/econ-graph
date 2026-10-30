@@ -110,9 +110,11 @@ python3 scripts/check_migration_order.py --base-ref origin/main
 The local default is `origin/main`. For a stacked PR, pass its actual target branch instead.
 A missing target or unavailable history fails validation; the checker never silently falls back
 to a fork-point. CI checks out full history and final product tags and selects the PR's
-`pull_request.base.sha` or the merge queue's `merge_group.base_sha` from the event. A push checks
-against its previous tip. This validates additions against the target tip, including migrations
-that landed after the feature branch diverged.
+`pull_request.base.sha` or the merge queue's `merge_group.base_sha` from the event. Pushes to
+`main`, `develop` and `release/*` check against their previous tip. Other feature pushes check
+against `origin/main`, so their own unmerged migrations remain editable and renumberable. This
+validates additions against the target tip, including migrations that landed after the feature
+branch diverged.
 
 If another branch lands a later version, rebase onto the target, renumber only your **unmerged**
 migration after the highest version in both sets, and recreate branch test databases that ran

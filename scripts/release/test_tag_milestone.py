@@ -9,10 +9,37 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+import tag_milestone
 
 
 SOURCE = Path(__file__).resolve().parents[2]
 HELPER = SOURCE / "scripts/release/tag_milestone.py"
+
+
+class SubprocessTimeoutTests(unittest.TestCase):
+    def test_command_timeout_fails_closed_without_captured_credentials(self):
+        error = subprocess.TimeoutExpired(
+            ["gh", "api", "sensitive-argument"], 300,
+            output="sensitive-output\n", stderr="sensitive-credentials\n",
+        )
+        with patch.object(tag_milestone.subprocess, "run", side_effect=error) as process:
+            with self.assertRaises(tag_milestone.Refused) as refused:
+                tag_milestone.run("gh", "api", "sensitive-argument")
+        self.assertEqual(str(refused.exception), "gh api timed out after 300s")
+        self.assertEqual(process.call_args.kwargs["timeout"], 300)
+
+    def test_ancestry_timeout_fails_closed_without_captured_credentials(self):
+        error = subprocess.TimeoutExpired(
+            ["git", "merge-base", "--is-ancestor", "older", "newer"], 300,
+            output=b"sensitive-output\n", stderr=b"sensitive-credentials\n",
+        )
+        with patch.object(tag_milestone.subprocess, "run", side_effect=error) as process:
+            with self.assertRaises(tag_milestone.Refused) as refused:
+                tag_milestone.ancestor("older", "newer")
+        self.assertEqual(str(refused.exception), "cannot establish commit ancestry: git merge-base timed out after 300s")
+        self.assertEqual(process.call_args.kwargs["timeout"], 300)
 
 
 class MilestoneTests(unittest.TestCase):

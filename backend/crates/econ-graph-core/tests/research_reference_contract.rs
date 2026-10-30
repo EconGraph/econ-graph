@@ -176,3 +176,23 @@ fn ambiguous_duplicate_dimension_axes_are_rejected() {
         "dimensions":{"axis":"first","axis":"second"}}"#;
     assert!(serde_json::from_str::<FactSubject>(duplicate).is_err());
 }
+
+#[test]
+fn malformed_legacy_series_ids_are_reported_without_mutation_or_chart_fallback() {
+    // The SQL column is VARCHAR, so imported/corrupt rows can violate the writer's
+    // UUID-string invariant. They must remain repairable rather than retargeted.
+    for series_id in ["GDP", "FRED:GDP", "", "not-a-uuid"] {
+        let note: ChartAnnotation = serde_json::from_value(json!({
+            "id": Uuid::from_u128(101), "user_id": Uuid::from_u128(102),
+            "series_id": series_id, "chart_id": Uuid::from_u128(103),
+            "annotation_date": "2024-01-01", "title": "retain original note",
+            "visibility": "Private"
+        }))
+        .unwrap();
+        let original = serde_json::to_value(&note).unwrap();
+        let error = AnnotationAnchor::try_from(&note).unwrap_err();
+        assert_eq!(error.0, "legacy series ID is not a UUID");
+        assert_eq!(serde_json::to_value(&note).unwrap(), original);
+        assert_eq!(note.series_id.as_deref(), Some(series_id));
+    }
+}

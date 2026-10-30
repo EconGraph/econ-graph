@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 TAG = "train-3"
 PACKAGES = tuple(f"P3-{n}" for n in range(1, 7))
 LANES = ("platform", "company", "workspace")
+SUBPROCESS_TIMEOUT_SECONDS = 300
 
 
 class Refused(Exception):
@@ -25,7 +26,15 @@ class Refused(Exception):
 
 
 def run(*args):
-    result = subprocess.run(args, text=True, capture_output=True, check=False)
+    try:
+        result = subprocess.run(
+            args, text=True, capture_output=True, check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        # Do not expose captured output or full command arguments: either can
+        # contain credentials when a remote command stalls.
+        raise Refused(f"{args[0]} {args[1]} timed out after {SUBPROCESS_TIMEOUT_SECONDS}s") from error
     if result.returncode:
         # Authentication errors may contain credentials; do not echo stderr.
         raise Refused(f"{args[0]} {args[1]} failed (exit {result.returncode})")
@@ -33,11 +42,15 @@ def run(*args):
 
 
 def ancestor(older, newer):
-    result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", older, newer],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", older, newer],
+            capture_output=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise Refused(f"cannot establish commit ancestry: git merge-base timed out after {SUBPROCESS_TIMEOUT_SECONDS}s") from error
     if result.returncode not in (0, 1):
         raise Refused("cannot establish commit ancestry")
     return result.returncode == 0

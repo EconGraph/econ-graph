@@ -240,6 +240,10 @@ impl AnnotationAnchor {
     }
 }
 
+// CollaborationService::create_annotation has always accepted a Uuid and stored its string
+// representation, despite the legacy VARCHAR column. Parse the stored UUID itself rather
+// than deriving one from a provider key. Out-of-contract rows return an error unchanged;
+// even with chart_id present, never fall back to a different target for a malformed series.
 impl TryFrom<&ChartAnnotation> for AnnotationAnchor {
     type Error = ReferenceError;
     fn try_from(note: &ChartAnnotation) -> Result<Self, Self::Error> {

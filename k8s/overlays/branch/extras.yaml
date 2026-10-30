@@ -206,7 +206,7 @@ spec:
       containers:
       - name: proxy
         image: econ-graph-frontend:branch-example
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         command:
         - nginx
         - -c

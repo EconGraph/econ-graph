@@ -59,8 +59,20 @@ def validate_data_image(image):
     return image
 
 
+def immutable_image(image):
+    return bool(re.search(r'(?:@sha256:[0-9a-f]{64}|:sha-[0-9a-f]{40})$', image))
+
+
+def local_image(image):
+    """An explicit registry hostname distinguishes remotely supplied images."""
+    first, separator, _ = image.partition('/')
+    return not (separator and ('.' in first or ':' in first or first == 'localhost'))
+
+
 def pull_policy(image):
-    return 'IfNotPresent' if re.search(r'(?:@sha256:[0-9a-f]{64}|:sha-[0-9a-f]{40})$', image) else 'Always'
+    # kind-loaded names must never trigger an implicit Docker Hub pull. The
+    # deployer reloads local names before rolling mutable candidate workloads.
+    return 'IfNotPresent' if local_image(image) or immutable_image(image) else 'Always'
 
 
 def render(branch, backend_image, frontend_image, local_data=False, data_image=None):
