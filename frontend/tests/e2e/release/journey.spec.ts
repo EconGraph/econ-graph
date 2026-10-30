@@ -17,14 +17,16 @@ import {
 } from './seriesPage';
 
 // Live QA: the same journey on the deployed build (REL-QA check 3), where the latest point is
-// checked against GDP's publication cadence instead of the fixture's values.
+// checked against CPI's publication cadence instead of the fixture's values.
 //
 // Exit criterion 5's cross-area journey, in one browser session: find a series by searching, open
 // it, read its chart, apply every transformation, download the shown points, then sign in and
 // annotate it. The areas' own specs cover each page in depth; this checks the pages hand off to
 // each other.
 
-const series = SEEDED.fredGdp;
+// BLS CPI: public, monthly, with a missing first point and a transformation without enough
+// observations, so the journey meets both.
+const series = SEEDED.blsCpi;
 
 // Covers a Keycloak redirect: the code exchange and the backend's first JWKS fetch.
 const AFTER_SIGN_IN = { timeout: 15_000 };
@@ -79,13 +81,14 @@ test.describe('release journey', () => {
     });
 
     await test.step('download shows the levels just charted', async () => {
-      // The loop above ends back on levels (SEEDED.fredGdp.transformations' last entry).
+      // The loop above ends back on levels (SEEDED.blsCpi.transformations' last entry).
       const rows = await downloadLevelsCsv(page, series);
       const [date, value] = rows[rows.length - 1];
       const shown = await latestShown(page);
       expect(asShown(date, shown.date)).toBe(shown.date);
       if (!DEPLOYED) {
-        expect(Number(value)).toBe(parseShown(series.latestShown.value));
+        // The CSV keeps the value unrounded; the page shows it to 2 decimal places.
+        expect(Number(value)).toBe(series.latestValue);
       } else {
         // Live values are unknown; the page rounds to 2 decimal places for display.
         expect(Math.abs(Number(value) - parseShown(shown.value))).toBeLessThan(0.01);

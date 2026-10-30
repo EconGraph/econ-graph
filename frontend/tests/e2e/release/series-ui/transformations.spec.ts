@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { DEPLOYED } from '../env';
 import { SEEDED, SWEPT_SOURCES } from '../fixtures';
-import { seededSeriesId } from '../auth/helpers';
+import { devUserToken, readAsDevUser, seededSeriesId } from '../auth/helpers';
 
 /**
  * The Transformation select on a series page. Find it by its containing FormControl's visible
@@ -65,12 +65,17 @@ async function latestShown(page: Page): Promise<{ date: string; value: string }>
 test.describe('series transformations', () => {
   // GDP is quarterly, so year-over-year (a year back), quarter-over-quarter and change-since-
   // first-observation all have data; month-over-month isn't offered for a quarterly series (see
-  // the CPI test below).
+  // the CPI test below). In fixture mode the seeded quarterly series with a year of data is
+  // FRED's, which is admin-only, so it is read with an admin's token; deployed, BEA's GDP has
+  // decades.
   test('quarterly transformations update the value column and the chip', async ({
     page,
     request,
   }) => {
-    const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
+    const gdp = DEPLOYED ? SEEDED.beaGdp : SEEDED.fredGdp;
+    const token = DEPLOYED ? undefined : await devUserToken(request, 'staff-admin');
+    if (token) await readAsDevUser(page, token);
+    const seriesId = await seededSeriesId(request, gdp, token);
     await page.goto(`/series/${seriesId}`);
     await expect(transformationSelect(page)).toBeVisible();
 
@@ -102,7 +107,7 @@ test.describe('series transformations', () => {
 
     // Back to none: the chip disappears and the column header reads the series' own units.
     await applyTransformation(page, 'None');
-    await expect(page.getByRole('columnheader', { name: 'Billions of Dollars', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: gdp.units, exact: true })).toBeVisible();
     if (!DEPLOYED) {
       await expect
         .poll(() => latestShown(page))
@@ -130,17 +135,17 @@ test.describe('series transformations', () => {
     if (!DEPLOYED) {
       await expect
         .poll(() => latestShown(page))
-        .toEqual(SEEDED.blsCpi.transformations[0].latestShown);
+        .toEqual(SEEDED.blsCpi.transformations[2].latestShown);
     }
   });
 
   // Log difference is offered by the frontend (src/utils/transformations.ts) and computed by the
-  // backend. GDP's newest two non-missing points are Jan 2026 (31,722.514) and Apr 2026
-  // (32,101.6), so the Apr 2026 value is ln(32101.6 / 31722.514) = 0.01188, which the table shows
-  // to four significant digits (the ln itself is pinned by series_data_tests.rs; this checks the
-  // option, the precision and that the newest value is not percent-scaled).
+  // backend. CPI's newest two points are Feb 2024 (310.326) and Mar 2024 (312.332), so the
+  // Mar 2024 value is ln(312.332 / 310.326) = 0.006443, which the table shows to four significant
+  // digits (the ln itself is pinned by series_data_tests.rs; this checks the option, the
+  // precision and that the newest value is not percent-scaled).
   test('log difference is offered and shows the newest change unscaled', async ({ page, request }) => {
-    const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
+    const seriesId = await seededSeriesId(request, SEEDED.blsCpi);
     await page.goto(`/series/${seriesId}`);
     await expect(transformationSelect(page)).toBeVisible();
 
@@ -148,10 +153,10 @@ test.describe('series transformations', () => {
     await expect(page.getByRole('columnheader', { name: 'Log Difference', exact: true })).toBeVisible();
     await expect(transformationChip(page, 'Log Difference')).toBeVisible();
     if (!DEPLOYED) {
-      // Not the 1.20 that quarter-over-quarter would give.
+      // Not the 0.65 that month-over-month would give.
       await expect
         .poll(() => latestShown(page))
-        .toEqual(SWEPT_SOURCES[0].transformations['Log difference']);
+        .toEqual(SWEPT_SOURCES.find(s => s.source === 'BLS')?.transformations['Log difference']);
     }
   });
 });

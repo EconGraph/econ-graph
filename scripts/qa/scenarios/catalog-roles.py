@@ -14,8 +14,8 @@ Inputs:
   QA_KEYCLOAK_ADMIN_USERNAME,  a master-realm admin; skipped without.
   QA_KEYCLOAK_ADMIN_PASSWORD
     (or _PASSWORD_FILE)
-  QA_CATALOG_ROLE              the role to withdraw (default catalog.fred:read).
-  QA_CATALOG_SOURCE            text in that catalog's data source name (default FRED).
+  QA_CATALOG_ROLE              the role to withdraw (default catalog.bls:read, a public catalog).
+  QA_CATALOG_SOURCE            text in that catalog's data source name (default BLS).
   QA_ANONYMOUS_CLIENT_ID       the anonymous reader's client (default econgraph-anonymous).
   QA_CATALOG_WAIT_SECONDS      how long a change may take to reach the backend (default 420:
                                the backend caches anonymous grants for up to five minutes).
@@ -40,8 +40,8 @@ from qa import cleanup_deadline, skip_check
 from qa import run as run_bounded
 
 REALM = 'econ-graph'
-ROLE = os.environ.get('QA_CATALOG_ROLE', 'catalog.fred:read')
-SOURCE_MATCH = os.environ.get('QA_CATALOG_SOURCE', 'FRED')
+ROLE = os.environ.get('QA_CATALOG_ROLE', 'catalog.bls:read')
+SOURCE_MATCH = os.environ.get('QA_CATALOG_SOURCE', 'BLS')
 READER_CLIENT = os.environ.get('QA_ANONYMOUS_CLIENT_ID', 'econgraph-anonymous')
 WAIT = float(os.environ.get('QA_CATALOG_WAIT_SECONDS', '420'))
 POLL = float(os.environ.get('QA_CATALOG_POLL_SECONDS', '10'))
