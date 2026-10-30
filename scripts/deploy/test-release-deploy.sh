@@ -463,6 +463,28 @@ for step in backup-postgres-now load-release-images backup-keycloak-db verify-re
     fi
 done
 
+# From the load on, the new images may be on the nodes: a backend pod that restarts
+# migrates econ_graph_app, and only it, before deploy.sh runs. So a failure before
+# deploy.sh names that database and how to check, never says the databases are
+# unchanged, and reports nothing to restore. Before the load, there is no such advice.
+for step in load-release-images backup-keycloak-db precheck-db-migration; do
+    run env STUB_FAIL="$step" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}" --report "$WORK/report"
+    if ! has "Only econ_graph_app can have changed" || ! has "get pods -l app=econ-graph-backend" ||
+        ! grep -qE '^  /.*/econ_graph_app-[^/]*\.dump$' <<<"$out"; then
+        fail "failing $step: does not say only econ_graph_app can have changed, how to check, or its dump"
+    elif has "The databases are unchanged" || has "restore them from the last backups"; then
+        fail "failing $step: says the databases are unchanged, or advises restoring them all"
+    elif grep -q '^restore_backup=' "$WORK/report"; then
+        fail "failing $step: reports a backup to restore when there may be nothing to restore"
+    else
+        echo "ok   failing $step: only econ_graph_app, after a backend restart, nothing reported to restore"
+    fi
+done
+run env STUB_FAIL=backup-postgres-now "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+if has "Only econ_graph_app can have changed" || has "restore them from the last backups"; then
+    fail "failing backup-postgres-now: restore advice before any new image is on the nodes"
+fi
+
 # Keycloak: stopped by the keycloak step, applied again by deploy.sh.
 for step in backup-keycloak-db precheck-db-migration deploy; do
     run env STUB_FAIL="$step" STUB_KEYCLOAK_REPLICAS=2 "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
@@ -1071,12 +1093,22 @@ echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 run env PUBLIC_HOST=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 [ "$rc" -eq 0 ] && [ "$(steps)" = "$ALL" ] || fail "an environment PUBLIC_HOST equal to the config: exit $rc, steps '$(steps)'"
 rm -f "$CONFIG"
-run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes
+run env STUB_MARKER=none STUB_SERVED_HOST= "$RELEASE_DEPLOY" --tag "$TAG" --yes
 if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST= " "$LOGS/steps.log"; then
     echo "ok   a test cluster without a deploy config deploys with PUBLIC_HOST empty, on --yes"
 else
     fail "a test cluster without a deploy config: exit $rc, $(cat "$LOGS/steps.log")"
 fi
+# ECO-752: an unmarked cluster without a deploy config that serves a public host now is
+# production missing its marker and config: an empty PUBLIC_HOST would remove its routes.
+run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "an unmarked cluster without a deploy config that serves a public host" \
+    "serves https://econgraph.com now, but context kind-econ-graph is not marked production"
+has "mark-production-cluster.sh" && has "add PUBLIC_HOST=econgraph.com" ||
+    fail "an unmarked cluster serving a public host: the refusal does not say how to fix it"
+run env STUB_MARKER=none STUB_SERVED_HOST=fail "$RELEASE_DEPLOY" --tag "$TAG" --yes
+refused "an unmarked cluster without a deploy config whose served host can't be read" \
+    "could not read which public host"
 echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
 # --- GATEWAY_TLS_ISSUER ---------------------------------------------------------------------
@@ -1145,7 +1177,7 @@ run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "an exported PUBLIC_HOST line" "without export"
 # Without a public host the issuer line is not read, so a bad one breaks nothing.
 printf 'GATEWAY_TLS_ISSUER=econ-graph-origin-ca # verified\n' >"$CONFIG"
-run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes
+run env STUB_MARKER=none STUB_SERVED_HOST= "$RELEASE_DEPLOY" --tag "$TAG" --yes
 if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST= " "$LOGS/steps.log"; then
     echo "ok   a bad issuer line does not stop a deploy without a public host"
 else
@@ -1190,9 +1222,9 @@ fi
 on_terminal "$UID_PREFIX" --tag "$TAG" --yes
 [ "$(steps)" = "$ALL" ] || fail "the UID prefix typed on a terminal: steps '$(steps)'"
 rm -f "$CONFIG"
-run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG"
+run env STUB_MARKER=none STUB_SERVED_HOST= "$RELEASE_DEPLOY" --tag "$TAG"
 refused "a test cluster without a terminal or --yes" "needs confirmation"
-run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes --confirm-production deadbeef
+run env STUB_MARKER=none STUB_SERVED_HOST= "$RELEASE_DEPLOY" --tag "$TAG" --yes --confirm-production deadbeef
 refused "a --confirm-production that doesn't match a test cluster" "--confirm-production deadbeef does not match"
 echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 

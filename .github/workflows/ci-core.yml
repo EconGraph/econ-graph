@@ -285,11 +285,13 @@ jobs:
 
     # The postgres-backup CronJob's backup, sync and restore scripts, in its
     # images, against scratch econ_graph, econ_graph_app and keycloak databases
-    # and an S3 mock.
+    # and an S3 mock; and backup-postgres-now.sh, which starts one, against a stub
+    # kubectl.
     - name: Check the backup and restore scripts
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-postgres-backup-scripts.sh
+        scripts/deploy/test-backup-postgres-now.sh
 
   deploy-manifests:
     name: Deploy Manifest Rendering

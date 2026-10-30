@@ -83,9 +83,10 @@
 #     without its host (and its tunnel connector stopped); so is one whose
 #     configured PUBLIC_HOST differs from the host it serves now, without
 #     --change-public-host; a cluster not marked production with one configured
-#     (deploy.sh would refuse it after the load and backups), a cluster whose
-#     marker can't be read, and a PUBLIC_HOST in the environment that differs
-#     from the config.
+#     (deploy.sh would refuse it after the load and backups), one not marked
+#     production without one configured that serves a public host now (a deploy
+#     would remove its routes), a cluster whose marker can't be read, and a
+#     PUBLIC_HOST in the environment that differs from the config.
 #   - With a public host, the gateway certificate's ClusterIssuer is chosen as
 #     deploy.sh will (tls_issuer_choose in lib/deploy-config.sh): GATEWAY_TLS_ISSUER
 #     from the environment, else a GATEWAY_TLS_ISSUER= line in the same config when
@@ -335,7 +336,15 @@ case "$marker" in
         fi ;;
     1)
         [ "$configured" = false ] ||
-            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host" ;;
+            die "${DEPLOY_ENV} sets PUBLIC_HOST=${PUBLIC_HOST}, but ${CLUSTER_ROLE_REASON}; only the production cluster serves the public host"
+        # Without a configured PUBLIC_HOST, deploy.sh gets an empty one and removes any
+        # public routes: its own refusal covers only an unset PUBLIC_HOST. A cluster that
+        # serves a public host now is the production cluster without its marker and its
+        # config, so refuse here, before any step, rather than take the site down.
+        served="$(public_host_in_cluster)" ||
+            die "could not read which public host ${CONTEXT} serves now; without PUBLIC_HOST configured, a deploy would remove its public routes"
+        [ -z "$served" ] ||
+            die "${CONTEXT} serves https://${served} now, but ${CLUSTER_ROLE_REASON} and ${DEPLOY_ENV} configures no PUBLIC_HOST: a deploy would remove its public routes. If it is the production cluster, mark it (scripts/deploy/mark-production-cluster.sh) and add PUBLIC_HOST=${served} to ${DEPLOY_ENV}; if it should not serve ${served}, delete its public routes first." ;;
     *) die "${CLUSTER_ROLE_REASON}" ;;
 esac
 # --confirm-production names one cluster: refuse it for any other, marked or not.
@@ -541,11 +550,16 @@ backup_before() {
 
 # print_backups RUN DATE LABEL: the data databases' dumps run RUN recorded, with
 # the restore command for econ_graph's, reported as restore_backup= (LABEL
-# "restore") or restore_backup_if_restored= (LABEL "later").
+# "restore") or restore_backup_if_restored= (LABEL "later"). LABEL "app" lists only
+# econ_graph_app's dump, unreported.
 print_backups() {
     local path
     while IFS= read -r path; do
         [ -n "$path" ] || continue
+        if [ "$3" = app ]; then
+            case "${path##*/}" in econ_graph_app-*) echo "  ${path}" ;; esac
+            continue
+        fi
         echo "  ${path}"
         case "$3" in
             restore) report "restore_backup=${path}" ;;
@@ -563,13 +577,39 @@ print_backups() {
 # not be. Before any deploy was started, the latest complete backup. When this
 # run's deploy came later, the latest backup before it is named too, for the
 # case where the databases were restored to before the tag since.
+# After a failure before deploy.sh ran (the load, keycloak or precheck step, or deploy.sh
+# not started): no migration ran, but the new images may be on the nodes, and a backend
+# pod that restarts runs the new one, which migrates econ_graph_app when it starts. The
+# data migrations (the crawler-migrate Job) and Keycloak's upgrade happen only in
+# deploy.sh, so no other database can have changed. Nothing is reported as
+# restore_backup=: there may be nothing to restore.
+explain_app_restore() {
+    local chosen
+    chosen="$(backup_before backup_complete first)"
+    echo
+    echo "Only econ_graph_app can have changed, and only if a backend pod restarted on the new"
+    echo "image: it migrates the app database when it starts. The other databases are as they"
+    echo "were. Check for a backend pod that restarted since the load:"
+    echo "  ${kubectl_hint} get pods -l app=econ-graph-backend"
+    echo "If one did, go back with the rollback above, then restore econ_graph_app alone"
+    echo "(docs/deployment/POSTGRES_BACKUP_RESTORE.md, \"econ_graph_app\" under Restore) from the"
+    echo "last backup taken before ${RC_TAG} was first deployed on this cluster:"
+    if [ -n "$chosen" ]; then
+        print_backups "${chosen%%$'\t'*}" "$(cut -f2 <<<"$chosen")" app
+        echo "  (with APP_DATABASE=shared there is no separate dump: the app tables are in econ_graph's)"
+    else
+        echo "  no complete backup is recorded for ${RC_TAG} on this cluster in ${RECORD}"
+    fi
+}
+
 explain_restore() {
     local chosen run date newer kc kc_newer
     chosen="$(backup_before backup_complete first)"
     run="${chosen%%$'\t'*}"
     date="$(cut -f2 <<<"$chosen")"
     echo
-    echo "If the data migrations (the crawler-migrate Job) ran, or Keycloak started on a new"
+    echo "If the data migrations (the crawler-migrate Job) ran, a backend pod restarted on the"
+    echo "new image (it migrates the app database when it starts), or Keycloak started on a new"
     echo "version, the databases are migrated: restore them from the last backups taken before"
     echo "${RC_TAG} was first deployed on this cluster:"
     if [ -n "$chosen" ]; then
@@ -620,8 +660,8 @@ explain_failure() {
     case "$failed" in
         backup)
             if [ -n "$BACKUP_STILL_RUNNING" ]; then
-                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running: it timed out here, but was"
-                echo "not stopped. Wait for it to finish:"
+                echo "The backup Job ${BACKUP_STILL_RUNNING} is still running (it outlasted the wait here, or"
+                echo "was already running when this run started), and was not stopped. Wait for it to finish:"
                 echo "  ${kubectl_hint} wait --for=condition=complete ${BACKUP_STILL_RUNNING} --timeout=3600s"
                 echo "and only then run this command again: a run starts another backup Job, which"
                 echo "would run beside this one. Nothing else was changed."
@@ -645,7 +685,8 @@ explain_failure() {
             echo "Fix the cause and run this command again, or go back with:" ;;
         keycloak)
             echo "The new images are loaded on the nodes under the names the manifests run;"
-            echo "running pods keep the old ones until they restart. The databases are unchanged."
+            echo "running pods keep the old ones until they restart. This run migrated nothing, but a"
+            echo "backend pod that restarts on the new image migrates the app database (see below)."
             echo "Fix the Keycloak backup and run this command again, or go back with:" ;;
         precheck)
             echo "The new images are loaded, the backups are taken, and the crawler worker"
@@ -667,7 +708,11 @@ explain_failure() {
     esac
     echo "  scripts/deploy/rollback-release-images.sh --to pre-${RC_TAG}${cluster_arg} --dry-run   # then without --dry-run"
     case "$failed" in
-        deploy | verify) [ -n "$NOT_STARTED" ] || explain_restore ;;
+        # From the load on, the new images may be on the nodes: a backend pod that
+        # restarts runs the new one, which migrates the app database.
+        load | keycloak | precheck) explain_app_restore ;;
+        deploy | verify)
+            if [ -n "$NOT_STARTED" ]; then explain_app_restore; else explain_restore; fi ;;
     esac
     case "$failed" in
         keycloak | precheck | deploy)
