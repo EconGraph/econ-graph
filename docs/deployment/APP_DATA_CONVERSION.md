@@ -11,6 +11,25 @@ change and no crawl is started. The same script rolls a removal back.
 The wrapper drives `scripts/deploy/split-app-data.py`, which does the database work and
 can also be run on its own against any two libpq services.
 
+## Prerequisites
+
+- **The backend stays on the combined database until the conversion is done.** Every
+  deploy before then sets `APP_DATABASE=shared` explicitly. A cluster deployed from a
+  release before the app database existed has no `app-database-url` in
+  `econ-graph-secrets`, and `create-secrets.sh` treats a missing key as a new install and
+  picks `separate`. It refuses that while `econ_graph` still holds `public.users`
+  (`scripts/deploy/lib/app-database-guard.sh`), so a deploy without `APP_DATABASE=shared`
+  stops instead of serving an app database without its accounts.
+- **Every deploy names its cluster**: `KIND_CLUSTER=<name> ... scripts/deploy/deploy.sh`.
+  `deploy.sh` runs `create-secrets.sh` on the context `kind-<name>`, so a rehearsal
+  cannot write a setting into production.
+- **The checkout is the release that is deployed**, the one whose app migrations the
+  source has run. The conversion refuses a source that lacks an app migration of the
+  checkout, and the rollback refuses a backup whose removed tables, enum types or
+  migration versions differ from the checkout.
+- **Run it inside tmux or screen.** A dropped connection or a closed pipe no longer
+  leaves the writers stopped, but the removal's typed confirmation needs the terminal.
+
 ## What the wrapper does
 
 ```sh
@@ -29,9 +48,12 @@ scripts/deploy/convert-app-data.sh --cluster NAME [--production] \
 2. **Full cluster backup**: `scripts/deploy/backup-kind-databases.sh` (data, app and
    Keycloak dumps plus the Secrets). The run stops if it fails, before anything changes.
 3. **Writers stopped**: `deployment/econ-graph-backend` and `deployment/crawler-worker`
-   scaled to 0 and `cronjob/postgres-backup` suspended. Each is put back as it was when
-   the script exits, also after a failure. After a successful removal or rollback the
-   backend stays at 0, because its database setting must change before it starts.
+   scaled to 0 and `cronjob/postgres-backup` suspended. On exit, also after a failure, a
+   signal or a closed terminal, the crawler and the CronJob are put back as they were.
+   The backend is put back only if `econ_graph` still holds the app tables (checked in
+   the database, not inferred from how the run ended) and no removal or rollback
+   succeeded. Otherwise it stays at 0 and the script prints the deploy that starts it on
+   the right database, naming the cluster.
 4. **Connections**: port-forwards to both databases on 127.0.0.1, and a private temporary
    directory with a mode-0600 libpq service file and password file built from the
    `postgres-password` keys of the Secrets `econ-graph-postgres` and
@@ -42,7 +64,9 @@ scripts/deploy/convert-app-data.sh --cluster NAME [--production] \
    `--drop-source-app`, the removal, which asks for a typed phrase on the terminal. With
    `--restore-source-app`, the rollback instead.
 
-`--dry-run` performs the checks of step 1 and prints every later step. It takes no backup,
+The check step prints the kubectl it uses (the cluster's own copy, usually
+`~/.cache/econgraph/bin/kubectl`). `--dry-run` performs the checks of step 1 and prints
+every later step. It takes no backup,
 stops nothing, reads no Secret and opens no database connection. A cluster other than
 `econ-graph` is a scratch cluster and needs `ECONGRAPH_SCRATCH_STORAGE` (see
 [Testing on a scratch cluster](HOST_STORAGE.md#testing-on-a-scratch-cluster)).
@@ -74,9 +98,14 @@ know which crawler source each `data_sources` row is. Write a JSON object from e
 {"<FRED source UUID>": "FRED", "<BLS source UUID>": "BLS"}
 ```
 
-List the rows with the cluster's kubectl (the wrapper's check step prints which one it
-uses), for example
-`kubectl --context kind-NAME -n econ-graph exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph -Atc 'select id, name from data_sources'`.
+List the rows with that kubectl, never the host's plain `kubectl` (on this host it is
+MicroK8s):
+
+```sh
+~/.cache/econgraph/bin/kubectl --context kind-NAME -n econ-graph exec postgresql-0 -c postgresql -- \
+    psql -U postgres -d econ_graph -Atc 'select id, name from data_sources'
+```
+
 Every source that has an economic series must be mapped. The script stops if any series ID
 differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
 
@@ -94,9 +123,10 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    `scripts/deploy/restore-kind-databases.sh --from ~/econgraph-backups/<timestamp>
    --expect-series N --expect-data-points N`. This brings over the combined `econ_graph`,
    Keycloak and the Secrets the databases were created with.
-4. Deploy the release being rolled out to the scratch cluster with `scripts/deploy/deploy.sh`.
-   It creates `app-postgres` with an empty `econ_graph_app` and keeps
-   `APP_DATABASE=shared`, so the backend still uses `econ_graph`.
+4. Deploy the release being rolled out to the scratch cluster, keeping the backend on the
+   combined database: `KIND_CLUSTER=<name> APP_DATABASE=shared scripts/deploy/deploy.sh`.
+   It creates `app-postgres` with an empty `econ_graph_app`. Check out that release for
+   the steps below too.
 5. Run the conversion against the scratch cluster, with the same environment:
 
    ```sh
@@ -117,10 +147,11 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    If the backend ran on `econ_graph` in between, the copy in `econ_graph_app` is stale; add
    `--previous-evidence <scratch backup root>/<copy timestamp>/evidence.json` to replace it.
 
-7. Switch the backend over with `APP_DATABASE=separate scripts/deploy/create-secrets.sh`,
-   start it, and check that existing users sign in and their annotations still show on
-   their original series. Run the tagged crawler's `migrate --dry-run` against the data
-   database to confirm nothing is pending.
+7. Switch the backend over and start it with
+   `KIND_CLUSTER=<name> APP_DATABASE=separate scripts/deploy/deploy.sh`, then check that
+   existing users sign in and their annotations still show on their original series.
+   Run the tagged crawler's `migrate --dry-run` against the data database to confirm
+   nothing is pending.
 
 The scratch backup root then holds full copies of production records; it has the same
 permissions and handling as below. The synthetic test in CI does not replace this
@@ -128,23 +159,38 @@ rehearsal.
 
 ## Convert production
 
-After a rehearsal on the same release, run the same commands with
-`--cluster econ-graph --production`, a `--dry-run` first. Without `--drop-source-app` the
-wrapper copies, verifies and puts every writer back: the backend keeps using `econ_graph`
-and the copy in `econ_graph_app` goes stale. A later run replaces that stale copy only when
-given its `--previous-evidence`; any other existing app data in `econ_graph_app` is refused.
+Production first gets the release with the app database while keeping the combined
+database: `KIND_CLUSTER=econ-graph APP_DATABASE=shared PUBLIC_HOST=<the public host>
+scripts/deploy/deploy.sh`. Then, from that release's checkout and after a rehearsal of
+it, run the same conversion commands with `--cluster econ-graph --production`, a
+`--dry-run` first.
+
+Without `--drop-source-app` the wrapper copies, verifies and puts every writer back: the
+backend keeps using `econ_graph` and the copy in `econ_graph_app` goes stale. A later run
+replaces that stale copy only when given its `--previous-evidence`; any other existing app
+data in `econ_graph_app` is refused.
 
 With `--drop-source-app`, the third step asks for `DROP APP TABLES FROM econ_graph` on the
 terminal. There is no bypass. While the prompt waits, the copy is committed and the source
 is still locked, so the evidence can be reviewed from another terminal. The removal drops
 the app tables and their five enum types without `CASCADE` (the three cross-plane foreign
-keys go with their tables) and deletes only the app migration entries. Every data table
-and the series-ID checksum must be unchanged before it commits. A wrong phrase, a refusal
-or a failed check leaves the source as it was, with the verified copy committed and every
-writer put back.
+keys go with their tables) and deletes only the app migration entries, recording which.
+Every data table and the series-ID checksum must be unchanged before it commits, and the
+evidence is marked `pending` before the commit so a failure right after it is still
+recoverable. A wrong phrase, a refusal or a failed check leaves the source as it was, with
+the verified copy committed and every writer put back.
 
-After a removal, run `APP_DATABASE=separate scripts/deploy/create-secrets.sh`, start the
-backend (`scripts/deploy/deploy.sh`), and check users and annotations as in the rehearsal.
+After a removal the backend stays stopped. Start it on the app database with
+`KIND_CLUSTER=econ-graph APP_DATABASE=separate PUBLIC_HOST=<the public host>
+scripts/deploy/deploy.sh` and check users and annotations as in the rehearsal.
+
+The backup CronJob is resumed when the wrapper exits. Until the deploy above it still
+reads `app-database-url` as the combined database, so its nightly dumps cover `econ_graph`
+but not `econ_graph_app`. Nothing writes app rows in that interval, because the backend is
+stopped, and the app records as of the removal are in the removal's backup directory. The
+deploy that starts the backend also points the CronJob at `econ_graph_app`, which closes
+the gap. Keeping the CronJob suspended instead would also stop the crawl's nightly dumps
+for as long as the switch waits.
 
 ## Roll back a removal
 
@@ -155,18 +201,25 @@ scripts/deploy/convert-app-data.sh --cluster econ-graph --production \
 
 The rollback puts the app tables back into `econ_graph` from the dump the removal run took
 just before it dropped them. It requires that directory's `evidence.json` to record a
-removal, the dump to match its recorded SHA-256, and the source to be the same database
-(by system identifier and name), holding the data tables and no app tables. From
-`pg_restore --list` it selects only the app tables, their rows, the app enum types and the
-indexes, constraints, triggers, comments and privileges on them, writes that list to
-`restore.list` in a new directory under the backup root, and restores it in one
-transaction. It then checks every app table against the row counts and content hashes
-recorded before the removal and adds back the app migration entries the removal deleted.
-Data tables are not touched; crawl data written after the conversion stays.
+removal (`source_app_removed` true, or `pending` when the run failed after its commit),
+the dump to match its recorded SHA-256, the source to be the same database (by system
+identifier and name) holding the data tables and no app tables, and the checkout to match
+what was removed: the app tables, enum types and migration versions are taken from the
+evidence and compared with the checkout before anything is restored.
 
-Rows written to `econ_graph_app` after the switch are not carried back. The app database is
-left as it is. Afterwards run `APP_DATABASE=shared scripts/deploy/create-secrets.sh` and
-start the backend.
+From `pg_restore --list` it selects only the app tables, their rows, the app enum types
+and the indexes, constraints, triggers, comments and privileges on them, writes that list
+to `restore.list` in a new directory under the backup root, and restores it in one
+transaction. It then locks the restored tables, checks each against the row counts and
+content hashes recorded before the removal, and adds back the migration entries the
+removal deleted. If the contents differ, it drops what it just restored, so the source is
+as it was before the rollback, and stops. Data tables are not touched; crawl data written
+after the conversion stays.
+
+Rows written to `econ_graph_app` after the switch are not carried back. The app database
+is left as it is. The backend stays stopped; start it on the combined database with
+`KIND_CLUSTER=econ-graph APP_DATABASE=shared PUBLIC_HOST=<the public host>
+scripts/deploy/deploy.sh`.
 
 `scripts/deploy/restore-kind-databases.sh` does not restore conversion backups: they have no
 `econ_graph.dump`, so it refuses them. It compares only `economic_series` and
@@ -230,5 +283,7 @@ daemon named by `DOCKER_HOST`, default the rootful socket) and `psycopg[binary]=
 its backups go to a scratch `ECONGRAPH_BACKUP_ROOT`.
 
 `scripts/deploy/test-convert-app-data.sh` runs the wrapper against stub `kubectl`, `docker`,
-`kind` and Python with `HOME`, the cache and the backup root in a scratch directory. Neither
-test connects to a cluster or reads production configuration.
+`kind` and Python with `HOME`, the cache and the backup root in a scratch directory,
+including failures and a hangup while the writers are stopped.
+`scripts/deploy/test-app-database-guard.sh` checks the `create-secrets.sh` guard. None of
+these tests connects to a cluster or reads production configuration.

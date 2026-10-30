@@ -32,10 +32,11 @@
 #   2. scripts/deploy/backup-kind-databases.sh: data, app and Keycloak dumps plus the
 #      Secrets, under ${ECONGRAPH_BACKUP_ROOT:-~/econgraph-backups}.
 #   3. Stop the writers: deployment/econ-graph-backend and deployment/crawler-worker
-#      scaled to 0, cronjob/postgres-backup suspended. They are put back as they were
-#      when the script exits, also on failure, with one exception: after a successful
-#      --drop-source-app or --restore-source-app the backend stays at 0, because its
-#      database settings must change before it starts (the runbook says how).
+#      scaled to 0, cronjob/postgres-backup suspended. On exit, also after a failure or a
+#      signal, the crawler and the CronJob are put back as they were. The backend is put
+#      back only if econ_graph still holds the app tables and no removal or rollback
+#      succeeded: a backend on the old setting would otherwise serve the wrong database or
+#      create new, empty app tables. The script then prints the deploy that starts it.
 #   4. Port-forward both databases on 127.0.0.1 and write a 0600 libpq service file and
 #      password file from the Secrets econ-graph-postgres and econ-graph-app-postgres
 #      into a private temporary directory, removed on exit. Passwords are never printed.
@@ -46,7 +47,8 @@
 #      with --restore-source-app.
 #
 # The run holds database locks for the length of each step; writers are stopped first.
-# Nothing under the backup root is ever deleted.
+# Nothing under the backup root is ever deleted. Run it inside tmux or screen: a dropped
+# connection is handled, but the typed confirmation needs the terminal.
 #
 # Environment: PYTHON (default python3), PG_IMAGE (default postgres:18),
 # ECONGRAPH_BACKUP_ROOT, and lib/kind-env.sh's ECONGRAPH_DOCKER_HOST.

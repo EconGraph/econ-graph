@@ -8,6 +8,8 @@ on:
       - 'scripts/deploy/*convert-app-data*'
       - 'scripts/deploy/backup-kind-databases.sh'
       - 'scripts/deploy/lib/**'
+      - 'scripts/deploy/create-secrets.sh'
+      - 'scripts/deploy/*app-database-guard*'
       - 'backend/migrations/**'
   push:
     branches: [main]
@@ -17,6 +19,8 @@ on:
       - 'scripts/deploy/*convert-app-data*'
       - 'scripts/deploy/backup-kind-databases.sh'
       - 'scripts/deploy/lib/**'
+      - 'scripts/deploy/create-secrets.sh'
+      - 'scripts/deploy/*app-database-guard*'
       - 'backend/migrations/**'
   workflow_dispatch:
 
@@ -45,3 +49,5 @@ jobs:
         run: python scripts/deploy/test-split-app-data.py -v
       - name: Check the operator wrapper against stub kubectl, docker and kind
         run: scripts/deploy/test-convert-app-data.sh
+      - name: Check the app database guard of create-secrets.sh
+        run: scripts/deploy/test-app-database-guard.sh

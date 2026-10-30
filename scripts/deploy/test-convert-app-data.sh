@@ -73,6 +73,7 @@ STUB
 #   STUB_BACKUP_FAILS=1      pg_dump in backup-kind-databases.sh fails
 #   STUB_SCALE_FAILS=NAME    scaling deployment NAME to 0 fails
 #   STUB_SOURCE_USERS=f      econ_graph no longer holds public.users
+#   STUB_RESTORE_PATCH_FAILS=1  un-suspending the CronJob fails
 cat >"$STUB_KUBECTL" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >>"$STUB_LOG"
@@ -95,6 +96,7 @@ case "$*" in
   "get cronjob postgres-backup -o jsonpath={.spec.suspend}") ;;
   "scale deployment ${STUB_SCALE_FAILS:-none} --replicas=0") exit 1 ;;
   "scale deployment "*" --replicas="*) ;;
+  "patch cronjob postgres-backup --type=merge -p "*'"suspend":false'*) [ "${STUB_RESTORE_PATCH_FAILS:-0}" != 1 ] || exit 1 ;;
   "patch cronjob postgres-backup --type=merge -p "*) ;;
   "get pods -l app="*" -o name") ;;
   "port-forward --address 127.0.0.1 pod/postgresql-0 :5432") echo "Forwarding from 127.0.0.1:15432 -> 5432"; exec sleep 300 ;;
@@ -147,7 +149,7 @@ convert() { ECONGRAPH_SCRATCH_STORAGE="$tmp/scratch-storage" scripts/deploy/conv
 reset() {
   sleep 1; : >"$STUB_LOG"; rm -f "$STUB_LOG.sleeping"
   unset STUB_MARKER STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT STUB_SCALE_FAILS \
-    STUB_SOURCE_USERS STUB_KILL_READER STUB_PY_SLEEP_ON
+    STUB_SOURCE_USERS STUB_KILL_READER STUB_PY_SLEEP_ON STUB_RESTORE_PATCH_FAILS
 }
 never() { # never PATTERN WHAT: no log line matches PATTERN
   if grep -qE "$1" "$STUB_LOG"; then fail "$2"; grep -E "$1" "$STUB_LOG" | head -3; fi
@@ -303,6 +305,14 @@ wait "$pid" || status=$?
 has "scale deployment econ-graph-backend --replicas=2" "hangup: backend not put back"
 has "patch cronjob postgres-backup --type=merge -p \{\"spec\":\{\"suspend\":false\}\}" "hangup: CronJob not put back"
 leftovers "hangup"
+
+# One writer that cannot be put back does not keep the others stopped.
+reset
+STUB_RESTORE_PATCH_FAILS=1 STUB_PY_FAIL=--writers-stopped convert --cluster kg-test --source-map "$map" &&
+  fail "failed copy reported success"
+has "scale deployment econ-graph-backend --replicas=2" "failed CronJob restore: backend not put back"
+has "scale deployment crawler-worker --replicas=1" "failed CronJob restore: crawler not put back"
+grep -q "could not restore cronjob/postgres-backup" "$tmp/out" || fail "failed CronJob restore not reported"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failure(s)"
