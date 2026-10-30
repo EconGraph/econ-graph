@@ -84,7 +84,7 @@ class CrawlerSecretsTest(unittest.TestCase):
         self.assertEqual(set(trigger["workflow_dispatch"]["inputs"]), {"source", "series"})
         steps = workflow["jobs"]["crawler-integration-test"]["steps"]
         crawl = next(step for step in steps if step.get("name") == "Crawl one series through the queue")
-        for source in ("FRED", "BLS", "CENSUS"):
+        for source in ("FRED", "BLS", "BEA", "CENSUS"):
             self.assertEqual(crawl["env"][f"{source}_API_KEY"], "${{ secrets." + source + "_API_KEY }}")
 
 
