@@ -62,7 +62,7 @@ By default a source's catalog is discovered by one `discover_catalog` job, insid
 An adapter whose `chunked_discovery()` returns `Some` is discovered in pieces instead
 ([`src/discovery_run.rs`](src/discovery_run.rs)), so a catalog that needs one upstream request
 per entry neither outlives the worker's `stuck_after` nor fails as a whole on one transient error.
-No adapter that ships with the crawler does this yet; all use single-job discovery.
+No adapter that ships with the crawler does this; all use single-job discovery.
 
 1. **Enumerate.** The `discover_catalog` job refreshes reference data, records a run in
    `discovery_runs` (state `enumerating`) and calls `enumerate_discovery()` for a list of work
@@ -74,7 +74,9 @@ No adapter that ships with the crawler does this yet; all use single-job discove
    result on its chunk row. Chunk jobs are ordinary queue jobs at the priority of the
    `discover_catalog` job that started the run: they share the source's rate limiter and circuit
    breaker, and each is retried on its own under the source's retry policy. A chunk that fails
-   for good fails the run and cancels its remaining queued chunks.
+   for good fails the run and cancels its remaining queued chunks. Claims are by priority, then
+   age, so while a run's chunks are due they can fill every worker slot not held by an older or
+   higher-priority job; the source's rate limiter, not the queue, bounds their upstream load.
 3. **Finalize.** The result transaction that stores the last chunk moves the run to
    `finalizing` and enqueues one `finalize_discovery` job. That job concatenates the chunks'
    series in chunk order and commits them exactly as a single-job discovery commits its list:
@@ -87,17 +89,23 @@ A run that fails or is superseded writes no metadata, stores no validator and re
 Each chunk commit locks its run row, and only the commit that brings the done count up to the
 chunk count can move the run from `running` to `finalizing`, so a run is finalized once even
 when its last chunks finish together on different workers. Starting a run supersedes any older
-run of the source that is not final and cancels that run's queued jobs; a chunk of it that is
-already in flight finds the run superseded when it commits and discards its result. A worker
+`enumerating` or `running` run of the source and cancels that run's queued jobs; a chunk of it
+that is already in flight finds the run superseded when it commits and discards its result. A
+`finalizing` run already has every chunk stored, so it is never superseded: a discovery that
+finds one starts no run and completes. Only the current claim of a `discover_catalog` job can
+start a run, so a worker whose lease expired cannot supersede the run of the worker that
+re-claimed the job. A worker
 that dies mid-chunk is handled like any other job: `release_stuck` re-queues the chunk, and the
 late result of the dead claim is dropped as a lost lease. The worker's maintenance loop fails
 runs whose chunk or finalize jobs ended without completing (for example, `release_stuck`
 exhausting their retries) and runs left `enumerating` with no active `discover_catalog` job.
-For the scheduler, a failed `discover_chunk` or `finalize_discovery` job counts as a failed
-discovery, with the usual one-hour backoff.
+For the scheduler, a run that fails after enumeration counts as one failed discovery, however
+many of its chunk jobs failed, with the usual one-hour backoff; a superseded run counts as
+nothing.
 
 An adapter may give a `selection_fingerprint` of its catalog selection rules. It is recorded
-when a run starts, and finalize fails the run if the adapter's fingerprint has changed since.
+when a run starts, and a chunk or finalize job fails the run if the adapter's fingerprint
+differs from the run's, so no chunk discovered under other rules is ever committed.
 
 `crawler status` lists each source's newest run, its state and its chunk progress. Final runs
 are deleted after the worker's queue retention, except each source's newest complete run and,

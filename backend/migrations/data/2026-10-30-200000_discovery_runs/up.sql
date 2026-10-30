@@ -16,7 +16,8 @@
 --   superseded   a newer run of the same source started first; nothing was committed
 -- At most one run per source is not final (enumerating, running or finalizing).
 --
--- New tables only, plus a wider crawl_queue kind constraint: no existing row changes.
+-- New tables, a wider crawl_queue kind constraint and a partial crawl_queue index: no existing
+-- row changes.
 --
 -- Locking: replacing the kind constraint takes ACCESS EXCLUSIVE on crawl_queue until the
 -- migration commits. lock_timeout and statement_timeout bound the wait at about 10 seconds, so
@@ -36,6 +37,13 @@ ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_kind
     CHECK (kind IN ('fetch_series', 'discover_catalog', 'fetch_filing', 'refetch_series',
                     'discover_chunk', 'finalize_discovery'));
 
+-- A run's chunk and finalize jobs, found by run id (the series_id up to the first '/') when the
+-- run is superseded or failed, without scanning the source's other queue rows. Partial, so it
+-- holds only those jobs; building it reads crawl_queue once, under the lock above.
+CREATE INDEX idx_crawl_queue_discovery_run
+    ON crawl_queue (split_part(series_id, '/', 1), status)
+    WHERE kind IN ('discover_chunk', 'finalize_discovery');
+
 CREATE TABLE discovery_runs (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     -- crawl_queue.source of the run's jobs (e.g. FRED).
@@ -45,6 +53,10 @@ CREATE TABLE discovery_runs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Set when the run reaches complete, failed or superseded.
     finished_at TIMESTAMPTZ,
+    -- Set when enumeration's result committed (the discover_catalog job completed). The
+    -- scheduler counts a failed run as a failed discovery only if it got this far; a failed
+    -- enumeration fails its discover_catalog job instead.
+    enumerated_at TIMESTAMPTZ,
     chunks_total INTEGER NOT NULL DEFAULT 0,
     chunks_done INTEGER NOT NULL DEFAULT 0,
     chunks_failed INTEGER NOT NULL DEFAULT 0,
@@ -54,8 +66,8 @@ CREATE TABLE discovery_runs (
     -- Queue priority of the discover_catalog job that started the run; its chunk and finalize
     -- jobs use the same priority.
     priority INTEGER NOT NULL DEFAULT 5,
-    -- The catalog validator ({"url": ..., "validators": {...}}) enumeration returned, stored
-    -- with the discovered series only when the run finalizes.
+    -- The catalog validator enumeration returned, stored with the discovered series only when
+    -- the run finalizes: {"url", "etag", "last_modified", "content_sha256", "version"}.
     validator JSONB,
     -- Curated entries enumeration found missing upstream (a JSON array of strings).
     curated_missing JSONB NOT NULL DEFAULT '[]'::jsonb,

@@ -22,7 +22,8 @@
 //!   run finished. A source with no complete run reports when its oldest retained run started, so
 //!   a source whose runs never complete still ages.
 //!
-//! Only sources whose adapter discovers in chunks have runs, so only they have these series.
+//! The polled gauges cover only the enabled sources whose adapter discovers in chunks today, so a
+//! source that stops opting in, or is disabled, drops out (and its alert clears).
 
 use once_cell::sync::Lazy;
 use prometheus::{

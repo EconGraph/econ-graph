@@ -32,6 +32,8 @@ BEGIN
 END
 $$;
 
+DROP INDEX idx_crawl_queue_discovery_run;
+
 ALTER TABLE crawl_queue DROP CONSTRAINT check_crawl_queue_kind;
 
 ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_kind

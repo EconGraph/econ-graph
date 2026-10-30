@@ -410,6 +410,7 @@ diesel::table! {
         started_at -> Timestamptz,
         updated_at -> Timestamptz,
         finished_at -> Nullable<Timestamptz>,
+        enumerated_at -> Nullable<Timestamptz>,
         chunks_total -> Int4,
         chunks_done -> Int4,
         chunks_failed -> Int4,

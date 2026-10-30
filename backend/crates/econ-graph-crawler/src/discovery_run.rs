@@ -67,6 +67,7 @@ use diesel::sql_types::{
 use diesel::QueryableByName;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
+use econ_graph_core::models::CrawlQueueItem;
 use econ_graph_core::DatabasePool;
 use econ_graph_metrics::crawler::discovery_runs::CRAWLER_DISCOVERY_RUN_METRICS;
 use serde::{Deserialize, Serialize};
@@ -377,9 +378,6 @@ pub(crate) fn publish(source: SourceId, event: &RunEvent) {
 // Database
 // ---------------------------------------------------------------------------
 
-/// Run and job states that are not final.
-const ACTIVE_RUN_STATES: &str = "('enumerating', 'running', 'finalizing')";
-
 fn conn_err(e: impl std::fmt::Display) -> AppError {
     AppError::DatabaseError(format!("Failed to get database connection: {e}"))
 }
@@ -432,9 +430,9 @@ async fn cancel_jobs_conn(
     Ok(diesel::sql_query(
         "UPDATE crawl_queue SET status = 'cancelled', finished_at = NOW(), updated_at = NOW(), \
              error_message = $3 \
-         WHERE source = $1 AND status IN ('pending', 'retrying') \
-           AND ((kind = 'discover_chunk' AND split_part(series_id, '/', 1) = ANY($2)) \
-             OR (kind = 'finalize_discovery' AND series_id = ANY($2)))",
+         WHERE kind IN ('discover_chunk', 'finalize_discovery') \
+           AND split_part(series_id, '/', 1) = ANY($2) \
+           AND source = $1 AND status IN ('pending', 'retrying')",
     )
     .bind::<Text, _>(source)
     .bind::<Array<Text>, _>(&ids)
@@ -443,19 +441,39 @@ async fn cancel_jobs_conn(
     .await?)
 }
 
-/// Starts a run of `source` in state `enumerating`, first superseding any older run that isn't
-/// final (and cancelling its queued jobs). Returns the new run's id and how many runs it
-/// superseded.
+/// Outcome of [`start_run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunStart {
+    /// A new run in state `enumerating`, after superseding this many older runs.
+    Started { run_id: Uuid, superseded: usize },
+    /// The `discover_catalog` claim is no longer current (its lease expired and the job may have
+    /// been claimed again): nothing changed, and the caller must not start a run.
+    ClaimLost,
+    /// A run of the source has every chunk stored and is waiting for its finalize job: nothing
+    /// changed. Superseding it would throw away a finished catalog, so this discovery starts no
+    /// run and the finalizing one commits.
+    Finalizing { run_id: Uuid },
+}
+
+/// Starts a run of `source` in state `enumerating` for the `discover_catalog` job `claim`, first
+/// superseding any older run that is `enumerating` or `running` (and cancelling its queued
+/// jobs). See [`RunStart`] for when it starts nothing.
 pub(crate) async fn start_run(
     pool: &DatabasePool,
     source: SourceId,
     settings: &ChunkedDiscovery,
-    priority: i32,
-) -> AppResult<(Uuid, usize)> {
+    claim: &CrawlQueueItem,
+) -> AppResult<RunStart> {
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source = source.as_str();
     let fingerprint = settings.selection_fingerprint.clone();
+    let priority = claim.priority;
     conn.transaction::<_, AppError, _>(async move |conn| {
+        // The claim row stays locked until commit, so the lease can't be released and re-claimed
+        // in between (`release_stuck` and re-claims update the row).
+        if claim.locked_by.is_none() || !CrawlQueueItem::lock_current_claim(conn, claim).await? {
+            return Ok(RunStart::ClaimLost);
+        }
         // Serializes run starts of one source, so the partial unique index never rejects one.
         diesel::sql_query(
             "SELECT pg_advisory_xact_lock(hashtextextended('discovery_runs:' || $1, 0))",
@@ -463,11 +481,20 @@ pub(crate) async fn start_run(
         .bind::<Text, _>(source)
         .execute(conn)
         .await?;
-        let superseded: Vec<IdRow> = diesel::sql_query(format!(
+        let finalizing: Vec<IdRow> = diesel::sql_query(
+            "SELECT id FROM discovery_runs WHERE source = $1 AND state = 'finalizing'",
+        )
+        .bind::<Text, _>(source)
+        .load(conn)
+        .await?;
+        if let Some(run) = finalizing.into_iter().next() {
+            return Ok(RunStart::Finalizing { run_id: run.id });
+        }
+        let superseded: Vec<IdRow> = diesel::sql_query(
             "UPDATE discovery_runs SET state = 'superseded', finished_at = NOW(), \
                  updated_at = NOW(), error_message = 'superseded by a newer run' \
-             WHERE source = $1 AND state IN {ACTIVE_RUN_STATES} RETURNING id"
-        ))
+             WHERE source = $1 AND state IN ('enumerating', 'running') RETURNING id",
+        )
         .bind::<Text, _>(source)
         .load(conn)
         .await?;
@@ -488,7 +515,10 @@ pub(crate) async fn start_run(
         .bind::<Integer, _>(priority)
         .get_result(conn)
         .await?;
-        Ok((run.id, superseded.len()))
+        Ok(RunStart::Started {
+            run_id: run.id,
+            superseded: superseded.len(),
+        })
     })
     .await
 }
@@ -526,21 +556,24 @@ pub(crate) async fn load_run(pool: &DatabasePool, run_id: Uuid) -> AppResult<Opt
     Ok(rows.into_iter().next())
 }
 
-/// The units of a chunk that is still `pending` in a `running` run; `None` when there is
+/// A chunk that is still `pending` in a `running` run; `None` when there is
 /// nothing to do (the run or chunk is gone, finished, failed or superseded).
 pub(crate) async fn pending_chunk_units(
     pool: &DatabasePool,
     run_id: Uuid,
     chunk_index: i32,
-) -> AppResult<Option<Vec<DiscoveryUnit>>> {
+) -> AppResult<Option<PendingChunk>> {
     #[derive(QueryableByName)]
     struct Row {
         #[diesel(sql_type = Jsonb)]
         units: serde_json::Value,
+        #[diesel(sql_type = Nullable<Text>)]
+        selection_fingerprint: Option<String>,
     }
     let mut conn = pool.get().await.map_err(conn_err)?;
     let rows: Vec<Row> = diesel::sql_query(
-        "SELECT c.units FROM discovery_run_chunks c JOIN discovery_runs r ON r.id = c.run_id \
+        "SELECT c.units, r.selection_fingerprint \
+         FROM discovery_run_chunks c JOIN discovery_runs r ON r.id = c.run_id \
          WHERE c.run_id = $1 AND c.chunk_index = $2 AND c.state = 'pending' \
            AND r.state = 'running'",
     )
@@ -550,8 +583,19 @@ pub(crate) async fn pending_chunk_units(
     .await?;
     rows.into_iter()
         .next()
-        .map(|r| from_json(r.units))
+        .map(|r| {
+            Ok(PendingChunk {
+                units: from_json(r.units)?,
+                selection_fingerprint: r.selection_fingerprint,
+            })
+        })
         .transpose()
+}
+
+/// A chunk still waiting for its details, with its run's selection fingerprint.
+pub(crate) struct PendingChunk {
+    pub units: Vec<DiscoveryUnit>,
+    pub selection_fingerprint: Option<String>,
 }
 
 /// Every chunk's series in chunk order, then every curated entry missing (enumeration's first,
@@ -651,7 +695,7 @@ pub(crate) async fn commit_enumeration_conn(
         .map_err(|_| AppError::ValidationError("too many discovery chunks".into()))?;
     let moved: Vec<IdRow> = diesel::sql_query(
         "UPDATE discovery_runs SET state = 'running', chunks_total = $2, validator = $3, \
-             curated_missing = $4, updated_at = NOW() \
+             curated_missing = $4, enumerated_at = NOW(), updated_at = NOW() \
          WHERE id = $1 AND state = 'enumerating' RETURNING id",
     )
     .bind::<SqlUuid, _>(run_id)
@@ -697,16 +741,25 @@ pub(crate) async fn commit_enumeration_conn(
 pub(crate) async fn commit_unchanged_conn(
     conn: &mut AsyncPgConnection,
     run_id: Uuid,
-) -> AppResult<bool> {
-    let n = diesel::sql_query(
+) -> AppResult<Option<Duration>> {
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Double)]
+        seconds: f64,
+    }
+    let done: Vec<Row> = diesel::sql_query(
         "UPDATE discovery_runs SET state = 'complete', catalog_unchanged = TRUE, \
-             finished_at = NOW(), updated_at = NOW() \
-         WHERE id = $1 AND state = 'enumerating'",
+             enumerated_at = NOW(), finished_at = NOW(), updated_at = NOW() \
+         WHERE id = $1 AND state = 'enumerating' \
+         RETURNING EXTRACT(EPOCH FROM (NOW() - started_at))::float8 AS seconds",
     )
     .bind::<SqlUuid, _>(run_id)
-    .execute(conn)
+    .load(conn)
     .await?;
-    Ok(n > 0)
+    Ok(done
+        .into_iter()
+        .next()
+        .map(|d| Duration::from_secs_f64(d.seconds.max(0.0))))
 }
 
 /// What a chunk's result transaction did.
@@ -868,9 +921,9 @@ pub async fn fail_abandoned_runs(pool: &DatabasePool) -> AppResult<Vec<String>> 
                      ELSE 'a chunk or finalize job ended without completing' END \
              WHERE (r.state IN ('running', 'finalizing') AND EXISTS ( \
                      SELECT 1 FROM crawl_queue q \
-                     WHERE q.source = r.source AND q.status IN ('failed', 'cancelled') \
-                       AND ((q.kind = 'discover_chunk' AND q.series_id LIKE r.id::text || '/%') \
-                         OR (q.kind = 'finalize_discovery' AND q.series_id = r.id::text)))) \
+                     WHERE q.kind IN ('discover_chunk', 'finalize_discovery') \
+                       AND split_part(q.series_id, '/', 1) = r.id::text \
+                       AND q.source = r.source AND q.status IN ('failed', 'cancelled'))) \
                 OR (r.state = 'enumerating' AND NOT EXISTS ( \
                      SELECT 1 FROM crawl_queue q \
                      WHERE q.source = r.source AND q.kind = 'discover_catalog' \
@@ -970,6 +1023,45 @@ ORDER BY r.source, r.started_at DESC, r.id DESC";
 pub async fn run_progress(pool: &DatabasePool) -> AppResult<Vec<DiscoveryRunProgress>> {
     let mut conn = pool.get().await.map_err(conn_err)?;
     Ok(diesel::sql_query(PROGRESS_SQL).load(&mut conn).await?)
+}
+
+/// The newest run of each of `sources` whose `data_sources` row is enabled or missing, ordered
+/// by source: what the run gauges and their alert cover. Pass the sources whose adapter
+/// currently discovers in chunks, so a source that stops opting in, or is disabled, drops out.
+pub async fn alerting_run_progress(
+    pool: &DatabasePool,
+    sources: &[SourceId],
+) -> AppResult<Vec<DiscoveryRunProgress>> {
+    #[derive(QueryableByName)]
+    struct Code {
+        #[diesel(sql_type = Text)]
+        code: String,
+    }
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    let codes: Vec<String> = sources.iter().map(|s| s.as_str().to_string()).collect();
+    let names: Vec<String> = sources
+        .iter()
+        .map(|&s| crate::persist::data_source_template(s).name)
+        .collect();
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let enabled: Vec<Code> = diesel::sql_query(
+        "SELECT m.code FROM unnest($1::text[], $2::text[]) AS m(code, ds_name) \
+         LEFT JOIN data_sources ds ON ds.name = m.ds_name \
+         WHERE ds.id IS NULL OR ds.is_enabled",
+    )
+    .bind::<Array<Text>, _>(&codes)
+    .bind::<Array<Text>, _>(&names)
+    .load(&mut conn)
+    .await?;
+    drop(conn);
+    let enabled: std::collections::HashSet<String> = enabled.into_iter().map(|c| c.code).collect();
+    Ok(run_progress(pool)
+        .await?
+        .into_iter()
+        .filter(|r| enabled.contains(&r.source))
+        .collect())
 }
 
 #[cfg(test)]

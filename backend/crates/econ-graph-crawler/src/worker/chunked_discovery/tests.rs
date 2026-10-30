@@ -22,7 +22,7 @@ use crate::adapter::{
 };
 use crate::dataset::{parse_dataset_file, DatasetCatalog, SeriesDataset};
 use crate::discovery_run::{
-    self, ChunkCommit, ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration,
+    self, ChunkCommit, ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration, RunStart,
 };
 use crate::error::CrawlError;
 use crate::http::Validators;
@@ -775,10 +775,18 @@ async fn racing_chunk_commits_begin_finalize_once() {
         units_per_chunk: 1,
         selection_fingerprint: None,
     };
+    enqueue_discovery(p, 5).await;
+    let claim = CrawlQueueItem::claim_next(p, "t745-w1", None)
+        .await
+        .unwrap()
+        .unwrap();
     for _ in 0..10 {
-        let (run_id, _) = discovery_run::start_run(p, SRC, &settings, 5)
+        let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &claim)
             .await
-            .unwrap();
+            .unwrap()
+        else {
+            panic!("run not started");
+        };
         let mut conn = p.get().await.unwrap();
         let units = vec![DiscoveryUnit::new("t745_a"), DiscoveryUnit::new("t745_b")];
         discovery_run::commit_enumeration_conn(&mut conn, run_id, &units, 1, None, &[], 3)
@@ -808,7 +816,114 @@ async fn racing_chunk_commits_begin_finalize_once() {
         results.sort_by_key(|r| *r == ChunkCommit::StoredLast);
         assert_eq!(results, vec![ChunkCommit::Stored, ChunkCommit::StoredLast]);
         assert_eq!(finalize_jobs(p, run_id).await, 1);
+        // A finalizing run is never superseded; complete it so the next round can start one.
+        exec(
+            p,
+            "UPDATE discovery_runs SET state = 'complete', finished_at = NOW() \
+             WHERE state = 'finalizing'",
+        )
+        .await;
     }
+}
+
+/// A worker whose `discover_catalog` lease expired cannot start a run once another worker has
+/// re-claimed the job and started its own: the stale claim changes nothing.
+#[tokio::test]
+async fn a_stale_discovery_claim_cannot_supersede_the_live_run() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let settings = ChunkedDiscovery {
+        units_per_chunk: 1,
+        selection_fingerprint: None,
+    };
+    enqueue_discovery(p, 5).await;
+    let stale = CrawlQueueItem::claim_next(p, "t745-a", None)
+        .await
+        .unwrap()
+        .unwrap();
+    exec(
+        p,
+        "UPDATE crawl_queue SET locked_at = NOW() - INTERVAL '2 hours' WHERE status = 'processing'",
+    )
+    .await;
+    CrawlQueueItem::release_stuck(p, Duration::from_secs(3600))
+        .await
+        .unwrap();
+    let live = CrawlQueueItem::claim_next(p, "t745-b", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(live.id, stale.id);
+    let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &live)
+        .await
+        .unwrap()
+    else {
+        panic!("the live claim starts a run");
+    };
+    assert_eq!(
+        discovery_run::start_run(p, SRC, &settings, &stale)
+            .await
+            .unwrap(),
+        RunStart::ClaimLost
+    );
+    let all = runs(p).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!((all[0].id, all[0].state.as_str()), (run_id, "enumerating"));
+}
+
+/// A discovery issued while a run is finalizing starts no run and leaves it alone, so the
+/// finished chunks still commit.
+#[tokio::test]
+async fn a_finalizing_run_is_not_superseded() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let adapter = ChunkedAdapter::new(&IDS, 3);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    for _ in 0..4 {
+        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    }
+    let run = runs(p).await.pop().unwrap();
+    assert_eq!(run.state, "finalizing");
+
+    // A manual discovery, at a higher priority so it runs before the finalize job.
+    enqueue_discovery(p, 6).await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    let all = runs(p).await;
+    assert_eq!(all.len(), 1, "no new run");
+    assert_eq!(all[0].state, "finalizing");
+    assert_eq!(finalize_jobs(p, run.id).await, 1);
+
+    drain(&w).await;
+    assert_eq!(runs(p).await.pop().unwrap().state, "complete");
+    assert_eq!(metadata(p).await.len(), IDS.len());
+}
+
+/// Chunks check the run's selection fingerprint too: after a selection change, the next chunk
+/// fails the run without calling upstream, so chunks discovered under other rules never commit.
+#[tokio::test]
+async fn a_selection_change_fails_the_run_at_the_next_chunk() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    seed_stale(p).await;
+    let adapter = ChunkedAdapter::new(&IDS, 3);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    w.run_once().await.unwrap();
+    *adapter.chunked.lock().unwrap() = Some(ChunkedDiscovery {
+        units_per_chunk: 3,
+        selection_fingerprint: Some("rules-v2".into()),
+    });
+    assert!(matches!(
+        w.run_once().await,
+        Some(JobOutcome::Failed { .. })
+    ));
+    let run = runs(p).await.pop().unwrap();
+    assert_eq!((run.state.as_str(), run.chunks_failed), ("failed", 1));
+    assert!(adapter.calls.lock().unwrap().is_empty(), "no upstream call");
+    drain(&w).await;
+    assert_eq!(metadata(p).await.len(), 1);
+    assert_eq!(is_active(p, "t745_stale").await, Some(true));
 }
 
 /// A worker that dies mid-chunk: the reaper returns its chunk to the queue, another worker runs

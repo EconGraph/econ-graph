@@ -287,10 +287,12 @@ data:
             summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
             description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; update the curated list (for BEA, data/bea_tables.csv).
 
-        # Sources that discover in chunks only. Discovery is scheduled every 7 days, so a source
-        # with no complete run for twice that has missed at least one: runs keep failing (a chunk
-        # failed for good) or never finish. The gauge is polled from discovery_runs, so it survives
-        # worker restarts; a source that never completed a run ages from its oldest retained run.
+        # Enabled sources whose adapter discovers in chunks today only: the worker drops the gauge
+        # of a source that stops opting in or is disabled, which clears the alert. Discovery is
+        # scheduled every 7 days, so a source with no complete run for twice that has missed at
+        # least one: runs keep failing (a chunk failed for good) or never finish. The gauge is
+        # polled from discovery_runs, so it survives worker restarts; a source that never
+        # completed a run ages from its oldest retained run.
         - alert: CrawlerDiscoveryRunOverdue
           expr: time() - max by (source) (crawler_discovery_last_complete_run_timestamp_seconds{kubernetes_namespace="econ-graph"}) > 2 * 7 * 86400
           for: 1h

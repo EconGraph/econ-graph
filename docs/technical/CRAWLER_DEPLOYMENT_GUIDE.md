@@ -217,7 +217,8 @@ failed, superseded) and `crawler_discovery_chunks_total{source,outcome}` (comple
 discarded), and records `crawler_discovery_chunk_duration_seconds` and
 `crawler_discovery_run_duration_seconds`. It polls `crawler_discovery_run_chunks{source,state}`,
 `crawler_discovery_run_active{source}` and
-`crawler_discovery_last_complete_run_timestamp_seconds{source}` from `discovery_runs`. The
-`CrawlerDiscoveryRunOverdue` alert fires when a source has had no complete run for more than
+`crawler_discovery_last_complete_run_timestamp_seconds{source}` from `discovery_runs` for the
+enabled sources that discover in chunks today, so a source that stops opting in or is disabled
+drops out. The `CrawlerDiscoveryRunOverdue` alert fires when a source has had no complete run for more than
 twice its 7-day discovery interval; `discovery_runs.error_message` and the source's failed
 `discover_chunk` or `finalize_discovery` rows in `crawl_queue` say why.

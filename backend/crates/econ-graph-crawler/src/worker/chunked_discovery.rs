@@ -19,7 +19,7 @@ use super::{db_error, guarded, Fetched, JobOutcome, JobStats, JobWrite, Worker};
 use crate::adapter::SourceAdapter;
 use crate::discovery_run::{
     self, ChunkCommit, ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration, RunEvent,
-    RunEvents,
+    RunEvents, RunStart,
 };
 use crate::error::CrawlError;
 use crate::http::Validators;
@@ -93,9 +93,23 @@ impl Worker {
             }
         }
         let (run_id, superseded) =
-            discovery_run::start_run(&self.ctx.pool, source, &settings, item.priority)
+            match discovery_run::start_run(&self.ctx.pool, source, &settings, item)
                 .await
-                .map_err(db_error)?;
+                .map_err(db_error)?
+            {
+                RunStart::Started { run_id, superseded } => (run_id, superseded),
+                // The result commit finds the claim gone too and reports the lost lease.
+                RunStart::ClaimLost => {
+                    return Err(CrawlError::Transient(
+                        "discover_catalog claim lost before starting a discovery run".into(),
+                    ))
+                }
+                RunStart::Finalizing { run_id } => {
+                    tracing::info!(%source, %run_id,
+                        "a discovery run is finalizing; this discovery starts no new run");
+                    return Ok(JobWrite::DiscoveryUnchanged);
+                }
+            };
         discovery_run::publish(source, &RunEvent::Started);
         if superseded > 0 {
             discovery_run::publish(source, &RunEvent::Superseded(superseded));
@@ -148,18 +162,26 @@ impl Worker {
                     item.series_id
                 ))
             })?;
-        let Some((adapter, _)) = self.chunked_discovery(source) else {
+        let Some((adapter, settings)) = self.chunked_discovery(source) else {
             return Err(CrawlError::Permanent(format!(
                 "{source} has no adapter that discovers in chunks"
             )));
         };
-        let Some(units) = discovery_run::pending_chunk_units(&self.ctx.pool, run_id, chunk_index)
+        let Some(chunk) = discovery_run::pending_chunk_units(&self.ctx.pool, run_id, chunk_index)
             .await
             .map_err(db_error)?
         else {
             tracing::info!(%source, %run_id, chunk_index, "discovery chunk no longer needed; skipping");
             return Ok(JobWrite::DiscoveryRun(RunWrite::Skipped));
         };
+        // Chunks discovered under another selection must never finalize as this run's.
+        if settings.selection_fingerprint != chunk.selection_fingerprint {
+            return Err(CrawlError::Permanent(format!(
+                "{source} catalog selection changed since discovery run {run_id} started; \
+                 failing the run"
+            )));
+        }
+        let units = chunk.units;
         let started = Instant::now();
         let ctx = self.ctx.clone();
         let result = guarded(async move { adapter.discover_units(&ctx, &units).await }).await?;
@@ -262,10 +284,8 @@ impl Worker {
                 Ok(done)
             }
             RunWrite::Unchanged { run_id } => {
-                if discovery_run::commit_unchanged_conn(conn, run_id).await? {
-                    events.push(RunEvent::Completed {
-                        duration: Duration::ZERO,
-                    });
+                if let Some(duration) = discovery_run::commit_unchanged_conn(conn, run_id).await? {
+                    events.push(RunEvent::Completed { duration });
                 }
                 Ok(Ok(JobWrite::DiscoveryUnchanged))
             }

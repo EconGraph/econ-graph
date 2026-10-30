@@ -56,9 +56,11 @@
 //!    instead backs off for one hour, doubling on consecutive failed jobs up to one day. A
 //!    successful discovery resets this backoff. Cancellation retains the weekly delay. For an
 //!    adapter that [discovers in chunks](crate::discovery_run), the `discover_catalog` job only
-//!    lists the catalog, so a failed `discover_chunk` or `finalize_discovery` job counts as a
-//!    failed discovery too. History comes from retained queue rows (14 days by default); purging
-//!    that history resets the backoff, never lengthens it.
+//!    lists the catalog, so a run that fails after enumeration (`discovery_runs` in state
+//!    `failed` with `enumerated_at` set) counts as one failed discovery, however many of its
+//!    chunk jobs failed; a superseded run counts as nothing. History comes from retained queue
+//!    rows and runs (14 days by default); purging that history resets the backoff, never
+//!    lengthens it.
 //!
 //! Deployment runs a single `crawler-worker` replica (which hosts the scheduler), and duplicates
 //! are prevented by the queue's unique index anyway, so there is no leader election.
@@ -265,8 +267,10 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
 /// matching data_sources names, `$3` weekly interval, `$4` retry base, `$5` retry cap (seconds).
 const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
-         FROM crawl_queue WHERE source = ANY($1) AND (kind = 'discover_catalog' \
-             OR (kind IN ('discover_chunk', 'finalize_discovery') AND status = 'failed')) \
+         FROM crawl_queue WHERE kind = 'discover_catalog' AND source = ANY($1) \
+         UNION ALL \
+         SELECT source, 'failed', finished_at FROM discovery_runs \
+         WHERE state = 'failed' AND enumerated_at IS NOT NULL AND source = ANY($1) \
      ), summary AS ( \
          SELECT source, bool_or(status IN ('pending', 'processing', 'retrying')) AS active, \
                 max(finished_at) FILTER (WHERE status = 'completed') AS last_success, \
@@ -610,6 +614,7 @@ mod tests {
         let (url, guard) = crate::testkit::lock_test_db("scheduler").await?;
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
+        exec(&pool, "DELETE FROM discovery_runs").await;
         for sql in [
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM series_metadata WHERE external_id LIKE 't15c\\_%'",
@@ -1547,20 +1552,25 @@ mod tests {
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "active job");
     }
 
-    /// A chunked discovery whose listing completed but whose chunk job then failed is a failed
-    /// discovery: it retries after an hour, not a week. A completed chunk changes nothing.
+    /// A chunked discovery run that fails after its listing completed is one failed discovery,
+    /// however many of its chunk jobs failed: it retries after an hour, not a week, and not after
+    /// the longer backoff of several failures.
     #[tokio::test]
-    async fn failed_discovery_chunk_retries_after_an_hour_instead_of_a_week() {
+    async fn a_failed_discovery_run_counts_as_one_failure() {
         let Some(db) = db().await else { return };
         let p = &db.pool;
         finished_discovery(p, "completed", 2.0).await;
         exec(
             p,
-            "INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) VALUES \
-             ('FRED', '00000000-0000-0000-0000-000000000001/0', 'discover_chunk', 'completed', \
-              NOW() - INTERVAL '90 minutes'), \
-             ('FRED', '00000000-0000-0000-0000-000000000001/1', 'discover_chunk', 'failed', \
-              NOW() - INTERVAL '30 minutes')",
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total, chunks_failed) \
+                 VALUES ('FRED', 'failed', NOW() - INTERVAL '2 hours', \
+                     NOW() - INTERVAL '2 hours', NOW() - INTERVAL '30 minutes', 4, 1) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/' || g, 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '30 minutes' FROM run, generate_series(0, 3) AS g",
         )
         .await;
         let s = scheduler(p, &[SourceId::Fred], 0);
@@ -1571,11 +1581,45 @@ mod tests {
         );
         exec(
             p,
-            "UPDATE crawl_queue SET finished_at = NOW() - INTERVAL '70 minutes' \
-             WHERE kind = 'discover_chunk' AND status = 'failed'",
+            "UPDATE discovery_runs SET finished_at = NOW() - INTERVAL '70 minutes'",
         )
         .await;
-        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "one failure: an hour, not the eight hours four failures would give"
+        );
+    }
+
+    /// Failed chunk jobs of a superseded run, or of a run that failed during enumeration, are
+    /// not failed discoveries: the weekly delay after the last completed discovery holds.
+    #[tokio::test]
+    async fn superseded_runs_and_their_late_chunk_failures_are_not_failed_discoveries() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total) \
+                 VALUES ('FRED', 'superseded', NOW() - INTERVAL '3 hours', \
+                     NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours', 2) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/0', 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '90 minutes' FROM run",
+        )
+        .await;
+        exec(
+            p,
+            "INSERT INTO discovery_runs (source, state, started_at, finished_at) \
+             VALUES ('FRED', 'failed', NOW() - INTERVAL '100 minutes', \
+                 NOW() - INTERVAL '95 minutes')",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
     }
 
     #[tokio::test]
