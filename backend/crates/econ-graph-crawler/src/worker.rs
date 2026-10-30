@@ -37,7 +37,10 @@
 //! `fetch_series` with neither bound, whatever the adapter, and with
 //! [`CrawlCtx::bypass_validators`] set, so the adapter re-reads the full history even when its
 //! stored validators say nothing changed. `discover_catalog` calls
-//! [`SourceAdapter::discover`]. Adapter and handler calls run in
+//! [`SourceAdapter::discover`], or, for an adapter that
+//! [discovers in chunks](crate::SourceAdapter::chunked_discovery), starts a chunked discovery
+//! run whose `discover_chunk` and `finalize_discovery` jobs follow (see [`crate::discovery_run`]).
+//! Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
 //! Batching: when the claimed item is a `fetch_series` or `refetch_series` job with no
@@ -66,7 +69,9 @@
 //! A maintenance loop calls [`CrawlQueueItem::release_stuck`] every `stuck_after / 2`
 //! (clamped to 1 s ..= 5 min) so items held by crashed workers become claimable again (each
 //! release counts as an attempt). The same loop purges `completed` / `failed` rows older than
-//! `queue_retention` with [`CrawlQueueItem::purge_finished`], at start-up and then hourly.
+//! `queue_retention` with [`CrawlQueueItem::purge_finished`], at start-up and then hourly, and
+//! final discovery runs with [`discovery_run::purge_finished_runs`]. Every pass also fails
+//! discovery runs whose jobs ended without completing ([`discovery_run::fail_abandoned_runs`]).
 //!
 //! [`Worker::run`] stops claiming when its `shutdown` future resolves and returns once in-flight
 //! jobs have finished.
@@ -89,6 +94,7 @@ use crate::adapter::{
     AdapterRegistry, CrawlCtx, DiscoveredSeries, Discovery, FetchedSeries, SourceAdapter,
 };
 use crate::dataset::DatasetCatalog;
+use crate::discovery_run::{self, RunEvents};
 use crate::error::CrawlError;
 use crate::http::Validators;
 use crate::persist::{self, AttemptRecord};
@@ -291,6 +297,8 @@ enum JobWrite {
     /// The adapter found its catalog unchanged: nothing to write.
     DiscoveryUnchanged,
     Handler(JobStats),
+    /// A chunked-discovery job's result (see [`crate::discovery_run`]).
+    DiscoveryRun(chunked_discovery::RunWrite),
 }
 
 type Fetched = Result<JobWrite, CrawlError>;
@@ -407,6 +415,17 @@ impl Worker {
                 Ok(n) => tracing::warn!(released = n, "released stuck crawl_queue items"),
                 Err(e) => tracing::warn!(error = %e, "release_stuck failed"),
             }
+            match discovery_run::fail_abandoned_runs(&self.ctx.pool).await {
+                Ok(sources) => {
+                    for source in sources {
+                        tracing::warn!(%source, "failed a discovery run whose jobs ended without completing");
+                        if let Ok(source) = SourceId::from_str(&source) {
+                            discovery_run::publish(source, &discovery_run::RunEvent::Failed);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "failing abandoned discovery runs failed"),
+            }
             if let Some(retention) = self.config.queue_retention
                 && last_purge.is_none_or(|t| t.elapsed() >= PURGE_INTERVAL)
             {
@@ -419,6 +438,11 @@ impl Worker {
                         "purged finished crawl_queue items"
                     ),
                     Err(e) => tracing::warn!(error = %e, "purging crawl_queue failed"),
+                }
+                match discovery_run::purge_finished_runs(&self.ctx.pool, retention).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(deleted = n, "purged finished discovery runs"),
+                    Err(e) => tracing::warn!(error = %e, "purging discovery_runs failed"),
                 }
             }
             tokio::select! {
@@ -717,7 +741,14 @@ impl Worker {
         match kind {
             JobKind::FetchSeries => self.fetch_series(source, &item.series_id, false).await,
             JobKind::RefetchSeries => self.fetch_series(source, &item.series_id, true).await,
-            JobKind::DiscoverCatalog => self.discover(source).await,
+            JobKind::DiscoverCatalog => match self.chunked_discovery(source) {
+                Some((adapter, settings)) => {
+                    self.enumerate_run(source, adapter, settings, item).await
+                }
+                None => self.discover(source).await,
+            },
+            JobKind::DiscoverChunk => self.discover_chunk(source, item).await,
+            JobKind::FinalizeDiscovery => self.finalize_run(source, item).await,
             other => Err(CrawlError::Permanent(format!(
                 "no handler registered for {source} {other}"
             ))),
@@ -771,8 +802,6 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let complete = adapter.discovery_is_complete();
-        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
         {
             let adapter = adapter.clone();
@@ -796,9 +825,25 @@ impl Worker {
                 }
                 Discovery::Changed { found, validator } => (found, validator),
             };
+        let missing = adapter.curated_missing();
+        self.discovery_write(source, adapter.as_ref(), found, validator, missing)
+    }
+
+    /// Checks a listed catalog and builds its discovery write. Shared by single-job discovery
+    /// and the finalize step of chunked discovery, so both commit the same way. `missing` is the
+    /// listing's [`SourceAdapter::curated_missing`].
+    fn discovery_write(
+        &self,
+        source: SourceId,
+        adapter: &dyn SourceAdapter,
+        found: Vec<DiscoveredSeries>,
+        validator: Option<(String, Validators)>,
+        missing: Vec<String>,
+    ) -> Fetched {
+        let complete = adapter.discovery_is_complete();
+        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         // A curated entry the source no longer lists keeps its stored series: a discovery that
         // skipped one retires nothing, and the gauge alerts so the curated list gets fixed.
-        let missing = adapter.curated_missing();
         econ_graph_metrics::crawler::CRAWLER_DISCOVERY_METRICS
             .curated_missing
             .with_label_values(&[source.as_str()])
@@ -878,6 +923,8 @@ impl Worker {
         let mut conn = self.ctx.pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {e}"))
         })?;
+        let run_events = RunEvents::default();
+        let transaction_run_events = run_events.clone();
         // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
         // the token after a lock wait; the queue row stays locked through commit.
         conn.build_transaction()
@@ -895,6 +942,9 @@ impl Worker {
                         error: result.err().map(|e| e.to_string()),
                     });
                 }
+                let result = self
+                    .commit_discovery_run_conn(conn, source, result, &transaction_run_events)
+                    .await?;
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
                         let write =
@@ -935,6 +985,9 @@ impl Worker {
                     }
                     Ok(JobWrite::DiscoveryUnchanged) => Ok(JobStats::default()),
                     Ok(JobWrite::Handler(stats)) => Ok(stats),
+                    Ok(JobWrite::DiscoveryRun(_)) => Err(CrawlError::Permanent(
+                        "discovery run write was not applied".into(),
+                    )),
                     Err(error) => Err(error),
                 };
                 if matches!(
@@ -950,9 +1003,19 @@ impl Worker {
                     )
                     .await?;
                 }
-                self.transition_conn(conn, source, item, result).await
+                let outcome = self.transition_conn(conn, source, item, result).await?;
+                self.record_discovery_run_outcome_conn(
+                    conn,
+                    source,
+                    item,
+                    &outcome,
+                    &transaction_run_events,
+                )
+                .await?;
+                Ok(outcome)
             })
             .await
+            .inspect(|_| run_events.publish(source))
     }
 
     fn record_breaker(&self, source: SourceId, error: Option<&CrawlError>) {
@@ -1212,6 +1275,8 @@ mod breaker_tests {
         assert!(!b.record(SourceId::Bls, Some(&t), 1, pause));
     }
 }
+
+mod chunked_discovery;
 
 #[cfg(test)]
 mod tests;

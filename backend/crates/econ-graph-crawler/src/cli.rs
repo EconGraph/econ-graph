@@ -763,6 +763,25 @@ pub fn format_status(s: &CrawlerStatusSnapshot) -> String {
             );
         }
     }
+    if !s.discovery_runs.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n{:<12} {:<12} {:>13} {:>7}  {:<25}  last complete run",
+            "DISCOVERY", "RUN STATE", "CHUNKS DONE", "FAILED", "started"
+        );
+        for r in &s.discovery_runs {
+            let _ = writeln!(
+                out,
+                "{:<12} {:<12} {:>13} {:>7}  {:<25}  {}",
+                r.source,
+                r.state,
+                format!("{}/{}", r.chunks_done, r.chunks_total),
+                r.chunks_failed,
+                r.started_at.to_rfc3339(),
+                fmt_time(r.last_complete_at)
+            );
+        }
+    }
     out
 }
 
@@ -1218,12 +1237,38 @@ mod tests {
                 last_success: None,
                 last_failure: None,
             }],
+            discovery_runs: vec![],
         };
         let out = format_status(&s);
         assert!(out.contains("active workers: 2"));
         assert!(out
             .lines()
             .any(|l| l.starts_with("FRED") && l.contains(" 3 ") && l.contains(" 4 ")));
+        assert!(!out.contains("DISCOVERY"), "no run section without runs");
+
+        let started = chrono::Utc::now();
+        let s = CrawlerStatusSnapshot {
+            discovery_runs: vec![crate::discovery_run::DiscoveryRunProgress {
+                source: "FRED".into(),
+                run_id: uuid::Uuid::nil(),
+                state: "running".into(),
+                started_at: started,
+                finished_at: None,
+                chunks_total: 31,
+                chunks_done: 12,
+                chunks_failed: 0,
+                last_complete_at: None,
+                first_started_at: started,
+            }],
+            ..s
+        };
+        let out = format_status(&s);
+        assert!(out.contains("DISCOVERY"), "{out}");
+        assert!(
+            out.lines()
+                .any(|l| l.starts_with("FRED") && l.contains("running") && l.contains("12/31")),
+            "{out}"
+        );
     }
 
     #[test]

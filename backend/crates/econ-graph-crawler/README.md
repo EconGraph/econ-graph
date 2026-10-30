@@ -8,7 +8,9 @@ The worker lives in the `econ-graph-crawler-worker` crate and is deployed by
 [`crawler-worker.yaml`](../../../k8s/manifests/crawler-worker.yaml).
 
 The queue supports `fetch_series` to download one series, `refetch_series` to force a
-full-history re-fetch, and `discover_catalog` to write a source's series metadata.
+full-history re-fetch, and `discover_catalog` to write a source's series metadata, with
+`discover_chunk` and `finalize_discovery` for
+[chunked catalog discovery](#chunked-catalog-discovery).
 `fetch_filing` jobs are handled separately by `econ-graph-sec-crawler` for SEC filings.
 For debugging, `crawler fetch` runs an adapter and persists its result directly in the CLI
 process, bypassing the queue.
@@ -53,6 +55,55 @@ history resets the backoff.
 Active jobs (`pending`, `processing`, or `retrying`) suppress new discovery jobs for the same
 source and new series refreshes for a series with a `fetch_series` or `refetch_series` job.
 The queue's unique index rejects concurrent duplicates, so no leader election is needed.
+
+## Chunked catalog discovery
+
+By default a source's catalog is discovered by one `discover_catalog` job, inside one lease.
+An adapter whose `chunked_discovery()` returns `Some` is discovered in pieces instead
+([`src/discovery_run.rs`](src/discovery_run.rs)), so a catalog that needs one upstream request
+per entry neither outlives the worker's `stuck_after` nor fails as a whole on one transient error.
+No adapter that ships with the crawler does this yet; all use single-job discovery.
+
+1. **Enumerate.** The `discover_catalog` job refreshes reference data, records a run in
+   `discovery_runs` (state `enumerating`) and calls `enumerate_discovery()` for a list of work
+   units: ids or tables, each with whatever the listing already returned. Its result
+   transaction stores the units in chunks of `units_per_chunk` (`discovery_run_chunks`), moves
+   the run to `running` and enqueues one `discover_chunk` job per chunk. An unchanged catalog
+   completes the run with no chunks and writes nothing.
+2. **Chunks.** Each `discover_chunk` job calls `discover_units()` for its units and stores the
+   result on its chunk row. Chunk jobs are ordinary queue jobs at the priority of the
+   `discover_catalog` job that started the run: they share the source's rate limiter and circuit
+   breaker, and each is retried on its own under the source's retry policy. A chunk that fails
+   for good fails the run and cancels its remaining queued chunks.
+3. **Finalize.** The result transaction that stores the last chunk moves the run to
+   `finalizing` and enqueues one `finalize_discovery` job. That job concatenates the chunks'
+   series in chunk order and commits them exactly as a single-job discovery commits its list:
+   the catalog validator, `series_metadata`, the `crawler_curated_missing` gauge, and, for a
+   complete discovery with no curated entry missing, retirement of series it no longer lists.
+   The run becomes `complete` and its chunk rows are deleted in the same transaction.
+
+A run that fails or is superseded writes no metadata, stores no validator and retires nothing.
+
+Each chunk commit locks its run row, and only the commit that brings the done count up to the
+chunk count can move the run from `running` to `finalizing`, so a run is finalized once even
+when its last chunks finish together on different workers. Starting a run supersedes any older
+run of the source that is not final and cancels that run's queued jobs; a chunk of it that is
+already in flight finds the run superseded when it commits and discards its result. A worker
+that dies mid-chunk is handled like any other job: `release_stuck` re-queues the chunk, and the
+late result of the dead claim is dropped as a lost lease. The worker's maintenance loop fails
+runs whose chunk or finalize jobs ended without completing (for example, `release_stuck`
+exhausting their retries) and runs left `enumerating` with no active `discover_catalog` job.
+For the scheduler, a failed `discover_chunk` or `finalize_discovery` job counts as a failed
+discovery, with the usual one-hour backoff.
+
+An adapter may give a `selection_fingerprint` of its catalog selection rules. It is recorded
+when a run starts, and finalize fails the run if the adapter's fingerprint has changed since.
+
+`crawler status` lists each source's newest run, its state and its chunk progress. Final runs
+are deleted after the worker's queue retention, except each source's newest complete run and,
+for a source with no complete run, its oldest run. The metrics and the
+`CrawlerDiscoveryRunOverdue` alert are described in the
+[crawler deployment guide](../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md#monitoring).
 
 ## `crawler` CLI
 

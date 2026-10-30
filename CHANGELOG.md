@@ -8,6 +8,13 @@ All notable changes to EconGraph are documented here. The format follows
 
 ### Added
 
+- Chunked catalog discovery for crawler adapters that opt in: the `discover_catalog` job lists
+  work units, `discover_chunk` queue jobs fetch their details a chunk at a time under the
+  source's rate limit and retry policy, and one `finalize_discovery` job commits the result as a
+  single-job discovery would. Runs are recorded in the new data tables `discovery_runs` and
+  `discovery_run_chunks`, shown by `crawler status`, and reported by the
+  `crawler_discovery_*` metrics and the `CrawlerDiscoveryRunOverdue` alert. No built-in adapter
+  uses it yet; every source keeps single-job discovery.
 - The frontend can send data operations (series, search, data sources, the dashboard cards and
   the world map) to a separate GraphQL URL, `VITE_DATA_GRAPHQL_URL`, and never sends them a
   sign-in token. Annotations, comments and admin operations still go to `/graphql` with the

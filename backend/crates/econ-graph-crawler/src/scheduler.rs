@@ -54,9 +54,11 @@
 //!    source already has an active discovery job, a successful discovery within
 //!    [`DISCOVERY_INTERVAL`], or its `data_sources` row exists and is disabled. A failed discovery
 //!    instead backs off for one hour, doubling on consecutive failed jobs up to one day. A
-//!    successful discovery resets this backoff. Cancellation retains the weekly delay. History
-//!    comes from retained queue rows (14 days by default); purging that history resets the
-//!    backoff, never lengthens it.
+//!    successful discovery resets this backoff. Cancellation retains the weekly delay. For an
+//!    adapter that [discovers in chunks](crate::discovery_run), the `discover_catalog` job only
+//!    lists the catalog, so a failed `discover_chunk` or `finalize_discovery` job counts as a
+//!    failed discovery too. History comes from retained queue rows (14 days by default); purging
+//!    that history resets the backoff, never lengthens it.
 //!
 //! Deployment runs a single `crawler-worker` replica (which hosts the scheduler), and duplicates
 //! are prevented by the queue's unique index anyway, so there is no leader election.
@@ -263,7 +265,8 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
 /// matching data_sources names, `$3` weekly interval, `$4` retry base, `$5` retry cap (seconds).
 const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
-         FROM crawl_queue WHERE kind = 'discover_catalog' AND source = ANY($1) \
+         FROM crawl_queue WHERE source = ANY($1) AND (kind = 'discover_catalog' \
+             OR (kind IN ('discover_chunk', 'finalize_discovery') AND status = 'failed')) \
      ), summary AS ( \
          SELECT source, bool_or(status IN ('pending', 'processing', 'retrying')) AS active, \
                 max(finished_at) FILTER (WHERE status = 'completed') AS last_success, \
@@ -1542,6 +1545,37 @@ mod tests {
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
         assert_eq!(queued_discovery(p).await, set(&["FRED"]));
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "active job");
+    }
+
+    /// A chunked discovery whose listing completed but whose chunk job then failed is a failed
+    /// discovery: it retries after an hour, not a week. A completed chunk changes nothing.
+    #[tokio::test]
+    async fn failed_discovery_chunk_retries_after_an_hour_instead_of_a_week() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) VALUES \
+             ('FRED', '00000000-0000-0000-0000-000000000001/0', 'discover_chunk', 'completed', \
+              NOW() - INTERVAL '90 minutes'), \
+             ('FRED', '00000000-0000-0000-0000-000000000001/1', 'discover_chunk', 'failed', \
+              NOW() - INTERVAL '30 minutes')",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "within the hour"
+        );
+        exec(
+            p,
+            "UPDATE crawl_queue SET finished_at = NOW() - INTERVAL '70 minutes' \
+             WHERE kind = 'discover_chunk' AND status = 'failed'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
     }
 
     #[tokio::test]
