@@ -131,6 +131,15 @@ automatically.
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
+`backup-snapshots.sh`, `restore-snapshot.sh`, `delete-snapshots.sh` and
+`snapshot-now.sh` (when run as root) take one lock,
+`/run/econgraph-backup-snapshots.lock`, before they change anything, and
+hold it until they exit, so none of them overlaps another. One that finds it
+held stops without changing anything (`restore-snapshot.sh` can wait with
+`--lock-wait`); dry runs and `delete-snapshots.sh --list` take no lock. The
+lock file is root's, mode 0600, so no other user can open it to hold the
+lock. A lock file with another owner or mode is replaced by one that is.
+
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
 re-run. They are listed in order in [Needs sudo](#needs-sudo).

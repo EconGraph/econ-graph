@@ -15,8 +15,11 @@
 # the backup pool with the hourly ones. Delete by hand, if ever, with
 # scripts/host/delete-snapshots.sh (see docs/deployment/BACKUPS.md).
 #
-# Runs as the operator without sudo, provided the operator owns the subvolume roots
-# (the kernel only lets a non-root user snapshot subvolumes it owns) and can
+# Run as root, it first takes the lock the hourly backup-snapshots.sh holds
+# (/run/econgraph-backup-snapshots.lock) and stops if it is held. It also
+# runs as the operator without sudo, taking no lock, provided the operator
+# owns the subvolume roots (the kernel only lets a non-root user snapshot
+# subvolumes it owns) and can
 # write to SNAPSHOT_DIR. Postgres can keep running: each data directory,
 # WAL included, is inside one subvolume, so the snapshot is crash-consistent.
 
@@ -31,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --only) [[ $# -ge 2 ]] || die "--only needs data-plane or app-prod"; only="$2"; shift 2 ;;
         --dry-run|-n) DRY_RUN="true"; shift ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        -h|--help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;;
         -*) die "unknown option: $1" ;;
         *) break ;;
     esac
@@ -48,6 +51,73 @@ case "${only}" in
     data-plane|app-prod) names=("${only}") ;;
     *) die "--only takes data-plane or app-prod" ;;
 esac
+
+# >>> backup lock: the same in backup-snapshots.sh, restore-snapshot.sh,
+# delete-snapshots.sh and snapshot-now.sh (test-backup-scripts.sh checks).
+# take_backup_lock FILE WAIT: take FILE's flock on fd 9, waiting up to WAIT
+# seconds, and keep it until the script exits. FILE is root's and mode 0600,
+# so no other user can open it to hold the lock; one that is not is replaced,
+# under the lock, by one that is (a chmod would not close a descriptor some
+# user already has open). After locking, the file must still be the one at
+# FILE (another run may have replaced it meanwhile), or it starts over.
+# Returns 1 when the lock is held, 2 on any other failure.
+take_backup_lock() {
+    local file="$1" wait="$2" owner="0:0" tries=0 old_umask status tmp
+    # Under scripts/host/test-backup-scripts.sh only: the test user's own files.
+    [ -z "${ECONGRAPH_TEST_ROOT:-}" ] || owner="${BACKUP_LOCK_OWNER:-0:0}"
+    while :; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 5 ]; then
+            echo "error: $file keeps being replaced; could not lock it" >&2
+            return 2
+        fi
+        if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+            echo "error: $file is not a regular file; refusing to use it as the lock" >&2
+            return 2
+        fi
+        old_umask="$(umask)"
+        umask 077
+        if ! exec 9>>"$file"; then
+            umask "$old_umask"
+            echo "error: could not open $file" >&2
+            return 2
+        fi
+        umask "$old_umask"
+        status=0
+        flock -w "$wait" 9 || status=$?
+        if [ "$status" -eq 1 ]; then
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "error: could not lock $file (flock exited $status)" >&2
+            return 2
+        fi
+        [ "$(stat -L -c %d:%i /proc/self/fd/9)" != "$(stat -c %d:%i "$file" 2>/dev/null)" ] || break
+        exec 9>&-
+    done
+    if [ "$(stat -c '%u:%g %a' "$file")" != "$owner 600" ]; then
+        echo "note: $file is $(stat -c '%u:%g %a' "$file"), not $owner 600; replacing it" >&2
+        tmp=""
+        if ! { tmp="$(mktemp "$file.XXXXXX")" && chown "$owner" "$tmp" && chmod 0600 "$tmp" &&
+            exec 8>>"$tmp" && flock -n 8 && mv -f "$tmp" "$file"; }; then
+            [ -z "$tmp" ] || rm -f "$tmp"
+            echo "error: could not replace $file with a root-only one" >&2
+            return 2
+        fi
+        exec 9>&8 8>&-
+    fi
+}
+# <<< backup lock
+
+# As root, the lock the hourly backup-snapshots.sh holds, until exit, so no
+# backup run lists, sends or prunes the snapshot directory meanwhile. Without
+# root the lock (in /run) can't be taken; the snapshots are made anyway.
+if [[ "${DRY_RUN}" != "true" && "$(id -u)" == 0 ]]; then
+    lock_file="${ECONGRAPH_TEST_ROOT:-}/run/econgraph-backup-snapshots.lock"
+    lock_status=0
+    take_backup_lock "${lock_file}" 0 || lock_status=$?
+    [[ "${lock_status}" != 1 ]] || die "${lock_file} is held: a backup-snapshots run, a restore or a delete is in progress; nothing was taken, re-run when it is done"
+    [[ "${lock_status}" == 0 ]] || die "could not take ${lock_file}; nothing was taken"
+fi
 
 [[ -d "${SNAPSHOT_DIR}" ]] || die "${SNAPSHOT_DIR} does not exist (see 'Needs sudo' in BACKUPS.md)"
 [[ -w "${SNAPSHOT_DIR}" ]] || die "${SNAPSHOT_DIR} is not writable by $(id -un)"

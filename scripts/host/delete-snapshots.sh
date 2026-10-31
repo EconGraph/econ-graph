@@ -3,7 +3,10 @@
 # Delete snapshots BY HAND (docs/deployment/BACKUPS.md, "Deleting by hand").
 # Nothing deletes snapshots automatically; this is the only tool that does,
 # and it is never run from a timer: it refuses to run without a terminal
-# and asks for typed confirmation every time.
+# and asks for typed confirmation every time. Before it looks at any name
+# it takes the lock the hourly backup-snapshots.sh holds
+# (/run/econgraph-backup-snapshots.lock), and keeps it until it exits; if
+# the lock is held it stops, deleting nothing.
 #
 # Usage:
 #   sudo scripts/host/delete-snapshots.sh [--dry-run] [--pool] <name>...
@@ -31,6 +34,9 @@
 set -euo pipefail
 
 FS_UUID="03ee0fcb-5f19-4f44-8596-e227f1fb647c"
+# ECONGRAPH_TEST_ROOT, if set, is prefixed to the lock file only, so
+# scripts/host/test-backup-scripts.sh can check the lock against stubs.
+LOCK_FILE="${ECONGRAPH_TEST_ROOT:-}/run/econgraph-backup-snapshots.lock"
 LOCAL_DIR="/srv/econgraph/snapshots"
 POOL_DIR="/srv/econgraph-backups/snapshots"
 
@@ -66,6 +72,75 @@ if [ "$LIST" = "true" ]; then
 fi
 
 [ "${#names[@]}" -gt 0 ] || { echo "usage: $0 [--dry-run] [--pool] <name>... | --list [--pool]" >&2; exit 2; }
+
+# >>> backup lock: the same in backup-snapshots.sh, restore-snapshot.sh,
+# delete-snapshots.sh and snapshot-now.sh (test-backup-scripts.sh checks).
+# take_backup_lock FILE WAIT: take FILE's flock on fd 9, waiting up to WAIT
+# seconds, and keep it until the script exits. FILE is root's and mode 0600,
+# so no other user can open it to hold the lock; one that is not is replaced,
+# under the lock, by one that is (a chmod would not close a descriptor some
+# user already has open). After locking, the file must still be the one at
+# FILE (another run may have replaced it meanwhile), or it starts over.
+# Returns 1 when the lock is held, 2 on any other failure.
+take_backup_lock() {
+    local file="$1" wait="$2" owner="0:0" tries=0 old_umask status tmp
+    # Under scripts/host/test-backup-scripts.sh only: the test user's own files.
+    [ -z "${ECONGRAPH_TEST_ROOT:-}" ] || owner="${BACKUP_LOCK_OWNER:-0:0}"
+    while :; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 5 ]; then
+            echo "error: $file keeps being replaced; could not lock it" >&2
+            return 2
+        fi
+        if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+            echo "error: $file is not a regular file; refusing to use it as the lock" >&2
+            return 2
+        fi
+        old_umask="$(umask)"
+        umask 077
+        if ! exec 9>>"$file"; then
+            umask "$old_umask"
+            echo "error: could not open $file" >&2
+            return 2
+        fi
+        umask "$old_umask"
+        status=0
+        flock -w "$wait" 9 || status=$?
+        if [ "$status" -eq 1 ]; then
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "error: could not lock $file (flock exited $status)" >&2
+            return 2
+        fi
+        [ "$(stat -L -c %d:%i /proc/self/fd/9)" != "$(stat -c %d:%i "$file" 2>/dev/null)" ] || break
+        exec 9>&-
+    done
+    if [ "$(stat -c '%u:%g %a' "$file")" != "$owner 600" ]; then
+        echo "note: $file is $(stat -c '%u:%g %a' "$file"), not $owner 600; replacing it" >&2
+        tmp=""
+        if ! { tmp="$(mktemp "$file.XXXXXX")" && chown "$owner" "$tmp" && chmod 0600 "$tmp" &&
+            exec 8>>"$tmp" && flock -n 8 && mv -f "$tmp" "$file"; }; then
+            [ -z "$tmp" ] || rm -f "$tmp"
+            echo "error: could not replace $file with a root-only one" >&2
+            return 2
+        fi
+        exec 9>&8 8>&-
+    fi
+}
+# <<< backup lock
+
+# The backup lock, held until this script exits, before the first check of
+# a name: no backup run sends, or restore uses, a snapshot while it is
+# deleted. A dry run takes none.
+if [ "$DRY_RUN" = "false" ]; then
+    lock_status=0
+    take_backup_lock "$LOCK_FILE" 0 || lock_status=$?
+    if [ "$lock_status" -eq 1 ]; then
+        echo "error: $LOCK_FILE is held: a backup-snapshots run (econgraph-backup-snapshots.service)," >&2
+        echo "  a restore or another delete is in progress. Nothing was deleted; re-run when it is done." >&2
+    fi
+    [ "$lock_status" -eq 0 ] || exit 1
+fi
 
 if [ "$DRY_RUN" = "false" ] && [ ! -t 0 ]; then
     echo "error: this is a manual tool; run it from a terminal (it asks for confirmation)" >&2

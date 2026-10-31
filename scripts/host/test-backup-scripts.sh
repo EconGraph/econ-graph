@@ -16,8 +16,9 @@ source "${repo_root}/scripts/backup/test-stubs.sh"
 
 failures=0
 tmp="$(mktemp -d)"
-holder=""
-trap '[ -z "${holder}" ] || kill "${holder}" 2>/dev/null || true; rm -rf "${tmp}"' EXIT
+holder="" holder2="" restore_bg=""
+# shellcheck disable=SC2154 # set by the lock tests further down
+trap 'for p in ${holder} ${holder2} ${restore_bg}; do kill "${p}" 2>/dev/null || true; done; rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
 # restore-snapshot.sh mounts the filesystem top level on a mktemp directory
 # under /mnt once its checks pass. The checks run here are meant to stop it
@@ -35,6 +36,10 @@ printf '#!/bin/bash\ncase " $* " in *" /mnt/"*) echo "mktemp $*" >>"${STUB_LOG:-
 chmod +x "${tmp}/bin/mount" "${tmp}/bin/umount" "${tmp}/bin/mktemp"
 export PATH="${tmp}/bin:${PATH}"
 export STUB_LOG="${tmp}/calls.log"
+# The lock file's owner as the scripts expect it under ECONGRAPH_TEST_ROOT
+# (root's, outside tests).
+BACKUP_LOCK_OWNER="$(id -u):$(id -g)"
+export BACKUP_LOCK_OWNER
 # Never read the operator's backup.env.
 export ECONGRAPH_CONFIG_DIR="${tmp}/config"
 mkdir -p "${ECONGRAPH_CONFIG_DIR}"
@@ -325,7 +330,7 @@ release_lock
 FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot asks the cluster with the lock held" 1 \
     "still in use by" "${restore}" --yes "${app_snap}"
 # shellcheck disable=SC2016 # $1 expands in the inner bash
-check "... held at every findmnt, mountpoint and cluster call, from the first" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
+check "... held at every findmnt, mountpoint and cluster call, from the first" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -qE "^lock-(probe free|fd stale)" "$1"' _ "${STUB_LOG}"
 # shellcheck disable=SC2016 # $1 expands in the inner bash
 check "... the first call is a findmnt" bash -c '[ "$(head -n 1 "$1" | cut -d" " -f1)" = findmnt ]' _ "${STUB_LOG}"
 for wait in soon "" 86401 9999999999999999999999 18446744073709551617; do
@@ -337,7 +342,103 @@ done
 FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
     "still in use by" "${restore}" --yes --lock-wait=09 "${app_snap}"
 # shellcheck disable=SC2016 # $1 expands in the inner bash
-check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
+check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -qE "^lock-(probe free|fd stale)" "$1"' _ "${STUB_LOG}"
+
+echo "== the lock file is root's, mode 0600; delete-snapshots.sh and snapshot-now.sh take it too"
+mode_of() { stat -c '%u:%g %a' "$1"; }
+probe_ok() { grep -q "^lock-probe held" "${STUB_LOG}" && ! grep -qE "^lock-(probe free|fd stale)" "${STUB_LOG}"; }
+rm -f "${lock}"
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot creates a missing lock file" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+check "... owned by root (here the test user), mode 0600" [ "$(mode_of "${lock}")" == "${BACKUP_LOCK_OWNER} 600" ]
+check "... without a note about replacing it" bash -c "! grep -q 'replacing it' <<<\"\$1\"" _ "${out}"
+for bad in 644 666 640; do
+    chmod "${bad}" "${lock}"
+    old_inode="$(stat -c %i "${lock}")"
+    FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot replaces a mode ${bad} lock file" 1 \
+        "is ${BACKUP_LOCK_OWNER} ${bad}, not ${BACKUP_LOCK_OWNER} 600; replacing it" "${restore}" --yes "${app_snap}"
+    # shellcheck disable=SC2016 # $1 and $2 expand in the inner bash
+    check "... with a new 0600 file" bash -c '[ "$(stat -c %i "$1")" != "$2" ] && [ "$(stat -c %a "$1")" = 600 ]' _ "${lock}" "${old_inode}"
+    check "... and holds the new one throughout" probe_ok
+done
+# Someone who opened the old, readable file keeps that descriptor, but
+# locking it no longer blocks anything once it has been replaced.
+chmod 644 "${lock}"
+rm -f "${tmp}/opened"
+bash -c 'exec 7<"$1"; : >"$2"; while [ ! -e "$3" ]; do sleep 0.05; done; flock 7; exec sleep 60' \
+    _ "${lock}" "${tmp}/opened" "${tmp}/go" 7>&- &
+holder2=$!
+while [ ! -e "${tmp}/opened" ]; do sleep 0.05; done
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot replaces a lock file another user has open" 1 "replacing it" \
+    "${restore}" --yes "${app_snap}"
+: >"${tmp}/go"
+sleep 0.3
+FAKE_PODS=app-postgres-0 run_script "... whose old descriptor, locked, blocks nothing" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+kill "${holder2}" 2>/dev/null || true; wait "${holder2}" 2>/dev/null || true; holder2=""
+rm -f "${lock}"
+ln -s "${tmp}/elsewhere" "${lock}"
+before="$(tree_state "${root}")"
+run_script "restore-snapshot refuses a lock path that is a symlink" 1 "is not a regular file" \
+    "${restore}" --yes "${app_snap}"
+# shellcheck disable=SC2016 # $1 and $2 expand in the inner bash
+check "... before anything else, creating nothing" bash -c '[ ! -s "$1" ] && [ ! -e "$2" ]' _ "${STUB_LOG}" "${tmp}/elsewhere"
+check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+rm -f "${lock}"
+# A run that waited on a lock file that was then replaced locks the new one.
+hold_lock 60
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 "${restore}" --yes --lock-wait=30 "${app_snap}" \
+    >"${tmp}/bg.out" 2>&1 </dev/null &
+restore_bg=$!
+sleep 0.5
+rm -f "${tmp}/new-held"
+bash -c 'exec 8>>"$1.new"; flock 8; mv "$1.new" "$1"; : >"$2"; exec sleep 1' _ "${lock}" "${tmp}/new-held" &
+holder2=$!
+while [ ! -e "${tmp}/new-held" ]; do sleep 0.05; done
+: >"${STUB_LOG}"
+release_lock
+status=0; wait "${restore_bg}" || status=$?; restore_bg=""
+wait "${holder2}" 2>/dev/null || true; holder2=""
+if [ "${status}" -eq 1 ] && grep -qF "still in use by" "${tmp}/bg.out" && probe_ok; then
+    pass "restore-snapshot locks the file now at the path after waiting on a replaced one"
+else
+    fail "restore-snapshot after waiting on a replaced lock file (exit ${status}):"
+    sed 's/^/    /' "${tmp}/bg.out" "${STUB_LOG}"
+fi
+
+delete="${repo_root}/scripts/host/delete-snapshots.sh"
+hold_lock 60
+run_script "delete-snapshots refuses while the backup lock is held" 1 "${lock} is held" \
+    "${delete}" data-plane.20261024T010000Z
+check "... before any btrfs call" bash -c "! grep -q '^btrfs' '${STUB_LOG}'"
+release_lock
+rm -f "${lock}"
+run_script "delete-snapshots takes the lock, then still wants a terminal" 1 "this is a manual tool" \
+    "${delete}" data-plane.20261024T010000Z
+check "... and created the lock file 0600" [ "$(mode_of "${lock}")" == "${BACKUP_LOCK_OWNER} 600" ]
+
+snapshot_now="${repo_root}/scripts/backup/snapshot-now.sh"
+hold_lock 60
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now as root refuses while the lock is held" 1 "${lock} is held" \
+    "${snapshot_now}" before-test
+check "... before taking anything" bash -c "! grep -q '^btrfs' '${STUB_LOG}'"
+SNAPSHOT_DIR="${tmp}/no-such-dir" FAKE_ROOT=0 run_script "snapshot-now as the operator takes no lock" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" before-test
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now --dry-run takes no lock" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" --dry-run before-test
+release_lock
+rm -f "${lock}"
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now as root takes the lock, then checks" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" before-test
+check "... and created the lock file 0600" [ "$(mode_of "${lock}")" == "${BACKUP_LOCK_OWNER} 600" ]
+
+lock_block() { sed -n '/^# >>> backup lock/,/^# <<< backup lock/p' "$1"; }
+first_block="$(lock_block "${repo_root}/scripts/host/backup-snapshots.sh")"
+check "the lock block is in backup-snapshots.sh" [ -n "${first_block}" ]
+for f in scripts/host/restore-snapshot.sh scripts/host/delete-snapshots.sh scripts/backup/snapshot-now.sh; do
+    check "the lock block in ${f} is the same as backup-snapshots.sh's" \
+        [ "$(lock_block "${repo_root}/${f}")" == "${first_block}" ]
+done
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"

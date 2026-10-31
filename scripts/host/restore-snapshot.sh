@@ -125,16 +125,71 @@ if [ -z "$OWNER" ] || [ "$OWNER" = "root" ]; then
     exit 1
 fi
 
+# >>> backup lock: the same in backup-snapshots.sh, restore-snapshot.sh,
+# delete-snapshots.sh and snapshot-now.sh (test-backup-scripts.sh checks).
+# take_backup_lock FILE WAIT: take FILE's flock on fd 9, waiting up to WAIT
+# seconds, and keep it until the script exits. FILE is root's and mode 0600,
+# so no other user can open it to hold the lock; one that is not is replaced,
+# under the lock, by one that is (a chmod would not close a descriptor some
+# user already has open). After locking, the file must still be the one at
+# FILE (another run may have replaced it meanwhile), or it starts over.
+# Returns 1 when the lock is held, 2 on any other failure.
+take_backup_lock() {
+    local file="$1" wait="$2" owner="0:0" tries=0 old_umask status tmp
+    # Under scripts/host/test-backup-scripts.sh only: the test user's own files.
+    [ -z "${ECONGRAPH_TEST_ROOT:-}" ] || owner="${BACKUP_LOCK_OWNER:-0:0}"
+    while :; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 5 ]; then
+            echo "error: $file keeps being replaced; could not lock it" >&2
+            return 2
+        fi
+        if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+            echo "error: $file is not a regular file; refusing to use it as the lock" >&2
+            return 2
+        fi
+        old_umask="$(umask)"
+        umask 077
+        if ! exec 9>>"$file"; then
+            umask "$old_umask"
+            echo "error: could not open $file" >&2
+            return 2
+        fi
+        umask "$old_umask"
+        status=0
+        flock -w "$wait" 9 || status=$?
+        if [ "$status" -eq 1 ]; then
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "error: could not lock $file (flock exited $status)" >&2
+            return 2
+        fi
+        [ "$(stat -L -c %d:%i /proc/self/fd/9)" != "$(stat -c %d:%i "$file" 2>/dev/null)" ] || break
+        exec 9>&-
+    done
+    if [ "$(stat -c '%u:%g %a' "$file")" != "$owner 600" ]; then
+        echo "note: $file is $(stat -c '%u:%g %a' "$file"), not $owner 600; replacing it" >&2
+        tmp=""
+        if ! { tmp="$(mktemp "$file.XXXXXX")" && chown "$owner" "$tmp" && chmod 0600 "$tmp" &&
+            exec 8>>"$tmp" && flock -n 8 && mv -f "$tmp" "$file"; }; then
+            [ -z "$tmp" ] || rm -f "$tmp"
+            echo "error: could not replace $file with a root-only one" >&2
+            return 2
+        fi
+        exec 9>&8 8>&-
+    fi
+}
+# <<< backup lock
+
 # The backup lock, held until this script exits (fd 9 stays open).
 if [ "$DRY_RUN" = "false" ]; then
-    exec 9>"$LOCK_FILE"
     # Computed on its own line: a failed expansion stops the script here
-    # (set -e) instead of skipping flock.
+    # (set -e) instead of skipping the lock.
     lock_wait_seconds=$((10#$LOCK_WAIT))
     lock_status=0
-    flock -w "$lock_wait_seconds" 9 || lock_status=$?
-    if [ "$lock_status" -ne 0 ] && [ "$lock_status" -ne 1 ]; then
-        echo "error: could not take the lock $LOCK_FILE (flock exited $lock_status); nothing changed" >&2
+    take_backup_lock "$LOCK_FILE" "$lock_wait_seconds" || lock_status=$?
+    if [ "$lock_status" -eq 2 ]; then
+        echo "error: could not take the lock $LOCK_FILE; nothing changed" >&2
         exit 1
     fi
     if [ "$lock_status" -eq 1 ]; then
