@@ -34,6 +34,8 @@ mod latest_observation_tests;
 #[cfg(test)]
 pub mod n_plus_one_tests;
 #[cfg(test)]
+mod original_only_db_tests;
+#[cfg(test)]
 mod search_filter_db_tests;
 #[cfg(test)]
 mod split_databases_tests;
