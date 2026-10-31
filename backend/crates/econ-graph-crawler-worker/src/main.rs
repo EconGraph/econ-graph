@@ -142,15 +142,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = econ_graph_core::config::data_database_url()?;
     let pool = DataPool(econ_graph_core::create_pool(&database_url).await?);
 
-    let registry = default_registry();
+    // Licence-gated sources get no adapter, so nothing below (startup reference-data refresh,
+    // scheduler, coverage, job dispatch) can reach their upstream.
+    let registry = econ_graph_crawler::licence::ungated_registry(default_registry());
+    for source in registry.ids() {
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS.initialize_source(source.as_str());
+    }
     // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
-    // their first job (BLS reads `bls_series`; FRED reads `fred_series`).
+    // their first job. Catalog selection rules are validated before any discovery is enqueued.
     let bls_series = econ_graph_crawler::reference::bls_series()?;
-    let fred_series = econ_graph_crawler::reference::fred_series()?;
+    econ_graph_crawler::sources::fred::validate_catalog_rules()?;
+    let bea_rules = econ_graph_crawler::catalog_selection::bea_rules()?;
+    // Alerts on rule matches join on the rules this worker loaded, so an edited rule's
+    // old label stops alerting once no worker reports it as configured.
+    if registry.ids().contains(&econ_graph_crawler::SourceId::Fred) {
+        econ_graph_crawler::catalog_selection::publish_configured_rules(
+            "FRED",
+            &econ_graph_crawler::sources::fred::configured_rule_labels()?,
+        );
+    }
+    if registry.ids().contains(&econ_graph_crawler::SourceId::Bea) {
+        econ_graph_crawler::catalog_selection::publish_configured_rules(
+            "BEA",
+            &bea_rules.rule_labels(),
+        );
+    }
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         bls_series = bls_series.len(),
-        fred_series = fred_series.len(),
         "reference data loaded"
     );
     // Shared reference data ($REFERENCE_DATA_DIR), e.g. the country table.

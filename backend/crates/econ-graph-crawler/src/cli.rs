@@ -4,8 +4,10 @@
 
 //! The `crawler` operator CLI.
 //!
-//! Everything except `fetch` and `migrate` only touches `crawl_queue`: jobs are enqueued here and
-//! processed by the `crawler-worker` deployment.
+//! Discovery and fetch jobs are enqueued here and processed by `crawler-worker`.
+//! `confirm-successor` records an operator-reviewed link without changing either history.
+//! `accept-guarded-catalog` shows, and with `--accept` applies, the newest catalog snapshot the
+//! mass-disappearance guard rejected (see [`crate::lifecycle`]).
 //!
 //! ```text
 //! crawler enqueue  --source FRED --series GDP,UNRATE [--priority N]
@@ -18,6 +20,8 @@
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
 //! crawler migrate  [--dry-run]   # apply the data migrations
+//! crawler confirm-successor --source FRED --series OLD --successor NEW
+//! crawler accept-guarded-catalog --source BEA [--accept --guarded-at TIME]
 //! ```
 //!
 //! `migrate` applies the data migrations (`backend/migrations/data`) to the data database. No
@@ -47,6 +51,7 @@ use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx, SourceAdapter};
 use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
 use crate::dataset::DatasetCatalog;
 use crate::http::{HttpConfig, HttpFetcher};
+use crate::licence;
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference_file;
@@ -81,6 +86,34 @@ pub struct Cli {
 /// `crawler` subcommands.
 #[derive(Debug, Subcommand, PartialEq)]
 pub enum Command {
+    /// Show the newest catalog snapshot the mass-disappearance guard rejected and the series
+    /// it would count as absent. With --accept, apply it as an ordinary complete catalog:
+    /// each newly absent series gets one absence (three are still needed to mark it missing).
+    AcceptGuardedCatalog {
+        /// Source whose guarded snapshot to review, e.g. BEA.
+        #[arg(long)]
+        source: SourceId,
+        /// Apply the snapshot after reviewing it. Without this flag nothing is written.
+        #[arg(long, requires = "guarded_at")]
+        accept: bool,
+        /// The guarded-at time the review printed (RFC 3339). Accepting refuses a different,
+        /// newer snapshot.
+        #[arg(long)]
+        guarded_at: Option<chrono::DateTime<chrono::Utc>>,
+    },
+    /// Confirm a replacement series after reviewing its meaning and units. Records a link;
+    /// never merges observations, deletes a series, or moves annotations.
+    ConfirmSuccessor {
+        /// Source containing both series, e.g. FRED.
+        #[arg(long)]
+        source: SourceId,
+        /// Existing series whose publication has ended.
+        #[arg(long)]
+        series: String,
+        /// Replacement series id, in the same source.
+        #[arg(long)]
+        successor: String,
+    },
     /// Enqueue fetch_series jobs.
     Enqueue {
         /// Source, e.g. FRED, BLS, WORLD_BANK.
@@ -195,6 +228,28 @@ pub enum Command {
     },
 }
 
+impl Command {
+    /// The sources whose upstream this command crawls, or queues a crawl of. `refetch --all`
+    /// leaves gated sources out in [`SourceSelection::resolve`].
+    fn upstream_sources(&self) -> Vec<SourceId> {
+        match self {
+            Command::Enqueue { source, .. }
+            | Command::Discover { source, .. }
+            | Command::Fetch { source, .. }
+            | Command::RecordReferenceSeeds { source, .. } => vec![*source],
+            Command::Refetch { sources, .. } => sources.source.clone(),
+            // Read-only, or stored data only with no upstream request: nothing to gate.
+            Command::AcceptGuardedCatalog { .. }
+            | Command::ConfirmSuccessor { .. }
+            | Command::RefetchStatus { .. }
+            | Command::Status { .. }
+            | Command::Coverage { .. }
+            | Command::Sources
+            | Command::Migrate { .. } => Vec::new(),
+        }
+    }
+}
+
 /// The sources a `refetch` / `refetch-status` command covers.
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[group(required = true, multiple = false)]
@@ -212,13 +267,17 @@ impl SourceSelection {
     /// The selected sources, sorted and de-duplicated. A named source must be one the refresh
     /// scheduler refreshes (it has an adapter that fetches series).
     pub fn resolve(&self, registry: &AdapterRegistry) -> anyhow::Result<Vec<SourceId>> {
-        let fetchable = covered_sources(&registry.ids());
+        let mut fetchable = covered_sources(&registry.ids());
+        fetchable.retain(|&s| licence::allows(s));
         if self.all {
             return Ok(fetchable);
         }
         let mut out = self.source.clone();
         out.sort_unstable();
         out.dedup();
+        for &source in &out {
+            licence::check(source)?;
+        }
         if let Some(bad) = out.iter().find(|s| !fetchable.contains(s)) {
             bail!("{bad} has no adapter that fetches series; refetchable sources: {fetchable:?}");
         }
@@ -279,7 +338,13 @@ pub fn new_job(
 }
 
 /// Enqueues `jobs`; returns how many were inserted (jobs with an active duplicate are skipped).
+/// Refuses, inserting nothing, if any job is for a [licence-gated](crate::licence) source.
 pub async fn enqueue_all(pool: &DatabasePool, jobs: &[NewCrawlQueueItem]) -> anyhow::Result<usize> {
+    for job in jobs {
+        if let Ok(source) = job.source.parse::<SourceId>() {
+            licence::check(source)?;
+        }
+    }
     let mut inserted = 0;
     for job in jobs {
         match CrawlQueueItem::enqueue(pool, job).await? {
@@ -318,6 +383,9 @@ impl Cli {
     pub async fn execute(self) -> anyhow::Result<String> {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
+        }
+        for source in self.command.upstream_sources() {
+            licence::check(source)?;
         }
         if let Command::RecordReferenceSeeds {
             source,
@@ -481,11 +549,66 @@ impl Cli {
                 series,
                 full,
             } => fetch_one(pool.0, source, series.trim(), full).await,
+            Command::ConfirmSuccessor {
+                source,
+                series,
+                successor,
+            } => {
+                crate::lifecycle::confirm_successor(&pool, source, series.trim(), successor.trim())
+                    .await
+                    .context("confirming the reviewed successor")?;
+                Ok(format!(
+                    "confirmed successor for {source} {series}: {successor}; histories unchanged\n"
+                ))
+            }
+            Command::AcceptGuardedCatalog {
+                source,
+                accept,
+                guarded_at,
+            } => {
+                let reviewed = if accept { guarded_at } else { None };
+                let review = crate::lifecycle::review_guarded_catalog(&pool, source, reviewed)
+                    .await
+                    .context("reviewing the guarded catalog snapshot")?;
+                Ok(format_guarded_review(source, &review, accept))
+            }
             Command::Sources | Command::RecordReferenceSeeds { .. } | Command::Migrate { .. } => {
                 unreachable!("handled above")
             }
         }
     }
+}
+
+/// Text for `crawler accept-guarded-catalog`.
+fn format_guarded_review(
+    source: SourceId,
+    review: &crate::lifecycle::GuardedReview,
+    accepted: bool,
+) -> String {
+    let mut out = format!(
+        "{source} catalog guarded at {}: {} listed; {} of {} series in the last accepted catalog are absent\n",
+        review.guarded_at.to_rfc3339(),
+        review.listed,
+        review.newly_missing.len(),
+        review.previously_listed,
+    );
+    for id in &review.newly_missing {
+        let _ = writeln!(out, "absent {id}");
+    }
+    if accepted {
+        let _ = writeln!(
+            out,
+            "accepted: one absence recorded per absent series; {} status changes",
+            review.transitions
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "nothing written; to apply this snapshot: crawler accept-guarded-catalog --source {source} --accept --guarded-at {}",
+            review.guarded_at.to_rfc3339()
+        );
+    }
+    out
 }
 
 /// `crawler migrate`: applies the data set's pending migrations to `database_url` under the
@@ -751,9 +874,16 @@ pub fn format_status(s: &CrawlerStatusSnapshot) -> String {
             "SOURCE", "PENDING", "PROCESSING", "RETRYING", "FAILED/24H"
         );
         for p in &s.per_source {
+            // A licence-gated source's queued jobs are never claimed, so say why they wait.
+            let gated = p
+                .source
+                .parse::<SourceId>()
+                .ok()
+                .and_then(licence::blocking)
+                .map_or_else(String::new, |g| format!("  ({}; not claimed)", g.label()));
             let _ = writeln!(
                 out,
-                "{:<12} {:>8} {:>10} {:>9} {:>10}  {}",
+                "{:<12} {:>8} {:>10} {:>9} {:>10}  {}{gated}",
                 p.source,
                 p.pending,
                 p.processing,
@@ -852,13 +982,14 @@ pub fn format_coverage(rows: &[SourceCoverage]) -> String {
     out
 }
 
-/// Text rendering of every [`SourceId`] with its policy, adapter and API key state.
+/// Text rendering of every [`SourceId`] with its policy, adapter, whether this build may crawl it
+/// (`disabled: licence (<ticket>)` for a [licence-gated](crate::licence) source) and API key state.
 pub fn format_sources(registry: &AdapterRegistry, keys: &ApiKeys) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{:<12} {:>8} {:>6} {:>5} {:>8}  {:<8} API KEY",
-        "SOURCE", "REQ/MIN", "BURST", "CONC", "RETRIES", "ADAPTER"
+        "{:<12} {:>8} {:>6} {:>5} {:>8}  {:<8} {:<28} API KEY",
+        "SOURCE", "REQ/MIN", "BURST", "CONC", "RETRIES", "ADAPTER", "CRAWL"
     );
     for id in SourceId::ALL {
         let adapter = registry.get(id);
@@ -882,15 +1013,17 @@ pub fn format_sources(registry: &AdapterRegistry, keys: &ApiKeys) -> String {
             None if policy.needs_api_key => "required (no env var)".to_string(),
             None => "-".to_string(),
         };
+        let crawl = licence::blocking(id).map_or_else(|| "enabled".to_string(), |g| g.label());
         let _ = writeln!(
             out,
-            "{:<12} {:>8.1} {:>6} {:>5} {:>8}  {:<8} {}",
+            "{:<12} {:>8.1} {:>6} {:>5} {:>8}  {:<8} {:<28} {}",
             id.as_str(),
             policy.requests_per_second * 60.0,
             policy.burst,
             policy.max_concurrency,
             policy.max_retries,
             if adapter.is_some() { "yes" } else { "no" },
+            crawl,
             key
         );
     }
@@ -914,6 +1047,63 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn guarded_catalog_acceptance_needs_an_explicit_flag() {
+        assert_eq!(
+            parse(&["accept-guarded-catalog", "--source", "BEA"])
+                .unwrap()
+                .command,
+            Command::AcceptGuardedCatalog {
+                source: SourceId::Bea,
+                accept: false,
+                guarded_at: None
+            }
+        );
+        assert!(parse(&["accept-guarded-catalog", "--source", "BEA", "--accept"]).is_err());
+        assert_eq!(
+            parse(&[
+                "accept-guarded-catalog",
+                "--source",
+                "BEA",
+                "--accept",
+                "--guarded-at",
+                "2026-10-30T18:02:15.123456+00:00"
+            ])
+            .unwrap()
+            .command,
+            Command::AcceptGuardedCatalog {
+                source: SourceId::Bea,
+                accept: true,
+                guarded_at: Some("2026-10-30T18:02:15.123456Z".parse().unwrap())
+            }
+        );
+        assert!(parse(&["accept-guarded-catalog"]).is_err());
+    }
+
+    #[test]
+    fn successor_confirmation_requires_both_series_and_source() {
+        assert_eq!(
+            parse(&[
+                "confirm-successor",
+                "--source",
+                "FRED",
+                "--series",
+                "OLD",
+                "--successor",
+                "NEW"
+            ])
+            .unwrap()
+            .command,
+            Command::ConfirmSuccessor {
+                source: SourceId::Fred,
+                series: "OLD".into(),
+                successor: "NEW".into()
+            }
+        );
+        assert!(parse(&["confirm-successor", "--source", "FRED", "--series", "OLD"]).is_err());
+        assert!(parse(&["confirm-successor", "--series", "OLD", "--successor", "NEW"]).is_err());
     }
 
     #[test]

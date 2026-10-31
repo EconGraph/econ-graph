@@ -36,12 +36,21 @@
 //!
 //!    Series whose `crawl_status` is `not_found` (the source returned `CrawlError::NotFound`, a
 //!    firmer signal than a generic failure) back off **ten times** the interval instead, so a
-//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. A series
+//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. Series
+//!    whose `crawl_status` is `absent` (`CrawlError::Absent`: a complete response omitted them)
+//!    back off just as long. A series
 //!    the source reports NotFound before it ever gets an `economic_series` row has its
 //!    `series_metadata` row deactivated instead (`persist::deactivate_metadata_conn`) and so
 //!    isn't a candidate at all; it comes back only when a later catalog discovery lists the id
 //!    again (see [`coverage`](crate::coverage) for how this keeps it out of coverage's
 //!    denominator).
+//!
+//!    A series with a publication state other than active (see [`lifecycle`](crate::lifecycle))
+//!    is not a candidate, except one retired solely by consecutive fetch results (NotFound, or
+//!    a BEA line omitted from the response; `series_lifecycle.fetch_retired`). That series is probed once
+//!    [`FETCH_RETIRED_PROBE_FACTOR`] intervals after its last attempt (a discovered series
+//!    without an `economic_series` row uses its last failed queue row, so at most the queue
+//!    retention), and a successful probe makes it active again.
 //!
 //!    Discovered series and refreshes of existing series take turns in the batch, each kind
 //!    oldest first (never-crawled series first; discovered series never tried before ones whose
@@ -99,6 +108,26 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Default maximum `fetch_series` jobs enqueued per tick.
 pub const DEFAULT_BATCH_LIMIT: i64 = 500;
+
+/// Backoff, in refresh intervals, after a fetch that ended in `not_found`.
+pub const NOT_FOUND_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after `absent` (a complete response omitted the series). Weaker evidence than
+/// NotFound needs more misses to fetch-retire a series, and never retires it sooner in time.
+pub const ABSENT_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after any other failed fetch.
+pub const FAILED_BACKOFF_FACTOR: i64 = 2;
+
+/// `CASE` over a crawl_status column giving the backoff factor for a failed fetch.
+pub(crate) fn failure_backoff_sql(status: &str) -> String {
+    format!(
+        "(CASE WHEN {status} = 'not_found' THEN {NOT_FOUND_BACKOFF_FACTOR} \
+         WHEN {status} = 'absent' THEN {ABSENT_BACKOFF_FACTOR} ELSE {FAILED_BACKOFF_FACTOR} END)"
+    )
+}
+
+/// A series retired only by consecutive fetch NotFound (or omitted-line) results is still probed, once per this
+/// many refresh intervals, so a later successful fetch can reactivate it.
+pub const FETCH_RETIRED_PROBE_FACTOR: i64 = 12;
 
 /// Refresh interval, in days, for a frequency that matches no rule.
 pub const UNKNOWN_FREQUENCY_DAYS: i64 = 7;
@@ -206,10 +235,15 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
          ), cand AS ( \
              SELECT src.code, es.id, es.external_id, es.last_crawled_at, es.crawl_status, \
                     NULL::timestamptz AS failed_at, FALSE AS discovered, \
-                    make_interval(days => ({es_days})) AS refresh \
+                    make_interval(days => ({es_days})) AS refresh, \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = es.source_id \
+                        AND lc.external_id = es.external_id AND {fetch_retired}) AS probe \
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM datasets d \
@@ -217,12 +251,17 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
-                    make_interval(days => ({sm_days})) \
+                    make_interval(days => ({sm_days})), \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = sm.source_id \
+                        AND lc.external_id = sm.external_id AND {fetch_retired}) \
              FROM series_metadata sm \
              JOIN src ON sm.source_id = src.ds_id \
              LEFT JOIN failed_jobs f \
                     ON f.source = src.code AND f.series_id = sm.external_id \
              WHERE sm.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR sm.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
@@ -239,13 +278,18 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                  WHERE q.source = c.code AND q.series_id = c.external_id \
                    AND q.kind IN ('fetch_series', 'refetch_series') \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
-           AND CASE WHEN c.crawl_status IN ('failed', 'not_found') THEN \
+           AND CASE WHEN c.probe THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
-                       <= NOW() - (CASE WHEN c.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
-                          * c.refresh \
+                       <= NOW() - {probe_factor} * c.refresh \
+               WHEN c.crawl_status IN ('failed', 'not_found', 'absent') THEN \
+                   COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
+                                     (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
+                                      WHERE ca.series_id = c.id)), \
+                            '-infinity'::timestamptz) \
+                       <= NOW() - {failure_backoff} * c.refresh \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
          ) \
@@ -256,6 +300,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
         es_days = frequency_days_sql("lower(btrim(es.frequency))"),
         sm_days = frequency_days_sql("lower(btrim(sm.frequency))"),
         census = SourceId::Census.as_str(),
+        fetch_retired = "(lc.status = 'retired' AND lc.fetch_retired)",
+        probe_factor = FETCH_RETIRED_PROBE_FACTOR,
+        failure_backoff = failure_backoff_sql("c.crawl_status"),
     )
 });
 
@@ -366,6 +413,8 @@ impl RefreshScheduler {
         config: SchedulerConfig,
     ) -> Self {
         let mut registry_sources = registry_sources;
+        // Licence-gated sources are neither refreshed nor re-discovered.
+        registry_sources.retain(|&s| crate::licence::allows(s));
         registry_sources.sort_unstable();
         registry_sources.dedup();
         Self {
@@ -608,6 +657,7 @@ mod tests {
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
         for sql in [
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM series_metadata WHERE external_id LIKE 't15c\\_%'",
         ] {
@@ -983,6 +1033,178 @@ mod tests {
         for sql in &cleanup {
             exec(p, sql).await;
         }
+    }
+
+    #[tokio::test]
+    async fn publication_state_suspends_automatic_fetches_and_recovery_resumes_them() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        for status in [
+            "active",
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            let id = format!("t15c_lifecycle_{status}");
+            seed(
+                pool,
+                SourceId::Fred,
+                &id,
+                "Monthly",
+                Some(365.0),
+                Some("success"),
+            )
+            .await;
+            let metadata_only = format!("{id}_catalog");
+            discover(pool, SourceId::Fred, &[(&metadata_only, "Monthly")]).await;
+            let mut conn = pool.get().await.unwrap();
+            for external_id in [&id, &metadata_only] {
+                diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,successor_id) VALUES($1,$2,$3,NOW(),'test',CASE WHEN $3='superseded' THEN gen_random_uuid() END)")
+                    .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(external_id)
+                    .bind::<Text,_>(status).execute(&mut conn).await.unwrap();
+            }
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let jobs = queued_series(pool).await;
+        let ours: BTreeSet<_> = jobs
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_lifecycle_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_lifecycle_active".to_string(),
+                "FRED/t15c_lifecycle_active_catalog".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(pool, "UPDATE series_lifecycle SET status='active',since=NULL WHERE external_id='t15c_lifecycle_retired'").await;
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        assert!(queued_series(pool)
+            .await
+            .contains("FRED/t15c_lifecycle_retired"));
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
+        )
+        .await;
+    }
+
+    /// A series whose last fetch was Absent backs off as long as NotFound (10 intervals),
+    /// not the 2 intervals of an ordinary failure.
+    #[tokio::test]
+    async fn absent_series_back_off_like_not_found() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        // Monthly refreshes every 7 days: failed is due after 14, absent after 70.
+        for (id, days_ago, status) in [
+            ("t15c_backoff_failed", 30.0, "failed"),
+            ("t15c_backoff_absent_recent", 30.0, "absent"),
+            ("t15c_backoff_absent_due", 80.0, "absent"),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some(status),
+            )
+            .await;
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_backoff_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_backoff_absent_due".to_string(),
+                "FRED/t15c_backoff_failed".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    /// A series retired only by fetch NotFound results is still probed on a slow schedule,
+    /// so a later successful fetch can reactivate it. Catalog-confirmed retirement is not.
+    #[tokio::test]
+    async fn fetch_retired_series_are_probed_slowly() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        // Monthly refreshes every 7 days, so a probe is due after 84.
+        for (id, days_ago, fetch_retired) in [
+            ("t15c_probe_recent", 30.0, true),
+            ("t15c_probe_due", 100.0, true),
+            ("t15c_probe_catalog", 100.0, false),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some("retired"),
+            )
+            .await;
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,$3)")
+                .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(id)
+                .bind::<diesel::sql_types::Bool,_>(fetch_retired).execute(&mut conn).await.unwrap();
+        }
+        let metadata_only = "t15c_probe_catalog_only";
+        discover(pool, SourceId::Fred, &[(metadata_only, "Monthly")]).await;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,TRUE)")
+            .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(metadata_only)
+            .execute(&mut conn).await.unwrap();
+        drop(conn);
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_probe_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_probe_catalog_only".to_string(),
+                "FRED/t15c_probe_due".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_probe_%'",
+        )
+        .await;
     }
 
     #[tokio::test]

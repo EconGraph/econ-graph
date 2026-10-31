@@ -520,11 +520,14 @@ name it. The data and app databases each have a role `econgraph`, created by the
   `crawler-migrate` Job read it as `DATA_DATABASE_URL`, and so does the backend (optional there).
 - `app-database-url`: the backend reads it as `APP_DATABASE_URL` and applies the app migrations
   to it at startup. It names `econ_graph_app` on
-  `app-postgres-service` (`APP_DATABASE=separate`), or, in a cluster deployed before the app
-  database existed, the data database's URL (`APP_DATABASE=shared`). An existing cluster keeps
-  its setting until `create-secrets.sh` runs with `APP_DATABASE` set; a new Secret gets
-  `separate`. Moving an existing cluster to `separate` means moving its app rows into
-  `econ_graph_app` first: the script only rewrites the URL.
+  `app-postgres-service` (`APP_DATABASE=separate`), or the data database's URL
+  (`APP_DATABASE=shared`) while the app records are still in `econ_graph`, as on a cluster
+  deployed before the app database existed. With `APP_DATABASE` unset, the key's current
+  setting is kept; a cluster without `econ-graph-secrets` gets `separate`; an existing Secret
+  without the key needs `APP_DATABASE`. `create-secrets.sh` refuses `separate` while
+  `econ_graph` holds the app tables, and `shared` once they are only in `econ_graph_app`
+  (`scripts/deploy/lib/app-database-guard.sh`). `scripts/deploy/convert-app-data.sh` moves
+  the app rows and rewrites the key ([the runbook](../docs/deployment/APP_DATA_CONVERSION.md)).
 - `database-url`: the same URL as `data-database-url`. No binary reads `DATABASE_URL`; the key is
   kept for manifests of earlier versions, which read it.
 

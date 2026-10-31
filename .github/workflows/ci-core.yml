@@ -903,6 +903,20 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run publication lifecycle and public visibility regressions (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for lifecycle regressions}"
+        for filter in graphql::lifecycle::tests graphql::lifecycle_visibility_tests; do
+          log="$RUNNER_TEMP/lifecycle-${filter//:/_}.log"
+          cargo test -p econ-graph-graphql --lib "$filter" -- --test-threads=1 --nocapture | tee "$log"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        done
+        log="$RUNNER_TEMP/lifecycle-cross-section.log"
+        cargo test -p econ-graph-services --lib restricted_series -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail

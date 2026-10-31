@@ -422,6 +422,7 @@ impl BatchFn<Uuid, Option<SeriesDatasetFields>> for SeriesDatasetFieldsBatcher {
             };
             let rows = match dsl::economic_series
                 .filter(dsl::id.eq_any(&keys))
+                .filter(econ_graph_services::services::series_service::public_series_predicate())
                 .select((
                     dsl::id,
                     dsl::dataset_id,
