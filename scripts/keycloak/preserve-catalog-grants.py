@@ -156,11 +156,17 @@ def config_cli_state(attributes, kind):
     return set(names)
 
 
+# Clients every Keycloak realm has, which config-cli never deletes (KeycloakUtil.isDefaultClient).
+KEYCLOAK_CLIENTS = {"account", "account-console", "admin-cli", "broker", "realm-management",
+                    "security-admin-console"}
+
+
 def clients_config_cli_deletes(realm, attributes):
     """Client ids config-cli created and the realm file no longer declares."""
-    if "clients" not in realm:
+    if realm.get("clients") is None:
         return set()  # Without a clients list config-cli manages, and deletes, no client.
-    return config_cli_state(attributes, "clients") - {client["clientId"] for client in realm["clients"]}
+    return (config_cli_state(attributes, "clients") - {client["clientId"] for client in realm["clients"]}
+            - KEYCLOAK_CLIENTS)
 
 
 def roles_config_cli_deletes(realm, attributes, client=None):
@@ -502,8 +508,8 @@ def merge_catalog_policy(realm, get):
             for name in user["clientRoles"]:
                 if name in deleted_clients:
                     # The client goes, with every role on it; a grant left in would fail the import.
-                    warn("client %s is no longer in the realm file, so the import deletes it and its roles "
-                         "%s on %s" % (name, ", ".join(user["clientRoles"][name]), account_label))
+                    warn("client %s is no longer in the realm file, so the import deletes it with its roles, "
+                         "dropping grants of %s on %s" % (name, ", ".join(user["clientRoles"][name]), account_label))
                     user["clientRoles"][name] = []
                     continue
                 deleted = deleted_roles if name == API_CLIENT else roles_config_cli_deletes(realm, observed_attrs, name)

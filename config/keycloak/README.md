@@ -383,7 +383,8 @@ client would be assigned it.
 
 When a role leaves the realm file, the import deletes it if config-cli created it. Dropping a
 client's block under `roles.client` deletes the roles config-cli created for it. Dropping a client
-config-cli created deletes the client with every role on it, including roles made in Keycloak. config-cli
+config-cli created deletes the client with every role on it, including roles made in Keycloak;
+Keycloak's own clients, such as `account`, are never deleted. config-cli
 records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes, and when that
 list shrinks it leaves an old chunk behind, which both it and the import ignore (the import names it
 in a warning). The role's live grants are then left out of the import, each named with a warning,

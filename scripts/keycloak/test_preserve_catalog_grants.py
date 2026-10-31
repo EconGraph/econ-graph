@@ -599,7 +599,7 @@ class CatalogPolicyTests(unittest.TestCase):
 
     def test_roles_of_a_client_the_realm_file_drops_are_dropped_from_the_reader(self):
         # config-cli 6.5.1 deletes every role it created for a client missing from roles.client,
-        # as when the realm file drops the client; the realm's default role is never deleted.
+        # and a client it created, once the realm file drops it, with every role on it.
         attributes = self.state[self.prefix]["attributes"]
         attributes["de.adorsys.keycloak.config.state-default-roles-client-temp-x-0"] = '["temp-role"]'
         self.state[self.prefix + "/users/reader/role-mappings"] = {
@@ -614,8 +614,11 @@ class CatalogPolicyTests(unittest.TestCase):
             [c["clientId"] for c in self.realm["clients"]] + ["temp-x"])
         merged, warnings = self.merge_with_warnings()
         self.assertEqual(merged["users"][0]["clientRoles"], {"temp-x": []})
-        self.assertIn("client temp-x is no longer in the realm file, so the import deletes it and its roles "
-                      "temp-role, op-role", warnings)
+        self.assertIn("client temp-x is no longer in the realm file, so the import deletes it with its roles, "
+                      "dropping grants of temp-role, op-role", warnings)
+        # Keycloak's own clients are never deleted, whatever the state says.
+        attributes["de.adorsys.keycloak.config.state-default-clients-0"] = '["account"]'
+        self.assertEqual(preserve.clients_config_cli_deletes(self.realm, attributes), set())
         # Without roles.client config-cli deletes no client role.
         del self.realm["roles"]["client"]
         self.assertEqual(preserve.roles_config_cli_deletes(self.realm, attributes, "temp-x"), set())
@@ -646,6 +649,12 @@ class CatalogPolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as raised:
             self.merge()
         self.assertNotIn("catalog.ilo:read", str(raised.exception))
+        # The same through the reader's own scope, by a realm role mapped there.
+        self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = []
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api/composite"] = [{"name": "catalog.ilo:read"}]
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("its own scope admits catalog.ilo:read to econgraph-anonymous tokens until the import "
+                      "deletes it", warnings)
 
     def test_scope_mapping_entries_naming_both_a_client_and_a_scope_fail_the_deploy(self):
         self.realm["clientScopeMappings"]["econ-graph-api"].append(

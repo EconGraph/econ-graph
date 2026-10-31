@@ -290,7 +290,7 @@ for target in "client partner-x: api:mcp" "client scope catalog-extra: api:mcp" 
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client partner-x" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client econgraph-anonymous" \
     "catalog.retired_0:read is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account" \
-    "client temp-x is no longer in the realm file, so the import deletes it and its roles"; do
+    "client temp-x is no longer in the realm file, so the import deletes it with its roles"; do
     grep -qF "$target" "$WORK/warnings-second" || fail "no warning for $target: $(cat "$WORK/warnings-second")"
 done
 [ "$(grep -v 'is no longer in the realm file' "$WORK/warnings-second" | grep -c 'catalog\.\|temp-x')" = 0 ] ||
