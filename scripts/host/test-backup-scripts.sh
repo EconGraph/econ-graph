@@ -332,9 +332,12 @@ for wait in soon "" 86401 9999999999999999999999 18446744073709551617; do
     run_script "restore-snapshot rejects --lock-wait=${wait}" 2 "SECONDS: 0 to 86400" \
         "${restore}" --yes "--lock-wait=${wait}" "${app_snap}"
 done
-# 09 is not octal: read as decimal, it goes on to the pod check.
-FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
+# 09 is not octal: read as decimal, the lock is taken and it goes on to the
+# pod check.
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
     "still in use by" "${restore}" --yes --lock-wait=09 "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"
