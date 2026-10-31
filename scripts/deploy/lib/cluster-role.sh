@@ -215,11 +215,41 @@ kube_system_uid() {
     printf '%s\n' "$uid"
 }
 
-# Print the marker as "ROLE UID", or nothing when there is no marker. Fails when
-# the cluster cannot be asked.
-cluster_role_marker() {
-    kc -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
-        --ignore-not-found -o 'jsonpath={.data.role}{" "}{.data.kube-system-uid}'
+# cluster_role_read_marker KUBECTL...: read the marker with KUBECTL (kc, or
+# recreate-kind-cluster.sh's in-node kubectl) into
+#   CLUSTER_ROLE_MARKER_EXISTS  true when the ConfigMap exists, false when not
+#   CLUSTER_ROLE_MARKER_ROLE    its data.role, exactly as stored
+#   CLUSTER_ROLE_MARKER_UID     its data.kube-system-uid, exactly as stored
+# Existence is asked on its own, so an existing but empty ConfigMap is told
+# apart from a missing one, and each value is read with a trailing "#" that is
+# then removed, so leading, trailing and inner whitespace and newlines all
+# survive. Fails when the cluster cannot be asked, including when the
+# ConfigMap goes away between the reads.
+# shellcheck disable=SC2034 # the CLUSTER_ROLE_MARKER_* values are read by the callers.
+cluster_role_read_marker() {
+    local -a get=("$@")
+    local name value
+    [ "${#get[@]}" -gt 0 ] || { echo "cluster_role_read_marker: no kubectl given" >&2; return 1; }
+    CLUSTER_ROLE_MARKER_EXISTS=false
+    CLUSTER_ROLE_MARKER_ROLE=""
+    CLUSTER_ROLE_MARKER_UID=""
+    name="$("${get[@]}" -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
+        --ignore-not-found -o name)" || return 1
+    [ -n "$name" ] || return 0
+    CLUSTER_ROLE_MARKER_EXISTS=true
+    value="$("${get[@]}" -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
+        -o 'jsonpath={.data.role}{"#"}')" || return 1
+    CLUSTER_ROLE_MARKER_ROLE="${value%#}"
+    value="$("${get[@]}" -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
+        -o 'jsonpath={.data.kube-system-uid}{"#"}')" || return 1
+    CLUSTER_ROLE_MARKER_UID="${value%#}"
+}
+
+# The marker read by cluster_role_read_marker, for messages: "role=R,
+# kube-system-uid=U" with each value shell-quoted, so whitespace and newlines
+# show.
+cluster_role_marker_text() {
+    printf 'role=%q, kube-system-uid=%q' "$CLUSTER_ROLE_MARKER_ROLE" "$CLUSTER_ROLE_MARKER_UID"
 }
 
 # True only when the cluster (on the pinned context) carries a production
@@ -229,7 +259,7 @@ cluster_role_marker() {
 # could not be asked.
 # shellcheck disable=SC2034 # CLUSTER_ROLE_REASON is read by the callers.
 cluster_is_marked_production() {
-    local uid marker role marker_uid
+    local uid
     CLUSTER_ROLE_REASON=""
     if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
         cluster_role_pin_context
@@ -246,34 +276,43 @@ cluster_is_marked_production() {
         CLUSTER_ROLE_REASON="could not read the ${CLUSTER_ROLE_NAMESPACE} namespace UID from context ${CLUSTER_ROLE_CONTEXT}, so it is treated as not production"
         return 2
     fi
-    if ! marker="$(cluster_role_marker)"; then
+    if ! cluster_role_read_marker kc; then
         CLUSTER_ROLE_REASON="could not read ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP} from context ${CLUSTER_ROLE_CONTEXT}, so it is treated as not production"
         return 2
     fi
-    read -r role marker_uid <<<"$marker" || true
-    if [ -z "$role" ] && [ -z "$marker_uid" ]; then
+    if [ "$CLUSTER_ROLE_MARKER_EXISTS" != true ]; then
         CLUSTER_ROLE_REASON="context ${CLUSTER_ROLE_CONTEXT} is not marked production (no ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP})"
         return 1
     fi
-    if [ "$role" != production ]; then
-        CLUSTER_ROLE_REASON="ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP} on context ${CLUSTER_ROLE_CONTEXT} does not say role=production"
+    if [ "$CLUSTER_ROLE_MARKER_ROLE" != production ]; then
+        CLUSTER_ROLE_REASON="ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP} on context ${CLUSTER_ROLE_CONTEXT} does not say exactly role=production ($(cluster_role_marker_text))"
         return 1
     fi
-    if [ "$marker_uid" != "$uid" ]; then
-        CLUSTER_ROLE_REASON="the production marker on context ${CLUSTER_ROLE_CONTEXT} was made on another cluster (${CLUSTER_ROLE_NAMESPACE} UID ${marker_uid:-missing}, this cluster's is ${uid}); a copied or restored marker does not count"
+    if [ "$CLUSTER_ROLE_MARKER_UID" != "$uid" ]; then
+        CLUSTER_ROLE_REASON="the production marker on context ${CLUSTER_ROLE_CONTEXT} was made on another cluster (${CLUSTER_ROLE_NAMESPACE} UID $(printf '%q' "${CLUSTER_ROLE_MARKER_UID:-missing}"), this cluster's is ${uid}); a copied or restored marker does not count"
         return 1
     fi
 }
 
-# For a script about to destroy a cluster (recreate-kind-cluster.sh): whether
-# the marker text $1, "ROLE UID" as cluster_role_marker prints it, calls for the
-# kube-system UID prefix before the delete. True for any marker with a role
-# other than `none`, whatever its case or UID: a mistyped, copied or stale
-# production marker still asks. Deliberately broader than
-# cluster_is_marked_production, which decides whether a cluster may run the
-# tunnel and so counts only an exact marker made on this cluster.
+# cluster_role_marker_guards_delete EXISTS ROLE UID: for a script about to
+# destroy a cluster (recreate-kind-cluster.sh, migrate-to-host-storage.sh),
+# whether the marker cluster_role_read_marker read calls for the kube-system UID
+# prefix before the delete. Fail closed: only two markers do not.
+#   - no ConfigMap (EXISTS false);
+#   - role exactly `none`, with no kube-system-uid or one without whitespace
+#     (`none` or `none <uid>`, as written by hand to say "not production").
+# Everything else guards: an existing ConfigMap with no role or an empty one,
+# any other role (whatever its case or UID, so a mistyped, copied or stale
+# production marker still asks), and any whitespace or newline in the role or
+# UID. Deliberately broader than cluster_is_marked_production, which decides
+# whether a cluster may run the tunnel and so counts only an exact marker made
+# on this cluster.
 cluster_role_marker_guards_delete() {
-    local role
-    read -r role _ <<<"${1:-}" || true
-    [ -n "${role}" ] && [ "${role}" != none ]
+    [ "${1:-}" = true ] || return 1
+    [ "${2-}" = none ] || return 0
+    case "${3-}" in
+        "") return 1 ;;
+        *[[:space:]]*) return 0 ;;
+        *) return 1 ;;
+    esac
 }

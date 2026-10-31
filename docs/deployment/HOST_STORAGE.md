@@ -82,7 +82,12 @@ the operator account (`<operator>`). Everything after that runs without sudo.
   `recreate-kind-cluster.sh` asks for a confirmation and takes a dump before
   deleting the cluster; on a cluster with a production marker, or one whose
   marker can't be read, the confirmation is the first 8 characters of its
-  kube-system UID (typed, or `--confirm-production`), never `--yes`.
+  kube-system UID (typed, or `--confirm-production`), never `--yes`. Here
+  any ConfigMap `kube-system/econgraph-cluster-role` is a production marker,
+  valid or not, empty included, except one whose role is exactly `none` with
+  no `kube-system-uid` or one without whitespace; whitespace around the role
+  or a newline anywhere counts as production (see "Production marker" in
+  `k8s/README.md`).
   `terraform destroy` doesn't delete it.
 
 ## Which Docker daemon
