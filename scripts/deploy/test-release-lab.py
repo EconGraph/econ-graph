@@ -403,6 +403,23 @@ class CreateTests(Stubbed):
         with self.assertRaisesRegex(lab.LabError, '0 replicas'):
             lab.check_manifests([crawler[0]])
 
+    def test_source_repository_namespace_text_cannot_escape_the_loaded_lab_tag(self):
+        _, namespace = lab.renderer.identity('lab-one')
+        reference = f'ghcr.io/{namespace}/econ-graph-crawler-worker:sha-{COMMIT}'
+        images = self.state()['images']
+        images[reference] = images[f'ghcr.io/econgraph/econ-graph-crawler-worker:sha-{COMMIT}']
+        self.state(images=images)
+        self.create(**{'--crawler-image': reference})
+        containers = [c for d in self.state()['applied']
+                      if d['kind'] in ('Deployment', 'StatefulSet', 'Job')
+                      for c in d['spec']['template']['spec'].get('initContainers', []) +
+                      d['spec']['template']['spec']['containers']
+                      if c['name'] in ('crawler-worker', 'crawler-migrate')]
+        self.assertEqual({c['name'] for c in containers}, {'crawler-worker', 'crawler-migrate'})
+        for container in containers:
+            self.assertEqual(container['image'], lab.lab_tag('one', 'crawler-worker', IMAGE_ID))
+            self.assertEqual(container['imagePullPolicy'], 'Never')
+
     def test_inputs_never_modified(self):
         self.create()
         restored = [c for c in self.calls('kubectl') if 'pg_restore' in c['args']]
