@@ -31,14 +31,14 @@ contract is reviewed. API design can proceed against that contract; integration
 must exercise persisted facts and real calculations. Pages, ratio presentation
 and notes join the API contract before the complete research workflow runs.
 
-The review stack is rooted at current `main` through the focused shared-reference
-prerequisite [#773](https://github.com/EconGraph/econ-graph/pull/773). Each row below
-is a separate pull request based on the preceding row's branch, so its diff contains
-only that package. Merge in order, retargeting the next PR after its parent lands.
+The review stack starts directly at `main` with the fact-storage PR. The shared
+reference prerequisite [#773](https://github.com/EconGraph/econ-graph/pull/773) has
+landed on main. Each subsequent package below is a separate pull request based on
+the preceding row's branch, so its diff contains only that package. Merge in
+order, retargeting the next PR after its parent lands.
 
 | Package | Branch | Review focus |
 | --- | --- | --- |
-| Shared references (Train 3) | `feat/train3-research-references` | Stable targets and legacy filing identity |
 | Fact identity and schema | `stack/train5-fact-storage` | Decimal precision, revisions, Train 6 compatibility |
 | Financial calculations | `stack/train5-calculations` | Actual periods, compatible inputs, missing data, provenance |
 | Bulk ingestion | `stack/train5-ingestion` | Idempotency, recovery, archive bounds, freshness |
@@ -54,7 +54,7 @@ No merge or production deployment is authorized by this coordination work.
 
 ## Baseline and integration gates
 
-The review stack preserves current main and includes only the shared-reference
+The review stack preserves current main, including the accepted shared-reference
 prerequisite from Train 3. It does not import the old provisional integration
 baseline's observation-store, deployment, fixture or milestone changes. The
 original aggregate PR is superseded by these focused package PRs.
