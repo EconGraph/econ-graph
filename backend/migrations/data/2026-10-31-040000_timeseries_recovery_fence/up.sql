@@ -29,6 +29,11 @@ CREATE FUNCTION assert_timeseries_write_allowed(expected_target uuid, expected_b
 RETURNS bigint LANGUAGE plpgsql AS $$
 DECLARE current_state timeseries_recovery_state%ROWTYPE;
 BEGIN
+    -- Advisory locks serialize commits but do not refresh an already established RR or
+    -- serializable snapshot. Require RC so the SELECT after waiting observes the pause.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'observation write guard requires READ COMMITTED isolation' USING ERRCODE = '25001';
+    END IF;
     IF expected_backend NOT IN ('postgres', 'iceberg') OR expected_backend IS NULL THEN
         RAISE EXCEPTION 'invalid observation backend' USING ERRCODE = '22023';
     END IF;
