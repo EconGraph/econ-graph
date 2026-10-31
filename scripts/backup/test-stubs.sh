@@ -26,15 +26,17 @@
 #     when it is FAKE_POD_FAILS; get pv -o jsonpath prints FAKE_PVS (printf
 #     %b; default the three host-storage PersistentVolumes as
 #     "<path>\t<namespace>/<claim>" lines) and get pods -A prints
-#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<volume>=<claim or host
+#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<volume>=<claim>=<host
 #     path>..." lines; default none), failing with FAKE_PV_FAILS=1 and
 #     FAKE_POD_LIST_FAILS=1; crictl ps -q on econ-graph-worker, for a pod in
 #     econ-graph (any other crictl call is unsupported), prints a container
 #     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
-#     with FAKE_CRICTL_FAILS=1;
+#     with FAKE_CRICTL_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql
+#     prints nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - with FAKE_LOCK_PROBE set to a lock file, every docker, findmnt and
-#     mountpoint call also logs "lock-probe held" or "lock-probe free" for it; wait exits FAKE_WAIT_RC (default 0), psql prints
-#     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
+#     mountpoint call also logs "lock-probe held" or "lock-probe free" for
+#     it, and "lock-fd current" or "lock-fd stale": whether the caller's fd 9
+#     is the file now at that path.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
 #     FAKE_SWAP_TO (a symlink changed between the check and the restore).
@@ -126,6 +128,8 @@ EOF
 echo "mountpoint $*" >>"${STUB_LOG:-/dev/null}"
 if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
     if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+    if [[ "$(stat -L -c %d:%i "/proc/${PPID}/fd/9" 2>/dev/null)" == "$(stat -c %d:%i "${FAKE_LOCK_PROBE}")" ]]; then
+        echo "lock-fd current"; else echo "lock-fd stale"; fi >>"${STUB_LOG:-/dev/null}"
 fi
 [[ "$1" == -q ]] && shift
 [[ -f "$1/.fake-mount" ]]
@@ -136,6 +140,8 @@ EOF
 echo "findmnt $*" >>"${STUB_LOG:-/dev/null}"
 if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
     if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+    if [[ "$(stat -L -c %d:%i "/proc/${PPID}/fd/9" 2>/dev/null)" == "$(stat -c %d:%i "${FAKE_LOCK_PROBE}")" ]]; then
+        echo "lock-fd current"; else echo "lock-fd stale"; fi >>"${STUB_LOG:-/dev/null}"
 fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -158,6 +164,8 @@ EOF
 echo "docker $*" >>"${STUB_LOG:-/dev/null}"
 if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
     if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+    if [[ "$(stat -L -c %d:%i "/proc/${PPID}/fd/9" 2>/dev/null)" == "$(stat -c %d:%i "${FAKE_LOCK_PROBE}")" ]]; then
+        echo "lock-fd current"; else echo "lock-fd stale"; fi >>"${STUB_LOG:-/dev/null}"
 fi
 case " $* " in
     " info "*) echo "27.0.0 [name=seccomp]" ;;
