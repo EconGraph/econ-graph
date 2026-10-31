@@ -7,6 +7,7 @@
 pub(crate) mod audit;
 pub mod catalogs;
 pub mod context;
+pub mod crawler_admin;
 pub mod cross_section;
 pub mod dataloaders;
 pub mod datasets;
