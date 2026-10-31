@@ -208,3 +208,50 @@ fn canonical_key_bytes_are_stable_for_v1() {
         r#"research:v1:{"kind":"company","cik":"0000320193"}"#
     );
 }
+
+#[test]
+fn filed_fact_canonical_key_bytes_are_stable_for_v1() {
+    let AnnotationAnchor::V1 { target, .. } = anchor();
+    assert_eq!(
+        target.canonical_key().unwrap(),
+        r#"research:v1:{"kind":"filed_fact","subject":{"cik":"0000320193","concept_namespace":"http://fasb.org/us-gaap/2024","concept":"RevenueFromContractWithCustomerExcludingAssessedTax","period":{"kind":"duration","start":"2023-10-01","end":"2024-09-28"},"unit":"{http://www.xbrl.org/2003/iso4217}USD","dimensions":{"{http://fasb.org/us-gaap/2024}StatementBusinessSegmentsAxis":"{https://example.invalid/taxonomy}HardwareMember"}},"filing":{"cik":"0000320193","accession":"0000320193-24-000123"}}"#
+    );
+}
+
+#[test]
+fn observation_values_require_exact_decimal_strings() {
+    let exact = "123456789012345678901234567890.12345678901234567890";
+    let string_json = FIXTURE.replace(
+        "\"observation_value\": null",
+        &format!("\"observation_value\": \"{exact}\""),
+    );
+    let parsed = AnnotationAnchor::from_json(&string_json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&parsed).unwrap()["observation_value"],
+        exact
+    );
+    assert_eq!(
+        AnnotationAnchor::from_json(&serde_json::to_string(&parsed).unwrap()).unwrap(),
+        parsed
+    );
+    let AnnotationAnchor::V1 {
+        observation_value, ..
+    } = parsed;
+    assert_eq!(
+        observation_value.unwrap(),
+        exact.parse::<bigdecimal::BigDecimal>().unwrap()
+    );
+    let numeric_json = FIXTURE.replace(
+        "\"observation_value\": null",
+        &format!("\"observation_value\": {exact}"),
+    );
+    assert!(AnnotationAnchor::from_json(&numeric_json).is_err());
+    assert!(serde_json::from_str::<AnnotationAnchor>(&numeric_json).is_err());
+    assert!(AnnotationAnchor::from_json(FIXTURE).is_ok());
+    let mut omitted: Value = serde_json::from_str(FIXTURE).unwrap();
+    omitted.as_object_mut().unwrap().remove("observation_value");
+    let AnnotationAnchor::V1 {
+        observation_value, ..
+    } = AnnotationAnchor::from_json(&omitted.to_string()).unwrap();
+    assert!(observation_value.is_none());
+}
