@@ -173,6 +173,8 @@ impl User {
 pub struct ChartAnnotation {
     pub id: Uuid,
     pub user_id: Uuid,
+    /// Stored `economic_series.id` as a UUID string, never a provider external ID.
+    /// The collaboration writer accepts `Uuid`; VARCHAR is retained for schema compatibility.
     pub series_id: Option<String>,
     pub chart_id: Option<Uuid>,
     pub annotation_date: NaiveDate,
@@ -193,6 +195,8 @@ pub struct ChartAnnotation {
 #[diesel(table_name = chart_annotations)]
 pub struct NewChartAnnotation {
     pub user_id: Uuid,
+    /// Stored `economic_series.id` as a UUID string, never a provider external ID.
+    /// The collaboration writer accepts `Uuid`; VARCHAR is retained for schema compatibility.
     pub series_id: Option<String>,
     pub chart_id: Option<Uuid>,
     pub annotation_date: NaiveDate,

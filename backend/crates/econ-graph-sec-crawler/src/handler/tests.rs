@@ -273,8 +273,10 @@ async fn prestore(pool: &DatabasePool, accessions: &[&str]) {
             pool,
             &format!(
                 "INSERT INTO financial_statements (company_id, filing_type, form_type, \
-                 accession_number, filing_date, period_end_date, fiscal_year, document_url) \
-                 SELECT id, '10-K', '10-K', '{acc}', '2024-01-01', '2023-12-31', 2023, 'test' \
+                 accession_number, filing_date, period_end_date, fiscal_year, document_url, \
+                 xbrl_file_content, xbrl_file_hash, xbrl_file_compressed) \
+                 SELECT id, '10-K', '10-K', '{acc}', '2024-01-01', '2023-12-31', 2023, 'test', \
+                 convert_to('test','UTF8'), '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', false \
                  FROM companies WHERE cik = '0009999901'"
             ),
         )
@@ -316,6 +318,39 @@ async fn rerun_skips_stored_filings_without_downloading() {
     assert_eq!(stored_filings(&db.pool).await.len(), 2);
     // Upserted by CIK: one row, refreshed from the submissions document.
     assert_eq!(company_names(&db.pool).await, vec!["Testco Holdings Inc."]);
+}
+
+#[tokio::test]
+async fn immutable_identity_conflict_does_not_block_later_filings() {
+    for kind in ["metadata", "content"] {
+        let Some(db) = db().await else { return };
+        prestore(&db.pool, &["0000950170-24-000001"]).await;
+        if kind == "metadata" {
+            exec(&db.pool, "UPDATE financial_statements SET xbrl_file_content=NULL, xbrl_file_hash=NULL WHERE accession_number='0000950170-24-000001'").await;
+        } else {
+            exec(&db.pool, "UPDATE financial_statements SET filing_date='2024-02-15', fiscal_quarter=4, xbrl_file_content=NULL WHERE accession_number='0000950170-24-000001'").await;
+        }
+        let mock = MockSource::start().await;
+        mount_company(&mock, 1).await;
+        let crawler = SecEdgarCrawler::with_fetcher(
+            db.pool.clone(),
+            SecFilingHandler::default_config(),
+            fast_ctx(db.pool.clone()).http,
+            SecEndpoints::new(mock.base_url(), mock.base_url()),
+        );
+        let result = crawler.crawl_company(CIK).await.unwrap();
+        assert!(
+            result.retryable_error.is_none(),
+            "{kind} conflicts must not retry the company"
+        );
+        assert_eq!(result.result.filings_failed, 1);
+        assert_eq!(
+            result.result.filings_downloaded, 1,
+            "the later 10-Q must still download"
+        );
+        assert!(result.result.errors[0].contains(&format!("filing {kind} changed")));
+        assert_eq!(stored_filings(&db.pool).await.len(), 2);
+    }
 }
 
 #[tokio::test]

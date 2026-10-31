@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
 use diesel::query_dsl::QueryDsl;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -16,6 +16,14 @@ use crate::models::{StoredXbrlDocument, XbrlStorageStats};
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::enums::{CompressionType, ProcessingStatus};
 use econ_graph_core::models::{Company, FinancialStatement};
+
+/// An immutable accession cannot be silently reused for conflicting metadata or bytes.
+#[derive(Debug, thiserror::Error)]
+#[error("filing {kind} changed for accession {accession_number}; preserve the original filing identity and ingest a distinct amendment instead")]
+pub struct FilingIdentityConflict {
+    pub accession_number: String,
+    pub kind: &'static str,
+}
 
 /// Configuration for XBRL file storage
 #[derive(Debug, Clone)]
@@ -181,23 +189,82 @@ impl XbrlStorage {
             updated_at: Utc::now(),
         };
 
-        diesel::insert_into(financial_statements)
-            .values(&new_statement)
-            .execute(conn)
-            .await
-            .context("Failed to insert financial statement")?;
+        // Serialize completion of an existing metadata-only row with competing crawls.
+        // The accession and original row identity remain immutable.
+        let stored = conn
+            .transaction::<FinancialStatement, anyhow::Error, _>(async move |conn| {
+                diesel::insert_into(financial_statements)
+                    .values(&new_statement)
+                    .on_conflict((company_id, accession_number))
+                    .do_nothing()
+                    .execute(conn)
+                    .await
+                    .context("Failed to insert financial statement")?;
+                let stored = financial_statements
+                    .filter(company_id.eq(comp_id))
+                    .filter(accession_number.eq(acc_num))
+                    .for_update()
+                    .select(FinancialStatement::as_select())
+                    .first::<FinancialStatement>(conn)
+                    .await
+                    .context("Failed to read stored filing identity")?;
+                anyhow::ensure!(
+                    stored.filing_date == filing_dt.date_naive()
+                        && stored.period_end_date == period_end_dt.date_naive()
+                        && stored.fiscal_year == fiscal_yr
+                        && stored.fiscal_quarter == fiscal_qtr
+                        && stored.form_type == form_typ.unwrap_or("10-K"),
+                    FilingIdentityConflict {
+                        accession_number: acc_num.to_owned(),
+                        kind: "metadata"
+                    }
+                );
+                if stored.xbrl_file_hash.is_none()
+                    && stored.xbrl_file_content.is_none()
+                    && stored.xbrl_file_oid.is_none()
+                {
+                    return diesel::update(financial_statements.find(stored.id))
+                        .set((
+                            xbrl_file_content.eq(new_statement.xbrl_file_content),
+                            xbrl_file_size_bytes.eq(new_statement.xbrl_file_size_bytes),
+                            xbrl_file_compressed.eq(new_statement.xbrl_file_compressed),
+                            xbrl_file_compression_type.eq(new_statement.xbrl_file_compression_type),
+                            xbrl_file_hash.eq(new_statement.xbrl_file_hash),
+                            document_url.eq(new_statement.document_url),
+                            xbrl_processing_status.eq(ProcessingStatus::Pending),
+                            xbrl_processing_error.eq(None::<String>),
+                            xbrl_processing_started_at.eq(None::<DateTime<Utc>>),
+                            xbrl_processing_completed_at.eq(None::<DateTime<Utc>>),
+                            updated_at.eq(Utc::now()),
+                        ))
+                        .returning(FinancialStatement::as_returning())
+                        .get_result(conn)
+                        .await
+                        .context("Failed to complete metadata-only filing");
+                }
+                anyhow::ensure!(
+                    stored.xbrl_file_hash.as_deref() == Some(file_hash)
+                        && (stored.xbrl_file_content.is_some() || stored.xbrl_file_oid.is_some()),
+                    FilingIdentityConflict {
+                        accession_number: acc_num.to_owned(),
+                        kind: "content"
+                    }
+                );
+                Ok(stored)
+            })
+            .await?;
 
         Ok(StoredXbrlDocument {
-            id: new_statement.id,
+            id: stored.id,
             accession_number: acc_num.to_string(),
-            company_id: comp_id,
+            company_id: stored.company_id,
             filing_date: filing_dt,
             period_end_date: period_end_dt,
-            fiscal_year: fiscal_yr,
-            fiscal_quarter: fiscal_qtr,
-            file_size: original_size,
-            compressed_size: content.len(),
-            compression_type: match compression_type {
+            fiscal_year: stored.fiscal_year,
+            fiscal_quarter: stored.fiscal_quarter,
+            file_size: stored.xbrl_file_size_bytes.unwrap_or(0) as usize,
+            compressed_size: stored.xbrl_file_content.as_ref().map_or(0, Vec::len),
+            compression_type: match stored.xbrl_file_compression_type {
                 CompressionType::Zstd => "zstd".to_string(),
                 CompressionType::Lz4 => "lz4".to_string(),
                 CompressionType::Gzip => "gzip".to_string(),
@@ -205,7 +272,7 @@ impl XbrlStorage {
             },
             file_hash: file_hash.to_string(),
             storage_method: "bytea".to_string(),
-            created_at: new_statement.created_at,
+            created_at: stored.created_at,
         })
     }
 
@@ -307,7 +374,6 @@ impl XbrlStorage {
         download_url: &str,
         statement_id: &Uuid,
     ) -> Result<()> {
-        use diesel_async::AsyncConnection;
         use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
         use econ_graph_core::models::XbrlTaxonomySchema;
         use sha2::{Digest, Sha256};
@@ -364,14 +430,50 @@ impl XbrlStorage {
         // DTS reference cannot be stored.
         let mut conn = self.pool.get().await?;
         conn.transaction::<(), anyhow::Error, _>(async move |conn| {
+            use econ_graph_core::schema::{
+                financial_statements, xbrl_instance_dts_references as refs,
+            };
+            // Every DTS writer locks the same existing filing before checking the reference.
+            // This also prevents orphan taxonomy rows from concurrent duplicate downloads.
+            financial_statements::table
+                .find(statement_id)
+                .for_update()
+                .select(financial_statements::id)
+                .first::<Uuid>(conn)
+                .await
+                .context("DTS target filing not found")?;
+            let exists = refs::table
+                .filter(refs::statement_id.eq(statement_id))
+                .filter(refs::reference_type.eq(&reference.reference_type))
+                .filter(refs::reference_href.eq(&reference.reference_href))
+                .filter(
+                    refs::reference_role.is_not_distinct_from(reference.reference_role.as_deref()),
+                )
+                .filter(
+                    refs::reference_arcrole
+                        .is_not_distinct_from(reference.reference_arcrole.as_deref()),
+                )
+                .select((refs::id, refs::is_resolved))
+                .first::<(Uuid, bool)>(conn)
+                .await
+                .optional()?;
+            if matches!(exists, Some((_, true))) {
+                return Ok(());
+            }
             diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
                 .values(&taxonomy_schema)
                 .execute(conn)
                 .await
                 .context("Failed to insert taxonomy schema")?;
 
-            self.store_dts_reference(conn, reference, statement_id, &taxonomy_schema.id)
-                .await
+            self.store_dts_reference(
+                conn,
+                reference,
+                statement_id,
+                &taxonomy_schema.id,
+                exists.map(|(id, _)| id),
+            )
+            .await
         })
         .await
     }
@@ -383,6 +485,7 @@ impl XbrlStorage {
         reference: &crate::models::DtsReference,
         statement_id: &Uuid,
         resolved_schema_id: &Uuid,
+        existing_reference_id: Option<Uuid>,
     ) -> Result<()> {
         use econ_graph_core::schema::xbrl_instance_dts_references;
 
@@ -398,11 +501,24 @@ impl XbrlStorage {
             xbrl_instance_dts_references::created_at.eq(Utc::now()),
         );
 
-        diesel::insert_into(xbrl_instance_dts_references::table)
-            .values(dts_reference)
-            .execute(conn)
-            .await
-            .context("Failed to insert DTS reference")?;
+        if let Some(id) = existing_reference_id {
+            diesel::update(xbrl_instance_dts_references::table.find(id))
+                .set((
+                    xbrl_instance_dts_references::resolved_schema_id.eq(resolved_schema_id),
+                    xbrl_instance_dts_references::is_resolved.eq(true),
+                    xbrl_instance_dts_references::resolution_error.eq(None::<String>),
+                    xbrl_instance_dts_references::resolved_at.eq(Utc::now()),
+                ))
+                .execute(conn)
+                .await
+                .context("Failed to resolve existing DTS reference")?;
+        } else {
+            diesel::insert_into(xbrl_instance_dts_references::table)
+                .values(dts_reference)
+                .execute(conn)
+                .await
+                .context("Failed to insert DTS reference")?;
+        }
 
         Ok(())
     }
@@ -608,7 +724,7 @@ mod tests {
             let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
             let reference = reference();
 
-            // No statement exists for this ID: only the second insert should fail.
+            // A missing parent is rejected before any taxonomy writes.
             let error = storage
                 .store_taxonomy_component(
                     &reference,
@@ -618,15 +734,59 @@ mod tests {
                 )
                 .await
                 .unwrap_err();
+            assert!(error.to_string().contains("DTS target filing not found"));
+            assert!(matches!(
+                error.downcast_ref::<diesel::result::Error>(),
+                Some(diesel::result::Error::NotFound)
+            ));
+
+            let company = Uuid::new_v4();
+            let mut conn = pool.get().await.unwrap();
+            diesel::insert_into(companies::table)
+                .values((
+                    companies::id.eq(company),
+                    companies::cik.eq("0009999901"),
+                    companies::name.eq("Rollback fixture"),
+                ))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+            drop(conn);
+            let now = Utc::now();
+            let filing = storage
+                .store_xbrl_file(
+                    "0009999901-24-000001",
+                    b"original",
+                    company,
+                    now,
+                    now,
+                    2024,
+                    None,
+                    Some("10-K"),
+                    None,
+                )
+                .await
+                .unwrap();
+            // The parent and taxonomy insert succeed; an overlong reference type fails
+            // the subsequent DTS insert and must roll back the taxonomy row as well.
+            let invalid_reference = crate::models::DtsReference {
+                reference_type: "x".repeat(21),
+                ..reference.clone()
+            };
+            let error = storage
+                .store_taxonomy_component(
+                    &invalid_reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &filing.id,
+                )
+                .await
+                .unwrap_err();
             assert!(error.to_string().contains("Failed to insert DTS reference"));
             assert!(matches!(
                 error.downcast_ref::<diesel::result::Error>(),
-                Some(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _
-                ))
+                Some(diesel::result::Error::DatabaseError(_, _))
             ));
-
             let mut conn = pool.get().await.unwrap();
             let schemas: i64 = xbrl_taxonomy_schemas::table
                 .count()
