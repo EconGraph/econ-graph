@@ -42,6 +42,31 @@ pub struct BeaRule {
     #[serde(default)]
     pub title_contains: Option<String>,
     pub frequencies: Vec<String>,
+    /// How many current tables this rule is meant to match at most. Discovery doesn't enforce
+    /// it (`max_tables` bounds the whole selection); `crawler check-selection` reports a rule
+    /// that matches more as over-broad. Like the other limits, it isn't part of the fingerprint.
+    #[serde(default, skip_serializing)]
+    pub max_matches: Option<usize>,
+}
+
+impl BeaRule {
+    fn dataset(&self) -> BeaDataset {
+        if self.dataset == "NIPA" {
+            BeaDataset::Nipa
+        } else {
+            BeaDataset::Regional
+        }
+    }
+
+    /// `NIPA T10101* frequencies=A,Q`, for reports.
+    pub fn describe(&self) -> String {
+        let mut out = format!("{} {}*", self.dataset, self.prefix);
+        if let Some(title) = &self.title_contains {
+            out.push_str(&format!(" title~{title:?}"));
+        }
+        out.push_str(&format!(" frequencies={}", self.frequencies.join(",")));
+        out
+    }
 }
 
 impl BeaSelection {
@@ -66,6 +91,7 @@ impl BeaSelection {
                 || r.title_contains
                     .as_ref()
                     .is_some_and(|s| s.trim().is_empty())
+                || r.max_matches == Some(0)
             {
                 return Err(CrawlError::Permanent(format!(
                     "BEA invalid selection rule for {} {}",
@@ -101,11 +127,7 @@ impl BeaSelection {
         let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
         let labels = self.rule_labels();
         for (index, rule) in self.rule.iter().enumerate() {
-            let dataset = if rule.dataset == "NIPA" {
-                BeaDataset::Nipa
-            } else {
-                BeaDataset::Regional
-            };
+            let dataset = rule.dataset();
             let catalog = catalogs.get(&dataset).ok_or_else(|| {
                 CrawlError::Transient(format!(
                     "BEA {}: current table catalog unavailable; title not yet known",
@@ -138,9 +160,7 @@ impl BeaSelection {
         // An empty result may mean a truncated catalog or a broken rule. Never certify it as a
         // complete disappearance; a later healthy refresh must establish what happened.
         if selected.is_empty() {
-            return Err(CrawlError::Transient(
-                "BEA selection matched no current tables".into(),
-            ));
+            return Err(CrawlError::Transient(EMPTY_SELECTION.into()));
         }
         Ok(selected
             .into_iter()
@@ -154,6 +174,30 @@ impl BeaSelection {
                 frequencies,
             })
             .collect())
+    }
+
+    /// The current tables each rule matches (exclusions applied), sorted, in rule order. A rule
+    /// whose dataset's catalog is missing matches nothing. Unlike [`select`](Self::select) it
+    /// never stops at `max_tables`, so a report can show how far a rule overshoots.
+    pub fn rule_matches(
+        &self,
+        catalogs: &HashMap<BeaDataset, HashMap<String, String>>,
+    ) -> Vec<Vec<String>> {
+        let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
+        self.rule
+            .iter()
+            .map(|rule| {
+                let mut names: Vec<String> = catalogs
+                    .get(&rule.dataset())
+                    .into_iter()
+                    .flatten()
+                    .filter(|(name, title)| rule.matches_table(name, title, &excluded))
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                names.sort_unstable();
+                names
+            })
+            .collect()
     }
 
     /// Whether an already-stored canonical series belongs to these rules. Retained titles
@@ -228,13 +272,26 @@ pub fn publish_configured_rules(source: &str, labels: &[String]) {
     }
 }
 
+const VOLUME_GUARD: &str = "BEA catalog volume guard";
+const EMPTY_SELECTION: &str = "BEA selection matched no current tables";
+
+/// Whether `error` is [`BeaSelection::select`] finding no current table for any rule.
+pub fn is_empty_selection(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Transient(message) if message == EMPTY_SELECTION)
+}
+
+/// Whether `error` is the volume guard stopping a selection that grew past a limit.
+pub fn is_volume_guard(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.starts_with(VOLUME_GUARD))
+}
+
 fn volume_error(kind: &str, count: usize, max: usize) -> CrawlError {
     econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
         .guard_rejections_total
         .with_label_values(&["BEA", "volume"])
         .inc();
     CrawlError::Permanent(format!(
-        "BEA catalog volume guard: selected {count} {kind}, limit {max}; no series enqueued"
+        "{VOLUME_GUARD}: selected {count} {kind}, limit {max}; no series enqueued"
     ))
 }
 

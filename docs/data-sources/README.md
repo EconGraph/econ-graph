@@ -94,6 +94,62 @@ are also not stored as observation attributes. WDI declares attributes in its da
 contract, but that declaration does not populate them. FRED has no per-observation flags;
 its `"."` missing-value marker becomes `NULL`.
 
+## Checking selections against the live catalogs
+
+`crawler check-selection` ([crawler guide](../technical/CRAWLER_DEPLOYMENT_GUIDE.md#check-curated-lists-and-selection-rules),
+[code](../../backend/crates/econ-graph-crawler/src/check_selection.rs)) downloads the catalog
+each adapter selects from and applies the current curated list or selection rules, read-only
+and without a database. `scripts/deploy/check-selection.sh --namespace NS` runs it in the
+cluster with the crawler's API keys.
+
+| Source | Catalog checked | Selection checked |
+|---|---|---|
+| FRED | Release and category series pages, plus `/series` for each include override | `catalog_selection/fred.toml` |
+| BEA | `GetParameterValues(TableName)` for NIPA and Regional, then each selected table (NIPA `GetData`, Regional line codes and areas) | `catalog_selection/bea.toml` |
+| BLS | The survey series files (`cu.series`, `la.series`, ... under download.bls.gov) | `bls_series.csv` |
+| World Bank WDI | Each indicator's `/indicator/{id}` | `wdi_indicators.csv` |
+| Census BDS | `variables.json` and `geography.json`, and the state file | The adapter's economic-variable keyword rules |
+| FHFA HPI | The HPI master CSV (its required columns and in-scope rows) | The adapter's fixed scope |
+
+Problems, each of which makes the command exit nonzero:
+
+- **missing**: a curated entry the source no longer lists (a FRED include override FRED reports
+  as nonexistent, a BLS id absent from its survey's series file, a World Bank indicator the API
+  rejects), or a rule that matches nothing in the current catalog;
+- **discontinued**: a FRED include override titled `(DISCONTINUED)`, a BLS series whose latest
+  period is too old, a World Bank indicator whose source is an archive, or a BEA table that BEA
+  lists but serves no rows or lines for (the BLS and World Bank rules are heuristics, below);
+- **restricted**: a FRED include override whose notes carry a copyright restriction;
+- **over-broad**: a rule that matches more catalog entries than its optional `max_matches`;
+- **over-cap**: a selection past `max_series`, `max_tables` or `max_catalog_series`, which would
+  stop discovery;
+- **over-quota**: a refresh needing more requests than the source's daily quota (BLS: 500 a day
+  with a key, 25 without);
+- **unfetchable**: a World Bank indicator listed under a source other than WDI whose data request
+  fails. The adapter's `/country/all/indicator/{id}` names no source, and the API answers it only
+  for WDI indicators (message 175, "not found", for one such as `DT.AMT.MLTC.GG.CD` in
+  International Debt Statistics). The check makes that request, for one row, for each indicator
+  not listed under WDI;
+- **rejected**: a selected BEA table whose request BEA refuses as invalid ("rejected by BEA").
+
+BLS and World Bank publish no discontinued flag, so the check infers one:
+
+- **BLS**: the series file's `end_year`, the year of the latest published period, is before
+  last year. Annual and semi-annual series, which BLS publishes with a lag, get one more year.
+- **World Bank**: `/indicator/{id}` names an archive as the indicator's source (a source whose
+  name contains "Archive", such as 57, "WDI Database Archives"). An indicator listed under
+  another live source is unfetchable (above) unless its data request works, which is a notice.
+
+Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired include
+probes (`expected_missing`), are reported as notices: discovery keeps them on purpose. Each
+source also reports the selected series count against its limits, how many entries each rule
+matched, and the requests one refresh of every selected series takes at its policy rate.
+
+`max_matches` is optional on each rule in `catalog_selection/fred.toml` (`[[rules]]`) and
+`catalog_selection/bea.toml` (`[[rule]]`). Discovery does not enforce it and it is not part of
+the selection fingerprint; it states how many entries the rule is meant to match, so a rule that
+starts matching more is reported.
+
 ## Attribution
 
 The citation and notice each source's terms require, and where they appear, are in
