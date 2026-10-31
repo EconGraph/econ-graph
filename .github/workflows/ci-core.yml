@@ -1080,7 +1080,7 @@ jobs:
         TRAIN4_PG_RESTORE: ${{ github.workspace }}/scripts/train4/pg-restore
         TRAIN4_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
       run: |
-        cargo test --locked -p econ-graph-timeseries --test iceberg_contract -- --include-ignored --test-threads=1
+        cargo test --locked -p econ-graph-timeseries --test iceberg_contract --test smoke_safety -- --include-ignored --test-threads=1
         cargo build --locked -p econ-graph-timeseries --bin timeseries-recovery
         python3 ../scripts/train4/test_recovery.py
       working-directory: backend
