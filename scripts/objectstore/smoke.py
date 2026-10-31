@@ -128,7 +128,7 @@ class Store:
         env = {}
         if self.kind == "versity":
             env = {"ROOT_ACCESS_KEY": self.key, "ROOT_SECRET_KEY": self.secret}
-            extra = ["--port", ":7070", "posix", "/data"]
+            extra = ["--port", ":7070", "posix", "--fsync", "/data"]
         else:
             config = self.scratch / "garage.toml"
             config.write_text(garage_config())
@@ -517,6 +517,8 @@ def main():
         scratch = args.scratch_parent.resolve() / f"econgraph-objectstore-{owner}-{kind}"
         store = Store(kind, owner, scratch, args.btrfs_scratch)
         run = {"store": kind, "image": IMAGES[kind], "owner": owner, "gates": {}}
+        if kind == "versity":
+            run["posix_fsync"] = True
         runs.append(run)
         crawler = None
         try:

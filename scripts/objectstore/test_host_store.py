@@ -31,7 +31,7 @@ def synthetic_report():
         "btrfs_restore": {"readonly": True, "restored": True, "table_reread_sha256": checksum},
     }
     return {"format_version": 1, "status": "passed", "runs": [{"store": "versity", "image": host.IMAGE,
-            "status": "passed", "gates": {key: {"status": "passed", "evidence": value} for key, value in evidence.items()}}]}
+            "status": "passed", "posix_fsync": True, "gates": {key: {"status": "passed", "evidence": value} for key, value in evidence.items()}}]}
 
 
 class HostStoreGuards(unittest.TestCase):
@@ -111,6 +111,16 @@ class HostStoreGuards(unittest.TestCase):
             path.write_text(json.dumps(report))
             self.assertTrue(host.acceptance(path, "systemd"))
 
+    def test_acceptance_requires_fsync_enabled_rehearsal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "synthetic.json"
+            for setting in (None, False):
+                report = synthetic_report()
+                report["runs"][0]["posix_fsync"] = setting
+                path.write_text(json.dumps(report))
+                with self.subTest(setting=setting), self.assertRaisesRegex(ValueError, "No complete accepted"):
+                    host.acceptance(path, "docker")
+
     def test_garage_pass_never_automatically_reconfigures_host(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "synthetic.json"
@@ -127,6 +137,7 @@ class HostStoreGuards(unittest.TestCase):
         self.assertEqual(compose["image"], host.IMAGE)
         self.assertEqual(compose["ports"], ["192.168.250.1:7070:7070"])
         self.assertNotIn("ROOT_SECRET_KEY", " ".join(compose["command"]))
+        self.assertEqual(compose["command"], ["--port", ":7070", "posix", "--fsync", "/data"])
         self.assertIn("subvol=/@econgraph-objectstore", fstab)
         args.form = "systemd"
         _, files, _ = host.templates(args)
@@ -135,6 +146,7 @@ class HostStoreGuards(unittest.TestCase):
         self.assertIn("User=econgraph-objectstore", unit)
         self.assertNotIn("--secret", unit)
         self.assertNotIn("--nometa", unit)
+        self.assertIn(f"posix --fsync {host.DATA}", unit)
 
     def test_candidate_render_is_idempotent_and_refuses_different_existing_file(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -168,7 +180,7 @@ class HostStoreGuards(unittest.TestCase):
         args = host.parser().parse_args(BASE)
         identity, _, _ = host.templates(args)
         value = {"Config": {"Labels": {"org.econgraph.objectstore-owner": identity["owner"]}, "Image": host.IMAGE,
-                 "User": f"{args.uid}:{args.gid}", "Cmd": ["--port", ":7070", "posix", "/data"],
+                 "User": f"{args.uid}:{args.gid}", "Cmd": ["--port", ":7070", "posix", "--fsync", "/data"],
                  "Entrypoint": ["/usr/local/bin/docker-entrypoint.sh"],
                  "Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},
                  "Mounts": [{"Type": "bind", "Destination": "/data", "Source": str(host.DATA), "RW": True}],
@@ -181,6 +193,9 @@ class HostStoreGuards(unittest.TestCase):
                  "PortBindings": {"7070/tcp": [{"HostIp": args.bind_address, "HostPort": "7070"}]}}}
         self.assertTrue(host.container_matches(value, args, identity))
         pristine = json.loads(json.dumps(value))
+        value["Config"]["Cmd"] = ["--port", ":7070", "posix", "/data"]
+        self.assertFalse(host.container_matches(value, args, identity))
+        value = json.loads(json.dumps(pristine))
         for field, changed in (("Mounts", value["Mounts"] + [{"Type": "bind", "Destination": "/primary", "Source": "/srv/primary", "RW": True}]),):
             value[field] = changed
             self.assertFalse(host.container_matches(value, args, identity))
@@ -196,7 +211,7 @@ class HostStoreGuards(unittest.TestCase):
         value = json.loads(json.dumps(pristine))
         value["Config"]["Cmd"] = ["--port", ":7070", "posix", "--nometa", "/data"]
         self.assertFalse(host.container_matches(value, args, identity))
-        value["Config"]["Cmd"] = ["--port", ":7070", "posix", "/data"]
+        value["Config"]["Cmd"] = ["--port", ":7070", "posix", "--fsync", "/data"]
         value["HostConfig"]["PortBindings"]["7070/tcp"][0]["HostIp"] = "0.0.0.0"
         self.assertFalse(host.container_matches(value, args, identity))
 

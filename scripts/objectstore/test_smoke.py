@@ -15,6 +15,15 @@ spec.loader.exec_module(smoke)
 
 
 class SmokeSafetyTests(unittest.TestCase):
+    def test_disposable_versity_flushes_acknowledged_writes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = smoke.Store("versity", "owner", Path(temp) / "store")
+            with patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=8 * 1024**3)), \
+                    patch.object(smoke, "docker", side_effect=["created", "127.0.0.1:32768"]) as docker, \
+                    patch.object(smoke, "owned_action"), patch.object(store, "client", return_value=MagicMock()):
+                store.start()
+            self.assertEqual(docker.call_args_list[0].args[-5:], ("--port", ":7070", "posix", "--fsync", "/data"))
+
     def test_default_is_dry_run_without_docker_or_sdk(self):
         with patch("sys.argv", ["smoke.py"]), patch.object(smoke, "docker", side_effect=AssertionError), contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(smoke.main(), 0)

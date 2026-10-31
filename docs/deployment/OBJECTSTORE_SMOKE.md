@@ -29,6 +29,11 @@ accommodates multipart assembly when `/tmp` is tmpfs. Client buffers are 16 MiB 
 part and one MiB per read chunk; listing concurrency is eight. External hooks have a timeout
 and must impose their own resource bounds.
 
+The disposable Versity command uses POSIX `--fsync`, matching both persistent service forms.
+Its report records `posix_fsync: true`; reports made without that setting cannot authorize host
+installation. Flushes add write latency and must be included in capacity measurements. The
+interrupted PUT check establishes process-crash behavior, not survival of a physical power loss.
+
 Each run uses a new actor-owned scratch directory. Kill/restart/removal first verifies that
 container's exact ownership label; cleanup never searches for or deletes unrelated Docker
 resources. Disposable generated objects are removed when the container is removed. If the
@@ -163,6 +168,8 @@ capacity gates. This smoke report alone does not authorize replacing production 
 - [Versity Docker configuration](https://github.com/versity/versitygw/wiki/Docker)
 - [Versity POSIX backend and conditional-publish locking](https://github.com/versity/versitygw/wiki/POSIX-Backend)
 - [Versity v1.10.0 release](https://github.com/versity/versitygw/releases/tag/v1.10.0)
+- [Versity POSIX durability flag](https://github.com/versity/versitygw/blob/v1.10.0/cmd/internal/gwcli/posix.go)
+- [Versity object and directory flushes](https://github.com/versity/versitygw/blob/v1.10.0/backend/posix/fsync.go)
 - [Garage quick start and single-node bootstrap](https://garagehq.deuxfleurs.fr/documentation/quick-start/)
 - [Garage configuration, fsync and optional metadata snapshots](https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/)
 

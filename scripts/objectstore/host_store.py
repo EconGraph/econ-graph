@@ -97,7 +97,7 @@ def acceptance(path, form):
     if report.get("format_version") != 1 or report.get("status") != "passed":
         raise ValueError("Host installation is blocked: all seven acceptance gates must pass")
     candidates = [run for run in report.get("runs", []) if run.get("store") == "versity"
-                  and run.get("image") == IMAGE and run.get("status") == "passed"]
+                  and run.get("image") == IMAGE and run.get("posix_fsync") is True and run.get("status") == "passed"]
     for candidate in candidates:
         gates = candidate.get("gates", {})
         if set(gates) != GATES or any(value.get("status") != "passed" or not value.get("evidence") for value in gates.values()):
@@ -134,7 +134,7 @@ def templates(args):
     identity = {"format_version": 1, "form": args.form, "bind_address": args.bind_address,
                 "bridge": args.bridge, "filesystem_uuid": args.filesystem_uuid.lower(),
                 "credential_file": str(args.credential_file), "uid": args.uid, "gid": args.gid,
-                "image": IMAGE, "native_binary_sha256": BINARY_SHA, "data": str(DATA)}
+                "image": IMAGE, "posix_fsync": True, "native_binary_sha256": BINARY_SHA, "data": str(DATA)}
     owner = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     identity["owner"] = owner
     common = f'''[Unit]
@@ -156,7 +156,7 @@ PrivateTmp=true
         unit = common + f'''User={USER}
 Group={USER}
 EnvironmentFile={args.credential_file}
-ExecStart={BINARY} --port {args.bind_address}:7070 posix {DATA}
+ExecStart={BINARY} --port {args.bind_address}:7070 posix --fsync {DATA}
 ReadWritePaths={DATA}
 PrivateDevices=true
 CapabilityBoundingSet=
@@ -176,7 +176,7 @@ WantedBy=multi-user.target
         compose = {"services": {"objectstore": {
             "image": IMAGE, "container_name": "econgraph-objectstore", "restart": "no",
             "user": f"{args.uid}:{args.gid}", "env_file": [str(args.credential_file)],
-            "command": ["--port", ":7070", "posix", "/data"],
+            "command": ["--port", ":7070", "posix", "--fsync", "/data"],
             "ports": [f"{args.bind_address}:7070:7070"],
             "volumes": [{"type": "bind", "source": str(DATA), "target": "/data"}],
             "labels": {"org.econgraph.objectstore-owner": owner}, "cap_drop": ["ALL"],
@@ -292,7 +292,7 @@ def container_matches(value, args, identity, expected_credentials=None):
         and config.get("Entrypoint") == ["/usr/local/bin/docker-entrypoint.sh"]
         and not config.get("Healthcheck")
         and config.get("User") == f"{args.uid}:{args.gid}"
-        and config.get("Cmd") == ["--port", ":7070", "posix", "/data"]
+        and config.get("Cmd") == ["--port", ":7070", "posix", "--fsync", "/data"]
         and len(mounts) == 1 and mounts[0].get("Type") == "bind" and mounts[0].get("Destination") == "/data"
         and mounts[0].get("Source") == str(DATA) and mounts[0].get("RW") is True
         and not host.get("Privileged") and not host.get("CapAdd") and host.get("CapDrop") == ["ALL"]

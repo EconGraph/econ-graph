@@ -39,6 +39,13 @@ with daemon restart propagation and `Restart=on-failure`. Every start/restart th
 the exact object-store UUID/btrfs/subvolume, matching mounted snapshot filesystem and coverage
 marker before starting a container. Dockerd cannot auto-start it ahead of those mount checks.
 
+Both Versity forms use POSIX `--fsync`, which flushes object data, metadata and publication
+directories before acknowledging writes. This adds storage flush latency; capacity and recovery
+acceptance must measure that configuration. The installer requires smoke evidence with
+`posix_fsync: true` and refuses to adopt an existing container without the flag. A process-kill
+test alone does not prove power-loss durability, and it does not replace the separate recovery
+acceptance gates.
+
 The default dedicated UID/GID is 61100. The installer refuses an existing foreign account or an
 occupied numeric ID. Choose an explicit unoccupied `--uid`/`--gid` if necessary. The native unit
 limits memory/CPU/tasks; the container has equivalent limits and bounded logs. Stop preserves
