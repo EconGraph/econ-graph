@@ -148,10 +148,13 @@ jobs:
       run: python3 scripts/tests/test_release_e2e.py
 
     # The runner's guards (the production profile refuses state-changing scenarios) and each
-    # scenario against a stub site, before the stack.
+    # scenario against a stub site, before the stack; deploy-rc-to-qa.sh against stub
+    # docker, kind and kubectl.
     - name: Check the QA scenario runner
       if: matrix.suite == 'qa-scenarios'
-      run: python3 -m unittest discover -s scripts/qa/tests -v
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        python3 -m unittest discover -s scripts/qa/tests -v
 
     - name: Build, seed and run the ${{ matrix.suite }} suite
       env:

@@ -97,10 +97,55 @@ diesel migration generate --migration-dir migrations/data add_something
 ```
 
 Give it a version later than every existing version in both sets. The version must be unique
-(rule 4, which CI checks); sorting after the rest is a separate rule that CI does not check. It
-matters because a new database runs each set's migrations in version order, and because the
-listing in [Squashing at a release](#squashing-at-a-release) assumes unshipped app migrations
-sort after shipped ones. Run `python3 scripts/check_migration_order.py` before pushing.
+(rule 4); CI also requires every addition to sort after the highest version in either set
+on the actual merge target. This matters because a new database runs each set's migrations in
+version order, and because the listing in [Squashing at a release](#squashing-at-a-release) assumes unshipped app migrations
+sort after shipped ones. Fetch the merge target and run this before pushing (from `backend/`):
+
+```sh
+git fetch origin main --tags
+python3 scripts/check_migration_order.py --base-ref origin/main
+```
+
+The local default is `origin/main`. For a stacked PR, pass its actual target branch instead.
+A missing target or unavailable history fails validation; the checker never silently falls back
+to a fork-point. CI checks out full history and final product tags and selects the PR's
+`pull_request.base.sha` or the merge queue's `merge_group.base_sha` from the event. Pushes to
+`main`, `develop` and `release/*` check against their previous tip. Other feature pushes check
+against `origin/main`, so their own unmerged migrations remain editable and renumberable. This
+validates additions against the target tip, including migrations that landed after the feature
+branch diverged.
+
+If another branch lands a later version, rebase onto the target, renumber only your **unmerged**
+migration after the highest version in both sets, and recreate branch test databases that ran
+its old version. Reserved version ranges do not avoid this check. Do not rename a merged version
+to repair a collision. Apply both sets and regenerate the full schema again after rebasing.
+
+The target comparison also rejects changes to any file in, or removal/renaming of, a merged
+migration directory. It allows two narrowly defined policy exceptions: a removed data reference
+seed must have a newer replacement for the same source, and an app release squash must fold a
+complete unshipped suffix of at least two migrations into its last version. Baselines, published
+product versions and data migrations cannot participate in an app squash. A seed cannot be
+edited in place. Squash eligibility does not prove SQL equivalence: the release procedure below
+still requires the complete catalog/seed comparison and upgrade guards.
+
+`train-3` is a development milestone rather than a final `v*` product release. It neither makes
+migrations eligible for release squashing nor authorizes a squash or a new baseline at the cut.
+
+### Parallel schema responsibilities
+
+The storage/platform workstream owns catalog and observation data surfaces; the SEC workstream
+owns structured financial fact surfaces; the workspace workstream owns chart and annotation app
+surfaces. Ownership follows the schema surface, rather than a named person. A shared change is
+a small prerequisite PR to `main` that each dependent branch integrates. No workstream edits a
+merged migration in another branch.
+
+`python3 -m unittest discover -s scripts -p test_check_migration_order.py -v` exercises two real
+scratch Git branches, target-tip conflicts, rebase/renumber repair, protected histories and the
+policy exceptions. Set `MIGRATION_TEST_DATABASE_URL` to a disposable PostgreSQL connection to run
+the additional transaction-scoped fresh-versus-sequential schema rehearsal; CI supplies one.
+These sample migrations supplement the existing full PostgreSQL/Diesel schema validation, which
+continues to apply both real migration sets.
 
 Then regenerate `backend/crates/econ-graph-core/src/schema.rs`, which covers both sets, from a
 database with both sets applied. `test_schema_compatibility` (in
