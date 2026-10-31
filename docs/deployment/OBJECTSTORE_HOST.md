@@ -118,12 +118,12 @@ snapshots the independent objectstore subvolume read-only and sends/receives it 
 backup pool, preserving object files and xattrs. Invalid or symlinked markers are rejected.
 There is no competing backup schedule or automatic deletion of snapshots/backups.
 
-The installer adds an exact managed backup-service drop-in requiring the object-store mount;
-it does not replace the existing backup unit or timer. The new object-store sources participate
-in the existing backup failure/status reporting. A
-missing object-store mount is an explicit failure; it cannot cause the empty underlying mount
-point to be snapshotted as successful coverage. Restore/cutover still requires the separate SQL
-catalog/object consistency and CNPG recovery gates.
+The installer leaves the shared backup unit and timer unchanged. Only the object-store service
+requires the new mount at startup, so an unavailable object-store mount cannot prevent the
+data-plane and app-prod backups from running. The backup script records that source as a failure,
+continues the other snapshots and pool copies, and publishes fresh status. It never snapshots
+the empty underlying object-store mount point as successful coverage. Restore/cutover still
+requires the separate SQL catalog/object consistency and CNPG recovery gates.
 
 ## Local verification
 

@@ -218,6 +218,17 @@ class HostStoreGuards(unittest.TestCase):
                 self.assertIn("Restart=on-failure", unit)
                 self.assertNotIn(" up -d", unit)
 
+    def test_store_mount_requirements_do_not_block_shared_backup_unit(self):
+        for form in ("systemd", "docker"):
+            with self.subTest(form=form):
+                args = host.parser().parse_args(BASE)
+                args.form = form
+                _, files, _ = host.templates(args)
+                self.assertIn(f"RequiresMountsFor={host.DATA} {host.SNAPSHOTS}", files[str(host.UNIT)])
+                # systemd rejects a job before ExecStart if any required mount
+                # fails; optional coverage must leave the shared unit alone.
+                self.assertFalse(any("econgraph-backup-snapshots.service" in path for path in files))
+
     def test_boot_guard_rejects_wrong_filesystem_subvolume_and_coverage(self):
         args = host.parser().parse_args(BASE)
         _, files, _ = host.templates(args)

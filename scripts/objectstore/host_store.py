@@ -201,7 +201,9 @@ WantedBy=multi-user.target
 '''
         files = {str(UNIT): unit, str(compose_path): json.dumps(compose, indent=2) + "\n"}
     fstab = f"UUID={args.filesystem_uuid.lower()} {DATA} btrfs subvol=/@econgraph-objectstore,compress=zstd:3,ssd,noatime,nofail 0 0"
-    files["/etc/systemd/system/econgraph-backup-snapshots.service.d/objectstore.conf"] = f"[Unit]\nRequiresMountsFor={DATA}\n"
+    # Keep optional store mount failures out of the shared backup unit's startup
+    # dependencies. The backup script records this source's failure and continues
+    # the independent data/app snapshots and status publication.
     files[str(COVERAGE)] = "objectstore-v1\n"
     return identity, files, fstab
 

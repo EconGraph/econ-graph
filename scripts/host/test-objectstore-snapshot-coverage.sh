@@ -90,4 +90,38 @@ for invalid in contents directory symlink; do
         exit 1
     fi
 done
-echo 'objectstore opt-in and invalid-marker isolation/status checks passed'
+# A valid opt-in with an unavailable store mount must also leave the existing
+# sources running. The shared systemd backup job must be able to reach this
+# per-source check rather than acquiring a dependency on the optional mount.
+root="$scratch/unavailable-mount"
+export ECONGRAPH_TEST_ROOT="$root"
+srv="$root/srv/econgraph"
+pool="$root/srv/econgraph-backups/snapshots"
+state="$root/var/lib/econgraph"
+mkdir -p "$pool" "$state" "$root/etc/econgraph" "$root/run" "$srv/objectstore"
+for name in data-plane app-prod snapshots; do
+    mkdir -p "$srv/$name"
+    touch "$srv/$name/.fake-mount"
+done
+touch "$root/srv/econgraph-backups/.fake-mount"
+printf 'objectstore-v1\n' >"$root/etc/econgraph/objectstore-snapshots.enabled"
+printf 'run_epoch=1\nfailures=0\n' >"$state/backup-snapshots.status"
+: >"$STUB_LOG"
+status=0
+bash "$repo_root/scripts/host/backup-snapshots.sh" >"$scratch/unavailable.log" 2>&1 || status=$?
+[[ "$status" == 1 ]]
+grep -q "$srv/objectstore is not mounted from the same filesystem" "$scratch/unavailable.log"
+for name in data-plane app-prod; do
+    grep -q "^btrfs subvolume snapshot -r $srv/$name " "$STUB_LOG"
+    find "$pool" -mindepth 1 -maxdepth 1 -type d -name "$name.*" | grep -q .
+done
+if grep -q "^btrfs subvolume snapshot -r $srv/objectstore " "$STUB_LOG"; then
+    echo 'unavailable objectstore mount was snapshotted' >&2
+    exit 1
+fi
+grep -qx 'failures=1' "$state/backup-snapshots.status"
+grep -qx 'pool_status=ok' "$state/backup-snapshots.status"
+awk -F= '$1 == "run_epoch" && $2 > 1 { found=1 } END { exit !found }' \
+    "$state/backup-snapshots.status"
+test -f "$state/backup-sizes.env"
+echo 'objectstore opt-in, invalid-marker and unavailable-mount isolation/status checks passed'
