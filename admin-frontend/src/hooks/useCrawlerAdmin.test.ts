@@ -244,3 +244,102 @@ it("drops a previous operator's mutation result when the session changes", async
   clearAuthToken();
   client.clear();
 });
+
+it("shows failed session cleanup on every crawler page and blocks new operations", async () => {
+  const { createElement } = await import("react");
+  const { render, screen, waitFor, act, fireEvent } =
+    await import("@testing-library/react");
+  const { QueryClientProvider } = await import("@tanstack/react-query");
+  const { queryClient } = await import("../lib/queryClient");
+  const {
+    default: apolloClient,
+    setAuthToken,
+    clearAuthToken,
+    isAuthSessionReady,
+  } = await import("../services/graphqlClient");
+  const { default: Dashboard } = await import("../pages/CrawlerDashboard");
+  const { default: Config } = await import("../pages/CrawlerConfig");
+  const { default: Logs } = await import("../pages/CrawlerLogs");
+  const request = vi.fn().mockImplementation(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          data: {
+            crawlerStatus: { activeWorkers: 23, sources: [] },
+            queueStatistics: {
+              pendingItems: 0,
+              processingItems: 0,
+              completedItems: 0,
+              failedItems: 0,
+              retryingItems: 0,
+            },
+            crawlerSources: [],
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  vi.stubGlobal("fetch", request);
+  setAuthToken("before-failed-session-reset");
+  await waitFor(() => expect(isAuthSessionReady()).toBe(true));
+  const show = (page: typeof Dashboard) =>
+    render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(page),
+      ),
+    );
+  let view = show(Dashboard);
+  await screen.findByText(/Workers holding jobs: 23/);
+  const clear = vi
+    .spyOn(apolloClient, "clearStore")
+    .mockRejectedValueOnce(new Error("internal cache error"));
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await act(async () => {
+      setAuthToken("after-failed-session-reset");
+    });
+    const message =
+      "Unable to reset your sign-in session. Reload this page before continuing.";
+    await screen.findByText(message);
+    expect(
+      screen.queryByText(/Workers holding jobs: 23/),
+    ).not.toBeInTheDocument();
+    expect(isAuthSessionReady()).toBe(false);
+    expect(request).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => {});
+    expect(request).toHaveBeenCalledOnce();
+    view.unmount();
+    for (const page of [Config, Logs]) {
+      view = show(page);
+      expect(screen.getByRole("alert")).toHaveTextContent(message);
+      expect(request).toHaveBeenCalledOnce();
+      view.unmount();
+    }
+    await expect(
+      crawlerRequest(
+        'mutation {triggerCrawl(input:{source:"FRED"}){enqueuedCount}}',
+      ),
+    ).rejects.toThrow(message);
+    expect(request).toHaveBeenCalledOnce();
+    clear.mockRestore();
+    await act(async () => {
+      setAuthToken("recovered-session");
+    });
+    await waitFor(() => expect(isAuthSessionReady()).toBe(true));
+    view = show(Dashboard);
+    await screen.findByText(/Workers holding jobs: 23/);
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+    clear.mockRestore();
+    logged.mockRestore();
+    clearAuthToken();
+    await waitFor(() => expect(isAuthSessionReady()).toBe(true));
+    queryClient.clear();
+  }
+});

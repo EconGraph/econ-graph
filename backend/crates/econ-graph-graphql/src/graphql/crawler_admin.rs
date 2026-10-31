@@ -3,6 +3,7 @@ use crate::imports::*;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use econ_graph_core::schema::{crawl_queue, data_sources};
+use std::sync::LazyLock;
 
 /// One stored queue job, including its most recent execution outcome.
 #[derive(SimpleObject)]
@@ -53,13 +54,16 @@ pub(super) fn adapter(source: &str) -> Result<econ_graph_crawler::SourceId> {
 fn redact_error(message: &str) -> String {
     // No request URL, query string, headers or API keys are needed to identify
     // a queue failure. CrawlError already requires redacted messages; this also covers old rows.
-    let urls = regex::Regex::new(r#"https?://[^\s<>"']+"#).unwrap();
-    let assignments = regex::Regex::new(
+    static URLS: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"https?://[^\s<>"']+"#).unwrap());
+    static ASSIGNMENTS: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
         r#"(?i)(["']?(?:api[_-]?key|(?:access[_-]?)?token|password|secret|authorization)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|Bearer\s+[^\s,;]+|[^\s,;]+)"#,
     )
-    .unwrap();
-    let text = urls.replace_all(message, "[upstream URL redacted]");
-    assignments
+    .unwrap()
+    });
+    let text = URLS.replace_all(message, "[upstream URL redacted]");
+    ASSIGNMENTS
         .replace_all(&text, "$1[redacted]")
         .chars()
         .take(2000)

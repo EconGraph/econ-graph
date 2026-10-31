@@ -5,6 +5,8 @@ import {
   getAuthSessionSnapshot,
   subscribeAuthSession,
   isAuthSessionReady,
+  getAuthSessionError,
+  assertAuthSessionReady,
 } from "../services/graphqlClient";
 import { useSyncExternalStore } from "react";
 
@@ -71,6 +73,7 @@ export async function crawlerRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
+  assertAuthSessionReady();
   return requestGraphQL<T>(query, variables, { retry: false });
 }
 
@@ -79,7 +82,7 @@ export function useCrawlerOverview() {
     subscribeAuthSession,
     getAuthSessionSnapshot,
   );
-  return useQuery({
+  const query = useQuery({
     queryKey: ["crawlerAdmin", session, "overview"],
     enabled: isAuthSessionReady(),
     queryFn: async () => {
@@ -106,6 +109,7 @@ export function useCrawlerOverview() {
     refetchIntervalInBackground: false,
     retry: false,
   });
+  return { ...query, error: getAuthSessionError() ?? query.error };
 }
 export function useCrawlerJobs(
   source: string,
@@ -117,7 +121,7 @@ export function useCrawlerJobs(
     subscribeAuthSession,
     getAuthSessionSnapshot,
   );
-  return useQuery({
+  const query = useQuery({
     queryKey: ["crawlerAdmin", session, "jobs", source, status, offset],
     enabled: isAuthSessionReady(),
     queryFn: async () => {
@@ -135,6 +139,7 @@ export function useCrawlerJobs(
     refetchIntervalInBackground: false,
     retry: false,
   });
+  return { ...query, error: getAuthSessionError() ?? query.error };
 }
 export function useCrawlerActions() {
   const session = useSyncExternalStore(

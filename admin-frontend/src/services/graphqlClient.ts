@@ -211,6 +211,7 @@ export const getAuthToken = (): string | null => {
 // responses for an old generation cannot become data for the newly signed-in principal.
 let sessionGeneration = 0;
 let authSessionReady = true;
+let authSessionError: Error | null = null;
 let sessionToken = localStorage.getItem("auth_token");
 const sessionListeners = new Set<() => void>();
 function rotateAuthSession(): void {
@@ -220,6 +221,7 @@ function rotateAuthSession(): void {
   sessionGeneration += 1;
   const transition = sessionGeneration;
   authSessionReady = false;
+  authSessionError = null;
   queryClient.clear();
   sessionListeners.forEach((listener) => listener());
   // Do not launch a new session's operation while Apollo is still cancelling the old one.
@@ -232,13 +234,27 @@ function rotateAuthSession(): void {
       }
     },
     () => {
+      if (sessionGeneration !== transition) return;
       // Keep new-session queries disabled if old normalized state could not be cleared.
+      authSessionError = new Error(
+        "Unable to reset your sign-in session. Reload this page before continuing.",
+      );
+      sessionGeneration += 1;
+      sessionListeners.forEach((listener) => listener());
       console.error("Unable to clear GraphQL authentication state");
     },
   );
 }
 export const getAuthSessionSnapshot = (): number => sessionGeneration;
 export const isAuthSessionReady = (): boolean => authSessionReady;
+export const getAuthSessionError = (): Error | null => authSessionError;
+export function assertAuthSessionReady(): void {
+  if (!authSessionReady) {
+    throw (
+      authSessionError ?? new Error("Sign-in session is changing. Please wait.")
+    );
+  }
+}
 window.addEventListener("storage", (event: StorageEvent) => {
   if (event.key === "auth_token" || event.key === null) rotateAuthSession();
 });
