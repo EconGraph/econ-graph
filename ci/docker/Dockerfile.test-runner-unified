@@ -22,6 +22,8 @@ WORKDIR /app
 
 # Copy package files first for better layer caching
 COPY frontend/package*.json ./
+# Local API adapter is a locked dependency and must precede npm ci.
+COPY frontend/compat ./compat
 COPY frontend/playwright.config.ts ./
 COPY frontend/playwright.mobile.config.ts ./
 

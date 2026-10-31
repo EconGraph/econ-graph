@@ -98,6 +98,7 @@
     "graphql": "^16.14.2",
     "identity-obj-proxy": "^3.0.0",
     "jsdom": "^30.1.1",
+    "minimatch": "file:compat/minimatch",
     "msw": "^2.15.0",
     "prettier": "3.9.9",
     "resize-observer-polyfill": "1.5.1",
@@ -153,7 +154,8 @@
     "test:e2e:mobile:analysis": "playwright test --config=ci/configs/playwright-mobile-analysis.config.ts",
     "test:e2e:mobile:comprehensive": "playwright test --config=ci/configs/playwright-mobile-comprehensive.config.ts",
     "test:e2e:global-analysis": "playwright test --config=ci/configs/playwright-global-analysis.config.ts",
-    "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts"
+    "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts",
+    "test:dependency-compat": "node --test scripts/test-minimatch-compat.mjs"
   },
   "overrides": {
     "nth-check": "^2.1.1",
@@ -163,10 +165,8 @@
     "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
     "uuid": "^11.1.1",
     "source-map-js": "^1.2.2",
-    "glob@^10": "^14.0.2",
-    "glob@^13": "^14.0.2",
-    "minimatch@^9": "^11.0.1",
-    "minimatch@^10": "^11.0.1"
+    "minimatch": "$minimatch",
+    "glob@>=9 <14.0.2": "14.0.3"
   },
   "resolutions": {
     "@types/d3-dispatch": "3.0.4"
