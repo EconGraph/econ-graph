@@ -34,6 +34,7 @@ jobs:
       DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
       DATA_DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
       APP_DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
+      TRAIN5_INGEST_TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
     services:
       postgres:
         image: postgres:18
