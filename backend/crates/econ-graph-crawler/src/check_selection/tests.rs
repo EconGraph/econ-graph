@@ -763,3 +763,26 @@ async fn a_failed_keyed_request_never_puts_the_key_in_the_report() {
         "the key leaked: {text}"
     );
 }
+
+/// A licence-gated source is skipped without a request, whatever asks for it.
+#[tokio::test]
+async fn a_licence_gated_source_is_skipped_without_a_request() {
+    let mock = MockSource::start().await;
+    let checker = checker(&mock);
+    for gate in crate::licence::LICENCE_GATES {
+        if crate::licence::allows(gate.source) {
+            continue; // unlocked in this build
+        }
+        let check = check_one(&checker, gate.source).await;
+        assert_eq!(check.status, CheckStatus::Skipped, "{check:#?}");
+        assert_eq!(
+            check.skipped.as_deref(),
+            Some(format!("disabled: licence ({})", gate.ticket).as_str())
+        );
+    }
+    assert!(mock.received_requests().await.is_empty());
+    // Every source checked by default is crawlable in a default build.
+    for source in CHECKED_SOURCES {
+        assert!(crate::licence::allows(source), "{source}");
+    }
+}

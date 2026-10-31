@@ -58,7 +58,8 @@
 //! would fail the check instead.
 //!
 //! A source whose policy needs an API key that isn't set is skipped, which is neither a pass
-//! nor a failure ([`SelectionReport::exit_code`]).
+//! nor a failure ([`SelectionReport::exit_code`]). So is a source the
+//! [licence gate](crate::licence) disables: the check makes no request to it.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -522,6 +523,11 @@ impl Checker {
 
     async fn check_source(&self, source: SourceId) -> SourceCheck {
         let mut check = SourceCheck::new(source);
+        // Never contact a source this build is not licensed to crawl (see `crate::licence`).
+        if let Some(gate) = crate::licence::blocking(source) {
+            check.skipped = Some(format!("disabled: licence ({})", gate.ticket));
+            return check.finish(Ok(()));
+        }
         let policy = self.worker_policy(source);
         if policy.needs_api_key && self.ctx.keys.get(source).is_none() {
             let var = crate::cli::api_key_env_var(source).unwrap_or("its API key");
