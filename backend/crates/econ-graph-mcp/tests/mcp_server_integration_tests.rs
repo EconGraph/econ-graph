@@ -140,6 +140,185 @@ async fn mcp_series_data_has_each_date_once_at_its_latest_revision() {
     assert_eq!(values, [101.0, 105.0], "{points:?}");
 }
 
+/// A series longer than the limit gives its latest dates, marked truncated with the total, in
+/// both the data tool and the chart tool, which charts the latest 1000.
+#[tokio::test]
+#[serial]
+async fn mcp_series_data_and_charts_give_the_latest_dates_and_say_when_cut_short() {
+    use diesel_async::RunQueryDsl;
+    let (_database, pool) = create_test_database_pool().await;
+    let mut conn = pool.get().await.unwrap();
+    let id = econ_graph_core::test_utils::insert_series_without_observations(&mut conn).await;
+    diesel::sql_query("UPDATE economic_series SET title = 'MCP long series', start_date = '1900-01-01', end_date = '2000-04-01' WHERE id = $1")
+        .bind::<diesel::sql_types::Uuid, _>(id).execute(&mut conn).await.unwrap();
+    // 1201 monthly dates, 1900-01 to 2000-01, valued by their index.
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date) \
+         SELECT $1, d::date, n, d::date \
+         FROM generate_series(0, 1200) n, LATERAL (SELECT DATE '1900-01-01' + n * INTERVAL '1 month' AS d) m",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(id)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    // No chart API listens on a closed port: the chart tool returns its data structure.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let closed_url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let server = test_server(
+        econ_graph_core::AppPool(pool.clone()),
+        Some(econ_graph_core::DataPool(pool.clone())),
+    )
+    .with_chart_api_url(closed_url);
+    let series = |text: &str| -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(text).unwrap()["data"]["series"].clone()
+    };
+    let dates = |series: &serde_json::Value| -> Vec<String> {
+        series["dataPoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["date"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // The default limit, 100: the latest 100 dates, oldest first.
+    let response = server
+        .get_series_data(json!({"series_id": id.to_string()}))
+        .await
+        .unwrap();
+    let got = series(response["content"][0]["text"].as_str().unwrap());
+    let got_dates = dates(&got);
+    assert_eq!(got_dates.len(), 100);
+    assert_eq!(got_dates[0], "1991-10-01");
+    assert_eq!(got_dates.last().unwrap(), "2000-01-01");
+    assert_eq!(
+        (got["truncated"].clone(), got["totalCount"].clone()),
+        (json!(true), json!(1201))
+    );
+
+    // Within a date range, the latest dates in it.
+    let response = server
+        .get_series_data(
+            json!({"series_id": id.to_string(), "end_date": "1950-12-01", "limit": 12}),
+        )
+        .await
+        .unwrap();
+    let got = series(response["content"][0]["text"].as_str().unwrap());
+    assert_eq!(dates(&got)[0], "1950-01-01");
+    assert_eq!(dates(&got).last().unwrap(), "1950-12-01");
+    assert_eq!(got["totalCount"], json!(612));
+
+    // Everything fits: not truncated.
+    let response = server
+        .get_series_data(json!({"series_id": id.to_string(), "limit": 5000}))
+        .await
+        .unwrap();
+    let got = series(response["content"][0]["text"].as_str().unwrap());
+    assert_eq!(dates(&got).len(), 1201);
+    assert_eq!(
+        (got["truncated"].clone(), got["totalCount"].clone()),
+        (json!(false), json!(1201))
+    );
+
+    // The chart tool: no chart API runs here, so it returns its data structure, the latest 1000.
+    let response = server
+        .create_data_visualization(json!({"series_ids": [id.to_string()]}))
+        .await
+        .unwrap();
+    let text = response["content"][0]["text"].as_str().unwrap();
+    let data: serde_json::Value =
+        serde_json::from_str(text.split("📋 Visualization Data:\n").nth(1).expect(text)).unwrap();
+    let charted = &data["series_data"][0];
+    assert_eq!(dates(charted).len(), 1000);
+    assert_eq!(dates(charted)[0], "1916-10-01");
+    assert_eq!(dates(charted).last().unwrap(), "2000-01-01");
+    assert_eq!(
+        (charted["truncated"].clone(), charted["totalCount"].clone()),
+        (json!(true), json!(1201))
+    );
+    // A limit above seriesData's page cap gets the latest 10000, not the oldest.
+    let mut conn = pool.get().await.unwrap();
+    let long = econ_graph_core::test_utils::insert_series_without_observations(&mut conn).await;
+    diesel::sql_query("UPDATE economic_series SET title = 'MCP daily series', start_date = '1980-01-01', end_date = '2030-01-01' WHERE id = $1")
+        .bind::<diesel::sql_types::Uuid, _>(long).execute(&mut conn).await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date) \
+         SELECT $1, DATE '1980-01-01' + n, n, DATE '1980-01-01' + n FROM generate_series(0, 14999) n",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(long)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    let response = server
+        .get_series_data(json!({"series_id": long.to_string(), "limit": 20000}))
+        .await
+        .unwrap();
+    let got = series(response["content"][0]["text"].as_str().unwrap());
+    let got_dates = dates(&got);
+    assert_eq!(got_dates.len(), 10000);
+    assert_eq!(got_dates.last().unwrap(), "2021-01-24");
+    assert_eq!(
+        (got["truncated"].clone(), got["totalCount"].clone()),
+        (json!(true), json!(15000))
+    );
+    assert!(server
+        .get_series_data(json!({"series_id": long.to_string(), "limit": -1}))
+        .await
+        .is_err());
+}
+
+/// With a chart API answering, the chart tool's text still says how much of each series the
+/// chart holds.
+#[tokio::test]
+#[serial]
+async fn mcp_chart_says_when_a_series_was_cut_short() {
+    use diesel_async::RunQueryDsl;
+    use warp::Filter;
+    let (_database, pool) = create_test_database_pool().await;
+    let mut conn = pool.get().await.unwrap();
+    let id = econ_graph_core::test_utils::insert_series_without_observations(&mut conn).await;
+    diesel::sql_query("UPDATE economic_series SET title = 'MCP charted', start_date = '1900-01-01', end_date = '2000-01-01' WHERE id = $1")
+        .bind::<diesel::sql_types::Uuid, _>(id).execute(&mut conn).await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date) \
+         SELECT $1, DATE '1900-01-01' + n, n, DATE '1900-01-01' + n FROM generate_series(0, 1199) n",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(id)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    // A stand-in chart API that answers every request with a configuration.
+    let route = warp::post().and(warp::path("generate")).map(|| {
+        warp::reply::json(&json!({"chartConfig": {"type": "line"}, "metadata": {"ok": true}}))
+    });
+    let (addr, serve) = warp::serve(route).bind_ephemeral(([127, 0, 0, 1], 0));
+    tokio::spawn(serve);
+    let server = test_server(
+        econ_graph_core::AppPool(pool.clone()),
+        Some(econ_graph_core::DataPool(pool)),
+    )
+    .with_chart_api_url(format!("http://{addr}"));
+    let response = server
+        .create_data_visualization(json!({"series_ids": [id.to_string()]}))
+        .await
+        .unwrap();
+    let text = response["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Chart Configuration"), "{text}");
+    let coverage = text
+        .split("📏 Coverage:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n📜").next())
+        .expect(text);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(coverage).unwrap(),
+        json!([{"series": "MCP charted", "dataPoints": 1000, "totalCount": 1200, "truncated": true}])
+    );
+}
+
 /// Tools must return stored data, not a successful wrapper around GraphQL errors.
 #[tokio::test]
 #[serial]
