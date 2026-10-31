@@ -1,0 +1,5 @@
+boto3==1.40.72
+pyiceberg[pyarrow]==0.12.0
+duckdb==1.4.5
+pyarrow==26.0.0
+botocore==1.40.76
