@@ -252,7 +252,7 @@ def main():
     annotation = f"Train 3 development milestone\n\nCommit: {commit}\nEvidence:\n" + "\n".join(dict.fromkeys(references))
     run("git", "tag", "-a", TAG, commit, "-m", annotation)
     try:
-        run("git", "push", "origin", f"refs/tags/{TAG}:refs/tags/{TAG}")
+        run("git", "push", "--no-follow-tags", "origin", f"refs/tags/{TAG}:refs/tags/{TAG}")
     except Refused as error:
         raise Refused(f"push failed; local {TAG} retained for inspection; never replace or force-push it") from error
     print(f"Published annotated {TAG} at {commit}; no product release or workstream branches created.")
