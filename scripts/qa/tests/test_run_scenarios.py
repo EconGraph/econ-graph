@@ -37,6 +37,27 @@ SCENARIOS = runner.discover(runner.DEFAULT_SCENARIO_DIR)
 BY_NAME = {s.name: s for s in SCENARIOS}
 
 
+def assert_stopped(test: unittest.TestCase, pid: int, wait: float = 5) -> None:
+    """Fail unless PID has exited. A process orphaned when its parent died is reparented to init
+    and stays a zombie until init reaps it, which can take a moment after it has exited; a zombie
+    has stopped running, so it counts as stopped. A live process fails after WAIT seconds."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        try:
+            state = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
+        except (FileNotFoundError, IndexError):
+            state = None  # no /proc (macOS), or gone meanwhile: keep polling
+        if state == 'Z':
+            return
+        if time.monotonic() >= deadline:
+            test.fail(f'process {pid} is still running (state {state})')
+        time.sleep(0.05)
+
+
 def write_scenario(directory: Path, name: str, header: str, body: str) -> Path:
     path = directory / name
     path.write_text(f'#!/usr/bin/env bash\n{header}\n{body}\n', encoding='utf-8')
@@ -368,9 +389,7 @@ class RunnerTest(unittest.TestCase):
                                       dict(self.env, QA_TIMEOUT_GRACE_SECONDS='2'))
         self.assertEqual(code, 1)
         self.assertEqual(report['scenarios'][0]['reason'], 'timed out after 1s')
-        child = int(pid_file.read_text())
-        with self.assertRaises(ProcessLookupError):
-            os.kill(child, 0)
+        assert_stopped(self, int(pid_file.read_text()))
 
     def test_an_overrunning_python_scenario_still_cleans_up(self):
         cleaned = self.dir / 'cleaned'
@@ -433,8 +452,7 @@ finally:
                 runner_proc.communicate()
         self.assertEqual(runner_proc.returncode, 1)
         # The scenario's own command is gone too.
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(child_pid.read_text()), 0)
+        assert_stopped(self, int(child_pid.read_text()))
         # Cleanup ran, with half the grace period for its waits.
         self.assertAlmostEqual(float(cleaned.read_text()), 4.0, delta=0.5)
         self.assertEqual(self.ran(), [])
@@ -826,8 +844,7 @@ echo "end $QA_CRAWL_SOURCE" >> "{log}"
             'QA_CRAWL_SOURCES': 'FRED', 'QA_CRAWL_HOOK_TIMEOUT_SECONDS': '1'})
         self.assertEqual(code, 1)
         self.assertIn('overran', results['crawl-sample']['reason'])
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(pid_file.read_text()), 0)
+        assert_stopped(self, int(pid_file.read_text()))
 
     def test_lab_only_scenarios_are_not_run_outside_labs(self):
         # Asked for by name, they are an error; in a full run, the runner skips them.
