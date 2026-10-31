@@ -506,6 +506,38 @@ pub struct CompanyResearchStatement {
     pub lines: Vec<CompanyStatementLine>,
     pub periods: Vec<CompanyPeriod>,
 }
+/// Index evidence once by economic subject. Revision selection emits at most one
+/// unclassified row per subject, so checking each selected subject's own bucket
+/// visits at most the input evidence count overall, rather than rescanning every
+/// issuer fact for every output row.
+fn fact_history(facts: &[CompanyFact]) -> Result<BTreeMap<String, Vec<&CompanyFact>>> {
+    let mut history: BTreeMap<String, Vec<&CompanyFact>> = BTreeMap::new();
+    for fact in facts {
+        let key = fact
+            .subject
+            .canonical_key()
+            .map_err(|e| bad_user_input(e.to_string()))?;
+        history.entry(key).or_default().push(fact);
+    }
+    Ok(history)
+}
+
+fn earlier_changed_value(
+    fact: &CompanyFact,
+    history: &BTreeMap<String, Vec<&CompanyFact>>,
+) -> Result<bool> {
+    let key = fact
+        .subject
+        .canonical_key()
+        .map_err(|e| bad_user_input(e.to_string()))?;
+    Ok(history.get(&key).is_some_and(|revisions| {
+        revisions.iter().any(|prior| {
+            (&prior.filed, &prior.accession) < (&fact.filed, &fact.accession)
+                && prior.value != fact.value
+        })
+    }))
+}
+
 pub async fn financial_statement(
     ctx: &Context<'_>,
     cik: String,
@@ -542,6 +574,7 @@ pub async fn financial_statement(
             .into(),
         });
     }
+    let history = fact_history(&facts)?;
     let unclassified_facts = company_financials::unclassified_statement_facts(&facts, &selection)
         .map_err(|e| bad_user_input(e.to_string()))?
         .into_iter()
@@ -551,12 +584,8 @@ pub async fn financial_statement(
         })
         .map(|f| {
             let evidence = FactEvidence::from(&f);
-            let restated = facts.iter().any(|prior| {
-                prior.subject == f.subject
-                    && (&prior.filed, &prior.accession) < (&f.filed, &f.accession)
-                    && prior.value != f.value
-            });
-            company_financials::FinancialStatementLine {
+            let restated = earlier_changed_value(&f, &history)?;
+            Ok(company_financials::FinancialStatementLine {
                 key: format!("{}:{}", f.subject.taxonomy, f.subject.concept),
                 label: f.label.clone().unwrap_or_else(|| f.subject.concept.clone()),
                 taxonomy: f.subject.taxonomy,
@@ -568,9 +597,9 @@ pub async fn financial_statement(
                 derivation: None,
                 restated,
             }
-            .into()
+            .into())
         })
-        .collect::<Vec<CompanyStatementLine>>();
+        .collect::<Result<Vec<CompanyStatementLine>>>()?;
     for line in &unclassified_facts {
         periods
             .entry((line.period_end, line.period_start))
@@ -770,6 +799,119 @@ mod tests {
         }))
         .is_err());
     }
+    fn history_fact(concept: &str, accession: &str, filed: &str, value: &str) -> CompanyFact {
+        CompanyFact::new(
+            CompanyFactSubject {
+                cik: "0000320193".into(),
+                taxonomy: "us-gaap".into(),
+                concept: concept.into(),
+                period: ResearchPeriod::Instant {
+                    date: "2024-12-31".parse().unwrap(),
+                },
+                unit: "USD".into(),
+            },
+            accession.into(),
+            filed.parse().unwrap(),
+            value.parse().unwrap(),
+            "10-K".into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn indexed_restatement_history_preserves_chronology_and_exact_values() {
+        let original = history_fact(
+            "UnmappedConcept",
+            "0000320193-25-000001",
+            "2025-01-01",
+            "10.00",
+        );
+        let unchanged = history_fact(
+            "UnmappedConcept",
+            "0000320193-25-000002",
+            "2025-01-01",
+            "10",
+        );
+        let changed = history_fact(
+            "UnmappedConcept",
+            "0000320193-25-000003",
+            "2025-01-01",
+            "11",
+        );
+        let reverted = history_fact(
+            "UnmappedConcept",
+            "0000320193-25-000004",
+            "2025-01-02",
+            "10",
+        );
+        let other = history_fact("OtherConcept", "0000320193-24-000001", "2024-01-01", "99");
+        let mut unit = other.clone();
+        unit.subject.concept = "UnmappedConcept".into();
+        unit.subject.unit = "EUR".into();
+        let mut duration = other.clone();
+        duration.subject.concept = "UnmappedConcept".into();
+        duration.subject.period = ResearchPeriod::Duration {
+            start: "2024-01-01".parse().unwrap(),
+            end: "2024-12-31".parse().unwrap(),
+        };
+        let mut issuer = other.clone();
+        issuer.subject.concept = "UnmappedConcept".into();
+        issuer.subject.cik = "0000789019".into();
+        // Intentionally shuffled. Neither input order nor future revisions can
+        // turn an original/unchanged filing into a restatement.
+        let facts = vec![
+            reverted.clone(),
+            unit,
+            duration,
+            changed.clone(),
+            issuer,
+            unchanged.clone(),
+            other,
+            original.clone(),
+        ];
+        let index = fact_history(&facts).unwrap();
+        assert_eq!(index.len(), 5);
+        assert!(!earlier_changed_value(&original, &index).unwrap());
+        assert!(!earlier_changed_value(&unchanged, &index).unwrap());
+        assert!(earlier_changed_value(&changed, &index).unwrap());
+        assert!(earlier_changed_value(&reverted, &index).unwrap());
+    }
+
+    #[test]
+    fn many_unclassified_subjects_keep_disjoint_history_buckets() {
+        let mut facts = Vec::new();
+        for i in 0..4_000 {
+            let concept = format!("UnmappedConcept{i}");
+            facts.push(history_fact(
+                &concept,
+                "0000320193-25-000001",
+                "2025-01-01",
+                "1",
+            ));
+            facts.push(history_fact(
+                &concept,
+                "0000320193-25-000002",
+                "2025-02-01",
+                "1.0",
+            ));
+            facts.push(history_fact(
+                &concept,
+                "0000320193-25-000003",
+                "2025-03-01",
+                "2",
+            ));
+        }
+        let index = fact_history(&facts).unwrap();
+        assert_eq!(index.len(), 4_000);
+        assert_eq!(index.values().map(Vec::len).sum::<usize>(), facts.len());
+        assert!(index.values().all(|bucket| bucket.len() == 3));
+        for facts in facts.chunks_exact(3) {
+            assert!(!earlier_changed_value(&facts[0], &index).unwrap());
+            assert!(!earlier_changed_value(&facts[1], &index).unwrap());
+            assert!(earlier_changed_value(&facts[2], &index).unwrap());
+        }
+    }
+
     #[test]
     fn pagination_and_period_reject_invalid_arguments() {
         assert_eq!(page(None, None, 20).unwrap(), (20, 0));
