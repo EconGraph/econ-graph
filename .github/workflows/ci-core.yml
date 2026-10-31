@@ -936,6 +936,19 @@ jobs:
         diesel migration run --migration-dir migrations/app
       working-directory: backend
 
+    - name: Run observation store contracts (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for observation store contracts}"
+        export DATA_DATABASE_URL="$DATABASE_URL"
+        log="$RUNNER_TEMP/observation-store-contract.log"
+        cargo test -p econ-graph-services --test observation_contract -- --include-ignored --test-threads=1 --nocapture | tee "$log"
+        grep -Fq 'test postgres_satisfies_same_consumer_contract ... ok' "$log"
+        grep -Fq 'test postgres_preserves_restricted_visibility_and_projection_vintages ... ok' "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     # Fail closed: only the focused user-admin regressions become required, while
     # the unrelated full GraphQL/workspace suite below remains advisory.
     - name: Run user administration authorization regressions (required)
