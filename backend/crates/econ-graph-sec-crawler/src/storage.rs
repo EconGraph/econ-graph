@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
 use diesel::query_dsl::QueryDsl;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -181,34 +181,62 @@ impl XbrlStorage {
             updated_at: Utc::now(),
         };
 
-        // Preserve the original row identity on concurrent/repeated ingest. A changed
-        // payload under one accession must never silently retarget existing notes.
-        diesel::insert_into(financial_statements)
-            .values(&new_statement)
-            .on_conflict((company_id, accession_number))
-            .do_nothing()
-            .execute(conn)
-            .await
-            .context("Failed to insert financial statement")?;
-        let stored = financial_statements
-            .select(FinancialStatement::as_select())
-            .filter(company_id.eq(comp_id))
-            .filter(accession_number.eq(acc_num))
-            .first::<FinancialStatement>(conn)
-            .await
-            .context("Failed to read stored filing identity")?;
-        anyhow::ensure!(
-            stored.filing_date == filing_dt.date_naive()
-                && stored.period_end_date == period_end_dt.date_naive()
-                && stored.fiscal_year == fiscal_yr
-                && stored.fiscal_quarter == fiscal_qtr
-                && stored.form_type == form_typ.unwrap_or("10-K"),
-            "filing metadata changed for accession {acc_num}; preserve the original filing identity"
-        );
-        anyhow::ensure!(
-            stored.xbrl_file_hash.as_deref() == Some(file_hash),
-            "filing content changed for accession {acc_num}; preserve the original target and ingest a distinct amendment instead"
-        );
+        // Serialize completion of an existing metadata-only row with competing crawls.
+        // The accession and original row identity remain immutable.
+        let stored = conn.transaction::<FinancialStatement, anyhow::Error, _>(async move |conn| {
+            diesel::insert_into(financial_statements)
+                .values(&new_statement)
+                .on_conflict((company_id, accession_number))
+                .do_nothing()
+                .execute(conn)
+                .await
+                .context("Failed to insert financial statement")?;
+            let stored = financial_statements
+                .filter(company_id.eq(comp_id))
+                .filter(accession_number.eq(acc_num))
+                .for_update()
+                .select(FinancialStatement::as_select())
+                .first::<FinancialStatement>(conn)
+                .await
+                .context("Failed to read stored filing identity")?;
+            anyhow::ensure!(
+                stored.filing_date == filing_dt.date_naive()
+                    && stored.period_end_date == period_end_dt.date_naive()
+                    && stored.fiscal_year == fiscal_yr
+                    && stored.fiscal_quarter == fiscal_qtr
+                    && stored.form_type == form_typ.unwrap_or("10-K"),
+                "filing metadata changed for accession {acc_num}; preserve the original filing identity"
+            );
+            if stored.xbrl_file_hash.is_none()
+                && stored.xbrl_file_content.is_none()
+                && stored.xbrl_file_oid.is_none()
+            {
+                return diesel::update(financial_statements.find(stored.id))
+                    .set((
+                        xbrl_file_content.eq(new_statement.xbrl_file_content),
+                        xbrl_file_size_bytes.eq(new_statement.xbrl_file_size_bytes),
+                        xbrl_file_compressed.eq(new_statement.xbrl_file_compressed),
+                        xbrl_file_compression_type.eq(new_statement.xbrl_file_compression_type),
+                        xbrl_file_hash.eq(new_statement.xbrl_file_hash),
+                        document_url.eq(new_statement.document_url),
+                        xbrl_processing_status.eq(ProcessingStatus::Pending),
+                        xbrl_processing_error.eq(None::<String>),
+                        xbrl_processing_started_at.eq(None::<DateTime<Utc>>),
+                        xbrl_processing_completed_at.eq(None::<DateTime<Utc>>),
+                        updated_at.eq(Utc::now()),
+                    ))
+                    .returning(FinancialStatement::as_returning())
+                    .get_result(conn)
+                    .await
+                    .context("Failed to complete metadata-only filing");
+            }
+            anyhow::ensure!(
+                stored.xbrl_file_hash.as_deref() == Some(file_hash)
+                    && (stored.xbrl_file_content.is_some() || stored.xbrl_file_oid.is_some()),
+                "filing content changed for accession {acc_num}; preserve the original target and ingest a distinct amendment instead"
+            );
+            Ok(stored)
+        }).await?;
 
         Ok(StoredXbrlDocument {
             id: stored.id,
@@ -330,7 +358,6 @@ impl XbrlStorage {
         download_url: &str,
         statement_id: &Uuid,
     ) -> Result<()> {
-        use diesel_async::AsyncConnection;
         use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
         use econ_graph_core::models::XbrlTaxonomySchema;
         use sha2::{Digest, Sha256};
@@ -387,14 +414,49 @@ impl XbrlStorage {
         // DTS reference cannot be stored.
         let mut conn = self.pool.get().await?;
         conn.transaction::<(), anyhow::Error, _>(async move |conn| {
+            use econ_graph_core::schema::{
+                financial_statements, xbrl_instance_dts_references as refs,
+            };
+            // Every DTS writer locks the same existing filing before checking the reference.
+            // This also prevents orphan taxonomy rows from concurrent duplicate downloads.
+            financial_statements::table
+                .find(statement_id)
+                .for_update()
+                .select(financial_statements::id)
+                .first::<Uuid>(conn)
+                .await?;
+            let exists = refs::table
+                .filter(refs::statement_id.eq(statement_id))
+                .filter(refs::reference_type.eq(&reference.reference_type))
+                .filter(refs::reference_href.eq(&reference.reference_href))
+                .filter(
+                    refs::reference_role.is_not_distinct_from(reference.reference_role.as_deref()),
+                )
+                .filter(
+                    refs::reference_arcrole
+                        .is_not_distinct_from(reference.reference_arcrole.as_deref()),
+                )
+                .select((refs::id, refs::is_resolved))
+                .first::<(Uuid, bool)>(conn)
+                .await
+                .optional()?;
+            if matches!(exists, Some((_, true))) {
+                return Ok(());
+            }
             diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
                 .values(&taxonomy_schema)
                 .execute(conn)
                 .await
                 .context("Failed to insert taxonomy schema")?;
 
-            self.store_dts_reference(conn, reference, statement_id, &taxonomy_schema.id)
-                .await
+            self.store_dts_reference(
+                conn,
+                reference,
+                statement_id,
+                &taxonomy_schema.id,
+                exists.map(|(id, _)| id),
+            )
+            .await
         })
         .await
     }
@@ -406,6 +468,7 @@ impl XbrlStorage {
         reference: &crate::models::DtsReference,
         statement_id: &Uuid,
         resolved_schema_id: &Uuid,
+        existing_reference_id: Option<Uuid>,
     ) -> Result<()> {
         use econ_graph_core::schema::xbrl_instance_dts_references;
 
@@ -421,11 +484,24 @@ impl XbrlStorage {
             xbrl_instance_dts_references::created_at.eq(Utc::now()),
         );
 
-        diesel::insert_into(xbrl_instance_dts_references::table)
-            .values(dts_reference)
-            .execute(conn)
-            .await
-            .context("Failed to insert DTS reference")?;
+        if let Some(id) = existing_reference_id {
+            diesel::update(xbrl_instance_dts_references::table.find(id))
+                .set((
+                    xbrl_instance_dts_references::resolved_schema_id.eq(resolved_schema_id),
+                    xbrl_instance_dts_references::is_resolved.eq(true),
+                    xbrl_instance_dts_references::resolution_error.eq(None::<String>),
+                    xbrl_instance_dts_references::resolved_at.eq(Utc::now()),
+                ))
+                .execute(conn)
+                .await
+                .context("Failed to resolve existing DTS reference")?;
+        } else {
+            diesel::insert_into(xbrl_instance_dts_references::table)
+                .values(dts_reference)
+                .execute(conn)
+                .await
+                .context("Failed to insert DTS reference")?;
+        }
 
         Ok(())
     }
