@@ -485,6 +485,8 @@ def parser():
     result.add_argument("--store", choices=("versity", "garage", "both"), default="both")
     result.add_argument("--btrfs-scratch", action="store_true",
                         help="Use a scratch subvolume and owned cleanup helper; scratch-parent must be btrfs")
+    result.add_argument("--gates", default=",".join(GATES),
+                        help="Comma-separated gates for dependency-focused reruns; omitted gates never pass")
     result.add_argument("--report", type=Path)
     result.add_argument("--scratch-parent", type=Path, default=Path(tempfile.gettempdir()))
     result.add_argument("--hook-timeout", type=int, default=1800)
@@ -494,7 +496,11 @@ def parser():
 
 
 def main():
-    args = parser().parse_args()
+    cli = parser()
+    args = cli.parse_args()
+    selected = set(args.gates.split(","))
+    if not selected or not selected <= set(GATES):
+        cli.error("--gates must select named acceptance gates")
     if not args.execute:
         print(json.dumps({"status": "dry_run", "images": IMAGES, "gates": GATES,
                           "resources": "unique ownership labels; 2 CPU/6GiB per store; random loopback ports",
@@ -525,6 +531,9 @@ def main():
                 "btrfs_restore": lambda: hook(store, args, "snapshot", ("snapshot", "restored", "table_reread_sha256")) if args.snapshot_command else snapshot_restore(store, crawler),
             }
             for name, check in checks.items():
+                if name not in selected:
+                    run["gates"][name] = {"status": "not_run", "reason": "Excluded by --gates; no acceptance claim"}
+                    continue
                 started = time.monotonic()
                 try:
                     evidence = check()

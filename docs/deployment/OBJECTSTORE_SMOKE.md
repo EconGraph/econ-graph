@@ -36,6 +36,10 @@ CNPG hook starts, all store data and its scratch directory are retained even on 
 because incomplete backups are recovery artifacts too. There are no lifecycle, expiry,
 retentionPolicy, backup deletion or automatic metadata-snapshot rules.
 
+Use `--gates crawler_sql_catalog,independent_readers,btrfs_restore` to rerun dependent gates
+without repeating the expensive multipart/listing workload. Excluded gates are `not_run`, so
+such a focused report cannot claim complete acceptance.
+
 Use `--store versity` or `--store garage` for diagnosis. The acceptance default is `both`;
 the fallback receives the same workload and hooks. Garage uses SQLite metadata,
 `replication_factor=1`, `metadata_fsync=true`, `data_fsync=true`, and leaves

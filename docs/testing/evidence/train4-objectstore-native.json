@@ -1,0 +1,114 @@
+{
+  "format_version": 1,
+  "scope": "Disposable stores only; partial native compatibility evidence, not seven-gate acceptance",
+  "overall_status": "incomplete",
+  "native_bytes": 2164260864,
+  "stores": [
+    {
+      "store": "versity",
+      "image": "versity/versitygw@sha256:89cad13cc981986ee284cbafea4613f9533ce6fd5f37a2c96c4c4fb8adb3a316",
+      "gates": {
+        "multipart_hash": {
+          "status": "passed",
+          "evidence": {
+            "bytes": 2164260864,
+            "sha256": "7482368c5480fae13d59159e60c98f496e958a73604e2847a787c533fff98e5f",
+            "parts": 129,
+            "boto3_checksum_default": "when_supported",
+            "conditional_create_required": false
+          },
+          "seconds": 14.459
+        },
+        "interrupted_put": {
+          "status": "passed",
+          "evidence": {
+            "advertised_bytes": 134217728,
+            "partial_object_visible": false,
+            "store_restarted": true
+          },
+          "seconds": 0.645
+        },
+        "paginated_listing": {
+          "status": "passed",
+          "evidence": {
+            "objects": 10007,
+            "pages": 74,
+            "delimiter_prefixes": 11,
+            "disk_evidence": "exact POSIX filename comparison"
+          },
+          "seconds": 19.946
+        }
+      },
+      "conditional_create_probe": {
+        "status": "passed",
+        "evidence": {
+          "if_none_match": "412 and original preserved",
+          "sdk_checksum_headers": [
+            "x-amz-checksum-crc32",
+            "x-amz-sdk-checksum-algorithm"
+          ]
+        }
+      },
+      "btrfs_mechanics": {
+        "filesystem_restore": "passed",
+        "marker_sha256": "b092b6eb64a39ba2c5b7eb70c54c569fc0c6cb845e98047b278b88f7c88c95cc",
+        "iceberg_gate": "not_run_requires_actual_crawler_table",
+        "readonly": true,
+        "restored": true
+      }
+    },
+    {
+      "store": "garage",
+      "image": "dxflrs/garage@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5",
+      "gates": {
+        "multipart_hash": {
+          "status": "passed",
+          "evidence": {
+            "bytes": 2164260864,
+            "sha256": "7482368c5480fae13d59159e60c98f496e958a73604e2847a787c533fff98e5f",
+            "parts": 129,
+            "boto3_checksum_default": "when_supported",
+            "conditional_create_required": false
+          },
+          "seconds": 16.368
+        },
+        "interrupted_put": {
+          "status": "passed",
+          "evidence": {
+            "advertised_bytes": 134217728,
+            "partial_object_visible": false,
+            "store_restarted": true
+          },
+          "seconds": 1.657
+        },
+        "paginated_listing": {
+          "status": "passed",
+          "evidence": {
+            "objects": 10007,
+            "pages": 74,
+            "delimiter_prefixes": 11,
+            "disk_evidence": "17 block files plus all logical-object byte checks"
+          },
+          "seconds": 36.887
+        }
+      },
+      "conditional_create_probe": {
+        "status": "failed",
+        "reason": "Create-only If-None-Match write overwrote an existing object"
+      },
+      "btrfs_mechanics": {
+        "filesystem_restore": "passed",
+        "marker_sha256": "b092b6eb64a39ba2c5b7eb70c54c569fc0c6cb845e98047b278b88f7c88c95cc",
+        "iceberg_gate": "not_run_requires_actual_crawler_table",
+        "readonly": true,
+        "restored": true
+      }
+    }
+  ],
+  "remaining_acceptance": [
+    "Actual crawler writes and SQL catalog commit",
+    "PyIceberg and DuckDB exact row parity",
+    "CNPG base backup plus WAL archive and point-in-time recovery",
+    "Iceberg table reread after btrfs restore (filesystem marker already verified)"
+  ]
+}

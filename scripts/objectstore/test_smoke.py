@@ -24,6 +24,12 @@ class SmokeSafetyTests(unittest.TestCase):
         self.assertFalse(plan["persistent_host_service"])
         self.assertTrue(all("@sha256:" in image for image in plan["images"].values()))
 
+    def test_unknown_gate_is_rejected_before_docker(self):
+        with patch("sys.argv", ["smoke.py", "--execute", "--gates", "pretend"]), patch.object(smoke, "docker", side_effect=AssertionError), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                smoke.main()
+        self.assertEqual(error.exception.code, 2)
+
     def test_cleanup_refuses_container_with_other_owner(self):
         with patch.object(smoke, "docker", return_value=json.dumps({smoke.LABEL: "someone-else"})) as call:
             with self.assertRaisesRegex(RuntimeError, "different ownership"):
