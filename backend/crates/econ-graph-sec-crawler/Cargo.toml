@@ -15,7 +15,7 @@ xbrl-parser = ["dep:quick-xml", "dep:xml", "dep:regex", "dep:md5", "econ-graph-c
 # Workspace dependencies
 tokio.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
 anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
@@ -55,6 +55,8 @@ tracing-subscriber.workspace = true
 
 # File system operations
 walkdir = "2.5"
+zip = { version = "9.2", default-features = false, features = ["deflate"] }
+tempfile.workspace = true
 
 # XML parsing for XBRL
 quick-xml = { version = "0.42", optional = true }
@@ -92,7 +94,6 @@ econ-graph-crawler = { path = "../econ-graph-crawler", features = ["testkit"] }
 # Testing
 tokio-test.workspace = true
 mockito.workspace = true
-tempfile.workspace = true
 testcontainers.workspace = true
 serial_test.workspace = true
 
@@ -112,3 +113,7 @@ path = "src/bin/sec_crawler.rs"
 [[bin]]
 name = "sec-company-crawler"
 path = "src/bin/sec_company_crawler.rs"
+
+[[bin]]
+name = "sec-companyfacts-ingest"
+path = "src/bin/sec_companyfacts_ingest.rs"

@@ -1,0 +1,112 @@
+# Explicit opt-in after Train 4 platform/data authorization and Train 5 ingest validation.
+# Apply the data migration first, then enable BOTH CronJobs; this file is not auto-deployed.
+# UTC 09:00 follows SEC's approximately 03:00 ET nightly bulk publication year round.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sec-companyfacts-ingest
+  namespace: econ-graph
+spec:
+  schedule: "0 9 * * *"
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 28800
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: ingest
+            image: econ-graph-crawler-worker:v4.0.0
+            imagePullPolicy: Never
+            command: ["/app/sec-companyfacts-ingest", "--staging-dir", "/staging"]
+            env:
+            - name: DATA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: data-database-url
+            resources:
+              requests:
+                cpu: "1"
+                memory: 512Mi
+                ephemeral-storage: 32Gi
+              limits:
+                cpu: "4"
+                memory: 2Gi
+                ephemeral-storage: 34Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+            - name: staging
+              mountPath: /staging
+          volumes:
+          - name: staging
+            emptyDir:
+              sizeLimit: 32Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sec-companyfacts-freshness
+  namespace: econ-graph
+spec:
+  schedule: "*/15 * * * *"
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: freshness
+            image: econ-graph-crawler-worker:v4.0.0
+            imagePullPolicy: Never
+            command: ["/app/sec-companyfacts-ingest", "--check-freshness"]
+            env:
+            - name: DATA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: data-database-url
+            resources:
+              requests:
+                cpu: 50m
+                memory: 32Mi
+              limits:
+                cpu: 200m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]

@@ -1,0 +1,8 @@
+{
+ "cik":"0000320193","name":"Apple Inc.","tickers":["AAPL"],"sic":"3571","sicDescription":"Electronic Computers","entityType":"operating",
+ "filings":{"recent":{
+  "accessionNumber":["0000320193-24-000006","0000320193-24-000007"],
+  "filingDate":["2024-02-02","2024-02-03"],"reportDate":["2023-12-30","2023-12-30"],"form":["10-Q","10-Q/A"],
+  "primaryDocument":["aapl-20231230.htm","aapl-20231230a.htm"],"isXBRL":[1,1]},
+  "files":[{"name":"CIK0000320193-submissions-001.json","filingCount":1,"filingFrom":"2023-01-01","filingTo":"2023-12-31"}]}
+}
