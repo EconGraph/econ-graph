@@ -8,8 +8,8 @@ include recorded series metadata and illustrative observation responses.
 
 FRED is readable by admins only: `catalog.fred:read` is granted to the `admin` composite
 (and so to `super_admin`), not to `catalog-public` or the anonymous reader. Visitors and
-signed-in users who aren't admins see no FRED source, series, search result, observation or
-dashboard value. Admins read it as usual. An operator changes this on a running cluster with
+signed-in users who aren't admins see no FRED source, series, search result or observation.
+The dashboard's cards use public BEA and BLS series instead. Admins read it as usual. An operator changes this on a running cluster with
 `scripts/keycloak/set-catalog-access.sh`; see
 [catalog access](../../config/keycloak/README.md#catalog-access-including-anonymous-visitors).
 
@@ -21,6 +21,20 @@ title, id prefix and frequency. All pages must agree on count and ordering befor
 snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
 Separate scan and selected-series bounds stop unexpected expansion before observation
 jobs are enqueued. A small include/exclude list handles explicit exceptions.
+
+Discovery runs in chunks (the crawler's
+[chunked catalog discovery](../../backend/crates/econ-graph-crawler/README.md#chunked-catalog-discovery)).
+The `discover_catalog` job walks the rules' catalog pages and lists one unit per selected
+series, carrying the metadata its catalog page returned, and one per include override the
+rules didn't select. Each `discover_chunk` job handles 50 units. A rule-selected unit needs no
+request; an include override needs one `/series` request. So a chunk makes at most 50
+requests, under FRED's rate limit, which it shares with fetch jobs. One finalize job commits
+the whole catalog. The run's catalog scope is the selection rules' fingerprint, the same one a
+single walk reports, computed from `fred.toml` without a walk; if the rules can't be read the
+discovery is refused and nothing changes. Setting `CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES=FRED` on
+the worker discovers FRED with a single job instead; see the
+[crawler deployment guide](../technical/CRAWLER_DEPLOYMENT_GUIDE.md#run-the-worker).
+
 The default scope is GDP release series plus headline overrides, including the NBER
 recession indicator (`USREC`) and probes for two previously curated retired ids. `expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An

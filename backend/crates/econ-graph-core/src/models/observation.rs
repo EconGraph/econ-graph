@@ -1,7 +1,7 @@
 //! Storage-independent observation read contracts. Database writes deliberately remain in
 //! the crawler's caller-owned, lease-fenced transaction.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -168,6 +168,10 @@ pub struct ObservationPage {
     pub dataset_id: Option<Uuid>,
     pub points: Vec<Observation>,
     pub context: Vec<Observation>,
+    /// Whether each returned point differs numerically from its earliest real original
+    /// release, keyed by observation UUID. The original itself is false; missing or
+    /// later-published originals leave the point absent. Read in the same snapshot.
+    pub revised: HashMap<Uuid, bool>,
     pub total_count: i64,
     pub offset: i64,
 }

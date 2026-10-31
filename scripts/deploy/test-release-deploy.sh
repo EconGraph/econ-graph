@@ -119,7 +119,9 @@ case "$*" in
     "get nodes"*) printf 'econ-graph-control-plane econ-graph-worker' ;;
     "get namespace kube-system"*) printf '%s' "$uid" ;;
     "get namespace econ-graph --ignore-not-found -o name") echo namespace/econ-graph ;;
-    "get crd httproutes.gateway.networking.k8s.io"*) ;;
+    "get crd httproutes.gateway.networking.k8s.io"*) echo customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io ;;
+    "get httproute econ-graph-frontend-public "*)
+        printf '%s' "${STUB_SERVED_MAIN-www.econgraph.com}" ;;
     "get httproute -l econgraph.io/public-host=true "*)
         [ "${STUB_SERVED_HOST-}" != fail ] || exit 1
         printf '%s\n' "${STUB_SERVED_HOST-econgraph.com}" ;;
@@ -128,6 +130,8 @@ case "$*" in
     "get certificate econ-graph-tls "*)
         [ "${STUB_CERT_ISSUER-}" != fail ] || exit 1
         printf '%s' "${STUB_CERT_ISSUER-econ-graph-selfsigned}" ;;
+    # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+    "get configmap econgraph-lab-owner"*) ;;
     "get configmap econgraph-cluster-role"*)
         # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         case "${STUB_MARKER:-production}" in
@@ -210,7 +214,7 @@ for step in load-release-images backup-postgres-now backup-keycloak-db precheck-
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0" .sh)"
-echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD APP_DATABASE=${APP_DATABASE-<unset>} ISSUER=${GATEWAY_TLS_ISSUER-<unset>}" >>"$TEST_LOGS/steps.log"
+echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD APP_DATABASE=${APP_DATABASE-<unset>} ISSUER=${GATEWAY_TLS_ISSUER-<unset>} MAIN_HOST=${MAIN_HOST-<unset>}" >>"$TEST_LOGS/steps.log"
 stamp="${STUB_STAMP:-20261028T080000Z}"
 case "$name" in
     backup-postgres-now)
@@ -1132,6 +1136,36 @@ if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST=econgraph.com " "$LOGS/ste
 else
     fail "PUBLIC_HOST=ECONGRAPH.COM: exit $rc, $(cat "$LOGS/steps.log")"
 fi
+# The independent main-host setting reaches deploy and is validated before any step.
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n' >"$CONFIG"
+run env STUB_SERVED_MAIN=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=econgraph.com' "$LOGS/steps.log" ||
+    fail "persisted apex rollback MAIN_HOST did not reach deploy"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=www.econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=www.econgraph.com' "$LOGS/steps.log" ||
+    fail "persisted www MAIN_HOST did not reach deploy"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=elsewhere.example\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an unrelated MAIN_HOST" "MAIN_HOST"
+printf 'PUBLIC_HOST=econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=www.econgraph.com' "$LOGS/steps.log" ||
+    fail "default www MAIN_HOST did not reach deploy"
+
+run env STUB_SERVED_MAIN=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a release that would implicitly change the issuer" "switch-main-host.sh"
+# The refusal names the deploy-config fix first, then the switch.
+if has "To keep the live main host, set MAIN_HOST=econgraph.com in ${CONFIG}. To change it, run scripts/deploy/switch-main-host.sh"; then
+    echo "ok   the main-host refusal names MAIN_HOST=econgraph.com in the deploy config first"
+else
+    fail "the main-host refusal does not name MAIN_HOST=econgraph.com in the deploy config first"
+fi
+has "exported in this shell" && fail "the main-host refusal blames an export that is not there"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n' >"$CONFIG"
+run env STUB_SERVED_MAIN=econgraph.com MAIN_HOST=www.econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a stale exported MAIN_HOST" "unset the MAIN_HOST=www.econgraph.com exported in this shell"
+
 # Several PUBLIC_HOST lines: the last one wins, as if the file were sourced.
 printf 'PUBLIC_HOST=econ-graph.com\nPUBLIC_HOST=econgraph.com\n' >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
@@ -1164,7 +1198,7 @@ echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
 # --- GATEWAY_TLS_ISSUER ---------------------------------------------------------------------
 issuer_case() { # NAME EXPECTED PLAN: the last run deployed with GATEWAY_TLS_ISSUER EXPECTED, showing PLAN
-    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2\$" "$LOGS/steps.log" && has "$3"; then
+    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2 MAIN_HOST=" "$LOGS/steps.log" && has "$3"; then
         echo "ok   $1"
     else
         fail "$1: exit $rc, $(grep '^deploy ' "$LOGS/steps.log" || true), $(grep 'TLS issuer' <<<"$out" || true)"

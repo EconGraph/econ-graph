@@ -278,6 +278,9 @@ pub struct Worker {
     /// every series, since every series needs a dataset.
     pub datasets: DatasetCatalog,
     handlers: HashMap<(SourceId, JobKind), Arc<dyn JobHandler>>,
+    /// Sources discovered by a single `discover_catalog` job even though their adapter can
+    /// discover in chunks (see [`with_single_job_discovery`](Self::with_single_job_discovery)).
+    single_job_discovery: Vec<SourceId>,
     breaker: Mutex<Breaker>,
 }
 
@@ -331,6 +334,7 @@ impl Worker {
             config,
             datasets: DatasetCatalog::empty(),
             handlers: HashMap::new(),
+            single_job_discovery: Vec::new(),
             breaker: Mutex::new(Breaker::default()),
         }
     }
@@ -355,6 +359,17 @@ impl Worker {
         handler: Arc<dyn JobHandler>,
     ) -> Self {
         self.register_handler(source, kind, handler);
+        self
+    }
+
+    /// Discovers `sources` with a single `discover_catalog` job each, as before chunked
+    /// discovery, even if their adapter can discover in chunks
+    /// ([`SourceAdapter::chunked_discovery`]). A chunk or finalize job of such a source that is
+    /// still queued fails its run, and its next discovery supersedes any run still in progress,
+    /// so no run of it commits after a single-job discovery (see [`crate::discovery_run`]).
+    #[must_use]
+    pub fn with_single_job_discovery(mut self, sources: Vec<SourceId>) -> Self {
+        self.single_job_discovery = sources;
         self
     }
 
@@ -772,7 +787,10 @@ impl Worker {
                 Some((adapter, settings)) => {
                     self.enumerate_run(source, adapter, settings, item).await
                 }
-                None => self.discover(source).await,
+                None => {
+                    self.supersede_runs_for_single_job(source).await?;
+                    self.discover(source).await
+                }
             },
             JobKind::DiscoverChunk => self.discover_chunk(source, item).await,
             JobKind::FinalizeDiscovery => self.finalize_run(source, item).await,

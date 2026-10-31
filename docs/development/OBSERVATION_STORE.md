@@ -22,7 +22,7 @@ let page = PostgresStore::new(&pool).read_page(ObservationRequest {
 }).await?;
 ```
 
-A read is one repeatable-read, read-only transaction. Count, page, dataset identity and context
+A read is one repeatable-read, read-only transaction. Count, page, dataset identity, revision flags and context
 are selected in that transaction. Dates are inclusive bounds. Ordering is observation date,
 revision date, then stored observation UUID, ascending. A page defaults to 10,000 rows and is
 clamped to 0–10,000; negative offsets normalize to zero. The total is computed after revision
@@ -55,6 +55,12 @@ Synthetic rows are also excluded from the competing revisions in the latest/as-o
 This matters for forecasts whose real release predates the observation: the future-dated legacy
 synthetic must not hide the real vintage. The shared `revision_filter_excluding_synthetic`
 predicate remains in `models::data_point` for optimized compatibility paths.
+
+The page's `revised` map compares each returned point with the earliest real original for its
+observation date, ordered by revision date and UUID. Numeric equality ignores decimal scale;
+null differs from a number. The original itself is false, and points with no original or an
+original published after their vintage have no map entry. Revision selection and pagination
+do not narrow the original lookup. These flags share the page's database snapshot.
 
 Untransformed public reads default to `All`. The existing GraphQL boundary chooses `Latest`
 for transformations only when the caller did not explicitly choose a mode. Nulls stay null;

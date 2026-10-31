@@ -11,7 +11,9 @@
 //!
 //! Observations are read at their current revision: for each date the newest `revision_date`
 //! wins, and on the same revision date a revision beats the original release (the order
-//! [`econ_graph_core::models::revision_filter`] uses). `asOf` arrives with that filter.
+//! [`econ_graph_core::models::revision_filter`] uses). `asOf` arrives with that filter. Synthetic
+//! legacy rows never count ([`econ_graph_core::models::exclude_synthetic_legacy_rows`]), as in
+//! every reader that resolves revisions.
 
 use std::collections::BTreeMap;
 
@@ -113,43 +115,43 @@ pub async fn cross_section(
         CrossSectionDate::Latest => None,
     };
 
-    // For each date the current revision wins (the inner ORDER BY; `id DESC` only makes that
-    // order total, since the unique key on (series_id, date, revision_date,
-    // is_original_release) already leaves one row per date). Of those current values, the
-    // latest non-null one (or the one on `on_date`, null or not) is the series' observation;
-    // `value IS NOT NULL` runs after the current revision is picked, so a null current value
-    // never lets an earlier, superseded value show through.
+    // Each series' dates are walked newest first (`d`, from the index alone), and each date's
+    // current revision picked on its own (`cur`: newest `revision_date`, a revision before the
+    // original release on the same day; `id DESC` only makes that order total, since the unique
+    // key on (series_id, date, revision_date, is_original_release) already leaves one row per
+    // date). The first date whose current value isn't null (or `on_date`, null or not) is the
+    // series' observation, so the walk usually stops at the newest date instead of resolving
+    // every date. `value IS NOT NULL` applies after the current revision is picked, so a null
+    // current value never lets an earlier, superseded value show through.
     //
     // With `asOf` ($5), revisions first published after it are invisible (`dp.revision_date <=
-    // $5`). A pre-vintage-tracking synthetic row (`revision_date = date`, tagged
-    // `is_original_release`) is also dropped when the same date has another original-release
-    // row at a different `revision_date` — see
-    // [`econ_graph_core::models::exclude_synthetic_legacy_rows`] — so the synthetic row can't
-    // stand in for "known on `$5`" when it really only means "current as of an old crawl".
-    let rows: Vec<SqlRow> = diesel::sql_query(
+    // $5`). A date with none left is skipped already in the walk (`dd.revision_date <= $5`), so
+    // an `asOf` early in a long history doesn't probe every later date. A pre-vintage-tracking
+    // synthetic row never counts, with `asOf` or without — see
+    // [`econ_graph_core::models::exclude_synthetic_legacy_rows`] — so it can't stand in for
+    // "known on `$5`", or for the latest value, when it really only means "current as of an
+    // old crawl", and the cross-section agrees with `dataPoints`.
+    let rows: Vec<SqlRow> = diesel::sql_query(format!(
         "SELECT s.id AS series_id, s.dimensions ->> $2 AS key, obs.date, obs.value \
          FROM economic_series s \
          LEFT JOIN LATERAL ( \
-             SELECT cur.date, cur.value FROM ( \
-                 SELECT DISTINCT ON (dp.date) dp.date, dp.value \
-                 FROM data_points dp \
-                 WHERE dp.series_id = s.id AND ($4::date IS NULL OR dp.date = $4) \
+             SELECT d.date, cur.value \
+             FROM ( \
+                 SELECT DISTINCT dd.date FROM data_points dd \
+                 WHERE dd.series_id = s.id AND ($4::date IS NULL OR dd.date = $4) \
+                   AND ($5::date IS NULL OR dd.revision_date <= $5) \
+                 ORDER BY dd.date DESC \
+             ) d \
+             CROSS JOIN LATERAL ( \
+                 SELECT dp.value FROM data_points dp \
+                 WHERE dp.series_id = s.id AND dp.date = d.date \
                    AND ($5::date IS NULL OR dp.revision_date <= $5) \
-                   AND ($5::date IS NULL OR NOT ( \
-                         dp.revision_date = dp.date AND dp.is_original_release \
-                         AND EXISTS ( \
-                           SELECT 1 FROM data_points other_original \
-                           WHERE other_original.series_id = dp.series_id \
-                             AND other_original.date = dp.date \
-                             AND other_original.is_original_release \
-                             AND other_original.revision_date <> dp.date \
-                         ) \
-                       )) \
-                 ORDER BY dp.date DESC, dp.revision_date DESC, dp.is_original_release ASC, \
-                          dp.id DESC \
+                   AND NOT {} \
+                 ORDER BY dp.revision_date DESC, dp.is_original_release ASC, dp.id DESC \
+                 LIMIT 1 \
              ) cur \
              WHERE $4::date IS NOT NULL OR cur.value IS NOT NULL \
-             ORDER BY cur.date DESC \
+             ORDER BY d.date DESC \
              LIMIT 1 \
          ) obs ON TRUE \
          WHERE s.dataset_id = $1 AND s.is_active \
@@ -159,7 +161,8 @@ pub async fn cross_section(
                  AND lifecycle.status = 'restricted') \
            AND s.dimensions @> $3 AND s.dimensions ? $2 \
          ORDER BY (s.dimensions ->> $2) COLLATE \"C\", s.id",
-    )
+        econ_graph_core::models::synthetic_legacy_row("dp", "other_original")
+    ))
     .bind::<diesel::sql_types::Uuid, _>(dataset.id)
     .bind::<Text, _>(&request.across)
     .bind::<Jsonb, _>(filter)

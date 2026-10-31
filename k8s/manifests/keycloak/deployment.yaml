@@ -3,9 +3,12 @@
 # Public URL: http://localhost/idp through the gateway (HTTPRoute econ-graph-idp,
 # k8s/manifests/gateway/routes/httproutes.yaml), so the issuer is
 # http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
-# KC_HOSTNAME, KC_WEB_BASE_URL and KC_WEB_E2E_BASE_URL below to https://<PUBLIC_HOST>, the backend's
+# KC_HOSTNAME, KC_WEB_BASE_URL and KC_WEB_E2E_BASE_URL below to https://<MAIN_HOST>, the backend's
 # OIDC_ISSUER and the routes' host names with them (scripts/deploy/render-public-host.py),
-# so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Keycloak
+# so the issuer is https://<MAIN_HOST>/idp/realms/econ-graph: https://www.econgraph.com/...
+# with MAIN_HOST=www.econgraph.com (the default), https://econgraph.com/... with
+# MAIN_HOST=econgraph.com. The realm import sets the realm's frontendUrl to the same
+# https://<MAIN_HOST>/idp (it overrides KC_HOSTNAME). Keycloak
 # builds its URLs from the full KC_HOSTNAME, not from request headers, and the public
 # host is only served over https (plain http is redirected; scripts/deploy/render-public-host.py).
 #

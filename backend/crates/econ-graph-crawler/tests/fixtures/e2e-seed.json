@@ -40,6 +40,39 @@
       ]
     },
     {
+      "source": "BLS",
+      "external_id": "CUSR0000SA0",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/timeseries/data/",
+          "fixture": "bls/cpi_seasonally_adjusted_monthly.json"
+        }
+      ]
+    },
+    {
+      "source": "BLS",
+      "external_id": "LNS14000000",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/timeseries/data/",
+          "fixture": "bls/unemployment_rate_monthly.json"
+        }
+      ]
+    },
+    {
+      "source": "BLS",
+      "external_id": "CES0000000001",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/timeseries/data/",
+          "fixture": "bls/nonfarm_payrolls_monthly.json"
+        }
+      ]
+    },
+    {
       "source": "CENSUS",
       "external_id": "bds/national..ESTAB",
       "discovery": [
@@ -70,6 +103,16 @@
           "path": "/",
           "query": { "method": "GetParameterValues", "DatasetName": "NIPA", "ParameterName": "TableName" },
           "fixture": "bea/nipa_table_titles_t10105.json"
+        },
+        {
+          "method": "GET",
+          "path": "/",
+          "query": {
+            "method": "GetParameterValues",
+            "DatasetName": "Regional",
+            "ParameterName": "TableName"
+          },
+          "fixture": "bea/regional_table_titles.json"
         }
       ]
     },

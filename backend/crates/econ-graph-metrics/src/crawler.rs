@@ -534,6 +534,60 @@ pub static CRAWLER_DISCOVERY_METRICS: Lazy<CrawlerDiscoveryMetrics> = Lazy::new(
         .expect("Failed to initialize crawler discovery metrics")
 });
 
+/// Checks of each fetched series' units text against the vocabulary, recorded when a fetched
+/// series is stored (`econ_graph_crawler::units`). `source` is the source id (`"FRED"`, ...).
+///
+/// - `crawler_units_unrecognised_total{source}`: units texts the parser does not recognise.
+/// - `crawler_units_mismatch_total{source}`: units texts that parse but disagree with the units
+///   the source's structured fields state.
+/// - `crawler_units_agree_total{source}`: units texts that parse and agree with them.
+pub struct CrawlerUnitsMetrics {
+    /// Unrecognised units texts, by source.
+    pub unrecognised_total: IntCounterVec,
+    /// Units texts that disagree with the structured units, by source.
+    pub mismatch_total: IntCounterVec,
+    /// Units texts that agree with the structured units, by source.
+    pub agree_total: IntCounterVec,
+}
+
+impl CrawlerUnitsMetrics {
+    /// Creates the units metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any metric fails to register with the provided registry
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let counter = |name: &str, help: &str| -> anyhow::Result<IntCounterVec> {
+            let value = IntCounterVec::new(Opts::new(name, help), &["source"])?;
+            registry.register(Box::new(value.clone()))?;
+            Ok(value)
+        };
+        Ok(Self {
+            unrecognised_total: counter(
+                "crawler_units_unrecognised_total",
+                "Fetched units texts the units parser does not recognise, by source",
+            )?,
+            mismatch_total: counter(
+                "crawler_units_mismatch_total",
+                "Fetched units texts that disagree with the source's structured units, by source",
+            )?,
+            agree_total: counter(
+                "crawler_units_agree_total",
+                "Fetched units texts that agree with the source's structured units, by source",
+            )?,
+        })
+    }
+}
+
+/// Global units metrics, registered with [`DEFAULT_REGISTRY`].
+///
+/// # Panics
+///
+/// Panics if the metrics fail to initialize during lazy initialization
+pub static CRAWLER_UNITS_METRICS: Lazy<CrawlerUnitsMetrics> = Lazy::new(|| {
+    CrawlerUnitsMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize crawler units metrics")
+});
+
 /// Catalog safety guards and retained series lifecycle. Labels are bounded source codes,
 /// lifecycle statuses, guard reasons and configured selection rules, never upstream series
 /// identifiers.
@@ -799,6 +853,28 @@ mod queue_metrics_tests {
             .map(|f| f.name().to_string())
             .collect();
         assert!(names.contains(&"crawler_curated_missing".to_string()));
+    }
+
+    /// Registers the three units-check counters.
+    #[test]
+    fn units_metrics_register() {
+        let registry = Registry::new();
+        let m = CrawlerUnitsMetrics::new(&registry).unwrap();
+        m.unrecognised_total.with_label_values(&["FRED"]).inc();
+        m.mismatch_total.with_label_values(&["BEA"]).inc();
+        m.agree_total.with_label_values(&["BEA"]).inc();
+        let names: Vec<String> = registry
+            .gather()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect();
+        for n in [
+            "crawler_units_unrecognised_total",
+            "crawler_units_mismatch_total",
+            "crawler_units_agree_total",
+        ] {
+            assert!(names.contains(&n.to_string()), "{n} missing: {names:?}");
+        }
     }
 
     #[test]

@@ -30,6 +30,11 @@ export interface SeriesDataPoint {
   exactValue?: string;
   revisionDate: string;
   isOriginalRelease: boolean;
+  /**
+   * Whether the value differs from its date's original release value (a later release that
+   * repeated the value is not revised); null or absent when that original isn't known.
+   */
+  revisedFromOriginal?: boolean | null;
 }
 
 /** A series' observations and the transformation they carry. */
@@ -89,6 +94,7 @@ interface RawDataPoint {
   value: string | number | null;
   revisionDate: string;
   isOriginalRelease: boolean;
+  revisedFromOriginal?: boolean | null;
 }
 
 function toDataPoint(raw: RawDataPoint): SeriesDataPoint {
@@ -99,6 +105,7 @@ function toDataPoint(raw: RawDataPoint): SeriesDataPoint {
     value: finite,
     revisionDate: raw.revisionDate,
     isOriginalRelease: raw.isOriginalRelease,
+    revisedFromOriginal: raw.revisedFromOriginal ?? null,
   };
   if (finite !== null && typeof raw.value === 'string') point.exactValue = raw.value.trim();
   return point;

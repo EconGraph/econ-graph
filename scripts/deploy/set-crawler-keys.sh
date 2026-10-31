@@ -72,6 +72,8 @@ NAMESPACE="${NAMESPACE:-econ-graph}"
 # The PUBLIC_HOST the environment had, before the libraries are sourced.
 ENV_PUBLIC_HOST_SET="${PUBLIC_HOST+set}"
 ENV_PUBLIC_HOST="${PUBLIC_HOST-}"
+ENV_MAIN_HOST_SET="${MAIN_HOST+set}"
+ENV_MAIN_HOST="${MAIN_HOST-}"
 unset PUBLIC_HOST
 
 DRY_RUN=false
@@ -244,6 +246,17 @@ if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } &&
     PUBLIC_HOST="$(public_host_in_cluster)" ||
         die "could not read the cluster's routes to see which public host it serves; nothing was asked for or written"
     PUBLIC_HOST="${PUBLIC_HOST,,}"
+    served_main="$(public_main_host_in_cluster "$PUBLIC_HOST")" ||
+        die "could not read the canonical public route; nothing was asked for or written"
+    if [ "$ENV_MAIN_HOST_SET" = set ] && [ "${ENV_MAIN_HOST,,}" != "$served_main" ]; then
+        die "refusing to set sign-in keys: MAIN_HOST differs from the served canonical host; nothing was asked for or written"
+    fi
+    configured_main="$(deploy_config_value MAIN_HOST "host name")" || exit 1
+    if [ -n "$configured_main" ] && [ "${configured_main,,}" != "$served_main" ]; then
+        die "refusing to set sign-in keys: deploy config MAIN_HOST differs from the served canonical host; nothing was asked for or written"
+    fi
+    MAIN_HOST="$served_main"
+    export MAIN_HOST
     if [ -z "$PUBLIC_HOST" ]; then
         production=0
         cluster_is_marked_production || production=$?
@@ -291,7 +304,7 @@ if [ "$DRY_RUN" = true ]; then
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
     # The realm allows the public host only when there is one, else http://localhost.
     realm_origin="http://localhost"
-    [ -n "${PUBLIC_HOST:-}" ] && realm_origin="https://${PUBLIC_HOST}"
+    [ -n "${PUBLIC_HOST:-}" ] && realm_origin="https://${MAIN_HOST}"
     [ "$REIMPORT_REALM" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
         "then delete and re-apply job/keycloak-realm-import (for ${realm_origin}) and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
@@ -356,7 +369,7 @@ if [ "$REIMPORT_REALM" = true ] && [ "$entered" -gt 0 ]; then
     # the realm; a restart alone does not re-run it. A finished Job cannot be
     # re-run in place, so the old one goes first (as in deploy.sh). Rendered
     # for the public host read above, as deploy.sh renders it.
-    echo "==> Re-running the Keycloak realm import for the new sign-in client${PUBLIC_HOST:+ (public host https://${PUBLIC_HOST})}"
+    echo "==> Re-running the Keycloak realm import for the new sign-in client${PUBLIC_HOST:+ (public host https://${MAIN_HOST})}"
     kubectl -n "$NAMESPACE" delete job keycloak-realm-import --ignore-not-found
     (cd "$PROJECT_ROOT" && render_manifest k8s/manifests/keycloak/realm-import-job.yaml) |
         kubectl -n "$NAMESPACE" apply -f -

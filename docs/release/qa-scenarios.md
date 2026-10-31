@@ -11,7 +11,7 @@ need a person or a long observation period.
 
 ```bash
 QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab
-scripts/qa/run-scenarios.sh --target https://econgraph.com --profile production --json out.json
+scripts/qa/run-scenarios.sh --target https://www.econgraph.com --profile production --json out.json
 QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab \
     --only anonymous-api,mcp-reads
 scripts/qa/run-scenarios.sh --list
@@ -37,7 +37,30 @@ group gets SIGTERM, so a Python scenario stops the commands it started and runs 
 anonymous reader's roles). After `QA_TIMEOUT_GRACE_SECONDS` (default 60), whatever remains is
 killed. Stopping the runner with SIGTERM or Ctrl-C does the same to the running scenario, and
 the runner then starts no further scenario and exits 1. A scenario's own waits during cleanup
-use at most half the grace period.
+use at most half the grace period, and a command it starts during cleanup with `qa.run` gets
+only what is left of the grace period, less a margin (a fifth of it, at most 5 seconds), so it
+ends before the scenario is killed; with nothing left, it isn't started.
+
+`qa.run` starts each command in its own session, outside the scenario's process group, and a
+command can leave it with `setsid`. So once a scenario has ended, however it ends, the runner
+also kills every process still carrying the scenario's `QA_RUN_MARKER` environment variable,
+after giving them a second to end on their own. The scenario then fails, and its reason names
+each one (`left running, now killed: psql (4242)`) after the scenario's own reason. A process
+the runner can't see this way is neither killed nor reported:
+
+- anything on macOS, which has no `/proc`;
+- a process that clears or rewrites its environment: `env -i`, `sudo` with its default
+  environment reset, and programs that rewrite their process title, such as browsers,
+  PostgreSQL and nginx;
+- a process the runner's user can't read: setuid or non-dumpable ones, such as `ssh-agent`.
+
+If such a process still holds the scenario's output open, the runner stops waiting for the
+output 10 seconds after the scenario ends and reports what it has.
+
+Killing a local `kubectl exec` or `docker exec` client doesn't stop the command it started
+remotely. So a scenario, and any command it runs through a hook such as `QA_REDEPLOY_COMMAND`,
+must not leave anything running, including helpers that persist on purpose: an ssh
+ControlMaster (ControlPersist), `kubectl port-forward` or a gpg-agent.
 
 ## Profiles
 
@@ -47,7 +70,7 @@ unclear counts as changing state.
 
 | Profile | Runs | Targets |
 |---|---|---|
-| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com` or a host in `QA_PRODUCTION_HOSTS` |
+| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com`, `www.econgraph.com`, or a host in `QA_PRODUCTION_HOSTS` |
 | `ci` | every scenario except the lab-only ones | the same |
 | `production` | the scenarios that change nothing, plus `annotation-round-trip` as a dedicated QA account | any |
 
@@ -87,7 +110,7 @@ deployed realm.
 
 | Scenario | Changes state | Profiles | What it checks |
 |---|---|---|---|
-| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, the issuer, the sign-in page (which must refuse a `http://localhost` redirect URI), CORS, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check. It reaches the host through DNS, as a visitor does; `QA_PUBLIC_SITE_ROUTE=gateway` sends it to the gateway on the runner's host instead (`LOCAL_INGRESS_IP` and the ports `check-public-site.sh` reads) |
+| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, canonical-host redirects, the issuer, the sign-in page (which must refuse a `http://localhost` redirect URI), both public CORS origins and refused-origin preflights, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check. It reaches the host through DNS, as a visitor does; `QA_PUBLIC_SITE_ROUTE=gateway` sends it to the gateway on the runner's host instead (`LOCAL_INGRESS_IP` and the ports `check-public-site.sh` reads) |
 | `anonymous-api` | no | all | Without a token, through `/graphql`: a search, the series, its observations and the world map's cross-section. The same search and observations through `/data/graphql` must match |
 | `anonymous-browser` | no | all | Signed out, in Chromium: the home page without script errors, a search, a series page and its chart, the CSV download against the page's newest point, and the world map's colored countries and value table |
 | `annotation-round-trip` | yes | all, production only as a `qa-*` account | Signs in, creates a private annotation, retries the create with the same idempotency key and gets the same annotation, checks that it is stored once and invisible to an anonymous reader, then deletes it. Anything it created is deleted even when a check fails |
@@ -103,6 +126,34 @@ deployed realm.
 `QA_SEARCH_QUERY` (default `GDP`) is the search the read scenarios use. Each scenario's header
 documents its inputs and outputs in full.
 
+### Main address and sign-in checks
+
+The production target is the main address, `https://www.econgraph.com` by default:
+`PUBLIC_HOST=econgraph.com` is the base domain and `MAIN_HOST` selects the main host.
+With the apex as the main host, use the apex target and the checker's
+`--main-host econgraph.com`. Once the switch to www is finalized, run the `public-site`
+scenario with `MAIN_HOST_PERMANENT=www.econgraph.com`, so it expects 301 redirects
+rather than 302s. See [Main public address](../deployment/MAIN_HOST.md) for
+the operator commands. These browser and token checks supplement the `public-site`
+scenario: a passing routing probe does not show that sign-in completes.
+
+| Check | Expected result |
+| --- | --- |
+| Open HTTP on each public name and HTTPS on the apex, with a page path and query | HTTP first gets Cloudflare's 301 to HTTPS on the same name (Always Use HTTPS); HTTPS on the apex then redirects to the same path and query on `https://www.econgraph.com`: 302 until the switch is finalized, 301 after; the destination serves content without another canonical-host redirect |
+| Open HTTPS www directly, in both a fresh and an existing browser profile | App loads without a redirect loop; the canonical link uses HTTPS www and the path, without query/fragment. Clear cached permanent redirects if an existing profile retains the opposite redirect |
+| Start sign-in from a page reached through each name | Both flows reach the same www realm, complete the callback on www, and return to the intended page |
+| Reload, renew a token, and sign out after signing in | Session restore/renewal and logout use www callbacks; no apex issuer or callback is introduced |
+| Complete a sign-in already in progress when the host changes | Old state either completes safely on the main host or offers a fresh sign-in; no loop or unrecoverable callback error |
+| Inspect discovery and a newly issued token | Issuer is exactly `https://www.econgraph.com/idp/realms/econ-graph`, matching backend validation and the frontend's resolved relative issuer |
+| Use a token from before the issuer change in an isolated QA deployment | Backend rejects the old issuer; a newly issued token succeeds |
+| Browse signed out during the switch in an isolated QA deployment | Anonymous catalog data keeps loading, apart from at most the backend's own rollout |
+| Preflight from both public origins | Both origins are allowed whichever is the main host; `http://localhost` stays allowed, and `http://localhost:3000` and arbitrary origins get the backend's 403 with no allow-origin header |
+| Preview/apply the switch, finalize and apex rollback twice in a stubbed test or isolated QA deployment | Dry run makes no changes; reruns converge; finalize turns the redirects to www into 301s; rollback restores the apex issuer and the inverse redirect matrix while retaining both public CORS origins and TLS names |
+
+State-changing switch, token and rollback tests run against an isolated QA deployment
+or the targeted tests with `kubectl` and `curl` stubbed, never against production;
+never glob-run `scripts/deploy/test-*.sh`.
+
 ### The cluster scenarios
 
 `branch-isolation`, `data-survives-redeploy` and `gateway-routes-only` read the kind cluster. Each
@@ -116,7 +167,7 @@ the Postgres pods: the data database is `econ_graph` in `postgresql-0`, and each
 
 ```bash
 # Exit criterion 5, read-only:
-QA_KUBE_CONTEXT=kind-econ-graph scripts/qa/run-scenarios.sh --target https://econgraph.com \
+QA_KUBE_CONTEXT=kind-econ-graph scripts/qa/run-scenarios.sh --target https://www.econgraph.com \
     --profile production --only gateway-routes-only
 
 # Exit criterion 1, against a deployed branch, as a user of the branch's realm:

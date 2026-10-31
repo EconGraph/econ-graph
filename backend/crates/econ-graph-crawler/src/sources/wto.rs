@@ -650,6 +650,7 @@ fn series_metadata(
         units: info.unit(),
         frequency: info.frequency(),
         seasonal_adjustment: None,
+        ..NewSeriesMetadataLite::default()
     }
 }
 

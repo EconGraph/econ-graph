@@ -191,10 +191,13 @@ jobs:
             - 'k8s/manifests/keycloak/realm-import-job.yaml'
             - 'k8s/manifests/keycloak/deployment.yaml'
             - 'scripts/deploy/deploy.sh'
+            # test-realm-import.sh runs its realm frontendUrl query.
+            - 'scripts/deploy/switch-main-host.sh'
           migrations:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
             - 'backend/scripts/check_migration_order.py'
+            - 'backend/scripts/test_check_migration_order.py'
           # E2E Image Build builds the ci/docker/e2e images. Beyond the
           # Dockerfiles: what decides the build context, the files they COPY
           # by name, and what decides where the frontend build lands (the
@@ -318,19 +321,24 @@ jobs:
       with:
         persist-credentials: false
 
-    # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
+    # deploy.sh applies PUBLIC_HOST and MAIN_HOST to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
     # rendering against the manifests, the library and the cut-over's rollback
-    # NetworkPolicy step against a stub kubectl, and check-public-site.sh's www
-    # redirect checks against a stub curl.
+    # NetworkPolicy step against a stub kubectl, and check-public-site.sh's main-host
+    # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
+    # curl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-check-public-site.sh
+        shellcheck -x scripts/deploy/switch-main-host.sh scripts/deploy/test-switch-main-host.sh
+        scripts/deploy/test-switch-main-host.sh
         scripts/deploy/test-public-host-lib.sh
+        scripts/deploy/test-public-host-urls.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-cutover-main-host.sh
         scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
@@ -338,6 +346,18 @@ jobs:
         KUSTOMIZE_KUBECTL="$(command -v kubectl)" || { echo 'kubectl is required for Kustomize parity' >&2; exit 1; }
         export KUSTOMIZE_KUBECTL
         python3 scripts/deploy/test-branch-environments.py
+
+    # The release lab (docs/deployment/RELEASE_LAB.md) against stub kind, kubectl and
+    # docker: never marked production, no tunnel token or cloudflared, no host ports,
+    # teardown only of its own marked cluster, dumps never modified, crawler-worker at 0
+    # replicas, and the image-loading refusals.
+    - name: Check the release lab's safety properties
+      run: python3 scripts/deploy/test-release-lab.py
+
+    # Its restore, Keycloak clean-up and row counts on a scratch postgres:18 container
+    # (published on 127.0.0.1 only, removed afterwards) with synthetic dumps.
+    - name: Check the release lab's restore on PostgreSQL 18
+      run: python3 scripts/deploy/test-release-lab-restore.py
 
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.
@@ -394,12 +414,14 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, and its roll of the app
+    # when econ-graph-config changes, against a stub kubectl.
     - name: Check the pre-deploy database check
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-precheck-db-migration.sh
         scripts/deploy/test-data-migrations.sh
+        scripts/deploy/test-app-config.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
@@ -490,11 +512,26 @@ jobs:
     # it. Stop if selection failed or the run was cancelled.
     if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.migrations == 'true') }}
 
+    services:
+      migration-postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: migration-test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432/tcp
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
+        # Target-tip comparisons and published-version protection need branches and final tags.
+        fetch-depth: 0
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
@@ -502,10 +539,18 @@ jobs:
       with:
         python-version: '3.14'
 
+    - name: Test target migration coordination
+      env:
+        MIGRATION_TEST_DATABASE_URL: postgres://postgres:migration-test@127.0.0.1:${{ job.services.migration-postgres.ports['5432'] }}/postgres
+      run: python3 -m unittest discover -s backend/scripts -p test_check_migration_order.py -v
+
     - name: Run migration order validation
+      env:
+        MIGRATION_EVENT_PATH: ${{ github.event_path }}
+        MIGRATION_EVENT_NAME: ${{ github.event_name }}
       run: |
         cd backend
-        python3 scripts/check_migration_order.py
+        python3 scripts/check_migration_order.py --event-path "$MIGRATION_EVENT_PATH" --event-name "$MIGRATION_EVENT_NAME"
 
     - name: Test migration validation with duplicate timestamps
       run: |

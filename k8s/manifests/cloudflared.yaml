@@ -1,5 +1,5 @@
 # cloudflared: the Cloudflare Tunnel connector that serves the public site
-# (PUBLIC_HOST in scripts/deploy/deploy.sh, https://econgraph.com) from this cluster.
+# (PUBLIC_HOST base domain, MAIN_HOST https://www.econgraph.com by default) from this cluster.
 #
 # Traffic: browser -> Cloudflare edge (TLS) -> this tunnel (outbound-only from
 # the cluster, no inbound port is opened on the host) -> the gateway -> the app.
@@ -8,7 +8,9 @@
 # Each public hostname (econgraph.com, www.econgraph.com) points at
 #   https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443
 # with No TLS Verify on and no HTTP Host header override: cloudflared passes the
-# visitor's Host through, which is what the public routes match on.
+# visitor's Host through. The gateway serves MAIN_HOST; the alternate name
+# redirects to it (to www: 302 until switch-main-host.sh --finalize, then 301; to the
+# apex: 301), with both names covered by the gateway certificate.
 # The origin is the gateway's https listener so that the scheme the gateway
 # passes on as X-Forwarded-Proto is the connection's own: no client header can
 # claim https, and plain http for the public host is redirected to https

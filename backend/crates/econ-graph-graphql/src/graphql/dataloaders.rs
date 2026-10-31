@@ -18,6 +18,7 @@
 //! - All DataLoaders must have comprehensive documentation
 
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
+use crate::graphql::units::{SeriesUnitsBatcher, SeriesUnitsFields};
 use crate::imports::*;
 use crate::types::LatestObservationType;
 use dataloader::cached::Loader;
@@ -121,7 +122,8 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
             let data_points = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
                 .filter(public_data_points_predicate())
-                .filter(econ_graph_core::models::revision_filter(None, false))
+                .filter(econ_graph_core::models::exclude_synthetic_legacy_rows())
+                .filter(econ_graph_core::models::revision_filter_excluding_synthetic(None, false))
                 .order(dsl::date.desc())
                 .load::<DataPoint>(&mut conn)
                 .await
@@ -360,7 +362,8 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
             };
 
             // One row per series: newest date, then newest revision of it. On a same-day tie
-            // between an original release and a revision, the revision wins. A LATERAL
+            // between an original release and a revision, the revision wins. A synthetic
+            // legacy row never counts, as in `dataPoints` with `latestRevisionOnly`. A LATERAL
             // `LIMIT 1` per key walks the unique index backwards and reads only the newest
             // (date, revision_date) group, at most two rows sorted to put the revision first;
             // DISTINCT ON would read and sort every row of every requested series.
@@ -369,13 +372,14 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                  FROM unnest($1::uuid[]) AS k(id) \
                  CROSS JOIN LATERAL ( \
                      SELECT date, value, revision_date FROM data_points \
-                     WHERE series_id = k.id \
+                     WHERE series_id = k.id AND NOT {} \
                      ORDER BY date DESC, revision_date DESC, is_original_release ASC \
                      LIMIT 1 \
                  ) dp \
                  WHERE EXISTS (SELECT 1 FROM economic_series public_series \
                      WHERE public_series.id = k.id \
                        AND {})",
+                econ_graph_core::models::synthetic_legacy_row("data_points", "other_original"),
                 public_series_sql("public_series")
             ))
             .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)
@@ -427,6 +431,8 @@ pub struct DataLoaders {
     /// Non-caching, so series moving between datasets show on the next request.
     pub series_dataset_fields_loader:
         NonCachedLoader<Uuid, Option<SeriesDatasetFields>, SeriesDatasetFieldsBatcher>,
+    /// Non-caching, so a crawl's new units show on the next request.
+    pub series_units_loader: NonCachedLoader<Uuid, Option<SeriesUnitsFields>, SeriesUnitsBatcher>,
     /// A non-caching data source loader for [`crate::graphql::datasets::DatasetType::source`].
     /// `data_source_loader` above is cached for the schema's lifetime, so a dataset's source
     /// resolver uses this one to keep faith with the "next request sees the edit" promise the
@@ -464,6 +470,8 @@ impl DataLoaders {
         let series_dataset_fields_loader =
             NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
                 .with_max_batch_size(2000);
+        let series_units_loader = NonCachedLoader::new(SeriesUnitsBatcher { pool: pool.clone() })
+            .with_max_batch_size(2000);
         // Sources publish only a handful of datasets each, so a page of `datasets { source }`
         // won't approach the default batch size; raised anyway for consistency with the loaders
         // above.
@@ -487,6 +495,7 @@ impl DataLoaders {
             series_count_loader,
             dataset_loader,
             series_dataset_fields_loader,
+            series_units_loader,
             dataset_source_loader,
             latest_observation_loader,
         }

@@ -7,8 +7,9 @@
 //! - `GET /metrics`: Prometheus text exposition of `econ_graph_metrics::DEFAULT_REGISTRY`, the
 //!   registry `CRAWLER_METRICS` (HTTP-level `econgraph_crawler_*`), `CRAWLER_QUEUE_METRICS`
 //!   (`crawler_jobs_total`, `crawler_queue_*`, `crawler_last_{success,failure}_timestamp_seconds`)
-//!   `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`) and `CRAWLER_SCHEDULER_METRICS`
-//!   (`crawler_scheduler_*`) use.
+//!   `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`), `CRAWLER_SCHEDULER_METRICS`
+//!   (`crawler_scheduler_*`) and `CRAWLER_UNITS_METRICS` (`crawler_units_*`, every source from 0)
+//!   use.
 //! - `GET /healthz`: 200 while the worker loop runs, 503 before it starts and once it stops.
 //!
 //! [`queue_gauge_loop`] refreshes the queue gauges from
@@ -65,6 +66,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_COVERAGE_METRICS;
     let _ = &*CRAWLER_SCHEDULER_METRICS;
     let _ = &*CRAWLER_DISCOVERY_RUN_METRICS;
+    econ_graph_crawler::units::init_metrics();
 }
 
 /// Unix seconds of `t`, as a gauge value.
@@ -284,6 +286,26 @@ pub async fn update_discovery_run_gauges(
     let runs = alerting_run_progress(pool, sources).await?;
     apply_discovery_runs(m, &runs, known);
     Ok(())
+}
+
+/// The sources this worker discovers in chunks: their adapter can
+/// ([`chunked_discovery`](econ_graph_crawler::SourceAdapter::chunked_discovery)) and the
+/// worker's single-job switch doesn't list them. Only these get the run gauges, so a source
+/// switched to single-job discovery drops out of `CrawlerDiscoveryRunOverdue`.
+pub fn chunked_run_sources(
+    registry: &econ_graph_crawler::AdapterRegistry,
+    single_job_discovery: &[SourceId],
+) -> Vec<SourceId> {
+    registry
+        .ids()
+        .into_iter()
+        .filter(|id| !single_job_discovery.contains(id))
+        .filter(|&id| {
+            registry
+                .get(id)
+                .is_some_and(|a| a.chunked_discovery().is_some())
+        })
+        .collect()
 }
 
 /// Refreshes the global queue gauges, and the run gauges of `chunked_sources` (the sources
@@ -715,6 +737,15 @@ mod tests {
             .map(|l| l.value().to_string())
             .collect();
         assert_eq!(sources, HashSet::from(["FRED".to_string()]));
+    }
+
+    /// FRED is a chunked source unless the single-job switch lists it.
+    #[test]
+    fn chunked_run_sources_leave_out_the_single_job_switch() {
+        let registry = econ_graph_crawler::sources::default_registry();
+        assert!(chunked_run_sources(&registry, &[]).contains(&SourceId::Fred));
+        let switched = chunked_run_sources(&registry, &[SourceId::Fred]);
+        assert!(!switched.contains(&SourceId::Fred), "{switched:?}");
     }
 
     /// Coverage from the database lands on /metrics for every covered source.

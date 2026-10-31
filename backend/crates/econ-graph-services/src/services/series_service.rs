@@ -13,7 +13,7 @@ use econ_graph_core::{
         DataPoint, DataQueryParams, DataTransformation, EconomicSeries, SeriesSearchParams,
         TransformedDataPoint,
     },
-    schema::economic_series,
+    schema::{data_points, economic_series},
 };
 
 /// Public reads exclude legally restricted series independently of activity filters.
@@ -392,6 +392,7 @@ pub async fn get_series_data(
     Ok(SeriesDataPage {
         points: page.points.into_iter().map(DataPoint::from).collect(),
         context: page.context.into_iter().map(DataPoint::from).collect(),
+        revised: page.revised,
         total_count: page.total_count,
         offset: page.offset,
     })
@@ -408,6 +409,9 @@ pub struct SeriesDataPage {
     /// Points before this page that a transformation compares the page's points with (see
     /// [`PageContext`]), in page order. Empty on the first page.
     pub context: Vec<DataPoint>,
+    /// For each point on the page whose date's original release is known, by point id: whether
+    /// its value differs from that original release's (see [`revised_from_original`]).
+    pub revised: std::collections::HashMap<uuid::Uuid, bool>,
     /// How many points match the filters across all pages.
     pub total_count: i64,
     /// How many matching points come before this page.
@@ -422,6 +426,82 @@ impl SeriesDataPage {
 }
 
 pub use econ_graph_core::models::PageContext;
+
+/// Whether each of `points` (all of series `series_id`) has a value that differs from its date's
+/// original release, by point id. A date's original release is its earliest real original
+/// (by revision date, then id): an `is_original_release` row that is not a synthetic legacy row
+/// ([`econ_graph_core::models::exclude_synthetic_legacy_rows`]), read under the same public
+/// series predicate as the page. The original release itself is not revised.
+///
+/// Values compare as numbers, exactly: `3.0` and `3.00` are the same value, and a missing value
+/// differs from any number. A point is left out (the original is unknown) when its date has no
+/// real original, or the original was published after the point, which only an inconsistent
+/// history has.
+///
+/// One indexed query for the page's dates (`data_points`' unique key starts with `series_id,
+/// date`), in the caller's transaction.
+pub async fn revised_from_original(
+    conn: &mut diesel_async::AsyncPgConnection,
+    series_id: uuid::Uuid,
+    points: &[DataPoint],
+) -> Result<std::collections::HashMap<uuid::Uuid, bool>, diesel::result::Error> {
+    let dates: Vec<chrono::NaiveDate> = points
+        .iter()
+        .map(|p| p.date)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if dates.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let originals: std::collections::HashMap<_, _> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .filter(
+            data_points::series_id.eq_any(
+                economic_series::table
+                    .filter(public_series_predicate())
+                    .select(economic_series::id),
+            ),
+        )
+        .filter(data_points::date.eq_any(dates))
+        .filter(data_points::is_original_release.eq(true))
+        .filter(econ_graph_core::models::exclude_synthetic_legacy_rows())
+        .distinct_on(data_points::date)
+        .order_by((
+            data_points::date,
+            data_points::revision_date,
+            data_points::id,
+        ))
+        .select((
+            data_points::date,
+            data_points::id,
+            data_points::revision_date,
+            data_points::value,
+        ))
+        .load::<(
+            chrono::NaiveDate,
+            uuid::Uuid,
+            chrono::NaiveDate,
+            Option<bigdecimal::BigDecimal>,
+        )>(conn)
+        .await?
+        .into_iter()
+        .map(|(date, id, revision_date, value)| (date, (id, revision_date, value)))
+        .collect();
+    Ok(points
+        .iter()
+        .filter_map(|point| {
+            let (id, revision_date, value) = originals.get(&point.date)?;
+            if *id == point.id {
+                Some((point.id, false))
+            } else if *revision_date > point.revision_date {
+                None
+            } else {
+                Some((point.id, point.value != *value))
+            }
+        })
+        .collect())
+}
 
 /// Transform data points according to the specified transformation
 pub async fn transform_data_points(

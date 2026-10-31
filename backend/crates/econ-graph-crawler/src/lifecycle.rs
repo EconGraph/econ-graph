@@ -97,6 +97,22 @@ impl CatalogLifecycle {
     }
 }
 
+/// Refuses an empty catalog selection, the same way wherever a catalog is about to be
+/// committed (an adapter's own walk, a chunked discovery's finalize): an empty list is never
+/// evidence that every tracked series is gone, so nothing is reconciled or retired against it.
+/// The error is transient, as for a failed catalog page: the next discovery tries again.
+pub(crate) fn refuse_empty_selection(
+    source: SourceId,
+    selected: usize,
+) -> Result<(), crate::error::CrawlError> {
+    if selected == 0 {
+        return Err(crate::error::CrawlError::Transient(format!(
+            "{source} catalog selection is empty; refusing to infer removals"
+        )));
+    }
+    Ok(())
+}
+
 /// Durable evidence requirements, independent of worker replica/process lifetime.
 #[derive(Debug, Clone, Copy)]
 pub struct LifecyclePolicy {

@@ -3,8 +3,8 @@
 //! in persist_series_conn: it borrows the worker transaction which owns its lease and queue
 //! completion; a pool-based write method here would break that all-or-nothing boundary.
 
-use super::series_service::public_series_predicate;
 pub use super::series_service::MAX_SERIES_DATA_PAGE;
+use super::series_service::{public_series_predicate, revised_from_original};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 pub use econ_graph_core::models::{
@@ -77,6 +77,7 @@ impl TimeSeriesStore for PostgresStore<'_> {
                     _ => Vec::new(),
                 };
 
+                let revised = revised_from_original(conn, params.series_id, &points).await?;
                 let dataset_id = economic_series::table
                     .find(params.series_id)
                     .filter(public_series_predicate())
@@ -89,6 +90,7 @@ impl TimeSeriesStore for PostgresStore<'_> {
                     dataset_id,
                     points: points.into_iter().map(Observation::from).collect(),
                     context: context.into_iter().map(Observation::from).collect(),
+                    revised,
                     total_count,
                     offset,
                 })

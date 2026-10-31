@@ -150,11 +150,40 @@ impl TimeSeriesStore for MemoryStore {
         } else {
             vec![]
         };
+        let revised = page
+            .iter()
+            .filter_map(|point| {
+                let original = self
+                    .points
+                    .iter()
+                    .filter(|p| {
+                        p.series_id == point.series_id
+                            && p.date == point.date
+                            && p.is_original_release
+                            && !(p.revision_date == p.date
+                                && self.points.iter().any(|other| {
+                                    other.series_id == p.series_id
+                                        && other.date == p.date
+                                        && other.is_original_release
+                                        && other.revision_date != p.date
+                                }))
+                    })
+                    .min_by_key(|p| (p.revision_date, p.id))?;
+                if original.id == point.id {
+                    Some((point.id, false))
+                } else if original.revision_date > point.revision_date {
+                    None
+                } else {
+                    Some((point.id, point.value != original.value))
+                }
+            })
+            .collect();
         Ok(ObservationPage {
             series_id: req.series_id,
             dataset_id: (req.series_id == self.series_id).then_some(self.dataset_id),
             points: page,
             context,
+            revised,
             total_count,
             offset,
         })
@@ -188,6 +217,10 @@ async fn contract(store: &impl TimeSeriesStore, series: Uuid, dataset: Uuid) {
     );
     assert_eq!(all.points[2].value, None);
     assert!(!all.has_next_page());
+    assert_eq!(all.revised.get(&observation_id(series, 1)), None);
+    assert_eq!(all.revised.get(&observation_id(series, 2)), Some(&false));
+    assert_eq!(all.revised.get(&observation_id(series, 3)), Some(&true));
+    assert_eq!(all.revised.get(&observation_id(series, 6)), Some(&false));
     for (mode, count, first_value) in [
         (RevisionMode::Latest, 3, None),
         (RevisionMode::AsOf(day(2)), 2, Some(EXACT)),
@@ -296,6 +329,96 @@ async fn alternate_adapter_satisfies_consumer_contract() {
     .await;
 }
 
+// Exercise the revised map independently of revision selection: equal decimal scales,
+// nulls, reversion, multiple originals and unavailable originals.
+fn revised_observations(series_id: Uuid) -> Vec<Observation> {
+    let rows = [
+        (1, 2, true, Some("3.0")),
+        (1, 3, false, Some("3.00")),
+        (1, 4, false, None),
+        (1, 5, false, Some("3")),
+        (2, 3, true, None),
+        (2, 4, false, None),
+        (2, 5, false, Some("0")),
+        (3, 4, false, Some("9")), // no original
+        (4, 5, true, Some("8")),
+        (4, 4, false, Some("7")), // original not published yet
+        (5, 6, true, Some("11")),
+        (5, 7, true, Some("12")),
+    ];
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, (date, rev, original, value))| Observation {
+            id: Uuid::from_u128((series_id.as_u128() & !0xffff) | (1000 + i as u128)),
+            series_id,
+            date: day(date),
+            revision_date: day(rev),
+            is_original_release: original,
+            value: value.map(|v| BigDecimal::from_str(v).unwrap()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            attributes: BTreeMap::new(),
+        })
+        .collect()
+}
+
+async fn revised_contract(store: &impl TimeSeriesStore, series: Uuid) {
+    let page = store
+        .read_page(request(series, RevisionMode::All))
+        .await
+        .unwrap();
+    let expected = [
+        Some(false),
+        Some(false),
+        Some(true),
+        Some(false),
+        Some(false),
+        Some(false),
+        Some(true),
+        None,
+        Some(false),
+        None,
+        Some(false),
+        Some(true),
+    ];
+    for (i, expected) in expected.into_iter().enumerate() {
+        assert_eq!(
+            page.revised
+                .get(&Uuid::from_u128(
+                    (series.as_u128() & !0xffff) | (1000 + i as u128)
+                ))
+                .copied(),
+            expected,
+            "revised flag for fixture row {i}"
+        );
+    }
+    // Paging and vintage bounds cannot hide an original used for the comparison.
+    let mut req = request(series, RevisionMode::AsOf(day(4)));
+    req.start_date = Some(day(1));
+    req.end_date = Some(day(1));
+    let page = store.read_page(req).await.unwrap();
+    assert_eq!(page.points.len(), 1);
+    assert_eq!(
+        page.revised
+            .get(&Uuid::from_u128((series.as_u128() & !0xffff) | 1002)),
+        Some(&true)
+    );
+}
+
+#[tokio::test]
+async fn alternate_adapter_preserves_revised_flags() {
+    let series_id = Uuid::new_v4();
+    revised_contract(
+        &MemoryStore {
+            series_id,
+            dataset_id: Uuid::new_v4(),
+            points: revised_observations(series_id),
+        },
+        series_id,
+    )
+    .await;
+}
+
 #[test]
 fn exact_nullable_transport_and_legacy_modes() {
     for p in observations(Uuid::nil()) {
@@ -381,6 +504,7 @@ async fn postgres_satisfies_same_consumer_contract() {
         .await
         .unwrap();
     assert_eq!(legacy.total_count, neutral.total_count);
+    assert_eq!(legacy.revised, neutral.revised);
     assert_eq!(
         legacy
             .points
@@ -420,15 +544,47 @@ async fn postgres_satisfies_same_consumer_contract() {
             page.total_count as usize,
             page.points.len() + page.context.len()
         );
+        // If the page saw this transient original, the flag lookup must see it too.
+        if page.points.iter().any(|point| point.id == changing_id) {
+            assert_eq!(page.revised.get(&changing_id), Some(&false));
+        } else {
+            assert!(!page.revised.contains_key(&changing_id));
+        }
     }
     writer.await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    diesel::delete(
+        econ_graph_core::schema::data_points::table
+            .filter(econ_graph_core::schema::data_points::series_id.eq(series)),
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    for point in revised_observations(series) {
+        let row: econ_graph_core::models::DataPoint = point.into();
+        diesel::insert_into(econ_graph_core::schema::data_points::table)
+            .values((
+                econ_graph_core::schema::data_points::id.eq(row.id),
+                econ_graph_core::schema::data_points::series_id.eq(row.series_id),
+                econ_graph_core::schema::data_points::date.eq(row.date),
+                econ_graph_core::schema::data_points::value.eq(row.value),
+                econ_graph_core::schema::data_points::revision_date.eq(row.revision_date),
+                econ_graph_core::schema::data_points::is_original_release
+                    .eq(row.is_original_release),
+            ))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    drop(conn);
+    revised_contract(&PostgresStore::new(&pool), series).await;
     let mut conn = pool.get().await.unwrap();
     diesel::sql_query(format!("DELETE FROM data_sources WHERE id='{source}'"))
         .execute(&mut conn)
         .await
         .unwrap();
 }
-use diesel::ExpressionMethods;
+use diesel::{ExpressionMethods, QueryDsl};
 
 /// Forecasts can be published before their observation date. A synthetic row stamped with
 /// that future observation date must not defeat the actual vintage during latest selection.
@@ -592,6 +748,7 @@ async fn postgres_preserves_restricted_visibility_and_projection_vintages() {
         assert_eq!(hidden.total_count, 0);
         assert!(hidden.points.is_empty());
         assert!(hidden.context.is_empty());
+        assert!(hidden.revised.is_empty());
         assert!(!hidden.has_next_page());
         let legacy = econ_graph_services::series_service::get_series_data(
             &pool,
@@ -603,6 +760,7 @@ async fn postgres_preserves_restricted_visibility_and_projection_vintages() {
         assert_eq!(legacy.total_count, 0);
         assert!(legacy.points.is_empty());
         assert!(legacy.context.is_empty());
+        assert!(legacy.revised.is_empty());
     }
     let mut conn = pool.get().await.unwrap();
     let retained = data_points::table

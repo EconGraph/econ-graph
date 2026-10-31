@@ -125,17 +125,18 @@ same name) are ignored, and the run says how many. A record that can't be writte
 the run: before any step, or at the step whose result it was recording. A record without
 `deploy_started` lines counts as never deployed.
 
-## PUBLIC_HOST
+## PUBLIC_HOST and MAIN_HOST
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
 `ECONGRAPH_CONFIG_DIR` names another directory; `ECONGRAPH_DEPLOY_ENV` names another file
 and wins over both). `ECONGRAPH_CONFIG_DIR` is also the backup scripts' variable
-(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too. One
-line:
+(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too.
+The public-domain and main-host settings are:
 
 ```sh
 PUBLIC_HOST=econgraph.com
+MAIN_HOST=www.econgraph.com
 ```
 
 The file is read, not sourced: surrounding blanks and one pair of quotes are dropped, and
@@ -164,6 +165,21 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
   routes first;
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
+
+`MAIN_HOST` selects the main public address independently of the base domain. Its
+default is `www.${PUBLIC_HOST}`; the only other supported value is `PUBLIC_HOST`
+itself. The hostname setting drives gateway routes, Keycloak's hostname and realm
+`frontendUrl`, the web client, and the backend's token issuer. Normal deploys and
+release deploys refuse to change the main host of a live deployment: set `MAIN_HOST`
+in the deploy configuration to the main host the cluster serves, and change it only
+with the operator switch, which invalidates existing realm sessions with the issuer.
+An exported `MAIN_HOST` overrides the deploy configuration, so a stale export is
+refused the same way.
+
+`MAIN_HOST_PERMANENT`, written by the switch's `--finalize`, makes the redirects to
+www permanent (301); without it they are temporary (302). Redirects to the apex are
+always permanent. See [Main public address](MAIN_HOST.md) for the operator procedure,
+the redirect status and rollback.
 
 ## APP_DATABASE
 

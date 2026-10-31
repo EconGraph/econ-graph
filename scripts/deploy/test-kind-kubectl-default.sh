@@ -85,6 +85,10 @@ case "$*" in
     # ... and none pending, by crawler-migrate-check (scripts/deploy/lib/data-migrations.sh).
     "get pods -l job-name=crawler-migrate-check "*) [ -z "${FAKE_APPLY:-}" ] || echo pod/crawler-migrate-check-x ;;
     "logs pod/crawler-migrate-check-x "*) [ -z "${FAKE_APPLY:-}" ] || echo "0 data migration(s) pending" ;;
+    # ... and the app's ConfigMap, whose hash roll_app_on_config_change (lib/app-config.sh)
+    # finds already on each Deployment, so nothing is rolled.
+    "get configmap econ-graph-config -o jsonpath={.data}") [ -z "${FAKE_APPLY:-}" ] || printf '{"A":"1"}' ;;
+    "get deployment/"*app-config-hash*) [ -z "${FAKE_APPLY:-}" ] || printf '%s' "$(printf '{"A":"1"}' | sha256sum | cut -c1-16)" ;;
     # deploy.sh checks the anonymous reader's key before its first apply (base64, fake).
     "get secret econ-graph-keycloak --ignore-not-found -o name") echo secret/econ-graph-keycloak ;;
     "get secret econ-graph-keycloak -o "*anonymous-client-secret*) printf 'ZmFrZQ==' ;;
@@ -271,10 +275,10 @@ out="$({ timeout 60 env -u KUBECTL -u KUBECONFIG -u DOCKER_HOST -u DOCKER_CONTEX
     -u KIND_FALLBACK_WARNED -u DRY_RUN \
     HOME="$HOME_DIR" TMPDIR="$WORK/tmp" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin" \
     TEST_LOGS="$LOGS" TEST_SOURCE="$WORK/source" PUBLIC_HOST= FAKE_APPLY=1 \
-    FAKE_FAIL="wait --for=condition=available" "$DTREE/scripts/deploy/deploy.sh" </dev/null 2>&1
+    FAKE_FAIL="rollout status deployment/econ-graph-backend" "$DTREE/scripts/deploy/deploy.sh" </dev/null 2>&1
     echo "deploy.sh exit $?"; } | timeout 30 cat)"
 elapsed=$((SECONDS - start))
-if ! grep -qF "fake kind kubectl: failing as asked: wait --for=condition=available" <<<"$out"; then
+if ! grep -qF "fake kind kubectl: failing as asked: rollout status deployment/econ-graph-backend" <<<"$out"; then
     fail "deploy.sh with a failing wait: did not reach the wait for the Deployments"
 elif ! grep -qE "^deploy.sh exit [1-9]" <<<"$out"; then
     fail "deploy.sh with a failing wait: did not fail"

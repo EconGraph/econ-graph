@@ -150,6 +150,7 @@ use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
 use crate::reference_file::{self, labels_only, CodeList, ReferenceFile};
 use crate::source::SourceId;
+use crate::units::UnitsContext;
 use crate::value::parse_observation_value;
 
 /// The real BLS Public Data API v2 root.
@@ -1423,6 +1424,8 @@ fn build_series(
             units: c.measure_data_type,
             frequency: frequency.map(str::to_string),
             seasonal_adjustment: c.seasonality.or_else(id_seasonality),
+            units_context: UnitsContext::for_source(SourceId::Bls),
+            ..NewSeriesMetadataLite::default()
         },
         None => NewSeriesMetadataLite {
             title: String::new(),
@@ -1430,6 +1433,7 @@ fn build_series(
             units: None,
             frequency: frequency.map(str::to_string),
             seasonal_adjustment: id_seasonality(),
+            ..NewSeriesMetadataLite::default()
         },
     };
     let metadata = (metadata != NewSeriesMetadataLite::default()).then_some(metadata);
