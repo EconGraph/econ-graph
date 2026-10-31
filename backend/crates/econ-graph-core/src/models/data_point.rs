@@ -345,17 +345,42 @@ pub fn revision_filter(
     as_of: Option<NaiveDate>,
     original_only: bool,
 ) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
-    let newer = format!(
+    revision_filter_skipping(as_of, original_only, false)
+}
+
+/// [`revision_filter`] for a read that also applies [`exclude_synthetic_legacy_rows`]: a
+/// synthetic legacy row doesn't compete either, so it can't hide the row the read keeps.
+///
+/// Without this, an original release published before its observation date (a projection,
+/// say) loses to the synthetic row for that date, which is newer; the synthetic row is then
+/// excluded too, and the date disappears from `originalOnly` and `asOf` reads.
+pub fn revision_filter_excluding_synthetic(
+    as_of: Option<NaiveDate>,
+    original_only: bool,
+) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
+    revision_filter_skipping(as_of, original_only, true)
+}
+
+fn revision_filter_skipping(
+    as_of: Option<NaiveDate>,
+    original_only: bool,
+    skip_synthetic: bool,
+) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
+    let mut newer = String::from(
         "NOT EXISTS (SELECT 1 FROM data_points newer \
          WHERE newer.series_id = data_points.series_id AND newer.date = data_points.date \
          AND (newer.revision_date, NOT newer.is_original_release, newer.id) \
-         > (data_points.revision_date, NOT data_points.is_original_release, data_points.id){}",
-        if original_only {
-            " AND newer.is_original_release"
-        } else {
-            ""
-        }
+         > (data_points.revision_date, NOT data_points.is_original_release, data_points.id)",
     );
+    if original_only {
+        newer.push_str(" AND newer.is_original_release");
+    }
+    if skip_synthetic {
+        newer.push_str(&format!(
+            " AND NOT {}",
+            synthetic_legacy_row("newer", "newer_other_original")
+        ));
+    }
     match as_of {
         None => Box::new(sql::<Bool>(&newer).sql(")")),
         Some(as_of) => Box::new(
@@ -386,18 +411,25 @@ pub fn revision_filter(
 /// `is_original_release` row, at any `revision_date`, is untouched.
 pub fn exclude_synthetic_legacy_rows(
 ) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
-    Box::new(sql::<Bool>(
-        "NOT (\
-           data_points.revision_date = data_points.date AND data_points.is_original_release \
-           AND EXISTS (\
-             SELECT 1 FROM data_points other_original \
-             WHERE other_original.series_id = data_points.series_id \
-             AND other_original.date = data_points.date \
-             AND other_original.is_original_release \
-             AND other_original.revision_date <> data_points.date\
-           )\
-         )",
-    ))
+    Box::new(sql::<Bool>(&format!(
+        "NOT {}",
+        synthetic_legacy_row("data_points", "other_original")
+    )))
+}
+
+/// SQL: the `data_points` row aliased `row` is a synthetic legacy row (see
+/// [`exclude_synthetic_legacy_rows`]), with `other` the alias its subquery uses.
+fn synthetic_legacy_row(row: &str, other: &str) -> String {
+    format!(
+        "({row}.revision_date = {row}.date AND {row}.is_original_release \
+         AND EXISTS (\
+           SELECT 1 FROM data_points {other} \
+           WHERE {other}.series_id = {row}.series_id \
+           AND {other}.date = {row}.date \
+           AND {other}.is_original_release \
+           AND {other}.revision_date <> {row}.date\
+         ))"
+    )
 }
 
 /// **DataTransformation Enum**

@@ -287,7 +287,10 @@ impl EconomicSeriesType {
         }
 
         if as_of_or_latest {
-            query = query.filter(models::revision_filter(filter.as_of, original_only));
+            query = query.filter(models::revision_filter_excluding_synthetic(
+                filter.as_of,
+                original_only,
+            ));
         }
 
         let data_points = query

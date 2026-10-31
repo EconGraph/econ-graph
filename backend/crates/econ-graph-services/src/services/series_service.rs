@@ -513,10 +513,12 @@ fn filtered_data_points(
         query = query.filter(data_points::is_original_release.eq(true));
     }
     if as_of_or_latest {
-        query = query.filter(econ_graph_core::models::revision_filter(
-            params.as_of,
-            original_only,
-        ));
+        query = query.filter(
+            econ_graph_core::models::revision_filter_excluding_synthetic(
+                params.as_of,
+                original_only,
+            ),
+        );
     }
 
     query
