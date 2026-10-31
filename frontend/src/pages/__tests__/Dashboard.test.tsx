@@ -133,19 +133,21 @@ describe('Dashboard', () => {
     ).toBeInTheDocument();
     expect(within(gdpCard).queryByText('Current Dollars')).not.toBeInTheDocument();
     expect(within(gdpCard).getByText('Oct 1, 2024')).toHaveAttribute('datetime', '2024-10-01');
-    expect(within(gdpCard).getByText(`BEA ${GDP_ID}`)).toBeInTheDocument();
+    // The chip names the NIPA table and line, not the internal id it was looked up by.
+    expect(within(gdpCard).getByText('BEA · NIPA Table 1.1.5, line 1')).toBeInTheDocument();
+    expect(within(gdpCard).queryByText(GDP_ID, { exact: false })).toBeNull();
 
     const unemploymentCard = card('Unemployment Rate');
     expect(await within(unemploymentCard).findByText('4.1')).toBeInTheDocument();
     expect(within(unemploymentCard).getByText('Percent, seasonally adjusted')).toBeInTheDocument();
     expect(within(unemploymentCard).getByText('Feb 1, 2025')).toBeInTheDocument();
-    expect(within(unemploymentCard).getByText('BLS LNS14000000')).toBeInTheDocument();
+    expect(within(unemploymentCard).getByText('BLS · LNS14000000')).toBeInTheDocument();
 
     // 319.0825 rounds up to 319.083 on the digits; float rounding would give 319.082.
     const cpiCard = card('Consumer Price Index');
     expect(await within(cpiCard).findByText('319.083')).toBeInTheDocument();
     expect(within(cpiCard).getByText('Index 1982-84=100, seasonally adjusted')).toBeInTheDocument();
-    expect(within(cpiCard).getByText('BLS CUSR0000SA0')).toBeInTheDocument();
+    expect(within(cpiCard).getByText('BLS · CUSR0000SA0')).toBeInTheDocument();
 
     // BLS publishes payrolls in thousands; the value is shown as stored.
     const payrollsCard = card('Nonfarm Payrolls');
@@ -153,7 +155,7 @@ describe('Dashboard', () => {
     expect(
       within(payrollsCard).getByText('Thousands of employees, seasonally adjusted')
     ).toBeInTheDocument();
-    expect(within(payrollsCard).getByText('BLS CES0000000001')).toBeInTheDocument();
+    expect(within(payrollsCard).getByText('BLS · CES0000000001')).toBeInTheDocument();
 
     expect(screen.queryByText(/FRED/)).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Federal Funds Rate' })).not.toBeInTheDocument();

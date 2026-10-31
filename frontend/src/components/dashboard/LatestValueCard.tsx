@@ -4,7 +4,7 @@ import { Box, Card, CardActionArea, CardContent, Chip, Skeleton, Typography } fr
 import { Assessment as AssessmentIcon } from '@mui/icons-material';
 import { format, isValid, parseISO } from 'date-fns';
 
-import { DISPLAY_SCALES, type DashboardSeriesEntry } from '../../config/dashboardSeries';
+import { DISPLAY_SCALES, chipLabel, type DashboardSeriesEntry } from '../../config/dashboardSeries';
 import { useLatestObservation } from '../../hooks/useLatestObservation';
 import { formatDecimalString } from '../../utils/formatDecimal';
 import { SourceNoticePanel } from '../common/SourceNoticePanel';
@@ -124,12 +124,7 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
           >
             {entry.label}
           </Typography>
-          <Chip
-            label={`${entry.sourceLabel} ${entry.externalId}`}
-            size='small'
-            variant='outlined'
-            sx={{ mt: 0.5 }}
-          />
+          <Chip label={chipLabel(entry)} size='small' variant='outlined' sx={{ mt: 0.5 }} />
         </Box>
       </Box>
       {body}
