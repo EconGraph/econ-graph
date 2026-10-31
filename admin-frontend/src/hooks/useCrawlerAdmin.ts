@@ -1,5 +1,12 @@
 /** Poll the executable crawler contract. Mutations enqueue work; they never control processes. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  requestGraphQL,
+  getAuthSessionSnapshot,
+  subscribeAuthSession,
+  isAuthSessionReady,
+} from "../services/graphqlClient";
+import { useSyncExternalStore } from "react";
 
 export interface CrawlerSource {
   source: string;
@@ -64,33 +71,17 @@ export async function crawlerRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
-  const token = localStorage.getItem("auth_token");
-  const response = await fetch(
-    import.meta.env.VITE_GRAPHQL_ENDPOINT || "/graphql",
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ query, variables }),
-    },
-  );
-  if (!response.ok)
-    throw new Error(`Crawler request failed (${response.status})`);
-  const result = (await response.json()) as {
-    data?: T;
-    errors?: { message: string }[];
-  };
-  if (result.errors?.length) throw new Error(result.errors[0].message);
-  if (!result.data) throw new Error("Crawler service returned no data");
-  return result.data;
+  return requestGraphQL<T>(query, variables, { retry: false });
 }
 
 export function useCrawlerOverview() {
+  const session = useSyncExternalStore(
+    subscribeAuthSession,
+    getAuthSessionSnapshot,
+  );
   return useQuery({
-    queryKey: ["crawlerAdmin", "overview"],
+    queryKey: ["crawlerAdmin", session, "overview"],
+    enabled: isAuthSessionReady(),
     queryFn: async () => {
       const snapshot = await crawlerRequest<Overview>(OVERVIEW);
       const counts = snapshot.queueStatistics;
@@ -122,8 +113,13 @@ export function useCrawlerJobs(
   offset: number,
   polling: boolean,
 ) {
+  const session = useSyncExternalStore(
+    subscribeAuthSession,
+    getAuthSessionSnapshot,
+  );
   return useQuery({
-    queryKey: ["crawlerAdmin", "jobs", source, status, offset],
+    queryKey: ["crawlerAdmin", session, "jobs", source, status, offset],
+    enabled: isAuthSessionReady(),
     queryFn: async () => {
       const result = await crawlerRequest<{ crawlerJobs: CrawlerJob[] }>(JOBS, {
         limit: 50,
@@ -141,10 +137,15 @@ export function useCrawlerJobs(
   });
 }
 export function useCrawlerActions() {
+  const session = useSyncExternalStore(
+    subscribeAuthSession,
+    getAuthSessionSnapshot,
+  );
   const client = useQueryClient();
   const refresh = () =>
     client.invalidateQueries({ queryKey: ["crawlerAdmin"] });
   const enqueue = useMutation({
+    mutationKey: ["crawlerAdmin", session, "enqueue"],
     retry: false,
     mutationFn: (input: {
       source: string;
@@ -158,6 +159,7 @@ export function useCrawlerActions() {
     onSuccess: refresh,
   });
   const schedule = useMutation({
+    mutationKey: ["crawlerAdmin", session, "schedule"],
     retry: false,
     mutationFn: (variables: { source: string; enabled: boolean }) =>
       crawlerRequest<{ setCrawlerSourceEnabled: boolean }>(
