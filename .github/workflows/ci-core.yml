@@ -1209,6 +1209,21 @@ jobs:
         CHECKPOINT: before the doctests
       run: *disk_checkpoint
 
+    - name: Rehearse Iceberg backfill and catalog-object recovery
+      if: ${{ !cancelled() }}
+      env:
+        DATA_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+        TRAIN4_RECOVERY_TEST_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+        TRAIN4_RECOVERY_BINARY: ${{ github.workspace }}/backend/target/debug/timeseries-recovery
+        TRAIN4_PG_DUMP: ${{ github.workspace }}/scripts/train4/pg-dump
+        TRAIN4_PG_RESTORE: ${{ github.workspace }}/scripts/train4/pg-restore
+        TRAIN4_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+      run: |
+        set -euo pipefail
+        cargo build --locked -p econ-graph-timeseries --bin timeseries-recovery
+        python3 ../scripts/train4/test_recovery.py
+      working-directory: backend
+
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
       if: ${{ !cancelled() }}
