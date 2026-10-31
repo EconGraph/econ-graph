@@ -73,7 +73,7 @@ fi
 if [ "$DRY_RUN" = "false" ]; then
     exec 9>"$LOCK_FILE"
     if ! flock -n 9; then
-        echo "error: another backup-snapshots run is in progress" >&2
+        echo "error: another backup-snapshots run, or a restore-snapshot.sh, is in progress" >&2
         exit 1
     fi
 fi

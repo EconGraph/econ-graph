@@ -31,7 +31,8 @@
 #     FAKE_POD_LIST_FAILS=1; crictl ps -q on econ-graph-worker, for a pod in
 #     econ-graph (any other crictl call is unsupported), prints a container
 #     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
-#     with FAKE_CRICTL_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql prints
+#     with FAKE_CRICTL_FAILS=1; with FAKE_LOCK_PROBE set to a lock file, each
+#     call first logs "lock-probe held" or "lock-probe free" for it; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
@@ -146,6 +147,9 @@ EOF
     cat >"${dir}/docker" <<'EOF'
 #!/bin/bash
 echo "docker $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 case " $* " in
     " info "*) echo "27.0.0 [name=seccomp]" ;;
     *" pg_restore "*) cat >"${FAKE_RESTORE_INPUT:-/dev/null}" ;;

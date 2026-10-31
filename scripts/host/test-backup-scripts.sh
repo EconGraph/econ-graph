@@ -291,6 +291,37 @@ refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ
     'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0=\n'
 accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
 unset RESTORE_SNAP
+
+echo "== restore-snapshot.sh: holds the backup lock from before its first check"
+lock="${root}/run/econgraph-backup-snapshots.lock"
+# hold_lock SECONDS: hold the lock from the background for that long (until
+# release_lock); returns once it is held.
+hold_lock() {
+    rm -f "${tmp}/lock-held"
+    bash -c 'exec 8>"$1"; flock 8; : >"$2"; exec sleep "$3"' _ "${lock}" "${tmp}/lock-held" "$1" &
+    holder=$!
+    while [ ! -e "${tmp}/lock-held" ]; do sleep 0.05; done
+}
+release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; }
+hold_lock 60
+before="$(tree_state "${root}")"
+run_script "restore-snapshot refuses while the backup lock is held" 1 "${lock} is held" \
+    "${restore}" --yes "${app_snap}"
+check "... before asking the cluster or btrfs anything" [ ! -s "${STUB_LOG}" ]
+check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+run_script "restore-snapshot --dry-run takes no lock" 0 "(dry run: nothing restored)" \
+    "${restore}" --dry-run "${app_snap}"
+release_lock
+hold_lock 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for the lock, then checks" 1 \
+    "still in use by: econ-graph/app-postgres-0." "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_lock
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot asks the cluster with the lock held" 1 \
+    "still in use by" "${restore}" --yes "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... held at every cluster call" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
+run_script "restore-snapshot rejects a --lock-wait that is not a number" 2 "usage:" \
+    "${restore}" --yes --lock-wait=soon "${app_snap}"
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"
