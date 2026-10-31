@@ -47,8 +47,10 @@ ones without touching them:
 
 www is redirected rather than served: sign-in goes through Keycloak on the app's own
 origin, and Keycloak has one issuer that the backend checks exactly. Serving www too
-would add a second origin to every redirect URI, web origin and CORS list and split
-sessions between two hosts, for nothing.
+would add a second origin to every redirect URI and web origin and split sessions
+between two hosts, for nothing. The CORS list names https://www.HOST anyway: while
+www redirects, no page is served from it, so the entry is unused, and it allows only
+the site's own www name.
 
 Keycloak's issuer must equal the backend's OIDC_ISSUER, which is why both are set from
 the one HOST here.
