@@ -5,6 +5,15 @@ use econ_graph_core::test_utils::ScratchDatabase;
 use econ_graph_core::{create_pool, run_migration_set, MigrationSet};
 use uuid::Uuid;
 
+async fn write_epoch(
+    conn: &mut diesel_async::AsyncPgConnection,
+    selection: ObservationStorage,
+) -> econ_graph_core::AppResult<i64> {
+    conn.build_transaction()
+        .run(async |conn| selection.assert_write_allowed_conn(conn).await)
+        .await
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readers_and_writers_refuse_stale_targets_but_pause_only_blocks_writes() {
     let db = ScratchDatabase::create("train4_selection");
@@ -19,15 +28,18 @@ async fn readers_and_writers_refuse_stale_targets_but_pause_only_blocks_writes()
         mirror_iceberg: false,
     };
     default.assert_read_selection_conn(&mut conn).await.unwrap();
-    assert_eq!(
-        default.assert_write_allowed_conn(&mut conn).await.unwrap(),
-        0
-    );
+    assert!(default
+        .assert_write_allowed_conn(&mut conn)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("caller-owned"));
+    assert_eq!(write_epoch(&mut conn, default).await.unwrap(), 0);
 
     let target = Uuid::new_v4();
     db.connect().batch_execute(&format!("INSERT INTO timeseries_recovery_state(target_id, target_label) VALUES ('{target}', 'disposable selection test')")).unwrap();
     assert!(default.assert_read_selection_conn(&mut conn).await.is_err());
-    assert!(default.assert_write_allowed_conn(&mut conn).await.is_err());
+    assert!(write_epoch(&mut conn, default).await.is_err());
     let matching = ObservationStorage {
         target_id: Some(target),
         ..default
@@ -36,13 +48,13 @@ async fn readers_and_writers_refuse_stale_targets_but_pause_only_blocks_writes()
         .assert_read_selection_conn(&mut conn)
         .await
         .unwrap();
-    matching.assert_write_allowed_conn(&mut conn).await.unwrap();
+    write_epoch(&mut conn, matching).await.unwrap();
     let wrong = ObservationStorage {
         target_id: Some(Uuid::new_v4()),
         ..matching
     };
     assert!(wrong.assert_read_selection_conn(&mut conn).await.is_err());
-    assert!(wrong.assert_write_allowed_conn(&mut conn).await.is_err());
+    assert!(write_epoch(&mut conn, wrong).await.is_err());
 
     db.connect()
         .batch_execute(&format!(
@@ -54,7 +66,7 @@ async fn readers_and_writers_refuse_stale_targets_but_pause_only_blocks_writes()
         .assert_read_selection_conn(&mut conn)
         .await
         .unwrap();
-    assert!(matching.assert_write_allowed_conn(&mut conn).await.is_err());
+    assert!(write_epoch(&mut conn, matching).await.is_err());
     db.connect()
         .batch_execute("UPDATE timeseries_recovery_state SET backend='iceberg', epoch=2")
         .unwrap();
@@ -68,16 +80,13 @@ async fn readers_and_writers_refuse_stale_targets_but_pause_only_blocks_writes()
         ..matching
     };
     iceberg.assert_read_selection_conn(&mut conn).await.unwrap();
-    assert!(iceberg.assert_write_allowed_conn(&mut conn).await.is_err());
+    assert!(write_epoch(&mut conn, iceberg).await.is_err());
     db.connect()
         .batch_execute(
             "UPDATE timeseries_recovery_state SET writes_paused=false, pause_token=NULL, epoch=3",
         )
         .unwrap();
-    assert_eq!(
-        iceberg.assert_write_allowed_conn(&mut conn).await.unwrap(),
-        3
-    );
+    assert_eq!(write_epoch(&mut conn, iceberg).await.unwrap(), 3);
     drop(conn);
     drop(pool);
 }

@@ -4,7 +4,7 @@
 use crate::{AppError, AppResult};
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Nullable, Text, Uuid as SqlUuid};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AnsiTransactionManager, AsyncPgConnection, RunQueryDsl, TransactionManager};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +87,14 @@ impl ObservationStorage {
     /// backend transition takes the exclusive lock and therefore drains guarded writers.
     /// This function must be called inside the transaction owning all observation writes.
     pub async fn assert_write_allowed_conn(&self, conn: &mut AsyncPgConnection) -> AppResult<i64> {
+        if AnsiTransactionManager::transaction_manager_status_mut(conn)
+            .transaction_depth()?
+            .is_none()
+        {
+            return Err(AppError::InternalError(
+                "observation writes require a caller-owned database transaction".into(),
+            ));
+        }
         #[derive(QueryableByName)]
         struct Epoch {
             #[diesel(sql_type = BigInt)]
