@@ -1121,10 +1121,12 @@ mod tests {
 
     /// New data-plane incrementals after the pinned release/v4.0 fixture. Keep this explicit:
     /// deriving it from the embedded migrations would hide an unexpected upgrade path.
-    const POST_V4_0_DATA_VERSIONS: [&str; 3] = [
+    const POST_V4_0_DATA_VERSIONS: [&str; 5] = [
         "20261031010000", // nullable observation attributes
         "20261031020000", // Iceberg SQL catalog and commit receipts
         "20261031040000", // durable recovery target and write fence
+        "20261031120000", // source-preserving SEC companyfacts evidence
+        "20261031120100", // complete bulk-pair load provenance
     ];
 
     /// Rebuilds a database created by the single v4.0.0 baseline, before the split, from its two
@@ -1311,7 +1313,7 @@ mod tests {
     }
 
     /// A release/v4.0 database already records its numeric-widening migration, but the
-    /// three Train 4 data incrementals are pending and must block data-plane readiness.
+    /// five Train 4/5 data incrementals are pending and must block data-plane readiness.
     /// Applying the data set runs exactly those migrations, then applying the app set
     /// records its split baseline without replaying it or applying any data migration.
     /// Both results match independent forward migration of the unchanged release fixture.
@@ -1337,7 +1339,7 @@ mod tests {
         let err = readiness_check_set(&pool, MigrationSet::Data)
             .await
             .expect_err("the release schema must not serve a newer data-plane binary");
-        assert!(err.to_string().contains("20261031040000"), "{err}");
+        assert!(err.to_string().contains("20261031120100"), "{err}");
         assert_eq!(
             run_migration_set(&db.url, MigrationSet::Data)
                 .await
@@ -1371,8 +1373,8 @@ mod tests {
     }
 
     /// A release candidate from before ECO-501 (the single baseline plus the release app
-    /// migration only): the data set applies numeric widening followed by the three
-    /// Train 4 incrementals. Applying the app set first leaves all four pending and never
+    /// migration only): the data set applies numeric widening followed by the five
+    /// Train 4/5 incrementals. Applying the app set first leaves all six pending and never
     /// records them. Both sets end at the independently forward-migrated reference schema.
     #[tokio::test]
     #[serial_test::serial]
@@ -1390,6 +1392,8 @@ mod tests {
             "20261031010000",
             "20261031020000",
             "20261031040000",
+            "20261031120000",
+            "20261031120100",
         ];
 
         assert_eq!(
@@ -1471,7 +1475,7 @@ mod tests {
         }
 
         let newest_data = minimum_schema_version(MigrationSet::Data).expect("embedded versions");
-        assert_eq!(newest_data, "20261031040000");
+        assert_eq!(newest_data, "20261031120100");
         conn.batch_execute(&format!(
             "DELETE FROM __diesel_schema_migrations WHERE version = '{newest_data}'"
         ))
