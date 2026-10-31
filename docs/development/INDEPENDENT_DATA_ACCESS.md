@@ -85,8 +85,9 @@ capabilities. It has no optional offline-access scope. Anonymous service-account
 grants retain the existing public facade and do not receive a data audience.
 
 Importing this overlay into a live realm is a deployment action. Rendering and
-offline shape checks do not claim that a live Keycloak import, new-platform rollout
-or production authorization matrix has been completed.
+offline shape checks alone do not prove a live import. The disposable real-Keycloak
+acceptance below proves a local import and login; a production realm import,
+new-platform rollout and production authorization matrix remain deployment gates.
 
 ## Fresh local app with shared read-only data
 
@@ -164,3 +165,57 @@ self-hosted-platform acceptance must additionally import the realm overlay, prov
 both old public paths and the new signed path, exercise real user plan grants,
 and verify NetworkPolicy against the ECO-438 deployment. Local contract success
 does not replace that sibling deployment evidence.
+
+
+## Optional real Keycloak acceptance
+
+The optional integration harness imports the actual rendered overlay into a new
+local realm using the repository's Keycloak 26.8.1 image, pinned to its verified
+immutable OCI digest. It uses Chromium to perform authorization code login with
+S256 PKCE. A privileged fixture account receives both app and data audiences and
+staff capabilities through the normal web client; the same account receives only
+catalog read roles and the data audience through `econ-graph-dev-readonly`.
+Password grants, service-account grants and an incorrect PKCE verifier must fail.
+
+Build the real services and install the existing browser test dependency first:
+
+```sh
+CARGO_BUILD_JOBS=4 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 \
+  cargo build --manifest-path backend/Cargo.toml \
+  -p econ-graph-backend --bin econ-graph-backend -p econ-graph-crawler --bin crawler
+npm --prefix admin-frontend ci
+(cd admin-frontend && npx playwright install chromium)
+docker pull postgres:18
+python3 scripts/data-access/test-real-keycloak.py \
+  --evidence /tmp/independent-data-keycloak-evidence.json
+```
+
+The harness can use alternate compiled binaries through `--backend` and
+`--crawler`, and an existing Playwright installation through `--playwright-module`.
+It checks the Keycloak version against the repository pin before starting. Docker
+may fetch that immutable Keycloak image; PostgreSQL uses the locally cached
+`postgres:18` image's immutable digest, recorded in the evidence file. The file
+contains assertion results, roles and image identities, never credentials or
+access tokens.
+
+The resulting real signed token must read an observation through the compiled
+strict data HTTP service and fail at the app API. Neither that token nor a staff
+token can mutate or recrawl through the strict data service. A second backend
+with a fresh app database must validate an annotation target through the data
+service and save only the local annotation. The harness checks that observations
+and the crawl queue remain unchanged and that app/data tables remain separate.
+
+All realms, fixture users and credentials are disposable. The harness uses only
+the local Unix Docker socket, unique owner labels, CPU/memory/PID limits, bounded
+tmpfs databases, random loopback container ports and a private bridge without
+outbound NAT. The client's fixed loopback callback uses port 8765; it must be free.
+Browser traffic to other destinations is refused. Only resources bearing the
+run's ownership label are removed, and backend processes and temporary browser
+files are cleaned on exit. This is an explicit integration command, not an added
+mandatory CI dependency.
+
+This check passed with a real Keycloak import and real signed backend requests.
+It uses loopback HTTP and fake local identities; it does not verify production
+issuer/TLS configuration, reverse-proxy behavior, actual customer plan assignment,
+NetworkPolicy or the self-hosted platform rollout. Those release gates above
+remain required.
