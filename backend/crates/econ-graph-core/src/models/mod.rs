@@ -4,6 +4,7 @@ pub mod annotation_reply;
 pub mod annotation_template;
 pub mod company;
 pub mod company_fact;
+pub mod company_financials;
 pub mod crawl_attempt;
 pub mod crawl_queue;
 pub mod data_point;
