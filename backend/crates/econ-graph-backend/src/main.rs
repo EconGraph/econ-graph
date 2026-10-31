@@ -1367,20 +1367,25 @@ mod cors_tests {
         assert!(res.headers().get("access-control-allow-origin").is_none());
     }
 
-    /// The list deploy.sh gives the kind cluster with PUBLIC_HOST=econgraph.com (ECO-457):
-    /// the public site and the on-host http://localhost both reach the API. Browsers send
-    /// Origin on same-origin POSTs as well, so the app's own origin has to be listed.
-    /// www.econgraph.com only ever redirects to the apex, so it is never an origin.
+    /// The list deploy.sh gives the kind cluster with PUBLIC_HOST=econgraph.com: the public
+    /// site, its www name and the app on the host's http://localhost reach the API. Browsers
+    /// send Origin on same-origin POSTs as well, so the app's own origin has to be listed. The
+    /// dev server's http://localhost:3000 and plain http on the public host are refused.
     #[tokio::test]
-    async fn the_deployed_public_and_local_origins_are_allowed() {
-        let deployed: Vec<String> = "https://econgraph.com,http://localhost,http://localhost:3000"
-            .split(',')
-            .map(str::to_string)
-            .collect();
+    async fn the_deployed_public_www_and_local_origins_are_allowed() {
+        let deployed: Vec<String> =
+            "https://econgraph.com,https://www.econgraph.com,http://localhost"
+                .split(',')
+                .map(str::to_string)
+                .collect();
         let app = warp::any()
             .map(|| "ok")
             .with(cors_filter(&validate_cors_origins(&deployed).unwrap()));
-        for origin in ["https://econgraph.com", "http://localhost"] {
+        for origin in [
+            "https://econgraph.com",
+            "https://www.econgraph.com",
+            "http://localhost",
+        ] {
             let res = warp::test::request()
                 .method("POST")
                 .header("origin", origin)
@@ -1389,7 +1394,7 @@ mod cors_tests {
             assert_eq!(res.status(), 200, "{origin}");
             assert_eq!(res.headers()["access-control-allow-origin"], origin);
         }
-        for origin in ["https://www.econgraph.com", "http://econgraph.com"] {
+        for origin in ["http://econgraph.com", "http://localhost:3000"] {
             let res = warp::test::request()
                 .method("POST")
                 .header("origin", origin)

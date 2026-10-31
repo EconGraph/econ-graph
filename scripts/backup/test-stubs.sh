@@ -20,14 +20,26 @@
 #     --mountpoint prints that file's content ("<fs uuid> <subvolume>"), and
 #     findmnt -T prints the same filesystem UUID for every path.
 #   - id -u prints 0 when FAKE_ROOT=1.
-#   - docker answers the kubectl calls the scripts make: get pod prints
-#     FAKE_POD_NAME, wait exits FAKE_WAIT_RC (default 0), psql prints
+#   - docker answers the kubectl calls the scripts make: get pod <name>
+#     prints pod/<name> when <name> is in FAKE_PODS (space-separated; with
+#     FAKE_PODS_FROM_CALL=N, only from the Nth get pod call on) and fails
+#     when it is FAKE_POD_FAILS; get pv -o jsonpath prints FAKE_PVS (printf
+#     %b; default the three host-storage PersistentVolumes as
+#     "<path>\t<namespace>/<claim>" lines) and get pods -A prints
+#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<volume>=<claim or host
+#     path>..." lines; default none), failing with FAKE_PV_FAILS=1 and
+#     FAKE_POD_LIST_FAILS=1; crictl ps -q on econ-graph-worker, for a pod in
+#     econ-graph (any other crictl call is unsupported), prints a container
+#     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
+#     with FAKE_CRICTL_FAILS=1;
+#   - with FAKE_LOCK_PROBE set to a lock file, every docker, findmnt and
+#     mountpoint call also logs "lock-probe held" or "lock-probe free" for it; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
 #     FAKE_SWAP_TO (a symlink changed between the check and the restore).
 #
-# Every btrfs and docker call is appended to STUB_LOG.
+# Every btrfs, docker, findmnt and mountpoint call is appended to STUB_LOG.
 
 # shellcheck disable=SC2016  # the stubs' $ expand when they run, not here
 make_stubs() {
@@ -111,12 +123,20 @@ EOF
 
     cat >"${dir}/mountpoint" <<'EOF'
 #!/bin/bash
+echo "mountpoint $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 [[ "$1" == -q ]] && shift
 [[ -f "$1/.fake-mount" ]]
 EOF
 
     cat >"${dir}/findmnt" <<'EOF'
 #!/bin/bash
+echo "findmnt $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mountpoint) [[ -s "$2/.fake-mount" ]] || exit 1; cat "$2/.fake-mount"; exit 0 ;;
@@ -136,13 +156,36 @@ EOF
     cat >"${dir}/docker" <<'EOF'
 #!/bin/bash
 echo "docker $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 case " $* " in
     " info "*) echo "27.0.0 [name=seccomp]" ;;
     *" pg_restore "*) cat >"${FAKE_RESTORE_INPUT:-/dev/null}" ;;
     *" psql "*) : ;;
     *" wait "*) exit "${FAKE_WAIT_RC:-0}" ;;
+    *" exec econ-graph-worker crictl ps -q --label io.kubernetes.pod.namespace=econ-graph --label io.kubernetes.pod.name="*)
+        [[ -z "${FAKE_CRICTL_FAILS:-}" ]] || { echo "error: connect: no such file or directory" >&2; exit 1; }
+        for a in "$@"; do
+            case "${a}" in io.kubernetes.pod.name=*)
+                [[ " ${FAKE_RUNNING:-} " != *" ${a#*=} "* ]] || echo 0123456789ab ;;
+            esac
+        done ;;
+    *" get pv -o jsonpath="*)
+        [[ -z "${FAKE_PV_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        printf '%b' "${FAKE_PVS-/srv/econgraph/data-plane/pg\tecon-graph/postgresql-data-postgresql-0\n/srv/econgraph/app-prod/keycloak-pg\tecon-graph/keycloak-postgres-data-keycloak-postgres-0\n/srv/econgraph/app-prod/app-pg\tecon-graph/app-postgres-data-app-postgres-0\n}" ;;
+    *" get pods -A -o jsonpath="*)
+        [[ -z "${FAKE_POD_LIST_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        printf '%b' "${FAKE_POD_LIST-}" ;;
     *" -o jsonpath="*) echo Running ;;
-    *" get pod "*) [[ -z "${FAKE_POD_NAME:-}" ]] || echo "${FAKE_POD_NAME}" ;;
+    *" get pod "*)
+        args=("$@"); name=""
+        for i in "${!args[@]}"; do [[ "${args[$i]}" != pod ]] || name="${args[$((i + 1))]}"; done
+        [[ "${name}" != "${FAKE_POD_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        calls="$(($(cat "${STUB_LOG:-/dev/null}.get-pod" 2>/dev/null || echo 0) + 1))"
+        [[ -z "${STUB_LOG:-}" ]] || echo "${calls}" >"${STUB_LOG}.get-pod"
+        [[ "${calls}" -ge "${FAKE_PODS_FROM_CALL:-1}" ]] || exit 0
+        [[ " ${FAKE_PODS:-} " != *" ${name} "* ]] || echo "pod/${name}" ;;
     *) echo "fake docker: unsupported: $*" >&2; exit 1 ;;
 esac
 EOF

@@ -260,7 +260,8 @@ impl EconomicSeriesType {
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
             .filter(crate::graphql::dataloaders::public_data_points_predicate())
-            .filter(models::revision_filter(None, false))
+            .filter(models::exclude_synthetic_legacy_rows())
+            .filter(models::revision_filter_excluding_synthetic(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
             .load::<models::DataPoint>(&mut conn)

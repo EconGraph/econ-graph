@@ -410,8 +410,9 @@ echo "📊 Current deployment status:"
 kubectl get pods -n econ-graph -o wide
 echo ""
 echo "🌐 Application URLs:"
-echo "  🌍 Production (SSL): https://www.econgraph.com"
-echo "  🌍 Production (SSL): https://econgraph.com"
+if [ -n "$PUBLIC_HOST" ]; then
+    echo "  🌍 Production (SSL): https://${PUBLIC_HOST} (https://www.${PUBLIC_HOST} redirects to it)"
+fi
 echo "  🏠 Local Development:"
 echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
@@ -460,20 +461,11 @@ else
     echo "  ❌ Main Entry Point: http://localhost - Not accessible (the gateway may be missing: scripts/deploy/install-gateway.sh)"
 fi
 
-# Test HTTPS Termination (www.econgraph.com)
-echo ""
-echo "🔒 Testing HTTPS termination..."
-if curl -s -o /dev/null -w "%{http_code}" -k https://www.econgraph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://www.econgraph.com - Accessible"
-else
-    echo "  ❌ HTTPS Production: https://www.econgraph.com - Not accessible (SSL certificate may not be ready)"
-fi
-
-# Test HTTPS Termination (econgraph.com)
-if curl -s -o /dev/null -w "%{http_code}" -k https://econgraph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://econgraph.com - Accessible"
-else
-    echo "  ❌ HTTPS Production: https://econgraph.com - Not accessible (SSL certificate may not be ready)"
+# The public host, and its www redirect (lib/public-host.sh).
+if [ -n "$PUBLIC_HOST" ]; then
+    echo ""
+    echo "🔒 Testing HTTPS termination..."
+    check_public_host_urls "$PUBLIC_HOST"
 fi
 
 # Test SSL Certificate Status

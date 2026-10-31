@@ -122,7 +122,8 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
             let data_points = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
                 .filter(public_data_points_predicate())
-                .filter(econ_graph_core::models::revision_filter(None, false))
+                .filter(econ_graph_core::models::exclude_synthetic_legacy_rows())
+                .filter(econ_graph_core::models::revision_filter_excluding_synthetic(None, false))
                 .order(dsl::date.desc())
                 .load::<DataPoint>(&mut conn)
                 .await
@@ -361,7 +362,8 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
             };
 
             // One row per series: newest date, then newest revision of it. On a same-day tie
-            // between an original release and a revision, the revision wins. A LATERAL
+            // between an original release and a revision, the revision wins. A synthetic
+            // legacy row never counts, as in `dataPoints` with `latestRevisionOnly`. A LATERAL
             // `LIMIT 1` per key walks the unique index backwards and reads only the newest
             // (date, revision_date) group, at most two rows sorted to put the revision first;
             // DISTINCT ON would read and sort every row of every requested series.
@@ -370,13 +372,14 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                  FROM unnest($1::uuid[]) AS k(id) \
                  CROSS JOIN LATERAL ( \
                      SELECT date, value, revision_date FROM data_points \
-                     WHERE series_id = k.id \
+                     WHERE series_id = k.id AND NOT {} \
                      ORDER BY date DESC, revision_date DESC, is_original_release ASC \
                      LIMIT 1 \
                  ) dp \
                  WHERE EXISTS (SELECT 1 FROM economic_series public_series \
                      WHERE public_series.id = k.id \
                        AND {})",
+                econ_graph_core::models::synthetic_legacy_row("data_points", "other_original"),
                 public_series_sql("public_series")
             ))
             .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)

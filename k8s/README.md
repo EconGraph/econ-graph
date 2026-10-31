@@ -287,7 +287,7 @@ apply it through `scripts/deploy/lib/public-host.sh` and
 | Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
 | Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
 | Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
-| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
+| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com,https://www.econgraph.com,http://localhost`; without a public host, `http://localhost,http://localhost:3000` |
 
 `PUBLIC_HOST=` (empty) removes every piece again: the public routes, the https listener and its
 certificate, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no

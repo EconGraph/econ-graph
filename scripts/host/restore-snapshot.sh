@@ -3,19 +3,33 @@
 # Put production data back to a btrfs snapshot (docs/deployment/BACKUPS.md,
 # "Restore from a snapshot").
 #
-#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] [--from-pool] <snapshot>
+#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] [--from-pool] [--lock-wait=SECONDS] <snapshot>
 #
 # <snapshot> is a name (or path) in /srv/econgraph/snapshots, e.g.
 # data-plane.20261024T040000Z or app-prod.pre-20261024T044210Z-recrawl.
 # With --from-pool it is a name in /srv/econgraph-backups/snapshots (the
 # copy on the SATA backup pool): it is first copied back into
 # /srv/econgraph/snapshots with btrfs send/receive, then restored as usual.
-# Its prefix says which subvolume it replaces:
-#   data-plane.*  -> @econgraph-data-plane at /srv/econgraph/data-plane (pod postgresql-0)
-#   app-prod.*    -> @econgraph-app-prod   at /srv/econgraph/app-prod   (pod keycloak-postgres-0)
+# Its prefix says which subvolume it replaces, and the Postgres pods whose
+# data it holds:
+#   data-plane.*  -> @econgraph-data-plane at /srv/econgraph/data-plane
+#                    (pod postgresql-0)
+#   app-prod.*    -> @econgraph-app-prod   at /srv/econgraph/app-prod
+#                    (pods app-postgres-0 and keycloak-postgres-0)
 #
-# Steps: refuse unless the Postgres pod using that subvolume is gone (scale
-# its StatefulSet to 0 first); ask you to type the subvolume name (e.g.
+# Steps: refuse unless every pod using that subvolume is gone: those Postgres
+# pods (in the API, and with no container still running on the storage
+# node), and any other pod, in any namespace, that the API shows mounting it
+# (a hostPath volume at, under or above /srv/econgraph/<name>, compared as
+# text after resolving //, . and .., links not followed, or anywhere under
+# /proc or relative; or a claim, generic ephemeral ones included,
+# bound to a PersistentVolume there). The refusal names each one; scale
+# their StatefulSets to 0 first. If the cluster can't be asked, refuse too.
+# The check runs again after the confirmation. Containers started outside
+# Kubernetes are not seen. This
+# check does not replace stopping the writers (backend, crawler, Keycloak)
+# first, nor restarting the storage node after the restore (below). Then ask
+# you to type the subvolume name (e.g.
 # @econgraph-data-plane; refused without a terminal unless --yes); unmount the subvolume; rename it to
 # @econgraph-<name>.replaced-<UTC stamp> (kept, so the restore can itself
 # be undone; delete it later with scripts/host/delete-snapshots.sh); create
@@ -29,8 +43,19 @@
 #
 # Nothing is deleted. Safe to re-run with a different snapshot.
 #
-# --dry-run (-n) writes nothing and mounts nothing: it runs the read-only
-# checks (the snapshot is a read-only subvolume, the Postgres pod is gone,
+# Before its first check it takes the lock the hourly backup-snapshots.sh
+# holds (/run/econgraph-backup-snapshots.lock), and keeps it until it exits,
+# after the swap and remount: no backup run snapshots, sends or prunes
+# meanwhile, and no second restore runs. If the lock is held it stops,
+# changing nothing; --lock-wait=SECONDS (up to 86400) waits up to that long
+# for it first. While it waits at the typed confirmation it still holds the
+# lock, so an hourly backup run that starts then fails and is skipped.
+# The storage node restart that follows (below) is yours to run after the
+# script exits, so the lock does not cover it.
+#
+# --dry-run (-n) writes nothing, mounts nothing and takes no lock (opening
+# the lock file would create it): it runs the read-only
+# checks (the snapshot is a read-only subvolume, no pod uses the subvolume,
 # and, through findmnt on the existing mounts, that the target and the
 # snapshot directory are the expected subvolumes of this filesystem), then
 # prints each step. With --from-pool it stops before the copy back.
@@ -63,17 +88,25 @@ YES="false"
 FROM_POOL="false"
 POOL_MOUNT="$TEST_ROOT/srv/econgraph-backups"
 POOL_SNAPSHOT_DIR="$POOL_MOUNT/snapshots"
+LOCK_FILE="$TEST_ROOT/run/econgraph-backup-snapshots.lock"
+LOCK_WAIT=0
+usage="usage: $0 [--dry-run] [--yes] [--from-pool] [--lock-wait=SECONDS] <snapshot>"
 snap=""
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN="true" ;;
         --yes|-y) YES="true" ;;
         --from-pool) FROM_POOL="true" ;;
-        -*) echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2 ;;
+        --lock-wait=*)
+            LOCK_WAIT="${arg#*=}"
+            # At most a day: flock can't set up a timer for some larger values.
+            [[ "$LOCK_WAIT" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$LOCK_WAIT))" -le 86400 ] ||
+                { echo "$usage (SECONDS: 0 to 86400)" >&2; exit 2; } ;;
+        -*) echo "$usage" >&2; exit 2 ;;
         *) snap="$arg" ;;
     esac
 done
-[ -n "$snap" ] || { echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2; }
+[ -n "$snap" ] || { echo "$usage" >&2; exit 2; }
 
 run() {
     echo "+ $*"
@@ -92,14 +125,37 @@ if [ -z "$OWNER" ] || [ "$OWNER" = "root" ]; then
     exit 1
 fi
 
+# The backup lock, held until this script exits (fd 9 stays open).
+if [ "$DRY_RUN" = "false" ]; then
+    exec 9>"$LOCK_FILE"
+    # Computed on its own line: a failed expansion stops the script here
+    # (set -e) instead of skipping flock.
+    lock_wait_seconds=$((10#$LOCK_WAIT))
+    lock_status=0
+    flock -w "$lock_wait_seconds" 9 || lock_status=$?
+    if [ "$lock_status" -ne 0 ] && [ "$lock_status" -ne 1 ]; then
+        echo "error: could not take the lock $LOCK_FILE (flock exited $lock_status); nothing changed" >&2
+        exit 1
+    fi
+    if [ "$lock_status" -eq 1 ]; then
+        echo "error: $LOCK_FILE is held: a backup-snapshots run (econgraph-backup-snapshots.service)" >&2
+        echo "  or another restore is in progress. Nothing changed. Wait for it to finish" >&2
+        echo "  (systemctl status econgraph-backup-snapshots.service), then re-run, or pass --lock-wait=SECONDS." >&2
+        exit 1
+    fi
+fi
+
 snap="$(basename "$snap")"
 case "$snap" in
-    data-plane.*) name="data-plane"; pod="postgresql-0" ;;
-    app-prod.*) name="app-prod"; pod="keycloak-postgres-0" ;;
+    data-plane.*) name="data-plane"; pods=(postgresql-0) ;;
+    app-prod.*) name="app-prod"; pods=(app-postgres-0 keycloak-postgres-0) ;;
     *) echo "error: $snap is not a data-plane.* or app-prod.* snapshot" >&2; exit 1 ;;
 esac
 target="$SRV_ROOT/$name"
 subvol="@econgraph-$name"
+# The subvolume's path on the storage node, as pods and PersistentVolumes
+# name it (the node bind-mounts it at the same path).
+node_path="/srv/econgraph/$name"
 
 # mounted_subvol <mountpoint>: "<uuid> <subvolume path>" of the mount there.
 mounted_subvol() {
@@ -211,19 +267,120 @@ if [ "$(btrfs property get "$SNAPSHOT_DIR/$snap" ro)" != "ro=true" ]; then
     exit 1
 fi
 
-# Postgres must be stopped: ask the cluster, on the rootful daemon.
-pod_state="$(env -u DOCKER_CONTEXT DOCKER_HOST="$DOCKER_SOCK" \
-    docker exec "$KIND_NODE" kubectl -n "$NAMESPACE" get pod "$pod" --ignore-not-found -o name 2>&1)" || {
-    echo "error: could not ask the cluster ($KIND_NODE on $DOCKER_SOCK) whether $pod is running: $pod_state" >&2
+# Nothing may use the subvolume: ask the cluster, on the rootful daemon.
+# Any failure to ask refuses the restore.
+k() {
+    env -u DOCKER_CONTEXT DOCKER_HOST="$DOCKER_SOCK" docker exec "$KIND_NODE" kubectl "$@"
+}
+cannot_ask() {
+    echo "error: could not ask the cluster $1, so it may still be in use; nothing changed: $2" >&2
     exit 1
 }
-if [ -n "$pod_state" ]; then
-    echo "error: $pod still exists. Stop it first, e.g.:" >&2
-    echo "  docker -H $DOCKER_SOCK exec $KIND_NODE kubectl -n $NAMESPACE scale statefulset/${pod%-0} --replicas=0" >&2
-    echo "  (scale the backend and crawler to 0 too, so nothing reconnects mid-restore)" >&2
-    exit 1
-fi
-echo "= $pod is not running"
+# normalize <absolute path>: the path with empty, "." and ".." components
+# resolved as text (no symlinks followed), e.g. /srv//econgraph/./x/ -> /srv/econgraph/x.
+normalize() {
+    local part parts out=()
+    IFS=/ read -r -a parts <<<"$1"
+    for part in ${parts[@]+"${parts[@]}"}; do
+        case "$part" in
+            "" | .) ;;
+            ..) [ "${#out[@]}" -eq 0 ] || out=("${out[@]:0:${#out[@]}-1}") ;;
+            *) out+=("$part") ;;
+        esac
+    done
+    (IFS=/; echo "/${out[*]}")
+}
+# path_overlaps <path>: whether <path> is $node_path, inside it or above it.
+# Compared as text, links not followed. A path that is not absolute, or one
+# under /proc (/proc/<pid>/root leads to the node's whole filesystem), counts
+# as overlapping: it can't be checked.
+path_overlaps() {
+    local p
+    case "$1" in /*) ;; *) return 0 ;; esac
+    p="$(normalize "$1")"
+    [ "$p" = "$node_path" ] || [ "${p#"$node_path"/}" != "$p" ] ||
+        [ "$p" = "/" ] || [ "${node_path#"$p"/}" != "$node_path" ] ||
+        [ "$p" = /proc ] || [ "${p#/proc/}" != "$p" ]
+}
+# check_unused: exit 1, naming them, if any pod uses the subvolume:
+#   - the plane's Postgres pods, as the API server reports them, or with a
+#     container still running on the storage node (a pod force-deleted from
+#     the API can leave its container running there);
+#   - any pod, in any namespace, with a hostPath volume at, under or above
+#     $node_path, or a claim (named, or a generic ephemeral volume's
+#     <pod>-<volume>) bound to a PersistentVolume there.
+check_unused() {
+    local p state pvs line path claim all_pods fields id vol name rest
+    local in_use=() others=() stuck=() claims=()
+    for p in "${pods[@]}"; do
+        state="$(k -n "$NAMESPACE" get pod "$p" --ignore-not-found -o name 2>&1)" ||
+            cannot_ask "($KIND_NODE on $DOCKER_SOCK) whether $p exists" "$state"
+        [ -z "$state" ] || in_use+=("$p")
+        state="$(env -u DOCKER_CONTEXT DOCKER_HOST="$DOCKER_SOCK" docker exec "$STORAGE_NODE" \
+            crictl ps -q --label "io.kubernetes.pod.namespace=$NAMESPACE" --label "io.kubernetes.pod.name=$p" 2>&1)" ||
+            cannot_ask "($STORAGE_NODE on $DOCKER_SOCK) whether a container of $p still runs" "$state"
+        if [ -n "$state" ] && [[ " ${in_use[*]} " != *" $p "* ]]; then
+            in_use+=("$p")
+            stuck+=("$p")
+        fi
+    done
+    # Claims bound to a PersistentVolume on the subvolume, as "<namespace>/<name>".
+    pvs="$(k get pv -o 'jsonpath={range .items[*]}{.spec.hostPath.path}{.spec.local.path}{"\t"}{.spec.claimRef.namespace}/{.spec.claimRef.name}{"\n"}{end}' 2>&1)" ||
+        cannot_ask "($KIND_NODE on $DOCKER_SOCK) which PersistentVolumes are on $node_path" "$pvs"
+    while IFS= read -r line; do
+        path="${line%%$'\t'*}"
+        claim="${line#*$'\t'}"
+        if [ -n "$path" ] && path_overlaps "$path" && [ "$claim" != "/" ]; then
+            claims+=("$claim")
+        fi
+    done <<<"$pvs"
+    # Every pod, as "<namespace>/<name>", then a tab and
+    # "<volume>=<claim>=<host path>" for each volume (names and claims never
+    # contain "=", so the host path is everything after the second one).
+    all_pods="$(k get pods -A -o 'jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{range .spec.volumes[*]}{"\t"}{.name}={.persistentVolumeClaim.claimName}={.hostPath.path}{end}{"\n"}{end}' 2>&1)" ||
+        cannot_ask "($KIND_NODE on $DOCKER_SOCK) which pods use $node_path" "$all_pods"
+    while IFS=$'\t' read -r -a fields; do
+        [ "${#fields[@]}" -gt 0 ] || continue
+        id="${fields[0]}"
+        for vol in "${fields[@]:1}"; do
+            name="${vol%%=*}"
+            rest="${vol#*=}"
+            claim="${rest%%=*}"
+            path="${rest#*=}"
+            # A host path; a claim bound there; or a generic ephemeral
+            # volume's claim, <pod>-<volume>, bound there.
+            if ! { [ -n "$path" ] && path_overlaps "$path"; } &&
+                ! { [ -n "$claim" ] && [[ " ${claims[*]} " == *" ${id%%/*}/$claim "* ]]; } &&
+                [[ " ${claims[*]} " != *" $id-$name "* ]]; then
+                continue
+            fi
+            if [[ " ${in_use[*]} " != *" ${id#"$NAMESPACE"/} "* ]] && [[ " ${others[*]} " != *" $id "* ]]; then
+                others+=("$id")
+            fi
+            break
+        done
+    done <<<"$all_pods"
+    if [ "${#in_use[@]}" -gt 0 ] || [ "${#others[@]}" -gt 0 ]; then
+        local named=()
+        for p in ${in_use[@]+"${in_use[@]}"}; do named+=("$NAMESPACE/$p"); done
+        named+=(${others[@]+"${others[@]}"})
+        echo "error: $subvol is still in use by: ${named[*]}." >&2
+        echo "Nothing changed. After stopping the writers (docs/deployment/BACKUPS.md, \"Restore from a snapshot\", step 2):" >&2
+        if [ "${#in_use[@]}" -gt 0 ]; then
+            echo "  docker -H $DOCKER_SOCK exec $KIND_NODE kubectl -n $NAMESPACE scale$(printf ' statefulset/%s' "${in_use[@]%-0}") --replicas=0" >&2
+        fi
+        if [ "${#stuck[@]}" -gt 0 ]; then
+            echo "  ${stuck[*]}: gone from the API but a container still runs on $STORAGE_NODE; wait for it to stop" >&2
+            echo "  (docker -H $DOCKER_SOCK exec $STORAGE_NODE crictl ps --label io.kubernetes.pod.name=<pod>)" >&2
+        fi
+        if [ "${#others[@]}" -gt 0 ]; then
+            echo "  stop or delete ${others[*]}, which mount $node_path" >&2
+        fi
+        exit 1
+    fi
+}
+check_unused
+echo "= no pod uses $subvol (${pods[*]} are gone)"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 echo "Restore plan:"
@@ -240,6 +397,10 @@ if [ "$YES" = "false" ] && [ "$DRY_RUN" = "false" ]; then
         exit 1
     fi
 fi
+
+# Again, after the confirmation, which may have waited a long time.
+check_unused
+echo "= still no pod uses $subvol"
 
 if [ "$DRY_RUN" = "true" ]; then
     # No temporary directory and no top-level mount in a dry run.

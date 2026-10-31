@@ -4,7 +4,8 @@
 # scripts/backup/check-freshness.sh and scripts/backup/restore-dump.sh.
 #
 # Runs as any user with fake btrfs, stat, mountpoint, findmnt, id, docker
-# and pg_restore (scripts/backup/test-stubs.sh) first on PATH, and with
+# and pg_restore (scripts/backup/test-stubs.sh), and mount, umount and a
+# mktemp that refuses /mnt, first on PATH, and with
 # ECONGRAPH_TEST_ROOT pointing the host scripts' /srv, /var/lib and /run
 # paths into a temporary directory. Nothing outside it is read or written.
 set -euo pipefail
@@ -15,8 +16,23 @@ source "${repo_root}/scripts/backup/test-stubs.sh"
 
 failures=0
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+holder=""
+trap '[ -z "${holder}" ] || kill "${holder}" 2>/dev/null || true; rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
+# restore-snapshot.sh mounts the filesystem top level on a mktemp directory
+# under /mnt once its checks pass. The checks run here are meant to stop it
+# first; should one not, these record the call and fail instead of mounting
+# anything or creating a directory outside ${tmp}.
+# shellcheck disable=SC2016 # the stubs' $ expand when they run, not here
+for cmd in mount umount; do
+    printf '#!/bin/bash\necho "%s $*" >>"${STUB_LOG:-/dev/null}"\necho "fake %s: refused in tests" >&2\nexit 1\n' \
+        "${cmd}" "${cmd}" >"${tmp}/bin/${cmd}"
+done
+real_mktemp="$(command -v mktemp)"
+# shellcheck disable=SC2016
+printf '#!/bin/bash\ncase " $* " in *" /mnt/"*) echo "mktemp $*" >>"${STUB_LOG:-/dev/null}"; echo "fake mktemp: refused in tests" >&2; exit 1 ;; esac\nexec %q "$@"\n' \
+    "${real_mktemp}" >"${tmp}/bin/mktemp"
+chmod +x "${tmp}/bin/mount" "${tmp}/bin/umount" "${tmp}/bin/mktemp"
 export PATH="${tmp}/bin:${PATH}"
 export STUB_LOG="${tmp}/calls.log"
 # Never read the operator's backup.env.
@@ -33,6 +49,7 @@ run_script() {
     local name="$1" want="$2" text="$3" status=0
     shift 3
     : >"${STUB_LOG}"
+    rm -f "${STUB_LOG}.get-pod"
     out="$("$@" </dev/null 2>&1)" || status=$?
     if [[ "${status}" -ne "${want}" ]] || ! grep -qF -- "${text}" <<<"${out}"; then
         fail "${name}: want exit ${want} and output containing '${text}', got exit ${status}:"
@@ -179,14 +196,148 @@ run_script "restore-snapshot --from-pool --dry-run stops before the copy back" 0
 check "... and receives nothing" [ ! -e "${snaps}/data-plane.20261023T030000Z" ]
 # The copy back itself (not a dry run) stops at the pod check: postgresql-0
 # still exists, so nothing is unmounted or renamed.
-FAKE_POD_NAME=pod/postgresql-0 FAKE_RECEIVE_UUID="${STALE}" run_script "restore-snapshot --from-pool sets a mismatched copy back aside" 1 \
+FAKE_PODS=postgresql-0 FAKE_RECEIVE_UUID="${STALE}" run_script "restore-snapshot --from-pool sets a mismatched copy back aside" 1 \
     "set aside as ${snaps}/data-plane.20261023T030000Z.mismatch-" \
     "${restore}" --from-pool data-plane.20261023T030000Z
 check "... kept, not deleted" bash -c "ls -d '${snaps}'/data-plane.20261023T030000Z.mismatch-* >/dev/null"
-FAKE_POD_NAME=pod/postgresql-0 run_script "restore-snapshot --from-pool checks a good copy back and goes on" 1 \
-    "postgresql-0 still exists" "${restore}" --from-pool data-plane.20261023T030000Z
+FAKE_PODS=postgresql-0 run_script "restore-snapshot --from-pool checks a good copy back and goes on" 1 \
+    "still in use by: econ-graph/postgresql-0" "${restore}" --from-pool data-plane.20261023T030000Z
 check "... the copy back has the pool copy's Received UUID" \
     [ "$(fake_meta "${snaps}/data-plane.20261023T030000Z" received)" == "${L2}" ]
+
+echo "== restore-snapshot.sh: every pod using the subvolume must be gone, or nothing changes"
+# Refusals run without --dry-run (they must stop before anything changes);
+# acceptances only as dry runs.
+echo "${FS_UUID} /@econgraph-app-prod" >"${srv}/app-prod/.fake-mount"
+app_snap=app-prod.20261024T010000Z
+# refuse NAME TEXT [VAR=value...]: restoring app_snap (or RESTORE_SNAP) with
+# the stubbed cluster in that state exits 1 with TEXT and changes nothing.
+refuse() {
+    local name="$1" text="$2" before
+    shift 2
+    before="$(tree_state "${root}")"
+    run_script "restore-snapshot refuses: ${name}" 1 "${text}" \
+        env "$@" "${restore}" --yes "${RESTORE_SNAP:-${app_snap}}"
+    check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+    check "... and touches no subvolume and mounts nothing" \
+        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp) ' '${STUB_LOG}'"
+}
+# accept NAME [VAR=value...]: a dry run of the same restore gets past the check.
+accept() {
+    local name="$1"
+    shift
+    run_script "restore-snapshot accepts: ${name}" 0 "(dry run: nothing restored)" \
+        env "$@" "${restore}" --dry-run "${RESTORE_SNAP:-${app_snap}}"
+    check "... and says no pod uses it" grep -qF "= no pod uses @econgraph-${RESTORE_SNAP%%.*}" <<<"${out}"
+}
+RESTORE_SNAP=""
+refuse "app-prod while app-postgres-0 exists (keycloak-postgres-0 gone)" \
+    "still in use by: econ-graph/app-postgres-0." FAKE_PODS=app-postgres-0
+check "... and names its StatefulSet to scale down" \
+    grep -qF "scale statefulset/app-postgres --replicas=0" <<<"${out}"
+refuse "app-prod while keycloak-postgres-0 exists" \
+    "still in use by: econ-graph/keycloak-postgres-0." FAKE_PODS=keycloak-postgres-0
+refuse "app-prod while both exist" \
+    "still in use by: econ-graph/app-postgres-0 econ-graph/keycloak-postgres-0." \
+    "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
+check "... and names both StatefulSets to scale down" \
+    grep -qF "scale statefulset/app-postgres statefulset/keycloak-postgres --replicas=0" <<<"${out}"
+refuse "app-prod when the cluster can't say whether app-postgres-0 exists" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) whether app-postgres-0 exists" \
+    FAKE_POD_FAILS=app-postgres-0
+refuse "app-prod when the PersistentVolumes can't be listed" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) which PersistentVolumes" \
+    FAKE_PV_FAILS=1
+refuse "app-prod when the pods can't be listed" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) which pods use /srv/econgraph/app-prod" \
+    FAKE_POD_LIST_FAILS=1
+refuse "app-prod while another pod mounts app-postgres's claim" "still in use by: econ-graph/pg-debug." \
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume==\necon-graph/pg-debug\tscratch==\tdata=app-postgres-data-app-postgres-0=\n'
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... and asks to stop it, not to scale Postgres" \
+    bash -c 'grep -qF "stop or delete econ-graph/pg-debug" <<<"$1" && ! grep -qF "scale statefulset" <<<"$1"' _ "${out}"
+refuse "app-prod while a pod mounts a hand-made PersistentVolume on the subvolume" "still in use by: other/copy." \
+    'FAKE_PVS=/srv/econgraph/app-prod/\tother/hand-made\n' 'FAKE_POD_LIST=other/copy\tdata=hand-made=\n'
+for path in /srv/econgraph/app-prod /srv/econgraph/app-prod/app-pg/18 /srv/econgraph /srv/econgraph/ /srv / \
+    /srv//econgraph/app-prod /srv/econgraph/./app-prod/app-pg /srv/econgraph// /srv/x/../econgraph/app-prod \
+    srv/econgraph/app-prod . srv /proc/1/root/srv/econgraph/app-prod /proc; do
+    refuse "app-prod while a pod has hostPath ${path}" "still in use by: econ-graph/shell." \
+        "FAKE_POD_LIST=econ-graph/shell\thost==${path}\n"
+done
+refuse "app-prod while a pod mounts a PersistentVolume spelled with // on the subvolume" "still in use by: econ-graph/pg-debug." \
+    'FAKE_PVS=/srv/econgraph//app-prod/app-pg\tecon-graph/side\n' 'FAKE_POD_LIST=econ-graph/pg-debug\tdata=side=\n'
+refuse "app-prod while a generic ephemeral volume's claim is bound on the subvolume" "still in use by: econ-graph/dbg." \
+    'FAKE_PVS=/srv/econgraph/app-prod/scratch\tecon-graph/dbg-scratch\n' 'FAKE_POD_LIST=econ-graph/dbg\tscratch==\n'
+refuse "app-prod while app-postgres-0 is gone from the API but its container still runs" \
+    "still in use by: econ-graph/app-postgres-0." FAKE_RUNNING=app-postgres-0
+check "... and says a container still runs on the storage node" \
+    grep -qF "app-postgres-0: gone from the API but a container still runs on econ-graph-worker" <<<"${out}"
+refuse "app-prod when the storage node can't say what runs on it" \
+    "could not ask the cluster (econ-graph-worker on unix:///var/run/docker.sock) whether a container of app-postgres-0 still runs" \
+    FAKE_CRICTL_FAILS=1
+refuse "app-prod when a Postgres pod comes back while the confirmation waits" \
+    "still in use by: econ-graph/app-postgres-0." FAKE_PODS=app-postgres-0 FAKE_PODS_FROM_CALL=3
+check "... after the first check passed" grep -qF "= no pod uses @econgraph-app-prod" <<<"${out}"
+accept "app-prod with both Postgres pods gone and nothing else on it" \
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume==\necon-graph/econ-graph-backend-1\ttmp==\tcerts==\n'
+accept "app-prod while postgresql-0 and the data plane's users exist" FAKE_PODS=postgresql-0 \
+    'FAKE_POD_LIST=econ-graph/postgresql-0\tdata=postgresql-data-postgresql-0=\necon-graph/shell\thost==/srv/econgraph/data-plane\n'
+accept "app-prod while a pod has a look-alike path or a same-named claim elsewhere" \
+    'FAKE_POD_LIST=econ-graph/a\thost==/srv/econgraph/app-prod-old\nstaging/b\tdata=app-postgres-data-app-postgres-0=\nstaging/app-postgres\t0==\necon-graph/c\tcfg==/etc/a=b\n'
+RESTORE_SNAP=data-plane.20261024T010000Z
+refuse "data-plane while postgresql-0 exists" "still in use by: econ-graph/postgresql-0." FAKE_PODS=postgresql-0
+check "... and names its StatefulSet to scale down" \
+    grep -qF "scale statefulset/postgresql --replicas=0" <<<"${out}"
+refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ-graph/x." \
+    'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0=\n'
+accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
+unset RESTORE_SNAP
+
+echo "== restore-snapshot.sh: holds the backup lock from before its first check"
+lock="${root}/run/econgraph-backup-snapshots.lock"
+# hold_lock SECONDS: hold the lock from the background for that long (until
+# release_lock); returns once it is held.
+hold_lock() {
+    rm -f "${tmp}/lock-held"
+    bash -c 'exec 8>"$1"; flock 8; : >"$2"; exec sleep "$3"' _ "${lock}" "${tmp}/lock-held" "$1" &
+    holder=$!
+    local tries=0
+    while [ ! -e "${tmp}/lock-held" ]; do
+        tries=$((tries + 1))
+        [ "${tries}" -le 200 ] || { echo "FAIL could not hold ${lock} for the test"; exit 1; }
+        sleep 0.05
+    done
+}
+release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; holder=""; }
+hold_lock 60
+before="$(tree_state "${root}")"
+run_script "restore-snapshot refuses while the backup lock is held" 1 "${lock} is held" \
+    "${restore}" --yes "${app_snap}"
+check "... before any findmnt, mountpoint, btrfs or docker call" [ ! -s "${STUB_LOG}" ]
+check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+run_script "restore-snapshot --dry-run takes no lock" 0 "(dry run: nothing restored)" \
+    "${restore}" --dry-run "${app_snap}"
+release_lock
+hold_lock 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for the lock, then checks" 1 \
+    "still in use by: econ-graph/app-postgres-0." "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_lock
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot asks the cluster with the lock held" 1 \
+    "still in use by" "${restore}" --yes "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... held at every findmnt, mountpoint and cluster call, from the first" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... the first call is a findmnt" bash -c '[ "$(head -n 1 "$1" | cut -d" " -f1)" = findmnt ]' _ "${STUB_LOG}"
+for wait in soon "" 86401 9999999999999999999999 18446744073709551617; do
+    run_script "restore-snapshot rejects --lock-wait=${wait}" 2 "SECONDS: 0 to 86400" \
+        "${restore}" --yes "--lock-wait=${wait}" "${app_snap}"
+done
+# 09 is not octal: read as decimal, the lock is taken and it goes on to the
+# pod check.
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
+    "still in use by" "${restore}" --yes --lock-wait=09 "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"
