@@ -14,7 +14,7 @@ use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Bool, Date, Text};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use econ_graph_core::models::{exclude_synthetic_legacy_rows, revision_filter};
+use econ_graph_core::models::{exclude_synthetic_legacy_rows, revision_filter_excluding_synthetic};
 use econ_graph_core::schema::data_points;
 use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use testcontainers::core::WaitFor;
@@ -131,6 +131,11 @@ fn populate(conn: &mut PgConnection) {
         // 2002: first published in 2021, the same value released again in 2022.
         ("2002-01-01", "2021-07-01", true, "3.0"),
         ("2002-01-01", "2022-07-01", true, "3.0"),
+        // 2003: a projection published before the date, a later legacy release, and a
+        // synthetic legacy row that is newer than the projection.
+        ("2003-01-01", "2002-10-01", true, "4.0"),
+        ("2003-01-01", "2023-07-01", true, "4.1"),
+        ("2003-01-01", "2003-01-01", true, "3.9"),
     ] {
         point(conn, WB_SERIES, row);
     }
@@ -174,24 +179,29 @@ fn row_count(conn: &mut PgConnection) -> i64 {
         .n
 }
 
+fn world_bank_series_id(conn: &mut PgConnection) -> uuid::Uuid {
+    #[derive(QueryableByName)]
+    struct Id {
+        #[diesel(sql_type = diesel::sql_types::Uuid)]
+        id: uuid::Uuid,
+    }
+    diesel::sql_query("SELECT id FROM economic_series WHERE external_id = $1")
+        .bind::<Text, _>(WB_SERIES)
+        .get_result::<Id>(conn)
+        .expect("series id")
+        .id
+}
+
 /// `(date, revision_date, value)` the series service's read returns for these options: the
-/// same `exclude_synthetic_legacy_rows` and `revision_filter` filters it applies.
+/// same `exclude_synthetic_legacy_rows` and `revision_filter_excluding_synthetic` filters it
+/// applies.
 fn read(
     conn: &mut PgConnection,
     original_only: bool,
     as_of: Option<NaiveDate>,
     latest: bool,
 ) -> Vec<(NaiveDate, NaiveDate, String)> {
-    #[derive(QueryableByName)]
-    struct Id {
-        #[diesel(sql_type = diesel::sql_types::Uuid)]
-        id: uuid::Uuid,
-    }
-    let series = diesel::sql_query("SELECT id FROM economic_series WHERE external_id = $1")
-        .bind::<Text, _>(WB_SERIES)
-        .get_result::<Id>(conn)
-        .expect("series id")
-        .id;
+    let series = world_bank_series_id(conn);
     let mut query = data_points::table
         .filter(data_points::series_id.eq(series))
         .into_boxed();
@@ -203,7 +213,7 @@ fn read(
         query = query.filter(data_points::is_original_release.eq(true));
     }
     if as_of_or_latest {
-        query = query.filter(revision_filter(as_of, original_only));
+        query = query.filter(revision_filter_excluding_synthetic(as_of, original_only));
     }
     query
         .order_by((data_points::date, data_points::revision_date))
@@ -216,6 +226,21 @@ fn read(
         .expect("read")
         .into_iter()
         .map(|(date, revision, value)| (date, revision, value.unwrap().to_string()))
+        .collect()
+}
+
+/// `(date, revision_date)` of the World Bank rows `exclude_synthetic_legacy_rows` drops.
+fn synthetic(conn: &mut PgConnection) -> Vec<(NaiveDate, NaiveDate)> {
+    let kept: Vec<(NaiveDate, NaiveDate)> = data_points::table
+        .filter(data_points::series_id.eq(world_bank_series_id(conn)))
+        .filter(exclude_synthetic_legacy_rows())
+        .select((data_points::date, data_points::revision_date))
+        .load(conn)
+        .expect("kept rows");
+    rows(conn, WB_SERIES)
+        .into_iter()
+        .map(|r| (r.date, r.revision_date))
+        .filter(|key| !kept.contains(key))
         .collect()
 }
 
@@ -235,6 +260,14 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
     let as_of = Some(d("2022-12-31"));
     let as_of_before = read(&mut conn, false, as_of, false);
     let latest_before = read(&mut conn, false, None, true);
+    let synthetic_before = synthetic(&mut conn);
+    assert_eq!(
+        synthetic_before,
+        [
+            (d("2000-01-01"), d("2000-01-01")),
+            (d("2003-01-01"), d("2003-01-01"))
+        ]
+    );
     // Before: originalOnly returns every legacy release, and its asOf the newest one.
     assert_eq!(
         read(&mut conn, true, None, false),
@@ -245,6 +278,8 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
             p("2001-01-01", "2020-07-01", "2.0"),
             p("2002-01-01", "2021-07-01", "3.0"),
             p("2002-01-01", "2022-07-01", "3.0"),
+            p("2003-01-01", "2002-10-01", "4.0"),
+            p("2003-01-01", "2023-07-01", "4.1"),
         ]
     );
     assert_eq!(
@@ -272,8 +307,14 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
             original("2001-01-01", "2023-07-01", false, "2.1"),
             original("2002-01-01", "2021-07-01", true, "3.0"),
             original("2002-01-01", "2022-07-01", false, "3.0"),
+            original("2003-01-01", "2002-10-01", true, "4.0"),
+            original("2003-01-01", "2003-01-01", true, "3.9"),
+            original("2003-01-01", "2023-07-01", false, "4.1"),
         ]
     );
+    // The same rows are synthetic: each date keeps its earliest real original, which is what
+    // makes its legacy row synthetic, and no relabelled row has revision_date = date.
+    assert_eq!(synthetic(&mut conn), synthetic_before);
     // Nothing deleted, no other source touched.
     assert_eq!(row_count(&mut conn), count_before);
     assert_eq!(rows(&mut conn, FRED_SERIES), fred_before);
@@ -283,6 +324,7 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
         p("2000-01-01", "2020-07-01", "1.0"),
         p("2001-01-01", "2020-07-01", "2.0"),
         p("2002-01-01", "2021-07-01", "3.0"),
+        p("2003-01-01", "2002-10-01", "4.0"),
     ];
     assert_eq!(read(&mut conn, true, None, false), first);
     assert_eq!(read(&mut conn, true, as_of, false), first);

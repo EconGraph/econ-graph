@@ -14,7 +14,10 @@
 -- Synthetic legacy rows (revision_date = date, original, alongside an original with a real
 -- vintage; the predicate of econ_graph_core::models::exclude_synthetic_legacy_rows) are left
 -- out of the ranking and left as they are: their date is not a release, and reads already
--- skip them whenever a real original exists.
+-- skip them whenever a real original exists. The same rows are synthetic before and after:
+-- each date keeps its earliest real original (revision_date <> date), which is what makes its
+-- legacy row synthetic, and a relabelled row never has revision_date = date, so no row stops
+-- or starts being synthetic and the readers' exclusion is unchanged.
 --
 -- Checks, each raising an error with nothing changed (diesel runs the migration in one
 -- transaction):
