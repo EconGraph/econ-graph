@@ -363,8 +363,26 @@ replaces the Job. To keep such a mapping, declare it:
 The client or client scope must exist, either in Keycloak or in the realm file. Remove its
 entry before deleting it. Scope mappings of realm roles, such as `catalog-public` mapped on a
 client scope, are not managed and stay as they are.
-`scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak and checks
-what it keeps and removes; CI runs it when the realm, its import or the Keycloak manifests change.
+
+Anonymous tokens are built with the anonymous client's client scopes (`basic`, and any other
+default or optional scope assigned to it) as well as its own scope mapping. A catalog read mapped
+on one of those client scopes would reach visitors whatever the client's own scope mapping says,
+including after `set-catalog-access.sh` withdraws it. So a deploy stops, before importing
+anything, while one does, live or in the realm file, and the error names each client scope and
+role. Remove those roles from the client scope's scope mappings, and make a catalog public with
+`set-catalog-access.sh --make-public` instead. `set-catalog-access.sh` names such a client scope
+too. A catalog read on a realm default client scope is named with a warning: a recreated
+anonymous client would be assigned that scope.
+
+When a catalog role leaves the realm file, the import deletes it if config-cli created it (it
+records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes). Its live
+grants on composites, scope mappings and the anonymous service account are then left out of the
+import, each named with a warning, because importing a grant of a deleted role fails the import
+part way. A catalog role an operator created in Keycloak isn't deleted, and its grants are kept.
+
+`scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak, starting
+from the last release's realm as production does, and checks what it keeps, removes and refuses.
+CI runs it when the realm, its import, the Keycloak manifests or `scripts/deploy/deploy.sh` change.
 
 Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
 separate admin API operations, so preservation is best effort under concurrent administrator edits;
