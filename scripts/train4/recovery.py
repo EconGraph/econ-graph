@@ -552,7 +552,7 @@ COMMIT;
             temporary.unlink()
 
 
-def replay_postgres(source_path, target_id, token, epoch, database_variable='DATA_DATABASE_URL', apply_target=None):
+def replay_postgres(source_path, target_id, token, epoch, database_variable='DATA_DATABASE_URL', apply_target=None, psql='psql'):
     """Restore missing post-cutover rows without deleting or overwriting conflicting history."""
     target_id, token = identity(target_id), identity(token)
     if type(epoch) is not int or epoch < 0:
@@ -564,12 +564,15 @@ def replay_postgres(source_path, target_id, token, epoch, database_variable='DAT
                     'preserves_existing_history': True}
         if identity(apply_target) != target_id:
             raise Refused('replay target confirmation mismatch')
-        # COPY CSV safely transports arbitrary JSON strings; no observation is SQL text.
+        # Keep SQL commands separate from the disk-backed CSV input. SQL COPY's inline
+        # \. marker handling differs across clients; frontend \copy FROM pstdin owns
+        # the data stream and ends at EOF, without sending any sentinel as JSON data.
         import csv
-        with tempfile.TemporaryFile(mode='w+') as script:
-            script.write(f'''BEGIN;
+        with tempfile.TemporaryFile(mode='w+', encoding='utf-8', newline='') as payload:
+            preamble = f'''BEGIN ISOLATION LEVEL READ COMMITTED;
 SET LOCAL lock_timeout = '30s';
 SET LOCAL standard_conforming_strings = on;
+SET LOCAL client_encoding = 'UTF8';
 DO $$ BEGIN
  PERFORM pg_advisory_xact_lock({LOCK});
  IF NOT EXISTS(SELECT 1 FROM timeseries_recovery_state WHERE target_id='{target_id}' AND writes_paused AND pause_token='{token}' AND epoch={epoch}) THEN
@@ -577,16 +580,14 @@ DO $$ BEGIN
  END IF;
 END $$;
 CREATE TEMP TABLE recovery_replay(payload jsonb NOT NULL) ON COMMIT DROP;
-COPY recovery_replay(payload) FROM STDIN WITH (FORMAT csv);
-''')
-            writer = csv.writer(script, lineterminator='\n')
+'''
+            writer = csv.writer(payload, lineterminator='\n')
             for raw, in source.db.execute('SELECT raw FROM observations ORDER BY id'):
                 row = json.loads(raw, parse_float=Decimal)
                 if any(len(timestamp_key(row[k])[1]) > 6 for k in ('created_at', 'updated_at')):
                     raise Refused('Postgres replay cannot narrow sub-microsecond provenance')
                 writer.writerow([raw])
-            script.write('\\.\n')
-            script.write('''DO $$ BEGIN
+            postamble = '''DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM recovery_replay r LEFT JOIN economic_series s ON s.id=(r.payload->>'series_id')::uuid
   WHERE s.id IS NULL OR s.dataset_id<>(r.payload->>'dataset_id')::uuid) THEN
   RAISE EXCEPTION 'restore series/dataset metadata before replay';
@@ -610,11 +611,14 @@ SELECT (payload->>'id')::uuid,(payload->>'series_id')::uuid,(payload->>'date')::
  (payload->>'created_at')::timestamptz,(payload->>'updated_at')::timestamptz FROM recovery_replay
 ON CONFLICT(id) DO NOTHING;
 COMMIT;
-''')
-            script.seek(0)
+'''
+            payload.seek(0)
             environment = dict(os.environ, PGDATABASE=database_url(database_variable))
-            result = subprocess.run(['psql', '--no-psqlrc', '--quiet', '--set', 'ON_ERROR_STOP=1', '--dbname', database_url(database_variable)],
-                                    stdin=script, capture_output=True, text=True, env=environment)
+            result = subprocess.run([str(psql), '--no-psqlrc', '--quiet', '--set', 'ON_ERROR_STOP=1', '--dbname', database_url(database_variable),
+                                     '--command', preamble,
+                                     '--command', r'\copy recovery_replay(payload) FROM pstdin WITH (FORMAT csv)',
+                                     '--command', postamble],
+                                    stdin=payload, capture_output=True, text=True, env=environment)
             if result.returncode:
                 raise Refused('replay transaction failed; inspect target before retry: ' + result.stderr.splitlines()[0][:300])
         return {'format': FORMAT, 'kind': 'postgres-replay', 'committed': True,

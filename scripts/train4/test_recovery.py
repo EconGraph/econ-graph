@@ -46,6 +46,30 @@ class RecoveryContracts(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_replay_uses_frontend_copy_eof_with_sql_separate_from_csv(self):
+        import csv
+        import io
+        from unittest.mock import patch
+        attributes={'footnote':"  Café Ω\n\\.\nCOMMIT; 'quoted'  "}
+        fixture(self.source,attrs=attributes)
+        def inspect_transport(command, **options):
+            sql=[command[i+1] for i,value in enumerate(command) if value=='--command']
+            self.assertEqual(len(sql),3)
+            self.assertTrue(sql[0].startswith('BEGIN ISOLATION LEVEL READ COMMITTED;'))
+            self.assertIn('pg_advisory_xact_lock',sql[0])
+            self.assertEqual(sql[1],r'\copy recovery_replay(payload) FROM pstdin WITH (FORMAT csv)')
+            self.assertTrue(sql[2].rstrip().endswith('COMMIT;'))
+            payload=options['stdin'].read()
+            self.assertNotIn('\\.\n',payload.splitlines(keepends=True), 'EOF, never an inline data terminator')
+            rows=[json.loads(row[0]) for row in csv.reader(io.StringIO(payload))]
+            self.assertEqual(len(rows),3)
+            self.assertTrue(all(row['attributes']==attributes for row in rows))
+            return subprocess.CompletedProcess(command,0,stdout='',stderr='')
+        with patch.dict(os.environ,RECOVERY_PROTOCOL_TEST_URL='postgres://not-contacted/scratch'):
+            with patch.object(r.subprocess,'run',side_effect=inspect_transport) as process:
+                self.assertTrue(r.replay_postgres(self.source,T,TOKEN,1,'RECOVERY_PROTOCOL_TEST_URL',T)['committed'])
+                self.assertEqual(process.call_count,1,'one psql connection must own the entire fenced transaction')
+
     def test_matching_clients_reject_other_databases_and_uri_routing_overrides(self):
         helper=Path(__file__).with_name('pg-client.py')
         for suffix in ('production','eg_train4_recovery_x?dbname=production','eg_train4_recovery_x?host=other-server'):
@@ -368,15 +392,23 @@ class PostgresRecoveryContracts(unittest.TestCase):
     def test_replay_preserves_exact_null_attributes_and_is_idempotent(self):
         self.control('initialize',label='disposable replay fixture')
         self.control('pause',token=TOKEN)
-        r.pg_run("""UPDATE data_points SET attributes='{"footnotes":[{"code":"P","text":"  Initial release  "}],"preliminary":false,"unknown":null}'::jsonb WHERE id='30000000-0000-4000-8000-000000000004';""",self.variable)
+        attributes={'footnotes':[{'code':'P','text':"  Initial release\n\\.\nCOMMIT; 'quoted' Café Ω  "}], 'preliminary':False,'unknown':None}
+        r.pg_run("UPDATE data_points SET attributes="+r.sql_string(r.exact_json(attributes))+"::jsonb WHERE id='30000000-0000-4000-8000-000000000004';",self.variable)
         original=self.root/'original.jsonl'
         r.export_postgres(original,T,self.variable)
-        r.pg_run("DELETE FROM data_points WHERE id='30000000-0000-4000-8000-000000000005';",self.variable)
-        for _ in range(2):
-            receipt=r.replay_postgres(original,T,TOKEN,1,self.variable,T)
-            self.assertTrue(receipt['committed'])
-        restored=self.root/'restored.jsonl'; r.export_postgres(restored,T,self.variable)
-        self.assertTrue(r.parity(original,restored)['passed'])
+        clients=['psql']
+        if os.environ.get('TRAIN4_TEST_PG_CONTAINER'):
+            clients.append(str(Path(__file__).with_name('psql')))
+        for index,client in enumerate(clients):
+            with self.subTest(client=client):
+                version=subprocess.run([client,'--dbname',self.url,'--version'],capture_output=True,text=True,check=True).stdout.strip()
+                print('Replay client: '+version)
+                r.pg_run("DELETE FROM data_points WHERE id='30000000-0000-4000-8000-000000000005';",self.variable)
+                for _ in range(2):
+                    receipt=r.replay_postgres(original,T,TOKEN,1,self.variable,T,psql=client)
+                    self.assertTrue(receipt['committed'])
+                restored=self.root/f'restored-{index}.jsonl'; r.export_postgres(restored,T,self.variable)
+                self.assertTrue(r.parity(original,restored)['passed'])
         r.pg_run("UPDATE data_points SET value=42 WHERE id='30000000-0000-4000-8000-000000000004';",self.variable)
         before=self.root/'before-conflict.jsonl'; r.export_postgres(before,T,self.variable)
         with self.assertRaisesRegex(r.Refused,'conflicts'):

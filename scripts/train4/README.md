@@ -136,7 +136,13 @@ acknowledgment requires inspecting the durable transition ledger; there is no fo
 
 `replay-postgres SOURCE.jsonl --target-id UUID --pause-token UUID --epoch N` plans recovery
 of missing post-cutover shadow rows. Applying requires the same `--apply-target UUID` and
-current paused fence. It restores all exact values/attributes/provenance in one transaction,
+current paused fence. Replay sends its disk-backed UTF-8 CSV stream to frontend `\copy FROM pstdin` until EOF;
+its SQL setup/fence, copy and validation/commit commands share one explicit READ COMMITTED
+psql connection. No inline `\.` terminator is sent to the server, so replay does not depend
+on a particular client's SQL COPY/CSV terminator handling ([psql documentation](https://www.postgresql.org/docs/18/app-psql.html)).
+The PostgreSQL test exercises both the installed psql and the service's matching client
+when `TRAIN4_TEST_PG_CONTAINER` is provided, including literal terminator/SQL-like footnotes.
+It restores all exact values/attributes/provenance in one transaction,
 leaves existing identical rows alone, and refuses conflicting IDs/natural keys or missing
 series/dataset metadata. It never deletes/replaces old history or narrows sub-microsecond
 provenance into PostgreSQL precision. Revalidate parity after replay before rollback.
