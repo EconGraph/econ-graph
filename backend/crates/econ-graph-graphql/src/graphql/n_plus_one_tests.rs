@@ -42,7 +42,7 @@ async fn test_dataloader_batching_for_n_plus_one_prevention() {
 
                 // Test data point count loader
                 let count_result =
-                    dataloader::cached::Loader::load(&data_loaders.data_point_count_loader, id)
+                    dataloader::non_cached::Loader::load(&data_loaders.data_point_count_loader, id)
                         .await;
                 assert_eq!(count_result, 0);
             }
@@ -75,7 +75,7 @@ async fn test_comprehensive_n_plus_one_prevention() {
         let source_result =
             dataloader::cached::Loader::load(&data_loaders.data_source_loader, id).await;
         let count_result =
-            dataloader::cached::Loader::load(&data_loaders.data_point_count_loader, id).await;
+            dataloader::non_cached::Loader::load(&data_loaders.data_point_count_loader, id).await;
 
         // DataLoaders now correctly return Options for missing entities
         assert!(source_result.is_none());

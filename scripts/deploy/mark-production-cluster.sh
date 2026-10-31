@@ -99,8 +99,10 @@ else
 fi
 context="$CLUSTER_ROLE_CONTEXT"
 uid="$(kube_system_uid)" || die "could not read the kube-system namespace UID of context $context"
-marker="$(cluster_role_marker)" ||
+cluster_role_read_marker kc ||
     die "could not read ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_CONFIGMAP of context $context"
+# Whether the ConfigMap exists, empty or not: --unmark removes any.
+marker="$CLUSTER_ROLE_MARKER_EXISTS"
 code="${uid:0:8}"
 
 # What this cluster is, shown on every run (dry runs and "nothing to do"
@@ -140,7 +142,7 @@ if [[ "$UNMARK" == true ]]; then
         die "could not look up Secret cloudflare-tunnel in $TUNNEL_NAMESPACE; nothing was changed"
     running=false
     [[ -z "$replicas" || "$replicas" == 0 ]] || running=true
-    if [[ -z "$marker" && "$running" == false && -z "$token" ]]; then
+    if [[ "$marker" != true && "$running" == false && -z "$token" ]]; then
         log "context $context: not marked production, cloudflared not running, no tunnel token; nothing to do"
         exit 0
     fi
@@ -153,7 +155,7 @@ if [[ "$UNMARK" == true ]]; then
     if [[ "$DRY_RUN" == true ]]; then
         [[ "$running" == false ]] ||
             log "dry run: would scale deployment/cloudflared in $TUNNEL_NAMESPACE from $replicas to 0 replicas"
-        [[ -z "$marker" ]] ||
+        [[ "$marker" != true ]] ||
             log "dry run: would delete ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_CONFIGMAP"
         [[ -z "$token" ]] ||
             log "dry run: would offer to delete Secret $TUNNEL_NAMESPACE/cloudflare-tunnel (the tunnel token)"
@@ -165,7 +167,7 @@ if [[ "$UNMARK" == true ]]; then
             die "could not scale deployment/cloudflared in $TUNNEL_NAMESPACE to 0; the marker was kept." \
                 "Scale it to 0 yourself, then run --unmark again"
     fi
-    if [[ -n "$marker" ]]; then
+    if [[ "$marker" == true ]]; then
         kc -n "$CLUSTER_ROLE_NAMESPACE" delete configmap "$CLUSTER_ROLE_CONFIGMAP" --ignore-not-found
     fi
     log "unmarked"

@@ -275,8 +275,8 @@ const PrivacyPolicy: React.FC = () => {
             }}
           >
             The economic data shown on EconGraph comes from public statistical sources (FRED, BLS,
-            Census BDS, FHFA, BEA and the World Bank). Reading it sends nothing about you to those
-            sources.
+            Census BDS, FHFA, BEA, the World Bank and the Bank of Canada). Reading it sends nothing
+            about you to those sources.
           </Typography>
         </Box>
       ),

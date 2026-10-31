@@ -474,6 +474,8 @@ fn plan_trigger_crawl(
         if id != SourceId::Sec && registry.get(id).is_none() {
             return Err(format!("source {trimmed:?} is not available in this build"));
         }
+        // A licence-gated source (econ_graph_crawler::licence) is refused with its restriction.
+        econ_graph_crawler::licence::check(id).map_err(|e| e.to_string())?;
         Ok(id)
     };
     let mut sources: Vec<SourceId> = Vec::new();
@@ -754,6 +756,19 @@ mod tests {
         // default, so only a FLAGS_PROFILE=release build excludes them (see the crawler crate's
         // own `default_registry_holds_exactly_the_live_sources`).
         assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
+        // Licence-gated sources are refused with the restriction and ticket. BOJ's static catalog
+        // registers in this dev-profile test build, so only the licence gate refuses it here.
+        if econ_graph_crawler::sources::default_registry()
+            .get(econ_graph_crawler::SourceId::Boj)
+            .is_some()
+        {
+            let msg = err(input(&["BOJ"], &[], None, None));
+            assert!(msg.contains("disabled: licence (ECO-743)"), "{msg}");
+            assert!(
+                msg.contains("https://linear.app/econgraph/issue/ECO-743"),
+                "{msg}"
+            );
+        }
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
         assert!(err(input(&[], &[], None, None)).contains("nothing to crawl"));

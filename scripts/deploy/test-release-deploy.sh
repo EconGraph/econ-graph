@@ -18,7 +18,9 @@
 #     replicas (from this run, an earlier run's record, or the manifest), the
 #     backups to restore from (the tag's first run's), and a backup Job still
 #     running;
-#   - before any step: the checkout must be the tag's commit and clean; the
+#   - before any step: a cluster whose econ-graph-secrets has no app-database-url needs
+#     APP_DATABASE (shared or separate), which then reaches deploy.sh; the checkout must be
+#     the tag's commit and clean; the
 #     PUBLIC_HOST guard (a production cluster without PUBLIC_HOST configured,
 #     one that serves another host than the configured one, a cluster not
 #     marked production with one, a marker that can't be read, an environment
@@ -127,10 +129,35 @@ case "$*" in
         [ "${STUB_CERT_ISSUER-}" != fail ] || exit 1
         printf '%s' "${STUB_CERT_ISSUER-econ-graph-selfsigned}" ;;
     "get configmap econgraph-cluster-role"*)
+        # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         case "${STUB_MARKER:-production}" in
-            production) printf 'production %s' "$uid" ;;
+            production)
+                case "$*" in
+                    *"-o name"*) echo configmap/econgraph-cluster-role ;;
+                    *"{.data.role}"*) printf 'production#' ;;
+                    *) printf '%s#' "$uid" ;;
+                esac ;;
             fails) exit 1 ;;
         esac ;;
+    # create-secrets.sh --app-database-only --dry-run, which the preflight runs.
+    # econ-graph-secrets: STUB_SECRETS keyed (default; app-database-url names econ_graph),
+    # keyless (deployed before the app database existed) or none. Whether econ_graph and
+    # econ_graph_app hold the app tables: STUB_DATA_USERS (default t), STUB_APP_USERS (f).
+    "get namespace econ-graph") echo namespace/econ-graph ;;
+    "get secret econ-graph-secrets --ignore-not-found -o name")
+        [ "${STUB_SECRETS:-keyed}" = none ] || echo secret/econ-graph-secrets ;;
+    "get secret econ-graph-secrets --ignore-not-found -o jsonpath={.data.app-database-url}")
+        [ "${STUB_SECRETS:-keyed}" != keyed ] ||
+            printf 'postgresql://econgraph:pw@data-postgres-service:5432/econ_graph' | base64 -w0 ;;
+    "get secret econ-graph-postgres --ignore-not-found -o jsonpath={.data.app-password}" | \
+    "get secret econ-graph-app-postgres --ignore-not-found -o jsonpath={.data.app-password}")
+        printf 'pw' | base64 -w0 ;;
+    "get pod postgresql-0 --ignore-not-found -o name "*) echo pod/postgresql-0 ;;
+    "get pod app-postgres-0 --ignore-not-found -o name "*) echo pod/app-postgres-0 ;;
+    "get persistentvolumeclaim -o name "*)
+        printf 'persistentvolumeclaim/postgresql-data-postgresql-0\npersistentvolumeclaim/app-postgres-data-app-postgres-0\n' ;;
+    "exec postgresql-0 -c postgresql -- psql -U postgres -d econ_graph "*) echo "${STUB_DATA_USERS:-t}" ;;
+    "exec app-postgres-0 -c postgres -- psql -U postgres -d econ_graph_app "*) echo "${STUB_APP_USERS:-f}" ;;
     "get deployment keycloak "*) printf '%s' "${STUB_KEYCLOAK_REPLICAS-1}" ;;
     # The crawler worker's replicas: STUB_CRAWLER_NOW, else what the precheck
     # stub scales it down from (STUB_CRAWLER_FROM, default 3), else 0.
@@ -174,7 +201,8 @@ chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED
 # release-deploy.sh reads, and fail when STUB_FAIL names them.
 TREE="$WORK/tree"
 mkdir -p "$TREE/scripts/deploy" "$TREE/k8s/manifests/keycloak"
-cp "$PROJECT_ROOT/scripts/deploy/release-deploy.sh" "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$TREE/scripts/deploy/"
+cp "$PROJECT_ROOT/scripts/deploy/release-deploy.sh" "$PROJECT_ROOT/scripts/deploy/render-public-host.py" \
+    "$PROJECT_ROOT/scripts/deploy/create-secrets.sh" "$TREE/scripts/deploy/"
 cp -r "$PROJECT_ROOT/scripts/deploy/lib" "$TREE/scripts/deploy/lib"
 cp "$PROJECT_ROOT/k8s/manifests/crawler-worker.yaml" "$TREE/k8s/manifests/"
 cp "$PROJECT_ROOT/k8s/manifests/keycloak/deployment.yaml" "$TREE/k8s/manifests/keycloak/"
@@ -182,7 +210,7 @@ for step in load-release-images backup-postgres-now backup-keycloak-db precheck-
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0" .sh)"
-echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD ISSUER=${GATEWAY_TLS_ISSUER-<unset>}" >>"$TEST_LOGS/steps.log"
+echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD APP_DATABASE=${APP_DATABASE-<unset>} ISSUER=${GATEWAY_TLS_ISSUER-<unset>}" >>"$TEST_LOGS/steps.log"
 stamp="${STUB_STAMP:-20261028T080000Z}"
 case "$name" in
     backup-postgres-now)
@@ -304,7 +332,7 @@ RELEASE_DEPLOY="$TREE/scripts/deploy/release-deploy.sh"
 # DOCKER_HOST and PUBLIC_HOST set (a case sets one with `env X=y` first).
 ENV=(env -u KUBECTL -u KUBECONFIG -u DOCKER_HOST -u DOCKER_CONTEXT -u ECONGRAPH_DOCKER_HOST
     -u ECONGRAPH_KUBE_DIR -u CLUSTER_ROLE_CONTEXT -u KIND_CLUSTER -u NAMESPACE -u PUBLIC_HOST
-    -u ECONGRAPH_DEPLOY_ENV -u ECONGRAPH_CONFIG_DIR -u GATEWAY_TLS_ISSUER -u ECONGRAPH_SCRATCH_STORAGE -u XDG_CACHE_HOME -u XDG_DATA_HOME
+    -u ECONGRAPH_DEPLOY_ENV -u ECONGRAPH_CONFIG_DIR -u GATEWAY_TLS_ISSUER -u ECONGRAPH_SCRATCH_STORAGE -u XDG_CACHE_HOME -u XDG_DATA_HOME -u APP_DATABASE
     -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u DRY_RUN -u ASSUME_YES -u KIND_FALLBACK_WARNED
     HOME="$HOME_DIR" TMPDIR="$WORK/tmp" XDG_RUNTIME_DIR="$WORK/run" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
     ECONGRAPH_BACKUP_ROOT="$WORK/backups" ECONGRAPH_RELEASES_DIR="$WORK/releases"
@@ -1031,6 +1059,29 @@ run env STUB_MARKER=none "$RELEASE_DEPLOY" --tag "$TAG" --yes
 refused "a cluster not marked production with PUBLIC_HOST configured" "only the production cluster serves the public host"
 run env STUB_MARKER=fails "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a marker that can't be read" "treated as not production"
+# A cluster deployed before the app database existed: APP_DATABASE is required up front.
+run env STUB_SECRETS=keyless "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a Secret without app-database-url and no APP_DATABASE" "Set APP_DATABASE=shared until"
+run env STUB_SECRETS=keyless APP_DATABASE=both "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an APP_DATABASE that is neither shared nor separate" "APP_DATABASE must be shared or separate"
+run env STUB_SECRETS=keyless APP_DATABASE=shared "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+if [ "$rc" -ne 0 ]; then
+    fail "a Secret without app-database-url with APP_DATABASE=shared: exit $rc"
+elif ! grep -q '^deploy .* APP_DATABASE=shared ISSUER=' "$LOGS/steps.log"; then
+    fail "APP_DATABASE=shared did not reach deploy.sh: $(cat "$LOGS/steps.log")"
+else
+    echo "ok   APP_DATABASE=shared reaches deploy.sh on a Secret without app-database-url"
+fi
+# The wrong direction, refused before any step: shared after the conversion removed the app
+# tables from econ_graph (kept, or given), and separate while econ_graph still holds them.
+run env STUB_DATA_USERS=f STUB_APP_USERS=t "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a kept shared app-database-url after the conversion" "Use APP_DATABASE=separate"
+run env STUB_DATA_USERS=f STUB_APP_USERS=t APP_DATABASE=shared "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "APP_DATABASE=shared after the conversion" "Use APP_DATABASE=separate"
+run env APP_DATABASE=separate "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "APP_DATABASE=separate while econ_graph holds the app tables" "Keep APP_DATABASE=shared"
+run env STUB_SECRETS=none STUB_DATA_USERS=f "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] || fail "a cluster without econ-graph-secrets (a new install): exit $rc"
 run env PUBLIC_HOST= "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "an environment PUBLIC_HOST that differs from the config" "the config decides"
 printf 'PUBLIC_HOST=econgraph.com\r\n' >"$CONFIG"

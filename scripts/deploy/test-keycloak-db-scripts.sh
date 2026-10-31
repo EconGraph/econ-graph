@@ -95,8 +95,14 @@ case "$*" in
   "version --request-timeout=15s") ;;
   "config get-contexts -o name") printf 'kind-econ-graph\nkind-other\nkind-kg-test\n' ;;
   "get namespace kube-system "*) printf '%s' "${STUB_UID:-uid-this-cluster}" ;;
+  # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
   "get configmap econgraph-cluster-role "*)
-    [ "${STUB_MARKER:-none}" != production ] || printf 'production %s' "${STUB_UID:-uid-this-cluster}" ;;
+    [ "${STUB_MARKER:-none}" = production ] || exit 0
+    case "$*" in
+      *" -o name") echo configmap/econgraph-cluster-role ;;
+      *"{.data.role}"*) printf 'production#' ;;
+      *) printf '%s#' "${STUB_UID:-uid-this-cluster}" ;;
+    esac ;;
   "get pod keycloak-postgres-0 "*'@.name=="postgres"'*) printf '%s' "${STUB_POD_READY:-true}" ;;
   *"jsonpath={.spec.replicas}") printf 1 ;;
   *"jsonpath={.spec.template.spec.containers[0].image}") printf 'quay.io/keycloak/keycloak:26.7.4' ;;

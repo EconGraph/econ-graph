@@ -91,7 +91,11 @@ branch. To unblock it:
    or the npm lockfile entry or an `overrides` pin), or, when no fixed version
    exists, add an entry with a reason and a review date to the audit allowlist
    (`backend/.cargo/audit.toml`, `frontend/scripts/npm-audit-allowlist.json`,
-   `admin-frontend/scripts/npm-audit-allowlist.json`).
+   `admin-frontend/scripts/npm-audit-allowlist.json`). An npm entry also names
+   the installed `versions` it excuses (an exact version or a range of `<`,
+   `<=`, `>`, `>=` comparators and `||`), and optionally the lockfile `paths` of
+   those copies; any other copy of the package still fails the audit, and so
+   does an entry past its review date.
 2. Queue it. Its own merge group passes, since it carries the fix, and the
    PRs queued after it pass once it is ahead of them. Remove other PRs from
    the queue first if they keep failing in front of it.

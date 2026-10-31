@@ -151,6 +151,8 @@ spec:
           value: "true"
         - name: IMPORT_FILES_LOCATIONS
           value: "/rendered/econ-graph-realm.json"
+        # IMPORT_CACHE_KEY stays unset: preserve-catalog-grants.py reads config-cli's state from
+        # the realm attributes it names with the default key ("state-default-...").
         volumeMounts:
         - name: rendered
           mountPath: /rendered

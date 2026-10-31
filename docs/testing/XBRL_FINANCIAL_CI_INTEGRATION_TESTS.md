@@ -13,11 +13,11 @@ is `xbrl_financial_integration_tests` in `econ-graph-sec-crawler`. It requires t
 
 ### Database Prerequisites
 
-Provide a reachable, disposable PostgreSQL database before running this target.
-Although the tests use `TestContainer`, the core crate is compiled as a dependency
-of this integration-test binary. In that mode, the helper connects to
-`DATABASE_URL`, falling back to `postgres://localhost/econ_graph_test`; it does not
-start a container. See the [TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle).
+Provide a reachable, disposable PostgreSQL server before running this target, with a
+role that can create databases. The tests use `TestContainer`, which gives each test a
+migrated scratch database of its own on the server `DATABASE_URL` names (falling back
+to `postgres://localhost/econ_graph_test`); it does not start a container. See the
+[TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle).
 
 The four persistence tests call `clean_database()`, which **drops the entire
 `public` schema with `CASCADE`**, recreates it, and runs migrations. Set
@@ -138,7 +138,7 @@ tests and then explicitly runs SEC crawler tests with `xbrl-parser` enabled. Its
 feature-enabled command, from `backend/`, includes this integration target:
 
 ```bash
-cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests
 ```
 
 The workflow's **Frontend Integration Tests** job runs `npm run test:coverage`.

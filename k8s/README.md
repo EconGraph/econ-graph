@@ -408,6 +408,13 @@ again after creating or recreating it.** A node or etcd snapshot of production r
 elsewhere keeps the UID, the marker and the token, so run `--unmark` on such a clone before
 starting its workloads, or don't restore it while production runs.
 
+Scripts that delete a cluster (`recreate-kind-cluster.sh`, `migrate-to-host-storage.sh`)
+read the marker more broadly, so a damaged one still protects: any ConfigMap
+`kube-system/econgraph-cluster-role` counts as a production marker there, whatever its role
+or UID, an empty one included, except one whose role is exactly `none`, with no
+`kube-system-uid` or one without whitespace. A role or UID with surrounding whitespace or a
+newline in it counts as production. `--unmark` removes any such ConfigMap, empty ones too.
+
 Before it changes anything, the script shows the cluster's identity (this host's name, the
 nodes, the API server and the kube-system UID) and asks, at a terminal, for the first 8
 characters of the kube-system UID: context names such as `kind-econ-graph` are the same on
@@ -520,11 +527,14 @@ name it. The data and app databases each have a role `econgraph`, created by the
   `crawler-migrate` Job read it as `DATA_DATABASE_URL`, and so does the backend (optional there).
 - `app-database-url`: the backend reads it as `APP_DATABASE_URL` and applies the app migrations
   to it at startup. It names `econ_graph_app` on
-  `app-postgres-service` (`APP_DATABASE=separate`), or, in a cluster deployed before the app
-  database existed, the data database's URL (`APP_DATABASE=shared`). An existing cluster keeps
-  its setting until `create-secrets.sh` runs with `APP_DATABASE` set; a new Secret gets
-  `separate`. Moving an existing cluster to `separate` means moving its app rows into
-  `econ_graph_app` first: the script only rewrites the URL.
+  `app-postgres-service` (`APP_DATABASE=separate`), or the data database's URL
+  (`APP_DATABASE=shared`) while the app records are still in `econ_graph`, as on a cluster
+  deployed before the app database existed. With `APP_DATABASE` unset, the key's current
+  setting is kept; a cluster without `econ-graph-secrets` gets `separate`; an existing Secret
+  without the key needs `APP_DATABASE`. `create-secrets.sh` refuses `separate` while
+  `econ_graph` holds the app tables, and `shared` once they are only in `econ_graph_app`
+  (`scripts/deploy/lib/app-database-guard.sh`). `scripts/deploy/convert-app-data.sh` moves
+  the app rows and rewrites the key ([the runbook](../docs/deployment/APP_DATA_CONVERSION.md)).
 - `database-url`: the same URL as `data-database-url`. No binary reads `DATABASE_URL`; the key is
   kept for manifests of earlier versions, which read it.
 
@@ -565,7 +575,7 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `econ-graph-secrets` | `app-database-url`, `data-database-url`, and `database-url` (the same URL as `data-database-url`); see [Databases](#databases). The retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`), manifests of earlier versions (`database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | the data database (`postgresql`), its init script |
 | `econ-graph-app-postgres` | `postgres-password` (`APP_POSTGRES_PASSWORD`, generated), `app-password` (`APP_POSTGRES_APP_PASSWORD`, generated) | the app database (`app-postgres`), its init script |
-| `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
+| `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key`, `wto-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, `anonymous-client-secret`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`), and `facebook-idp-client-id`, `facebook-idp-client-secret`, kept if present but never written: Facebook sign-in is disabled and `KEYCLOAK_FACEBOOK_*` is refused; the passwords and the anonymous client secret are generated on the first run, the username defaults to `admin` | Keycloak, the realm import and the backend (`anonymous-client-secret`) |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
@@ -658,8 +668,9 @@ recreates them from the backup the teardown took.
 Asks for the cluster name, typed on a terminal, before deleting the cluster. Deleting the
 cluster loses what is stored only in its nodes: the in-cluster nightly backups and Grafana's
 data. `scripts/deploy/recreate-kind-cluster.sh` replaces a cluster with a confirmation, then a
-dump. On a cluster with a production marker (any role other than `none`), or one whose marker
-can't be read, the confirmation is the first 8 characters of its kube-system UID, typed or given
+dump. On a cluster with a production marker (any ConfigMap `kube-system/econgraph-cluster-role`
+except `none` or `none <uid>`, exactly; see [Production marker](#production-marker)), or one
+whose marker can't be read, the confirmation is the first 8 characters of its kube-system UID, typed or given
 as `--confirm-production`; `--yes` does not answer it. `terraform destroy` in `terraform/k8s/`
 does not delete the cluster.
 

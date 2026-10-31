@@ -30,7 +30,7 @@ for all six sources.
 | Empty or incomplete body | covered | `http.rs::empty_and_incomplete_bodies_are_parse_errors` |
 | Cancellation (caller drops the request) | covered | `http.rs::a_cancelled_request_frees_its_concurrency_slot` |
 | Per-source rate limit and concurrency | covered | `rate_limit.rs` (13 tests); `http.rs::concurrency_is_limited_per_source` |
-| Secrets never in errors | covered | `http.rs::api_key_is_redacted_from_{status,parse,transport}_errors`, `snippet_*` |
+| Secrets never in errors | covered | `http.rs::api_key_is_redacted_from_{status,parse,transport}_errors`, `encoded_keys_are_scrubbed_from_{status,parse,redirect}_errors`, `scrub_finds_every_encoding_of_a_secret`, `snippet_*` |
 | Error metrics | covered | `http.rs::record_response_error_counts_it`, `endpoint_labels_are_low_cardinality` |
 | Conditional GETs (304 handling) | covered | `http.rs::get_text_conditional_*`, `get_text_if_changed_*`, `a_304_to_an_unconditional_request_is_an_error` |
 

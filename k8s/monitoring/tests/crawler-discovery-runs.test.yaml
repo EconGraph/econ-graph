@@ -1,0 +1,34 @@
+# promtool unit tests for CrawlerDiscoveryRunOverdue in prometheus-rules-crawler.yaml.
+# Run through ../check-prometheus-rules.sh, which writes each rule ConfigMap's files to a temp
+# directory and copies this file next to them.
+rule_files:
+  - crawler.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # FRED's last complete run finished at time 0 and BEA's on day 10. FRED passes the 14-day
+  # limit at 336h and fires an hour later; BEA never does. A FRED run completing at 385h
+  # (gauge 16 days) clears it.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_discovery_last_complete_run_timestamp_seconds{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
+        values: '0x4620 1382400x300'
+      - series: 'crawler_discovery_last_complete_run_timestamp_seconds{kubernetes_namespace="econ-graph", source="BEA", pod="crawler-worker-1"}'
+        values: '864000x4920'
+    alert_rule_test:
+      - eval_time: 336h30m
+        alertname: CrawlerDiscoveryRunOverdue
+        exp_alerts: []
+      - eval_time: 362h
+        alertname: CrawlerDiscoveryRunOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: No complete FRED catalog discovery in over 14 days
+              description: 'FRED discovers its catalog in chunks and has had no complete discovery run for more than twice its 7-day discovery interval. `crawler status` shows its newest run; discovery_runs.error_message and the failed discover_chunk or finalize_discovery rows in crawl_queue say why it stopped.'
+      - eval_time: 408h
+        alertname: CrawlerDiscoveryRunOverdue
+        exp_alerts: []

@@ -12,7 +12,9 @@
 //! - `GET /healthz`: 200 while the worker loop runs, 503 before it starts and once it stops.
 //!
 //! [`queue_gauge_loop`] refreshes the queue gauges from
-//! [`econ_graph_crawler::status::crawler_status`] every interval, and [`coverage_gauge_loop`] the
+//! [`econ_graph_crawler::status::crawler_status`] and the chunked discovery run gauges
+//! (`crawler_discovery_run_*`, `crawler_discovery_last_complete_run_timestamp_seconds`) of the
+//! enabled sources whose adapter discovers in chunks every interval, and [`coverage_gauge_loop`] the
 //! coverage gauges from [`econ_graph_crawler::coverage::crawl_coverage`] (a heavier query, so on a
 //! longer interval).
 
@@ -26,8 +28,12 @@ use std::time::Duration;
 use econ_graph_core::error::AppResult;
 use econ_graph_core::DatabasePool;
 use econ_graph_crawler::coverage::{crawl_coverage, SourceCoverage};
+use econ_graph_crawler::discovery_run::{alerting_run_progress, DiscoveryRunProgress};
 use econ_graph_crawler::status::{crawler_status, CrawlerStatusSnapshot};
 use econ_graph_crawler::SourceId;
+use econ_graph_metrics::crawler::discovery_runs::{
+    CrawlerDiscoveryRunMetrics, CRAWLER_DISCOVERY_RUN_METRICS,
+};
 use econ_graph_metrics::crawler::{
     CrawlerCoverageMetrics, CrawlerQueueMetrics, CRAWLER_COVERAGE_METRICS, CRAWLER_METRICS,
     CRAWLER_QUEUE_METRICS, CRAWLER_SCHEDULER_METRICS,
@@ -58,6 +64,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_QUEUE_METRICS;
     let _ = &*CRAWLER_COVERAGE_METRICS;
     let _ = &*CRAWLER_SCHEDULER_METRICS;
+    let _ = &*CRAWLER_DISCOVERY_RUN_METRICS;
 }
 
 /// Unix seconds of `t`, as a gauge value.
@@ -170,6 +177,44 @@ pub fn apply_snapshot(
     *known = current;
 }
 
+/// Sets the discovery run gauges in `m` from each source's newest run. `known` holds the sources
+/// set by the previous call; sources no longer present have their series removed.
+pub fn apply_discovery_runs(
+    m: &CrawlerDiscoveryRunMetrics,
+    runs: &[DiscoveryRunProgress],
+    known: &mut HashSet<String>,
+) {
+    let current: HashSet<String> = runs.iter().map(|r| r.source.clone()).collect();
+    for gone in known.difference(&current) {
+        for state in ["total", "done", "failed"] {
+            let _ = m.run_chunks.remove_label_values(&[gone.as_str(), state]);
+        }
+        let _ = m.run_active.remove_label_values(&[gone]);
+        let _ = m
+            .last_complete_run_timestamp_seconds
+            .remove_label_values(&[gone]);
+    }
+    for r in runs {
+        let src = r.source.as_str();
+        for (state, n) in [
+            ("total", r.chunks_total),
+            ("done", r.chunks_done),
+            ("failed", r.chunks_failed),
+        ] {
+            m.run_chunks
+                .with_label_values(&[src, state])
+                .set(i64::from(n));
+        }
+        m.run_active
+            .with_label_values(&[src])
+            .set(i64::from(r.is_active()));
+        m.last_complete_run_timestamp_seconds
+            .with_label_values(&[src])
+            .set(unix_secs(r.last_complete_at.unwrap_or(r.first_started_at)));
+    }
+    *known = current;
+}
+
 /// Sets the coverage gauges in `m` from `rows`. `known` holds the sources set by the previous
 /// call; sources no longer present (e.g. disabled) have their series removed.
 pub fn apply_coverage(
@@ -228,19 +273,45 @@ pub async fn update_queue_gauges(
     Ok(())
 }
 
-/// Refreshes the global queue gauges every `interval` until `stop` becomes true.
+/// Reads the newest discovery run of each of `sources` that is enabled
+/// ([`alerting_run_progress`]) and updates the run gauges in `m`.
+pub async fn update_discovery_run_gauges(
+    pool: &DatabasePool,
+    sources: &[SourceId],
+    m: &CrawlerDiscoveryRunMetrics,
+    known: &mut HashSet<String>,
+) -> AppResult<()> {
+    let runs = alerting_run_progress(pool, sources).await?;
+    apply_discovery_runs(m, &runs, known);
+    Ok(())
+}
+
+/// Refreshes the global queue gauges, and the run gauges of `chunked_sources` (the sources
+/// whose adapter discovers in chunks), every `interval` until `stop` becomes true.
 pub async fn queue_gauge_loop(
     pool: DatabasePool,
+    chunked_sources: Vec<SourceId>,
     interval: Duration,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut known = HashSet::new();
+    let mut known_runs = HashSet::new();
     loop {
         if *stop.borrow() {
             return;
         }
         if let Err(e) = update_queue_gauges(&pool, &CRAWLER_QUEUE_METRICS, &mut known).await {
             tracing::warn!(error = %e, "updating crawl_queue gauges failed");
+        }
+        if let Err(e) = update_discovery_run_gauges(
+            &pool,
+            &chunked_sources,
+            &CRAWLER_DISCOVERY_RUN_METRICS,
+            &mut known_runs,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "updating discovery run gauges failed");
         }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -266,6 +337,9 @@ pub async fn coverage_gauge_loop(
             update_coverage_gauges(&pool, &sources, &CRAWLER_COVERAGE_METRICS, &mut known).await
         {
             tracing::warn!(error = %e, "updating coverage gauges failed");
+        }
+        if let Err(e) = econ_graph_crawler::lifecycle::refresh_metrics(&pool, &sources).await {
+            tracing::warn!(error = %e, "updating catalog lifecycle gauges failed");
         }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -571,6 +645,67 @@ mod tests {
 
         // BLS drops out (disabled): its series go away.
         apply_coverage(&m, &[coverage_row("FRED", 200, 195)], &mut known);
+        let sources: HashSet<String> = registry
+            .gather()
+            .iter()
+            .flat_map(|f| f.get_metric().iter())
+            .flat_map(|mm| mm.get_label().iter())
+            .filter(|l| l.name() == "source")
+            .map(|l| l.value().to_string())
+            .collect();
+        assert_eq!(sources, HashSet::from(["FRED".to_string()]));
+    }
+
+    /// The newest run's chunk counts and activity, and the last complete run (else the oldest
+    /// run's start), per source; a source with no runs left drops out.
+    #[test]
+    fn discovery_run_gauges_set_and_removed() {
+        let registry = Registry::new();
+        let m = CrawlerDiscoveryRunMetrics::new(&registry).unwrap();
+        let at = |secs| chrono::DateTime::from_timestamp(secs, 0).unwrap();
+        let run = |source: &str, state: &str, last_complete_at| DiscoveryRunProgress {
+            source: source.into(),
+            run_id: uuid::Uuid::nil(),
+            state: state.into(),
+            started_at: at(1_700_000_500),
+            finished_at: None,
+            chunks_total: 31,
+            chunks_done: 12,
+            chunks_failed: 1,
+            last_complete_at,
+            first_started_at: at(1_600_000_000),
+        };
+        let mut known = HashSet::new();
+        apply_discovery_runs(
+            &m,
+            &[
+                run("BEA", "failed", None),
+                run("FRED", "running", Some(at(1_700_000_000))),
+            ],
+            &mut known,
+        );
+        assert_eq!(m.run_chunks.with_label_values(&["FRED", "total"]).get(), 31);
+        assert_eq!(m.run_chunks.with_label_values(&["FRED", "done"]).get(), 12);
+        assert_eq!(m.run_chunks.with_label_values(&["FRED", "failed"]).get(), 1);
+        assert_eq!(m.run_active.with_label_values(&["FRED"]).get(), 1);
+        assert_eq!(m.run_active.with_label_values(&["BEA"]).get(), 0);
+        let last = |s: &str| {
+            m.last_complete_run_timestamp_seconds
+                .with_label_values(&[s])
+                .get()
+        };
+        assert_eq!(last("FRED"), 1_700_000_000.0);
+        assert_eq!(
+            last("BEA"),
+            1_600_000_000.0,
+            "no complete run: oldest start"
+        );
+
+        apply_discovery_runs(
+            &m,
+            &[run("FRED", "complete", Some(at(1_700_000_000)))],
+            &mut known,
+        );
         let sources: HashSet<String> = registry
             .gather()
             .iter()

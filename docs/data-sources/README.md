@@ -2,7 +2,7 @@
 
 These guides compare the data publishers return with what EconGraph discovers, fetches
 and stores. Each source page covers response samples, frequency and revisions, retained
-and dropped flags, and the current dataset mapping. The six main-crawler adapters store
+and dropped flags, and the current dataset mapping. The eight main-crawler adapters store
 series and observations in Postgres; SEC ingestion stores company profiles and raw
 filings separately.
 
@@ -22,6 +22,8 @@ The source pages identify the particular files and endpoints behind their sample
 | BEA | [BEA](bea.md) | Curated tables and frequencies expanded into lines and areas through API calls; full-history fetches | Illustrative NIPA and Regional fixtures; error fixture excerpt |
 | FHFA HPI | [FHFA HPI](fhfa.md) | Series enumerated and fetched from the publisher's HPI master CSV | Downloaded 12-column source excerpt; test fixture values are synthetic |
 | World Bank WDI | [World Bank](world-bank.md) | Curated indicators expanded into supported countries and aggregates through API calls | Checked-in observation fixture excerpt; response fields also checked live |
+| WTO Timeseries | [WTO](wto.md) | Curated indicators expanded into reporting economies through keyed API calls | Synthetic fixtures in the response shape the API portal documents |
+| Bank of Canada | [Bank of Canada Valet](boc.md) | Curated Valet series names enriched with live metadata; one observations request per series | Recorded fixtures; downloaded source excerpt |
 | SEC XBRL | [SEC XBRL](sec-xbrl.md) | Separate SEC filing handler fetches submissions and raw XBRL documents | Synthetic submissions fixture; downloaded companyfacts excerpt from an endpoint the crawler does not use |
 
 The downloaded FHFA file includes `rstderr` and `note` alongside the two index columns;
@@ -36,15 +38,17 @@ public ALFRED downloads use different interval semantics and do not establish it
 the [FRED fixture guide](../../backend/crates/econ-graph-crawler/tests/fixtures/fred/README.md)
 for the modeled window and filtering behavior.
 
-The other ten sources in `SourceId` (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO)
+Eight other sources in `SourceId` (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS)
 are [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs):
 fixed series lists without HTTP requests, whose `fetch_series` always fails. They are
 disabled in release builds by the `static_catalogs` build flag and available in development
-builds. There is no IMF adapter.
+builds. There is no IMF adapter. IMF, BOJ, SNB and UN_STATS are also
+[licence-gated](../../backend/crates/econ-graph-crawler/README.md#licence-gate): no build
+crawls them unless its `crawl_<source>` flag is on.
 
 ## Publisher shapes and stored datasets
 
-All six main-crawler adapters use the [dataset contracts](../../backend/crates/econ-graph-crawler/data/datasets/README.md).
+All eight main-crawler adapters use the [dataset contracts](../../backend/crates/econ-graph-crawler/data/datasets/README.md).
 Every dataset is stored long: `data_points` holds one `value` per observation. Named
 dimensions identify series within a dataset; their values are stored in the JSONB
 `dimensions` fields on `series_metadata` and `economic_series`, with definitions in
@@ -58,6 +62,8 @@ dimensions identify series within a dataset; their values are stored in the JSON
 | BEA | NIPA rows by table line and period; Regional rows also identify an area | `bea_nipa` uses `table_name`, `line_number`, `frequency`; `bea_regional` uses `table_name`, `line_code`, `geo_fips` |
 | FHFA HPI | CSV rows with `index_nsa` and `index_sa` value columns | `fhfa_hpi` uses `hpi_type`, `hpi_flavor`, `frequency`, `level`, `place_id`, `seasonal_adjustment`; each index column becomes a separate series |
 | World Bank WDI | Response metadata followed by rows for an indicator and area | One `wdi` dataset with `indicator` and `area` dimensions |
+| WTO Timeseries | Rows for an indicator, reporting economy, partner, product and period | One `timeseries` dataset with `indicator` and `area` dimensions; the curated list fixes each indicator's product and partner |
+| Bank of Canada | Single-valued series with opaque Valet names | One dimensionless `valet` dataset; units and frequency stay series metadata |
 
 For example, BLS's `CUUR0000SA0` splits into survey `CU`, seasonal adjustment `U`,
 periodicity `R`, area `0000` and item `SA0`. Census variables and FHFA's two index columns
@@ -72,7 +78,8 @@ populating `financial_line_items` with parsed facts.
 
 The [main crawler's persistence code](../../backend/crates/econ-graph-crawler/src/persist.rs)
 upserts observations on `(series_id, date, revision_date, is_original_release)`.
-A conflicting observation receives the new value. BLS, Census BDS, BEA and FHFA set
+A conflicting observation receives the new value. BLS, Census BDS, BEA, FHFA, WTO and the
+Bank of Canada set
 `revision_date = date` and `is_original_release = true`, so revised estimates overwrite
 that key rather than retaining earlier releases. This matters for sources that revise
 past observations, including Census annual releases, BEA updates and FHFA re-estimates.
@@ -87,10 +94,68 @@ it does not recover missed editions or provide an upstream archive comparable to
 
 Observation attributes are distinct from dimensions and vintage dates. BLS parses footnotes
 such as `P` (preliminary) and `X` (unavailable), but does not persist them.
-BEA's `NoteRef`, World Bank's `obs_status` and `decimal`, and FHFA's `rstderr` and `note`
-are also not stored as observation attributes. WDI declares attributes in its dataset
-contract, but that declaration does not populate them. FRED has no per-observation flags;
+BEA's `NoteRef`, World Bank's `obs_status` and `decimal`, FHFA's `rstderr` and `note`, and
+WTO's `ValueFlagCode` are also not stored as observation attributes. WDI and WTO declare
+attributes in their dataset contracts, but those declarations do not populate them. FRED has no per-observation flags;
 its `"."` missing-value marker becomes `NULL`.
+
+## Checking selections against the live catalogs
+
+`crawler check-selection` ([crawler guide](../technical/CRAWLER_DEPLOYMENT_GUIDE.md#check-curated-lists-and-selection-rules),
+[code](../../backend/crates/econ-graph-crawler/src/check_selection.rs)) downloads the catalog
+each adapter selects from and applies the current curated list or selection rules, read-only
+and without a database. `scripts/deploy/check-selection.sh --namespace NS` runs it in the
+cluster with the crawler's API keys. A licence-gated source is left out of the default run, and
+naming one with `--source` is refused with exit status 64, as is naming a source with nothing to
+check.
+
+| Source | Catalog checked | Selection checked |
+|---|---|---|
+| FRED | Release and category series pages, plus `/series` for each include override | `catalog_selection/fred.toml` |
+| BEA | `GetParameterValues(TableName)` for NIPA and Regional, then each selected table (NIPA `GetData`, Regional line codes and areas) | `catalog_selection/bea.toml` |
+| BLS | The survey series files (`cu.series`, `la.series`, ... under download.bls.gov) | `bls_series.csv` |
+| World Bank WDI | Each indicator's `/indicator/{id}` | `wdi_indicators.csv` |
+| Census BDS | `variables.json` and `geography.json`, and the state file | The adapter's economic-variable keyword rules |
+| FHFA HPI | The HPI master CSV (its required columns and in-scope rows) | The adapter's fixed scope |
+
+Problems, each of which makes the command exit nonzero:
+
+- **missing**: a curated entry the source no longer lists (a FRED include override FRED reports
+  as nonexistent, a BLS id absent from its survey's series file, a World Bank indicator the API
+  rejects), or a rule that matches nothing in the current catalog;
+- **discontinued**: a FRED include override titled `(DISCONTINUED)`, a BLS series whose latest
+  period is too old, a World Bank indicator whose source is an archive, or a BEA table that BEA
+  lists but serves no rows or lines for (the BLS and World Bank rules are heuristics, below);
+- **restricted**: a FRED include override whose notes carry a copyright restriction;
+- **over-broad**: a rule that matches more catalog entries than its optional `max_matches`;
+- **over-cap**: a selection past `max_series`, `max_tables` or `max_catalog_series`, which would
+  stop discovery;
+- **over-quota**: a refresh needing more requests than the source's daily quota (BLS: 500 a day
+  with a key, 25 without);
+- **unfetchable**: a World Bank indicator listed under a source other than WDI whose data request
+  fails. The adapter's `/country/all/indicator/{id}` names no source, and the API answers it only
+  for WDI indicators (message 175, "not found", for one such as `DT.AMT.MLTC.GG.CD` in
+  International Debt Statistics). The check makes that request, for one row, for each indicator
+  not listed under WDI;
+- **rejected**: a selected BEA table whose request BEA refuses as invalid ("rejected by BEA").
+
+BLS and World Bank publish no discontinued flag, so the check infers one:
+
+- **BLS**: the series file's `end_year`, the year of the latest published period, is before
+  last year. Annual and semi-annual series, which BLS publishes with a lag, get one more year.
+- **World Bank**: `/indicator/{id}` names an archive as the indicator's source (a source whose
+  name contains "Archive", such as 57, "WDI Database Archives"). An indicator listed under
+  another live source is unfetchable (above) unless its data request works, which is a notice.
+
+Rule-selected FRED series that are discontinued or restricted, and FRED's known-retired include
+probes (`expected_missing`), are reported as notices: discovery keeps them on purpose. Each
+source also reports the selected series count against its limits, how many entries each rule
+matched, and the requests one refresh of every selected series takes at its policy rate.
+
+`max_matches` is optional on each rule in `catalog_selection/fred.toml` (`[[rules]]`) and
+`catalog_selection/bea.toml` (`[[rule]]`). Discovery does not enforce it and it is not part of
+the selection fingerprint; it states how many entries the rule is meant to match, so a rule that
+starts matching more is reported.
 
 ## Attribution
 

@@ -150,7 +150,28 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
                 steps.append(("remove %s from %s" % (role_name, name), "DELETE", write_path))
 
     target = {"admin-only": "admin-only", "withdraw": "not public", "public": "public"}[mode]
+
+    def leaks(after_change):
+        """Where anonymous tokens admit the role other than through the reader's own direct
+        scope mapping, which the realm import refuses. Before a change the reader's own scope
+        can't be told apart: a direct mapping hides anything else admitting the role there."""
+        if not anonymous:
+            return []
+        found = ["client scope " + scope["name"] for kind in ("default", "optional")
+                 for scope in kc.call("GET", "/clients/%s/%s-client-scopes" % (anonymous[0]["id"], kind))
+                 if holds("/client-scopes/%s/scope-mappings/clients/%s/composite" % (scope["id"], api_id))]
+        if mode != "public" and holds(scope_path + "/composite") and (after_change or not holds(scope_path)):
+            found.append("its own scope (a realm role or client role mapped there, or full scope)")
+        return found
+
+    def warn_leaks(found, maybe=""):
+        if found:
+            out("warning: %s tokens %sadmit %s through %s, so visitors read it while the service account "
+                "holds it, and deploys refuse to run; remove that scope mapping in Keycloak"
+                % (ANONYMOUS_CLIENT, maybe, role_name, " and ".join(found)))
+
     if not steps:
+        warn_leaks(leaks(True))
         out("%s is already %s; nothing to change" % (role_name, target))
         return 0
     for description, method, path in steps:
@@ -160,6 +181,11 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
             kc.call(method, path, edge)
             out(description)
     if dry_run:
+        # Until the change is made only the client scopes are known for certain.
+        warn_leaks(leaks(False), "currently ")
+        if mode != "public" and anonymous and holds(scope_path) and holds(scope_path + "/composite"):
+            out("note: whether anything but the direct mapping admits %s on the %s scope shows only "
+                "after the change; the real run checks it" % (role_name, ANONYMOUS_CLIENT))
         return len(steps)
     # Read back every grant the change set.
     wrong = []
@@ -171,11 +197,13 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
     if wrong:
         raise RuntimeError("after the change %s is not %s: %s; run the command again"
                            % (role_name, target, "; ".join(wrong)))
+    warn_leaks(leaks(True))
     if anonymous and mode != "public":
         account = kc.call("GET", "/clients/%s/service-account-user" % anonymous[0]["id"], missing_ok=True)
         if account and holds("/users/%s/role-mappings/clients/%s/composite" % (account["id"], api_id)):
-            out("note: the %s service account still holds %s through another mapping; its scope no longer "
-                "admits it, so anonymous tokens leave it out" % (ANONYMOUS_CLIENT, role_name))
+            out("note: the %s service account still holds %s through another mapping; anonymous tokens "
+                "leave it out unless a scope it is built with admits it (warned about above)"
+                % (ANONYMOUS_CLIENT, role_name))
     out("%s is now %s" % (role_name, target))
     return len(steps)
 

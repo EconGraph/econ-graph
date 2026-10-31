@@ -1,9 +1,10 @@
 # Bank of Canada dataset definitions. See README.md in this directory for the format.
 #
-# Development only: a static catalog (econ-graph-crawler src/sources/static_catalogs.rs), not a
-# live integration. Its hardcoded series ids are opaque, so it is one dataset with no dimensions.
+# Valet series names (V39079, FXUSDCAD, BD.CDN.10YR.DQ.YLD) are opaque keys chosen by the Bank of
+# Canada, not combinations of dimension values, so Valet is one dataset with no dimensions and
+# every series keeps its Valet name as its external id (see src/sources/boc.rs).
 
 [[dataset]]
-code = "catalog"
-name = "Bank of Canada catalog"
-description = "Hardcoded development catalog of Bank of Canada series (no live data)"
+code = "valet"
+name = "Bank of Canada Valet"
+description = "Series published by the Bank of Canada through its Valet web services"

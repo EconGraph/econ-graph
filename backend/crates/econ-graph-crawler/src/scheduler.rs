@@ -36,12 +36,21 @@
 //!
 //!    Series whose `crawl_status` is `not_found` (the source returned `CrawlError::NotFound`, a
 //!    firmer signal than a generic failure) back off **ten times** the interval instead, so a
-//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. A series
+//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. Series
+//!    whose `crawl_status` is `absent` (`CrawlError::Absent`: a complete response omitted them)
+//!    back off just as long. A series
 //!    the source reports NotFound before it ever gets an `economic_series` row has its
 //!    `series_metadata` row deactivated instead (`persist::deactivate_metadata_conn`) and so
 //!    isn't a candidate at all; it comes back only when a later catalog discovery lists the id
 //!    again (see [`coverage`](crate::coverage) for how this keeps it out of coverage's
 //!    denominator).
+//!
+//!    A series with a publication state other than active (see [`lifecycle`](crate::lifecycle))
+//!    is not a candidate, except one retired solely by consecutive fetch results (NotFound, or
+//!    a BEA line omitted from the response; `series_lifecycle.fetch_retired`). That series is probed once
+//!    [`FETCH_RETIRED_PROBE_FACTOR`] intervals after its last attempt (a discovered series
+//!    without an `economic_series` row uses its last failed queue row, so at most the queue
+//!    retention), and a successful probe makes it active again.
 //!
 //!    Discovered series and refreshes of existing series take turns in the batch, each kind
 //!    oldest first (never-crawled series first; discovered series never tried before ones whose
@@ -54,9 +63,17 @@
 //!    source already has an active discovery job, a successful discovery within
 //!    [`DISCOVERY_INTERVAL`], or its `data_sources` row exists and is disabled. A failed discovery
 //!    instead backs off for one hour, doubling on consecutive failed jobs up to one day. A
-//!    successful discovery resets this backoff. Cancellation retains the weekly delay. History
-//!    comes from retained queue rows (14 days by default); purging that history resets the
-//!    backoff, never lengthens it.
+//!    successful discovery resets this backoff. Cancellation retains the weekly delay. For an
+//!    adapter that [discovers in chunks](crate::discovery_run), the `discover_catalog` job only
+//!    lists the catalog, so the discovery's outcome is its run's (`discovery_runs.discovery_job_id`
+//!    links them, and `deferred_discovery_job_ids` the jobs that found a run finalizing and started
+//!    none): the job's completion settles nothing, a run that is not final is an active
+//!    discovery, a complete run is a successful one, and a run that fails after enumeration
+//!    (`enumerated_at` set) is one failed discovery, however many of its chunk jobs failed.
+//!    Consecutive failed runs therefore double the backoff as failed jobs do. A superseded run
+//!    counts as nothing. History comes from retained queue
+//!    rows and runs (14 days by default); purging that history resets the backoff, never
+//!    lengthens it.
 //!
 //! Deployment runs a single `crawler-worker` replica (which hosts the scheduler), and duplicates
 //! are prevented by the queue's unique index anyway, so there is no leader election.
@@ -99,6 +116,26 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Default maximum `fetch_series` jobs enqueued per tick.
 pub const DEFAULT_BATCH_LIMIT: i64 = 500;
+
+/// Backoff, in refresh intervals, after a fetch that ended in `not_found`.
+pub const NOT_FOUND_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after `absent` (a complete response omitted the series). Weaker evidence than
+/// NotFound needs more misses to fetch-retire a series, and never retires it sooner in time.
+pub const ABSENT_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after any other failed fetch.
+pub const FAILED_BACKOFF_FACTOR: i64 = 2;
+
+/// `CASE` over a crawl_status column giving the backoff factor for a failed fetch.
+pub(crate) fn failure_backoff_sql(status: &str) -> String {
+    format!(
+        "(CASE WHEN {status} = 'not_found' THEN {NOT_FOUND_BACKOFF_FACTOR} \
+         WHEN {status} = 'absent' THEN {ABSENT_BACKOFF_FACTOR} ELSE {FAILED_BACKOFF_FACTOR} END)"
+    )
+}
+
+/// A series retired only by consecutive fetch NotFound (or omitted-line) results is still probed, once per this
+/// many refresh intervals, so a later successful fetch can reactivate it.
+pub const FETCH_RETIRED_PROBE_FACTOR: i64 = 12;
 
 /// Refresh interval, in days, for a frequency that matches no rule.
 pub const UNKNOWN_FREQUENCY_DAYS: i64 = 7;
@@ -206,10 +243,15 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
          ), cand AS ( \
              SELECT src.code, es.id, es.external_id, es.last_crawled_at, es.crawl_status, \
                     NULL::timestamptz AS failed_at, FALSE AS discovered, \
-                    make_interval(days => ({es_days})) AS refresh \
+                    make_interval(days => ({es_days})) AS refresh, \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = es.source_id \
+                        AND lc.external_id = es.external_id AND {fetch_retired}) AS probe \
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM datasets d \
@@ -217,12 +259,17 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
-                    make_interval(days => ({sm_days})) \
+                    make_interval(days => ({sm_days})), \
+                    EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = sm.source_id \
+                        AND lc.external_id = sm.external_id AND {fetch_retired}) \
              FROM series_metadata sm \
              JOIN src ON sm.source_id = src.ds_id \
              LEFT JOIN failed_jobs f \
                     ON f.source = src.code AND f.series_id = sm.external_id \
              WHERE sm.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
+                     AND lc.status <> 'active' AND NOT {fetch_retired}) \
                AND (src.code <> '{census}' OR sm.external_id ~ $4) \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
@@ -239,13 +286,18 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                  WHERE q.source = c.code AND q.series_id = c.external_id \
                    AND q.kind IN ('fetch_series', 'refetch_series') \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
-           AND CASE WHEN c.crawl_status IN ('failed', 'not_found') THEN \
+           AND CASE WHEN c.probe THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
-                       <= NOW() - (CASE WHEN c.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
-                          * c.refresh \
+                       <= NOW() - {probe_factor} * c.refresh \
+               WHEN c.crawl_status IN ('failed', 'not_found', 'absent') THEN \
+                   COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
+                                     (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
+                                      WHERE ca.series_id = c.id)), \
+                            '-infinity'::timestamptz) \
+                       <= NOW() - {failure_backoff} * c.refresh \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
          ) \
@@ -256,6 +308,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
         es_days = frequency_days_sql("lower(btrim(es.frequency))"),
         sm_days = frequency_days_sql("lower(btrim(sm.frequency))"),
         census = SourceId::Census.as_str(),
+        fetch_retired = "(lc.status = 'retired' AND lc.fetch_retired)",
+        probe_factor = FETCH_RETIRED_PROBE_FACTOR,
+        failure_backoff = failure_backoff_sql("c.crawl_status"),
     )
 });
 
@@ -263,7 +318,19 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
 /// matching data_sources names, `$3` weekly interval, `$4` retry base, `$5` retry cap (seconds).
 const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
-         FROM crawl_queue WHERE kind = 'discover_catalog' AND source = ANY($1) \
+         FROM crawl_queue q WHERE kind = 'discover_catalog' AND source = ANY($1) \
+           AND NOT (status = 'completed' AND ( \
+                 q.id IN (SELECT r.discovery_job_id FROM discovery_runs r \
+                          WHERE r.discovery_job_id IS NOT NULL) \
+                 OR q.id IN (SELECT d FROM discovery_runs r, \
+                                 unnest(r.deferred_discovery_job_ids) AS d \
+                             WHERE r.deferred_discovery_job_ids <> '{}' AND d IS NOT NULL))) \
+         UNION ALL \
+         SELECT source, CASE state WHEN 'complete' THEN 'completed' WHEN 'failed' THEN 'failed' \
+                ELSE 'processing' END, COALESCE(finished_at, updated_at) \
+         FROM discovery_runs WHERE source = ANY($1) \
+           AND (state IN ('complete', 'enumerating', 'running', 'finalizing') \
+                OR (state = 'failed' AND enumerated_at IS NOT NULL)) \
      ), summary AS ( \
          SELECT source, bool_or(status IN ('pending', 'processing', 'retrying')) AS active, \
                 max(finished_at) FILTER (WHERE status = 'completed') AS last_success, \
@@ -366,6 +433,8 @@ impl RefreshScheduler {
         config: SchedulerConfig,
     ) -> Self {
         let mut registry_sources = registry_sources;
+        // Licence-gated sources are neither refreshed nor re-discovered.
+        registry_sources.retain(|&s| crate::licence::allows(s));
         registry_sources.sort_unstable();
         registry_sources.dedup();
         Self {
@@ -607,7 +676,9 @@ mod tests {
         let (url, guard) = crate::testkit::lock_test_db("scheduler").await?;
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
+        exec(&pool, "DELETE FROM discovery_runs").await;
         for sql in [
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM series_metadata WHERE external_id LIKE 't15c\\_%'",
         ] {
@@ -847,6 +918,7 @@ mod tests {
             SourceId::Census,
             SourceId::Fhfa,
             SourceId::WorldBank,
+            SourceId::Boc,
         ] {
             assert!(supports_fetch(s), "{s}");
         }
@@ -871,6 +943,8 @@ mod tests {
                 SourceId::Bea,
                 SourceId::Census,
                 SourceId::WorldBank,
+                SourceId::Boc,
+                SourceId::Wto,
                 SourceId::Fhfa
             ]
         );
@@ -983,6 +1057,178 @@ mod tests {
         for sql in &cleanup {
             exec(p, sql).await;
         }
+    }
+
+    #[tokio::test]
+    async fn publication_state_suspends_automatic_fetches_and_recovery_resumes_them() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        for status in [
+            "active",
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            let id = format!("t15c_lifecycle_{status}");
+            seed(
+                pool,
+                SourceId::Fred,
+                &id,
+                "Monthly",
+                Some(365.0),
+                Some("success"),
+            )
+            .await;
+            let metadata_only = format!("{id}_catalog");
+            discover(pool, SourceId::Fred, &[(&metadata_only, "Monthly")]).await;
+            let mut conn = pool.get().await.unwrap();
+            for external_id in [&id, &metadata_only] {
+                diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,successor_id) VALUES($1,$2,$3,NOW(),'test',CASE WHEN $3='superseded' THEN gen_random_uuid() END)")
+                    .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(external_id)
+                    .bind::<Text,_>(status).execute(&mut conn).await.unwrap();
+            }
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let jobs = queued_series(pool).await;
+        let ours: BTreeSet<_> = jobs
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_lifecycle_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_lifecycle_active".to_string(),
+                "FRED/t15c_lifecycle_active_catalog".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(pool, "UPDATE series_lifecycle SET status='active',since=NULL WHERE external_id='t15c_lifecycle_retired'").await;
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        assert!(queued_series(pool)
+            .await
+            .contains("FRED/t15c_lifecycle_retired"));
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
+        )
+        .await;
+    }
+
+    /// A series whose last fetch was Absent backs off as long as NotFound (10 intervals),
+    /// not the 2 intervals of an ordinary failure.
+    #[tokio::test]
+    async fn absent_series_back_off_like_not_found() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        // Monthly refreshes every 7 days: failed is due after 14, absent after 70.
+        for (id, days_ago, status) in [
+            ("t15c_backoff_failed", 30.0, "failed"),
+            ("t15c_backoff_absent_recent", 30.0, "absent"),
+            ("t15c_backoff_absent_due", 80.0, "absent"),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some(status),
+            )
+            .await;
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_backoff_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_backoff_absent_due".to_string(),
+                "FRED/t15c_backoff_failed".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    /// A series retired only by fetch NotFound results is still probed on a slow schedule,
+    /// so a later successful fetch can reactivate it. Catalog-confirmed retirement is not.
+    #[tokio::test]
+    async fn fetch_retired_series_are_probed_slowly() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let source_id = persist::data_source_id(pool, SourceId::Fred).await.unwrap();
+        // Monthly refreshes every 7 days, so a probe is due after 84.
+        for (id, days_ago, fetch_retired) in [
+            ("t15c_probe_recent", 30.0, true),
+            ("t15c_probe_due", 100.0, true),
+            ("t15c_probe_catalog", 100.0, false),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some("retired"),
+            )
+            .await;
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,$3)")
+                .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(id)
+                .bind::<diesel::sql_types::Bool,_>(fetch_retired).execute(&mut conn).await.unwrap();
+        }
+        let metadata_only = "t15c_probe_catalog_only";
+        discover(pool, SourceId::Fred, &[(metadata_only, "Monthly")]).await;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,fetch_not_found_count,fetch_retired) VALUES($1,$2,'retired',NOW(),'fetch-only',3,TRUE)")
+            .bind::<diesel::sql_types::Uuid,_>(source_id).bind::<Text,_>(metadata_only)
+            .execute(&mut conn).await.unwrap();
+        drop(conn);
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_probe_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_probe_catalog_only".to_string(),
+                "FRED/t15c_probe_due".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+        exec(
+            pool,
+            "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_probe_%'",
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -1542,6 +1788,234 @@ mod tests {
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
         assert_eq!(queued_discovery(p).await, set(&["FRED"]));
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "active job");
+    }
+
+    /// A chunked discovery run that fails after its listing completed is one failed discovery,
+    /// however many of its chunk jobs failed: it retries after an hour, not a week, and not after
+    /// the longer backoff of several failures.
+    #[tokio::test]
+    async fn a_failed_discovery_run_counts_as_one_failure() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total, chunks_failed) \
+                 VALUES ('FRED', 'failed', NOW() - INTERVAL '2 hours', \
+                     NOW() - INTERVAL '2 hours', NOW() - INTERVAL '30 minutes', 4, 1) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/' || g, 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '30 minutes' FROM run, generate_series(0, 3) AS g",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "within the hour"
+        );
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = NOW() - INTERVAL '70 minutes'",
+        )
+        .await;
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "one failure: an hour, not the eight hours four failures would give"
+        );
+    }
+
+    /// Failed chunk jobs of a superseded run, or of a run that failed during enumeration, are
+    /// not failed discoveries: the weekly delay after the last completed discovery holds.
+    #[tokio::test]
+    async fn superseded_runs_and_their_late_chunk_failures_are_not_failed_discoveries() {
+        superseded_runs_case().await;
+    }
+
+    /// `n` discovery jobs that each completed at enumeration and started a run that ended in
+    /// `state`, the newest run finishing `newest_minutes_ago`, one hour apart.
+    async fn runs_from_jobs(pool: &DatabasePool, n: i32, state: &str, newest_minutes_ago: i32) {
+        exec(
+            pool,
+            &format!(
+                "WITH jobs AS ( \
+                     INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                     SELECT 'FRED', 'catalog', 'discover_catalog', 'completed', \
+                         NOW() - make_interval(mins => {newest_minutes_ago} + 30 + 60 * g) \
+                     FROM generate_series(0, {n} - 1) AS g RETURNING id, finished_at) \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, discovery_job_id) \
+                 SELECT 'FRED', '{state}', finished_at - INTERVAL '1 minute', finished_at, \
+                     finished_at + INTERVAL '30 minutes', id FROM jobs"
+            ),
+        )
+        .await;
+    }
+
+    /// Consecutive failed runs double the backoff like failed discovery jobs, though each run's
+    /// discovery job completed at enumeration; a complete run resets it.
+    #[tokio::test]
+    async fn consecutive_failed_runs_double_the_backoff_and_a_complete_run_resets_it() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 4, "failed", 70).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "four failures: eight hours"
+        );
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = finished_at - INTERVAL '6 hours'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "7h10m < 8h");
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = finished_at - INTERVAL '1 hour'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1, "8h10m");
+
+        // A complete run settles the discovery: the weekly delay, then one failure is an hour.
+        exec(p, "DELETE FROM crawl_queue WHERE status = 'pending'").await;
+        runs_from_jobs(p, 1, "complete", 200).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "weekly");
+        runs_from_jobs(p, 1, "failed", 70).await;
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "reset to one hour"
+        );
+    }
+
+    /// A discovery job that found a run finalizing and started none settles nothing itself: its
+    /// outcome is that run's, so a run that then fails keeps the failure backoff instead of the
+    /// job's completion resetting it to the weekly delay.
+    #[tokio::test]
+    async fn a_deferred_discovery_job_takes_its_runs_outcome() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 2, "failed", 130).await;
+        exec(
+            p,
+            "WITH job AS ( \
+                 INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                 VALUES ('FRED', 'catalog', 'discover_catalog', 'completed', \
+                     NOW() - INTERVAL '100 minutes') RETURNING id) \
+             UPDATE discovery_runs SET deferred_discovery_job_ids = ARRAY[(SELECT id FROM job)] \
+             WHERE id = (SELECT id FROM discovery_runs ORDER BY finished_at DESC LIMIT 1)",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "two failures: two hours, and the last was 130 minutes ago"
+        );
+    }
+
+    /// The schema rejects a NULL deferred job id, and the discovery query ignores one anyway: a
+    /// NULL in the set would otherwise drop every unlinked completed discovery job from the
+    /// history (`id IN (..., NULL)` is NULL, never false) and make the source due at once.
+    #[tokio::test]
+    async fn a_null_deferred_job_id_is_rejected_and_ignored() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        let mut conn = p.get().await.unwrap();
+        let rejected = diesel::sql_query(
+            "INSERT INTO discovery_runs (source, state, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'running', ARRAY[NULL::uuid])",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap_err();
+        assert!(
+            rejected
+                .to_string()
+                .contains("check_discovery_runs_deferred_jobs_not_null"),
+            "{rejected}"
+        );
+
+        // With the check dropped (rolled back below), the query still ignores the NULL.
+        diesel::sql_query("BEGIN").execute(&mut conn).await.unwrap();
+        for sql in [
+            "ALTER TABLE discovery_runs \
+             DROP CONSTRAINT check_discovery_runs_deferred_jobs_not_null",
+            "INSERT INTO discovery_runs (source, state, finished_at, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'complete', NOW() - INTERVAL '30 days', ARRAY[NULL::uuid])",
+        ] {
+            diesel::sql_query(sql).execute(&mut conn).await.unwrap();
+        }
+        let due: Result<Vec<DueSource>, _> = diesel::sql_query(DISCOVERY_DUE_SQL)
+            .bind::<Array<Text>, _>(vec!["FRED".to_string()])
+            .bind::<Array<Text>, _>(vec![data_source_template(SourceId::Fred).name])
+            .bind::<Double, _>(DISCOVERY_INTERVAL.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_BASE.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_CAP.as_secs_f64())
+            .load(&mut conn)
+            .await;
+        diesel::sql_query("ROLLBACK")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let due = due.unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(
+            !due[0].due,
+            "the discovery completed two hours ago still counts"
+        );
+    }
+
+    /// A run that is not final is an active discovery, though its job completed.
+    #[tokio::test]
+    async fn a_running_discovery_run_is_an_active_discovery() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 1, "complete", 8 * 24 * 60).await;
+        runs_from_jobs(p, 1, "failed", 70).await;
+        exec(
+            p,
+            "UPDATE discovery_runs SET state = 'running', finished_at = NULL \
+             WHERE state = 'failed'",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+    }
+
+    async fn superseded_runs_case() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total) \
+                 VALUES ('FRED', 'superseded', NOW() - INTERVAL '3 hours', \
+                     NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours', 2) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/0', 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '90 minutes' FROM run",
+        )
+        .await;
+        exec(
+            p,
+            "INSERT INTO discovery_runs (source, state, started_at, finished_at) \
+             VALUES ('FRED', 'failed', NOW() - INTERVAL '100 minutes', \
+                 NOW() - INTERVAL '95 minutes')",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
     }
 
     #[tokio::test]

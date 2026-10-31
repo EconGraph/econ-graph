@@ -217,8 +217,13 @@ A later deploy keeps the provider disabled while the keys are absent.
 ## Catalog access, including anonymous visitors
 
 Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
-`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
-canonical data-source names to these capabilities; adding a source requires its role and mapping.
+`catalog.bea:read`, or `catalog.bank_of_canada:read`. Unknown source names are denied. The
+backend maps canonical data-source names to these capabilities; adding a source requires its
+role and mapping. A new catalog role spells the source out (`catalog.bank_of_canada:read`, not
+an acronym). The crawler's `catalog_roles` test fails when a source's name has no role, a
+catalog role is missing from `catalog-public`, or a role in `catalog-public` is missing from the
+`econgraph-anonymous` scope mapping, apart from the exceptions it lists.
+
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
 So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
 `updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
@@ -228,7 +233,7 @@ missing series, so none of them reveals what an unreadable catalog contains.
 MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
 
 The `catalog-public` realm composite grants the initial catalog reads: in the realm file,
-BLS, BEA, Census, FHFA, World Bank, WTO and Bank of Canada. FRED's `catalog.fred:read` is on
+BLS, BEA, Census, FHFA and World Bank. FRED's `catalog.fred:read` is on
 the `admin` composite instead (`super_admin` includes `admin`), so only admins read FRED. The
 IMF, ECB, OECD, Bank of England, Bank of Japan, RBA, SNB, UN Statistics and ILO reads are
 granted to nobody by default. The `user` composite and
@@ -241,6 +246,15 @@ deploy stops while one is, live or in the realm file. Remove a catalog read role
 Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
 individually instead. Use group/composite grants for signed-in exceptions as usual.
+
+The WTO and Bank of Canada catalogs are restricted by default:
+`catalog.world_trade_organization:read` (World Trade Organization) and
+`catalog.bank_of_canada:read` (Bank of Canada) are defined but are in neither `catalog-public`
+nor the anonymous client's scope, so only users or groups granted them can read those series.
+To open one up, grant its role to a user or group, or add it to `catalog-public` (and the
+anonymous scope) to make it public.
+`backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks that the realm file
+keeps them that way.
 
 Visitors receive no token and no service-account identity. The backend obtains a client-credentials
 token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
@@ -320,6 +334,66 @@ finalizer marks initialization only after config-cli succeeds; deleting a policy
 cannot restore bootstrap grants on a later deploy. The reader is deliberately excluded
 from signed-in default roles, which would otherwise bypass anonymous-only restrictions.
 
+The import's keycloak-config-cli step manages the scope mappings of `econ-graph-api` roles on
+every client and client scope: it sets each one's to what the realm file's
+`clientScopeMappings` declares, and removes them from every client and client scope the file
+doesn't list there, including mappings made in Keycloak. Catalog reads in those mappings are
+operator policy and are kept like the grants above. `preserve-catalog-grants.py` writes each
+client's and client scope's live `catalog.*:read` scope mappings into the import. As with the
+grants above, a catalog read the file declares there seeds only a new realm (or the retry of an
+interrupted first import); after that, a client or client scope the import creates, or recreates
+after an operator deleted it, gets none. A client that config-cli created and the realm file no
+longer lists is deleted by the import, and its grants with it.
+Other `econ-graph-api` roles there, the anonymous reader's scope included, are configuration as
+code. When one was mapped in Keycloak but isn't declared, the import removes it and first names it
+in the Job's `render-realm` log, as in `warning: the realm import removes econ-graph-api scope
+mappings the realm file doesn't declare on client partner-x: api:mcp`. Read it with
+`kubectl -n econ-graph logs job/keycloak-realm-import -c render-realm` until the next deploy
+replaces the Job. To keep such a mapping, declare it:
+
+```json
+"clientScopeMappings": {
+  "econ-graph-api": [
+    {"client": "partner-x", "roles": ["api:mcp"]},
+    {"clientScope": "catalog-extra", "roles": ["api:mcp"]}
+  ]
+}
+```
+
+The client or client scope must exist, either in Keycloak or in the realm file. Remove its
+entry before deleting it. Scope mappings of realm roles, such as `catalog-public` mapped on a
+client scope, are not managed and stay as they are.
+
+Anonymous tokens are built with the anonymous client's client scopes (`basic`, and any other
+default or optional scope assigned to it) as well as its own scope mapping, with composite roles
+expanded. The supported switch for anonymous access to a catalog is its read mapped directly on
+the client's own scope. A catalog read admitted any other way would reach visitors whatever that
+mapping says, including after `set-catalog-access.sh` withdraws it. That covers a catalog read
+mapped on a client scope, a realm role such as `catalog-public` or `user` mapped on one or on the
+client's own scope, a composite role holding a catalog read, and full scope (`fullScopeAllowed`)
+on the anonymous client. Full scope stops even the deploy that would turn it off, so turn it off
+in Keycloak first. Protocol mappers that write roles into tokens are not checked: don't add one to
+the anonymous client or its client scopes. So a deploy stops, before
+importing anything, while one does, and the error names each scope and the catalog reads it
+admits. Keycloak is checked live, and the realm file's `clientScopeMappings` and `scopeMappings`
+through its realm composites. Remove those scope mappings, and make a catalog public with
+`set-catalog-access.sh --make-public` instead; `set-catalog-access.sh` names such a scope too. A
+realm default client scope admitting catalog reads is named with a warning: a recreated anonymous
+client would be assigned it.
+
+When a role leaves the realm file, the import deletes it if config-cli created it. config-cli
+records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes, and when that
+list shrinks it leaves an old chunk behind, which both it and the import ignore (the import names it
+in a warning). The role's live grants are then left out of the import, each named with a warning,
+because importing a grant of a deleted role fails the import part way. That covers grants on
+composites, on scope mappings and on the anonymous service account (its realm and client roles
+alike). A role an operator created in Keycloak isn't deleted, and its grants are kept. A state that
+can't be read stops the deploy.
+
+`scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak, starting
+from the last release's realm as production does, and checks what it keeps, removes and refuses.
+CI runs it when the realm, its import, the Keycloak manifests or `scripts/deploy/deploy.sh` change.
+
 Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
 separate admin API operations, so preservation is best effort under concurrent administrator edits;
 avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
@@ -328,8 +402,9 @@ modified. Role definitions and non-catalog structural settings remain configurat
 ### Changing catalog access on a running cluster
 
 The realm file's catalog grants seed only a new realm. On a running cluster, deploys keep the
-live `catalog-public`, the catalog grants on other composites such as `admin`, and the anonymous
-reader's scope (above), so a change to them is made in Keycloak.
+live `catalog-public`, the catalog grants on other composites such as `admin`, the anonymous
+reader's scope and the catalog reads in other clients' and client scopes' scope mappings
+(above), so a change to them is made in Keycloak.
 `scripts/keycloak/set-catalog-access.sh` makes it, on the kind cluster named by `--context`:
 
 ```bash

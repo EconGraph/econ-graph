@@ -4,7 +4,7 @@
 
 //! **Static catalogs** — hardcoded series lists for sources that have no live integration.
 //!
-//! These ten sources (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) were previously
+//! These eight sources (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS) were previously
 //! "discovered" by modules under `econ-graph-services/src/services/series_discovery/` that made
 //! no HTTP calls and returned fixed lists. They are ported here verbatim (same external ids,
 //! titles, descriptions, units, frequencies and data URLs) and clearly marked as static so
@@ -25,7 +25,7 @@
 //! entries for more sources without any API keys.
 //!
 //! Because no HTTP is made, the testkit's `new(base_url)` constructor convention does not apply;
-//! the constructors are one per source ([`StaticCatalogAdapter::boc`], ...). The `data_url`
+//! the constructors are one per source ([`StaticCatalogAdapter::boe`], ...). The `data_url`
 //! values point at the real upstream sites and are informational only.
 //!
 //! Where the old lists reused one external id for several unrelated series, only the first
@@ -44,8 +44,7 @@ use crate::source::SourceId;
 pub const IS_STATIC_CATALOG: bool = true;
 
 /// Sources whose only adapter is a [`StaticCatalogAdapter`].
-pub const STATIC_CATALOG_SOURCES: [SourceId; 10] = [
-    SourceId::Boc,
+pub const STATIC_CATALOG_SOURCES: [SourceId; 8] = [
     SourceId::Boe,
     SourceId::Boj,
     SourceId::Ecb,
@@ -54,7 +53,6 @@ pub const STATIC_CATALOG_SOURCES: [SourceId; 10] = [
     SourceId::Rba,
     SourceId::Snb,
     SourceId::UnStats,
-    SourceId::Wto,
 ];
 
 /// Whether `source` is served by a static catalog (no live discovery, no data fetching).
@@ -109,10 +107,6 @@ pub struct StaticCatalogAdapter {
 }
 
 impl StaticCatalogAdapter {
-    /// Bank of Canada (static catalog).
-    pub fn boc() -> Self {
-        Self::new(SourceId::Boc, BOC_CATALOG)
-    }
     /// Bank of England (static catalog).
     pub fn boe() -> Self {
         Self::new(SourceId::Boe, BOE_CATALOG)
@@ -145,15 +139,10 @@ impl StaticCatalogAdapter {
     pub fn un_stats() -> Self {
         Self::new(SourceId::UnStats, UN_STATS_CATALOG)
     }
-    /// World Trade Organization (static catalog).
-    pub fn wto() -> Self {
-        Self::new(SourceId::Wto, WTO_CATALOG)
-    }
 
-    /// All ten static-catalog adapters, in [`STATIC_CATALOG_SOURCES`] order.
-    pub fn all() -> [Self; 10] {
+    /// All eight static-catalog adapters, in [`STATIC_CATALOG_SOURCES`] order.
+    pub fn all() -> [Self; 8] {
         [
-            Self::boc(),
             Self::boe(),
             Self::boj(),
             Self::ecb(),
@@ -162,7 +151,6 @@ impl StaticCatalogAdapter {
             Self::rba(),
             Self::snb(),
             Self::un_stats(),
-            Self::wto(),
         ]
     }
 
@@ -215,37 +203,6 @@ impl SourceAdapter for StaticCatalogAdapter {
 // Catalog data (generated from the old series_discovery modules; do not edit by hand without
 // a reason — these ids are what existing `economic_series` rows were keyed on).
 // ---------------------------------------------------------------------------------------------
-
-/// Ported from `econ-graph-services/src/services/series_discovery/boc.rs` (3 entries there, 3 distinct external ids).
-pub const BOC_CATALOG: &[CatalogEntry] = &[
-    CatalogEntry {
-        external_id: "V39079",
-        title: "Canada - Overnight Rate Target",
-        description: "The target for the overnight rate set by the Bank of Canada",
-        units: "Percent per annum",
-        frequency: "Daily",
-        geographic_level: "Canada",
-        data_url: "https://www.bankofcanada.ca/valet/observations/V39079",
-    },
-    CatalogEntry {
-        external_id: "V41690914",
-        title: "Canada - Consumer Price Index",
-        description: "Consumer Price Index for Canada",
-        units: "Index (2002=100)",
-        frequency: "Monthly",
-        geographic_level: "Canada",
-        data_url: "https://www.bankofcanada.ca/valet/observations/V41690914",
-    },
-    CatalogEntry {
-        external_id: "V62700578",
-        title: "Canada - GDP",
-        description: "Gross Domestic Product for Canada",
-        units: "Millions of Canadian dollars",
-        frequency: "Quarterly",
-        geographic_level: "Canada",
-        data_url: "https://www.bankofcanada.ca/valet/observations/V62700578",
-    },
-];
 
 /// Ported from `econ-graph-services/src/services/series_discovery/boe.rs` (10 entries there, 3 distinct external ids).
 ///
@@ -653,55 +610,6 @@ pub const UN_STATS_CATALOG: &[CatalogEntry] = &[
     },
 ];
 
-/// Ported from `econ-graph-services/src/services/series_discovery/wto.rs` (5 entries there, 5 distinct external ids).
-pub const WTO_CATALOG: &[CatalogEntry] = &[
-    CatalogEntry {
-        external_id: "MT_GOODS_EXP",
-        title: "WTO - Merchandise exports",
-        description: "Merchandise exports for WTO member countries",
-        units: "Millions of US dollars",
-        frequency: "Annual",
-        geographic_level: "Country",
-        data_url: "https://api.wto.org/timeseries/v1/data/MT_GOODS_EXP",
-    },
-    CatalogEntry {
-        external_id: "MT_GOODS_IMP",
-        title: "WTO - Merchandise imports",
-        description: "Merchandise imports for WTO member countries",
-        units: "Millions of US dollars",
-        frequency: "Annual",
-        geographic_level: "Country",
-        data_url: "https://api.wto.org/timeseries/v1/data/MT_GOODS_IMP",
-    },
-    CatalogEntry {
-        external_id: "ST_SERVICES_EXP",
-        title: "WTO - Services exports",
-        description: "Services exports for WTO member countries",
-        units: "Millions of US dollars",
-        frequency: "Annual",
-        geographic_level: "Country",
-        data_url: "https://api.wto.org/timeseries/v1/data/ST_SERVICES_EXP",
-    },
-    CatalogEntry {
-        external_id: "ST_SERVICES_IMP",
-        title: "WTO - Services imports",
-        description: "Services imports for WTO member countries",
-        units: "Millions of US dollars",
-        frequency: "Annual",
-        geographic_level: "Country",
-        data_url: "https://api.wto.org/timeseries/v1/data/ST_SERVICES_IMP",
-    },
-    CatalogEntry {
-        external_id: "TP_TARIFFS",
-        title: "WTO - Applied tariffs",
-        description: "Applied tariffs for WTO member countries",
-        units: "Percent",
-        frequency: "Annual",
-        geographic_level: "Country",
-        data_url: "https://api.wto.org/timeseries/v1/data/TP_TARIFFS",
-    },
-];
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -712,8 +620,7 @@ mod tests {
     /// Expected distinct entries per source, counted from the old
     /// `econ-graph-services/src/services/series_discovery/*.rs` `discover_series()` lists
     /// (raw list length in the comment; duplicates by external id dropped, see module docs).
-    const EXPECTED: [(SourceId, usize); 10] = [
-        (SourceId::Boc, 3),     // boc.rs: 3 entries, 3 distinct ids
+    const EXPECTED: [(SourceId, usize); 8] = [
         (SourceId::Boe, 3),     // boe.rs: 10 entries, 3 distinct ids
         (SourceId::Boj, 9),     // boj.rs: 9 entries, 9 distinct ids
         (SourceId::Ecb, 4),     // ecb.rs: 10 entries, 4 distinct ids
@@ -722,7 +629,6 @@ mod tests {
         (SourceId::Rba, 2),     // rba.rs: 3 entries, 2 distinct ids
         (SourceId::Snb, 3),     // snb.rs: 3 entries, 3 distinct ids
         (SourceId::UnStats, 3), // unstats.rs: 3 entries, 3 distinct ids
-        (SourceId::Wto, 5),     // wto.rs: 5 entries, 5 distinct ids
     ];
 
     #[test]
@@ -735,6 +641,7 @@ mod tests {
         }
         assert!(!is_static_catalog_source(SourceId::Fred));
         assert!(!is_static_catalog_source(SourceId::Bls));
+        assert!(!is_static_catalog_source(SourceId::Boc));
     }
 
     #[test]
@@ -759,15 +666,6 @@ mod tests {
 
     #[test]
     fn spot_check_ported_values() {
-        let boc = StaticCatalogAdapter::boc().entries()[0];
-        assert_eq!(boc.external_id, "V39079");
-        assert_eq!(boc.title, "Canada - Overnight Rate Target");
-        assert_eq!(boc.units, "Percent per annum");
-        assert_eq!(boc.frequency, "Daily");
-        assert_eq!(
-            boc.data_url,
-            "https://www.bankofcanada.ca/valet/observations/V39079"
-        );
         let boe_ids: Vec<_> = BOE_CATALOG.iter().map(|e| e.external_id).collect();
         assert_eq!(boe_ids, ["IUDBEDR", "LPMVWYR", "XUDLBK67"]);
         assert_eq!(BOE_CATALOG[0].title, "UK - Bank Rate");

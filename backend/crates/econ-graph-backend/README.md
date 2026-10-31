@@ -42,15 +42,12 @@ measure request load, memory use, or overall server throughput.
 For database-backed tests, set `DATABASE_URL` to an existing, disposable PostgreSQL
 database. This test setting is separate from the server's `APP_DATABASE_URL` and
 `DATA_DATABASE_URL`. The integration tests use the core crate's `TestContainer`
-helper as a dependency: it connects to `DATABASE_URL`, falling back to
-`postgres://localhost/econ_graph_test`, and does not start a container.
-
-Integration-test cleanup drops the entire `public` schema with `CASCADE`, recreates
-it, and runs migrations. Use a role that can perform those operations, and do not
-share the database with an application or another test process. The database
-startup tests and database-backed authentication tests create scratch databases
-on the same PostgreSQL server, so the role must also be able to create and drop
-those databases. See [database testing](../../../docs/testing/DATABASE_TESTING.md)
+helper as a dependency: it gives each test a migrated scratch database of its own on
+the server `DATABASE_URL` names (falling back to
+`postgres://localhost/econ_graph_test`) and does not start a container. The database
+startup tests and database-backed authentication tests create scratch databases on
+that server too, so the role must be able to create and drop databases, and the
+server should not hold data you need. See [database testing](../../../docs/testing/DATABASE_TESTING.md)
 for helper behavior and isolation requirements.
 
 The scratch-database tests return early when `DATABASE_URL` is absent. Integration

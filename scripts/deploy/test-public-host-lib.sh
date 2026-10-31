@@ -24,7 +24,9 @@
 #     and refuses a Facebook credential in the environment before any kubectl call;
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
-#     cloudflared before removing the marker and deletes the token only when told to;
+#     cloudflared before removing the marker (an empty marker ConfigMap too) and deletes the
+#     token only when told to;
+#   - scripts/deploy/set-crawler-keys.sh passes APP_DATABASE on to create-secrets.sh;
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
@@ -64,7 +66,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_D
 # The stub cluster, as the executable $stub_dir/kubectl, passed as KUBECTL. Every call is
 # appended to $STUB_LOG (and stdin piped to `apply -f -` too); writes are never made.
 #   STUB_MARKER          production (made on this cluster, the default), copied (made on
-#                        another cluster), other-role, none, or fails (the lookup fails)
+#                        another cluster), other-role, empty (a ConfigMap with no data),
+#                        none (no ConfigMap), or fails (the lookup fails)
 #   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
 #   STUB_NO_CONTEXT=1    there is no current context
 #   STUB_ROUTE_HOST      the host the public HTTPRoutes serve; STUB_NO_GATEWAY_API=1 the
@@ -92,11 +95,19 @@ case "$*" in
     [ "${STUB_CLUSTER_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_EMPTY_UID:-0}" = 1 ] || printf 'uid-this-cluster' ;;
   *"get configmap econgraph-cluster-role"*)
+    # Existence (-o name), then each value with the "#" the reader strips.
     case "${STUB_MARKER:-production}" in
-      production) printf 'production uid-this-cluster' ;;
-      copied) printf 'production uid-other-cluster' ;;
-      other-role) printf 'staging uid-this-cluster' ;;
+      production) role=production uid=uid-this-cluster ;;
+      copied) role=production uid=uid-other-cluster ;;
+      other-role) role=staging uid=uid-this-cluster ;;
+      empty) role='' uid='' ;;
+      none) exit 0 ;;
       fails) exit 1 ;;
+    esac
+    case "$*" in
+      *"-o name"*) echo configmap/econgraph-cluster-role ;;
+      *"{.data.role}"*) printf '%s#' "$role" ;;
+      *"{.data.kube-system-uid}"*) printf '%s#' "$uid" ;;
     esac ;;
   *"get namespace econ-graph"*)
     [ "${STUB_LOOKUP_FAILS:-0}" != 1 ] || exit 1
@@ -116,6 +127,8 @@ case "$*" in
   *"get secret cloudflare-tunnel"*)
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  *"get secret econ-graph-secrets --ignore-not-found -o name"*)
+    [ "${STUB_KEYLESS_SECRET:-0}" != 1 ] || echo secret/econ-graph-secrets ;;
   *"get job keycloak-realm-import"*) echo Complete ;;
   *"get configmap keycloak-realm"*)
     case "${STUB_REALM:-current}" in
@@ -296,7 +309,7 @@ grep -q '^  replicas: 0$' k8s/manifests/cloudflared.yaml || fail "cloudflared.ya
 
 # Not production: 0 replicas even with the Secret, and a PUBLIC_HOST stops the deploy
 # before anything is applied.
-for marker in none copied other-role; do
+for marker in none copied other-role empty; do
   PUBLIC_HOST='' STUB_SECRET=1 STUB_MARKER=$marker run_lib 'public_host_init; apply_cloudflared; [ "$CLOUDFLARED_DEPLOYED" = false ]' ||
     fail "marker $marker, no public host: apply_cloudflared failed: $(cat "$out")"
   grep -q 'stdin: .*replicas: 0' "$log" || fail "marker $marker: cloudflared not at 0 replicas"
@@ -461,6 +474,12 @@ run_stubbed STUB_MARKER=production STUB_CLOUDFLARED_REPLICAS=1 "$mark" --unmark 
   fail "mark --unmark --dry-run on production failed: $(cat "$out")"
 grep -q 'WARNING: context kind-test is the cluster marked production' "$out" ||
   fail "mark --unmark --dry-run: no warning on the production cluster"
+# An existing but empty marker ConfigMap is not "nothing to do": --unmark removes it.
+run_stubbed STUB_MARKER=empty STUB_CLOUDFLARED_REPLICAS=0 "$mark" --unmark --dry-run ||
+  fail "mark --unmark --dry-run with an empty marker failed: $(cat "$out")"
+grep -q 'would delete ConfigMap kube-system/econgraph-cluster-role' "$out" ||
+  fail "mark --unmark --dry-run: an empty marker ConfigMap is not removed"
+grep -q 'nothing to do' "$out" && fail "mark --unmark: an empty marker ConfigMap was left alone"
 # A token without a marker or a running connector is still something to unmark.
 run_stubbed STUB_MARKER=none STUB_SECRET=1 "$mark" --unmark --dry-run ||
   fail "mark --unmark --dry-run with a token failed: $(cat "$out")"
@@ -630,7 +649,7 @@ keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
 # The host's deploy config is $keys_deploy_env (absent unless a test writes it), and
-# keys_env adds settings such as PUBLIC_HOST to the script's environment.
+# keys_env adds settings such as PUBLIC_HOST or APP_DATABASE to the script's environment.
 keys_deploy_env="$stub_dir/config/econgraph/deploy.env"
 keys_env=()
 run_keys() {
@@ -671,6 +690,22 @@ if [ "$have_script" = true ]; then
   grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
   grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
+  # A cluster deployed before the app database existed (econ-graph-secrets without
+  # app-database-url): create-secrets.sh needs APP_DATABASE, and set-crawler-keys.sh passes it on.
+  keyless='STUB_MARKER=production STUB_SECRET=1 STUB_CLOUDFLARED_REPLICAS=0 STUB_KEYLESS_SECRET=1'
+  if run_keys "$keyless" --tunnel "$fake_token"$'\n'; then
+    fail "set-crawler-keys --tunnel: wrote into a Secret without app-database-url without APP_DATABASE"
+  fi
+  grep -q 'has no app-database-url' "$out" || fail "set-crawler-keys: the APP_DATABASE refusal is not shown: $(cat "$out")"
+  keys_env=(APP_DATABASE=shared)
+  run_keys "$keyless" --tunnel "$fake_token"$'\n' ||
+    fail "set-crawler-keys --tunnel: APP_DATABASE=shared did not reach create-secrets.sh: $(cat "$out")"
+  keys_env=()
+  grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
+    fail "set-crawler-keys --tunnel with APP_DATABASE=shared: the token was not written"
+  grep -q 'app-database-url (shared with the data database, from APP_DATABASE)' "$out" ||
+    fail "set-crawler-keys --tunnel with APP_DATABASE=shared: create-secrets.sh did not use it: $(cat "$out")"
+
   # Facebook sign-in is disabled: --facebook refuses before any prompt, cluster call
   # or write, with --dry-run too.
   for args in --facebook '--facebook --dry-run'; do
@@ -681,9 +716,9 @@ if [ "$have_script" = true ]; then
     grep -q 'Enter each key' "$out" && fail "set-crawler-keys $args: prompted"
     [ -s "$log" ] && fail "set-crawler-keys $args: called kubectl: $(cat "$log")"
   done
-  # Google mode (crawler keys left blank) writes its IdP keys and reapplies the realm.
+  # Google mode (the five crawler keys left blank) writes its IdP keys and reapplies the realm.
   google_args='--google --no-start-crawler'
-  google_input=$'\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
+  google_input=$'\n\n\n\n\ngoogle-test-id\ngoogle-test-secret\n'
   run_keys 'STUB_MARKER=none' "$google_args" "$google_input" ||
     fail "set-crawler-keys --google failed: $(cat "$out")"
   grep -q 'create secret generic econ-graph-keycloak .*--from-file=google-idp-client-id=.*--from-file=google-idp-client-secret=' "$log" ||
@@ -966,15 +1001,27 @@ run_migrate 'WAS_PRODUCTION=true; mark_if_was_production' STUB_RC=1 DRY_RUN=true
 grep -q 'mark ran' "$log" && fail "mark_if_was_production: ran the mark script in a dry run"
 grep -q 'mark-production-cluster.sh' "$out" || fail "mark_if_was_production: the dry run does not show the step"
 # require_recreate_confirmation: before the downtime, a cluster that
-# recreate-kind-cluster.sh would ask the kube-system UID prefix for (a marker with any role
-# but none, one that can't be read, or one noted as production) needs the prefix: a
+# recreate-kind-cluster.sh would ask the kube-system UID prefix for (any marker ConfigMap
+# but `none` or `none <uid>` exactly, empty and malformed ones included, one that can't be
+# read, or one noted as production) needs the prefix: a
 # matching --confirm-production, or typed at a terminal, then passed on to
 # recreate-kind-cluster.sh. rrc runs it with stdin /dev/null (no terminal); rrc_tty under a
-# pseudo-terminal (run_migrate_tty).
+# pseudo-terminal (run_migrate_tty). The marker: STUB_MARKER "ROLE UID" (split at the first
+# space, nothing trimmed; empty: no ConfigMap), or STUB_ROLE and STUB_MUID exactly, with
+# STUB_MARKER_EMPTY=1 for a ConfigMap with no data.
 # shellcheck disable=SC2016 # expanded by run_migrate's bash
 rrc_setup='source scripts/deploy/lib/cluster-role.sh
   kube_system_uid() { [ -z "${STUB_UID_FAILS:-}" ] || return 1; echo uid-kind-cluster; }
-  cluster_role_marker() { [ -z "${STUB_MARKER_FAILS:-}" ] || return 1; printf "%s" "${STUB_MARKER:-}"; }
+  cluster_role_read_marker() {
+    [ -z "${STUB_MARKER_FAILS:-}" ] || return 1
+    CLUSTER_ROLE_MARKER_EXISTS=false CLUSTER_ROLE_MARKER_ROLE="" CLUSTER_ROLE_MARKER_UID=""
+    if [ -n "${STUB_ROLE+x}${STUB_MUID+x}${STUB_MARKER_EMPTY:-}" ]; then
+      CLUSTER_ROLE_MARKER_EXISTS=true CLUSTER_ROLE_MARKER_ROLE="${STUB_ROLE-}" CLUSTER_ROLE_MARKER_UID="${STUB_MUID-}"
+    elif [ -n "${STUB_MARKER:-}" ]; then
+      CLUSTER_ROLE_MARKER_EXISTS=true CLUSTER_ROLE_MARKER_ROLE="${STUB_MARKER%% *}"
+      case "$STUB_MARKER" in *" "*) CLUSTER_ROLE_MARKER_UID="${STUB_MARKER#* }" ;; esac
+    fi
+  }
   recreate_flags=()
   CONFIRM_PRODUCTION="${STUB_CONFIRM:-}" WAS_PRODUCTION="${STUB_WAS:-false}"'
 # shellcheck disable=SC2016
@@ -1020,6 +1067,16 @@ for marker in "production uid-kind-cluster" "Production uid-other" "None uid-kin
     fail "require_recreate_confirmation: went on without a terminal for the marker '$marker'"
   fi
   grep -q 'Pass --confirm-production' "$out" || fail "require_recreate_confirmation: no hint for '$marker': $(cat "$out")"
+done
+# Malformed markers (ECO-723): an empty ConfigMap, whitespace or a newline around none.
+# Each case is one variable, kept whole; STUB_ROLE=none is added to the STUB_MUID one.
+for case_env in STUB_MARKER_EMPTY=1 "STUB_ROLE= none" "STUB_ROLE=none " "STUB_ROLE=none"$'\n'"production" \
+  "STUB_ROLE="$'\n'"production" "STUB_MUID=uid-kind-cluster" "STUB_MUID=uid-a"$'\n'"x" "STUB_MUID=uid a"; do
+  role_env=STUB_RC=1
+  [[ "$case_env" != STUB_MUID=uid-a* && "$case_env" != "STUB_MUID=uid a" ]] || role_env=STUB_ROLE=none
+  if run_migrate "$rrc" STUB_RC=1 "$role_env" "$case_env"; then
+    fail "require_recreate_confirmation: went on without a terminal for $(printf '%q' "$case_env")"
+  fi
 done
 if run_migrate "$rrc" STUB_RC=1 STUB_MARKER_FAILS=1; then
   fail "require_recreate_confirmation: went on without a terminal when the marker can't be read"

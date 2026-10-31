@@ -33,6 +33,17 @@ app plane (the app database and its sign-in) snapshots as one unit.
 | app, `econ_graph_app` | `app-postgres` | `econgraph-app-prod-app-pg` | `econ-graph-app-postgres` |
 | Keycloak, `keycloak` | `keycloak-postgres` | `econgraph-app-prod-keycloak-pg` | `econ-graph-keycloak` |
 
+A database created by the original combined baseline needs a separate
+[app/data conversion](APP_DATA_CONVERSION.md) to move existing app records.
+Deploying these StatefulSets alone does not perform that copy;
+`scripts/deploy/convert-app-data.sh` does, and also rolls it back. The
+conversion first writes a verified plaintext dump of the combined database to a
+new directory under the backup root (`ECONGRAPH_BACKUP_ROOT`, default
+`~/econgraph-backups`), mode 0700 with 0600 files, and never deletes it. Like
+the Keycloak and app dumps beside it, it holds sensitive records (users,
+sessions, annotations, audit history): keep it on this host and do not copy it
+off.
+
 `scripts/host/setup-subvolumes.sh` (needs sudo) creates the subvolumes, adds
 them to `/etc/fstab` and mounts them, with the subvolume roots owned by
 the operator account (`<operator>`). Everything after that runs without sudo.
@@ -71,7 +82,12 @@ the operator account (`<operator>`). Everything after that runs without sudo.
   `recreate-kind-cluster.sh` asks for a confirmation and takes a dump before
   deleting the cluster; on a cluster with a production marker, or one whose
   marker can't be read, the confirmation is the first 8 characters of its
-  kube-system UID (typed, or `--confirm-production`), never `--yes`.
+  kube-system UID (typed, or `--confirm-production`), never `--yes`. Here
+  any ConfigMap `kube-system/econgraph-cluster-role` is a production marker,
+  valid or not, empty included, except one whose role is exactly `none` with
+  no `kube-system-uid` or one without whitespace; whitespace around the role
+  or a newline anywhere counts as production (see "Production marker" in
+  `k8s/README.md`).
   `terraform destroy` doesn't delete it.
 
 ## Which Docker daemon

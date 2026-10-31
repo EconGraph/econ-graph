@@ -153,6 +153,10 @@ pub async fn cross_section(
              LIMIT 1 \
          ) obs ON TRUE \
          WHERE s.dataset_id = $1 AND s.is_active \
+           AND NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
+               WHERE lifecycle.source_id = s.source_id \
+                 AND lifecycle.external_id = s.external_id \
+                 AND lifecycle.status = 'restricted') \
            AND s.dimensions @> $3 AND s.dimensions ? $2 \
          ORDER BY (s.dimensions ->> $2) COLLATE \"C\", s.id",
     )

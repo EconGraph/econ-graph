@@ -729,3 +729,34 @@ async fn query_count_does_not_grow_with_the_number_of_keys() {
         );
     }
 }
+
+#[tokio::test]
+async fn legally_restricted_series_are_hidden_from_both_cross_section_date_modes() {
+    let seeded = seed().await;
+    let mut conn = connect().await;
+    let hidden = seeded.series_id("GDP", "USA");
+    diesel::sql_query(
+        "INSERT INTO series_lifecycle (source_id, external_id, status, since, scope_fingerprint)
+         SELECT source_id, external_id, 'restricted', NOW(), 'cross-section-test'
+         FROM economic_series WHERE id = $1",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(hidden)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    for date in [CrossSectionDate::Latest, CrossSectionDate::On(d(2023))] {
+        let rows = cross_section(&mut conn, areas(), &request(&seeded, "GDP", date))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), AREAS.len() - 1);
+        assert!(rows.iter().all(|row| row.series_id != hidden));
+    }
+    // Hiding is a read-time rule: the original and revised observations remain stored.
+    let stored = data_points::table
+        .filter(data_points::series_id.eq(hidden))
+        .count()
+        .get_result::<i64>(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(stored, 3);
+}

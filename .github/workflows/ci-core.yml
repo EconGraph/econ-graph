@@ -84,6 +84,7 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
+      keycloak_import: ${{ steps.filter.outputs.keycloak_import }}
       e2e_images: ${{ steps.filter.outputs.e2e_images }}
       # False only on a PR that changes nothing but documentation (the paths
       # the push trigger ignores); every other event runs the suite.
@@ -181,6 +182,15 @@ jobs:
             - 'rust-toolchain.toml'
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
+          # Keycloak Realm Import runs the realm import Job's steps against a
+          # throwaway Keycloak.
+          keycloak_import:
+            - '.github/workflows/ci-core.yml'
+            - 'config/keycloak/**'
+            - 'scripts/keycloak/**'
+            - 'k8s/manifests/keycloak/realm-import-job.yaml'
+            - 'k8s/manifests/keycloak/deployment.yaml'
+            - 'scripts/deploy/deploy.sh'
           migrations:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
@@ -420,6 +430,56 @@ jobs:
     # identity printed first, and the resume hint keeping the run's options, against stubs.
     - name: Check the full-history re-fetch script
       run: scripts/deploy/test-refetch-full-history.sh
+
+    # The selection check Job: --namespace required, the crawler-worker image and optional key
+    # refs, cleanup before and after, and the check's exit status, against stubs.
+    - name: Check the selection check script
+      run: |
+        shellcheck -x scripts/deploy/check-selection.sh scripts/deploy/test-check-selection.sh
+        scripts/deploy/test-check-selection.sh
+
+    # The v4.1 first-deploy measurements (ECO-803): the production guard, read-only psql scripts,
+    # no secrets in output, the BEA rules from bea.toml and the FRED check, against stubs.
+    - name: Check the v4.1 first-deploy measurement script
+      run: |
+        shellcheck -x scripts/deploy/measure-v41-first-deploy.sh scripts/deploy/test-measure-v41-first-deploy.sh
+        scripts/deploy/test-measure-v41-first-deploy.sh
+
+  keycloak-realm-import:
+    name: Keycloak Realm Import
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The release production runs, whose realm the test upgrades from.
+      PREVIOUS_RELEASE: v4.0.1
+    needs: [changes]
+    # Only when the realm, its import or this workflow changed; every push to main and
+    # manual run still gets it. Stop if selection failed or the run was cancelled.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.keycloak_import == 'true') }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+
+    # Production's upgrade path starts from the last release's realm import.
+    - name: Checkout the previous release's realm import
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+        ref: ${{ env.PREVIOUS_RELEASE }}
+        path: previous-release
+        sparse-checkout: |
+          config/keycloak
+          scripts/keycloak
+
+    # A real Keycloak and keycloak-config-cli: what a deploy keeps, removes and refuses
+    # (scripts/keycloak/test-realm-import.sh).
+    - name: Run the realm import against a throwaway Keycloak
+      run: scripts/keycloak/test-realm-import.sh
+      env:
+        PREVIOUS_RELEASE_DIR: previous-release
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -796,8 +856,8 @@ jobs:
   # are picked up automatically. Tests read DATABASE_URL (see
   # econ-graph-core/src/test_utils.rs); when it is unset they fall back to
   # testcontainers, which also works here because ubuntu-latest has Docker.
-  # --test-threads=1: many DB tests drop/recreate the public schema of the shared
-  # database, so running them concurrently within one test binary is flaky.
+  # The suites run in parallel: each TestContainer test gets a scratch database of its
+  # own on that server, so a test that drops its schema drops no one else's.
   backend-workspace-tests:
     name: Backend Workspace Tests (all tests)
     runs-on: ubuntu-latest
@@ -903,6 +963,20 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run publication lifecycle and public visibility regressions (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for lifecycle regressions}"
+        for filter in graphql::lifecycle::tests graphql::lifecycle_visibility_tests; do
+          log="$RUNNER_TEMP/lifecycle-${filter//:/_}.log"
+          cargo test -p econ-graph-graphql --lib "$filter" -- --test-threads=1 --nocapture | tee "$log"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        done
+        log="$RUNNER_TEMP/lifecycle-cross-section.log"
+        cargo test -p econ-graph-services --lib restricted_series -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail
@@ -910,7 +984,7 @@ jobs:
         cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
         grep -Eq '^test result: ok\. 15 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
         cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
-        grep -Eq '^test result: ok\. 6 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 7 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
         cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
         grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
         cargo test -p econ-graph-services --lib services::series_check::tests::readable_series_exists_applies_the_plane_answer_and_the_callers_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-plane-grants.log"
@@ -1022,10 +1096,10 @@ jobs:
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-graphql --lib graphql::datasets -- --test-threads=1
-        cargo test -p econ-graph-services queue_service -- --test-threads=1
-        cargo test -p econ-graph-services cross_section -- --test-threads=1
+        cargo test -p econ-graph-services queue_service
+        cargo test -p econ-graph-services cross_section
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
-        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-services search_service
         cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
@@ -1038,13 +1112,13 @@ jobs:
         cargo build --release -p econ-graph-crawler --bin crawler
         release_sources="$(target/release/crawler sources)"
         echo "$release_sources"
-        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA; do
+        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA WTO BOC; do
           if ! echo "$release_sources" | grep -qE "^$live\b.*\byes\b"; then
             echo "::error::$live has no adapter in a release build"
             exit 1
           fi
         done
-        for gone in IMF ECB OECD BOE BOJ BOC RBA SNB UN_STATS ILO WTO; do
+        for gone in IMF ECB OECD BOE BOJ RBA SNB UN_STATS ILO; do
           if echo "$release_sources" | grep -qE "^$gone\b.*\byes\b"; then
             echo "::error::$gone has an adapter in a release build"
             exit 1
@@ -1065,9 +1139,9 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
-        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1 || status=$?
+        cargo test --workspace --no-fail-fast --lib --bins --tests || status=$?
         # The XBRL integration tests need the xbrl-parser feature (required-features).
-        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests || status=$?
         exit $status
       working-directory: backend
 
@@ -2462,6 +2536,7 @@ jobs:
       - postgres-backup-scripts
       - deploy-manifests
       - backend-migration-validation-tests
+      - keycloak-realm-import
       - backend-smoke-tests
       - chart-api-integration-tests
       - backend-mcp-integration-tests
@@ -2494,7 +2569,8 @@ jobs:
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
           changes backend-build-cache prometheus-rules postgres-backup-scripts
-          deploy-manifests backend-migration-validation-tests backend-smoke-tests
+          deploy-manifests backend-migration-validation-tests keycloak-realm-import
+          backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests
           backend-workspace-tests backend-db-tests admin-frontend-tests
           frontend-tests quality-checks security-audit license-compliance
