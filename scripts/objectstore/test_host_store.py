@@ -4,6 +4,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import shlex
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -165,16 +168,82 @@ class HostStoreGuards(unittest.TestCase):
         args = host.parser().parse_args(BASE)
         identity, _, _ = host.templates(args)
         value = {"Config": {"Labels": {"org.econgraph.objectstore-owner": identity["owner"]}, "Image": host.IMAGE,
-                 "User": f"{args.uid}:{args.gid}", "Cmd": ["--port", ":7070", "posix", "/data"]},
-                 "Mounts": [{"Destination": "/data", "Source": str(host.DATA), "RW": True}],
+                 "User": f"{args.uid}:{args.gid}", "Cmd": ["--port", ":7070", "posix", "/data"],
+                 "Entrypoint": ["/usr/local/bin/docker-entrypoint.sh"],
+                 "Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},
+                 "Mounts": [{"Type": "bind", "Destination": "/data", "Source": str(host.DATA), "RW": True}],
+                 "NetworkSettings": {"Networks": {"econgraph-objectstore-network": {}}},
                  "HostConfig": {"ReadonlyRootfs": True, "NetworkMode": "econgraph-objectstore-network",
+                 "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"], "RestartPolicy": {"Name": "no"},
+                 "NanoCpus": 2000000000, "Memory": 6 * 1024**3, "MemorySwap": 6 * 1024**3, "PidsLimit": 256,
+                 "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
+                 "LogConfig": {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},
                  "PortBindings": {"7070/tcp": [{"HostIp": args.bind_address, "HostPort": "7070"}]}}}
         self.assertTrue(host.container_matches(value, args, identity))
+        pristine = json.loads(json.dumps(value))
+        for field, changed in (("Mounts", value["Mounts"] + [{"Type": "bind", "Destination": "/primary", "Source": "/srv/primary", "RW": True}]),):
+            value[field] = changed
+            self.assertFalse(host.container_matches(value, args, identity))
+        value = json.loads(json.dumps(pristine))
+        value["Config"]["Entrypoint"] = ["/bin/sh"]
+        self.assertFalse(host.container_matches(value, args, identity))
+        value = json.loads(json.dumps(pristine))
+        value["HostConfig"]["Memory"] = 0
+        self.assertFalse(host.container_matches(value, args, identity))
+        value = json.loads(json.dumps(pristine))
+        value["HostConfig"]["RestartPolicy"]["Name"] = "unless-stopped"
+        self.assertFalse(host.container_matches(value, args, identity))
+        value = json.loads(json.dumps(pristine))
         value["Config"]["Cmd"] = ["--port", ":7070", "posix", "--nometa", "/data"]
         self.assertFalse(host.container_matches(value, args, identity))
         value["Config"]["Cmd"] = ["--port", ":7070", "posix", "/data"]
         value["HostConfig"]["PortBindings"]["7070/tcp"][0]["HostIp"] = "0.0.0.0"
         self.assertFalse(host.container_matches(value, args, identity))
+
+    def test_both_units_gate_exact_mount_and_docker_cannot_autorestart(self):
+        for form in ("systemd", "docker"):
+            args = host.parser().parse_args(BASE)
+            args.form = form
+            _, files, _ = host.templates(args)
+            unit = files[str(host.UNIT)]
+            self.assertIn("findmnt -rn -o UUID,FSTYPE,FSROOT", unit)
+            self.assertIn("btrfs /@econgraph-objectstore", unit)
+            self.assertIn("--mountpoint /srv/econgraph/snapshots", unit)
+            self.assertIn("objectstore-v1", unit)
+            if form == "docker":
+                compose = json.loads(files[str(host.CONFIG / "compose.json")])
+                self.assertEqual(compose["services"]["objectstore"]["restart"], "no")
+                self.assertIn("Type=simple", unit)
+                self.assertIn("PartOf=docker.service", unit)
+                self.assertIn("Restart=on-failure", unit)
+                self.assertNotIn(" up -d", unit)
+
+    def test_boot_guard_rejects_wrong_filesystem_subvolume_and_coverage(self):
+        args = host.parser().parse_args(BASE)
+        _, files, _ = host.templates(args)
+        line = next(line for line in files[str(host.UNIT)].splitlines() if line.startswith("ExecStartPre="))
+        shell = shlex.split(line.removeprefix("ExecStartPre="))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake_findmnt = root / "findmnt"
+            fake_findmnt.write_text('#!/bin/sh\ncase "$*" in *FSROOT*) printf "%s\\n" "$FAKE_DATA_MOUNT";; *) printf "%s\\n" "$FAKE_SNAPSHOT_MOUNT";; esac\n')
+            fake_findmnt.chmod(0o700)
+            data, snapshots, flag = root / "data", root / "snapshots", root / "coverage"
+            data.mkdir()
+            snapshots.mkdir()
+            flag.write_text("objectstore-v1\n")
+            script = shell[2].replace("/usr/bin/findmnt", str(fake_findmnt)).replace(str(host.DATA), str(data)).replace(str(host.SNAPSHOTS), str(snapshots)).replace(str(host.COVERAGE), str(flag))
+            correct_data = args.filesystem_uuid + " btrfs /@econgraph-objectstore"
+            correct_snapshot = args.filesystem_uuid + " btrfs"
+            for metadata, snapshot, expected in ((correct_data, correct_snapshot, 0),
+                    ("foreign btrfs /@econgraph-objectstore", correct_snapshot, 1),
+                    (args.filesystem_uuid + " btrfs /@data-plane", correct_snapshot, 1),
+                    (correct_data, "foreign btrfs", 1)):
+                result = subprocess.run([*shell[:2], script], env={**os.environ, "FAKE_DATA_MOUNT": metadata, "FAKE_SNAPSHOT_MOUNT": snapshot}, capture_output=True)
+                self.assertEqual(result.returncode, expected)
+            flag.write_text("foreign\n")
+            result = subprocess.run([*shell[:2], script], env={**os.environ, "FAKE_DATA_MOUNT": correct_data, "FAKE_SNAPSHOT_MOUNT": correct_snapshot}, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_native_archive_digest_checked_before_extraction(self):
         with tempfile.TemporaryDirectory() as temp:

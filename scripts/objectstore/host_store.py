@@ -22,6 +22,7 @@ ARCHIVE_SHA = "8f9869752939d4dc9cfe1bddb935a02cc6610e95319a3a9fc2947d2a6ebd2c91"
 BINARY_SHA = "11a815fbd71386318f556a0f5d735d21f12a4721d3b21a645ffc0c16278efc7d"
 ARCHIVE_URL = "https://github.com/versity/versitygw/releases/download/v1.10.0/versitygw_v1.10.0_Linux_x86_64.tar.gz"
 DATA = Path("/srv/econgraph/objectstore")
+SNAPSHOTS = Path("/srv/econgraph/snapshots")
 CONFIG = Path("/etc/econgraph/objectstore")
 MARKER = CONFIG / "managed.json"
 COVERAGE = Path("/etc/econgraph/objectstore-snapshots.enabled")
@@ -140,11 +141,11 @@ def templates(args):
 Description=EconGraph accepted host object store
 Wants=network-online.target
 After=network-online.target
-RequiresMountsFor={DATA}
+RequiresMountsFor={DATA} {SNAPSHOTS}
 AssertPathExists={COVERAGE}
 
 [Service]
-ExecStartPre=/usr/bin/mountpoint -q {DATA}
+ExecStartPre=/bin/sh -ec 'test ! -L {DATA}; test "$(/usr/bin/findmnt -rn -o UUID,FSTYPE,FSROOT --mountpoint {DATA})" = "{args.filesystem_uuid.lower()} btrfs /@econgraph-objectstore"; test "$(/usr/bin/findmnt -rn -o UUID,FSTYPE --mountpoint {SNAPSHOTS})" = "{args.filesystem_uuid.lower()} btrfs"; test ! -L {COVERAGE}; test "$(/usr/bin/cat {COVERAGE})" = "objectstore-v1"'
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -173,26 +174,27 @@ WantedBy=multi-user.target
         files = {str(UNIT): unit}
     else:
         compose = {"services": {"objectstore": {
-            "image": IMAGE, "container_name": "econgraph-objectstore", "restart": "unless-stopped",
+            "image": IMAGE, "container_name": "econgraph-objectstore", "restart": "no",
             "user": f"{args.uid}:{args.gid}", "env_file": [str(args.credential_file)],
             "command": ["--port", ":7070", "posix", "/data"],
             "ports": [f"{args.bind_address}:7070:7070"],
             "volumes": [{"type": "bind", "source": str(DATA), "target": "/data"}],
             "labels": {"org.econgraph.objectstore-owner": owner}, "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"], "cpus": 2, "mem_limit": "6g",
-            "pids_limit": 256, "read_only": True,
+            "pids_limit": 256, "memswap_limit": "6g", "read_only": True,
             "tmpfs": ["/tmp:rw,noexec,nosuid,size=64m"],
             "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}},
         }}}
         compose["networks"] = {"default": {"name": "econgraph-objectstore-network", "labels": {"org.econgraph.objectstore-owner": owner}}}
         compose_path = CONFIG / "compose.json"
         prefix = f"/usr/bin/docker --host=unix:///var/run/docker.sock compose --project-name econgraph-objectstore --file {compose_path}"
-        unit = common.replace("After=network-online.target", "After=network-online.target docker.service\nRequires=docker.service") + f'''Type=oneshot
-RemainAfterExit=true
-ExecStart={prefix} up -d --no-recreate --pull never
+        unit = common.replace("After=network-online.target", "After=network-online.target docker.service\nRequires=docker.service\nPartOf=docker.service") + f'''Type=simple
+ExecStart={prefix} up --no-recreate --pull never --abort-on-container-exit --exit-code-from objectstore
 ExecStop={prefix} stop
 TimeoutStartSec=120
 TimeoutStopSec=120
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -274,18 +276,35 @@ def container_matches(value, args, identity, expected_credentials=None):
     """A label alone never authorizes adoption of changed runtime configuration."""
     config = value.get("Config", {})
     host = value.get("HostConfig", {})
-    mounts = [mount for mount in value.get("Mounts", []) if mount.get("Destination") == "/data"]
+    mounts = value.get("Mounts", [])
     environment = dict(item.split("=", 1) for item in config.get("Env", []) if "=" in item)
+    proxy_names = {"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"}
+    allowed_env = proxy_names | {"PATH", "ROOT_ACCESS_KEY", "ROOT_SECRET_KEY"}
     return (
         (expected_credentials is None or all(environment.get(key) == data for key, data in expected_credentials.items()))
+        and len(environment) == len(config.get("Env", []))
+        and set(environment) <= allowed_env
+        and environment.get("PATH") == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         and (config.get("Labels") or {}).get("org.econgraph.objectstore-owner") == identity["owner"]
         and config.get("Image") == IMAGE
+        and config.get("Entrypoint") == ["/usr/local/bin/docker-entrypoint.sh"]
+        and not config.get("Healthcheck")
         and config.get("User") == f"{args.uid}:{args.gid}"
         and config.get("Cmd") == ["--port", ":7070", "posix", "/data"]
-        and len(mounts) == 1 and mounts[0].get("Source") == str(DATA) and mounts[0].get("RW") is True
-        and not host.get("Privileged") and not host.get("CapAdd") and host.get("ReadonlyRootfs") is True
+        and len(mounts) == 1 and mounts[0].get("Type") == "bind" and mounts[0].get("Destination") == "/data"
+        and mounts[0].get("Source") == str(DATA) and mounts[0].get("RW") is True
+        and not host.get("Privileged") and not host.get("CapAdd") and host.get("CapDrop") == ["ALL"]
+        and not host.get("Devices") and not host.get("DeviceRequests") and not host.get("PidMode")
+        and not host.get("UTSMode") and not host.get("UsernsMode")
+        and host.get("ReadonlyRootfs") is True and host.get("SecurityOpt") == ["no-new-privileges:true"]
+        and host.get("RestartPolicy", {}).get("Name") == "no"
+        and host.get("NanoCpus") == 2_000_000_000 and host.get("Memory") == 6 * 1024**3
+        and host.get("MemorySwap") == 6 * 1024**3 and host.get("PidsLimit") == 256
+        and host.get("Tmpfs") == {"/tmp": "rw,noexec,nosuid,size=64m"}
+        and host.get("LogConfig") == {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}}
         and host.get("NetworkMode") == "econgraph-objectstore-network"
-        and host.get("PortBindings", {}).get("7070/tcp") == [{"HostIp": args.bind_address, "HostPort": "7070"}]
+        and set(value.get("NetworkSettings", {}).get("Networks", {})) == {"econgraph-objectstore-network"}
+        and host.get("PortBindings") == {"7070/tcp": [{"HostIp": args.bind_address, "HostPort": "7070"}]}
     )
 
 
@@ -323,6 +342,8 @@ def preflight(args, identity, files, fstab):
         else:
             raise ValueError("An unmanaged service group already owns the selected name")
     account_check(args)
+    if run("findmnt", "-rn", "-o", "UUID,FSTYPE", "--mountpoint", str(SNAPSHOTS)).split() != [args.filesystem_uuid.lower(), "btrfs"]:
+        raise ValueError("Object store and mounted snapshot staging must share the selected btrfs filesystem")
     if owned:
         root_private(MARKER, 0o600)
         if json.loads(MARKER.read_text()) != identity:
@@ -376,8 +397,8 @@ def preflight(args, identity, files, fstab):
     run("systemctl", "is-enabled", "econgraph-backup-snapshots.timer")
     if args.form == "docker":
         options = json.loads(run("docker", "--host=unix:///var/run/docker.sock", "info", "--format", "{{json .SecurityOptions}}"))
-        if any("rootless" in option for option in options):
-            raise ValueError("Persistent container requires the rootful Docker daemon")
+        if any("rootless" in option or "userns" in option for option in options):
+            raise ValueError("Persistent container requires rootful Docker without implicit UID remapping")
         run("docker", "--host=unix:///var/run/docker.sock", "image", "inspect", IMAGE)
         network = run("docker", "--host=unix:///var/run/docker.sock", "network", "ls", "--filter", "name=^econgraph-objectstore-network$", "--format", "{{.Name}}")
         if network:

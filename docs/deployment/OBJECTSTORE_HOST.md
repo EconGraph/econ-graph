@@ -34,6 +34,10 @@ non-root UID/GID, drops capabilities, uses a read-only root and bounded temporar
 publishes only the explicit private bridge address. Neither candidate binds all interfaces.
 Both use systemd mount/network dependencies; the Docker unit additionally requires Docker and
 uses `--no-recreate --pull never` so startup cannot silently replace the existing container.
+Docker's own restart policy is `no`: a foreground Compose process is supervised by systemd,
+with daemon restart propagation and `Restart=on-failure`. Every start/restart therefore checks
+the exact object-store UUID/btrfs/subvolume, matching mounted snapshot filesystem and coverage
+marker before starting a container. Dockerd cannot auto-start it ahead of those mount checks.
 
 The default dedicated UID/GID is 61100. The installer refuses an existing foreign account or an
 occupied numeric ID. Choose an explicit unoccupied `--uid`/`--gid` if necessary. The native unit
@@ -54,8 +58,8 @@ Before any privileged operation, the installer requires:
   proof artifacts do not qualify. A Garage-only success never changes production configuration.
 - For native systemd execution, the report must also identify the exact accepted native binary
   digest. Image-only acceptance cannot silently authorize an untested native artifact.
-- The selected bind IP present on the named Linux bridge, the explicit filesystem UUID, and
-  root-owned non-writable configuration paths. Existing unrelated units, users, containers,
+- The selected bind IP present on the named Linux bridge, the explicit filesystem UUID matching
+  the already-mounted btrfs snapshot staging filesystem, and root-owned non-writable configuration paths. Existing unrelated units, users, containers,
   mounts, subvolumes, credential files or changed managed files are refused.
 - The updated existing snapshot script installed by the reviewed
   `scripts/host/install-backup-timer.sh` workflow, and its existing hourly timer enabled.
@@ -96,7 +100,10 @@ Before enabling coverage it verifies a real `user.*` xattr roundtrip; Versity re
 POSIX xattr metadata, without `--nometa`, sidecar storage or nodatacow. The object subvolume keeps
 normal copy-on-write snapshot behavior.
 
-Identical existing managed files are verified without replacement. A partially completed
+Existing container adoption checks every mount, the pinned entrypoint and command, private
+credential bindings, security/resource bounds, network scope and disabled Docker restart policy.
+Unexpected writable mounts, host namespaces, entrypoints or unlimited resources are refused even
+when an owner label matches. Identical existing managed files are verified without replacement. A partially completed
 installation can rerun with the same identity; changed bind/form/artifact settings are refused
 as a production configuration change requiring separate review. Installation ends with
 `installed_not_started`. A later explicitly authorized `--action start --execute` repeats the
