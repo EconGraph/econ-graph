@@ -38,7 +38,8 @@ k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin
 
 - **`postgres-backup-cronjob.yaml`**: a nightly (`0 8 * * *` UTC) `CronJob`
   whose `pg-dump` container `pg_dump`s `econ_graph`, `econ_graph_app` and
-  `keycloak` to `/backups` on the **`postgres-backup-data`** PVC:
+  `keycloak` to a private memory-backed `/plaintext` volume. The `encrypt`
+  stage encrypts verified archives to `/backups` on the **`postgres-backup-data`** PVC:
   a separate volume from the databases' own PVCs, so losing/recreating a
   primary volume doesn't take the backups with it. Its `backup-sync`
   container then optionally syncs `/backups` to S3 (or an S3-compatible
@@ -49,8 +50,8 @@ k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin
   different failure domain than the database volumes, or rely on the S3 sync
   instead.
 - **`postgres-backup-configmap.yaml`**: the `backup.sh` / `sync.sh` /
-  `restore.sh` scripts the CronJob and restore job run. They never delete
-  dumps.
+  `install-age.sh`, `encrypt.sh` and `restore.sh` scripts the CronJob and
+  legacy restore job run. They never delete completed dumps.
 - **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
   `PersistentVolume`s for `econ_graph`'s data and the backups to
   `persistentVolumeReclaimPolicy: Retain`. It runs after PostgreSQL comes
@@ -78,28 +79,58 @@ k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin
 - **`scripts/deploy/test-postgres-backup-scripts.sh`**: tests the three
   scripts; see [Testing](#testing).
 
+## Encryption setup
+
+Before deploying this CronJob, set `BACKUP_AGE_RECIPIENT` on its `encrypt`
+container to the maintainer's native `age1...` **public recipient**. This is
+public configuration and can be committed or rendered in a local overlay.
+An empty, malformed or private-key value fails the job; there is no plaintext
+fallback. Keep the private identity only on the operator's host, outside
+backup directories. Never create a Kubernetes Secret containing that identity.
+
+`install-age` uses a digest-pinned curl image to download official age 1.3.2
+archives for amd64 or arm64 and checks the release's SHA-256 before extracting
+the tools into a pod-local `emptyDir`. The encryption stage mounts those tools
+read-only. A fresh pod needs outbound HTTPS to GitHub releases; a download or
+checksum failure fails visibly rather than writing an unencrypted backup.
+
+Plaintext archives exist only in a memory-backed `emptyDir`, with `umask 077`.
+Its default capacity is **8Gi for the combined compressed dumps**, not a RAM
+reservation. Size it and the node's available memory before enabling large
+backups. A full tmpfs fails the affected dump and still permits the other
+successful dumps to be encrypted and synced; it does not spill to the PVC.
+Account for node swap policy when deciding whether tmpfs meets the host's
+at-rest requirements. Successful encryption releases each temporary plaintext archive. Failed
+encryption can retain staging until Kubernetes removes the pod; inspect
+failures and clean up finished Jobs as part of operations.
+
 ## What a run writes
 
-Each run takes one UTC timestamp and writes, on the backup PVC:
+Each run takes one UTC timestamp and writes these ciphertext files on the PVC:
 
 | File | Contents |
 |------|----------|
-| `econ_graph-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `econ_graph`, from `data-postgres-service` as `postgres` |
-| `econ_graph_app-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `econ_graph_app`, from `app-postgres-service` as `postgres`, when `APP_DATABASE=separate` |
-| `keycloak-<YYYYMMDD-HHMMSS>.dump` | `pg_dump --format=custom` of `keycloak`, from `keycloak-postgres-service` as `keycloak` |
-| `latest.dump` | symlink to the newest good `econ_graph` dump |
-| `latest-econ_graph_app.dump` | symlink to the newest good `econ_graph_app` dump |
-| `latest-keycloak.dump` | symlink to the newest good `keycloak` dump |
+| `econ_graph-<YYYYMMDD-HHMMSS>.dump.age` | encrypted custom archive of the data database |
+| `econ_graph_app-<YYYYMMDD-HHMMSS>.dump.age` | encrypted custom archive of the separate app database, when selected |
+| `keycloak-<YYYYMMDD-HHMMSS>.dump.age` | encrypted custom archive of Keycloak |
+| `latest.dump.age` | symlink to the newest encrypted data archive |
+| `latest-econ_graph_app.dump.age` | symlink to the newest encrypted app archive |
+| `latest-keycloak.dump.age` | symlink to the newest encrypted Keycloak archive |
 
-Every dump uses `--no-owner --no-privileges` and `--lock-wait-timeout=600s`:
-`pg_dump` waits at most 10 minutes for its share lock on the tables (only an
-exclusive lock, such as a migration's `ALTER TABLE` or a `VACUUM FULL`,
-blocks it), then fails that dump instead of waiting until the Job deadline.
-`PG_DUMP_LOCK_WAIT_TIMEOUT` overrides it. Each is written as
-`<name>.partial` and only renamed once it passes every check: it is not
-empty, `pg_restore --file=/dev/null` reads the whole archive back, and
-`pg_restore --list` shows at least one table. A dump that fails a check is
-removed, and the `latest` link keeps pointing at the previous good one.
+`backup.sh` first writes each custom archive on tmpfs, reads it back fully
+with `pg_restore --file=/dev/null`, and requires at least one table. Dumps
+keep `--no-owner --no-privileges` and the 600-second lock wait. Successful
+archives are then encrypted to exclusive `.partial` outputs on the PVC and
+published atomically without overwriting a prior archive, only after age
+succeeds. Ciphertext files are mode 0600. An existing
+output is preserved and records a failure. Encryption failures are added to
+the shared status file so successful archives can still sync before the Job
+fails. No private identity is available to verify decryption in the pod; the
+operator must run a restore drill with their key.
+
+Old plaintext backups on the PVC remain untouched for manual migration.
+The sync stage uploads only completed `*.dump.age` files, follows no symlinks,
+and excludes plaintext, partials and unrelated files. It never prunes objects.
 
 ### Which app database
 
@@ -257,7 +288,44 @@ read (API server, nodes, `kube-system` UID), stops either script before it
 changes anything. `--dry-run` shows the cluster and what would run, and
 starts nothing.
 
-## Restore
+## Restore encrypted archives
+
+Recovery is an operator action. Copy the chosen `.dump.age` file off the PVC
+using the read-only copy pod described below, or download it from object
+storage. Keep it encrypted on persistent local storage. On the operator host,
+use a private tmpfs directory and decrypt with a locally held identity:
+
+```bash
+umask 077
+STAGE=$(mktemp -d /dev/shm/econgraph-restore.XXXXXX)
+# The identity path is local; do not copy its contents into a pod or a Secret.
+read -r -p 'Local age identity path: ' IDENTITY
+age --decrypt --identity "$IDENTITY" \
+  --output "$STAGE/econ_graph-20260101-080000.dump" \
+  econ_graph-20260101-080000.dump.age
+pg_restore --file=/dev/null "$STAGE/econ_graph-20260101-080000.dump"
+```
+
+Restore the decrypted archive from this operator host over an authenticated
+PostgreSQL connection (for example, a port-forward to the selected database).
+Stop writers first. Preserve the ownership and extension handling described
+below: data and app objects belong to `econgraph`; Keycloak objects belong to
+`keycloak`. With a data dump, pre-create its required superuser-owned extensions
+or restore only the extension TOC entries as the superuser, then exclude those
+entries from the transactional `--clean --if-exists --role=econgraph` restore.
+A plain superuser restore loses the application role's ownership. Verify row
+counts and application access before restarting writers. Remove only this
+operator-created tmpfs staging directory when finished; keep the ciphertext.
+
+The in-cluster legacy restore Job does not decrypt `.age` files and refuses
+them with instructions to use operator-side recovery. Default recovery also
+refuses retained plaintext when encrypted data archives exist, including when
+latest metadata is dangling or missing. Do not upload the
+decrypted archive back to the backup PVC to use that Job. The legacy
+instructions below apply only to retained pre-encryption `.dump` backups;
+their read-only PVC-copy method can also fetch `.dump.age` files.
+
+## Restore legacy plaintext archives
 
 ### econ_graph
 
@@ -424,7 +492,8 @@ scripts/deploy/test-postgres-backup-scripts.sh
 ```
 
 Runs `backup.sh`, `sync.sh` and `restore.sh` from the ConfigMap in the
-CronJob's images and security settings (uid 999, read-only root), with the
+CronJob's images with a read-only root and no capabilities (the fixture uid
+maps to the calling host account, including on rootless Docker), with the
 `pg-dump` container's environment read from the CronJob manifest, against
 scratch `postgres:18` containers standing in for `data-postgres-service`
 (also aliased `postgres-service`), `app-postgres-service` and
@@ -465,7 +534,17 @@ that no run deletes a dump, and that a dump removed from the volume by hand
 stays in S3 after the next sync; and that no output contains a password. It needs Docker and
 python3 with PyYAML, and runs in CI ("PostgreSQL Backup Scripts").
 
-It does not cover the in-cluster wiring (the PVC mounts, the Secrets, the
+The encryption checks use a disposable identity only on the test host, verify
+real encrypt/decrypt round trips and mode 0600, exercise failed or invalid
+encryption and collisions, and check the manifest's memory-backed staging
+and mount separation. A separate smoke check installs and runs encryption
+in its actual image as uid 999 with a read-only root and no capabilities.
+A separate backup/restore pair also runs as uid 999 on private container
+tmpfs, with schema and row-count comparisons after restoration.
+The S3 fixture includes legacy plaintext, unrelated
+files, a partial ciphertext and a symlink, all of which must stay local.
+
+It does not exercise live in-cluster wiring (PVC mounts, Secrets, the
 CronJob schedule, the Services' selectors, network policy). Check that on a
 cluster with `backup-postgres-now.sh` followed by
 `restore-postgres-backup.sh --list`.
@@ -485,7 +564,7 @@ push them to S3 (or an S3-compatible service like MinIO), edit the
 
 The sync uploads every dump on the PVC that isn't in the bucket yet,
 `econ_graph-*`, `econ_graph_app-*` and `keycloak-*`, under the same prefix; it skips the
-`latest*.dump` links and any `*.partial` left by a killed run, and never
+`latest*.dump.age` links, all plaintext and any `*.partial` left by a killed run, and never
 deletes from the bucket. A run where a dump failed still syncs before
 failing the Job.
 

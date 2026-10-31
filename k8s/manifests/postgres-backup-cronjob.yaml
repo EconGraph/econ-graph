@@ -1,5 +1,10 @@
 # Nightly PostgreSQL backup.
 #
+# Encrypts verified pg_dump archives with the maintainer's public age recipient.
+# Plaintext exists only on a memory-backed emptyDir; the PVC and S3 receive
+# .dump.age files. Configure BACKUP_AGE_RECIPIENT on the encrypt container
+# before enabling this job. No private age identity belongs in Kubernetes.
+#
 # Writes a pg_dump of each of the three databases (the app database only when
 # app-database-url names it, see below), the data database
 # econ_graph (StatefulSet postgresql, data-postgres-service), the app
@@ -91,6 +96,22 @@ spec:
             runAsUser: 999
             fsGroup: 999
           initContainers:
+          - name: install-age
+            image: curlimages/curl:8.20.0@sha256:b3f1fb2a51d923260350d21b8654bbc607164a987e2f7c84a0ac199a67df812a
+            command: ["/scripts/install-age.sh"]
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: age-tools
+              mountPath: /tools
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+              seccompProfile:
+                type: RuntimeDefault
           - name: pg-dump
             image: postgres:18
             command: ["/scripts/backup.sh"]
@@ -157,12 +178,40 @@ spec:
             - name: KEYCLOAK_PGDATABASE
               value: "keycloak"
             - name: BACKUP_DIR
-              value: "/backups"
+              value: "/plaintext"
             - name: BACKUP_STATUS_FILE
               value: "/status/failed"
             volumeMounts:
             - name: scripts
               mountPath: /scripts
+            - name: plaintext
+              mountPath: /plaintext
+            - name: status
+              mountPath: /status
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+              seccompProfile:
+                type: RuntimeDefault
+          - name: encrypt
+            image: curlimages/curl:8.20.0@sha256:b3f1fb2a51d923260350d21b8654bbc607164a987e2f7c84a0ac199a67df812a
+            command: ["/scripts/encrypt.sh"]
+            env:
+            - name: BACKUP_AGE_RECIPIENT
+              value: "" # Set to the maintainer's PUBLIC age1 recipient; never a private identity.
+            - name: BACKUP_STATUS_FILE
+              value: "/status/failed"
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: age-tools
+              mountPath: /tools
+              readOnly: true
+            - name: plaintext
+              mountPath: /plaintext
             - name: backup-data
               mountPath: /backups
             - name: status
@@ -215,6 +264,16 @@ spec:
           - name: backup-data
             persistentVolumeClaim:
               claimName: postgres-backup-data
+          - name: age-tools
+            emptyDir:
+              sizeLimit: 64Mi
+          # Holds only this run's verified plaintext archives. This limit is
+          # capacity, not a reservation: size it to the compressed dumps and
+          # available node RAM. A full tmpfs fails the run instead of using disk.
+          - name: plaintext
+            emptyDir:
+              medium: Memory
+              sizeLimit: 8Gi
           # Which dumps failed, from pg-dump to backup-sync (see the top).
           - name: status
             emptyDir:
