@@ -18,6 +18,15 @@ D, S, T = [str(uuid.UUID(int=n)) for n in (1, 2, 3)]
 TOKEN = str(uuid.UUID(int=4))
 
 
+def scratch_database_url(admin, name):
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, quote
+    parts = urlsplit(admin)
+    # libpq URI values percent-decode; a literal '+' is not form-urlencoded space.
+    parameters = parse_qsl(parts.query.replace('+', '%2B'), keep_blank_values=True)
+    query = urlencode([(key, value) for key, value in parameters if key != 'dbname'], quote_via=quote)
+    return urlunsplit((parts.scheme, parts.netloc, '/' + name, query, ''))
+
+
 def fixture(path, values=None, target=T, checkpoint='source-checkpoint', attrs=None):
     values = values if values is not None else ['123456789012345678901234567890.1234567890123456789', None, '0.00000000000000000000000000000000000000000000000001']
     header = {'format': 1, 'kind': 'snapshot', 'target_id': target, 'checkpoint': checkpoint,
@@ -45,6 +54,45 @@ class RecoveryContracts(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_scratch_dsn_keeps_spaces_literal_plus_and_explicit_empty_options(self):
+        from urllib.parse import urlsplit, parse_qsl
+        source='postgresql://fixture:secret@127.0.0.1:5448/admin?options=-c%20statement_timeout%3D12s&application_name=review+probe%20space&connect_timeout=5&dbname=wrong&client_encoding='
+        rebuilt=scratch_database_url(source,'eg_train4_recovery_probe')
+        parsed=urlsplit(rebuilt)
+        self.assertEqual(parsed.path,'/eg_train4_recovery_probe')
+        self.assertEqual(parsed.netloc,urlsplit(source).netloc)
+        self.assertNotIn('+',parsed.query)
+        self.assertEqual(parse_qsl(parsed.query,keep_blank_values=True),[
+            ('options','-c statement_timeout=12s'),('application_name','review+probe space'),
+            ('connect_timeout','5'),('client_encoding','')])
+
+    def test_backfill_normalizes_confirmation_before_any_bootstrap(self):
+        from unittest.mock import patch
+        destination='e447c889-a5e3-44ae-a567-d35fd1b55e9d'
+        self.header['target_id']=destination
+        self.header['fence']={'target_id':destination,'backend':'postgres','writes_paused':True,'pause_token':TOKEN,'epoch':1}
+        write_snapshot(self.source,self.header,self.rows)
+        def importer(command, **options):
+            self.assertEqual(command[command.index('--expect-target')+1],destination)
+            if command[1]=='bootstrap':
+                receipt={'target_id':destination,'epoch':1,'bootstrapped':True}
+            else:
+                request=json.loads(options['input'])
+                self.assertEqual(request['target_id'],destination)
+                receipt={key:value for key,value in request.items() if key!='observations'}
+                receipt['committed']=True
+            return subprocess.CompletedProcess(command,0,stdout=json.dumps(receipt),stderr='')
+        for index,confirmation in enumerate((destination.upper(),'{'+destination.upper()+'}')):
+            with self.subTest(confirmation=confirmation):
+                with patch.object(r.subprocess,'run',side_effect=importer) as process:
+                    result=r.backfill(self.source,self.root/f'journal-{index}.json',destination,2,'storage-bridge',confirmation)
+                    self.assertEqual(result['committed_batches'],2)
+                    self.assertEqual(process.call_count,3)
+        with patch.object(r.subprocess,'run') as process:
+            with self.assertRaisesRegex(r.Refused,'exact destination'):
+                r.backfill(self.source,self.root/'wrong-target.json',destination,2,'storage-bridge',str(uuid.uuid4()))
+            process.assert_not_called()
 
     def test_replay_uses_frontend_copy_eof_with_sql_separate_from_csv(self):
         import csv
@@ -239,14 +287,12 @@ print(json.dumps(receipt))
 @unittest.skipUnless(os.environ.get('TRAIN4_RECOVERY_TEST_DATABASE_URL'), 'explicit disposable PostgreSQL admin URL required')
 class PostgresRecoveryContracts(unittest.TestCase):
     def setUp(self):
-        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
         admin = os.environ['TRAIN4_RECOVERY_TEST_DATABASE_URL']
         self.name = 'eg_train4_recovery_' + uuid.uuid4().hex
         self.admin = admin
         result = subprocess.run(['psql','--no-psqlrc','--dbname',admin,'--set','ON_ERROR_STOP=1','-c','CREATE DATABASE '+self.name], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        parts = urlsplit(admin)
-        self.url = urlunsplit((parts.scheme,parts.netloc,'/'+self.name,urlencode([(k,v) for k,v in parse_qsl(parts.query) if k!='dbname']),''))
+        self.url = scratch_database_url(admin, self.name)
         os.environ['RECOVERY_TEST_CASE_DSN'] = self.url
         self.variable = 'RECOVERY_TEST_CASE_DSN'
         self.tmp = tempfile.TemporaryDirectory()
@@ -267,6 +313,17 @@ class PostgresRecoveryContracts(unittest.TestCase):
 
     def control(self, action, **options):
         return json.loads(r.pg_run(r.control_sql(action,T,**options),self.variable))
+
+    def test_rebuilt_dsn_applies_spaced_libpq_options_without_losing_literal_plus(self):
+        from urllib.parse import urlsplit, urlunsplit
+        parts=urlsplit(self.url)
+        configured=urlunsplit((parts.scheme,parts.netloc,parts.path,
+                               'options=-c%20statement_timeout%3D12s&application_name=review+probe%20space',''))
+        rebuilt=scratch_database_url(configured,self.name)
+        result=subprocess.run(['psql','--no-psqlrc','--dbname',rebuilt,'--set','ON_ERROR_STOP=1','-Atc',
+                               "SELECT current_setting('statement_timeout') || '|' || current_setting('application_name');"],
+                              capture_output=True,text=True,check=True)
+        self.assertEqual(result.stdout.strip(),'12s|review+probe space')
 
     def test_unconfigured_writer_drains_before_target_initialization(self):
         import time

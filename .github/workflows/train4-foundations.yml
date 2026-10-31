@@ -55,6 +55,10 @@ jobs:
           "$RUNNER_TEMP/train4-python/bin/python" -m pip install -r scripts/platform/requirements.txt
           echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
       - name: Exercise dry-run and ownership guards
+        env:
+          TRAIN4_PG_DUMP: ${{ github.workspace }}/scripts/train4/pg-dump
+          TRAIN4_PG_RESTORE: ${{ github.workspace }}/scripts/train4/pg-restore
+          TRAIN4_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           python3 -m unittest discover -s scripts/talos -p test_talos.py
           python3 -m unittest discover -s scripts/objectstore -p 'test_*.py'

@@ -272,8 +272,10 @@ def journal_lock(path):
 
 def backfill(source_path, state_path, destination, batch_size, binary=None, apply_target=None):
     destination = identity(destination)
-    if apply_target is not None and (identity(apply_target) != destination or not binary):
-        raise Refused('backfill requires the exact destination and real recovery binary')
+    if apply_target is not None:
+        apply_target = identity(apply_target)
+        if apply_target != destination or not binary:
+            raise Refused('backfill requires the exact destination and real recovery binary')
     if batch_size <= 0:
         raise Refused('batch size must be positive')
     with journal_lock(state_path), Snapshot(source_path) as source:
@@ -308,8 +310,6 @@ def backfill(source_path, state_path, destination, batch_size, binary=None, appl
                 pending.append({k: v for k, v in request.items() if k != 'observations'})
                 if apply_target is None:
                     continue
-                if apply_target != destination or not binary:
-                    raise Refused('backfill requires the exact destination and real recovery binary')
                 # An explicit executable/argv, never a shell interpolation or a mock-success path.
                 result = subprocess.run([str(binary), 'import-batch', '--expect-target', destination],
                                         input=exact_json(request), text=True, capture_output=True, check=True)
