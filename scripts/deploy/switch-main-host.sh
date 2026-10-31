@@ -25,8 +25,9 @@
 #
 # The switch moves Keycloak's issuer first, the KC_HOSTNAME rollout and then the realm
 # import that sets the realm's frontendUrl (which overrides KC_HOSTNAME), and only then
-# the backend's OIDC_ISSUER, so the backend never expects an issuer Keycloak does not
-# yet issue. A rollback runs the same steps in the same order.
+# the backend's OIDC_ISSUER. The backend then rejects tokens for the new issuer only
+# from the end of the realm import until its own rollout completes (old pods), instead
+# of until the import. A rollback runs the same steps in the same order.
 set -euo pipefail
 set +x
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -79,7 +80,7 @@ echo "Tunnel: keep both existing host routes and their gateway origin; no change
 if [ "$DRY_RUN" = true ]; then
     echo "[dry-run] verify marked-production context, --confirm-production UID prefix and matching realm ConfigMap"
     if [ "$FINALIZE" = true ]; then
-        echo "[dry-run] verify the switch to ${MAIN_HOST} has completed (Keycloak hostname and deploy config)"
+        echo "[dry-run] verify the switch to ${MAIN_HOST} has completed: Keycloak hostname, realm frontendUrl, backend issuer and rollout, deploy config, served routes, and check-public-site.sh with the temporary redirects"
         echo "[dry-run] atomically retain other settings and write MAIN_HOST_PERMANENT=${MAIN_HOST} in ${CONFIG_FILE}"
         echo "[dry-run] apply gateway routes with permanent (301) redirects to ${MAIN_HOST}"
     else
@@ -97,8 +98,9 @@ fi
 # shellcheck source=scripts/deploy/lib/agent-access.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/agent-access.sh"
 require_operator_session
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+# kc and the production checks (lib/cluster-role.sh), public_main_host_in_cluster.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 # roll_app_on_config_change, through the context-pinned kubectl below.
 # shellcheck source=scripts/deploy/lib/app-config.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/app-config.sh"
@@ -170,20 +172,6 @@ finally:
 PY
 }
 
-if [ "$FINALIZE" = true ]; then
-    # Only a completed, accepted switch is made permanent.
-    [ "$current_hostname" = "https://${MAIN_HOST}/idp" ] ||
-        die "Keycloak's hostname is ${current_hostname}, not https://${MAIN_HOST}/idp: run the switch to ${MAIN_HOST} first; nothing was changed"
-    [ "$configured_main" = "$MAIN_HOST" ] ||
-        die "deploy config MAIN_HOST is '${configured_main}', not ${MAIN_HOST}: run the switch to ${MAIN_HOST} first; nothing was changed"
-    write_config "PUBLIC_HOST=${PUBLIC_HOST}" "MAIN_HOST=${MAIN_HOST}" "MAIN_HOST_PERMANENT=${MAIN_HOST}"
-    export MAIN_HOST_PERMANENT="$MAIN_HOST"
-    "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" --context "$CONTEXT"
-    "$PROJECT_ROOT/scripts/deploy/check-public-site.sh" --host "$PUBLIC_HOST" --main-host "$MAIN_HOST"
-    echo "Redirects to https://${MAIN_HOST} are permanent (301). Purge the Cloudflare cache for ${PUBLIC_HOST} and www.${PUBLIC_HOST} (docs/deployment/MAIN_HOST.md)."
-    exit 0
-fi
-
 # Authenticate inside the pod; no password or access token reaches this host.
 # Its temporary CLI config is removed even if an admin command fails.
 keycloak_admin() {
@@ -203,6 +191,38 @@ keycloak_admin() {
 realm_attributes="$(keycloak_admin get realms/econ-graph --fields attributes)"
 current_frontend_url="$(python3 -c 'import json, sys; print((json.loads(sys.argv[1]).get("attributes") or {}).get("frontendUrl", "").rstrip("/"))' "$realm_attributes")"
 kc -n econ-graph get deployment econ-graph-backend >/dev/null
+if [ "$FINALIZE" = true ]; then
+    # Only a completed switch is made permanent: Keycloak's hostname, the realm's
+    # frontendUrl, the backend's issuer and rollout, the deploy config and the served
+    # routes are all on MAIN_HOST, and the public site passes with its temporary
+    # redirects, before anything is written.
+    finalize_refuse() { die "$1: run the switch to ${MAIN_HOST} first (or rerun it); nothing was changed"; }
+    [ "$current_hostname" = "https://${MAIN_HOST}/idp" ] ||
+        finalize_refuse "Keycloak's hostname is ${current_hostname}, not https://${MAIN_HOST}/idp"
+    [ "$current_frontend_url" = "https://${MAIN_HOST}/idp" ] ||
+        finalize_refuse "the realm frontendUrl is '${current_frontend_url}', not https://${MAIN_HOST}/idp"
+    backend_issuer="$(kc -n econ-graph get deployment econ-graph-backend -o 'jsonpath={.spec.template.spec.containers[*].env[?(@.name=="OIDC_ISSUER")].value}')" ||
+        die "could not read the backend's issuer; nothing was changed"
+    [ "$backend_issuer" = "https://${MAIN_HOST}/idp/realms/econ-graph" ] ||
+        finalize_refuse "the backend expects the issuer '${backend_issuer}'"
+    [ "$configured_main" = "$MAIN_HOST" ] ||
+        finalize_refuse "deploy config MAIN_HOST is '${configured_main}', not ${MAIN_HOST}"
+    served_main="$(public_main_host_in_cluster "$PUBLIC_HOST")" ||
+        die "could not read the served main host; nothing was changed"
+    [ "$served_main" = "$MAIN_HOST" ] ||
+        finalize_refuse "the gateway serves ${served_main}, not ${MAIN_HOST}"
+    kc -n econ-graph rollout status deployment/econ-graph-backend --timeout=60s ||
+        finalize_refuse "the backend's rollout has not completed"
+    MAIN_HOST_PERMANENT="$configured_permanent" "$PROJECT_ROOT/scripts/deploy/check-public-site.sh" \
+        --host "$PUBLIC_HOST" --main-host "$MAIN_HOST" ||
+        finalize_refuse "the public site does not pass check-public-site.sh as it is"
+    write_config "PUBLIC_HOST=${PUBLIC_HOST}" "MAIN_HOST=${MAIN_HOST}" "MAIN_HOST_PERMANENT=${MAIN_HOST}"
+    export MAIN_HOST_PERMANENT="$MAIN_HOST"
+    "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" --context "$CONTEXT"
+    "$PROJECT_ROOT/scripts/deploy/check-public-site.sh" --host "$PUBLIC_HOST" --main-host "$MAIN_HOST"
+    echo "Redirects to https://${MAIN_HOST} are permanent (301). Purge the Cloudflare cache for ${PUBLIC_HOST} and www.${PUBLIC_HOST} (docs/deployment/MAIN_HOST.md)."
+    exit 0
+fi
 current_cors="$(kc -n econ-graph get configmap econ-graph-config -o 'jsonpath={.data.CORS_ORIGIN}')"
 # Render locally before the first mutation; the normal import preserves catalog grants.
 WORK="$(mktemp -d)"
@@ -233,9 +253,9 @@ kc -n econ-graph rollout status deployment/keycloak --timeout=900s
 kc -n econ-graph delete job keycloak-realm-import --ignore-not-found
 kc apply -f "$WORK/realm-import.yaml"
 kc -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=900s
-# 2. Only now the backend's expected issuer, so it never rejects the tokens Keycloak
-# issues (including the anonymous client-credentials renewal) for longer than its own
-# rollout.
+# 2. Only now the backend's expected issuer: old backend pods reject the new issuer's
+# tokens (including the anonymous client-credentials renewal) from the end of the
+# import until this rollout completes.
 cors="https://${PUBLIC_HOST},https://www.${PUBLIC_HOST},http://localhost"
 if [ "$current_cors" != "$cors" ]; then
     kc -n econ-graph patch configmap econ-graph-config --type=merge -p "{\"data\":{\"CORS_ORIGIN\":\"${cors}\"}}"

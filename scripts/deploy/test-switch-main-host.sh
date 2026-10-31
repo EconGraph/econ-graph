@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as temporary:
     work = Path(temporary)
     repo = work / 'repo'
     for source in ['scripts/deploy/switch-main-host.sh', 'scripts/deploy/lib/cluster-role.sh',
-                   'scripts/deploy/lib/app-config.sh',
+                   'scripts/deploy/lib/app-config.sh', 'scripts/deploy/lib/public-host.sh',
                    'scripts/deploy/lib/deploy-config.sh', 'scripts/deploy/lib/agent-access.sh',
                    'scripts/deploy/render-public-host.py', 'scripts/keycloak/render-realm.sh',
                    'scripts/keycloak/preserve-catalog-grants.py', 'config/keycloak/econ-graph-realm.json',
@@ -69,7 +69,11 @@ elif args[:5] == ['-n', 'econ-graph', 'get', 'configmap', 'keycloak-realm']:
               'preserve-catalog-grants.py': 'scripts/keycloak/preserve-catalog-grants.py'}[key]
     print('stale' if state.get('stale_realm') else (pathlib.Path(os.environ['TEST_REPO']) / source).read_text(), end='')
 elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'keycloak']: print(state['hostname'])
-elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'econ-graph-backend']: pass
+elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'econ-graph-backend']:
+    if 'OIDC_ISSUER' in args[-1]: print(state.get('issuer', 'https://econgraph.com/idp/realms/econ-graph'), end='')
+elif args[:2] == ['get', 'crd']: print('customresourcedefinition.apiextensions.k8s.io/' + args[2])
+elif args[:5] == ['-n', 'econ-graph', 'get', 'httproute', 'econ-graph-frontend-public']:
+    print(state.get('routes', 'econgraph.com'), end='')
 elif args[:3] == ['-n', 'econ-graph', 'get'] and args[3].startswith('deployment/') and 'app-config-hash' in args[-1]:
     print(state.get('app_hash', {}).get(args[3][11:], ''), end='')
 elif args[:5] == ['-n', 'econ-graph', 'get', 'configmap', 'econ-graph-config']:
@@ -127,8 +131,14 @@ import json, os, pathlib, sys
 with open(os.environ['TEST_CALLS'], 'a') as output:
     output.write(json.dumps([pathlib.Path(__file__).name, os.environ['PUBLIC_HOST'], os.environ['MAIN_HOST'],
                              'permanent=' + os.environ.get('MAIN_HOST_PERMANENT', '<unset>')] + sys.argv[1:]) + '\\n')
+state_file = pathlib.Path(os.environ['TEST_STATE'])
+state = json.loads(state_file.read_text())
 if pathlib.Path(__file__).name == 'apply-gateway-routes.sh':
     assert sys.argv[1:] == ['--context', 'test-operator-context']
+    state['routes'] = os.environ['MAIN_HOST']
+    state_file.write_text(json.dumps(state))
+elif state.get('site_fails'):
+    sys.exit(1)
 else:
     assert sys.argv[1:] == ['--host', os.environ['PUBLIC_HOST'], '--main-host', os.environ['MAIN_HOST']]
 ''')
@@ -281,6 +291,22 @@ else:
     reset(original.replace('MAIN_HOST=econgraph.com', 'MAIN_HOST=www.econgraph.com'))
     result = run('--finalize')
     assert result.returncode != 0 and "Keycloak's hostname is https://econgraph.com/idp" in result.stdout, result.stdout
+    # A switch that stopped part-way never passes the gate, whichever step it stopped at.
+    www_config = original.replace('MAIN_HOST=econgraph.com', 'MAIN_HOST=www.econgraph.com')
+    done = {'hostname': 'https://www.econgraph.com/idp', 'frontend_url': 'https://www.econgraph.com/idp',
+            'issuer': 'https://www.econgraph.com/idp/realms/econ-graph', 'routes': 'www.econgraph.com'}
+    for broken, message in [({'frontend_url': 'https://econgraph.com/idp'}, 'realm frontendUrl'),
+                            ({'issuer': 'https://econgraph.com/idp/realms/econ-graph'}, "backend expects the issuer"),
+                            ({'routes': 'econgraph.com'}, 'the gateway serves econgraph.com'),
+                            ({'fail_rollout': 'deployment/econ-graph-backend'}, "rollout has not completed"),
+                            ({'site_fails': True}, 'does not pass check-public-site.sh')]:
+        reset(www_config, **{**done, **broken})
+        before = json.loads(state.read_text())
+        result = run('--finalize')
+        assert result.returncode != 0 and message in result.stdout, (broken, result.stdout)
+        assert config.read_text() == www_config and json.loads(state.read_text()) == before, broken
+        assert not any(c[0] == 'apply-gateway-routes.sh' for c in logged()), broken
+    print('ok --finalize refuses a half-finished switch, changing nothing')
     reset()
     assert run().returncode == 0
     switched = json.loads(state.read_text())
@@ -290,8 +316,10 @@ else:
     finalized = original.replace('MAIN_HOST=econgraph.com', 'MAIN_HOST=www.econgraph.com') + 'MAIN_HOST_PERMANENT=www.econgraph.com\n'
     assert config.read_text() == finalized, config.read_text()
     assert json.loads(state.read_text()) == switched, 'finalize changed Keycloak, the backend or the realm'
-    assert [c[0] for c in logged() if c[0].endswith('.sh')] == ['apply-gateway-routes.sh', 'check-public-site.sh']
-    assert all(c[3] == 'permanent=www.econgraph.com' for c in logged() if c[0].endswith('.sh'))
+    # The site is checked as it is (302s) before anything is written, then with 301s.
+    assert [(c[0], c[3]) for c in logged() if c[0].endswith('.sh')] == [
+        ('check-public-site.sh', 'permanent='), ('apply-gateway-routes.sh', 'permanent=www.econgraph.com'),
+        ('check-public-site.sh', 'permanent=www.econgraph.com')], logged()
     assert run('--finalize').returncode == 0 and config.read_text() == finalized
     print('ok --finalize needs a completed switch, persists permanent redirects and is idempotent')
     calls.write_text('')

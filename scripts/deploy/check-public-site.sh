@@ -11,6 +11,8 @@
 # The redirects to MAIN_HOST are permanent (301) when MAIN_HOST is HOST, or when
 # MAIN_HOST_PERMANENT names MAIN_HOST (scripts/deploy/switch-main-host.sh
 # --finalize); otherwise temporary (302). render-public-host.py uses the same rule.
+# MAIN_HOST_PERMANENT comes from the environment, else from the host's deploy config
+# when its PUBLIC_HOST is HOST or unset (as lib/public-host.sh's main_host_init reads it).
 #
 # What it checks:
 #   - the frontend, and a /graphql search sent with the public Origin;
@@ -47,6 +49,7 @@ set -euo pipefail
 
 HOST=""
 MAIN_HOST="${MAIN_HOST:-}"
+MAIN_HOST_PERMANENT_SET="${MAIN_HOST_PERMANENT+set}"
 MAIN_HOST_PERMANENT="${MAIN_HOST_PERMANENT:-}"
 VIA_CLOUDFLARE=false
 LOCAL_INGRESS_IP="${LOCAL_INGRESS_IP:-127.0.0.1}"
@@ -109,6 +112,14 @@ for tool in curl python3; do
     }
 done
 
+if [ -z "${MAIN_HOST_PERMANENT_SET:-}" ]; then
+    # shellcheck source=scripts/deploy/lib/deploy-config.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/deploy-config.sh"
+    configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || exit 2
+    if [ -z "$configured_base" ] || [ "${configured_base,,}" = "$HOST" ]; then
+        MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || exit 2
+    fi
+fi
 if [ "$MAIN_HOST" = "$HOST" ] || [ "${MAIN_HOST_PERMANENT,,}" = "$MAIN_HOST" ]; then
     REDIRECT_STATUS=301
 else

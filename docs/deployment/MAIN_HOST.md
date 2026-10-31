@@ -92,8 +92,11 @@ images. In order, it:
    configuration change (the app-config hash `deploy.sh` uses) and waits;
 6. applies the gateway routes and runs `check-public-site.sh`.
 
-Keycloak's issuer moves before the backend's, so the backend rejects tokens for the
-new issuer only during its own rollout. Every step is idempotent: on a partial
+Keycloak's issuer moves before the backend's, so old backend pods reject tokens for
+the new issuer (including the anonymous client-credentials renewal) only from the end
+of the realm import until the backend's rollout completes. Until the gateway routes
+change in step 6, sign-in started on the old main address fails, since the web
+client accepts only the new one. Every step is idempotent: on a partial
 failure, inspect the reported failed step and rerun the same command after fixing its
 cause.
 
@@ -122,9 +125,11 @@ Once the switch is accepted, make the redirects to www permanent:
 scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --finalize --confirm-production UID-PREFIX
 ```
 
-It refuses unless Keycloak's hostname and the deploy configuration are already on
-www, records `MAIN_HOST_PERMANENT`, reapplies the gateway routes and checks the
-public site. It changes neither Keycloak nor the backend, and rerunning it changes
+It refuses, changing nothing, unless the switch to www completed: Keycloak's
+hostname, the realm `frontendUrl`, the backend's issuer and finished rollout, the
+deploy configuration and the served routes are all on www, and `check-public-site.sh`
+passes with the temporary redirects. It then records `MAIN_HOST_PERMANENT`, reapplies
+the gateway routes and checks the public site again. It changes neither Keycloak nor the backend, and rerunning it changes
 nothing. Purge the Cloudflare cache afterwards. After finalizing, a rollback leaves
 browsers that cached the 301 looping until they clear it.
 

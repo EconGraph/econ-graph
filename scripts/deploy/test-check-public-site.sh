@@ -91,6 +91,9 @@ print(status, end='')
     env = dict(os.environ, PATH=str(work) + os.pathsep + os.environ['PATH'])
     env.pop('MAIN_HOST', None)
     env.pop('MAIN_HOST_PERMANENT', None)
+    # The deploy config is a scratch file, never the operator's.
+    deploy_env = work / 'deploy.env'
+    env['ECONGRAPH_DEPLOY_ENV'] = str(deploy_env)
     check = root / 'scripts/deploy/check-public-site.sh'
     def run(scenario='', main='www.econgraph.com', explicit=False, via=False, permanent=None):
         args = [str(check), '--host', 'econgraph.com']
@@ -126,6 +129,21 @@ print(status, end='')
         result = run('wrong-status', permanent=permanent)
         assert 'expected a ' + ('301' if permanent else '302') in result.stdout, result.stdout
     print('ok a premature 301, or a 302 after finalize, fails')
+    # Without MAIN_HOST_PERMANENT in the environment, the deploy config's is used, for
+    # the same base domain only; the environment, even empty, wins.
+    deploy_env.write_text('PUBLIC_HOST=econgraph.com\nMAIN_HOST_PERMANENT=www.econgraph.com\n')
+    result = subprocess.run([str(check), '--host', 'econgraph.com'], env=dict(env, STUB_MAIN='www.econgraph.com',
+                            STUB_SCENARIO='', STUB_REDIRECT_STATUS='301'), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert result.returncode == 0, result.stdout
+    result = subprocess.run([str(check), '--host', 'econgraph.com'], env=dict(env, STUB_MAIN='www.econgraph.com',
+                            STUB_SCENARIO='', STUB_REDIRECT_STATUS='302', MAIN_HOST_PERMANENT=''), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert result.returncode == 0, result.stdout
+    deploy_env.write_text('PUBLIC_HOST=other.example\nMAIN_HOST_PERMANENT=www.econgraph.com\n')
+    result = subprocess.run([str(check), '--host', 'econgraph.com'], env=dict(env, STUB_MAIN='www.econgraph.com',
+                            STUB_SCENARIO='', STUB_REDIRECT_STATUS='302'), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert result.returncode == 0, result.stdout
+    deploy_env.unlink()
+    print('ok MAIN_HOST_PERMANENT from the deploy config for the same base domain; the environment wins')
     result = run(main='other.invalid', explicit=True)
     assert result.returncode == 2 and '--main-host must be' in result.stdout, result.stdout
     print('ok unrelated main host rejected before curl')
