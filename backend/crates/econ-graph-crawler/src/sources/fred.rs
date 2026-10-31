@@ -303,6 +303,17 @@ impl FredCatalogRules {
         self.max_catalog_series
     }
 
+    /// These rules with no bound on selected series, for `crawler check-selection
+    /// --count-uncapped` only: the selection is counted in full instead of stopping past
+    /// `max_series`. The catalog walk is still bounded by `max_catalog_series`. Discovery never
+    /// uses this.
+    pub(crate) fn uncapped(&self) -> Self {
+        Self {
+            max_series: usize::MAX,
+            ..self.clone()
+        }
+    }
+
     /// The explicit include overrides.
     pub(crate) fn include(&self) -> &[String] {
         &self.include

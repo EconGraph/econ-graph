@@ -463,6 +463,9 @@ pub struct Checker {
     pub fhfa: FhfaAdapter,
     /// FRED rules instead of `catalog_selection/fred.toml`.
     pub(crate) fred_rules: Option<FredCatalogRules>,
+    /// Count FRED's whole selection past `max_series` (still reported as over the cap) instead
+    /// of stopping at it, so the report says how far over it is.
+    pub count_uncapped: bool,
     /// BLS series ids instead of `bls_series.csv`.
     pub bls_series: Option<Vec<String>>,
     /// World Bank indicator ids instead of `wdi_indicators.csv`.
@@ -496,6 +499,7 @@ impl Checker {
             census: CensusAdapter::default(),
             fhfa: FhfaAdapter::default(),
             fred_rules: None,
+            count_uncapped: false,
             bls_series: None,
             wdi_indicators: None,
         })
@@ -561,7 +565,13 @@ impl Checker {
             Some(rules) => rules.clone(),
             None => fred::load_catalog_rules()?,
         };
-        let selection = match self.fred.select_catalog(&self.ctx, &rules).await {
+        // Uncapped, the selection runs to the end and the bound below reports it over the cap.
+        let selecting = if self.count_uncapped {
+            rules.uncapped()
+        } else {
+            rules.clone()
+        };
+        let selection = match self.fred.select_catalog(&self.ctx, &selecting).await {
             Ok(selection) => selection,
             Err(e) if fred::is_catalog_volume_guard(&e) => {
                 check.problem(FindingKind::OverCap, "selection", e.to_string());

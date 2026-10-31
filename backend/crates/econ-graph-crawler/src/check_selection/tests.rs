@@ -86,6 +86,7 @@ fn checker_with(mock: &MockSource, policies: HashMap<SourceId, SourcePolicy>) ->
         census: CensusAdapter::new(&base).with_states_url(mock.url("/geo/state.txt")),
         fhfa: FhfaAdapter::new(&base),
         fred_rules: None,
+        count_uncapped: false,
         bls_series: None,
         wdi_indicators: None,
     }
@@ -263,6 +264,46 @@ async fn fred_over_cap_selection_is_reported_without_fetching_overrides() {
         .await
         .iter()
         .any(|r| r.url.path() == "/series"));
+}
+
+#[tokio::test]
+async fn fred_count_uncapped_reports_the_whole_selection_over_the_cap() {
+    let mock = MockSource::start().await;
+    mount_fred(&mock).await;
+    let mut checker = checker(&mock);
+    checker.count_uncapped = true;
+    checker.fred_rules = Some(fred_rules(&format!(
+        "max_series=2\nmax_catalog_series=100\ninclude=['UNRATE']\n{FRED_RULE}"
+    )));
+    let check = check_one(&checker, SourceId::Fred).await;
+    assert_eq!(check.status, CheckStatus::Problems, "{check:#?}");
+    // The same 4 series as the uncapped clean check, against the real cap of 2.
+    assert_eq!(check.selected, Some(4));
+    assert!(check.bounds.contains(&Bound {
+        what: "selected series".into(),
+        count: 4,
+        limit: 2
+    }));
+    assert_eq!(
+        problems(&check),
+        [(FindingKind::OverCap, "selected series")]
+    );
+    assert!(check.problems[0]
+        .detail
+        .contains("4 exceeds the limit of 2"));
+    assert_eq!(check.refresh.as_ref().unwrap().requests, 12);
+    assert_eq!(report_of(check).exit_code(), EXIT_PROBLEMS);
+}
+
+#[test]
+fn uncapped_rules_keep_the_catalog_bound() {
+    let rules = fred_rules(&format!(
+        "max_series=2\nmax_catalog_series=100\n{FRED_RULE}"
+    ));
+    let uncapped = rules.uncapped();
+    assert_eq!(uncapped.max_series(), usize::MAX);
+    assert_eq!(uncapped.max_catalog_series(), 100);
+    assert_eq!(rules.max_series(), 2);
 }
 
 // --- BEA ---------------------------------------------------------------------------------

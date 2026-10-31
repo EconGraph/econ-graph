@@ -11,27 +11,42 @@ Prints a Markdown report to paste into ECO-803:
      the crawler matches stored series to rules: the external id as SeriesKey::parse reads it,
      the table prefix, `exclude`, the rule's frequencies (NIPA) or a state-level area
      (Regional); plus series known only from series_metadata that a rule matches.
-  2. FRED: `crawler check-selection --source FRED --json` against the live API: the series the
-     rules select, against max_series, and the requests one full fetch of them takes. Run only
-     when FRED_API_KEY is set; otherwise the report says it was skipped. The crawler gets only
-     PATH, HOME, the Cargo/Rust variables and FRED_API_KEY: no database URL.
+  2. FRED: `crawler check-selection --source FRED --json --count-uncapped` against the live
+     API: every series the rules select, counted past max_series when the selection is over
+     it, and the requests one full fetch of them takes. Run only when FRED_API_KEY is set;
+     otherwise the report says it was skipped. A report without a count is a failed
+     measurement. The crawler gets only PATH, HOME, the Cargo/Rust variables and
+     FRED_API_KEY: no database URL.
   ECO-807. The (series, date) pairs whose only two rows are one original release published
      before the date and one synthetic legacy row (the SQL of synthetic_legacy_row in
      backend/crates/econ-graph-core/src/models/data_point.rs), by source.
 
 --database-url is required and names the data database to measure: the rehearsal copy or a
 restored dump. Give the password in PGPASSWORD (or PGPASSFILE) rather than in the URL, where
-the process list would show it; either way it reaches psql as PGPASSWORD and is never printed. The script refuses
-a target that may reach the production cluster's data database unless --i-know-this-is-production
-is given: an in-cluster host name (*.svc, data-postgres-service, postgres-service, postgresql,
-postgresql-0), a host that does not resolve, or a port on this machine served by anything but a
-local Postgres server, a container port (docker-proxy, rootlesskit, rootlessport, slirp4netns,
-pasta) or a port-forward into another cluster or namespace. A port-forward into namespace
-econ-graph (or its context's default) of the kind cluster econ-graph, or of a cluster it cannot
-tell from --context or the kind-env.sh kubeconfig-<cluster>, is refused, and so is a listener
-this user cannot see. Every statement runs in a READ ONLY
-transaction (SET TRANSACTION READ ONLY, with default_transaction_read_only on as well) under a
-statement timeout (default 600 seconds). Idempotent: it writes nothing anywhere.
+the process list would show it; either way it reaches psql as PGPASSWORD and is never printed.
+
+The script refuses a target that may reach the production cluster's data database unless
+--i-know-this-is-production is given, failing closed:
+  - an in-cluster host name (*.svc, data-postgres-service, postgres-service, postgresql,
+    postgresql-0), or a host that does not resolve;
+  - a port on this machine with a listener this user cannot see (another user's or root's),
+    or when `ss` fails;
+  - a port on this machine served by anything but a local Postgres server, a container port
+    (docker-proxy, rootlesskit, rootlessport, slirp4netns, pasta) or a port-forward into
+    another cluster or namespace. A port-forward into namespace econ-graph (or its context's
+    default) of the kind cluster econ-graph, or of a cluster it cannot tell from --context or
+    the kind-env.sh kubeconfig-<cluster>, is refused.
+What it trusts, and why that holds today: an address that is not this machine's, because
+production's data database is a ClusterIP Service in the kind cluster econ-graph, with no
+NodePort or hostPort (kind maps only ports 80, 443, 3000 and 8080), so from this host it is
+reachable only through an in-cluster name or a local forward; and a port-forward's cluster by
+name, because kind names a cluster's context kind-<cluster> and kind-env.sh its kubeconfig
+kubeconfig-<cluster>, so one naming another cluster reaches that cluster.
+
+All queries run in one psql session and one transaction: SET TRANSACTION ISOLATION LEVEL
+REPEATABLE READ, READ ONLY (one snapshot for the whole report; default_transaction_read_only
+is on as well), with a statement timeout (default 600 seconds) and a 5-second lock timeout.
+Idempotent: it writes nothing anywhere.
 
 --crawler is the command that runs the crawler CLI, split on spaces (default: cargo run of
 econ-graph-crawler's crawler binary from backend/).
@@ -69,10 +84,14 @@ BEA_SOURCE = "ds.name = 'Bureau of Economic Analysis (BEA)'"
 DATASET_CODES = {'NIPA': 'bea_nipa', 'Regional': 'bea_regional'}
 
 EXIT_FAILED, EXIT_USAGE, EXIT_REFUSED = 1, 64, 65
+LOCK_TIMEOUT = 5
+# Precedes each query's output in the psql session.
+MARKER = '@@measure-v41:'
 
 
-class Refused(Exception):
-    pass
+def md(value) -> str:
+    """A value for a Markdown table cell."""
+    return str(value).replace('|', '\\|')
 
 
 def literal(value: str) -> str:
@@ -110,11 +129,19 @@ def redacted(url: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, '', ''))
 
 
+def resolve(host: str):
+    """getaddrinfo of `host`, or None when it does not resolve (including a malformed name,
+    such as a label longer than 63 characters)."""
+    try:
+        return socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return None
+
+
 def is_local(host: str) -> bool:
     """Whether `host` resolves to an address of this machine (one a local socket can bind)."""
-    try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+    infos = resolve(host)
+    if not infos:
         return False
     for family, _, _, _, address in infos:
         try:
@@ -126,9 +153,10 @@ def is_local(host: str) -> bool:
     return False
 
 
-def listeners(port: int) -> tuple[int, list[int]] | None:
-    """(listening sockets on TCP `port`, the pids of those this user can see), or None when
-    `ss` can't be run."""
+def listeners(port: int) -> tuple[bool, list[int]] | None:
+    """(whether any listening socket on TCP `port` has an owner this user cannot see, the pids
+    of the owners it can see), or None when `ss` can't be run. One process often listens
+    twice, on 127.0.0.1 and [::1]."""
     try:
         done = subprocess.run(['ss', '-Hltnp', f'sport = :{port}'], capture_output=True,
                               text=True, timeout=10)
@@ -137,7 +165,8 @@ def listeners(port: int) -> tuple[int, list[int]] | None:
     if done.returncode:
         return None
     lines = [line for line in done.stdout.splitlines() if line.strip()]
-    return len(lines), sorted({int(pid) for pid in re.findall(r'pid=(\d+)', done.stdout)})
+    hidden = any('pid=' not in line for line in lines)
+    return hidden, sorted({int(pid) for pid in re.findall(r'pid=(\d+)', done.stdout)})
 
 
 def proc_argv(pid: int) -> list[str]:
@@ -190,19 +219,15 @@ def production_reason(host: str, port: int) -> str | None:
     name = host.lower().rstrip('.')
     if '.svc' in name or name.split('.')[0] in IN_CLUSTER_HOSTS:
         return f'{host} is an in-cluster name of the data database'
-    try:
-        socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+    if not resolve(host):
         return f'{host} does not resolve, so it cannot be checked'
     if not is_local(host):
         return None
     found = listeners(port)
     if found is None:
         return f'cannot list what listens on port {port} (`ss` failed)'
-    count, pids = found
-    if not count:
-        return None  # nothing listens: psql will fail to connect
-    if len(pids) < count:
+    hidden, pids = found
+    if hidden:
         return f'port {port} is served by a process this user cannot see (another user, or root)'
     for pid in pids:
         argv = proc_argv(pid)
@@ -244,18 +269,40 @@ class Database:
         if password:
             self.env['PGPASSWORD'] = password
 
-    def rows(self, sql: str) -> list[list[str]]:
-        """Rows of one SELECT, run in a READ ONLY transaction under the statement timeout."""
-        script = ('BEGIN;\nSET TRANSACTION READ ONLY;\n'
-                  f"SET LOCAL statement_timeout = '{self.timeout}s';\n"
-                  f'{sql.rstrip().rstrip(";")};\nCOMMIT;\n')
-        done = subprocess.run(['psql', '-X', '-q', '-A', '-t', '-F', '\x1f', '-v', 'ON_ERROR_STOP=1'],
-                              input=script, capture_output=True, text=True, env=self.env,
-                              timeout=self.timeout + 60)
-        if done.returncode:
-            raise RuntimeError(done.stderr.strip().splitlines()[-1] if done.stderr.strip()
-                               else f'psql exited {done.returncode}')
-        return [line.split('\x1f') for line in done.stdout.splitlines() if line]
+    def run(self, queries: list[tuple[str, str]]):
+        """Run named SELECTs in one psql session and one READ ONLY, REPEATABLE READ transaction
+        (one snapshot), under the statement and lock timeouts. Returns ({name: rows} for the
+        queries that finished, the name of the one that failed or None, its error or None)."""
+        script = ['BEGIN;', 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;',
+                  f"SET LOCAL statement_timeout = '{self.timeout}s';",
+                  f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}s';"]
+        for name, sql in queries:
+            script += [f'\\echo {MARKER}{name}', sql.rstrip().rstrip(';') + ';']
+        script += [f'\\echo {MARKER}', 'COMMIT;']
+        try:
+            done = subprocess.run(['psql', '-X', '-q', '-A', '-t', '-F', '\x1f', '-v', 'ON_ERROR_STOP=1'],
+                                  input='\n'.join(script) + '\n', capture_output=True, text=True,
+                                  env=self.env, timeout=self.timeout * len(queries) + 60)
+        except subprocess.TimeoutExpired:
+            return {}, queries[0][0] if queries else None, 'psql did not finish in time'
+        results, current, ended = {}, None, False
+        for line in done.stdout.splitlines():
+            if line.startswith(MARKER):
+                current = line[len(MARKER):] or None
+                ended = current is None
+                if current:
+                    results[current] = []
+            elif current and line:
+                results[current].append(line.split('\x1f'))
+        if done.returncode or not ended:
+            lines = done.stderr.strip().splitlines()
+            # psql follows the ERROR line with the statement and a caret: report the ERROR.
+            error = next((line.strip() for line in lines if 'ERROR:' in line or 'FATAL:' in line),
+                         lines[-1] if lines else f'psql exited {done.returncode}')
+            failed = current or (queries[0][0] if queries else None)
+            results.pop(failed, None)
+            return results, failed, error
+        return results, None, None
 
 
 # --- 1. Inactive BEA series --------------------------------------------------------------------
@@ -310,8 +357,7 @@ def rule_predicate(rule, exclude, t: str = 'es') -> str:
     return '(' + ' AND '.join(parts) + ')'
 
 
-def measure_bea(db: Database) -> list[str]:
-    rules, exclude = bea_rules()
+def bea_queries(rules, exclude) -> list[tuple[str, str]]:
     inactive = (f'FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id '
                 f'WHERE {BEA_SOURCE} AND NOT es.is_active')
     columns = [f'count(*) FILTER (WHERE {rule_predicate(r, exclude)})' for r in rules]
@@ -319,15 +365,22 @@ def measure_bea(db: Database) -> list[str]:
     table = TABLE.format(t='es')
     excluded = (f"count(*) FILTER (WHERE {PARSES.format(t='es')} AND {table} IN "
                 f"({', '.join(literal(t) for t in exclude)}))" if exclude else '0')
-    row = db.rows(f'SELECT count(*), count(*) FILTER (WHERE {any_rule}), {excluded}'
-                  f'{", " if columns else ""}{", ".join(columns)} {inactive}')[0]
-    total, matched, in_excluded, per_rule = row[0], row[1], row[2], row[3:]
     # stored_scope_members also enrols series_metadata rows with no economic_series row yet.
     metadata_any = ' OR '.join(rule_predicate(r, exclude, 'sm') for r in rules) or 'FALSE'
-    metadata_only = db.rows(
-        f'SELECT count(*) FROM series_metadata sm JOIN data_sources ds ON ds.id = sm.source_id '
-        f'WHERE {BEA_SOURCE} AND ({metadata_any}) AND NOT EXISTS (SELECT 1 FROM economic_series e '
-        f'WHERE e.source_id = sm.source_id AND e.external_id = sm.external_id)')[0][0]
+    return [
+        ('bea', f'SELECT count(*), count(*) FILTER (WHERE {any_rule}), {excluded}'
+                f'{", " if columns else ""}{", ".join(columns)} {inactive}'),
+        ('bea_metadata', f'SELECT count(*) FROM series_metadata sm JOIN data_sources ds '
+                         f'ON ds.id = sm.source_id WHERE {BEA_SOURCE} AND ({metadata_any}) '
+                         f'AND NOT EXISTS (SELECT 1 FROM economic_series e WHERE e.source_id = '
+                         f'sm.source_id AND e.external_id = sm.external_id)'),
+    ]
+
+
+def render_bea(rules, exclude, results) -> list[str]:
+    row = results['bea'][0]
+    total, matched, in_excluded, per_rule = row[0], row[1], row[2], row[3:]
+    metadata_only = results['bea_metadata'][0][0]
     lines = [f'- Inactive BEA series: **{total}**',
              f'- Matched by a current rule (could be enrolled again): **{matched}**',
              f'- Not matched by any rule: {int(total) - int(matched)}'
@@ -336,8 +389,8 @@ def measure_bea(db: Database) -> list[str]:
              f'rule matches: {metadata_only}',
              '', '| Dataset | Rule prefix | Frequencies | Inactive series |', '|---|---|---|---|']
     for rule, count in zip(rules, per_rule):
-        lines.append(f"| {rule['dataset']} | {rule['prefix']} | "
-                     f"{', '.join(rule['frequencies'])} | {count} |")
+        lines.append(f"| {md(rule['dataset'])} | {md(rule['prefix'])} | "
+                     f"{md(', '.join(rule['frequencies']))} | {md(count)} |")
     return lines
 
 
@@ -369,14 +422,14 @@ WHERE {synthetic_legacy_row('s', 'other_original')}
 GROUP BY ds.name ORDER BY ds.name"""
 
 
-def measure_eco_807(db: Database) -> list[str]:
-    rows = db.rows(ECO_807)
+def render_eco_807(results) -> list[str]:
+    rows = results['eco_807']
     total = sum(int(n) for _, n in rows)
     lines = [f'- (series, date) pairs with exactly one original published before the date and '
              f'one synthetic legacy row, and no other row: **{total}**']
     if rows:
         lines += ['', '| Source | Pairs |', '|---|---|']
-        lines += [f'| {name} | {n} |' for name, n in rows]
+        lines += [f'| {md(name)} | {md(n)} |' for name, n in rows]
     return lines
 
 
@@ -392,7 +445,8 @@ def measure_fred(crawler: str) -> tuple[list[str], bool]:
     env['FRED_API_KEY'] = os.environ['FRED_API_KEY']
     env['RUST_LOG'] = 'error'
     try:
-        done = subprocess.run(shlex.split(crawler) + ['check-selection', '--source', 'FRED', '--json'],
+        done = subprocess.run(shlex.split(crawler) + ['check-selection', '--source', 'FRED', '--json',
+                                                      '--count-uncapped'],
                               capture_output=True, text=True, env=env, timeout=3600)
     except (OSError, subprocess.TimeoutExpired) as error:
         return [f'- FAILED: could not run the crawler: {error}'], True
@@ -407,8 +461,12 @@ def measure_fred(crawler: str) -> tuple[list[str], bool]:
         return [f"- FAILED: check-selection {fred.get('status')}: {why}"], True
     bound = next((b for b in fred.get('bounds', []) if b.get('what') == 'selected series'), {})
     selected, limit = fred.get('selected'), bound.get('limit')
+    if not isinstance(selected, int) or not isinstance(limit, int):
+        details = '; '.join(f"{p.get('entry')}: {p.get('detail')}" for p in fred.get('problems', []))
+        return [f'- FAILED: count unknown: check-selection reported no selected-series count'
+                f'{" (" + details[:300] + ")" if details else ""}'], True
     lines = [f'- Series the FRED rules and include list select now: **{selected}**'
-             f' (max_series {limit}; {"within" if selected is not None and limit is not None and selected <= limit else "OVER"} the cap)']
+             f' (max_series {limit}; {"within" if selected <= limit else "OVER"} the cap)']
     refresh = fred.get('refresh')
     if refresh:
         lines.append(f"- First full fetch: about {refresh['requests']} requests (/series, "
@@ -458,7 +516,9 @@ def main(argv=None) -> int:
     failed = False
     out = ['## v4.1 first-deploy measurements (ECO-803)', '',
            f"- Measured {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC against "
-           f"`{redacted(args.database_url)}`" + (' (production)' if reason else '')]
+           f"`{redacted(args.database_url)}`"]
+    if reason:
+        out[-1] += f' (production guard overridden: {reason})'
     try:
         commit = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--short', 'HEAD'],
                                 capture_output=True, text=True, timeout=10).stdout.strip()
@@ -466,22 +526,36 @@ def main(argv=None) -> int:
         commit = ''
     if commit:
         out[-1] += f', rules from commit {commit}'
+
+    sections = []
     try:
-        version = db.rows('SHOW server_version')[0][0]
-        out.append(f'- Server: PostgreSQL {version}; every statement READ ONLY, '
-                   f'statement timeout {args.statement_timeout}s')
-    except (RuntimeError, IndexError, subprocess.TimeoutExpired) as error:
+        rules, exclude = bea_rules()
+        bea = bea_queries(rules, exclude)
+        sections.append(('### 1. Inactive BEA series by rule', [n for n, _ in bea],
+                         lambda r: render_bea(rules, exclude, r)))
+    except (ValueError, OSError, KeyError) as error:
+        bea = []
+        sections.append(('### 1. Inactive BEA series by rule', [], error))
+    sections.append(('### ECO-807: projection-only dates with a synthetic row', ['eco_807'],
+                     render_eco_807))
+    queries = [('version', 'SHOW server_version')] + bea + [('eco_807', ECO_807)]
+    results, failed_query, error = db.run(queries)
+    if 'version' not in results:
         print(f'cannot query {redacted(args.database_url)}: {error}', file=sys.stderr)
         return EXIT_FAILED
-
-    for title, measure in (('### 1. Inactive BEA series by rule', lambda: measure_bea(db)),
-                           ('### ECO-807: projection-only dates with a synthetic row',
-                            lambda: measure_eco_807(db))):
+    out.append(f"- Server: PostgreSQL {results['version'][0][0]}; one READ ONLY, REPEATABLE "
+               f"READ transaction (one snapshot), statement timeout {args.statement_timeout}s, "
+               f"lock timeout {LOCK_TIMEOUT}s")
+    for title, names, render in sections:
         out += ['', title, '']
-        try:
-            out += measure()
-        except (RuntimeError, ValueError, OSError, KeyError, subprocess.TimeoutExpired) as error:
-            out.append(f'- FAILED: {error}')
+        if isinstance(render, Exception):
+            out.append(f'- FAILED: {render}')
+            failed = True
+        elif all(name in results for name in names):
+            out += render(results)
+        else:
+            why = error if failed_query in names else f'not run: {failed_query} failed first'
+            out.append(f'- FAILED: {why}')
             failed = True
     out += ['', '### 2. FRED selection (live API)', '']
     lines, fred_failed = measure_fred(args.crawler)
