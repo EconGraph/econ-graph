@@ -450,3 +450,28 @@ fn unsupported_concepts_and_period_shapes_remain_visible_as_unclassified_facts()
     assert!(unclassified.contains(&unknown));
     assert!(unclassified.contains(&wrong_period));
 }
+
+#[test]
+fn apple_and_chevron_statement_lines_retain_source_values_and_distinct_cost_categories() {
+    // Source-grounded examples from the repository's apple_2025_q3_10q.xml and
+    // chevron_2025_q2_10q.xml whole-entity contexts. These verify normalization;
+    // accession/filed metadata is synthetic. These are not companyfacts API captures.
+    for (cik,concept,value,kind,expected_key) in [
+        ("0000320193","NonoperatingIncomeExpense","-171000000",StatementKind::IncomeStatement,"nonoperating_income"),
+        ("0000320193","IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest","28031000000",StatementKind::IncomeStatement,"pretax_income"),
+        ("0000320193","AssetsNoncurrent","209004000000",StatementKind::BalanceSheet,"noncurrent_assets"),
+        ("0000320193","RetainedEarningsAccumulatedDeficit","-17607000000",StatementKind::BalanceSheet,"retained_earnings"),
+        ("0000320193","PaymentsToAcquireAvailableForSaleSecuritiesDebt","17591000000",StatementKind::CashFlow,"debt_security_purchases"),
+        ("0000093410","OperatingCostsAndExpenses","6674000000",StatementKind::IncomeStatement,"operating_costs_and_expenses"),
+        ("0000093410","CostsAndExpenses","40675000000",StatementKind::IncomeStatement,"total_costs_and_expenses"),
+        ("0000093410","IncomeLossFromEquityMethodInvestments","1356000000",StatementKind::IncomeStatement,"equity_method_income"),
+        ("0000093410","InterestPaidNet","410000000",StatementKind::CashFlow,"interest_paid_net"),
+    ] {
+        let p=if kind==StatementKind::BalanceSheet {ResearchPeriod::Instant{date:date("2025-06-28")}} else {period("2025-04-01","2025-06-30")};
+        let mut source=fact(concept,p,value,"0000320193-25-000001","2025-08-01");
+        source.subject.cik=cik.into();
+        source=CompanyFact::new(source.subject.clone(),source.accession.clone(),source.filed,source.value.clone(),source.form.clone()).unwrap();
+        let lines=normalized_statement(&[source.clone()],kind,&RevisionSelection::Latest).unwrap();
+        assert_eq!(lines.len(),1);assert_eq!(lines[0].key,expected_key);assert_eq!(lines[0].value,source.value);assert_eq!(lines[0].provenance[0].fact_id,source.id);
+    }
+}

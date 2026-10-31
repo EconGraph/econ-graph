@@ -41,15 +41,14 @@ pub fn select_fact_revisions(
                 .map_err(|e| FinancialCalculationError(e.to_string()))?,
             fact.accession.clone(),
         );
-        if let Some(existing) = revisions.insert(key, fact) {
-            if existing.value != fact.value
+        if revisions.insert(key, fact).is_some_and(|existing| {
+            existing.value != fact.value
                 || existing.filed != fact.filed
                 || existing.form != fact.form
-            {
-                return Err(FinancialCalculationError(
-                    "contradictory values or filing metadata for one subject/accession".into(),
-                ));
-            }
+        }) {
+            return Err(FinancialCalculationError(
+                "contradictory values or filing metadata for one subject/accession".into(),
+            ));
         }
     }
     let mut selected: BTreeMap<String, &CompanyFact> = BTreeMap::new();
@@ -115,6 +114,11 @@ pub fn standard_concept(
         (StatementKind::IncomeStatement, "CostOfRevenue" | "CostOfGoodsAndServicesSold" | "CostOfSales") => ("cost_of_revenue", "Cost of revenue", true),
         (StatementKind::IncomeStatement, "GrossProfit") => ("gross_profit", "Gross profit", true),
         (StatementKind::IncomeStatement, "OperatingExpenses") => ("operating_expenses", "Operating expenses", true),
+        (StatementKind::IncomeStatement, "OperatingCostsAndExpenses") => ("operating_costs_and_expenses", "Operating costs and expenses", true),
+        (StatementKind::IncomeStatement, "CostsAndExpenses") => ("total_costs_and_expenses", "Total costs and expenses", true),
+        (StatementKind::IncomeStatement, "NonoperatingIncomeExpense") => ("nonoperating_income", "Nonoperating income and expense", true),
+        (StatementKind::IncomeStatement, "IncomeLossFromEquityMethodInvestments") => ("equity_method_income", "Income from equity-method investments", true),
+        (StatementKind::IncomeStatement, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" | "ProfitLossBeforeTax") => ("pretax_income", "Income before tax", true),
         (StatementKind::IncomeStatement, "ResearchAndDevelopmentExpense") => ("research_and_development", "Research and development", true),
         (StatementKind::IncomeStatement, "SellingGeneralAndAdministrativeExpense") => ("selling_general_administrative", "Selling, general and administrative", true),
         (StatementKind::IncomeStatement, "OperatingIncomeLoss" | "ProfitLossFromOperatingActivities") => ("operating_income", "Operating income", true),
@@ -130,6 +134,10 @@ pub fn standard_concept(
         (StatementKind::BalanceSheet, "AccountsReceivableNetCurrent" | "TradeAndOtherCurrentReceivables") => ("receivables", "Current receivables", false),
         (StatementKind::BalanceSheet, "InventoryNet" | "Inventories") => ("inventory", "Inventory", false),
         (StatementKind::BalanceSheet, "AssetsCurrent" | "CurrentAssets") => ("current_assets", "Current assets", false),
+        (StatementKind::BalanceSheet, "AssetsNoncurrent" | "NoncurrentAssets") => ("noncurrent_assets", "Noncurrent assets", false),
+        (StatementKind::BalanceSheet, "LiabilitiesNoncurrent" | "NoncurrentLiabilities") => ("noncurrent_liabilities", "Noncurrent liabilities", false),
+        (StatementKind::BalanceSheet, "CommonStocksIncludingAdditionalPaidInCapital") => ("common_stock_and_paid_in_capital", "Common stock and additional paid-in capital", false),
+        (StatementKind::BalanceSheet, "RetainedEarningsAccumulatedDeficit" | "RetainedEarnings") => ("retained_earnings", "Retained earnings or accumulated deficit", false),
         (StatementKind::BalanceSheet, "PropertyPlantAndEquipmentNet" | "PropertyPlantAndEquipment") => ("property_plant_equipment", "Property, plant and equipment", false),
         (StatementKind::BalanceSheet, "Assets") => ("assets", "Total assets", false),
         (StatementKind::BalanceSheet, "AccountsPayableCurrent" | "TradeAndOtherCurrentPayables") => ("payables", "Current payables", false),
@@ -142,6 +150,11 @@ pub fn standard_concept(
         (StatementKind::BalanceSheet, "LiabilitiesAndStockholdersEquity" | "EquityAndLiabilities") => ("liabilities_and_equity", "Total liabilities and equity", false),
         (StatementKind::CashFlow, "NetIncomeLoss" | "ProfitLoss") => ("net_income", "Net income", true),
         (StatementKind::CashFlow, "DepreciationDepletionAndAmortization" | "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment" | "AdjustmentsForDepreciationAndAmortisationExpense") => ("depreciation_amortization", "Depreciation and amortization", true),
+        (StatementKind::CashFlow, "PaymentsToAcquireAvailableForSaleSecuritiesDebt") => ("debt_security_purchases", "Purchases of available-for-sale debt securities", true),
+        (StatementKind::CashFlow, "ProceedsFromSaleOfAvailableForSaleSecuritiesDebt") => ("debt_security_sale_proceeds", "Proceeds from sales of available-for-sale debt securities", true),
+        (StatementKind::CashFlow, "IncomeTaxesPaidNet") => ("income_taxes_paid_net", "Income taxes paid, net", true),
+        (StatementKind::CashFlow, "IncomeTaxesPaid") => ("income_taxes_paid", "Income taxes paid", true),
+        (StatementKind::CashFlow, "InterestPaidNet") => ("interest_paid_net", "Interest paid, net", true),
         (StatementKind::CashFlow, "ShareBasedCompensation") => ("share_based_compensation", "Share-based compensation", true),
         (StatementKind::CashFlow, "NetCashProvidedByUsedInOperatingActivities" | "CashFlowsFromUsedInOperatingActivities") => ("operating_cash_flow", "Net cash from operating activities", true),
         (StatementKind::CashFlow, "NetCashProvidedByUsedInInvestingActivities" | "CashFlowsFromUsedInInvestingActivities") => ("investing_cash_flow", "Net cash from investing activities", true),
@@ -149,7 +162,8 @@ pub fn standard_concept(
         (StatementKind::CashFlow, "PaymentsToAcquirePropertyPlantAndEquipment" | "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities") => ("capital_expenditure", "Purchases of property, plant and equipment", true),
         (StatementKind::CashFlow, "PaymentsOfDividends" | "DividendsPaidClassifiedAsFinancingActivities") => ("dividends_paid", "Dividends paid", true),
         (StatementKind::CashFlow, "PaymentsForRepurchaseOfCommonStock") => ("share_repurchases", "Share repurchases", true),
-        (StatementKind::CashFlow, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect" | "CashAndCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect" | "IncreaseDecreaseInCashAndCashEquivalents") => ("change_in_cash", "Change in cash", true),
+        (StatementKind::CashFlow, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect") => ("change_in_cash_including_restricted", "Change in cash including restricted cash", true),
+        (StatementKind::CashFlow, "CashAndCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect" | "IncreaseDecreaseInCashAndCashEquivalents") => ("change_in_cash", "Change in cash", true),
         _ => return None,
     };
     Some(StandardConcept {
@@ -775,7 +789,7 @@ pub fn calculate_ratios(
             if top.unit != bottom.unit || top.taxonomy != bottom.taxonomy {
                 result.unavailable_reason =
                     Some("inputs must use the same taxonomy and unit".into());
-            } else if bottom.value == BigDecimal::from(0) {
+            } else if bottom.value == 0 {
                 result.unavailable_reason = Some("denominator is zero".into());
             } else {
                 result.value = Some(&top.value / &bottom.value);
