@@ -572,7 +572,7 @@ diesel::table! {
 
     financial_annotations (id) {
         id -> Uuid,
-        statement_id -> Uuid,
+        statement_id -> Nullable<Uuid>,
         line_item_id -> Nullable<Uuid>,
         annotation_type -> AnnotationType,
         #[max_length = 255]
@@ -586,6 +586,9 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         resolved_at -> Nullable<Timestamptz>,
+        research_anchor -> Nullable<Jsonb>,
+        research_anchor_key -> Nullable<Text>,
+        research_cik -> Nullable<Text>,
     }
 }
 

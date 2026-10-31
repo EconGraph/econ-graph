@@ -364,6 +364,23 @@ type CompanyFinancialRatio {
 	unavailableReason: String
 }
 
+type CompanyNote {
+	id: ID!
+	"""
+	Original versioned target; never silently reattached to a later filing.
+	"""
+	anchor: String!
+	cik: String!
+	content: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	The note survives missing/inaccessible source data. This checks only target existence;
+	the original anchor and user-authored content are never rewritten by resolution.
+	"""
+	targetStatus: String!
+}
+
 type CompanyPeerComparison {
 	company: CompanyResearchCompany!
 	ratios: [CompanyFinancialRatio!]!
@@ -871,6 +888,18 @@ type LatestObservation {
 
 type Mutation {
 	"""
+	Create an owner-private note on an authorized company research target.
+	"""
+	createCompanyNote(anchor: String!, content: String!): CompanyNote!
+	"""
+	Edit one's own note without depending on source-data availability.
+	"""
+	updateCompanyNote(id: ID!, content: String!): CompanyNote!
+	"""
+	Delete one's own note; another owner's ID answers false.
+	"""
+	deleteCompanyNote(id: ID!): Boolean!
+	"""
 	Enqueue crawl jobs (requires `admin.crawlers:manage`). Nothing is crawled in the
 	request: the jobs go to `crawl_queue` and the crawler workers process them.
 	
@@ -998,6 +1027,10 @@ type Query {
 	Validate a company note's target on the authoritative data plane.
 	"""
 	companyResearchTargetExists(anchor: String!): Boolean!
+	"""
+	Read private authored notes, including notes whose source target disappeared.
+	"""
+	companyNotes(cik: String!, anchor: String, offset: Int): [CompanyNote!]!
 	"""
 	Get a specific economic series by ID
 	"""

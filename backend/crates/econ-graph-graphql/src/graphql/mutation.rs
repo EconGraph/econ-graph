@@ -27,6 +27,29 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
+    /// Create an owner-private note on an authorized company research target.
+    async fn create_company_note(
+        &self,
+        ctx: &Context<'_>,
+        anchor: String,
+        content: String,
+    ) -> Result<super::company_notes::CompanyNote> {
+        super::company_notes::create(ctx, anchor, content).await
+    }
+    /// Edit one's own note without depending on source-data availability.
+    async fn update_company_note(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+        content: String,
+    ) -> Result<super::company_notes::CompanyNote> {
+        super::company_notes::update(ctx, id, content).await
+    }
+    /// Delete one's own note; another owner's ID answers false.
+    async fn delete_company_note(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        super::company_notes::delete(ctx, id).await
+    }
+
     /// Enqueue crawl jobs (requires `admin.crawlers:manage`). Nothing is crawled in the
     /// request: the jobs go to `crawl_queue` and the crawler workers process them.
     ///
