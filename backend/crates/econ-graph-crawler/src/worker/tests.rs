@@ -5090,7 +5090,7 @@ async fn observation_attributes_update_without_value_changes_and_share_transacti
     use diesel_async::AsyncConnection;
     let aborted = conn
         .transaction::<(), econ_graph_core::AppError, _>(async |conn| {
-            persist::persist_series_conn(conn, SRC, "t5_attributes", &fetched).await?;
+            persist::persist_series_conn(conn, SRC, "t5_attributes", &fetched, true).await?;
             Err(econ_graph_core::AppError::BadRequest(
                 "fixture transaction abort".into(),
             ))
