@@ -1,0 +1,20 @@
+{
+  "cik": 320193,
+  "entityName": "Apple Inc.",
+  "facts": {
+    "us-gaap": {
+      "Revenues": {
+        "label": "Revenues", "description": "Revenue from contracts with customers.",
+        "units": {
+          "USD": [
+            {"start":"2023-10-01","end":"2023-12-30","val":119575000000.12345678901234567890,"accn":"0000320193-24-000006","fy":2024,"fp":"Q1","form":"10-Q","filed":"2024-02-02","frame":"CY2023Q4"},
+            {"start":"2023-10-01","end":"2023-12-30","val":119575000000.12345678901234567890,"accn":"0000320193-24-000006","fy":2025,"fp":"Q1","form":"10-Q","filed":"2024-02-02"},
+            {"start":"2023-10-01","end":"2023-12-30","val":119576000000,"accn":"0000320193-24-000007","fy":2024,"fp":"Q1","form":"10-Q/A","filed":"2024-02-03"}
+          ]
+        }
+      },
+      "Assets": {"label":"Assets","units":{"USD":[{"end":"2023-12-30","val":900719925474099312345,"accn":"0000320193-24-000006","form":"10-Q","filed":"2024-02-02"}]}},
+      "EarningsPerShareDiluted": {"label":"Diluted EPS","units":{"USD/shares":[{"start":"2023-10-01","end":"2023-12-30","val":2.18,"accn":"0000320193-24-000006","form":"10-Q","filed":"2024-02-02"}]}}
+    }
+  }
+}

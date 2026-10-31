@@ -11,6 +11,7 @@
 #[cfg(feature = "xbrl-parser")]
 pub mod config_loader;
 pub mod crawler;
+pub mod companyfacts;
 #[cfg(feature = "xbrl-parser")]
 pub mod dts_manager;
 #[cfg(feature = "xbrl-parser")]

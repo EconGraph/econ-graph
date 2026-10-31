@@ -98,3 +98,47 @@ cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL).
 See the [license](../../LICENSE) for complete terms and conditions.
+
+## Nightly companyfacts (Train 5)
+
+`sec-companyfacts-ingest` loads the SEC's official nightly
+[companyfacts and submissions bulk archives](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)
+into dedicated company-fact and filing-metadata tables. It leaves the existing raw XBRL crawler
+and company-page feature gate unchanged. Run data migrations before using it. The crawler-worker
+image includes `/app/sec-companyfacts-ingest`; the optional manifest
+`k8s/optional/sec-companyfacts.yaml` starts suspended and must be enabled together with its
+freshness check only after the platform and ingest acceptance gates pass.
+
+The command uses `DATA_DATABASE_URL` and SEC's shared HTTP rate policy and contact User-Agent.
+It downloads sequentially to private temporary files, verifies both complete ZIPs and payload
+CRCs before writing, and parses one company at a time through a bounded channel. Defaults
+limit each ZIP to 16 GiB, each JSON member to 128 MiB, total decompressed bytes per archive
+to 128 GiB and members to one million. These are capacity limits, not claims about current
+SEC payload sizes. Allow 32 GiB staging space plus database growth; the compressed archives
+are never buffered in RAM. The monitor rejects upstream Last-Modified timestamps older than
+24 hours. SEC publishes at approximately 03:00 ET; the optional schedule runs at 09:00 UTC.
+
+Each company's metadata, all available submissions-history chunks and facts commit in one
+transaction. Repeated loads preserve IDs and accession-specific revisions. A changed value
+under an already stored accession fails instead of silently replacing evidence. An interrupted
+run can leave earlier companies committed, but never marks the global run successful. Rerun
+both archives from the beginning; no byte-range resume or destructive replacement is needed.
+The dedicated database connection releases its advisory lock even after process termination.
+
+For operator-staged archives, run `sec-companyfacts-ingest --companyfacts-zip /path/companyfacts.zip
+--submissions-zip /path/submissions.zip`. This explicit offline mode checks ZIP integrity but
+cannot prove archive publication freshness, so it is for fixtures or separately verified staging.
+No supplied archive is deleted. Network mode deletes its own temporary files on exit.
+`--check-freshness` fails for missing runs, a latest staged/failed/interrupted run, a successful
+load older than 24 hours, or upstream archive timestamps older than 24 hours; `--evidence` prints the last 30 recorded runs, with source hashes and
+completion counts. Seven distinct nightly runs must be observed; repeated fixture loads do not
+satisfy release acceptance.
+
+`SecCompanyfactsLoadFailed` and `SecCompanyfactsStale` use existing kube-state-metrics and
+Prometheus rules. They remain inactive while the optional CronJobs are absent/suspended.
+As with the existing crawler rules, Prometheus visibility does not itself configure an external
+notification receiver. Validate notification routing before relying on paging.
+
+The ingestion database test is opt-in via `TRAIN5_INGEST_TEST_DATABASE_URL` and requires an
+isolated disposable data database. It applies migrations, then truncates only the three
+companyfacts tables in that database; never point it at production.

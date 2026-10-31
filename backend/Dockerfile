@@ -55,9 +55,9 @@ ENV FLAGS_PROFILE=${FLAGS_PROFILE}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker --bin crawler \
+    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker --bin crawler --bin sec-companyfacts-ingest \
     && mkdir -p /out \
-    && cp target/release/econ-graph-backend target/release/crawler-worker target/release/crawler /out/
+    && cp target/release/econ-graph-backend target/release/crawler-worker target/release/crawler target/release/sec-companyfacts-ingest /out/
 
 ############################
 # Shared runtime base
@@ -84,6 +84,7 @@ COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-w
 # The operator CLI (`kubectl exec deploy/crawler-worker -- /app/crawler coverage`), and the
 # crawler-migrate Job's `/app/crawler migrate`; it reads the pod's DATA_DATABASE_URL and API keys.
 COPY --from=builder --chown=econuser:econuser /out/crawler /app/crawler
+COPY --from=builder --chown=econuser:econuser /out/sec-companyfacts-ingest /app/sec-companyfacts-ingest
 # Reference data read at runtime (not compiled in), e.g. the BLS series list and dataset files.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data
