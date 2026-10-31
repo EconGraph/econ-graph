@@ -66,23 +66,26 @@ All notable changes to EconGraph are documented here. The format follows
   response through the gateway, on plain HTTP too, and the API responses get
   `X-Content-Type-Options`, `X-Frame-Options` and HSTS. The CSP no longer allows connections to
   `https://api.econ-graph.com`.
-- The backend applies only the app migrations at startup, and its `/readyz` checks only the app
-  migrations. No service applies the data migrations at startup, so redeploying one never
-  changes a data database; run `crawler migrate` first on a new or older database.
+- The backend applies only app plane migrations at startup, and its `/readyz` gates readiness
+  on those migrations. Service startup does not apply data plane migrations; run
+  `crawler migrate` first on a new or older data database, or let `deploy.sh` run its migration
+  Job.
 - The data-only binaries (`crawler`, `crawler-worker`, `seed-fixtures`, `sec-crawler`,
   `sec-company-crawler`) read the data database from `DATA_DATABASE_URL`. They no longer read
   `DATABASE_URL`: with only `DATABASE_URL` set they exit at startup with `DATABASE_URL is no
   longer read; set APP_DATABASE_URL and/or DATA_DATABASE_URL`. `seed-fixtures` applies only the
   data migrations. The SEC crawlers no longer fall back to a local default database.
 - The Kubernetes Secret `econ-graph-secrets` holds `app-database-url` and `data-database-url`
-  next to `database-url`, all three naming the one database. The backend and crawler-worker
-  manifests read the new keys.
+  alongside the compatibility key `database-url`, which matches `data-database-url`. The backend
+  and crawler-worker manifests read the new keys. New Secrets use separate app and data
+  databases; existing Secrets preserve their app database setting unless `APP_DATABASE` is
+  supplied. See [database settings](k8s/README.md#databases).
 - The backend reads `APP_DATABASE_URL` (required) and `DATA_DATABASE_URL` (optional) instead of
   `DATABASE_URL`, and exits at startup with the same message when only `DATABASE_URL` is set.
   Users, annotations, comments, collaborators, audit logs and security events use the app
   database; series, observations, sources, datasets, search and the crawl queue use the data
   database. Both may be the same database.
-- The backend never migrates the data database; operators apply the data set with
+- The backend does not apply data plane migrations; operators apply them with
   `crawler migrate` (the `crawler-migrate` Job in Kubernetes, the `crawler-migrate` service in
   docker-compose). `/readyz` fails only when the app database is unreachable or its migrations
   are pending, each database check bounded on its own. It reports the data database as `ok`,
