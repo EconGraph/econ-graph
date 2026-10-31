@@ -1,0 +1,52 @@
+name: Train 4 Talos Fit
+on:
+  pull_request:
+    paths:
+      - 'infra/talos/**'
+      - 'scripts/talos/**'
+      - 'ci/scripts/install-train4-tools.py'
+      - '.github/workflows/train4-talos.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/talos/**'
+      - 'scripts/talos/**'
+      - 'ci/scripts/install-train4-tools.py'
+      - '.github/workflows/train4-talos.yml'
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  guards:
+    name: Talos ownership and plan guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s scripts/talos -p test_talos.py
+  providers:
+    name: Pinned Talos provider configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TF_VAR_state_passphrase: ci-only-schema-encryption-key-not-runtime-state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install checksum-locked OpenTofu
+        run: |
+          python3 ci/scripts/install-train4-tools.py --bin-dir "$RUNNER_TEMP/train4-tools" --tool tofu
+          echo "$RUNNER_TEMP/train4-tools" >> "$GITHUB_PATH"
+      - name: Validate provider configuration without a hypervisor
+        run: |
+          tofu -chdir=infra/talos init -backend=false -input=false -lockfile=readonly
+          tofu -chdir=infra/talos fmt -check -recursive
+          tofu -chdir=infra/talos validate -no-color
+          tofu -chdir=infra/talos test -no-color
