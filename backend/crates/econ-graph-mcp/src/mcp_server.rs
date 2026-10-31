@@ -137,7 +137,7 @@ impl EconGraphMcpServer {
             }),
             json!({
                 "name": "get_series_data",
-                "description": "Retrieve time series data points for a specific economic series",
+                "description": "Retrieve time series data points for a specific economic series: each date once, at its latest revision, in date order. When more dates match than `limit`, the latest `limit` are returned, `truncated` is true and `totalCount` gives how many matched; narrow the dates or raise `limit` for the rest.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -157,7 +157,7 @@ impl EconGraphMcpServer {
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of data points to return",
+                            "description": "Maximum number of data points to return: the latest ones",
                             "default": 100
                         }
                     },
@@ -180,7 +180,7 @@ impl EconGraphMcpServer {
             }),
             json!({
                 "name": "create_data_visualization",
-                "description": "Create a data visualization (chart) for economic data",
+                "description": "Create a data visualization (chart) for economic data. Each series is charted over its latest 1000 dates in the range at most; a series cut short is marked `truncated`, with its `totalCount`.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -532,7 +532,9 @@ impl EconGraphMcpServer {
     }
 
     /// Get metadata and bounded observations for one existing series: each date once, at its
-    /// latest revision, as the site's charts read it (`latestRevisionOnly`).
+    /// latest revision, as the site's charts read it (`latestRevisionOnly`). When more dates
+    /// match than `limit`, the latest `limit` of them, with `truncated` set; `totalCount` is how
+    /// many matched.
     async fn get_series_payload(
         &self,
         series_id: &str,
@@ -542,24 +544,40 @@ impl EconGraphMcpServer {
     ) -> Result<Value> {
         let query = concat!(
             r#"
-            query GetSeriesPayload($seriesId: ID!, $limit: Int!, $filter: DataFilter) {
+            query GetSeriesPayload($seriesId: ID!, $limit: Int!, $after: String, $filter: DataFilter) {
                 series(id: $seriesId) { id name: title description lastUpdated source { name "#,
             notice_fields!(),
             r#" } }
-                seriesData(seriesId: $seriesId, first: $limit, filter: $filter) {
+                seriesData(seriesId: $seriesId, first: $limit, after: $after, filter: $filter) {
+                    totalCount
                     nodes { date value }
                 }
             }
         "#
         );
-        let variables = json!({"seriesId": series_id, "limit": limit,
-            "filter": {"startDate": start_date, "endDate": end_date, "latestRevisionOnly": true}});
-        let response = self.execute_graphql_query(query, Some(variables)).await?;
+        let filter =
+            json!({"startDate": start_date, "endDate": end_date, "latestRevisionOnly": true});
+        let mut variables = json!({"seriesId": series_id, "limit": limit, "filter": filter});
+        let mut response = self
+            .execute_graphql_query(query, Some(variables.clone()))
+            .await?;
         let mut series = response["data"]["series"].clone();
         if !series.is_object() {
             anyhow::bail!("Series not found: {series_id}");
         }
+        // Points come oldest first, and a cursor is the number of points before the next page:
+        // when more match than the limit, read the page that ends at the newest.
+        let total = response["data"]["seriesData"]["totalCount"]
+            .as_i64()
+            .unwrap_or(0);
+        let truncated = total > i64::from(limit.max(0));
+        if truncated {
+            variables["after"] = json!((total - i64::from(limit.max(0))).to_string());
+            response = self.execute_graphql_query(query, Some(variables)).await?;
+        }
         series["dataPoints"] = response["data"]["seriesData"]["nodes"].clone();
+        series["totalCount"] = json!(total);
+        series["truncated"] = json!(truncated);
         Ok(series)
     }
 
