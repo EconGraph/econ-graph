@@ -194,14 +194,23 @@ impl ObservationPage {
     }
 }
 
-/// A provider's verbatim footnote. Missing code and missing text remain distinct from "".
+/// A provider's verbatim footnote object, including absent keys, explicit nulls and extensions.
+/// The public map retains unknown field shapes and exact JSON numbers. String accessors
+/// interpret recognized fields without changing the object that is serialized.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObservationFootnote {
-    pub code: Option<String>,
-    pub text: Option<String>,
-    /// Preserve provider extensions verbatim instead of dropping unrecognized provenance.
-    #[serde(default, flatten)]
-    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
+#[serde(transparent)]
+pub struct ObservationFootnote(pub serde_json::Map<String, serde_json::Value>);
+
+impl ObservationFootnote {
+    /// The provider's code when it is a string. Missing, null and other shapes remain in the map.
+    pub fn code(&self) -> Option<&str> {
+        self.0.get("code").and_then(serde_json::Value::as_str)
+    }
+
+    /// The provider's text when it is a string. Missing, null and other shapes remain in the map.
+    pub fn text(&self) -> Option<&str> {
+        self.0.get("text").and_then(serde_json::Value::as_str)
+    }
 }
 
 /// Typed producer helper; raw JSON remains the storage/reader contract so unknown keys survive.

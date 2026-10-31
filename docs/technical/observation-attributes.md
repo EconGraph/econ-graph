@@ -20,7 +20,10 @@ provider responses, values, dates or original-release status.
 
 The typed producer helpers `ObservationAttributes` and `ObservationFootnote` describe
 current BLS captures. Readers may inspect them, but the raw object remains the lossless
-transport contract. Current keys are:
+transport contract. `ObservationFootnote` transparently wraps a public JSON object
+map, so serialization preserves omitted keys, explicit nulls, unknown field shapes
+and exact numbers. Its `code()` and `text()` accessors return only string values
+without changing that map. Current keys are:
 
 | Key | Meaning |
 | --- | --- |
@@ -35,8 +38,9 @@ SQL NULL/the outer JSON null means attributes were not captured. An empty object
 distinct from that unknown state. Within a captured BLS object, an omitted or null
 provider footnote array gives null `footnotes`, `status_flags`, `preliminary` and
 `estimated`. A supplied empty array or `[{}]` gives empty arrays and false marker
-booleans. `{}` is only the provider's placeholder; supplied code/text strings, even
-empty strings or unusual Unicode/whitespace, and extension fields are retained.
+booleans. Only the literal `{}` object is the provider's placeholder. Omitted
+code/text keys stay omitted, explicit nulls stay present, and supplied strings,
+even empty strings or unusual Unicode/whitespace, and extension fields are retained.
 False means **not explicitly marked in the captured array**, not a claim that the
 observation is final or was never estimated. Unknown survey-specific codes are
 preserved verbatim and are not guessed to mean estimated. BLS documents the `P`
@@ -76,3 +80,13 @@ metadata-only writes, deduplication, transaction rollback and unknown-state hand
 shared reader/API cases check exact metadata across revision modes and separated
 or combined databases. Recovery/backfill parity must include null-versus-object
 state, footnote ordering, extensions and literal strings in addition to exact values.
+
+## Migration locking
+
+The nullable column and object constraint are installed with `NOT VALID`, so the
+column-addition transaction does not scan historical observations while holding
+its exclusive table lock. The next migration validates existing rows in a separate
+transaction. New writes are checked immediately; validation permits concurrent
+readers and writers. The migration contract exercises validation while another
+connection holds a real write transaction and verifies that historical rows stay
+unchanged.

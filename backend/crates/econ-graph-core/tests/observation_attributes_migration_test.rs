@@ -46,7 +46,34 @@ fn nullable_attributes_preserve_the_populated_history_and_accept_only_objects() 
     conn.batch_execute(include_str!("fixtures/train3/data.sql"))
         .unwrap();
     let before = fingerprint(&mut conn);
+    let pending = conn.pending_migrations(DATA_MIGRATIONS).unwrap();
+    assert_eq!(pending[0].name().version().to_string(), "20261101000110");
+    conn.run_migration(pending[0].as_ref()).unwrap();
+    let constraint_state = |conn: &mut PgConnection| {
+        diesel::sql_query("SELECT convalidated::text AS value FROM pg_constraint WHERE conrelid='data_points'::regclass AND conname='data_points_attributes_object'")
+            .get_result::<Digest>(conn).unwrap().value
+    };
+    assert_eq!(constraint_state(&mut conn), "false");
+    assert!(
+        diesel::sql_query("UPDATE data_points SET attributes='[]'::jsonb")
+            .execute(&mut conn)
+            .is_err(),
+        "NOT VALID must still reject invalid new writes"
+    );
+
+    // Hold a real writer's table lock while the separate validation transaction runs.
+    // Reintroducing ACCESS EXCLUSIVE validation would fail the bounded lock acquisition.
+    let mut writer = database.connect();
+    writer
+        .batch_execute("BEGIN; UPDATE data_points SET attributes='{}'::jsonb")
+        .unwrap();
+    conn.batch_execute("SET lock_timeout='1s'").unwrap();
+    let pending = conn.pending_migrations(DATA_MIGRATIONS).unwrap();
+    assert_eq!(pending[0].name().version().to_string(), "20261101000111");
     conn.run_pending_migrations(DATA_MIGRATIONS).unwrap();
+    conn.batch_execute("SET lock_timeout=DEFAULT").unwrap();
+    writer.batch_execute("ROLLBACK").unwrap();
+    assert_eq!(constraint_state(&mut conn), "true");
     assert_eq!(before, fingerprint(&mut conn));
     let points = data_points::table
         .select(DataPoint::as_select())
