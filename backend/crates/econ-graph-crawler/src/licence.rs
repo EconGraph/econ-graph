@@ -24,6 +24,8 @@
 //! - the [scheduler](crate::scheduler) neither refreshes nor re-discovers it;
 //! - `crawler enqueue`, `discover`, `fetch`, `refetch` and `record-reference-seeds`, and GraphQL
 //!   `triggerCrawl`, refuse it with the [`LicenceRefusal`] message;
+//! - `crawler check-selection` refuses it when named, leaves it out of its default list, and
+//!   reports it as skipped without a request if asked to check it any other way;
 //! - `crawler sources` lists it as `disabled: licence (<ticket>)`.
 //!
 //! The terms register is the Linear document "Data source terms of use" in the Data sources

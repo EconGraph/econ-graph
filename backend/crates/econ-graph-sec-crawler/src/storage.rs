@@ -650,8 +650,7 @@ mod tests {
         async fn taxonomy_storage_succeeds_with_one_pool_connection() {
             let container = TestContainer::new().await;
             container.clean_database().await.unwrap();
-            let database_url = std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+            let database_url = container.database_url().to_string();
             let pool = DatabasePool::builder()
                 .max_size(1)
                 .connection_timeout(Duration::from_secs(2))

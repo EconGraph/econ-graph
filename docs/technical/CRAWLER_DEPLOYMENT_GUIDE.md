@@ -29,6 +29,7 @@ crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
 crawler migrate  [--dry-run]                         # apply (or list) pending data migrations
+crawler check-selection [--source FRED,BEA] [--json] # curated lists and rules vs live catalogs (no database)
 ```
 
 From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
@@ -200,6 +201,50 @@ cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-
 ```
 
 It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: made-up validators would let the crawl keep wrong labels as unchanged.
+
+## Check curated lists and selection rules
+
+`crawler check-selection` checks each source's curated list or catalog selection rules against
+the source's live upstream catalog, without a database and without writing anything (its
+database pool cannot connect, so a read or write would fail the check). With no `--source` it
+checks FRED, BEA, BLS, World Bank, Census and FHFA, one source at a time; what each check
+downloads and reports is in [Data sources](../data-sources/README.md#checking-selections-against-the-live-catalogs).
+
+Its requests follow the worker's per-source policies and retries, at `--rate-percent` (default
+25) of each policy's rate, burst and concurrency. Its rate limiter is its own, so beside a
+running worker on the same API keys the two together send up to 125% of each policy rate. For
+FRED, whose policy is its 120-a-minute limit, that is up to 150 a minute (the fetcher backs off
+on 429s). BEA also caps data volume per minute and locks a key out for an hour when exceeded.
+To stay within the limits, run the check while the worker is idle.
+
+```bash
+crawler check-selection --source FRED,BEA        # text report
+crawler check-selection --json                   # every source, as JSON
+```
+
+| Exit status | Meaning |
+|---|---|
+| 0 | every checked source is clean |
+| 1 | a source has a problem (missing, discontinued, restricted, over-broad, over-cap, over-quota) |
+| 2 | a source's check could not finish (download, parse or authentication failure) |
+| 3 | nothing worse, but a source was skipped because its API key is not set |
+| 64 | the command line was refused: a parse error, or a source `check-selection` doesn't check |
+
+The API keys live only in the cluster's `crawler-api-keys` Secret, so run the check there:
+
+```bash
+scripts/deploy/check-selection.sh --namespace econ-graph [--source FRED] [--json]
+scripts/deploy/check-selection.sh --namespace econ-graph-br-<slug> --image econ-graph-crawler-worker:<tag>
+```
+
+The script requires `--namespace`. It runs the check as a one-off Job with the namespace's
+`crawler-worker` image (or `--image`) and that namespace's optional key references, so keys never
+appear on a command line or in output. It waits, prints the Job's log, deletes the Job and exits
+with the check's status (its own usage errors exit 64, a Job that doesn't finish 4). It refuses
+to start (exit 5) while another `crawler-check-selection` Job is running in the namespace, and
+warns, naming the combined rate, when the namespace's `crawler-worker` is running; it never
+scales the worker. A branch namespace without `crawler-api-keys` reports the keyed sources as
+skipped.
 
 ## Retries
 

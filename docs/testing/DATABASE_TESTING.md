@@ -17,7 +17,7 @@ commands below from `backend/`, and use a disposable test database.
   testcontainers versions.
 
 There is no `db_test!` macro in the current utility. `db_test()` is an async function
-returning the same shared `Arc<TestContainer>` as `get_test_db()`.
+that returns what `get_test_db()` does.
 
 ## TestContainer Lifecycle
 
@@ -30,6 +30,7 @@ pub async fn db_test() -> Arc<TestContainer>;
 impl TestContainer {
     pub async fn new() -> Self;
     pub fn pool(&self) -> &DatabasePool;
+    pub fn database_url(&self) -> &str;
     pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error>>;
 }
 ```
@@ -38,50 +39,57 @@ These are signature summaries, not a standalone Rust implementation.
 `DatabaseTestExt` only exposes `test_pool(&self) -> &DatabasePool`; it does not
 provide count-query or table-inspection methods.
 
-Construction behaves differently depending on how the core crate is compiled:
+`TestContainer::new()` gives the calling test a database of its own:
 
-- In core unit tests (`cfg(test)`), `TestContainer::new()` starts PostgreSQL 18 with
-  testcontainers. Without `DATABASE_URL`, its pool connects to that container.
-  With `DATABASE_URL`, its pool connects to that URL, but construction still starts
-  a separate container; Docker is therefore required in either case.
-- When core is compiled as a dependency, including for integration tests and other
-  crates' tests, construction connects to `DATABASE_URL`, falling back to
-  `postgres://localhost/econ_graph_test`. It does not start a container.
-- Construction does **not** run migrations or create seed rows. Each test module
-  must arrange its own migration and fixture setup. There is no
-  `seed_test_data()` helper.
+- With `DATABASE_URL` set, and whenever core is compiled as a dependency (other crates'
+  tests and integration-test targets, which fall back to
+  `postgres://localhost/econ_graph_test`), it creates a scratch database named
+  `eg_scratch_test_<uuid>` on that server, applies both migration sets, and opens its pool
+  there. The database is dropped (`DROP DATABASE ... WITH (FORCE)`) when the last handle
+  to it is dropped. No container is started, but the role must be allowed to create
+  databases (for example, with `CREATEDB`).
+- In core's own unit tests (`cfg(test)`) without `DATABASE_URL`, it starts PostgreSQL 18
+  with testcontainers instead, which needs Docker. That database is not migrated; tests
+  migrate it with `clean_database()`.
 
-`get_test_db()` stores one container/pool in a global `OnceCell` per test binary.
-It does not give each test a separate database.
+`database_url()` returns the URL of the test's database, for a test that needs a pool or
+connection of its own; never build one from `DATABASE_URL` beside a `TestContainer`,
+which would reach a different database. Construction creates no seed rows beyond what the
+migrations insert, and there is no `seed_test_data()` helper.
+
+`get_test_db()` shares one database per test binary: the one `DATABASE_URL` names, as it
+is, without migrating it. Each call returns a pool of the caller's own, opened on the
+caller's runtime. Tests using it must not drop the schema; they create unique rows
+instead, as the graphql tests do.
 
 ### Cleaning and Migration Targets
 
-`clean_database()` drops the pool connection's entire `public` schema with
-`CASCADE`, recreates it, grants schema permissions, and then calls
-`run_migrations()`. It does not truncate tables or wrap each test in a rollback
-transaction.
+`clean_database()` drops the test database's entire `public` schema with `CASCADE`,
+recreates it, grants schema permissions, and applies both migration sets to that same
+database (its `database_url()`). It does not truncate tables or wrap each test in a
+rollback transaction. Because every `TestContainer::new()` has a database of its own,
+cleaning one never affects another test, so test functions can run in parallel; CI runs
+the workspace suites in parallel.
 
-The migration URL comes from `DATABASE_URL`, falling back to
-`postgres://localhost/econ_graph_test`; it is not derived from the container's
-mapped port. If using this helper, set `DATABASE_URL` to the disposable database
-used by the pool so cleaning and migrations target the same database.
+A test run that is killed (Ctrl-C, a timeout) leaves its scratch databases behind on a
+persistent server. Remove them with:
 
-Tests sharing that database must coordinate destructive cleanup and fixture writes.
-Some modules use `serial_test`, while others use their own database locks or unique
-rows. Neither the shared helper nor an unrelated module's lock guarantees isolation.
-`--test-threads=1` serializes a test binary's test functions; it does not coordinate
-separate Cargo processes.
+```bash
+psql "$DATABASE_URL" -Atc "SELECT 'DROP DATABASE ' || quote_ident(datname) || ' WITH (FORCE);'
+  FROM pg_database WHERE datname LIKE 'eg_scratch_%'" | psql "$DATABASE_URL"
+```
 
-For a new database test, follow the target module's existing setup and locking
-convention. Prefer unique fixture IDs when cleanup is unnecessary. See the dataset
-tests for an example that runs migrations once and avoids dropping the schema.
+For a new database test, use `TestContainer::new()` when the test needs a clean or
+migrated database of its own, and `get_test_db()` with unique fixture rows when it only
+reads and inserts. See the dataset tests for a module that migrates the shared database
+once and avoids dropping the schema.
 
 ## ScratchDatabase Lifecycle
 
 Core migration tests use `ScratchDatabase::create()` to create a uniquely named
 database on the server named by `DATABASE_URL`, falling back to
-`postgres://localhost/econ_graph_test`. Each scratch database is separate from the
-database used by the shared `TestContainer`. The helper attempts to drop the
+`postgres://localhost/econ_graph_test`. `TestContainer::new()` is built on it. The
+helper attempts to drop the
 scratch database when it goes out of scope; cleanup errors are ignored.
 
 ## Running Tests
@@ -90,9 +98,9 @@ Prerequisites are Rust, a reachable disposable PostgreSQL instance for tests usi
 external pools, and a running Docker daemon for container-backed tests. Schema
 validation additionally invokes the Diesel CLI's `print-schema`.
 
-Core migration tests, including those run by the full core unit suite and workspace
-suite below, also require the `DATABASE_URL` role to be allowed to create databases
-on that disposable PostgreSQL server (for example, with `CREATEDB`). The dataset-only
+Every `TestContainer` test, and the core migration tests, require the `DATABASE_URL` role
+to be allowed to create databases on that disposable PostgreSQL server (for example,
+with `CREATEDB`). The dataset-only
 command uses an existing database and does not require database-creation permission.
 
 From the repository root:
@@ -105,8 +113,8 @@ cd backend
 # Run a specific core unit-test module.
 cargo test -p econ-graph-core --lib models::dataset::tests -- --nocapture
 
-# Run core unit tests sequentially.
-cargo test -p econ-graph-core --lib -- --test-threads=1
+# Run core unit tests.
+cargo test -p econ-graph-core --lib
 
 # Run the existing schema validation integration-test target.
 cargo test -p econ-graph-core --test schema_validation_test -- --nocapture
@@ -122,8 +130,8 @@ There is no integration-test target named `integration`. Select an existing targ
 with `--test <filename-without-.rs>` and its owning package. A test-name filter does
 not arrange migrations, start application services, or seed a database.
 
-`TEST_DATABASE_URL` support is module-specific; the shared core `TestContainer`
-reads `DATABASE_URL`. The workspace suite can include external-service tests, so
+`TEST_DATABASE_URL` support is module-specific; the core `TestContainer` and
+`get_test_db()` read `DATABASE_URL`. The workspace suite can include external-service tests, so
 consult each module's prerequisites before running it. Feature-gated checks and
 required CI commands are documented in the [CI/CD guide](../development/CI_CD_PIPELINE.md).
 

@@ -67,6 +67,7 @@
 pub mod adapter;
 pub mod catalog_reference;
 pub mod catalog_selection;
+pub mod check_selection;
 pub mod cli;
 pub mod coverage;
 pub mod dataset;

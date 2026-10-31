@@ -142,9 +142,9 @@ async fn test_something() {
 
 Follow the target module's existing migration, fixture, and locking convention. Tests sharing a database must coordinate destructive cleanup and fixture writes through the same lock. `#[serial]` coordinates only participating tests using the same serialization arrangement; it does not protect against unrelated locks or separate Cargo processes.
 
-`TestContainer::new()` starts a PostgreSQL container in core unit tests, even when `DATABASE_URL` makes the pool use an external database. When core is compiled as a dependency, including for integration tests, it connects to `DATABASE_URL` or the test fallback without starting a container. Construction does not run migrations. See [TestContainer lifecycle](../testing/DATABASE_TESTING.md#testcontainer-lifecycle) for the full setup.
+`TestContainer::new()` gives each test a migrated scratch database of its own on the server `DATABASE_URL` names (or the test fallback), dropped with it; the role needs `CREATEDB`. Only core's own unit tests without `DATABASE_URL` start a PostgreSQL container instead. See [TestContainer lifecycle](../testing/DATABASE_TESTING.md#testcontainer-lifecycle) for the full setup.
 
-Before calling `clean_database()`, ensure the pool uses a disposable test database and set `DATABASE_URL` to that same database. The helper drops the pool database's entire `public` schema with `CASCADE`, then migrates using a separately selected URL. Follow the [cleaning and migration target requirements](../testing/DATABASE_TESTING.md#cleaning-and-migration-targets); never use this helper against a database containing data you need to keep.
+`clean_database()` drops the test database's entire `public` schema with `CASCADE` and migrates that same database again; it never touches another test's database. Point `DATABASE_URL` at a disposable server; see the [cleaning and migration targets](../testing/DATABASE_TESTING.md#cleaning-and-migration-targets).
 
 ### Test Data Management
 
@@ -157,7 +157,7 @@ let test_id = Uuid::new_v4();
 let unique_name = format!("test_data_{}", test_id);
 ```
 
-Keep the `TestContainer` alive while its pool is in use. Dropping it releases its owned resources, including a container it started, but does not remove rows from an external database. Arrange external-database cleanup through the module's test setup rather than assuming scope exit cleans the database. Unique fixture rows can avoid destructive cleanup where the module supports that pattern.
+Keep the `TestContainer` alive while its pool is in use. Dropping it drops its scratch database (or stops the container it started). Tests on the shared `get_test_db()` database leave their rows behind, so they use unique fixture rows rather than destructive cleanup.
 
 ## Async Programming Best Practices
 
