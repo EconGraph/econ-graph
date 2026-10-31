@@ -11,7 +11,8 @@
 # the operator account can change; re-run this installer after merging changes
 # to backup-snapshots.sh (restore-snapshot.sh, delete-snapshots.sh and
 # snapshot-now.sh refuse to run while the installed copy takes an older
-# lock). It does not replace the script while a backup run is in progress.
+# lock). It stops the timer, and refuses to replace the script while a
+# backup run is in progress (starting the timer again).
 # Safe to re-run. Nothing it installs deletes anything.
 #
 # --run-now also starts one run immediately instead of waiting for the timer.
@@ -79,12 +80,23 @@ if root_owned "$BIN" 0755 && cmp -s "$SRC" "$BIN"; then
     echo "= $BIN already up to date"
 else
     # A run in progress keeps the lock its own copy takes, which a newer
-    # copy may not share (the lock moved to /run/econgraph/), so wait for it.
-    if systemctl is-active --quiet "$UNIT.service"; then
-        echo "error: a backup run ($UNIT.service) is in progress; re-run this when it has finished" >&2
-        exit 1
-    fi
-    run install -o root -g root -m 0755 "$SRC" "$BIN"
+    # copy may not share (the lock moved to /run/econgraph/). Stop the timer
+    # so it starts none, then go on only if no run is in progress (a oneshot
+    # run is "activating" until it ends, never "active"); the timer is
+    # started again below, or now if this stops.
+    run systemctl stop "$UNIT.timer"
+    state="$(systemctl show -p ActiveState --value "$UNIT.service")" || state="unknown"
+    case "$state" in
+        inactive | failed) ;;
+        *)
+            echo "error: $UNIT.service is $state (a backup run may be in progress); re-run this when it has finished" >&2
+            run systemctl start "$UNIT.timer" || true
+            exit 1
+            ;;
+    esac
+    # A new file renamed into place, so the timer never runs a half-written one.
+    run install -o root -g root -m 0755 "$SRC" "$BIN.tmp"
+    run mv -f "$BIN.tmp" "$BIN"
 fi
 
 install_file "[Unit]

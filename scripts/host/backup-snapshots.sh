@@ -75,19 +75,38 @@ fi
 # delete-snapshots.sh and snapshot-now.sh (test-backup-scripts.sh checks).
 # take_backup_lock WAIT: take the backup lock, /run/econgraph/backup-snapshots.lock,
 # on fd 9, waiting up to WAIT seconds, and keep it until the script exits.
+# Then the lock older copies take, /run/econgraph-backup-snapshots.lock, on
+# fd 7: any user can open that file, so it counts as held only while a root
+# process holds it (an older checkout's restore-snapshot.sh, say); held by
+# anyone else it is skipped.
 # /run/econgraph is root's, mode 0700, so no other user can open the file to
 # hold the lock; a directory or file that is not as this function makes them
 # is refused, never used. The hourly job installed by install-backup-timer.sh
-# must take this same lock: an installed copy that does not (one installed
-# before it moved here, which locks /run/econgraph-backup-snapshots.lock) is
+# must take this same lock: an installed copy without the line below is
 # refused until the installer is re-run. Returns 1 when the lock is held, 2
 # on any other failure.
+BACKUP_LOCK_VERSION=2
+# backup_lock_root_holds FILE: whether a process of root's has FILE open, so
+# may hold its lock. (/proc/locks can't say: it names the process that took
+# the lock, often a flock(1) that has since exited.) Call with FILE closed.
+backup_lock_root_holds() {
+    local file="$1" root_uid="0" fd pid
+    # Under the test: the test user, unless BACKUP_LOCK_ROOT_UID says otherwise.
+    [ -z "${ECONGRAPH_TEST_ROOT:-}" ] || root_uid="${BACKUP_LOCK_ROOT_UID:-${BACKUP_LOCK_OWNER%%:*}}"
+    while IFS= read -r fd; do
+        pid="${fd#/proc/}"
+        pid="${pid%%/*}"
+        [ "$(stat -c %u "/proc/$pid" 2>/dev/null)" != "$root_uid" ] || return 0
+    done < <(find /proc/[0-9]*/fd -maxdepth 1 -lname "$file" 2>/dev/null)
+    return 1
+}
 take_backup_lock() {
     local wait="$1" root="${ECONGRAPH_TEST_ROOT:-}" owner="0:0" old_umask status
-    local dir file installed
+    local dir file installed legacy
     dir="$root/run/econgraph"
     file="$dir/backup-snapshots.lock"
     installed="$root/usr/local/sbin/econgraph-backup-snapshots"
+    legacy="$root/run/econgraph-backup-snapshots.lock"
     if [ -n "$root" ]; then
         # Test runs only (scripts/host/test-backup-scripts.sh, never root):
         # the test user's own files.
@@ -97,7 +116,7 @@ take_backup_lock() {
         fi
         owner="${BACKUP_LOCK_OWNER:-0:0}"
     fi
-    if [ -e "$installed" ] && ! grep -qF 'run/econgraph/backup-snapshots.lock' "$installed"; then
+    if [ -e "$installed" ] && ! grep -qx "BACKUP_LOCK_VERSION=$BACKUP_LOCK_VERSION" "$installed"; then
         echo "error: the installed hourly job $installed takes an older lock, so it would not" >&2
         echo "  wait for this run. Re-run sudo scripts/host/install-backup-timer.sh first." >&2
         return 2
@@ -130,6 +149,29 @@ take_backup_lock() {
     elif [ "$status" -ne 0 ]; then
         echo "error: could not lock $file (flock exited $status)" >&2
         return 2
+    fi
+    if [ -f "$legacy" ] && [ ! -L "$legacy" ]; then
+        if ! exec 7<"$legacy"; then
+            echo "error: could not open $legacy" >&2
+            return 2
+        fi
+        if ! flock -n 7; then
+            exec 7<&-
+            if backup_lock_root_holds "$legacy"; then
+                if ! exec 7<"$legacy"; then
+                    echo "error: could not open $legacy" >&2
+                    return 2
+                fi
+                status=0
+                flock -w "$wait" 7 || status=$?
+                if [ "$status" -eq 1 ]; then
+                    return 1
+                elif [ "$status" -ne 0 ]; then
+                    echo "error: could not lock $legacy (flock exited $status)" >&2
+                    return 2
+                fi
+            fi
+        fi
     fi
 }
 # <<< backup lock

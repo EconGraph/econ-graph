@@ -146,7 +146,12 @@ file to hold it; a directory or lock file that isn't as the scripts make
 them is refused, never used. The hourly job is a copy installed by
 `install-backup-timer.sh`, so the other three refuse to run while that copy
 takes an older lock: re-run `sudo scripts/host/install-backup-timer.sh`
-after pulling (it waits for a backup run in progress to finish).
+after pulling. It stops the timer and refuses, starting it again, while a
+backup run is in progress; re-run it when the run has finished. Copies older
+than this lock take `/run/econgraph-backup-snapshots.lock` instead; while a
+root process holds that file (a restore from an older checkout, say) the
+others wait for it too. Any user can open that old file, so a lock on it
+held by anyone but root is ignored.
 
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to

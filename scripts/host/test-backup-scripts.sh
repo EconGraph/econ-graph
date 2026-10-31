@@ -383,10 +383,46 @@ mkdir -p "$(dirname "${installed}")"
 printf '%s\n' '#!/bin/bash' 'LOCK_FILE="$TEST_ROOT/run/econgraph-backup-snapshots.lock"' >"${installed}"
 refuse_lock "while the installed hourly job takes the old lock" "takes an older lock"
 check "... and says to re-run the installer" grep -qF "install-backup-timer.sh" <<<"${out}"
+printf '%s\n' '#!/bin/bash' '# BACKUP_LOCK_VERSION=2 (only in a comment)' >"${installed}"
+refuse_lock "while the installed job only mentions the lock version in a comment" "takes an older lock"
 cp "${repo_root}/scripts/host/backup-snapshots.sh" "${installed}"
 FAKE_PODS=app-postgres-0 run_script "restore-snapshot goes on when the installed job takes this lock" 1 "still in use by" \
     "${restore}" --yes "${app_snap}"
 rm -f "${installed}"
+
+# The old lock path, which older checkouts and installed jobs take: held by
+# root it is waited for, held by anyone else it is skipped.
+legacy="${root}/run/econgraph-backup-snapshots.lock"
+# hold_legacy SECONDS: as hold_lock, for the old lock file (0644, as the old
+# scripts made it).
+hold_legacy() {
+    rm -f "${tmp}/legacy-held"
+    bash -c 'exec 7>>"$1"; flock 7; : >"$2"; exec sleep "$3"' _ "${legacy}" "${tmp}/legacy-held" "$1" &
+    holder=$!
+    local tries=0
+    while [ ! -e "${tmp}/legacy-held" ]; do
+        tries=$((tries + 1))
+        [ "${tries}" -le 200 ] || { echo "FAIL could not hold ${legacy} for the test"; exit 1; }
+        sleep 0.05
+    done
+}
+hold_legacy 60
+refuse_lock "while root holds the old lock" "${lock} is held"
+release_lock
+hold_legacy 60
+started="$(date +%s)"
+BACKUP_LOCK_ROOT_UID=0 FAKE_PODS=app-postgres-0 run_script "restore-snapshot skips the old lock held by another user" 1 \
+    "still in use by" "${restore}" --yes --lock-wait=30 "${app_snap}"
+check "... without waiting for it" [ "$(($(date +%s) - started))" -lt 10 ]
+release_lock
+hold_legacy 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for root's old lock" 1 "still in use by" \
+    "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_lock
+FAKE_LOCK_PROBE="${legacy}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot holds a free old lock too" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+check "... at every call" bash -c "grep -q '^lock-probe held' '${STUB_LOG}' && ! grep -q '^lock-probe free' '${STUB_LOG}'"
+rm -f "${legacy}"
 
 hold_lock 60
 run_script "backup-snapshots refuses while the backup lock is held" 1 "holds ${lock}" \
