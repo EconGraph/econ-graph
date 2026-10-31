@@ -377,8 +377,14 @@ is set aside, not deleted.
    #   statefulset/app-postgres statefulset/keycloak-postgres --replicas=0
    ```
 3. `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
-   then without `--dry-run`. It refuses while the Postgres pod still exists,
-   asks you to type the subvolume name (`@econgraph-data-plane` or
+   then without `--dry-run`. It refuses, changing nothing, while any pod
+   still uses the subvolume: `postgresql-0` for `data-plane`, `app-postgres-0`
+   and `keycloak-postgres-0` for `app-prod`, or any other pod in any
+   namespace that mounts it (a hostPath volume at, under or above
+   `/srv/econgraph/<name>`, or a claim bound to a PersistentVolume there).
+   The refusal names each pod. It also refuses when the cluster can't be
+   asked. The check does not stop the writers for you: step 2 still comes
+   first. It then asks you to type the subvolume name (`@econgraph-data-plane` or
    `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.

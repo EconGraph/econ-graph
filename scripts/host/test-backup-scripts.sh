@@ -4,7 +4,8 @@
 # scripts/backup/check-freshness.sh and scripts/backup/restore-dump.sh.
 #
 # Runs as any user with fake btrfs, stat, mountpoint, findmnt, id, docker
-# and pg_restore (scripts/backup/test-stubs.sh) first on PATH, and with
+# and pg_restore (scripts/backup/test-stubs.sh), and mount, umount and a
+# mktemp that refuses /mnt, first on PATH, and with
 # ECONGRAPH_TEST_ROOT pointing the host scripts' /srv, /var/lib and /run
 # paths into a temporary directory. Nothing outside it is read or written.
 set -euo pipefail
@@ -17,6 +18,20 @@ failures=0
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
+# restore-snapshot.sh mounts the filesystem top level on a mktemp directory
+# under /mnt once its checks pass. The checks run here are meant to stop it
+# first; should one not, these record the call and fail instead of mounting
+# anything or creating a directory outside ${tmp}.
+# shellcheck disable=SC2016 # the stubs' $ expand when they run, not here
+for cmd in mount umount; do
+    printf '#!/bin/bash\necho "%s $*" >>"${STUB_LOG:-/dev/null}"\necho "fake %s: refused in tests" >&2\nexit 1\n' \
+        "${cmd}" "${cmd}" >"${tmp}/bin/${cmd}"
+done
+real_mktemp="$(command -v mktemp)"
+# shellcheck disable=SC2016
+printf '#!/bin/bash\ncase " $* " in *" /mnt/"*) echo "mktemp $*" >>"${STUB_LOG:-/dev/null}"; echo "fake mktemp: refused in tests" >&2; exit 1 ;; esac\nexec %q "$@"\n' \
+    "${real_mktemp}" >"${tmp}/bin/mktemp"
+chmod +x "${tmp}/bin/mount" "${tmp}/bin/umount" "${tmp}/bin/mktemp"
 export PATH="${tmp}/bin:${PATH}"
 export STUB_LOG="${tmp}/calls.log"
 # Never read the operator's backup.env.
@@ -179,14 +194,81 @@ run_script "restore-snapshot --from-pool --dry-run stops before the copy back" 0
 check "... and receives nothing" [ ! -e "${snaps}/data-plane.20261023T030000Z" ]
 # The copy back itself (not a dry run) stops at the pod check: postgresql-0
 # still exists, so nothing is unmounted or renamed.
-FAKE_POD_NAME=pod/postgresql-0 FAKE_RECEIVE_UUID="${STALE}" run_script "restore-snapshot --from-pool sets a mismatched copy back aside" 1 \
+FAKE_PODS=postgresql-0 FAKE_RECEIVE_UUID="${STALE}" run_script "restore-snapshot --from-pool sets a mismatched copy back aside" 1 \
     "set aside as ${snaps}/data-plane.20261023T030000Z.mismatch-" \
     "${restore}" --from-pool data-plane.20261023T030000Z
 check "... kept, not deleted" bash -c "ls -d '${snaps}'/data-plane.20261023T030000Z.mismatch-* >/dev/null"
-FAKE_POD_NAME=pod/postgresql-0 run_script "restore-snapshot --from-pool checks a good copy back and goes on" 1 \
-    "postgresql-0 still exists" "${restore}" --from-pool data-plane.20261023T030000Z
+FAKE_PODS=postgresql-0 run_script "restore-snapshot --from-pool checks a good copy back and goes on" 1 \
+    "still in use by: econ-graph/postgresql-0" "${restore}" --from-pool data-plane.20261023T030000Z
 check "... the copy back has the pool copy's Received UUID" \
     [ "$(fake_meta "${snaps}/data-plane.20261023T030000Z" received)" == "${L2}" ]
+
+echo "== restore-snapshot.sh: every pod using the subvolume must be gone, or nothing changes"
+# Refusals run without --dry-run (they must stop before anything changes);
+# acceptances only as dry runs.
+echo "${FS_UUID} /@econgraph-app-prod" >"${srv}/app-prod/.fake-mount"
+app_snap=app-prod.20261024T010000Z
+# refuse NAME TEXT [VAR=value...]: restoring app_snap (or RESTORE_SNAP) with
+# the stubbed cluster in that state exits 1 with TEXT and changes nothing.
+refuse() {
+    local name="$1" text="$2" before
+    shift 2
+    before="$(tree_state "${root}")"
+    run_script "restore-snapshot refuses: ${name}" 1 "${text}" \
+        env "$@" "${restore}" --yes "${RESTORE_SNAP:-${app_snap}}"
+    check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+    check "... and touches no subvolume and mounts nothing" \
+        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp)' '${STUB_LOG}'"
+}
+# accept NAME [VAR=value...]: a dry run of the same restore gets past the check.
+accept() {
+    local name="$1"
+    shift
+    run_script "restore-snapshot accepts: ${name}" 0 "(dry run: nothing restored)" \
+        env "$@" "${restore}" --dry-run "${RESTORE_SNAP:-${app_snap}}"
+    check "... and says no pod uses it" grep -qF "= no pod uses @econgraph-${RESTORE_SNAP%%.*}" <<<"${out}"
+}
+RESTORE_SNAP=""
+refuse "app-prod while app-postgres-0 exists (keycloak-postgres-0 gone)" \
+    "still in use by: econ-graph/app-postgres-0." FAKE_PODS=app-postgres-0
+check "... and names both StatefulSets to scale down" \
+    grep -qF "scale statefulset/app-postgres statefulset/keycloak-postgres --replicas=0" <<<"${out}"
+refuse "app-prod while keycloak-postgres-0 exists" \
+    "still in use by: econ-graph/keycloak-postgres-0." FAKE_PODS=keycloak-postgres-0
+refuse "app-prod while both exist" \
+    "still in use by: econ-graph/app-postgres-0 econ-graph/keycloak-postgres-0." \
+    "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
+refuse "app-prod when the cluster can't say whether app-postgres-0 exists" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) whether app-postgres-0 exists" \
+    FAKE_POD_FAILS=app-postgres-0
+refuse "app-prod when the PersistentVolumes can't be listed" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) which PersistentVolumes" \
+    FAKE_PV_FAILS=1
+refuse "app-prod when the pods can't be listed" \
+    "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) which pods use /srv/econgraph/app-prod" \
+    FAKE_POD_LIST_FAILS=1
+refuse "app-prod while another pod mounts app-postgres's claim" "still in use by: econ-graph/pg-debug." \
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume\necon-graph/pg-debug\tscratch\tapp-postgres-data-app-postgres-0\n'
+refuse "app-prod while a pod mounts a hand-made PersistentVolume on the subvolume" "still in use by: other/copy." \
+    'FAKE_PVS=/srv/econgraph/app-prod/\tother/hand-made\n' 'FAKE_POD_LIST=other/copy\thand-made\n'
+for path in /srv/econgraph/app-prod /srv/econgraph/app-prod/app-pg/18 /srv/econgraph /srv /; do
+    refuse "app-prod while a pod has hostPath ${path}" "still in use by: econ-graph/shell." \
+        "FAKE_POD_LIST=econ-graph/shell\t${path}\n"
+done
+accept "app-prod with both Postgres pods gone and nothing else on it" \
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume\necon-graph/econ-graph-backend-1\t\t\n'
+accept "app-prod while postgresql-0 and the data plane's users exist" FAKE_PODS=postgresql-0 \
+    'FAKE_POD_LIST=econ-graph/postgresql-0\tpostgresql-data-postgresql-0\necon-graph/shell\t/srv/econgraph/data-plane\n'
+accept "app-prod while a pod has a look-alike path or a same-named claim elsewhere" \
+    'FAKE_POD_LIST=econ-graph/a\t/srv/econgraph/app-prod-old\nstaging/b\tapp-postgres-data-app-postgres-0\n'
+RESTORE_SNAP=data-plane.20261024T010000Z
+refuse "data-plane while postgresql-0 exists" "still in use by: econ-graph/postgresql-0." FAKE_PODS=postgresql-0
+check "... and names its StatefulSet to scale down" \
+    grep -qF "scale statefulset/postgresql --replicas=0" <<<"${out}"
+refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ-graph/x." \
+    'FAKE_POD_LIST=econ-graph/x\tpostgresql-data-postgresql-0\n'
+accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
+unset RESTORE_SNAP
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"

@@ -20,8 +20,14 @@
 #     --mountpoint prints that file's content ("<fs uuid> <subvolume>"), and
 #     findmnt -T prints the same filesystem UUID for every path.
 #   - id -u prints 0 when FAKE_ROOT=1.
-#   - docker answers the kubectl calls the scripts make: get pod prints
-#     FAKE_POD_NAME, wait exits FAKE_WAIT_RC (default 0), psql prints
+#   - docker answers the kubectl calls the scripts make: get pod <name>
+#     prints pod/<name> when <name> is in FAKE_PODS (space-separated) and
+#     fails when it is FAKE_POD_FAILS; get pv -o jsonpath prints FAKE_PVS
+#     (printf %b; default the three host-storage PersistentVolumes as
+#     "<path>\t<namespace>/<claim>" lines) and get pods -A prints
+#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<claim or host path>..."
+#     lines; default none), failing with FAKE_PV_FAILS=1 and
+#     FAKE_POD_LIST_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
@@ -141,8 +147,18 @@ case " $* " in
     *" pg_restore "*) cat >"${FAKE_RESTORE_INPUT:-/dev/null}" ;;
     *" psql "*) : ;;
     *" wait "*) exit "${FAKE_WAIT_RC:-0}" ;;
+    *" get pv -o jsonpath="*)
+        [[ -z "${FAKE_PV_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        printf '%b' "${FAKE_PVS-/srv/econgraph/data-plane/pg\tecon-graph/postgresql-data-postgresql-0\n/srv/econgraph/app-prod/keycloak-pg\tecon-graph/keycloak-postgres-data-keycloak-postgres-0\n/srv/econgraph/app-prod/app-pg\tecon-graph/app-postgres-data-app-postgres-0\n}" ;;
+    *" get pods -A -o jsonpath="*)
+        [[ -z "${FAKE_POD_LIST_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        printf '%b' "${FAKE_POD_LIST-}" ;;
     *" -o jsonpath="*) echo Running ;;
-    *" get pod "*) [[ -z "${FAKE_POD_NAME:-}" ]] || echo "${FAKE_POD_NAME}" ;;
+    *" get pod "*)
+        args=("$@"); name=""
+        for i in "${!args[@]}"; do [[ "${args[$i]}" != pod ]] || name="${args[$((i + 1))]}"; done
+        [[ "${name}" != "${FAKE_POD_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        [[ " ${FAKE_PODS:-} " != *" ${name} "* ]] || echo "pod/${name}" ;;
     *) echo "fake docker: unsupported: $*" >&2; exit 1 ;;
 esac
 EOF
