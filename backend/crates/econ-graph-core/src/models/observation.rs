@@ -2,6 +2,7 @@
 //! the crawler's caller-owned, lease-fenced transaction.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -9,6 +10,16 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{DataPoint, DataQueryParams};
+
+/// Observation stores return page, count and transformation context from one snapshot.
+/// Implementations validate context windows with [`ObservationRequest::validate`].
+/// Authorization remains request-scoped at the API boundary.
+pub trait TimeSeriesStore {
+    fn read_page(
+        &self,
+        request: ObservationRequest,
+    ) -> impl Future<Output = crate::error::AppResult<ObservationPage>> + Send;
+}
 
 /// Explicit vintage selection. Results always use (date, revision_date, id) ascending order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
