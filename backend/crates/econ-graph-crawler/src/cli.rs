@@ -72,6 +72,7 @@ use crate::refetch::{self, RefetchOptions, SourcePlan, SourceProgress, DEFAULT_R
 use crate::source::SourceId;
 use crate::sources::default_registry;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
+use crate::CrawlError;
 
 /// `series_id` stored for `discover_catalog` jobs (one per source).
 pub const CATALOG_SERIES_ID: &str = "catalog";
@@ -645,8 +646,9 @@ impl Cli {
                 } else {
                     format!(
                         "restriction review recorded for {source} {series}; a fetch_series job \
-                         was already queued. Only a fetch claimed after this review can publish \
-                         it: if that job is already running, re-run this command once it ends\n"
+                         for it was already queued, so none was added. Only a fetch claimed \
+                         after this review can publish it: if that job had already been claimed, \
+                         run this command again once it has finished\n"
                     )
                 })
             }
@@ -1023,9 +1025,17 @@ async fn fetch_one(
     datasets.load_adapter(&*adapter)?;
     persist::sync_datasets(&pool, &datasets).await?;
     tracing::info!(%source, series_id = external_id, ?since, ?known_vintage, "fetching");
-    let fetched = adapter
+    let fetched = match adapter
         .fetch_series_incremental(&ctx, external_id, since, known_vintage)
-        .await?;
+        .await
+    {
+        // As the worker does: hide it, and cancel any pending review of its restriction.
+        Err(CrawlError::Restricted(message)) if adapter.tracks_catalog_lifecycle() => {
+            crate::lifecycle::record_restricted(&pool, source, external_id).await?;
+            return Err(CrawlError::Restricted(message).into());
+        }
+        result => result?,
+    };
     datasets.check(source, external_id, &fetched.dataset)?;
     crate::value::check_fetched_values(external_id, &fetched)?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
