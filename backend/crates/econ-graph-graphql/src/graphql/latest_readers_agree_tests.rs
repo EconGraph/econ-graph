@@ -235,11 +235,6 @@ const RAW_DATA_POINTS_SQL: &[(&str, bool)] = &[
         "econ-graph-services/src/services/cross_section_service.rs",
         true,
     ),
-    // Backfill and rollback preserve the complete physical revision population.
-    (
-        "econ-graph-timeseries/src/bin/timeseries-recovery.rs",
-        false,
-    ),
     // Whether a successor series has any data.
     ("econ-graph-crawler/src/lifecycle.rs", false),
     // The crawler's change detection on write.
