@@ -28,6 +28,13 @@ arbitrary origins. CORS permission on both names does not permit a second token 
 | `www.${PUBLIC_HOST}`, before `--finalize` | 302 (temporary) |
 | `www.${PUBLIC_HOST}`, after `--finalize` | 301 (permanent) |
 
+The status covers every redirect the gateway makes to the main host: https on the
+other name and plain http on both names, including the main host's own http-to-https
+redirect, which is therefore also a 302 until `--finalize`. Through Cloudflare, plain
+http never reaches the gateway (the tunnel's origin is its https listener):
+Cloudflare's Always Use HTTPS answers it with its own 301 to https on the same name,
+and `check-public-site.sh --via-cloudflare` checks that hop and then the https one.
+
 A permanent redirect is cached by browsers with no expiry, and by Cloudflare. A
 temporary one is not kept, so a rollback from www to the apex works for every
 visitor until the switch is finalized. `switch-main-host.sh --finalize` records
@@ -48,6 +55,10 @@ existing realm sessions with the issuer change. The live `keycloak-realm` Config
 must match the checkout, including the realm file, renderer, and catalog-grant
 preservation helper; the switch refuses a mismatch, so deploy the release that
 contains the checkout first, with `MAIN_HOST` set to the main host it serves.
+`cutover-to-gateway.sh` resolves `MAIN_HOST` the same way and stops when Keycloak's
+live `KC_HOSTNAME` is on the other name. `render-public-host.py` has no default main
+host: a render by hand (such as a realm import rerun) names the served one in
+`MAIN_HOST`.
 
 Every run except `--dry-run` needs `--confirm-production` with the first 8
 characters of the production cluster's kube-system UID, as `release-deploy.sh`
@@ -83,19 +94,23 @@ images. In order, it:
 
 1. records the main host in the operator deploy configuration, so later deploys
    use it;
-2. signs out existing realm sessions when the issuer changes;
+2. when the issuer changes, marks `deployment/keycloak` with the annotation
+   `econgraph.io/issuer-change-logout-pending`;
 3. sets Keycloak's hostname and web client origins and waits for its rollout;
 4. reruns the realm import, which preserves catalog grants and moves the realm
    `frontendUrl` (it overrides the hostname) to the main host, so Keycloak now
    issues tokens for the new issuer;
-5. sets the backend's expected issuer and the CORS origins, rolls the app on the
+5. when marked, signs out every realm session, then removes the mark; sessions begun
+   during steps 3 and 4 are signed out too, and a rerun after an interruption still
+   signs out;
+6. sets the backend's expected issuer and the CORS origins, rolls the app on the
    configuration change (the app-config hash `deploy.sh` uses) and waits;
-6. applies the gateway routes and runs `check-public-site.sh`.
+7. applies the gateway routes and runs `check-public-site.sh`.
 
 Keycloak's issuer moves before the backend's, so old backend pods reject tokens for
 the new issuer (including the anonymous client-credentials renewal) only from the end
 of the realm import until the backend's rollout completes. Until the gateway routes
-change in step 6, sign-in started on the old main address fails, since the web
+change in step 7, sign-in started on the old main address fails, since the web
 client accepts only the new one. Every step is idempotent: on a partial
 failure, inspect the reported failed step and rerun the same command after fixing its
 cause.

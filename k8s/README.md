@@ -283,15 +283,20 @@ The committed manifests stay localhost-only. `http://localhost` still serves the
 on the host, but a public deployment accepts sign-in redirects only on its main HTTPS
 origin.
 
-| What | Value for `PUBLIC_HOST=econgraph.com` with the default `MAIN_HOST` |
-| --- | --- |
-| Gateway | listener `https` (port 443, no host name, so any TLS server name gets the certificate), certificate `econ-graph-tls` for `econgraph.com` and `www.econgraph.com` from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `econ-graph-selfsigned`: only the tunnel connector sees it, unverified) |
-| HTTPRoutes | a separate `<name>-public` route per localhost one, for `www.econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
-| Apex HTTPS and both names on HTTP | `econ-graph-www-redirect` and `econ-graph-public-redirect`: redirects to `https://www.econgraph.com`, preserving path and query; 302 until `MAIN_HOST_PERMANENT` names www (`switch-main-host.sh --finalize`), then 301. Redirects to the apex are always 301 |
-| Keycloak `KC_HOSTNAME` | `https://www.econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
-| Realm client `econ-graph-web` | redirect URIs and web origins for `https://www.econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
-| Backend `OIDC_ISSUER` | `https://www.econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
-| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com,https://www.econgraph.com,http://localhost`; both public names stay allowed during a main-host switch; without a public host, `http://localhost,http://localhost:3000` |
+With `PUBLIC_HOST=econgraph.com`, for each `MAIN_HOST`:
+
+| What | `MAIN_HOST=www.econgraph.com` (the default) | `MAIN_HOST=econgraph.com` |
+| --- | --- | --- |
+| Gateway | listener `https` (port 443, no host name, so any TLS server name gets the certificate), certificate `econ-graph-tls` for `econgraph.com` and `www.econgraph.com` from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `econ-graph-selfsigned`: only the tunnel connector sees it, unverified) | the same |
+| HTTPRoutes | a separate `<name>-public` route per localhost one, for `www.econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them | the same, for `econgraph.com` |
+| Redirects (`econ-graph-www-redirect`, `econ-graph-public-redirect`), path and query kept | https on `econgraph.com` and http on both names to `https://www.econgraph.com`: 302 until `MAIN_HOST_PERMANENT` names www (`switch-main-host.sh --finalize`), then 301; this includes http on `www.econgraph.com` itself | https on `www.econgraph.com` and http on both names to `https://econgraph.com`: 301 |
+| Keycloak `KC_HOSTNAME` and realm `frontendUrl` | `https://www.econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) | `https://econgraph.com/idp` |
+| Realm client `econ-graph-web` | redirect URIs and web origins for `https://www.econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`) | for `https://econgraph.com` only |
+| Backend `OIDC_ISSUER` | `https://www.econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) | `https://econgraph.com/idp/realms/econ-graph` |
+| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com,https://www.econgraph.com,http://localhost` | the same |
+
+Without a public host, the realm client allows `http://localhost` and CORS
+`http://localhost,http://localhost:3000`.
 
 `PUBLIC_HOST=` (empty) removes every piece again: the public routes, the https listener and its
 certificate, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no
@@ -317,8 +322,8 @@ The frontend image needs no rebuild per host: `build-images.sh` builds it with t
 An empty `VITE_OIDC_ISSUER` only warns and builds an image with sign-in hidden. The app's canonical link uses the
 main page origin and path, without a query or fragment.
 
-The apex redirects to www before the app starts, so sign-in uses one Keycloak issuer
-that the backend checks exactly. Allowing both public CORS origins does not create a
+The other public name redirects to the main host before the app starts, so sign-in
+uses one Keycloak issuer that the backend checks exactly. Allowing both public CORS origins does not create a
 second issuer. Changing the main host changes the issuer and forces users to sign in
 again; existing sessions and old-issuer tokens are no longer usable. See
 [Main public address](../docs/deployment/MAIN_HOST.md) for the operator commands and
@@ -366,17 +371,18 @@ HTTP Host Header* empty, so that cloudflared sends the visitor's host (`econgrap
 gateway without DNS or the tunnel, connecting over https as cloudflared does. It checks:
 
 - the frontend and a `/graphql` search;
-- the Keycloak discovery document (issuer `https://www.econgraph.com/idp/realms/econ-graph`) and the sign-in page;
+- the Keycloak discovery document (issuer `https://<MAIN_HOST>/idp/realms/econ-graph`) and the sign-in page;
 - both allowed public CORS origins, refused-origin preflights (the backend's 403), and the full redirect matrix (301 or 302, see [Main public address](../docs/deployment/MAIN_HOST.md#redirect-status));
-- that spoofed `X-Forwarded-Proto`, `-Host` and `-Port` headers change nothing, and that plain http is redirected;
+- that spoofed `X-Forwarded-Proto`, `-Host` and `-Port` headers change nothing, and that plain http is redirected (locally by the gateway, straight to the main host; through Cloudflare by its Always Use HTTPS, a 301 to https on the same name, whose https answer is then checked);
 - that `/idp/admin`, `/idp/realms/master`, `/metrics`, `/playground`, `/api/admin` and encoded traversals of them are not served.
 
 Add `--via-cloudflare` to go through Cloudflare the way a visitor does. The Prometheus alerts
 `CloudflareTunnelDown` and `CloudflareTunnelNoConnections`
 (`k8s/monitoring/prometheus-rules-tunnel.yaml`) cover the connector.
 
-**Google sign-in** needs `https://www.econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
-as an authorized redirect URI of the Google OAuth client (ECO-13).
+**Google sign-in** needs `https://<MAIN_HOST>/idp/realms/econ-graph/broker/google/endpoint`
+as an authorized redirect URI of the Google OAuth client (ECO-13); keep both names
+authorized while a rollback of the main host is possible.
 
 **Facebook sign-in** is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)):
 `scripts/deploy/set-crawler-keys.sh --facebook` refuses, and the realm's `facebook`

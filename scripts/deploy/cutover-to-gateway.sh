@@ -32,8 +32,10 @@
 #      controller, the Ingresses it serves and what else to look out for. The
 #      public host (PUBLIC_HOST, scripts/deploy/lib/public-host.sh) is the one
 #      the public Ingresses serve, unless PUBLIC_HOST is given; it needs
-#      cert-manager. MAIN_HOST defaults to www.PUBLIC_HOST; set MAIN_HOST to
-#      PUBLIC_HOST explicitly to keep the apex as main during a gateway-only cutover.
+#      cert-manager. MAIN_HOST and MAIN_HOST_PERMANENT come from the environment, else
+#      the host's deploy config (as deploy.sh reads them), else MAIN_HOST is
+#      www.PUBLIC_HOST; the cut-over stops when Keycloak's live KC_HOSTNAME is on the
+#      other name (scripts/deploy/switch-main-host.sh changes the main host).
 #   2. Save what a rollback needs to
 #      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/
 #      (mode 700; the files 600): the Ingresses and NetworkPolicies of
@@ -167,8 +169,10 @@ die() {
 # The kubectl (see the header), exported for install-gateway.sh and
 # apply-gateway-routes.sh. Every call names --context, so a context pinned by
 # a parent script is not followed.
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+# lib/public-host.sh brings lib/cluster-role.sh and lib/deploy-config.sh, and
+# main_host_init; its kc calls are this script's kc, defined below.
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 unset CLUSTER_ROLE_CONTEXT
 cluster_role_default_kubectl || exit 1
 export KUBECTL="${KUBECTL:-kubectl}"
@@ -237,6 +241,26 @@ check_public_redirects() {
         fi
     done
     return "$status"
+}
+
+# main_host_matches_keycloak: fails, saying why, when Keycloak's live public issuer is on
+# another name than MAIN_HOST, so a cut-over never serves www while sign-in stays on the
+# apex (or the reverse); changing the main host is scripts/deploy/switch-main-host.sh's.
+# A Keycloak without a public KC_HOSTNAME (none yet, or localhost) is no conflict.
+main_host_matches_keycloak() {
+    local live
+    if ! live="$(kc -n "$NAMESPACE" get deployment keycloak --ignore-not-found \
+        -o 'jsonpath={.spec.template.spec.containers[?(@.name=="keycloak")].env[?(@.name=="KC_HOSTNAME")].value}')"; then
+        echo "could not read Keycloak's KC_HOSTNAME to compare it with MAIN_HOST=${MAIN_HOST}"
+        return 1
+    fi
+    case "$live" in
+        https://*)
+            if [ "$live" != "https://${MAIN_HOST}/idp" ]; then
+                echo "Keycloak's live KC_HOSTNAME is ${live}, but MAIN_HOST=${MAIN_HOST} would serve https://${MAIN_HOST}: set MAIN_HOST to the host Keycloak serves (deploy config or environment), or change it first with scripts/deploy/switch-main-host.sh"
+                return 1
+            fi ;;
+    esac
 }
 
 # Check the routes through the proxy Service, before the proxy has host ports.
@@ -553,25 +577,11 @@ if [ -z "${PUBLIC_HOST+x}" ]; then
 fi
 [ "${PUBLIC_HOST:-}" = none ] && PUBLIC_HOST=""
 if [ -n "$PUBLIC_HOST" ]; then
-    MAIN_HOST="${MAIN_HOST:-www.${PUBLIC_HOST}}"
-    case "$MAIN_HOST" in
-        "$PUBLIC_HOST" | "www.${PUBLIC_HOST}") ;;
-        *) die "MAIN_HOST must be ${PUBLIC_HOST} or www.${PUBLIC_HOST}" ;;
-    esac
-    # Whether the redirects to MAIN_HOST are permanent, resolved as lib/public-host.sh's
-    # main_host_init does for apply-gateway-routes.sh: the environment, else the deploy
-    # config for the same base domain.
-    if [ -z "${MAIN_HOST_PERMANENT+x}" ]; then
-        # shellcheck source=scripts/deploy/lib/deploy-config.sh
-        source "$PROJECT_ROOT/scripts/deploy/lib/deploy-config.sh"
-        configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || exit 1
-        MAIN_HOST_PERMANENT=""
-        if [ -z "$configured_base" ] || [ "${configured_base,,}" = "${PUBLIC_HOST,,}" ]; then
-            MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || exit 1
-        fi
-    fi
-    MAIN_HOST_PERMANENT="${MAIN_HOST_PERMANENT,,}"
-    export MAIN_HOST_PERMANENT
+    PUBLIC_HOST="${PUBLIC_HOST,,}"
+    # MAIN_HOST and MAIN_HOST_PERMANENT as deploy.sh resolves them (main_host_init): the
+    # environment, else the deploy config for the same base domain, else www.PUBLIC_HOST.
+    main_host_init || die "MAIN_HOST must be ${PUBLIC_HOST} or www.${PUBLIC_HOST}"
+    reason="$(main_host_matches_keycloak)" || die "$reason; nothing was changed"
     echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST); main host: ${MAIN_HOST} (MAIN_HOST)${MAIN_HOST_PERMANENT:+; permanent redirects to ${MAIN_HOST_PERMANENT} (MAIN_HOST_PERMANENT)}"
     kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
         die "the public host needs cert-manager (for the gateway's https listener certificate); install it first"

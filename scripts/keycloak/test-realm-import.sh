@@ -33,7 +33,10 @@
 #     and a catalog role an operator made keeps its grants;
 #   - an anonymous token carries exactly the anonymous scope's catalogs;
 #   - a further import changes nothing and warns only that config-cli's role state, now a
-#     chunk shorter, has a chunk left over, which it ignores as config-cli does.
+#     chunk shorter, has a chunk left over, which it ignores as config-cli does;
+#   - scripts/deploy/switch-main-host.sh's kcadm query reads the realm frontendUrl an
+#     import with KC_REALM_FRONTEND_URL sets, and the discovery issuer follows it; an import
+#     without it clears frontendUrl, so the issuer is the request's own again.
 #
 # The previous release's files come from PREVIOUS_RELEASE_DIR when set (CI checks the tag
 # out there), otherwise from the tag in this repository. Needs docker, python3, curl and
@@ -305,6 +308,36 @@ grep -q "^warning: ignoring [0-9]* characters after the keycloak-config-cli stat
     "$WORK/warnings-third" || fail "the role state didn't shrink by a chunk; the leftover-chunk check is vacuous"
 [ "$(grep -vc '^warning: ignoring' "$WORK/warnings-third")" = 0 ] ||
     fail "a further import warned: $(cat "$WORK/warnings-third")"
+
+# scripts/deploy/switch-main-host.sh's realm frontendUrl query, exactly as it runs it
+# (keycloak_admin and realm_frontend_url, taken from the script), with its kubectl exec
+# into the Keycloak pod replaced by docker exec into this container. Then the discovery
+# issuer, after an import with and without KC_REALM_FRONTEND_URL.
+sed -n '/^keycloak_admin() {$/,/^}$/p; /^realm_frontend_url() {$/,/^}$/p' \
+    "$REPO/scripts/deploy/switch-main-host.sh" >"$WORK/switch-functions.sh"
+grep -q "^realm_frontend_url() {" "$WORK/switch-functions.sh" ||
+    { echo "switch-main-host.sh has no realm_frontend_url; update this test" >&2; exit 1; }
+kc() { # -n econ-graph exec deployment/keycloak -- COMMAND...
+    [ "$1 $2 $3 $4 $5" = "-n econ-graph exec deployment/keycloak --" ] || { echo "unexpected kc $*" >&2; return 1; }
+    shift 5
+    docker exec -e KC_BOOTSTRAP_ADMIN_USERNAME="$ADMIN" -e KC_BOOTSTRAP_ADMIN_PASSWORD="$PASS" "$KC" "$@"
+}
+# shellcheck source=/dev/null
+source "$WORK/switch-functions.sh"
+issuer() {
+    curl -sf "$BASE/realms/$REALM/.well-known/openid-configuration" | json 'd["issuer"]'
+}
+PUBLIC_IDP="https://www.example.test/idp"
+KC_REALM_FRONTEND_URL="$PUBLIC_IDP" import_realm public drop-ilo
+[ "$(realm_frontend_url)" = "$PUBLIC_IDP" ] ||
+    fail "switch-main-host.sh's query read the frontendUrl as '$(realm_frontend_url)', not $PUBLIC_IDP"
+[ "$(issuer)" = "$PUBLIC_IDP/realms/$REALM" ] || fail "with KC_REALM_FRONTEND_URL the issuer is $(issuer)"
+# The trap the query avoids: on this Keycloak, `--fields attributes` leaves frontendUrl out.
+plain="$(keycloak_admin get "realms/$REALM" --fields attributes | json '(d.get("attributes") or {}).get("frontendUrl", "")')"
+[ -z "$plain" ] || echo "note: --fields attributes now returns frontendUrl ($plain)" >&2
+import_realm local drop-ilo
+[ -z "$(realm_frontend_url)" ] || fail "an import without KC_REALM_FRONTEND_URL left frontendUrl '$(realm_frontend_url)'"
+[ "$(issuer)" = "$BASE/realms/$REALM" ] || fail "without KC_REALM_FRONTEND_URL the issuer is $(issuer), not $BASE/realms/$REALM"
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

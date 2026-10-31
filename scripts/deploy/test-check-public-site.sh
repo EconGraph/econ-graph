@@ -33,6 +33,7 @@ out = headers = None
 origin = ''
 method = 'GET'
 spoof = False
+local = False
 for arg in args:
     if arg == '-o': out = next(args)
     elif arg == '-D': headers = next(args)
@@ -41,7 +42,8 @@ for arg in args:
         if header.startswith('Origin: '): origin = header[8:]
         if header.startswith('X-Forwarded-Port:'): spoof = True
     elif arg == '-X': method = next(args)
-    elif arg in ('-w', '--max-time', '--connect-to', '--data'): next(args)
+    elif arg == '--connect-to': next(args); local = True
+    elif arg in ('-w', '--max-time', '--data'): next(args)
     elif not arg.startswith('-'): url = arg
 url = urlsplit(url)
 main = os.environ['STUB_MAIN']
@@ -50,12 +52,24 @@ issuer = base + '/idp/realms/econ-graph'
 scenario = os.environ.get('STUB_SCENARIO', '')
 status, body, response = 200, '', {}
 path = url.path + ('?' + url.query if url.query else '')
-if url.scheme == 'http' or url.hostname != main:
+if url.scheme == 'http' and not local and scenario != 'cf-gateway-http':
+    # Through Cloudflare, plain http never reaches the gateway: Always Use HTTPS
+    # answers with a 301 to https on the same name.
+    status = 301
+    response['Location'] = 'https://' + url.hostname + path
+    if scenario == 'cf-no-https': status, response = 200, {}
+    if scenario == 'cf-other-host': response['Location'] = 'https://elsewhere.invalid' + path
+elif url.scheme == 'http' or url.hostname != main:
     status = int(os.environ['STUB_REDIRECT_STATUS'])
     response['Location'] = base + path
     if scenario == 'query': response['Location'] = base + url.path
     if scenario == 'port': response['Location'] = 'https://' + main + ':443' + path
     if scenario == 'wrong-status': status = 302 if status == 301 else 301
+    if scenario.startswith('nginx') and url.scheme == 'https':
+        # ingress-nginx before the gateway cut-over: a 308 spelling out :443 (ECO-709).
+        status = 308
+        response['Location'] = 'https://' + main + ':443' + path
+        if scenario == 'nginx': body = '<html><center><h1>308 Permanent Redirect</h1></center><hr><center>nginx</center></html>'
     if scenario == 'spoof' and spoof: response['Location'] = 'https://spoofed.invalid' + path
 elif path == '/' or path.startswith('/series/smoke-check'):
     body = '<html><div id="root"></div></html>'
@@ -129,6 +143,33 @@ print(status, end='')
         result = run('wrong-status', permanent=permanent)
         assert 'expected a ' + ('301' if permanent else '302') in result.stdout, result.stdout
     print('ok a premature 301, or a 302 after finalize, fails')
+    # Local mode never sees Cloudflare's upgrade: the stub answers http there only as the
+    # gateway does, so the passing runs above checked the gateway's direct redirect, and
+    # the Cloudflare run checked the same-name 301 and then the https hop.
+    via = run(via=True)
+    assert via.returncode == 0 and 'redirects (301, Cloudflare) to https://www.econgraph.com, which serves the app' in via.stdout, via.stdout
+    assert 'redirects (301, Cloudflare) to https://econgraph.com, then (302) to https://www.econgraph.com/series' in via.stdout, via.stdout
+    via = run(main='econgraph.com', explicit=True, via=True)
+    assert via.returncode == 0 and 'to https://www.econgraph.com, then (301) to https://econgraph.com/series' in via.stdout, via.stdout
+    assert 'Cloudflare' not in run().stdout.replace('--via-cloudflare', '')
+    result = run('cf-gateway-http', via=True)
+    assert result.returncode == 0 and 'Cloudflare)' not in result.stdout, result.stdout
+    for scenario in ['cf-no-https', 'cf-other-host']:
+        result = run(scenario, via=True)
+        assert result.returncode != 0 and 'FAIL  plain http://' in result.stdout, (scenario, result.stdout)
+    for scenario in ['wrong-status', 'query']:
+        result = run(scenario, via=True)
+        assert result.returncode != 0, result.stdout
+        assert 'FAIL  plain http://econgraph.com redirects (301, Cloudflare)' in result.stdout, (scenario, result.stdout)
+    print('ok through Cloudflare: its same-name 301 to https, then the https hop to the main host')
+    # ingress-nginx's 308 with :443, only with nginx's own page, is the known case.
+    for via in (False, True):
+        result = run('nginx', via=via)
+        assert result.returncode == 0, result.stdout
+        assert 'redirects (308) through ingress-nginx, with :443 (ECO-709' in result.stdout, result.stdout
+        result = run('nginx-plain', via=via)
+        assert result.returncode != 0 and 'econgraph.com redirects (308)' in result.stdout, result.stdout
+    print('ok ingress-nginx 308 with :443 and its own page is the known ECO-709 case; without the page it fails')
     # Without MAIN_HOST_PERMANENT in the environment, the deploy config's is used, for
     # the same base domain only; the environment, even empty, wins.
     deploy_env.write_text('PUBLIC_HOST=econgraph.com\nMAIN_HOST_PERMANENT=www.econgraph.com\n')

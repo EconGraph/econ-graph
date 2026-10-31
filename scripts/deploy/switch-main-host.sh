@@ -85,9 +85,10 @@ if [ "$DRY_RUN" = true ]; then
         echo "[dry-run] apply gateway routes with permanent (301) redirects to ${MAIN_HOST}"
     else
         echo "[dry-run] atomically retain other settings and write PUBLIC_HOST/MAIN_HOST in ${CONFIG_FILE}; drop a MAIN_HOST_PERMANENT naming another host"
-        echo "[dry-run] if issuer changes: sign out existing realm sessions once"
+        echo "[dry-run] if issuer changes: mark deployment/keycloak so the sign-out below survives a rerun"
         echo "[dry-run] patch Keycloak hostname/client origins and wait for its rollout; preserve release images"
         echo "[dry-run] rerun the catalog-preserving realm import, moving the realm frontendUrl to ${MAIN_HOST}"
+        echo "[dry-run] if marked: sign out every realm session once, then clear the mark"
         echo "[dry-run] then patch the backend issuer; keep both public CORS origins plus http://localhost; roll the app on a config change (app-config hash) and wait"
         echo "[dry-run] apply canonical gateway routes (redirects $( [ "$MAIN_HOST" = "$PUBLIC_HOST" ] && echo 'permanent, 301' || echo 'temporary, 302, until --finalize'))"
     fi
@@ -186,10 +187,20 @@ keycloak_admin() {
         "$cli" "$@" --config "$config"
     ' -- "$@"
 }
-# A legacy frontendUrl overrides KC_HOSTNAME, so it participates in the logout
-# decision too. Capture only realm attributes, never credentials or tokens.
-realm_attributes="$(keycloak_admin get realms/econ-graph --fields attributes)"
-current_frontend_url="$(python3 -c 'import json, sys; print((json.loads(sys.argv[1]).get("attributes") or {}).get("frontendUrl", "").rstrip("/"))' "$realm_attributes")"
+# realm_frontend_url: the realm's frontendUrl attribute, without a trailing slash, or
+# nothing. kcadm's `--fields attributes` answers an empty object on Keycloak 26; only
+# naming the attribute returns it (scripts/keycloak/test-realm-import.sh runs this query
+# against a real Keycloak). Reads only that attribute, never credentials or tokens.
+realm_frontend_url() {
+    local answer
+    answer="$(keycloak_admin get realms/econ-graph --fields 'attributes(frontendUrl)')" || return 1
+    python3 -c 'import json, sys; print((json.loads(sys.argv[1]).get("attributes") or {}).get("frontendUrl", "").rstrip("/"))' "$answer"
+}
+# A legacy frontendUrl overrides KC_HOSTNAME, so it participates in the logout decision too.
+current_frontend_url="$(realm_frontend_url)" || die "could not read the realm frontendUrl; nothing was changed"
+LOGOUT_ANNOTATION="econgraph.io/issuer-change-logout-pending"
+logout_pending="$(kc -n econ-graph get deployment keycloak -o "jsonpath={.metadata.annotations.${LOGOUT_ANNOTATION//./\\.}}")" ||
+    die "could not read deployment/keycloak; nothing was changed"
 kc -n econ-graph get deployment econ-graph-backend >/dev/null
 if [ "$FINALIZE" = true ]; then
     # Only a completed switch is made permanent: Keycloak's hostname, the realm's
@@ -238,11 +249,16 @@ else
     write_config "PUBLIC_HOST=${PUBLIC_HOST}" "MAIN_HOST=${MAIN_HOST}" MAIN_HOST_PERMANENT
     export MAIN_HOST_PERMANENT=""
 fi
+# The issuer changes when either KC_HOSTNAME or the realm frontendUrl is elsewhere. Every
+# realm session is then signed out once the import has moved the issuer, so sessions
+# begun during the Keycloak rollout or the import go too. A marker on the Keycloak
+# Deployment, set before the first change and cleared after the sign-out, makes a rerun
+# after an interruption still sign out.
 if [ "$current_hostname" != "https://${MAIN_HOST}/idp" ] ||
     { [ -n "$current_frontend_url" ] && [ "$current_frontend_url" != "https://${MAIN_HOST}/idp" ]; }; then
-    echo "Issuer is changing: signing out realm sessions; users must sign in again."
-    # Logout-all prevents old refresh sessions from silently minting new tokens.
-    keycloak_admin create logout-all -r econ-graph >/dev/null
+    echo "Issuer is changing: realm sessions will be signed out after the realm import; users must sign in again."
+    kc -n econ-graph annotate deployment/keycloak --overwrite "${LOGOUT_ANNOTATION}=https://${MAIN_HOST}/idp" >/dev/null
+    logout_pending="https://${MAIN_HOST}/idp"
 fi
 # 1. Keycloak's issuer. set env patches existing Deployments: applying repo manifests
 # would reset release images. The realm's frontendUrl overrides KC_HOSTNAME, so
@@ -253,6 +269,12 @@ kc -n econ-graph rollout status deployment/keycloak --timeout=900s
 kc -n econ-graph delete job keycloak-realm-import --ignore-not-found
 kc apply -f "$WORK/realm-import.yaml"
 kc -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=900s
+if [ -n "$logout_pending" ]; then
+    echo "Signing out realm sessions: the issuer is now https://${MAIN_HOST}/idp."
+    # Logout-all prevents old refresh sessions from silently minting new tokens.
+    keycloak_admin create logout-all -r econ-graph >/dev/null
+    kc -n econ-graph annotate deployment/keycloak "${LOGOUT_ANNOTATION}-" >/dev/null
+fi
 # 2. Only now the backend's expected issuer: old backend pods reject the new issuer's
 # tokens (including the anonymous client-credentials renewal) from the end of the
 # import until this rollout completes.

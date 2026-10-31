@@ -29,7 +29,11 @@
 #     as above) to https://MAIN_HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
 #     neither the issuer, the sign-in form, nor the redirect, and plain http
-#     is redirected to https;
+#     is redirected to https: by the gateway straight to https://MAIN_HOST locally,
+#     and through Cloudflare by its Always Use HTTPS (a 301 to https on the same
+#     name), whose https request is then checked;
+#   - until the gateway cut-over (ECO-800), ingress-nginx's 308 with :443 for the
+#     alternate name is reported as the known ECO-709 case;
 #   - not served on the public host: Keycloak's admin console and master
 #     realm, metrics, the GraphQL playground and the admin API, including
 #     encoded-traversal variants.
@@ -276,14 +280,30 @@ for refused_origin in http://localhost:3000 https://evil.example; do
     fi
 done
 
-# 6. The alternate HTTPS host redirects to the canonical origin exactly once.
+# 6. The alternate HTTPS host redirects to the canonical origin exactly once, with
+# render-public-host.py's status, keeping the path and query and spelling out no port.
 # The frontend check above verifies that canonical HTTPS serves, rather than redirects.
+# Any other answer means something else answered, such as an old ingress or a
+# Cloudflare redirect rule.
 REDIRECT_PATH='/series/smoke-check?from=alternate'
 REDIRECT_TARGET="${PUBLIC_URL}${REDIRECT_PATH}"
+# Until production is cut over to the gateway, and only until then (ECO-800 removes
+# this): ingress-nginx still answers the alternate name with a 308 to the main host that
+# spells out :443 (ECO-709). That exact response, with nginx's own redirect page as its
+# body (which a Cloudflare redirect rule would not send), is reported as known; any
+# other one fails.
+INGRESS_NGINX_TARGET="https://${MAIN_HOST}:443${REDIRECT_PATH}"
+# ingress_nginx_redirect NAME STATUS LOCATION: the response saved as NAME is ingress-nginx's.
+ingress_nginx_redirect() {
+    [ "$2" = 308 ] && [ "$3" = "$INGRESS_NGINX_TARGET" ] &&
+        grep -qF '<center>nginx</center>' "$tmp/$1"
+}
 status="$(fetch alternate "${ALTERNATE_BASE}${REDIRECT_PATH}")"
 location="$(header alternate Location)"
 if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
     pass "${ALTERNATE_HOST} redirects (${status}) to ${location}"
+elif ingress_nginx_redirect alternate "$status" "$location"; then
+    pass "${ALTERNATE_HOST} redirects (308) through ingress-nginx, with :443 (ECO-709: production not yet cut over to the gateway)"
 else
     fail "${ALTERNATE_HOST} redirects (${status}) to '${location}', expected a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}"
 fi
@@ -309,18 +329,38 @@ status="$(fetch spoof-alternate "${SPOOF[@]}" "${ALTERNATE_BASE}${REDIRECT_PATH}
 location="$(header spoof-alternate Location)"
 if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
     pass "spoofed X-Forwarded-* headers leave the alternate redirect on ${PUBLIC_URL}"
+elif ingress_nginx_redirect spoof-alternate "$status" "$location"; then
+    pass "spoofed X-Forwarded-* headers leave ingress-nginx's alternate redirect on ${MAIN_HOST}:443 (ECO-709: production not yet cut over to the gateway)"
 else
     fail "with spoofed X-Forwarded-* headers ${ALTERNATE_HOST} redirects (${status}) to '${location}'"
 fi
-# HTTP on both names must redirect directly to canonical HTTPS, including when
-# the client claims it is already using HTTPS.
+# Plain http on both names, even claiming to be https, is redirected to canonical
+# https, never served. On the local gateway it is the gateway's own redirect, straight
+# to https://MAIN_HOST. Through Cloudflare, plain http never reaches the gateway (the
+# tunnel's origin is the https listener): Cloudflare's Always Use HTTPS answers with a
+# 301 to https on the same name, and that https request must then be the main host's
+# own page or the alternate name's redirect above.
 for name in "$HOST" "www.${HOST}"; do
     status="$(fetch plain -H "X-Forwarded-Proto: https" "http://${name}${REDIRECT_PATH}")"
     location="$(header plain Location)"
     if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
         pass "plain http://${name} (even claiming https) redirects (${status}) to ${location}"
+    elif [ "$VIA_CLOUDFLARE" = true ] && [ "$status" = 301 ] && [ "$location" = "https://${name}${REDIRECT_PATH}" ]; then
+        status="$(fetch plain-https "https://${name}${REDIRECT_PATH}")"
+        location="$(header plain-https Location)"
+        if [ "$name" = "$MAIN_HOST" ] && [ "$status" = 200 ] && grep -q 'id="root"' "$tmp/plain-https"; then
+            pass "plain http://${name} (even claiming https) redirects (301, Cloudflare) to https://${name}, which serves the app"
+        elif [ "$name" != "$MAIN_HOST" ] && [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+            pass "plain http://${name} (even claiming https) redirects (301, Cloudflare) to https://${name}, then (${status}) to ${location}"
+        elif [ "$name" != "$MAIN_HOST" ] && ingress_nginx_redirect plain-https "$status" "$location"; then
+            pass "plain http://${name} redirects (301, Cloudflare) to https://${name}, then (308) through ingress-nginx (ECO-709: production not yet cut over to the gateway)"
+        else
+            fail "plain http://${name} redirects (301, Cloudflare) to https://${name}, which answers ${status}${location:+ to ${location}}; expected $([ "$name" = "$MAIN_HOST" ] && echo 'the app' || echo "a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}")"
+        fi
+    elif [ "$VIA_CLOUDFLARE" = true ] && [[ "$status" != 3* ]]; then
+        fail "plain http://${name} returned ${status}: turn on Cloudflare's Always Use HTTPS"
     else
-        fail "plain http://${name} redirects (${status}) to '${location}', expected a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}"
+        fail "plain http://${name} redirects (${status}) to '${location}', expected a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}$([ "$VIA_CLOUDFLARE" = true ] && echo ", or Cloudflare's 301 to https://${name}${REDIRECT_PATH}")"
     fi
 done
 

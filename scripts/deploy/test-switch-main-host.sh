@@ -68,7 +68,12 @@ elif args[:5] == ['-n', 'econ-graph', 'get', 'configmap', 'keycloak-realm']:
               'render-realm.sh': 'scripts/keycloak/render-realm.sh',
               'preserve-catalog-grants.py': 'scripts/keycloak/preserve-catalog-grants.py'}[key]
     print('stale' if state.get('stale_realm') else (pathlib.Path(os.environ['TEST_REPO']) / source).read_text(), end='')
-elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'keycloak']: print(state['hostname'])
+elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'keycloak']:
+    if 'logout-pending' in args[-1]: print(state.get('logout_pending', ''), end='')
+    else: print(state['hostname'])
+elif args[:4] == ['-n', 'econ-graph', 'annotate', 'deployment/keycloak']:
+    if args[-1].endswith('-'): state.pop('logout_pending', None)
+    else: state['logout_pending'] = args[-1].split('=', 1)[1]
 elif args[:5] == ['-n', 'econ-graph', 'get', 'deployment', 'econ-graph-backend']:
     if 'OIDC_ISSUER' in args[-1]: print(state.get('issuer', 'https://econgraph.com/idp/realms/econ-graph'), end='')
 elif args[:2] == ['get', 'crd']: print('customresourcedefinition.apiextensions.k8s.io/' + args[2])
@@ -98,7 +103,11 @@ elif args[:3] == ['-n', 'econ-graph', 'patch'] and args[3].startswith('deploymen
         state['restarts'] = state.get('restarts', 0) + 1
     hashes[args[3][11:]] = value
 elif args[:4] == ['-n', 'econ-graph', 'exec', 'deployment/keycloak']:
+    # As kcadm on Keycloak 26: `--fields attributes` answers an empty object; only naming
+    # the attribute returns it.
     if args[-4:] == ['get', 'realms/econ-graph', '--fields', 'attributes']:
+        print(json.dumps({'attributes': {}}))
+    elif args[-4:] == ['get', 'realms/econ-graph', '--fields', 'attributes(frontendUrl)']:
         print(json.dumps({'attributes': {'frontendUrl': state['frontend_url']}}))
     else:
         assert args[-4:] == ['create', 'logout-all', '-r', 'econ-graph'], args
@@ -115,7 +124,8 @@ elif args[:4] == ['-n', 'econ-graph', 'rollout', 'status']:
     if state.get('fail_rollout') == args[4]: sys.exit(1)
 elif args[:4] == ['-n', 'econ-graph', 'rollout', 'restart']: state['restarts'] = state.get('restarts', 0) + 1
 elif args[:5] == ['-n', 'econ-graph', 'delete', 'job', 'keycloak-realm-import']: pass
-elif args[:3] == ['-n', 'econ-graph', 'wait']: pass
+elif args[:3] == ['-n', 'econ-graph', 'wait']:
+    if state.get('fail_wait'): sys.exit(1)
 else: raise AssertionError(args)
 state_file.write_text(json.dumps(state))
 ''')
@@ -184,6 +194,10 @@ else:
         roll = position(lambda c: c[2:5] == ['-n', 'econ-graph', 'rollout'] and c[6] == 'deployment/econ-graph-backend', 'backend rollout')
         edge = position(lambda c: c[0] == 'apply-gateway-routes.sh', 'gateway routes')
         assert kc_env < kc_ready < realm < realm_done < backend < roll < edge, logged()
+        # The sign-out comes after the import moved the issuer, before the backend changes.
+        logouts = [i for i, c in enumerate(logged()) if c[-4:] == ['create', 'logout-all', '-r', 'econ-graph']]
+        assert all(realm_done < i < backend for i in logouts), 'sign-out outside the import-to-backend window'
+        assert 'logout_pending' not in json.loads(state.read_text())
     for dry in ([], ['--finalize'], ['--main-host', 'econgraph.com']):
         reset()
         result = run('--dry-run', *dry, confirm=None)
@@ -236,6 +250,7 @@ else:
     current = json.loads(state.read_text())
     assert current['logouts'] == 1 and current['restarts'] == 3 and current['imports'] == 2
     print('ok forward: Keycloak issuer and realm frontendUrl move before the backend; rerun signs out and rolls nothing')
+    calls.write_text('')
     result = run('--main-host', 'econgraph.com')
     assert result.returncode == 0, result.stdout
     assert_issuer_order()
@@ -271,18 +286,32 @@ else:
     state.write_text(json.dumps(current))
     result = run()
     assert result.returncode == 0 and json.loads(state.read_text())['logouts'] == 1, result.stdout
-    # Interrupted before it: Keycloak still issued the old issuer, so sessions made in
-    # between are signed out too, and the backend was never changed.
+    # Interrupted before the import: nobody was signed out yet, the backend never changed,
+    # and the rerun signs out once.
     reset(fail_rollout='deployment/keycloak')
     result = run()
     current = json.loads(state.read_text())
     assert result.returncode != 0 and 'issuer' not in current and current['frontend_url'] == 'https://econgraph.com/idp'
-    assert not any(c[2:4] == ['apply', '-f'] for c in logged())
+    assert not any(c[2:4] == ['apply', '-f'] for c in logged()) and 'logouts' not in current
+    assert current['logout_pending'] == 'https://www.econgraph.com/idp'
     current['fail_rollout'] = None
     state.write_text(json.dumps(current))
     result = run()
-    assert result.returncode == 0 and json.loads(state.read_text())['logouts'] == 2, result.stdout
-    print('ok failed rollout stops before the edge switch; rerun recovers, signing out again only if the issuer had not moved')
+    assert result.returncode == 0 and json.loads(state.read_text())['logouts'] == 1, result.stdout
+    # Interrupted after the import moved the issuer but before the sign-out: Keycloak's
+    # hostname and frontendUrl already look switched, so only the marker makes the rerun
+    # sign out.
+    reset(fail_wait=True)
+    result = run()
+    current = json.loads(state.read_text())
+    assert result.returncode != 0 and 'logouts' not in current, result.stdout
+    assert current['hostname'] == current['frontend_url'] == 'https://www.econgraph.com/idp'
+    current['fail_wait'] = False
+    state.write_text(json.dumps(current))
+    result = run()
+    assert result.returncode == 0 and json.loads(state.read_text())['logouts'] == 1, result.stdout
+    assert 'logout_pending' not in json.loads(state.read_text())
+    print('ok failed rollout stops before the edge switch; a rerun signs out exactly once, after the import')
     # --finalize: only after a completed switch; persists and applies permanent redirects.
     reset()
     result = run('--finalize')

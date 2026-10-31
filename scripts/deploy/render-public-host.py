@@ -2,7 +2,8 @@
 """Render public manifests while keeping PUBLIC_HOST as the base DNS name.
 
 Usage: render-public-host.py HOST [MANIFEST ...]
-MAIN_HOST defaults to www.HOST; set it to HOST to restore apex canonicalization.
+MAIN_HOST (required: HOST or www.HOST) is the main host; lib/public-host.sh's
+main_host_init resolves it for the deploy scripts.
 Only the canonical HTTPS host serves public routes and Keycloak. HTTP on both
 names and HTTPS on the alternate name redirect to that host, retaining path and
 query. The redirects are permanent (301) to the apex, and to www.HOST only when
@@ -205,7 +206,18 @@ def main(argv):
     if host.startswith("www."):
         print("render-public-host: give the base name, without the www prefix", file=sys.stderr)
         return 2
-    main_host = os.environ.get("MAIN_HOST", f"www.{host}").strip().lower()
+    # No default: the main host decides the issuer, so a render that guessed www for a
+    # cluster serving the apex would move sign-in. lib/public-host.sh's main_host_init
+    # resolves it (environment, deploy config, else www.HOST) for the deploy scripts.
+    if "MAIN_HOST" not in os.environ:
+        print(
+            "render-public-host: MAIN_HOST is not set; set it to the main host the cluster "
+            "serves (HOST or www.HOST; scripts/deploy/lib/public-host.sh main_host_init "
+            "resolves it from the deploy config)",
+            file=sys.stderr,
+        )
+        return 2
+    main_host = os.environ["MAIN_HOST"].strip().lower()
     if main_host not in (host, f"www.{host}"):
         print("render-public-host: MAIN_HOST must be HOST or www.HOST", file=sys.stderr)
         return 2

@@ -53,6 +53,16 @@ sys.exit(0 if eval(sys.argv[1]) else 1)
 ' "$expr" <<<"$rendered" || fail "$name"
 }
 
+# MAIN_HOST is required with a host: a render that guessed www would move the issuer of a
+# cluster serving the apex (config/keycloak/README.md's realm import rerun, say).
+if out="$("$render" econgraph.com "$manifests/keycloak/realm-import-job.yaml" 2>&1)"; then
+  fail "a render without MAIN_HOST was accepted"
+fi
+grep -q 'MAIN_HOST is not set' <<<"$out" || fail "a render without MAIN_HOST did not say why: $out"
+grep -q 'MAIN_HOST=' "${repo_root}/config/keycloak/README.md" ||
+  fail "config/keycloak/README.md's realm import rerun renders without MAIN_HOST"
+export MAIN_HOST=www.econgraph.com
+
 rendered="$("$render" econgraph.com \
   "$manifests/gateway/routes/httproutes.yaml" "$manifests/gateway/routes/ratelimit-policies.yaml" \
   "$manifests/keycloak/deployment.yaml" "$manifests/keycloak/realm-import-job.yaml" \
@@ -188,7 +198,7 @@ check "rerendering to the apex keeps routes and issuer together" \
 rendered="$forward"
 
 # Another base name works without hardcoded production host names.
-rendered="$("$render" example.org "$manifests/gateway/routes/httproutes.yaml")"
+rendered="$(MAIN_HOST=www.example.org "$render" example.org "$manifests/gateway/routes/httproutes.yaml")"
 check "alternate public domains use their www name" \
   "hosts('econ-graph-frontend-public') == ['www.example.org'] and hosts('econ-graph-www-redirect') == ['example.org'] and redirect('econ-graph-public-redirect')['hostname'] == 'www.example.org'"
 for bad_main in '' other.example.org https://www.econgraph.com www.www.econgraph.com; do

@@ -259,7 +259,9 @@ public_host_init() {
 # Print manifest(s) (or stdin, "-") with the public host applied, if any.
 render_manifest() {
     if [ -n "$PUBLIC_HOST" ]; then
-        MAIN_HOST="${MAIN_HOST:-www.${PUBLIC_HOST}}" ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" "$@"
+        # MAIN_HOST comes from main_host_init (public_host_init); never guessed here.
+        MAIN_HOST="${MAIN_HOST:?MAIN_HOST is not resolved: call public_host_init first}" \
+            ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" "$@"
     else
         cat "$@"
     fi

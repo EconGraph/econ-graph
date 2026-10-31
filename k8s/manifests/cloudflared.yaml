@@ -9,7 +9,8 @@
 #   https://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:443
 # with No TLS Verify on and no HTTP Host header override: cloudflared passes the
 # visitor's Host through. The gateway serves MAIN_HOST; the alternate name
-# redirects permanently to it, with both names covered by the gateway certificate.
+# redirects to it (to www: 302 until switch-main-host.sh --finalize, then 301; to the
+# apex: 301), with both names covered by the gateway certificate.
 # The origin is the gateway's https listener so that the scheme the gateway
 # passes on as X-Forwarded-Proto is the connection's own: no client header can
 # claim https, and plain http for the public host is redirected to https
