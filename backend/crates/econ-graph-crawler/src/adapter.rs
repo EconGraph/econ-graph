@@ -155,6 +155,8 @@ pub struct FetchedPoint {
     pub revision_date: NaiveDate,
     /// Whether this is the first published value for `date`.
     pub is_original_release: bool,
+    /// Captured provider attributes; unknown history is None, never manufactured empty flags.
+    pub attributes: Option<serde_json::Value>,
 }
 
 /// A series found during catalog discovery, to be upserted and enqueued for fetching.

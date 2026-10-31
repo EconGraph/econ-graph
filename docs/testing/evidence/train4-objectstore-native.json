@@ -1,0 +1,203 @@
+{
+  "format_version": 1,
+  "scope": "Six-gate compatibility evidence on disposable Docker stores; CNPG/PITR remains unproved and no persistent host service or native host binary was installed/tested",
+  "overall_status": "incomplete",
+  "native_bytes": 2164260864,
+  "stores": [
+    {
+      "store": "versity",
+      "image": "versity/versitygw@sha256:89cad13cc981986ee284cbafea4613f9533ce6fd5f37a2c96c4c4fb8adb3a316",
+      "gates": {
+        "multipart_hash": {
+          "status": "passed",
+          "evidence": {
+            "bytes": 2164260864,
+            "sha256": "7482368c5480fae13d59159e60c98f496e958a73604e2847a787c533fff98e5f",
+            "parts": 129,
+            "boto3_checksum_default": "when_supported",
+            "conditional_create_required": false
+          },
+          "seconds": 14.459
+        },
+        "interrupted_put": {
+          "status": "passed",
+          "evidence": {
+            "advertised_bytes": 134217728,
+            "partial_object_visible": false,
+            "store_restarted": true
+          },
+          "seconds": 0.645
+        },
+        "paginated_listing": {
+          "status": "passed",
+          "evidence": {
+            "objects": 10007,
+            "pages": 74,
+            "delimiter_prefixes": 11,
+            "disk_evidence": "exact POSIX filename comparison"
+          },
+          "seconds": 19.946
+        },
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          },
+          "seconds": 0.355
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          },
+          "seconds": 0.353
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383"
+          },
+          "seconds": 0.928
+        }
+      },
+      "conditional_create_probe": {
+        "status": "passed",
+        "evidence": {
+          "if_none_match": "412 and original preserved",
+          "sdk_checksum_headers": [
+            "x-amz-checksum-crc32",
+            "x-amz-sdk-checksum-algorithm"
+          ]
+        }
+      },
+      "btrfs_mechanics": {
+        "filesystem_restore": "passed",
+        "marker_sha256": "b092b6eb64a39ba2c5b7eb70c54c569fc0c6cb845e98047b278b88f7c88c95cc",
+        "iceberg_gate": "not_run_requires_actual_crawler_table",
+        "readonly": true,
+        "restored": true
+      },
+      "crawler_source_commit": "6c60852e8098775257acae2e8e5e6776ee5bd48a",
+      "crawler_binary_sha256": "c6ea3086cd1156cf291177b85c2caffe9a061f34d40b2b2831db75ec50350ef3",
+      "disposable_target_verified": true,
+      "warehouse_scope_verified": true,
+      "owned_database_cleanup": "passed"
+    },
+    {
+      "store": "garage",
+      "image": "dxflrs/garage@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5",
+      "gates": {
+        "multipart_hash": {
+          "status": "passed",
+          "evidence": {
+            "bytes": 2164260864,
+            "sha256": "7482368c5480fae13d59159e60c98f496e958a73604e2847a787c533fff98e5f",
+            "parts": 129,
+            "boto3_checksum_default": "when_supported",
+            "conditional_create_required": false
+          },
+          "seconds": 16.368
+        },
+        "interrupted_put": {
+          "status": "passed",
+          "evidence": {
+            "advertised_bytes": 134217728,
+            "partial_object_visible": false,
+            "store_restarted": true
+          },
+          "seconds": 1.657
+        },
+        "paginated_listing": {
+          "status": "passed",
+          "evidence": {
+            "objects": 10007,
+            "pages": 74,
+            "delimiter_prefixes": 11,
+            "disk_evidence": "17 block files plus all logical-object byte checks"
+          },
+          "seconds": 36.887
+        },
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          },
+          "seconds": 0.439
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          },
+          "seconds": 0.407
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd"
+          },
+          "seconds": 22.134
+        }
+      },
+      "conditional_create_probe": {
+        "status": "failed",
+        "reason": "Create-only If-None-Match write overwrote an existing object"
+      },
+      "btrfs_mechanics": {
+        "filesystem_restore": "passed",
+        "marker_sha256": "b092b6eb64a39ba2c5b7eb70c54c569fc0c6cb845e98047b278b88f7c88c95cc",
+        "iceberg_gate": "not_run_requires_actual_crawler_table",
+        "readonly": true,
+        "restored": true
+      },
+      "crawler_source_commit": "6c60852e8098775257acae2e8e5e6776ee5bd48a",
+      "crawler_binary_sha256": "c6ea3086cd1156cf291177b85c2caffe9a061f34d40b2b2831db75ec50350ef3",
+      "disposable_target_verified": true,
+      "warehouse_scope_verified": true,
+      "owned_database_cleanup": "passed"
+    }
+  ],
+  "remaining_acceptance": [
+    "Actual CNPG base backup plus WAL archive and point-in-time recovery against each store; full seven-gate acceptance and persistent/native host deployment remain blocked"
+  ]
+}

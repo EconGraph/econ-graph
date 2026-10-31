@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- monitors.yaml
+- backup-health.yaml
+- dashboard.yaml
+configMapGenerator:
+- name: cnpg-backup-health
+  namespace: econ-graph
+  files:
+  - backup-health.py
+generatorOptions:
+  disableNameSuffixHash: true

@@ -1,0 +1,17 @@
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: econgraph-lan
+spec:
+  blocks:
+  - cidr: ${LOAD_BALANCER_CIDR}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: econgraph-lan
+spec:
+  interfaces:
+  - ${L2_INTERFACE_REGEX}
+  externalIPs: true
+  loadBalancerIPs: true

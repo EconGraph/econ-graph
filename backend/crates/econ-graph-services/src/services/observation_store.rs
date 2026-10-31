@@ -7,7 +7,7 @@ pub use super::series_service::MAX_SERIES_DATA_PAGE;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 pub use econ_graph_core::models::{
-    Observation, ObservationPage, ObservationRequest, PageContext, RevisionMode,
+    Observation, ObservationPage, ObservationRequest, PageContext, RevisionMode, TimeSeriesStore,
 };
 use econ_graph_core::{
     database::DatabasePool,
@@ -15,25 +15,30 @@ use econ_graph_core::{
     models::{DataPoint, DataQueryParams},
     schema::{data_points, economic_series},
 };
-use std::future::Future;
-
-/// Implementations must count, page and select transformation context in one snapshot.
-/// Consumers depend on this interface rather than a database pool or a physical encoding.
-/// Implementations must validate context windows with `ObservationRequest::validate`.
-pub trait TimeSeriesStore {
-    fn read_page(
-        &self,
-        request: ObservationRequest,
-    ) -> impl Future<Output = AppResult<ObservationPage>> + Send;
-}
 
 pub struct PostgresStore<'a> {
     pool: &'a DatabasePool,
+    selection: Option<econ_graph_core::observation_storage::ObservationStorage>,
 }
 
 impl<'a> PostgresStore<'a> {
     pub fn new(pool: &'a DatabasePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            selection: None,
+        }
+    }
+
+    /// Runtime-selected reads validate durable backend state in the observation snapshot.
+    /// `new` remains available for explicit physical-store migration/parity reads.
+    pub fn with_selection(
+        pool: &'a DatabasePool,
+        selection: econ_graph_core::observation_storage::ObservationStorage,
+    ) -> Self {
+        Self {
+            pool,
+            selection: Some(selection),
+        }
     }
 }
 
@@ -58,6 +63,9 @@ impl TimeSeriesStore for PostgresStore<'_> {
             .repeatable_read()
             .read_only()
             .run(async |conn| {
+                if let Some(selection) = self.selection {
+                    selection.assert_read_selection_conn(conn).await?;
+                }
                 let total_count = filtered_data_points(&params)
                     .count()
                     .get_result::<i64>(conn)

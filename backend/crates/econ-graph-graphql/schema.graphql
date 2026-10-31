@@ -295,6 +295,42 @@ type ChartCollaboratorType {
 }
 
 """
+One stored queue job, including its most recent execution outcome.
+"""
+type CrawlerJob {
+	id: ID!
+	source: String!
+	seriesId: String!
+	kind: String!
+	status: String!
+	priority: Int!
+	retryCount: Int!
+	maxRetries: Int!
+	scheduledFor: DateTime
+	startedAt: DateTime
+	finishedAt: DateTime
+	updatedAt: DateTime!
+	"""
+	Worker-recorded error with URLs and common credential assignments redacted.
+	"""
+	errorMessage: String
+}
+
+"""
+Scheduler configuration for an adapter present in this server build.
+"""
+type CrawlerSource {
+	source: String!
+	name: String!
+	"""
+	Null until the crawler has created this source's stored configuration.
+	"""
+	enabled: Boolean
+	crawlFrequencyHours: Int
+	requiresAdminApproval: Boolean
+}
+
+"""
 Queue counts for one crawl source.
 """
 type CrawlerSourceStatus {
@@ -446,6 +482,10 @@ type DataPoint {
 	isOriginalRelease: Boolean!
 	createdAt: DateTime!
 	updatedAt: DateTime!
+	"""
+	Null means provider attributes were not captured for this stored observation.
+	"""
+	attributes: ObservationAttributes
 }
 
 """
@@ -681,6 +721,10 @@ type LatestObservation {
 	Publication date of the revision the value comes from
 	"""
 	revisionDate: NaiveDate!
+	"""
+	Captured provider metadata for this exact observation revision, or null when unknown.
+	"""
+	attributes: ObservationAttributes
 }
 
 type Mutation {
@@ -694,6 +738,11 @@ type Mutation {
 	duplicate in the queue is skipped and not counted).
 	"""
 	triggerCrawl(input: TriggerCrawlInput!): CrawlerStatus!
+	"""
+	Enable or disable future automatic scheduling for one registered source. Existing jobs
+	and in-flight work are unaffected; explicit triggerCrawl remains an operator override.
+	"""
+	setCrawlerSourceEnabled(source: String!, enabled: Boolean!): Boolean!
 	"""
 	Create a new chart annotation
 	"""
@@ -743,6 +792,12 @@ Format: %Y-%m-%d
 * `2000-02-24`
 """
 scalar NaiveDate
+
+"""
+Provider JSON with exact native JSON numbers, including integers and fractional values
+wider than IEEE-754 or 64-bit integers. Clients must use a precision-preserving JSON parser.
+"""
+scalar ObservationAttributes
 
 """
 An observation attribute, e.g. `{name: "obs_status", value: "E"}`.
@@ -859,6 +914,14 @@ type Query {
 		"""
 		after: String
 	): DataPointConnection!
+	"""
+	Persistent queue history, most recently updated first (requires admin.system:read).
+	"""
+	crawlerJobs(limit: Int, offset: Int, source: String, status: String): [CrawlerJob!]!
+	"""
+	Registered adapters and their real scheduler configuration (requires admin.system:read).
+	"""
+	crawlerSources: [CrawlerSource!]!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state; requires
 	`admin.system:read`).

@@ -65,23 +65,23 @@ migration is introduced. Legacy DataPoint conversion intentionally has no attrib
 
 ## Current read and write inventory
 
-The following are explicit Postgres compatibility adapters. They remain optimized or preserve
-an existing uncapped API shape; they are not a promise that swapping one page adapter changes
-every storage read. A later backend must implement these operations before cutover.
+Observation pages use the selected store. The remaining public and batched compatibility
+shapes also dispatch through the durable selection; an Iceberg selection never answers from
+Postgres shadow observations. PostgreSQL keeps optimized grouped and lateral queries.
+The [selected compatibility contract](SELECTED_OBSERVATION_COMPATIBILITY.md) describes their
+snapshot, bounded-read, selection and cache behavior.
 
-| Consumer | Route and semantics | Regression coverage |
-| --- | --- | --- |
-| GraphQL `seriesData`; MCP `get_series_data` | `series_service::get_series_data` → `PostgresStore`; page/count/context together | `observation_contract`, GraphQL `series_data_tests` |
-| GraphQL series `dataPoints` | Direct uncapped Postgres read in `types.rs`; explicit modes, transformations default latest | GraphQL `series_data_tests` revision/default regressions and API contracts |
-| GraphQL series `recentDataPoints` | Direct descending latest-revision read, existing caller limit | GraphQL API contract suite |
-| GraphQL series `dataPointCount` | Direct count of all stored revisions, deliberately independent of latest summaries | GraphQL API contract suite |
-| `DataPointsBySeriesBatcher` | Batched latest revision reads, descending dates; uses shared revision predicate | `test_data_points_by_series_loader_with_real_data` |
-| `DataPointCountBatcher` | Batched counts of all stored rows, zero for missing | `test_data_point_count_loader_with_real_data` |
-| `LatestObservationBatcher` | Lateral join picks latest date then latest revision; current null stays null | GraphQL latest-observation regressions |
-| `cross_section_service::cross_section` | Caller-owned connection, dataset dimension selection and latest/as-of lateral read | `cross_section_service::tests` including same-vintage ties and synthetic rows |
-| Core `DataPoint::{find_all, find_by_series_and_date_range, get_by_series_and_date}` | Legacy raw ORM helpers with no current production consumer; no authorization or revision contract | Existing model tests; excluded from feature-consumer API |
-| Core `DataPoint::{create, create_batch}` | Legacy fixture helpers; not the crawler commit unit | Backend integration and GraphQL fixtures |
-| crawler `persist_series_conn` / worker commit | Writes observations, attempt, and queue completion in the worker's transaction under its lease lock | Existing crawler persistence/lease-fencing regressions |
+| Consumer                                      | Selected read semantics                                                             | Regression coverage                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| GraphQL `seriesData`; MCP `get_series_data`   | Selected `TimeSeriesStore`; page/count/context together                             | `observation_contract`, GraphQL `series_data_tests`            |
+| GraphQL series `dataPoints`                   | Compatibility service; explicit modes, transforms default latest, inclusive bounds  | `selected_compatibility`, GraphQL revision/default regressions |
+| GraphQL series `recentDataPoints`             | Compatibility latest-revision read in descending date order                         | `selected_compatibility` against divergent stores              |
+| GraphQL series `dataPointCount`               | All logical stored revisions, independent of latest summaries                       | `selected_compatibility`                                       |
+| `DataPointsBySeriesBatcher`                   | Batched selected-backend latest revisions; no process-lifetime observation cache    | `selected_compatibility`                                       |
+| `DataPointCountBatcher`                       | Grouped Postgres count or one pinned Iceberg logical population; zero for missing   | `selected_compatibility`, stale loader refusal                 |
+| `LatestObservationBatcher`                    | Indexed PostgreSQL lateral query or pinned Iceberg summary; current null stays null | `selected_compatibility`                                       |
+| `cross_section_service::cross_section`        | Caller connection, RR metadata/pointer snapshot, latest/non-null/AsOf semantics     | Existing cross-section suite and selected-backend API parity   |
+| crawler `persist_series_conn` / worker commit | Caller-owned atomic publication under lease fencing                                 | Crawler persistence, rollback and commit-conflict regressions  |
 
 No pool-based observation write operation is exposed by `TimeSeriesStore`. The transaction-bound
 write unit remains the existing worker transaction, including lease locking, attempt persistence,

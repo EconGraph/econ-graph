@@ -41,6 +41,7 @@
 
 pub mod graphql;
 pub mod imports;
+pub mod observation_json;
 pub mod types;
 
 // Re-export commonly used GraphQL types

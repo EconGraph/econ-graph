@@ -338,6 +338,7 @@ diesel::table! {
         is_original_release -> Bool,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        attributes -> Nullable<Jsonb>,
     }
 }
 
@@ -629,6 +630,29 @@ diesel::table! {
 }
 
 diesel::table! {
+    iceberg_catalog (dataset_id) {
+        dataset_id -> Uuid,
+        metadata_location -> Text,
+        previous_metadata_location -> Nullable<Text>,
+        generation -> Int8,
+        commit_id -> Uuid,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    iceberg_commits (commit_id) {
+        commit_id -> Uuid,
+        dataset_id -> Uuid,
+        metadata_location -> Text,
+        parent_metadata_location -> Nullable<Text>,
+        generation -> Int8,
+        content_sha256 -> Nullable<Text>,
+        committed_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     leading_indicators (id) {
         id -> Uuid,
         leading_country_id -> Uuid,
@@ -714,6 +738,31 @@ diesel::table! {
         dimensions -> Jsonb,
         #[max_length = 100]
         default_measure -> Nullable<Varchar>,
+    }
+}
+
+diesel::table! {
+    timeseries_recovery_state (singleton) {
+        singleton -> Bool,
+        target_id -> Uuid,
+        target_label -> Text,
+        backend -> Text,
+        epoch -> Int8,
+        writes_paused -> Bool,
+        pause_token -> Nullable<Uuid>,
+        checkpoint -> Nullable<Jsonb>,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    timeseries_recovery_transitions (id) {
+        id -> Uuid,
+        target_id -> Uuid,
+        epoch -> Int8,
+        action -> Text,
+        evidence -> Jsonb,
+        created_at -> Timestamptz,
     }
 }
 
@@ -949,6 +998,8 @@ diesel::joinable!(financial_statements -> companies (company_id));
 diesel::joinable!(global_economic_events -> countries (primary_country_id));
 diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
+diesel::joinable!(iceberg_catalog -> datasets (dataset_id));
+diesel::joinable!(iceberg_commits -> datasets (dataset_id));
 diesel::joinable!(reference_file_cache -> data_sources (source_id));
 diesel::joinable!(series_fetch_validators -> economic_series (series_id));
 diesel::joinable!(series_metadata -> data_sources (source_id));
@@ -985,11 +1036,15 @@ diesel::allow_tables_to_appear_in_same_query!(
     global_economic_events,
     global_economic_indicators,
     global_indicator_data,
+    iceberg_catalog,
+    iceberg_commits,
     leading_indicators,
     reference_file_cache,
     security_events,
     series_fetch_validators,
     series_metadata,
+    timeseries_recovery_state,
+    timeseries_recovery_transitions,
     trade_relationships,
     user_data_source_preferences,
     user_sessions,

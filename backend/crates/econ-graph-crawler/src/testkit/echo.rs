@@ -143,6 +143,7 @@ impl SourceAdapter for EchoAdapter {
                     })
                     .transpose()?;
                 Ok(FetchedPoint {
+                    attributes: None,
                     date: p.date,
                     value,
                     revision_date: today,

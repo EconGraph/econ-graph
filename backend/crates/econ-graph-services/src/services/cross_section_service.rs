@@ -6,8 +6,9 @@
 //! with `filter`, and asks for the remaining dimension (`across`) at a fixed date or at each
 //! key's latest non-null observation.
 //!
-//! A request costs two SQL statements whatever the number of keys: one reads the dataset,
-//! one reads every matching series with its observation (a lateral join over `data_points`).
+//! PostgreSQL keeps two batched metadata/observation statements regardless of key count,
+//! plus a durable-selection check and an explicit repeatable-read snapshot. Iceberg pins the
+//! same SQL metadata and immutable table pointer before bounded physical observation reads.
 //!
 //! Observations are read at their current revision: for each date the newest `revision_date`
 //! wins, and on the same revision date a revision beats the original release (the order
@@ -15,11 +16,13 @@
 
 use std::collections::BTreeMap;
 
+use super::observation_compatibility::{self, MAX_COMPATIBILITY_SERIES};
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use diesel::prelude::*;
 use diesel::sql_types::{Jsonb, Nullable, Text};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AnsiTransactionManager, AsyncPgConnection, RunQueryDsl, TransactionManager};
+use econ_graph_core::observation_storage::{ObservationBackend, ObservationStorage};
 use uuid::Uuid;
 
 use econ_graph_core::{
@@ -97,6 +100,43 @@ pub async fn cross_section(
     areas: &Areas,
     request: &CrossSectionRequest,
 ) -> AppResult<Vec<CrossSectionRow>> {
+    let selection = ObservationStorage::from_env()?;
+    if AnsiTransactionManager::transaction_manager_status_mut(conn)
+        .transaction_depth()?
+        .is_some()
+    {
+        #[derive(QueryableByName)]
+        struct Isolation {
+            #[diesel(sql_type = Text)]
+            transaction_isolation: String,
+        }
+        let isolation = diesel::sql_query("SHOW transaction_isolation")
+            .get_result::<Isolation>(conn)
+            .await?;
+        if !matches!(
+            isolation.transaction_isolation.as_str(),
+            "repeatable read" | "serializable"
+        ) {
+            return Err(AppError::BadRequest(
+                "cross-section caller transaction must use repeatable read".into(),
+            ));
+        }
+        return cross_section_snapshot(conn, areas, request, selection).await;
+    }
+    conn.build_transaction()
+        .repeatable_read()
+        .read_only()
+        .run(async |conn| cross_section_snapshot(conn, areas, request, selection).await)
+        .await
+}
+
+async fn cross_section_snapshot(
+    conn: &mut AsyncPgConnection,
+    areas: &Areas,
+    request: &CrossSectionRequest,
+    selection: ObservationStorage,
+) -> AppResult<Vec<CrossSectionRow>> {
+    selection.assert_read_selection_conn(conn).await?;
     let dataset = datasets::table
         .find(request.dataset_id)
         .select(Dataset::as_select())
@@ -126,8 +166,41 @@ pub async fn cross_section(
     // row at a different `revision_date` — see
     // [`econ_graph_core::models::exclude_synthetic_legacy_rows`] — so the synthetic row can't
     // stand in for "known on `$5`" when it really only means "current as of an old crawl".
-    let rows: Vec<SqlRow> = diesel::sql_query(
-        "SELECT s.id AS series_id, s.dimensions ->> $2 AS key, obs.date, obs.value \
+    let rows: Vec<SqlRow> = if selection.backend == ObservationBackend::Iceberg {
+        let mut series = diesel::sql_query("SELECT s.id AS series_id, s.dimensions ->> $2 AS key, NULL::date AS date, NULL::numeric AS value FROM economic_series s WHERE s.dataset_id=$1 AND s.is_active AND s.dimensions @> $3 AND s.dimensions ? $2 ORDER BY (s.dimensions ->> $2) COLLATE \"C\",s.id LIMIT $4")
+            .bind::<diesel::sql_types::Uuid,_>(dataset.id)
+            .bind::<Text,_>(&request.across)
+            .bind::<Jsonb,_>(&filter)
+            .bind::<diesel::sql_types::BigInt,_>((MAX_COMPATIBILITY_SERIES + 1) as i64)
+            .load::<SqlRow>(conn).await?;
+        if series.len() > MAX_COMPATIBILITY_SERIES {
+            return Err(AppError::ServiceUnavailable(
+                "cross-section series budget exceeded".into(),
+            ));
+        }
+        let keys: Vec<_> = series.iter().map(|row| row.series_id).collect();
+        let selected = observation_compatibility::iceberg_latest_conn(
+            conn,
+            &keys,
+            on_date,
+            request.as_of,
+            on_date.is_none(),
+        )
+        .await?;
+        let mut latest: std::collections::HashMap<_, _> = selected
+            .into_iter()
+            .map(|point| (point.series_id, point))
+            .collect();
+        for row in &mut series {
+            if let Some(point) = latest.remove(&row.series_id) {
+                row.date = Some(point.date);
+                row.value = point.value;
+            }
+        }
+        series
+    } else {
+        diesel::sql_query(
+            "SELECT s.id AS series_id, s.dimensions ->> $2 AS key, obs.date, obs.value \
          FROM economic_series s \
          LEFT JOIN LATERAL ( \
              SELECT cur.date, cur.value FROM ( \
@@ -154,15 +227,22 @@ pub async fn cross_section(
          ) obs ON TRUE \
          WHERE s.dataset_id = $1 AND s.is_active \
            AND s.dimensions @> $3 AND s.dimensions ? $2 \
-         ORDER BY (s.dimensions ->> $2) COLLATE \"C\", s.id",
-    )
-    .bind::<diesel::sql_types::Uuid, _>(dataset.id)
-    .bind::<Text, _>(&request.across)
-    .bind::<Jsonb, _>(filter)
-    .bind::<Nullable<diesel::sql_types::Date>, _>(on_date)
-    .bind::<Nullable<diesel::sql_types::Date>, _>(request.as_of)
-    .load(conn)
-    .await?;
+         ORDER BY (s.dimensions ->> $2) COLLATE \"C\", s.id LIMIT $6",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(dataset.id)
+        .bind::<Text, _>(&request.across)
+        .bind::<Jsonb, _>(filter)
+        .bind::<Nullable<diesel::sql_types::Date>, _>(on_date)
+        .bind::<Nullable<diesel::sql_types::Date>, _>(request.as_of)
+        .bind::<diesel::sql_types::BigInt, _>((MAX_COMPATIBILITY_SERIES + 1) as i64)
+        .load(conn)
+        .await?
+    };
+    if rows.len() > MAX_COMPATIBILITY_SERIES {
+        return Err(AppError::ServiceUnavailable(
+            "cross-section series budget exceeded".into(),
+        ));
+    }
 
     // The across dimension when it uses the countries code list, for each key's area, named as
     // the dataset names it (the World Bank's own names for its aggregates).

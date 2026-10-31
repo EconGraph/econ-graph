@@ -1,6 +1,5 @@
 //! One consumer suite exercised by two implementations. Run Postgres explicitly with
 //! DATA_DATABASE_URL=... cargo test -p econ-graph-services --test observation_contract -- --include-ignored.
-use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, Zero};
@@ -51,7 +50,11 @@ fn observations(series_id: Uuid) -> Vec<Observation> {
         value: value.map(|s| BigDecimal::from_str(s).unwrap()),
         created_at: Utc::now(),
         updated_at: Utc::now(),
-        attributes: BTreeMap::new(),
+        attributes: match i {
+            0 => None,
+            1 => Some(serde_json::json!({"source":"fixture","footnotes":[],"preliminary":false})),
+            _ => Some(serde_json::json!({"source":"fixture","footnotes":[{"code":"P","text":"literal\n雪"}],"preliminary":true,"vintage":rev})),
+        },
     })
     .collect()
 }
@@ -187,6 +190,13 @@ async fn contract(store: &impl TimeSeriesStore, series: Uuid, dataset: Uuid) {
         Some(BigDecimal::from_str(TINY).unwrap())
     );
     assert_eq!(all.points[2].value, None);
+    assert_eq!(
+        all.points.iter().map(|p| &p.attributes).collect::<Vec<_>>(),
+        observations(series)
+            .iter()
+            .map(|p| &p.attributes)
+            .collect::<Vec<_>>()
+    );
     assert!(!all.has_next_page());
     for (mode, count, first_value) in [
         (RevisionMode::Latest, 3, None),
@@ -197,6 +207,18 @@ async fn contract(store: &impl TimeSeriesStore, series: Uuid, dataset: Uuid) {
     ] {
         let page = store.read_page(request(series, mode)).await.unwrap();
         assert_eq!(page.total_count, count, "{mode:?}");
+        let expected = observations(series);
+        for point in &page.points {
+            assert_eq!(
+                point.attributes,
+                expected
+                    .iter()
+                    .find(|p| p.id == point.id)
+                    .unwrap()
+                    .attributes,
+                "{mode:?}"
+            );
+        }
         if mode == RevisionMode::Latest {
             assert_eq!(
                 page.points[2].id,
@@ -358,6 +380,7 @@ async fn postgres_satisfies_same_consumer_contract() {
                 econ_graph_core::schema::data_points::series_id.eq(row.series_id),
                 econ_graph_core::schema::data_points::date.eq(row.date),
                 econ_graph_core::schema::data_points::value.eq(row.value),
+                econ_graph_core::schema::data_points::attributes.eq(row.attributes),
                 econ_graph_core::schema::data_points::revision_date.eq(row.revision_date),
                 econ_graph_core::schema::data_points::is_original_release
                     .eq(row.is_original_release),

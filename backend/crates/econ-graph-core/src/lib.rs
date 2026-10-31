@@ -12,6 +12,7 @@ pub mod database;
 pub mod enums;
 pub mod error;
 pub mod models;
+pub mod observation_storage;
 pub mod reference;
 pub mod schema;
 

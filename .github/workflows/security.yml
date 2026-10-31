@@ -35,6 +35,13 @@ jobs:
     - name: Install cargo-audit
       run: cargo install cargo-audit --locked
 
+    - name: Validate patched dependency implementations
+      run: |
+        python3 scripts/check_security_adapters.py
+        python3 -m unittest discover -s scripts -p test_security_adapters.py -v
+        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 --doc
+      working-directory: backend
+
     - name: Run Rust security audit
       run: cargo audit --json > rust-audit.json
       working-directory: backend
@@ -53,6 +60,10 @@ jobs:
 
     - name: Install frontend dependencies
       run: npm ci
+      working-directory: frontend
+
+    - name: Verify patched dependency compatibility
+      run: npm run test:dependency-compat
       working-directory: frontend
 
     - name: Run npm security audit

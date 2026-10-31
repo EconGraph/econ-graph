@@ -21,6 +21,7 @@
 // to this script (frontend's own behavior).
 
 import { execFileSync } from 'node:child_process';
+import { validateMinimatchCompatibility } from './check-minimatch-compat.mjs';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -158,6 +159,7 @@ function main() {
   const cwd = resolve(dir);
   const allowlistPath = allowlistArg ? resolve(allowlistArg) : defaultAllowlistPath;
   const allowlistDisplayPath = relative(process.cwd(), allowlistPath);
+  validateMinimatchCompatibility(resolve(here, '..'));
   const report = runAudit(cwd);
   const allowlist = loadAllowlist(allowlistPath);
   const advisories = findAdvisories(report);

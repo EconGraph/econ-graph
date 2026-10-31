@@ -1,0 +1,144 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: econgraph-app
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    econgraph.io/plane: app
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:39add80f5b1e573e2f6b641c66fd1a2f8dede67ca0330e870285bc1078551390
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: false
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+    nodeSelector:
+      econgraph.io/storage: postgres
+  storage:
+    size: 10Gi
+    storageClass: econgraph-local
+  bootstrap:
+    initdb:
+      database: econ_graph_app
+      owner: econgraph
+      secret:
+        name: econ-graph-app-credentials
+  postgresql:
+    parameters:
+      archive_timeout: 60s
+      log_checkpoints: 'on'
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: app-backups
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 4Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: econgraph-data
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    econgraph.io/plane: data
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:39add80f5b1e573e2f6b641c66fd1a2f8dede67ca0330e870285bc1078551390
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: false
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+    nodeSelector:
+      econgraph.io/storage: postgres
+  storage:
+    size: 100Gi
+    storageClass: econgraph-local
+  bootstrap:
+    initdb:
+      database: econ_graph
+      owner: econgraph
+      secret:
+        name: econ-graph-data-credentials
+      postInitApplicationSQL:
+      - CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      - CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+      - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+      - CREATE EXTENSION IF NOT EXISTS pgcrypto;
+  postgresql:
+    parameters:
+      archive_timeout: 60s
+      log_checkpoints: 'on'
+    shared_preload_libraries:
+    - pg_stat_statements
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: data-backups
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 4Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: econgraph-keycloak
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    econgraph.io/plane: keycloak
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:39add80f5b1e573e2f6b641c66fd1a2f8dede67ca0330e870285bc1078551390
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: false
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+    nodeSelector:
+      econgraph.io/storage: postgres
+  storage:
+    size: 10Gi
+    storageClass: econgraph-local
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+      secret:
+        name: econ-graph-keycloak-credentials
+  postgresql:
+    parameters:
+      archive_timeout: 60s
+      log_checkpoints: 'on'
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: keycloak-backups
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 4Gi

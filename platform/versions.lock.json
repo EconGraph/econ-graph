@@ -1,0 +1,138 @@
+{
+  "format": 1,
+  "kubernetes": "1.36.4",
+  "flux": "2.10.0",
+  "helm_tested": "4.3.1",
+  "charts": {
+    "cilium": {
+      "chart": "cilium",
+      "version": "1.20.4",
+      "app_version": "1.20.4",
+      "repository": "https://helm.cilium.io",
+      "source": "cilium",
+      "namespace": "kube-system",
+      "package": "cilium-1.20.4.tgz",
+      "url": "https://helm.cilium.io/cilium-1.20.4.tgz",
+      "sha256": "505abff8385811df1a949776fc42e9f10697989a332acc86d6e8933efcb855ed"
+    },
+    "envoy": {
+      "chart": "gateway-helm",
+      "version": "v1.9.2",
+      "app_version": "v1.9.2",
+      "repository": "oci://docker.io/envoyproxy",
+      "source": "envoy",
+      "namespace": "envoy-gateway-system",
+      "package": "gateway-helm-v1.9.2.tgz",
+      "url": "oci://docker.io/envoyproxy/gateway-helm",
+      "sha256": "1079cad009e0885f6e10e5f712257d8e5fdaf911d2ceb3fa1b78632c8f29bbf9",
+      "oci_digest": "sha256:be034275b55deeddd6b7bc1f4da6eeb02b8efc418a4a29e2b1977851b24b1e63"
+    },
+    "cert-manager": {
+      "chart": "cert-manager",
+      "version": "v1.21.3",
+      "app_version": "v1.21.3",
+      "repository": "oci://quay.io/jetstack/charts",
+      "source": "cert-manager",
+      "namespace": "cert-manager",
+      "package": "cert-manager-v1.21.3.tgz",
+      "url": "oci://quay.io/jetstack/charts/cert-manager",
+      "sha256": "9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17",
+      "oci_digest": "sha256:e482675aec32862d323a9218293ff7de81192337998615e4378c56498473f240"
+    },
+    "cnpg": {
+      "chart": "cloudnative-pg",
+      "version": "0.29.1",
+      "app_version": "1.30.1",
+      "repository": "https://cloudnative-pg.github.io/charts",
+      "source": "cnpg",
+      "namespace": "cnpg-system",
+      "package": "cloudnative-pg-0.29.1.tgz",
+      "url": "https://github.com/cloudnative-pg/charts/releases/download/cloudnative-pg-v0.29.1/cloudnative-pg-0.29.1.tgz",
+      "sha256": "b53d3991fe84bcf38767e7702cae78666265427a127a26fff168ab4207d2b1df"
+    },
+    "barman": {
+      "chart": "plugin-barman-cloud",
+      "version": "0.8.1",
+      "app_version": "v0.15.1",
+      "repository": "https://cloudnative-pg.github.io/charts",
+      "source": "cnpg",
+      "namespace": "cnpg-system",
+      "package": "plugin-barman-cloud-0.8.1.tgz",
+      "url": "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz",
+      "sha256": "9ad0b9e56da2777a1a0269feaf7215e18297e9c8b5730e04acb27b5d462e9456"
+    },
+    "storage": {
+      "chart": "local-path-provisioner",
+      "version": "0.0.37",
+      "app_version": "v0.0.37",
+      "repository": "oci://ghcr.io/rancher/local-path-provisioner/charts",
+      "source": "storage",
+      "namespace": "local-path-storage",
+      "package": "local-path-provisioner-0.0.37.tgz",
+      "url": "oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner",
+      "sha256": "5fdbc13018711551041bb7112a2f9f7b5a2d9cad534866e389efe1b015871068",
+      "oci_digest": "sha256:81033683ce790e593524b2105945ee0d81bf6608f0c85eb5e0c1082cc74ff03d"
+    },
+    "monitoring": {
+      "chart": "kube-prometheus-stack",
+      "version": "92.16.1",
+      "app_version": "v0.94.2",
+      "repository": "https://prometheus-community.github.io/helm-charts",
+      "source": "prometheus",
+      "namespace": "monitoring",
+      "package": "kube-prometheus-stack-92.16.1.tgz",
+      "url": "https://github.com/prometheus-community/helm-charts/releases/download/kube-prometheus-stack-92.16.1/kube-prometheus-stack-92.16.1.tgz",
+      "sha256": "d2af1fccbd11fedad9e39ac7fd05d9b87613c801eb86cf3dfa33c4097a7fad97"
+    },
+    "loki": {
+      "chart": "loki",
+      "version": "7.5.0",
+      "app_version": "3.6.16",
+      "repository": "https://grafana.github.io/helm-charts",
+      "source": "grafana",
+      "namespace": "monitoring",
+      "package": "loki-7.5.0.tgz",
+      "url": "https://github.com/grafana/helm-charts/releases/download/helm-loki-7.5.0/loki-7.5.0.tgz",
+      "sha256": "bb8b254a57afc6b31ab23a6061216760c91c8ad3499d340442398b88ec603ca8"
+    },
+    "otel": {
+      "chart": "opentelemetry-collector",
+      "version": "0.178.1",
+      "app_version": "0.163.2",
+      "repository": "https://open-telemetry.github.io/opentelemetry-helm-charts",
+      "source": "otel",
+      "namespace": "monitoring",
+      "package": "opentelemetry-collector-0.178.1.tgz",
+      "url": "https://github.com/open-telemetry/opentelemetry-helm-charts/releases/download/opentelemetry-collector-0.178.1/opentelemetry-collector-0.178.1.tgz",
+      "sha256": "6df4120a2ae29f1bf89536eb4b527424f4522b66946857bce41ecc8fe8e9ef40"
+    }
+  },
+  "assets": {
+    "flux-install": {
+      "url": "https://github.com/fluxcd/flux2/releases/download/v2.10.0/install.yaml",
+      "sha256": "a8c838ccd9be5d30eba9df87cd229b7c4eb80c0049fba1bc3b9840829f267f28",
+      "file": "flux-install.yaml"
+    },
+    "kubernetes-openapi": {
+      "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/v1.36.4/api/openapi-spec/swagger.json",
+      "sha256": "dcede2063da1d7ad62ecb5af8adb6d7fabd0b52385a7fa0048afb491dac90450",
+      "file": "kubernetes-openapi.json"
+    },
+    "cilium-pool-crd": {
+      "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.4/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumloadbalancerippools.yaml",
+      "sha256": "31dd3d26d987e46bc04d66ec2f9bdcf2aa2b13b7b368e515ca324961b55d65b1",
+      "file": "cilium-pool-crd.yaml"
+    },
+    "cilium-l2-crd": {
+      "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.4/pkg/k8s/apis/cilium.io/client/crds/v2alpha1/ciliuml2announcementpolicies.yaml",
+      "sha256": "5a5ada1455e5169d1f95d4814302677ebff4bf477b5298483e9b827a70feee7a",
+      "file": "cilium-l2-crd.yaml"
+    },
+    "cilium-network-policy-crd": {
+      "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.4/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumnetworkpolicies.yaml",
+      "sha256": "62c6de8f358da125b94468d39187edb1cea157d79503fdc50ccec8a6aaa79a76",
+      "file": "cilium-network-policy-crd.yaml"
+    }
+  },
+  "postgres_image": "ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:39add80f5b1e573e2f6b641c66fd1a2f8dede67ca0330e870285bc1078551390"
+}

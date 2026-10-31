@@ -843,6 +843,7 @@ impl SourceAdapter for WorldBankAdapter {
                             points: rows
                                 .iter()
                                 .map(|r| FetchedPoint {
+                                    attributes: None,
                                     date: r.date,
                                     value: Some(r.value.clone()),
                                     revision_date: data.last_updated,

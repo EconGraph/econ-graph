@@ -155,6 +155,7 @@ impl History {
             .iter()
             .filter(|p| known_vintage.is_none_or(|k| p.start >= k))
             .map(|p| FetchedPoint {
+                attributes: None,
                 date: p.date,
                 value: (p.value != ".").then(|| BigDecimal::from_str(&p.value).unwrap()),
                 revision_date: p.start,

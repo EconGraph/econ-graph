@@ -1847,6 +1847,7 @@ fn wdi_usa(revision_date: NaiveDate, points: &[(NaiveDate, &str)]) -> FetchedSer
         points: points
             .iter()
             .map(|(date, value)| FetchedPoint {
+                attributes: None,
                 date: *date,
                 value: Some(BigDecimal::from_str(value).unwrap()),
                 revision_date,
@@ -2105,7 +2106,8 @@ async fn concurrent_persists_of_one_series_are_serialised() {
         let mut conn = pool_a.get().await.unwrap();
         conn.transaction::<_, econ_graph_core::error::AppError, _>(async |conn| {
             let w =
-                persist::persist_series_conn(conn, SourceId::WorldBank, USA, &release_a).await?;
+                persist::persist_series_conn(conn, &pool_a, SourceId::WorldBank, USA, &release_a)
+                    .await?;
             a_wrote_tx.send(()).unwrap();
             commit_rx.await.unwrap();
             Ok(w)

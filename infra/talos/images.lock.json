@@ -1,0 +1,29 @@
+{
+  "verified_on": "2026-10-30",
+  "talos_version": "v1.14.5",
+  "kubernetes_version": "1.36.4",
+  "schematic_id": "47f718feafaf5934d42735b54da7805fa768627393a4318a0c2d47fd5b1ecb79",
+  "official_extensions": [
+    {
+      "name": "siderolabs/btrfs",
+      "ref": "ghcr.io/siderolabs/btrfs:v1.14.5",
+      "digest": "sha256:e3a5f1f34c66b72460c508629fd3a9e203f3b82b3cec220288ce02df13a2e45d"
+    },
+    {
+      "name": "siderolabs/qemu-guest-agent",
+      "ref": "ghcr.io/siderolabs/qemu-guest-agent:11.1.1",
+      "digest": "sha256:c396304665b7aa10ee0d6cc5094c7426025846b06e06f3fa576af48fca75b3a4"
+    },
+    {
+      "name": "siderolabs/util-linux-tools",
+      "ref": "ghcr.io/siderolabs/util-linux-tools:2.42.2",
+      "digest": "sha256:f93f23e96b28e00228cf9a006a15c1648bd5975be989adb1bee6c05c046001a1"
+    }
+  ],
+  "sources": {
+    "talos_release": "https://github.com/siderolabs/talos/releases/tag/v1.14.5",
+    "schematic": "https://factory.talos.dev/schematics/47f718feafaf5934d42735b54da7805fa768627393a4318a0c2d47fd5b1ecb79",
+    "extensions": "https://factory.talos.dev/version/v1.14.5/extensions/official",
+    "kubernetes": "https://github.com/kubernetes/kubernetes/releases/tag/v1.36.4"
+  }
+}

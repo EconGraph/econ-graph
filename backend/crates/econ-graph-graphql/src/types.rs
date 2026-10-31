@@ -181,20 +181,26 @@ impl EconomicSeriesType {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let data_points = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .filter(models::revision_filter(None, false))
-            .order(dsl::date.desc())
-            .limit(limit as i64)
-            .load::<models::DataPoint>(&mut conn)
-            .await?;
-
-        let limited_points = data_points.into_iter().map(DataPointType::from).collect();
+        use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+        let mut rows = observation_compatibility::points_batch(
+            pool,
+            &[series_uuid],
+            PointsQuery {
+                start_date: None,
+                end_date: None,
+                revisions: models::RevisionMode::Latest,
+                exclude_synthetic: false,
+                descending: true,
+                limit: Some(i64::from(limit)),
+            },
+        )
+        .await?;
+        let limited_points = rows
+            .remove(&series_uuid)
+            .unwrap_or_default()
+            .into_iter()
+            .map(DataPointType::from)
+            .collect();
 
         Ok(limited_points)
     }
@@ -204,18 +210,12 @@ impl EconomicSeriesType {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let count = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await?;
-
-        Ok(count as i32)
+        let counts = econ_graph_services::services::observation_compatibility::counts_batch(
+            pool,
+            &[series_uuid],
+        )
+        .await?;
+        Ok(i32::try_from(*counts.get(&series_uuid).unwrap_or(&0)).unwrap_or(i32::MAX))
     }
 
     /// The series' newest observation: its latest date, at the newest revision of that date.
@@ -256,44 +256,34 @@ impl EconomicSeriesType {
             filter.latest_revision_only = Some(true);
         }
 
-        // Query data points directly from database
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let mut query = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .into_boxed();
-
-        if let Some(start_date) = filter.start_date {
-            query = query.filter(dsl::date.ge(start_date));
-        }
-
-        if let Some(end_date) = filter.end_date {
-            query = query.filter(dsl::date.le(end_date));
-        }
-
-        let original_only = filter.original_only.unwrap_or(false);
-        let as_of_or_latest =
-            filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false);
-
-        if original_only || as_of_or_latest {
-            query = query.filter(models::exclude_synthetic_legacy_rows());
-        }
-
-        if original_only {
-            query = query.filter(dsl::is_original_release.eq(true));
-        }
-
-        if as_of_or_latest {
-            query = query.filter(models::revision_filter(filter.as_of, original_only));
-        }
-
-        let data_points = query
-            .order(dsl::date.asc())
-            .load::<models::DataPoint>(&mut conn)
-            .await?;
+        let request = models::ObservationRequest::from_legacy(
+            models::DataQueryParams {
+                series_id: series_uuid,
+                start_date: filter.start_date,
+                end_date: filter.end_date,
+                original_only: filter.original_only,
+                latest_revision_only: filter.latest_revision_only,
+                as_of: filter.as_of,
+                limit: None,
+                offset: None,
+            },
+            None,
+        );
+        use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+        let mut rows = observation_compatibility::points_batch(
+            pool,
+            &[series_uuid],
+            PointsQuery {
+                start_date: request.start_date,
+                end_date: request.end_date,
+                revisions: request.revisions,
+                exclude_synthetic: request.revisions != models::RevisionMode::All,
+                descending: false,
+                limit: None,
+            },
+        )
+        .await?;
+        let data_points = rows.remove(&series_uuid).unwrap_or_default();
 
         // Apply transformation if requested
         if let Some(transformation) = transformation {
@@ -372,6 +362,8 @@ pub struct DataPointType {
     pub is_original_release: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Null means provider attributes were not captured for this stored observation.
+    pub attributes: Option<crate::observation_json::ObservationJson>,
 }
 
 impl From<DataPoint> for DataPointType {
@@ -385,6 +377,9 @@ impl From<DataPoint> for DataPointType {
             is_original_release: data_point.is_original_release,
             created_at: data_point.created_at,
             updated_at: data_point.updated_at,
+            attributes: data_point
+                .attributes
+                .map(crate::observation_json::ObservationJson),
         }
     }
 }
@@ -399,6 +394,8 @@ pub struct LatestObservationType {
     pub value: Option<BigDecimal>,
     /// Publication date of the revision the value comes from
     pub revision_date: NaiveDate,
+    /// Captured provider metadata for this exact observation revision, or null when unknown.
+    pub attributes: Option<crate::observation_json::ObservationJson>,
 }
 
 /// GraphQL representation of a data source

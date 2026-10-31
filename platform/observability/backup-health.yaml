@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnpg-backup-health
+  namespace: econ-graph
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-backup-health
+  namespace: econ-graph
+rules:
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters
+  - backups
+  verbs:
+  - get
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-backup-health
+  namespace: econ-graph
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-backup-health
+subjects:
+- kind: ServiceAccount
+  name: cnpg-backup-health
+  namespace: econ-graph
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-backup-health
+  namespace: econ-graph
+spec:
+  schedule: '*/5 * * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 60
+      template:
+        metadata:
+          labels:
+            app: cnpg-backup-health
+        spec:
+          serviceAccountName: cnpg-backup-health
+          restartPolicy: Never
+          containers:
+          - name: check
+            image: python:3.15.2-slim@sha256:2145e0fc7fbd73eaae44c3c4759cf303e2c4e531353b207c6493226a02668ca5
+            command:
+            - python
+            - /scripts/backup-health.py
+            env:
+            - name: NAMESPACE
+              value: econ-graph
+            volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+          volumes:
+          - name: script
+            configMap:
+              name: cnpg-backup-health

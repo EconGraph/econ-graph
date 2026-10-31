@@ -41,6 +41,21 @@ set -euo pipefail
 
 TEST_ROOT="${ECONGRAPH_TEST_ROOT:-}"
 NAMES=(data-plane app-prod)
+# Enabled only by the separately accepted host-store installer; existing hosts
+# retain their two sources. The same no-deletion snapshot/send/receive pipeline
+# then covers POSIX objects and xattrs on the new independent subvolume.
+OBJECTSTORE_COVERAGE="$TEST_ROOT/etc/econgraph/objectstore-snapshots.enabled"
+coverage_error=0
+if [[ -e "$OBJECTSTORE_COVERAGE" || -L "$OBJECTSTORE_COVERAGE" ]]; then
+    if [[ ! -f "$OBJECTSTORE_COVERAGE" || -L "$OBJECTSTORE_COVERAGE" ]] \
+        || [[ "$(cat "$OBJECTSTORE_COVERAGE")" != objectstore-v1 ]]; then
+        echo "error: invalid objectstore snapshot coverage marker" >&2
+        # This source is unsafe to include, but unrelated backups must continue.
+        coverage_error=1
+    else
+        NAMES+=(objectstore)
+    fi
+fi
 SRV_ROOT="$TEST_ROOT/srv/econgraph"
 SNAPSHOT_DIR="$SRV_ROOT/snapshots"
 POOL_MOUNT="$TEST_ROOT/srv/econgraph-backups"
@@ -137,7 +152,7 @@ newest_epoch() {
     echo "$best"
 }
 
-failures=0
+failures=$coverage_error
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
 # 1. local read-only snapshots

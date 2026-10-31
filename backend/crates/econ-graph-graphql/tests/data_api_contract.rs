@@ -166,7 +166,7 @@ async fn page(f: &Fixture, variables: Value) -> ObservationPage {
         .series_data
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn versioned_operations_preserve_observations_in_separate_and_combined_databases() {
     for split in [true, false] {
         let f = Fixture::new(split).await;
@@ -284,7 +284,7 @@ async fn versioned_operations_preserve_observations_in_separate_and_combined_dat
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn caller_grants_do_not_leak_through_a_reused_schema_or_request_cache() {
     let f = Fixture::new(true).await;
     let schema = f.schema();
@@ -306,7 +306,7 @@ async fn caller_grants_do_not_leak_through_a_reused_schema_or_request_cache() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn app_only_routing_and_unavailable_annotation_targets_fail_closed() {
     let f = Fixture::new(true).await;
     let user = User::get_or_create_for_subject(
@@ -362,4 +362,139 @@ async fn app_only_routing_and_unavailable_annotation_targets_fail_closed() {
         .unwrap();
     assert!(annotations.is_empty());
     server.verify().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observation_attributes_follow_selected_vintages_and_remain_nullable_in_public_reads() {
+    for split in [true, false] {
+        let f = Fixture::new(split).await;
+        let original = json!({"source":"BLS","footnotes":[{"code":"P","text":"literal\n\"雪\"","extension":{"future":null}}],"preliminary":true,"estimated":null});
+        let latest = json!({"source":"BLS","footnotes":[],"preliminary":false});
+        {
+            use diesel_async::RunQueryDsl;
+            let mut conn = f.data.get().await.unwrap();
+            for (id, attributes) in [
+                ("8933cde1-0db6-454c-8675-805b4386f311", original.clone()),
+                ("8933cde1-0db6-454c-8675-805b4386f312", latest.clone()),
+                ("8933cde1-0db6-454c-8675-805b4386f315", latest.clone()),
+            ] {
+                diesel::sql_query("UPDATE data_points SET attributes=$1 WHERE id=$2")
+                    .bind::<diesel::sql_types::Jsonb, _>(attributes)
+                    .bind::<diesel::sql_types::Uuid, _>(Uuid::parse_str(id).unwrap())
+                    .execute(&mut conn)
+                    .await
+                    .unwrap();
+            }
+        }
+        for (filter, expected) in [
+            ("", original.clone()),
+            (",filter:{latestRevisionOnly:true}", latest.clone()),
+            (",filter:{asOf:\"2024-01-20\"}", original.clone()),
+            (",filter:{originalOnly:true}", original.clone()),
+        ] {
+            let query = format!("{{seriesData(seriesId:\"{SERIES}\"{filter}){{nodes{{id attributes}}}} series(id:\"{SERIES}\"){{latestObservation{{attributes}}}}}}");
+            let response = f
+                .schema()
+                .execute(Request::new(query).data(anonymous(&[Role::CatalogFredRead])))
+                .await;
+            assert!(response.errors.is_empty(), "{:?}", response.errors);
+            let data = response.data.into_json().unwrap();
+            assert_eq!(data["seriesData"]["nodes"][0]["attributes"], expected);
+            assert_eq!(data["series"]["latestObservation"]["attributes"], latest);
+        }
+        let response = f
+            .schema()
+            .execute(
+                Request::new(format!(
+                    "{{seriesData(seriesId:\"{SERIES}\"){{nodes{{attributes}}}}}}"
+                ))
+                .data(anonymous(&[Role::CatalogFredRead])),
+            )
+            .await;
+        assert!(response.errors.is_empty());
+        assert_eq!(
+            response.data.into_json().unwrap()["seriesData"]["nodes"][2]["attributes"],
+            Value::Null
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observation_attribute_numbers_survive_postgres_and_actual_graphql_response_serialization()
+{
+    let integer = "9".repeat(240);
+    let fraction = format!("0.{}1234567890123456789", "0".repeat(210));
+    let raw = format!(
+        r#"{{"source":"recorded-provider","future":{{"integer":{integer},"fraction":{fraction},"exponent":1e1000}},"footnotes":[{{"code":"P","extension":{{"negative":-{integer}}}}}],"unknown":null}}"#
+    );
+    let attributes: Value = serde_json::from_str(&raw).unwrap();
+    for split in [true, false] {
+        let f = Fixture::new(split).await;
+        let stored: Value = {
+            use diesel_async::RunQueryDsl;
+            let mut conn = f.data.get().await.unwrap();
+            #[derive(diesel::QueryableByName)]
+            struct Stored {
+                #[diesel(sql_type=diesel::sql_types::Jsonb)]
+                attributes: Value,
+            }
+            diesel::sql_query("UPDATE data_points SET attributes=$1 WHERE series_id=$2")
+                .bind::<diesel::sql_types::Jsonb, _>(attributes.clone())
+                .bind::<diesel::sql_types::Uuid, _>(Uuid::parse_str(SERIES).unwrap())
+                .execute(&mut conn)
+                .await
+                .unwrap();
+            diesel::sql_query("SELECT attributes FROM data_points WHERE series_id=$1 LIMIT 1")
+                .bind::<diesel::sql_types::Uuid, _>(Uuid::parse_str(SERIES).unwrap())
+                .get_result::<Stored>(&mut conn)
+                .await
+                .unwrap()
+                .attributes
+        };
+        assert_eq!(
+            stored["future"]["integer"].as_number().unwrap().to_string(),
+            integer
+        );
+        assert_eq!(
+            stored["future"]["fraction"]
+                .as_number()
+                .unwrap()
+                .to_string(),
+            fraction
+        );
+        assert_eq!(
+            stored["future"]["exponent"]
+                .as_number()
+                .unwrap()
+                .to_string(),
+            format!("1{}", "0".repeat(1000))
+        );
+        let query = format!("{{seriesData(seriesId:\"{SERIES}\"){{nodes{{attributes}}}} series(id:\"{SERIES}\"){{dataPoints{{attributes}} latestObservation{{attributes}}}}}}");
+        let response = f
+            .schema()
+            .execute(Request::new(query).data(anonymous(&[Role::CatalogFredRead])))
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        // Use the production HTTP reply adapter, not only resolver DTOs: the scalar bridge
+        // and HTTP writer must both retain native JSON numbers without narrowing them.
+        let http = warp::Reply::into_response(async_graphql_warp::GraphQLResponse::from(response));
+        assert_eq!(http.status(), warp::http::StatusCode::OK);
+        let body = warp::hyper::body::to_bytes(http.into_body()).await.unwrap();
+        let wire = std::str::from_utf8(&body).unwrap();
+        assert!(
+            !wire.contains("$serde_json::private::Number"),
+            "private serde number tokens leaked into JSON response"
+        );
+        let decoded: Value = serde_json::from_str(&wire).unwrap();
+        for returned in [
+            &decoded["data"]["seriesData"]["nodes"][0]["attributes"],
+            &decoded["data"]["series"]["dataPoints"][0]["attributes"],
+            &decoded["data"]["series"]["latestObservation"]["attributes"],
+        ] {
+            assert_eq!(returned, &stored, "split={split}");
+            assert!(returned["future"]["integer"].is_number());
+            assert!(returned["future"]["fraction"].is_number());
+            assert!(returned["future"]["exponent"].is_number());
+        }
+    }
 }

@@ -361,12 +361,12 @@ pub async fn get_series_data(
     params: DataQueryParams,
     context: Option<PageContext>,
 ) -> AppResult<SeriesDataPage> {
-    use super::observation_store::{PostgresStore, TimeSeriesStore};
-    let page = PostgresStore::new(pool)
-        .read_page(econ_graph_core::models::ObservationRequest::from_legacy(
-            params, context,
-        ))
-        .await?;
+    let page = super::selected_observation_store::read_observations(
+        pool,
+        econ_graph_core::models::ObservationRequest::from_legacy(params, context),
+        econ_graph_core::observation_storage::ObservationStorage::from_env()?,
+    )
+    .await?;
     Ok(SeriesDataPage {
         points: page.points.into_iter().map(DataPoint::from).collect(),
         context: page.context.into_iter().map(DataPoint::from).collect(),
@@ -573,6 +573,7 @@ mod tests {
 
         let data_points = vec![
             DataPoint {
+                attributes: None,
                 id: Uuid::new_v4(),
                 series_id: Uuid::new_v4(),
                 date: NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
@@ -583,6 +584,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
             },
             DataPoint {
+                attributes: None,
                 id: Uuid::new_v4(),
                 series_id: Uuid::new_v4(),
                 date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),

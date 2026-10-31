@@ -1,0 +1,694 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-default-deny
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-econ-graph-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+    ports:
+    - port: 9876
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-econ-graph-data-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-data-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    ports:
+    - port: 9876
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-econ-graph-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-frontend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+    ports:
+    - port: 3000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: envoy-gateway-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: envoy
+          gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    - podSelector:
+        matchLabels:
+          app: econ-graph-data-backend
+    - podSelector:
+        matchLabels:
+          app: keycloak-realm-import
+    ports:
+    - port: 8080
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cnpg-app
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: econgraph-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - &id001
+      podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-app
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    - podSelector:
+        matchLabels:
+          app: econ-graph-data-backend
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: cnpg-system
+    ports:
+    - port: 5432
+      protocol: TCP
+    - port: 8000
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9187
+      protocol: TCP
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - *id001
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cnpg-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: econgraph-data
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - &id001
+      podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    - podSelector:
+        matchLabels:
+          app: econ-graph-data-backend
+    - podSelector:
+        matchLabels:
+          app: crawler-worker
+    - podSelector:
+        matchLabels:
+          app: crawler-migrate
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: cnpg-system
+    ports:
+    - port: 5432
+      protocol: TCP
+    - port: 8000
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9187
+      protocol: TCP
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - *id001
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cnpg-keycloak
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: econgraph-keycloak
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - &id001
+      podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-keycloak
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: cnpg-system
+    ports:
+    - port: 5432
+      protocol: TCP
+    - port: 8000
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9187
+      protocol: TCP
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - *id001
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-econ-graph-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-backend
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 8080
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-app
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-econ-graph-data-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-data-backend
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 8080
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-app
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 8080
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-keycloak
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+    ports:
+    - port: 443
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-keycloak-realm-import
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak-realm-import
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 8080
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backup-health-api
+spec:
+  podSelector:
+    matchLabels:
+      app: cnpg-backup-health
+  policyTypes:
+  - Egress
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-crawler-worker
+spec:
+  podSelector:
+    matchLabels:
+      app: crawler-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+    ports:
+    - port: 443
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-crawler-migrate
+spec:
+  podSelector:
+    matchLabels:
+      app: crawler-migrate
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-econ-graph-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9876
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-econ-graph-data-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-data-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9876
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-crawler-worker
+spec:
+  podSelector:
+    matchLabels:
+      app: crawler-worker
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9102
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-cache
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 7800
+      protocol: TCP
+    - port: 57800
+      protocol: TCP
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - port: 7800
+      protocol: TCP
+    - port: 57800
+      protocol: TCP

@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler-worker
+  namespace: econ-graph
+  labels:
+    app: crawler-worker
+    component: crawler
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: crawler-worker
+  template:
+    metadata:
+      labels:
+        app: crawler-worker
+        component: crawler
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9102'
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 120
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.38
+        command:
+        - sh
+        - -c
+        args:
+        - "echo \"Waiting for PostgreSQL to be ready...\"\nuntil nc -z data-postgres-service\
+          \ 5432; do\n  echo \"PostgreSQL is unavailable - sleeping\"\n  sleep 2\n\
+          done\necho \"PostgreSQL is ready!\"\n"
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 32Mi
+            cpu: 50m
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: crawler-worker
+        image: ${CRAWLER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9102
+          name: metrics
+          protocol: TCP
+        env:
+        - name: DATA_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: data-database-url
+        - name: RUST_LOG
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: RUST_LOG
+        - name: REFERENCE_DATA_DIR
+          value: /app/reference
+        - name: CRAWLER_WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CRAWLER_CONCURRENCY
+          value: '4'
+        - name: CRAWLER_METRICS_ADDR
+          value: 0.0.0.0:9102
+        - name: FRED_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: fred-api-key
+              optional: true
+        - name: BLS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: bls-api-key
+              optional: true
+        - name: BEA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: bea-api-key
+              optional: true
+        - name: CENSUS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: census-api-key
+              optional: true
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: Always

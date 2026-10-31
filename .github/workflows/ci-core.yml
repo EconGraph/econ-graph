@@ -902,6 +902,27 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run independent data authorization and proxy contracts (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for independent data contracts}"
+        cargo test -p econ-graph-backend --bin econ-graph-backend independent_data_tests:: -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/independent-data.log"
+        grep -Eq '^test result: ok\. 2 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/independent-data.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend data_access::tests:: -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/data-boundary.log"
+        grep -Eq '^test result: ok\. 2 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/data-boundary.log"
+        python3 ../scripts/data-access/test_independent_access.py
+      working-directory: backend
+
+    - name: Run selected observation compatibility contract (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for storage compatibility}"
+        cargo test -p econ-graph-graphql --test selected_compatibility -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/selected-compatibility.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/selected-compatibility.log"
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail
@@ -1047,6 +1068,21 @@ jobs:
         # The XBRL integration tests need the xbrl-parser feature (required-features).
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
         exit $status
+      working-directory: backend
+
+    - name: Rehearse real Iceberg backfill and catalog-object recovery
+      if: ${{ !cancelled() }}
+      env:
+        DATA_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+        TRAIN4_RECOVERY_TEST_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+        TRAIN4_RECOVERY_BINARY: ${{ github.workspace }}/backend/target/debug/timeseries-recovery
+        TRAIN4_PG_DUMP: ${{ github.workspace }}/scripts/train4/pg-dump
+        TRAIN4_PG_RESTORE: ${{ github.workspace }}/scripts/train4/pg-restore
+        TRAIN4_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+      run: |
+        cargo test --locked -p econ-graph-timeseries --test iceberg_contract --test smoke_safety -- --include-ignored --test-threads=1
+        cargo build --locked -p econ-graph-timeseries --bin timeseries-recovery
+        python3 ../scripts/train4/test_recovery.py
       working-directory: backend
 
     # Report documentation failures even when the broader test step failed.
@@ -1422,6 +1458,9 @@ jobs:
     - name: Run Rust security audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        python3 scripts/check_security_adapters.py
+        python3 -m unittest discover -s scripts -p test_security_adapters.py -v
+        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 --doc
         cargo audit
       working-directory: backend
 
@@ -1440,7 +1479,9 @@ jobs:
       # Gates every production and dev dependency, with narrow, documented
       # exceptions for advisories with no upstream fix (see
       # scripts/npm-audit-allowlist.json) instead of a blanket --omit=dev.
-      run: node scripts/check-npm-audit.mjs .
+      run: |
+        npm run test:dependency-compat
+        node scripts/check-npm-audit.mjs .
       working-directory: frontend
 
     - name: Install admin-frontend dependencies
