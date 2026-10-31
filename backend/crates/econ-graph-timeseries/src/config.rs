@@ -21,8 +21,10 @@ impl StorageConfig {
         }
     }
     pub fn from_env() -> Result<Self> {
-        let warehouse =
-            std::env::var("ICEBERG_WAREHOUSE").context("ICEBERG_WAREHOUSE is required")?;
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+    pub fn from_lookup(mut lookup: impl FnMut(&str) -> Option<String>) -> Result<Self> {
+        let warehouse = lookup("ICEBERG_WAREHOUSE").context("ICEBERG_WAREHOUSE is required")?;
         let mut properties = HashMap::new();
         for (env, key) in [
             ("S3_ENDPOINT", iceberg::io::S3_ENDPOINT),
@@ -31,7 +33,7 @@ impl StorageConfig {
             ("AWS_SECRET_ACCESS_KEY", iceberg::io::S3_SECRET_ACCESS_KEY),
             ("AWS_SESSION_TOKEN", iceberg::io::S3_SESSION_TOKEN),
         ] {
-            if let Ok(value) = std::env::var(env) {
+            if let Some(value) = lookup(env) {
                 properties.insert(key.into(), value);
             }
         }
@@ -53,15 +55,17 @@ impl StorageConfig {
             if properties
                 .get(iceberg::io::S3_ENDPOINT)
                 .is_some_and(|e| e.starts_with("http://"))
-                && std::env::var("AWS_ALLOW_HTTP").as_deref() != Ok("true")
+                && lookup("AWS_ALLOW_HTTP").as_deref() != Some("true")
             {
                 bail!("HTTP object-store endpoint requires explicit AWS_ALLOW_HTTP=true");
             }
         }
-        Ok(Self {
+        let config = Self {
             warehouse,
             properties,
-        })
+        };
+        config.factory()?;
+        Ok(config)
     }
     fn factory(&self) -> Result<Arc<dyn StorageFactory>> {
         if self.warehouse.contains("://") {

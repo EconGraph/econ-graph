@@ -114,7 +114,10 @@ impl SqlCatalog {
         )
     }
     pub async fn load_at(&self, pointer: &TablePointer) -> Result<Table> {
-        let io = self.config.file_io()?;
+        Self::load_at_config(&self.config, pointer).await
+    }
+    pub async fn load_at_config(config: &StorageConfig, pointer: &TablePointer) -> Result<Table> {
+        let io = config.file_io()?;
         let metadata =
             iceberg::spec::TableMetadata::read_from(&io, &pointer.metadata_location).await?;
         Ok(Table::builder()
@@ -240,6 +243,10 @@ impl SqlCatalog {
         if rows.is_empty() {
             bail!("cannot prepare an empty observation batch")
         }
+        if rows.len() > crate::query::QueryLimits::from_env()?.max_rows {
+            bail!("observation batch exceeds ICEBERG_MAX_SCAN_ROWS")
+        }
+
         let mut unique = std::collections::HashSet::new();
         for row in rows {
             if row.attributes.as_ref().is_some_and(|v| !v.is_object()) {
@@ -278,6 +285,7 @@ impl SqlCatalog {
         let table = staging
             .register_table(&ident, base.metadata_location.clone())
             .await?;
+        self.validate_observation_identities(&table, rows).await?;
         let schema = table.current_schema_ref();
         let ids: Vec<_> = rows.iter().map(|r| r.series_id).collect();
         let series = economic_series::table
@@ -347,6 +355,52 @@ impl SqlCatalog {
             rows: rows.len(),
             content_sha256,
         })
+    }
+    async fn validate_observation_identities(
+        &self,
+        table: &Table,
+        rows: &[Observation],
+    ) -> Result<()> {
+        let ctx = crate::query::context()?;
+        ctx.register_table(
+            "observations",
+            Arc::new(
+                iceberg_datafusion::IcebergStaticTableProvider::try_new_from_table(table.clone())
+                    .await?,
+            ),
+        )?;
+        let ids = arrow_array::RecordBatch::try_new(
+            Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+                "id",
+                arrow_schema::DataType::Utf8,
+                false,
+            )])),
+            vec![Arc::new(arrow_array::StringArray::from(
+                rows.iter().map(|r| r.id.to_string()).collect::<Vec<_>>(),
+            ))],
+        )?;
+        ctx.register_batch("candidate_ids", ids)?;
+        let existing=ctx.sql("SELECT id,series_id,date,revision_date,value,is_original_release,created_at,updated_at,attributes FROM (SELECT o.*,row_number() OVER(PARTITION BY o.id ORDER BY o._commit_generation DESC) AS _rank FROM observations o INNER JOIN candidate_ids c ON o.id=c.id) WHERE _rank=1").await?.collect().await?;
+        let by_id: HashMap<_, _> = rows.iter().map(|r| (r.id, r)).collect();
+        for old in encoding::from_batches(&existing)? {
+            let new = by_id
+                .get(&old.id)
+                .context("identity join returned unexpected UUID")?;
+            if (
+                old.series_id,
+                old.date,
+                old.revision_date,
+                old.is_original_release,
+            ) != (
+                new.series_id,
+                new.date,
+                new.revision_date,
+                new.is_original_release,
+            ) {
+                bail!("existing observation UUID cannot be retargeted to another series, date, vintage or release kind");
+            }
+        }
+        Ok(())
     }
     /// Publish only in an existing caller-owned transaction, after its crawl claim has been
     /// locked and verified. This method never opens/commits a pool transaction. Errors must
@@ -451,33 +505,105 @@ impl SqlCatalog {
         Ok(objects)
     }
     pub async fn read_rows(&self, pointer: &TablePointer) -> Result<Vec<Observation>> {
-        self.read_rows_filtered(pointer, None).await
+        Self::read_matching_config(
+            &self.config,
+            pointer,
+            None,
+            None,
+            None,
+            crate::query::QueryLimits::from_env()?.max_rows,
+        )
+        .await
     }
     pub async fn read_rows_filtered(
         &self,
         pointer: &TablePointer,
         request: Option<&econ_graph_core::models::ObservationRequest>,
     ) -> Result<Vec<Observation>> {
-        let table = self.load_at(pointer).await?;
-        let ctx = datafusion::prelude::SessionContext::new();
+        match request {
+            Some(req) => {
+                self.read_series_at(
+                    pointer,
+                    &[req.series_id],
+                    req.start_date,
+                    req.end_date,
+                    crate::query::QueryLimits::from_env()?.max_rows,
+                )
+                .await
+            }
+            None => self.read_rows(pointer).await,
+        }
+    }
+    pub async fn read_series_at(
+        &self,
+        pointer: &TablePointer,
+        series: &[Uuid],
+        start: Option<chrono::NaiveDate>,
+        end: Option<chrono::NaiveDate>,
+        max_rows: usize,
+    ) -> Result<Vec<Observation>> {
+        Self::read_series_at_config(&self.config, pointer, series, start, end, max_rows).await
+    }
+    /// Read a frozen metadata pointer without borrowing another database connection. Useful
+    /// when a compatibility caller already owns the SQL snapshot which selected that pointer.
+    pub async fn read_series_at_config(
+        config: &StorageConfig,
+        pointer: &TablePointer,
+        series: &[Uuid],
+        start: Option<chrono::NaiveDate>,
+        end: Option<chrono::NaiveDate>,
+        max_rows: usize,
+    ) -> Result<Vec<Observation>> {
+        if series.is_empty() {
+            return Ok(vec![]);
+        }
+        Self::read_matching_config(config, pointer, Some(series), start, end, max_rows).await
+    }
+    async fn read_matching_config(
+        config: &StorageConfig,
+        pointer: &TablePointer,
+        series: Option<&[Uuid]>,
+        start: Option<chrono::NaiveDate>,
+        end: Option<chrono::NaiveDate>,
+        max_rows: usize,
+    ) -> Result<Vec<Observation>> {
+        if max_rows == 0 {
+            bail!("snapshot read requires a positive row budget")
+        }
+        let budget = max_rows.min(crate::query::QueryLimits::from_env()?.max_rows);
+        if series.is_some_and(|ids| ids.len() > budget) {
+            bail!("snapshot series batch exceeds configured row budget")
+        }
+        let table = Self::load_at_config(config, pointer).await?;
+        let ctx = crate::query::context()?;
         let provider =
             iceberg_datafusion::IcebergStaticTableProvider::try_new_from_table(table).await?;
         ctx.register_table("observations", Arc::new(provider))?;
-        // Observation UUIDs never migrate between series. Filtering the identity partition
-        // before the window enables physical partition pruning; date bounds follow dedup.
-        let series = request
-            .map(|r| format!(" WHERE series_id='{}'", r.series_id))
+        // The write boundary enforces immutable UUID/series identity. Identity filtering
+        // before the window therefore enables safe physical partition pruning.
+        let series = series
+            .map(|ids| {
+                format!(
+                    " WHERE series_id IN ({})",
+                    ids.iter()
+                        .map(|id| format!("'{id}'"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
             .unwrap_or_default();
         let mut bounds = String::new();
-        if let Some(req) = request {
-            if let Some(day) = req.start_date {
-                bounds.push_str(&format!(" AND date>=DATE '{day}'"));
-            }
-            if let Some(day) = req.end_date {
-                bounds.push_str(&format!(" AND date<=DATE '{day}'"));
-            }
+        if let Some(day) = start {
+            bounds.push_str(&format!(" AND date>=DATE '{day}'"));
         }
-        let sql=format!("SELECT id,series_id,date,revision_date,value,is_original_release,created_at,updated_at,attributes FROM (SELECT *,row_number() OVER(PARTITION BY id ORDER BY _commit_generation DESC) AS _rank FROM observations{series}) WHERE _rank=1{bounds} ORDER BY series_id,date,revision_date,id");
-        encoding::from_batches(&ctx.sql(&sql).await?.collect().await?)
+        if let Some(day) = end {
+            bounds.push_str(&format!(" AND date<=DATE '{day}'"));
+        }
+        let sql=format!("SELECT id,series_id,date,revision_date,value,is_original_release,created_at,updated_at,attributes FROM (SELECT *,row_number() OVER(PARTITION BY id ORDER BY _commit_generation DESC) AS _rank FROM observations{series}) WHERE _rank=1{bounds} ORDER BY series_id,date,revision_date,id LIMIT {}",budget+1);
+        let batches = ctx.sql(&sql).await?.collect().await?;
+        if batches.iter().map(|b| b.num_rows()).sum::<usize>() > budget {
+            bail!("Iceberg snapshot exceeds the configured row budget; refusing to truncate observations or counts")
+        }
+        encoding::from_batches(&batches)
     }
 }

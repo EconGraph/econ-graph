@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod config;
 pub mod encoding;
 pub mod maintenance;
+pub mod query;
 pub mod store;
 pub use catalog::{CatalogCheckpoint, PreparedCommit, ReachableObject, SqlCatalog, TablePointer};
 pub use config::StorageConfig;

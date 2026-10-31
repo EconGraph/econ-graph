@@ -31,7 +31,7 @@ impl SqlCatalog {
             .context("dataset has no Iceberg catalog")?;
         let table = self.load_at(&pointer).await?;
         let snapshots = table.metadata().snapshots().len();
-        let ctx = datafusion::prelude::SessionContext::new();
+        let ctx = crate::query::context()?;
         ctx.register_table(
             "observations",
             Arc::new(

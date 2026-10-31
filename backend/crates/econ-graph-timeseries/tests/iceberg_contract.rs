@@ -39,10 +39,92 @@ fn arrow_encoding_is_lossless_for_exact_values_and_attributes() -> Result<()> {
     Ok(())
 }
 #[test]
+fn encoding_rejects_lossy_timestamps_and_nonobject_attributes() -> Result<()> {
+    use chrono::Timelike;
+    let schema = encoding::schema()?;
+    let mut row = rows(Uuid::new_v4())[0].clone();
+    row.created_at = row.created_at.with_nanosecond(123456789).unwrap();
+    assert!(encoding::to_batch(&schema, &[row.clone()], 1).is_err());
+    row.created_at = row.created_at.with_nanosecond(123456000).unwrap();
+    for attributes in [
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!([])),
+        Some(serde_json::json!("bad")),
+    ] {
+        row.attributes = attributes;
+        assert!(encoding::to_batch(&schema, &[row.clone()], 1).is_err());
+    }
+    for attributes in [
+        None,
+        Some(serde_json::json!({})),
+        Some(serde_json::json!({"nested":{"explicit":null},"ordered":["b","a"]})),
+    ] {
+        row.attributes = attributes;
+        let decoded = encoding::from_batches(&[encoding::to_batch(&schema, &[row.clone()], 1)?])?;
+        assert_eq!(decoded[0], row);
+    }
+    Ok(())
+}
+#[test]
 fn local_config_rejects_relative_warehouse() {
     assert!(StorageConfig::local("relative").file_io().is_err());
 }
 
+#[test]
+fn query_limits_reject_unbounded_or_invalid_budgets() -> Result<()> {
+    use econ_graph_timeseries::query::QueryLimits;
+    let defaults = QueryLimits::from_lookup(|_| None)?;
+    assert_eq!(defaults.max_rows, 100_000);
+    assert_eq!(defaults.memory_bytes, 256 * 1024 * 1024);
+    for value in ["0", "invalid", &usize::MAX.to_string()] {
+        assert!(QueryLimits::from_lookup(
+            |name| (name == "ICEBERG_MAX_SCAN_ROWS").then(|| value.into())
+        )
+        .is_err());
+    }
+    assert!(QueryLimits::from_lookup(
+        |name| (name == "ICEBERG_QUERY_MEMORY_BYTES").then(|| "1023".into())
+    )
+    .is_err());
+    Ok(())
+}
+#[test]
+fn endpoint_validation_is_pure_and_redacts_credential_input() -> Result<()> {
+    for endpoint in [
+        "https://user:credential-sentinel@example.test",
+        "https://example.test?token=credential-sentinel",
+        "https://example.test#credential-sentinel",
+        "ftp://example.test",
+    ] {
+        let result = StorageConfig::from_lookup(|name| match name {
+            "ICEBERG_WAREHOUSE" => Some("s3://bucket/prefix".into()),
+            "S3_ENDPOINT" => Some(endpoint.into()),
+            _ => None,
+        });
+        let error = result
+            .err()
+            .expect("invalid endpoint must be rejected")
+            .to_string();
+        assert!(
+            !error.contains("credential-sentinel"),
+            "error exposed URL credentials"
+        );
+    }
+    assert!(StorageConfig::from_lookup(|name| match name {
+        "ICEBERG_WAREHOUSE" => Some("s3://bucket/prefix".into()),
+        "S3_ENDPOINT" => Some("http://localhost:9000".into()),
+        _ => None,
+    })
+    .is_err());
+    assert!(StorageConfig::from_lookup(|name| match name {
+        "ICEBERG_WAREHOUSE" => Some("s3://bucket/prefix".into()),
+        "S3_ENDPOINT" => Some("http://localhost:9000".into()),
+        "AWS_ALLOW_HTTP" => Some("true".into()),
+        _ => None,
+    })
+    .is_ok());
+    Ok(())
+}
 #[tokio::test]
 #[ignore = "requires explicitly disposable DATA_DATABASE_URL, creates real Iceberg objects in tempdir"]
 async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Result<()> {
@@ -90,6 +172,45 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
     assert_eq!(
         encoding::canonical_rows(&catalog.read_rows(&prepared.next).await?)?,
         encoding::canonical_rows(&rows)?
+    );
+    assert!(
+        SqlCatalog::read_series_at_config(
+            &catalog.config,
+            &prepared.next,
+            &[series],
+            None,
+            None,
+            5
+        )
+        .await
+        .is_err(),
+        "bounded snapshot must error instead of truncating"
+    );
+    assert_eq!(
+        SqlCatalog::read_series_at_config(
+            &catalog.config,
+            &prepared.next,
+            &[series],
+            None,
+            None,
+            6
+        )
+        .await?
+        .len(),
+        6
+    );
+    assert_eq!(
+        catalog
+            .read_series_at(
+                &prepared.next,
+                &[series],
+                Some(NaiveDate::from_ymd_opt(2020, 2, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2020, 2, 1).unwrap()),
+                1
+            )
+            .await?
+            .len(),
+        1
     );
     let store = IcebergStore::new(catalog.clone());
     for mode in [
@@ -145,6 +266,64 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
         .await?;
     assert!(!changed);
     drop(conn);
+    assert!(
+        catalog
+            .prepare_append(Uuid::new_v4(), dataset, &[rows[0].clone(), rows[0].clone()])
+            .await
+            .is_err(),
+        "one batch cannot repeat an observation UUID"
+    );
+    let mut changed = rows[0].clone();
+    changed.value = Some("12".parse()?);
+    assert!(
+        catalog
+            .prepare_append(commit, dataset, &[changed])
+            .await
+            .is_err(),
+        "a committed UUID cannot acknowledge different content"
+    );
+    let other_series = Uuid::new_v4();
+    let mut conn = pool.get().await?;
+    diesel::sql_query("INSERT INTO economic_series(id,source_id,external_id,title,frequency,dataset_id) VALUES($1,$2,'other','Other','monthly',$3)").bind::<diesel::sql_types::Uuid,_>(other_series).bind::<diesel::sql_types::Uuid,_>(source).bind::<diesel::sql_types::Uuid,_>(dataset).execute(&mut conn).await?;
+    drop(conn);
+    let mut retargeted = rows[0].clone();
+    retargeted.series_id = other_series;
+    assert!(
+        catalog
+            .prepare_append(Uuid::new_v4(), dataset, &[retargeted])
+            .await
+            .is_err(),
+        "observation ID cannot move between series"
+    );
+    for field in 0..3 {
+        let mut retargeted = rows[0].clone();
+        match field {
+            0 => retargeted.date += chrono::Duration::days(1),
+            1 => retargeted.revision_date += chrono::Duration::days(1),
+            _ => retargeted.is_original_release = !retargeted.is_original_release,
+        }
+        assert!(
+            catalog
+                .prepare_append(Uuid::new_v4(), dataset, &[retargeted])
+                .await
+                .is_err(),
+            "observation natural identity is immutable"
+        );
+    }
+    assert_eq!(
+        store
+            .read_page(request(series, RevisionMode::All))
+            .await?
+            .total_count,
+        6
+    );
+    assert_eq!(
+        store
+            .read_page(request(other_series, RevisionMode::All))
+            .await?
+            .total_count,
+        0
+    );
     // Two writers based on the same pointer: only one can publish. A conflicting pointer
     // cannot partially update the caller's series summary in the surrounding transaction.
     let mut correction = rows[1].clone();

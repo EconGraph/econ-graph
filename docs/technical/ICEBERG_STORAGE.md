@@ -143,3 +143,26 @@ rejects a 5-row budget for that dataset, preserves the exact contents/old pinned
 expires metadata snapshots to the requested retain-last value, and still traverses the old
 recovery objects afterward. This bounds correctness; production throughput/capacity remains
 an independent acceptance gate.
+
+## Read and identity budgets
+
+Every materialized Iceberg snapshot read now applies a SQL `LIMIT budget + 1` before collecting
+results and fails on overflow, preserving truthful counts instead of silently truncating data.
+`ICEBERG_MAX_SCAN_ROWS` defaults to a conservative development limit of 100,000 logical rows;
+`ICEBERG_QUERY_MEMORY_BYTES` defaults to 256 MiB managed DataFusion memory. Query batches are
+1,024 rows with two target partitions. Operators must measure and explicitly configure larger
+approved workloads; the default is not a production capacity claim. Compaction, identity
+validation and recovery reads use these same managed query contexts.
+
+`SqlCatalog::read_series_at_config` reads one or several series from a frozen pointer without
+acquiring a database connection, allowing callers with a size-one pool to retain their own SQL
+snapshot. The pool-backed `read_series_at` delegates to it. Both enforce the smaller of the
+explicit caller budget and global row budget before returning observations.
+
+The write boundary joins candidate observation UUIDs against the current frozen table and
+rejects attempts to change an existing UUID's series, observation date, revision date or
+original-release kind. This preserves note targets and makes series partition pruning safe.
+Concurrent writers still publish through pointer CAS, so a losing writer restages against the
+new identity set. Value/attribute corrections retain their identity and advance only their
+physical commit generation. Lossy sub-microsecond audit timestamps and invalid attribute shapes
+are rejected before staging; their content hashes cannot acknowledge truncated storage.
