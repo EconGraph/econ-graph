@@ -1,4 +1,4 @@
-import { DASHBOARD_SERIES, parseDashboardSeries } from '../dashboardSeries';
+import { DASHBOARD_SERIES, chipLabel, parseDashboardSeries } from '../dashboardSeries';
 import realm from '../../../../config/keycloak/econ-graph-realm.json';
 
 const valid = {
@@ -51,6 +51,27 @@ describe('parseDashboardSeries', () => {
 
   test.each(['', '  ', 3])('rejects units %j', units => {
     expect(() => parseDashboardSeries([{ ...valid, units }])).toThrow('units');
+  });
+
+  test('accepts a display id and keeps the external id', () => {
+    const named = { ...valid, displayId: 'NIPA Table 1.1.5, line 1' };
+    expect(parseDashboardSeries([named])).toEqual([named]);
+  });
+
+  test.each(['', '  ', 3, null])('rejects displayId %j', displayId => {
+    expect(() => parseDashboardSeries([{ ...valid, displayId }])).toThrow('displayId');
+  });
+});
+
+describe('chipLabel', () => {
+  test('names the series by its display id when it has one', () => {
+    const [entry] = parseDashboardSeries([{ ...valid, displayId: 'NIPA Table 1.1.5, line 1' }]);
+    expect(chipLabel(entry)).toBe('BEA · NIPA Table 1.1.5, line 1');
+  });
+
+  test('falls back to the external id without one', () => {
+    const [entry] = parseDashboardSeries([valid]);
+    expect(chipLabel(entry)).toBe('BEA · bea_nipa/T10105.1.Q');
   });
 
   test('rejects a display scale without units for the scaled value', () => {

@@ -5,6 +5,7 @@
     "sourceName": "Bureau of Economic Analysis (BEA)",
     "sourceLabel": "BEA",
     "externalId": "bea_nipa/T10105.1.Q",
+    "displayId": "NIPA Table 1.1.5, line 1",
     "fractionDigits": 2,
     "displayScale": "trillions",
     "units": "Trillions of dollars, seasonally adjusted annual rate"

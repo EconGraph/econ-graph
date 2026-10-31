@@ -152,7 +152,7 @@ export interface DashboardCard {
   label: string;
   sourceName: string;
   externalId: string;
-  /** The chip under the heading: the short source name and the series id. */
+  /** The chip under the heading: the short source name and the series' readable id. */
   chip: string;
   /** The units line under the value: the card's own label for the value as shown. */
   units: string;
@@ -169,7 +169,7 @@ export const DASHBOARD_CARDS: readonly DashboardCard[] = [
     label: 'Gross Domestic Product',
     sourceName: SEEDED.beaGdp.sourceName,
     externalId: SEEDED.beaGdp.externalId,
-    chip: `BEA ${SEEDED.beaGdp.externalId}`,
+    chip: 'BEA · NIPA Table 1.1.5, line 1',
     units: 'Trillions of dollars, seasonally adjusted annual rate',
     // bea/nipa_t10105_q.json's 2024Q4 line 1: 28,624,702 million dollars, stored in dollars.
     latestShown: { date: 'Oct 1, 2024', value: '28.62' },
@@ -178,7 +178,7 @@ export const DASHBOARD_CARDS: readonly DashboardCard[] = [
     label: 'Unemployment Rate',
     sourceName: SEEDED.blsCpi.sourceName,
     externalId: 'LNS14000000',
-    chip: 'BLS LNS14000000',
+    chip: 'BLS · LNS14000000',
     units: 'Percent, seasonally adjusted',
     // bls/unemployment_rate_monthly.json
     latestShown: { date: 'Mar 1, 2024', value: '3.8' },
@@ -187,7 +187,7 @@ export const DASHBOARD_CARDS: readonly DashboardCard[] = [
     label: 'Consumer Price Index',
     sourceName: SEEDED.blsCpi.sourceName,
     externalId: 'CUSR0000SA0',
-    chip: 'BLS CUSR0000SA0',
+    chip: 'BLS · CUSR0000SA0',
     units: 'Index 1982-84=100, seasonally adjusted',
     // bls/cpi_seasonally_adjusted_monthly.json
     latestShown: { date: 'Mar 1, 2024', value: '312.230' },
@@ -196,7 +196,7 @@ export const DASHBOARD_CARDS: readonly DashboardCard[] = [
     label: 'Nonfarm Payrolls',
     sourceName: SEEDED.blsCpi.sourceName,
     externalId: 'CES0000000001',
-    chip: 'BLS CES0000000001',
+    chip: 'BLS · CES0000000001',
     units: 'Thousands of employees, seasonally adjusted',
     // bls/nonfarm_payrolls_monthly.json, in thousands as BLS publishes it.
     latestShown: { date: 'Mar 1, 2024', value: '158,089' },

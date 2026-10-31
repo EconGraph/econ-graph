@@ -27,7 +27,7 @@ The dashboard's cards show the newest value of four headline series, listed in `
 | Consumer Price Index | BLS | `CUSR0000SA0` | Index 1982-84=100, seasonally adjusted |
 | Nonfarm Payrolls | BLS | `CES0000000001` | Thousands of employees, seasonally adjusted |
 
-An entry's `fractionDigits` sets the decimals shown. `displayScale` (`thousands`, `millions`, `billions` or `trillions`) divides the stored value before it is shown: BEA stores GDP in dollars, so the GDP card divides by 10^12. `units` replaces the series' own units under the value, and is required with `displayScale`, since the stored units describe the unscaled value.
+An entry's `fractionDigits` sets the decimals shown. `displayScale` (`thousands`, `millions`, `billions` or `trillions`) divides the stored value before it is shown: BEA stores GDP in dollars, so the GDP card divides by 10^12. `units` replaces the series' own units under the value, and is required with `displayScale`, since the stored units describe the unscaled value. Each card's chip reads "source · id": `displayId` gives a readable name where the series id isn't one (the GDP card's chip reads "BEA · NIPA Table 1.1.5, line 1"), and the chip shows the series id otherwise. The card always looks its series up by the series id.
 
 ### Search and Filtering
 

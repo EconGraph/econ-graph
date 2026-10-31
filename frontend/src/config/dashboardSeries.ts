@@ -10,7 +10,8 @@
  * An entry may set `displayScale` to show a value stored in base units (BEA stores dollars,
  * not millions of dollars) in thousands, millions, billions or trillions, and `units` to label
  * the value as shown. Set `units` whenever `displayScale` is set: the series' own units
- * describe the stored value, not the scaled one.
+ * describe the stored value, not the scaled one. `displayId` names the series on the card's
+ * chip when its external id isn't readable (BEA's `bea_nipa/T10105.1.Q`).
  */
 
 import rawDashboardSeries from './dashboard-series.json';
@@ -42,6 +43,21 @@ export interface DashboardSeriesEntry {
   displayScale?: DisplayScale;
   /** Units shown under the value, in place of the series' own units. */
   units?: string;
+  /**
+   * How the card's chip names the series, for example "NIPA Table 1.1.5, line 1", when the
+   * external id is not readable as is; absent shows the external id. Display only: the card
+   * still looks the series up by `externalId`.
+   */
+  displayId?: string;
+}
+
+/**
+ * The chip text that names an entry's series: its source and its readable id.
+ * @param entry - The dashboard entry.
+ * @returns For example "BEA · NIPA Table 1.1.5, line 1" or "BLS · LNS14000000".
+ */
+export function chipLabel(entry: DashboardSeriesEntry): string {
+  return `${entry.sourceLabel} · ${entry.displayId ?? entry.externalId}`;
 }
 
 /**
@@ -102,6 +118,10 @@ export function parseDashboardSeries(value: unknown): DashboardSeriesEntry[] {
         `dashboard-series.json entry ${index} sets "displayScale" without "units" for the scaled value`
       );
     }
+    const { displayId } = record;
+    if (displayId !== undefined && (typeof displayId !== 'string' || displayId.trim() === '')) {
+      throw new Error(`dashboard-series.json entry ${index} has an empty "displayId"`);
+    }
     seen.add(id);
     return {
       id,
@@ -112,6 +132,7 @@ export function parseDashboardSeries(value: unknown): DashboardSeriesEntry[] {
       fractionDigits,
       ...(displayScale !== undefined && { displayScale: displayScale as DisplayScale }),
       ...(units !== undefined && { units: units as string }),
+      ...(displayId !== undefined && { displayId: displayId as string }),
     };
   });
 }
