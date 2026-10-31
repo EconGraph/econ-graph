@@ -6,6 +6,8 @@
 #     it to admin; --withdraw does the same without the admin grant; both together in one
 #     command, the production one;
 #   - a second run changes nothing (idempotent);
+#   - a catalog read on a client scope the anonymous reader uses is named, since it still
+#     reaches visitors;
 #   - --make-public restores the original state exactly;
 #   - it refuses, changing nothing, a role that isn't a catalog read, a role or composite
 #     that doesn't exist, a missing or non-kind --context, and a typo in a later role;
@@ -221,6 +223,24 @@ run -- --context kind-econ-graph --admin-only catalog.fred:read
 [ "$status" != 0 ] || fail "a grant that did not stick was not reported"
 grep -q "after the change catalog.fred:read is not admin-only: admin lacks it" "$out" ||
   fail "the read-back mismatch is not named: $(cat "$out")"
+
+# A catalog read mapped on a client scope the anonymous reader uses still reaches visitors:
+# the change is made and the scope is named. A reader that still holds the role elsewhere,
+# with no scope mapping it, gets the note instead.
+reset
+set_state '{"reader_scopes": {"basic": ["catalog.fred:read"]}, "reader_direct": ["catalog.fred:read"]}'
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+[ "$status" = 0 ] || fail "a reader client scope stopped the change: $(cat "$out")"
+grep -qF "warning: client scope basic, assigned to econgraph-anonymous, maps catalog.fred:read" "$out" ||
+  fail "the reader's client scope is not named: $(cat "$out")"
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+grep -qF "warning: client scope basic" "$out" || fail "an unchanged role hides the client scope: $(cat "$out")"
+reset
+set_state '{"reader_scopes": {"basic": []}, "reader_direct": ["catalog.fred:read"]}'
+run -- --context kind-econ-graph --admin-only catalog.fred:read
+if grep -q "warning: client scope" "$out"; then fail "warned about a client scope that maps nothing: $(cat "$out")"; fi
+grep -qF "note: the econgraph-anonymous service account still holds catalog.fred:read" "$out" ||
+  fail "no note for the reader's other mapping: $(cat "$out")"
 
 # A running realm import (a deploy) would write back its earlier snapshot: refuse.
 reset

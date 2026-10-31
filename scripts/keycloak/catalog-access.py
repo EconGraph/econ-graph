@@ -150,6 +150,16 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
                 steps.append(("remove %s from %s" % (role_name, name), "DELETE", write_path))
 
     target = {"admin-only": "admin-only", "withdraw": "not public", "public": "public"}[mode]
+    if anonymous and mode != "public":
+        # Anonymous tokens are built with the reader's client scopes as well as its own scope
+        # mapping, and the realm import refuses a catalog read mapped on one of them.
+        scopes = [scope["name"] for kind in ("default", "optional")
+                  for scope in kc.call("GET", "/clients/%s/%s-client-scopes" % (anonymous[0]["id"], kind))
+                  if holds("/client-scopes/%s/scope-mappings/clients/%s" % (scope["id"], api_id))]
+        if scopes:
+            out("warning: client scope %s, assigned to %s, maps %s, so anonymous tokens include it while "
+                "the service account holds it, and deploys refuse to run; remove it from that client "
+                "scope's scope mappings in Keycloak" % (", ".join(scopes), ANONYMOUS_CLIENT, role_name))
     if not steps:
         out("%s is already %s; nothing to change" % (role_name, target))
         return 0
@@ -174,8 +184,9 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
     if anonymous and mode != "public":
         account = kc.call("GET", "/clients/%s/service-account-user" % anonymous[0]["id"], missing_ok=True)
         if account and holds("/users/%s/role-mappings/clients/%s/composite" % (account["id"], api_id)):
-            out("note: the %s service account still holds %s through another mapping; its scope no longer "
-                "admits it, so anonymous tokens leave it out" % (ANONYMOUS_CLIENT, role_name))
+            out("note: the %s service account still holds %s through another mapping; anonymous tokens "
+                "leave it out unless a client scope assigned to it maps it (warned about above)"
+                % (ANONYMOUS_CLIENT, role_name))
     out("%s is now %s" % (role_name, target))
     return len(steps)
 

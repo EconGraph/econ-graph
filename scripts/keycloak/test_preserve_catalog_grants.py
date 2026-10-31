@@ -25,6 +25,10 @@ class CatalogPolicyTests(unittest.TestCase):
                                        {"id": "anon", "clientId": "econgraph-anonymous"}],
             self.prefix + "/clients/api/scope-mappings/clients/api": [],
             self.prefix + "/client-scopes": [],
+            self.prefix + "/clients/anon/default-client-scopes": [{"id": "basic", "name": "basic"}],
+            self.prefix + "/clients/anon/optional-client-scopes": [],
+            self.prefix + "/default-default-client-scopes": [{"id": "profile", "name": "profile"}],
+            self.prefix + "/default-optional-client-scopes": [],
             self.prefix + "/clients/anon/service-account-user": {"id": "reader", "enabled": True},
             self.prefix + "/users/reader/role-mappings": {"realmMappings": []},
             self.prefix + "/users/reader/groups": [],
@@ -455,6 +459,80 @@ class CatalogPolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.merge()
         self.state[self.prefix + "/client-scopes"] = None
+        with self.assertRaises(RuntimeError):
+            self.merge()
+
+    def test_catalog_reads_on_a_client_scope_the_reader_uses_fail_the_deploy(self):
+        # Anonymous tokens are built with the reader's client scopes: a catalog read mapped on
+        # one reaches visitors whatever the reader's own scope mapping says.
+        self.add_target("clientScope", "basic", "basic", ["catalog.fred:read"])
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("basic (catalog.fred:read)", str(raised.exception))
+        # Optional scopes, and scopes the realm file assigns, count too.
+        self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = []
+        self.state[self.prefix + "/clients/anon/optional-client-scopes"] = [{"id": "extra", "name": "catalog-extra"}]
+        self.add_target("clientScope", "extra", "catalog-extra", ["catalog.imf:read"])
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("catalog-extra (catalog.imf:read)", str(raised.exception))
+        self.state[self.prefix + "/clients/anon/optional-client-scopes"] = []
+        self.merge()
+        realm = copy.deepcopy(self.realm)
+        next(c for c in realm["clients"] if c["clientId"] == "econgraph-anonymous")[
+            "defaultClientScopes"].append("catalog-extra")
+        with self.assertRaises(RuntimeError):
+            self.merge_with_warnings(realm)
+        # A new realm is checked against the realm file alone.
+        self.state[self.prefix] = None
+        realm["clientScopeMappings"]["econ-graph-api"].append({"clientScope": "catalog-extra", "roles": ["catalog.imf:read"]})
+        with self.assertRaises(RuntimeError):
+            self.merge_with_warnings(realm)
+
+    def test_other_api_roles_on_the_readers_client_scopes_and_partner_scopes_are_allowed(self):
+        self.add_target("clientScope", "basic", "basic", ["api:mcp"])
+        self.add_target("clientScope", "extra", "catalog-extra", ["catalog.imf:read"])
+        self.merge()
+
+    def test_catalog_reads_on_a_realm_default_client_scope_are_named(self):
+        self.add_target("clientScope", "profile", "profile", ["catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("realm default client scope profile maps catalog.imf:read", warnings)
+        self.assertEqual(self.scope_entries(merged)[("clientScope", "profile")], ["catalog.imf:read"])
+
+    def test_grants_of_roles_the_import_deletes_are_dropped_and_named(self):
+        # A role config-cli created and the realm file dropped is deleted by the import; a grant
+        # of it written into the import would fail it part way.
+        self.state[self.prefix]["attributes"]["de.adorsys.keycloak.config.state-default-roles-client-econ-graph-api-0"] = \
+            json.dumps([r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]])
+        self.realm["roles"]["client"]["econ-graph-api"] = [
+            r for r in self.realm["roles"]["client"]["econ-graph-api"] if r["name"] != "catalog.ilo:read"]
+        edge = {"name": "catalog.ilo:read", "clientRole": True, "containerId": "api"}
+        operator_made = {"name": "catalog.partner:read", "clientRole": True, "containerId": "api"}
+        self.state[self.prefix + "/roles/catalog-public/composites"] = [edge, operator_made]
+        self.state[self.prefix + "/roles/admin/composites"] = [edge]
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [{"name": "catalog.ilo:read"}]
+        self.state[self.prefix + "/users/reader/role-mappings"] = {
+            "realmMappings": [], "clientMappings": {"econ-graph-api": {"mappings": [{"name": "catalog.ilo:read"}]}}}
+        self.add_target("client", "partner", "partner-x", ["catalog.ilo:read", "catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        # An operator-made role isn't config-cli's to delete, so its grant stays.
+        self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
+                         ["catalog.partner:read"])
+        self.assertNotIn("catalog.ilo:read", self.role(merged, "admin")["composites"]["client"]["econ-graph-api"])
+        entries = self.scope_entries(merged)
+        self.assertEqual(entries[("client", "partner-x")], ["catalog.imf:read"])
+        self.assertEqual(entries[("client", "econgraph-anonymous")], [])
+        self.assertEqual(merged["users"][0]["clientRoles"], {"econ-graph-api": []})
+        for where in ("role catalog-public", "role admin", "client partner-x", "client econgraph-anonymous",
+                      "the econgraph-anonymous service account"):
+            self.assertIn("catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on "
+                          + where, warnings)
+        self.assertNotIn("catalog.partner:read", warnings)
+
+    def test_scope_mapping_entries_naming_both_a_client_and_a_scope_fail_the_deploy(self):
+        self.realm["clientScopeMappings"]["econ-graph-api"].append(
+            {"client": "partner-x", "clientScope": "basic", "roles": ["api:mcp"]})
         with self.assertRaises(RuntimeError):
             self.merge()
 

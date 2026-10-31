@@ -11,6 +11,7 @@ on every request and rewrites on every change, so a test can set it up and read 
    "composites": {"catalog-public": [...], "admin": [...]},  # their econ-graph-api roles
    "anonymous": true, "scope": [...],                        # the reader's scope mapping
    "reader_direct": [...],                                   # roles mapped to the reader
+   "reader_scopes": {"basic": [...]},                        # its client scopes' mappings
    "fail_write": N,                                          # optional: the Nth write answers 500
    "ignore_writes_to": "admin"}                              # optional: writes to it are dropped
 
@@ -93,6 +94,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.edit(state, method, state["composites"].setdefault(name, []), path)
         if path == "/clients/anon/scope-mappings/clients/api" and state["anonymous"]:
             return self.edit(state, method, state["scope"], path)
+        if path == "/clients/anon/default-client-scopes" and method == "GET" and state["anonymous"]:
+            return self.reply(200, [{"id": n, "name": n} for n in sorted(state.get("reader_scopes", {}))])
+        if path == "/clients/anon/optional-client-scopes" and method == "GET" and state["anonymous"]:
+            return self.reply(200, [])
+        m = re.fullmatch(r"/client-scopes/([^/]+)/scope-mappings/clients/api", path)
+        if m and method == "GET" and m.group(1) in state.get("reader_scopes", {}):
+            return self.reply(200, [rep(n) for n in state["reader_scopes"][m.group(1)]])
         if path == "/clients/anon/service-account-user" and state["anonymous"]:
             return self.reply(200, {"id": "reader"})
         if path == "/users/reader/role-mappings/clients/api/composite" and method == "GET":
