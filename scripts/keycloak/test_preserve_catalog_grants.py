@@ -211,6 +211,29 @@ class CatalogPolicyTests(unittest.TestCase):
             preserve.complete_bootstrap(self.realm,self.state.get,lambda path,body:writes.append(body))
         self.assertEqual(writes,[])
 
+    def test_sec_fresh_realm_grants_signed_in_users_without_anonymous_access(self):
+        defined = {r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]}
+        self.assertIn("catalog.sec:read", defined)
+        signed = self.role(self.realm, "user")["composites"]["client"]["econ-graph-api"]
+        self.assertIn("catalog.sec:read", signed)
+        public = self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"]
+        self.assertNotIn("catalog.sec:read", public)
+        scope = next(e for e in self.realm["clientScopeMappings"]["econ-graph-api"]
+                     if e["client"] == "econgraph-anonymous")
+        self.assertNotIn("catalog.sec:read", scope["roles"])
+
+    def test_sec_signed_in_grant_is_explicit_and_live_policy_survives(self):
+        endpoint = self.prefix + "/roles/user/composites"
+        self.state[endpoint] = [{"name": "catalog-public", "clientRole": False}]
+        merged = self.merge()
+        self.assertNotIn("catalog.sec:read", self.role(merged, "user")["composites"]["client"]["econ-graph-api"])
+        self.state[endpoint].append({"name": "catalog.sec:read", "clientRole": True, "containerId": "api"})
+        merged = self.merge()
+        self.assertIn("catalog.sec:read", self.role(merged, "user")["composites"]["client"]["econ-graph-api"])
+        scope = next(e for e in merged["clientScopeMappings"]["econ-graph-api"]
+                     if e["client"] == "econgraph-anonymous")
+        self.assertNotIn("catalog.sec:read", scope["roles"])
+
     def test_missing_relations_or_failed_api_never_fall_back_to_defaults(self):
         self.state[self.prefix + "/roles/catalog-public/composites"] = None
         with self.assertRaises(RuntimeError): self.merge()
