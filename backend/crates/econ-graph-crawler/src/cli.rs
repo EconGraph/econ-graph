@@ -253,6 +253,11 @@ pub enum Command {
         #[arg(long, value_name = "PCT", default_value_t = DEFAULT_CHECK_RATE_PERCENT,
               value_parser = clap::value_parser!(u8).range(1..=100))]
         rate_percent: u8,
+        /// Count FRED's whole selection past max_series instead of stopping at it, so an
+        /// over-cap selection reports its size (still a problem). The catalog walk stays
+        /// bounded by max_catalog_series. Only this check: discovery always stops at the cap.
+        #[arg(long)]
+        count_uncapped: bool,
     },
     /// Apply the pending data migrations (backend/migrations/data) and print each version
     /// applied, one per line. Never touches the app migrations.
@@ -505,16 +510,18 @@ impl Cli {
             source,
             json,
             rate_percent,
+            count_uncapped,
         } = &self.command
         {
             let sources = check_selection_sources(source)?;
-            let checker = crate::check_selection::Checker::live(
+            let mut checker = crate::check_selection::Checker::live(
                 http_config(),
                 worker_policies(&default_registry()),
                 *rate_percent,
                 ApiKeys::from_env(),
                 Utc::now().date_naive(),
             )?;
+            checker.count_uncapped = *count_uncapped;
             let report = checker.check(&sources).await;
             let (out, status) = check_selection_output(&report, *json)?;
             return match status {
@@ -1203,6 +1210,7 @@ mod tests {
                 source: vec![],
                 json: false,
                 rate_percent: DEFAULT_CHECK_RATE_PERCENT,
+                count_uncapped: false,
             }
         );
         assert_eq!(
@@ -1213,6 +1221,7 @@ mod tests {
                 source: vec![SourceId::Bea, SourceId::Fred],
                 json: true,
                 rate_percent: DEFAULT_CHECK_RATE_PERCENT,
+                count_uncapped: false,
             }
         );
         assert!(matches!(
@@ -1221,6 +1230,15 @@ mod tests {
                 .command,
             Command::CheckSelection {
                 rate_percent: 50,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["check-selection", "--source", "FRED", "--count-uncapped"])
+                .unwrap()
+                .command,
+            Command::CheckSelection {
+                count_uncapped: true,
                 ..
             }
         ));

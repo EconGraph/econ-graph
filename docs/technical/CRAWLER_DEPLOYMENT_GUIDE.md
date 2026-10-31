@@ -29,7 +29,7 @@ crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
 crawler migrate  [--dry-run]                         # apply (or list) pending data migrations
-crawler check-selection [--source FRED,BEA] [--json] # curated lists and rules vs live catalogs (no database)
+crawler check-selection [--source FRED,BEA] [--json] [--count-uncapped] # curated lists and rules vs live catalogs (no database)
 ```
 
 From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
@@ -220,7 +220,13 @@ To stay within the limits, run the check while the worker is idle.
 ```bash
 crawler check-selection --source FRED,BEA        # text report
 crawler check-selection --json                   # every source, as JSON
+crawler check-selection --source FRED --count-uncapped  # size of an over-cap FRED selection
 ```
+
+A FRED selection past `max_series` stops at the first series over the cap, as discovery does,
+so the report gives no count. `--count-uncapped` counts the whole selection instead (the
+catalog walk is still bounded by `max_catalog_series`) and reports it over the cap; discovery
+always stops at the cap.
 
 | Exit status | Meaning |
 |---|---|
