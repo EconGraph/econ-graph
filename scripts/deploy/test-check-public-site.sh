@@ -13,7 +13,10 @@
 #     other port, status, or a dropped query, and a spoofed request that gets anything
 #     but the 301;
 #   - plain http's redirect must name https://econgraph.com/ with no port;
-#   - the sign-in page must refuse a http://localhost redirect URI.
+#   - the sign-in page must refuse a http://localhost redirect URI;
+#   - a CORS preflight from http://localhost:3000 or https://evil.example must get no
+#     Access-Control-Allow-Origin and must get the backend's 403 (the stub allows the
+#     origins in STUB_CORS_ALLOW); a 502 without the header is not a refusal.
 #
 # Usage: scripts/deploy/test-check-public-site.sh
 set -euo pipefail
@@ -30,22 +33,37 @@ cat >"$W/bin/curl" <<'STUB'
 # with STUB_WWW_STATUS, STUB_WWW_LOCATION and the body STUB_WWW_BODY (STUB_SPOOF_STATUS
 # and STUB_SPOOF_LOCATION instead, where set, when the request spoofs
 # X-Forwarded-Port), http://econgraph.com with STUB_PLAIN_STATUS and
-# STUB_PLAIN_LOCATION, and everything else with 404.
-out=/dev/null hdr=/dev/null url="" spoof=false
+# STUB_PLAIN_LOCATION, an OPTIONS to /graphql with 204 and Access-Control-Allow-Origin
+# when its Origin is in the comma-separated STUB_CORS_ALLOW (else STUB_CORS_REFUSED_STATUS,
+# default 403, with no CORS header), and everything
+# else with 404.
+out=/dev/null hdr=/dev/null url="" spoof=false method=GET origin=
 while [ $# -gt 0 ]; do
     case "$1" in
         -o) out="$2"; shift 2 ;;
         -D) hdr="$2"; shift 2 ;;
         -w) shift 2 ;;
-        -H) [[ "$2" == X-Forwarded-Port:* ]] && spoof=true; shift 2 ;;
-        -X | --max-time | --connect-to) shift 2 ;;
+        -H)
+            [[ "$2" == X-Forwarded-Port:* ]] && spoof=true
+            [[ "$2" == Origin:* ]] && origin="${2#Origin: }"
+            shift 2 ;;
+        -X) method="$2"; shift 2 ;;
+        --max-time | --connect-to) shift 2 ;;
         -*) shift ;;
         *) url="$1"; shift ;;
     esac
 done
 : >"$out"
-case "$url" in
-    https://www.econgraph.com/*)
+case "$method $url" in
+    "OPTIONS https://econgraph.com/graphql")
+        if [[ ",${STUB_CORS_ALLOW:-}," == *",$origin,"* ]]; then
+            status=204
+            printf 'HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: %s\r\n\r\n' "$origin" >"$hdr"
+        else
+            status="${STUB_CORS_REFUSED_STATUS:-403}"
+            printf 'HTTP/1.1 %s Refused\r\n\r\n' "$status" >"$hdr"
+        fi ;;
+    *" https://www.econgraph.com/"*)
         status="$STUB_WWW_STATUS"
         location="$STUB_WWW_LOCATION"
         if [ "$spoof" = true ]; then
@@ -54,11 +72,11 @@ case "$url" in
         fi
         printf '%s' "${STUB_WWW_BODY:-}" >"$out"
         printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "$location" >"$hdr" ;;
-    https://econgraph.com/idp/realms/econ-graph/protocol/openid-connect/auth\?*redirect_uri=http%3A%2F%2Flocalhost*)
+    *" https://econgraph.com/idp/realms/econ-graph/protocol/openid-connect/auth?"*"redirect_uri=http%3A%2F%2Flocalhost"*)
         status="${STUB_LOCAL_LOGIN_STATUS:-404}"
         printf '%s' "${STUB_LOCAL_LOGIN_BODY:-}" >"$out"
         printf 'HTTP/1.1 %s\r\n\r\n' "$status" >"$hdr" ;;
-    http://econgraph.com/*)
+    *" http://econgraph.com/"*)
         status="${STUB_PLAIN_STATUS:-404}"
         printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "${STUB_PLAIN_LOCATION:-}" >"$hdr" ;;
     *)
@@ -95,7 +113,7 @@ expect() {
         ok "$4"
     else
         bad "$4"
-        grep -E "www|spoofed" "$W/$1.out" | sed 's/^/       /'
+        grep -E "www|spoofed|CORS" "$W/$1.out" | sed 's/^/       /'
     fi
 }
 
@@ -153,6 +171,22 @@ STUB_LOCAL_LOGIN_STATUS=200 STUB_LOCAL_LOGIN_BODY='<form id="kc-form-login">' \
     run local-accepted 301 "$TARGET"
 expect local-accepted FAIL "$LOCAL returned 200 for http://localhost/auth/callback" \
     "a realm that still shows the sign-in form for it fails"
+
+CORS_LINE='CORS preflight from'
+STUB_CORS_ALLOW='https://econgraph.com' run cors-current 301 "$TARGET"
+expect cors-current ok "$CORS_LINE https://econgraph.com allowed" "the public origin is allowed"
+expect cors-current ok "$CORS_LINE http://localhost:3000 refused \(403\)" \
+    "a backend that refuses http://localhost:3000 passes"
+expect cors-current ok "$CORS_LINE https://evil.example refused \(403\)" "and one that refuses evil.example"
+STUB_CORS_ALLOW='https://econgraph.com,http://localhost,http://localhost:3000' run cors-old 301 "$TARGET"
+expect cors-old FAIL "$CORS_LINE http://localhost:3000 returned 204 with Access-Control-Allow-Origin 'http://localhost:3000'" \
+    "a backend still on the old list (allowing http://localhost:3000) fails"
+expect cors-old ok "$CORS_LINE https://evil.example refused" "while evil.example is still refused"
+STUB_CORS_ALLOW='https://econgraph.com,https://evil.example' run cors-evil 301 "$TARGET"
+expect cors-evil FAIL "$CORS_LINE https://evil.example returned 204" "a backend allowing an unrelated origin fails"
+STUB_CORS_ALLOW='https://econgraph.com' STUB_CORS_REFUSED_STATUS=502 run cors-down 301 "$TARGET"
+expect cors-down FAIL "$CORS_LINE http://localhost:3000 returned 502, expected the backend's 403" \
+    "a 502 without the header (the backend not answering) is not a refusal"
 
 if [ "$failures" -eq 0 ]; then
     echo "all passed"

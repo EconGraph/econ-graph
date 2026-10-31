@@ -16,7 +16,8 @@ source "${repo_root}/scripts/backup/test-stubs.sh"
 
 failures=0
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+holder=""
+trap '[ -z "${holder}" ] || kill "${holder}" 2>/dev/null || true; rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
 # restore-snapshot.sh mounts the filesystem top level on a mktemp directory
 # under /mnt once its checks pass. The checks run here are meant to stop it
@@ -219,7 +220,7 @@ refuse() {
         env "$@" "${restore}" --yes "${RESTORE_SNAP:-${app_snap}}"
     check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
     check "... and touches no subvolume and mounts nothing" \
-        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp)' '${STUB_LOG}'"
+        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp) ' '${STUB_LOG}'"
 }
 # accept NAME [VAR=value...]: a dry run of the same restore gets past the check.
 accept() {
@@ -291,6 +292,52 @@ refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ
     'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0=\n'
 accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
 unset RESTORE_SNAP
+
+echo "== restore-snapshot.sh: holds the backup lock from before its first check"
+lock="${root}/run/econgraph-backup-snapshots.lock"
+# hold_lock SECONDS: hold the lock from the background for that long (until
+# release_lock); returns once it is held.
+hold_lock() {
+    rm -f "${tmp}/lock-held"
+    bash -c 'exec 8>"$1"; flock 8; : >"$2"; exec sleep "$3"' _ "${lock}" "${tmp}/lock-held" "$1" &
+    holder=$!
+    local tries=0
+    while [ ! -e "${tmp}/lock-held" ]; do
+        tries=$((tries + 1))
+        [ "${tries}" -le 200 ] || { echo "FAIL could not hold ${lock} for the test"; exit 1; }
+        sleep 0.05
+    done
+}
+release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; holder=""; }
+hold_lock 60
+before="$(tree_state "${root}")"
+run_script "restore-snapshot refuses while the backup lock is held" 1 "${lock} is held" \
+    "${restore}" --yes "${app_snap}"
+check "... before any findmnt, mountpoint, btrfs or docker call" [ ! -s "${STUB_LOG}" ]
+check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+run_script "restore-snapshot --dry-run takes no lock" 0 "(dry run: nothing restored)" \
+    "${restore}" --dry-run "${app_snap}"
+release_lock
+hold_lock 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for the lock, then checks" 1 \
+    "still in use by: econ-graph/app-postgres-0." "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_lock
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot asks the cluster with the lock held" 1 \
+    "still in use by" "${restore}" --yes "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... held at every findmnt, mountpoint and cluster call, from the first" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... the first call is a findmnt" bash -c '[ "$(head -n 1 "$1" | cut -d" " -f1)" = findmnt ]' _ "${STUB_LOG}"
+for wait in soon "" 86401 9999999999999999999999 18446744073709551617; do
+    run_script "restore-snapshot rejects --lock-wait=${wait}" 2 "SECONDS: 0 to 86400" \
+        "${restore}" --yes "--lock-wait=${wait}" "${app_snap}"
+done
+# 09 is not octal: read as decimal, the lock is taken and it goes on to the
+# pod check.
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
+    "still in use by" "${restore}" --yes --lock-wait=09 "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -q "^lock-probe free" "$1"' _ "${STUB_LOG}"
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"
