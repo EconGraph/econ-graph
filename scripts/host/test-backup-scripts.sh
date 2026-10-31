@@ -251,7 +251,7 @@ refuse "app-prod while another pod mounts app-postgres's claim" "still in use by
     'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume\necon-graph/pg-debug\tscratch\tapp-postgres-data-app-postgres-0\n'
 refuse "app-prod while a pod mounts a hand-made PersistentVolume on the subvolume" "still in use by: other/copy." \
     'FAKE_PVS=/srv/econgraph/app-prod/\tother/hand-made\n' 'FAKE_POD_LIST=other/copy\thand-made\n'
-for path in /srv/econgraph/app-prod /srv/econgraph/app-prod/app-pg/18 /srv/econgraph /srv /; do
+for path in /srv/econgraph/app-prod /srv/econgraph/app-prod/app-pg/18 /srv/econgraph /srv/econgraph/ /srv /; do
     refuse "app-prod while a pod has hostPath ${path}" "still in use by: econ-graph/shell." \
         "FAKE_POD_LIST=econ-graph/shell\t${path}\n"
 done
