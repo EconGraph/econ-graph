@@ -1,0 +1,52 @@
+name: Train 4 Object Store Tools
+on:
+  pull_request:
+    paths:
+      - .github/workflows/train4-objectstore.yml
+      - scripts/objectstore/**
+      - scripts/host/backup-snapshots.sh
+      - scripts/host/test-objectstore-snapshot-coverage.sh
+      - scripts/host/test-backup-scripts.sh
+      - scripts/backup/test-stubs.sh
+      - docs/deployment/OBJECTSTORE_HOST.md
+      - docs/deployment/OBJECTSTORE_SMOKE.md
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train4-objectstore.yml
+      - scripts/objectstore/**
+      - scripts/host/backup-snapshots.sh
+      - scripts/host/test-objectstore-snapshot-coverage.sh
+      - scripts/host/test-backup-scripts.sh
+      - scripts/backup/test-stubs.sh
+      - docs/deployment/OBJECTSTORE_HOST.md
+      - docs/deployment/OBJECTSTORE_SMOKE.md
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  guards:
+    name: Offline ownership and backup guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.14'
+      - name: Check object-store refusal and ownership behavior
+        run: python3 -m unittest discover -s scripts/objectstore -p 'test_*.py' -v
+      - name: Check opt-in snapshot coverage and unrelated backup isolation
+        run: bash scripts/host/test-objectstore-snapshot-coverage.sh
+      - name: Check existing backup and restore contracts
+        run: bash scripts/host/test-backup-scripts.sh
+      - name: Lint backup integration
+        run: shellcheck -x scripts/host/backup-snapshots.sh scripts/host/test-objectstore-snapshot-coverage.sh
