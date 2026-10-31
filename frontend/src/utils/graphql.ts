@@ -31,6 +31,11 @@ console.log('  - Final DATA_GRAPHQL_ENDPOINT (data operations):', DATA_GRAPHQL_E
  * neither this set nor `APP_OPERATIONS`, or in both.
  */
 export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
+  // Company research is compiled out until the Train 5 feature gate is enabled.
+  'FindResearchCompanies',
+  'GetResearchCompany',
+  'GetCompanyResearchStatement',
+  'GetCompanyResearchComparisons',
   // Shipped in the release build.
   'GetSeriesDetail',
   'GetSeriesData',
