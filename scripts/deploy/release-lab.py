@@ -464,7 +464,15 @@ def render_manifests(record):
     images = record['images']
     branch = 'lab-' + record['name']
     docs = renderer.render(branch, images['backend']['lab_tag'], images['frontend']['lab_tag'],
-                           True, images['crawler-worker']['lab_tag'])
+                           True, images['crawler-worker']['reference'])
+    # Map the verified reference before rewriting namespace/address text: a source
+    # repository may itself contain the branch namespace and must not be rewritten.
+    for d in docs:
+        if d['kind'] in ('Deployment', 'StatefulSet', 'Job'):
+            pod = d['spec']['template']['spec']
+            for c in pod.get('initContainers', []) + pod['containers']:
+                if c['image'] == images['crawler-worker']['reference']:
+                    c['image'] = images['crawler-worker']['lab_tag']
     slug, branch_namespace = renderer.identity(branch)
     # The branch rendering's addresses become the lab's port-forward ports on localhost:
     # Keycloak's (its issuer and admin console) and the frontend's (its origin).
