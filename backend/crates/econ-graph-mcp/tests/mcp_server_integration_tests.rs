@@ -86,6 +86,60 @@ async fn seed_series(pool: &econ_graph_core::DatabasePool) -> String {
     id.to_string()
 }
 
+/// Series data and charts get each date once, at its latest revision: a revised date gives its
+/// revision, and a date with a projection and a synthetic legacy row gives the projection, as
+/// the site's charts do.
+#[tokio::test]
+#[serial]
+async fn mcp_series_data_has_each_date_once_at_its_latest_revision() {
+    use diesel_async::RunQueryDsl;
+    let (_database, pool) = create_test_database_pool().await;
+    let mut conn = pool.get().await.unwrap();
+    let id = econ_graph_core::test_utils::insert_series_without_observations(&mut conn).await;
+    diesel::sql_query("UPDATE economic_series SET title = 'MCP revisions', start_date = '2023-01-01', end_date = '2023-02-01' WHERE id = $1")
+        .bind::<diesel::sql_types::Uuid, _>(id).execute(&mut conn).await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) VALUES \
+         ($1, '2023-01-01', 100, '2023-01-15', true), ($1, '2023-01-01', 101, '2023-03-01', false), \
+         ($1, '2023-02-01', 105, '2023-01-20', true), ($1, '2023-02-01', 999, '2023-02-01', true)",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(id)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    let server = test_server(
+        econ_graph_core::AppPool(pool.clone()),
+        Some(econ_graph_core::DataPool(pool)),
+    );
+    let response = server
+        .get_series_data(json!({"series_id": id.to_string()}))
+        .await
+        .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
+    let mut points: Vec<(String, String)> = payload["data"]["series"]["dataPoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let value = p["value"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| p["value"].to_string());
+            (p["date"].as_str().unwrap().to_string(), value)
+        })
+        .collect();
+    points.sort();
+    let values: Vec<f64> = points.iter().map(|(_, v)| v.parse().unwrap()).collect();
+    assert_eq!(
+        points.iter().map(|(d, _)| d.as_str()).collect::<Vec<_>>(),
+        ["2023-01-01", "2023-02-01"],
+        "{points:?}"
+    );
+    assert_eq!(values, [101.0, 105.0], "{points:?}");
+}
+
 /// Tools must return stored data, not a successful wrapper around GraphQL errors.
 #[tokio::test]
 #[serial]
