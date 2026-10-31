@@ -1,7 +1,7 @@
 # Release images on the kind cluster
 
-The manifests in `k8s/manifests` run `econ-graph-backend`, `econ-graph-crawler-worker` and
-`econ-graph-frontend` under one fixed tag each, with `imagePullPolicy: Never`, so the kind
+The manifests in `k8s/manifests` run `econ-graph-backend`, `econ-graph-crawler-worker`,
+`econ-graph-frontend` and `econ-graph-chart-api` under one fixed tag each, with `imagePullPolicy: Never`, so the kind
 nodes never pull. To run a release candidate that `.github/workflows/release.yml` built,
 its images are put on the nodes under those names. Three scripts in `scripts/deploy/` do
 that around `deploy.sh`, check the result, and go back:
@@ -32,6 +32,7 @@ image, every manifest under `k8s/manifests` that runs it must name the same tag:
 | `econ-graph-backend` | Deployment `econ-graph-backend` |
 | `econ-graph-crawler-worker` | Deployment `crawler-worker`, Job `crawler-migrate` |
 | `econ-graph-frontend` | Deployment `econ-graph-frontend` |
+| `econ-graph-chart-api` | Deployment `chart-api-service` |
 
 When two manifests name one image with different tags, the load and the rollback stop before
 changing anything and name the files. Each script moves one name per image on the nodes, and
@@ -123,7 +124,7 @@ digest, which is what the nodes report and what the checks after `kind load` com
 ## Verify
 
 `verify-release-images.sh` uses kubectl only, on context `kind-<cluster>`. It refuses a
-partial load. It restarts the backend, crawler-worker and frontend Deployments, waits for
+partial load. It restarts the backend, crawler-worker, frontend and chart-api Deployments, waits for
 the rollouts, and fails unless every running pod of each runs the loaded image and each
 Deployment has a running pod. With `--no-restart` it only checks.
 
@@ -152,7 +153,7 @@ change nothing the pods run, so the script stops.
 
 It then retags `econ-graph-<name>:pre-<tag>` as the manifests' name in each node's containerd
 (`ctr -n k8s.io images tag --force`, through `docker exec`) and checks that the name now
-points at the copy. Next it restarts the three Deployments and fails unless every running
+points at the copy. Next it restarts the four Deployments and fails unless every running
 pod runs the copy. It appends the result to `rollback.txt` next to the load record, with
 `status=partial` and what it retagged if it stops half way.
 

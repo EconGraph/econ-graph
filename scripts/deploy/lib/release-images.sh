@@ -18,7 +18,7 @@ RI_REGISTRY="ghcr.io"
 RI_GITHUB_OWNER="EconGraph"
 RI_OWNER="$(printf '%s' "$RI_GITHUB_OWNER" | tr '[:upper:]' '[:lower:]')"
 
-RI_NAMES=(backend crawler-worker frontend)
+RI_NAMES=(backend crawler-worker frontend chart-api)
 RI_NAMESPACE="econ-graph"
 
 # Deployment (also its pods' app label), its container, and its manifest, per image.
@@ -29,16 +29,19 @@ declare -A RI_DEPLOYMENT=(
     [backend]=econ-graph-backend
     [crawler-worker]=crawler-worker
     [frontend]=econ-graph-frontend
+    [chart-api]=chart-api-service
 )
 declare -A RI_CONTAINER=(
     [backend]=backend
     [crawler-worker]=crawler-worker
     [frontend]=frontend
+    [chart-api]=chart-api-service
 )
 declare -A RI_MANIFEST=(
     [backend]=k8s/manifests/backend-deployment.yaml
     [crawler-worker]=k8s/manifests/crawler-worker.yaml
     [frontend]=k8s/manifests/frontend-deployment.yaml
+    [chart-api]=k8s/manifests/chart-api-deployment.yaml
 )
 
 # Jobs that run one of the images, per image: the Job's pods' app label and its
@@ -360,7 +363,7 @@ ri_check_job_pods() {
     return "$status"
 }
 
-# Restart the three Deployments and wait for each rollout.
+# Restart the release Deployments and wait for each rollout.
 ri_restart_deployments() {
     local name
     for name in "${RI_NAMES[@]}"; do

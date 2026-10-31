@@ -22,7 +22,7 @@
 # The local names come from k8s/manifests, never from this script: for each
 # image, every workload there that runs it (deployment/econ-graph-backend;
 # deployment/crawler-worker and the crawler-migrate Job;
-# deployment/econ-graph-frontend) must name the same tag, or the script stops
+# deployment/econ-graph-frontend and deployment/chart-api-service) must name the same tag, or the script stops
 # before changing anything. Moving that one name on the nodes therefore covers
 # the Job too: the next deploy.sh runs it on the loaded image.
 #
@@ -30,7 +30,7 @@
 #   1. git fetch --tags origin (an existing tag is never moved), and resolve
 #      the tag to its commit.
 #   2. The refs release.yml pushes: ghcr.io/econgraph/econ-graph-{backend,
-#      crawler-worker,frontend}:sha-<full commit>, and :<tag> on the same
+#      crawler-worker,frontend,chart-api}:sha-<full commit>, and :<tag> on the same
 #      digest. Both must resolve to one digest on GHCR.
 #   3. Decide what to keep for each image: the image its Deployment's running
 #      pods use now (with none running, the one the manifests' name points at on
