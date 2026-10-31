@@ -16,6 +16,19 @@ The series detail page plots the latest stored revision for each observation dat
 
 Selecting a transformation requests new values from the backend without reloading the page. While that request loads, the previous result stays visible with its own transformation label, so a new selection does not mislabel the values on screen.
 
+### Dashboard
+
+The dashboard's cards show the newest value of four headline series, listed in `frontend/src/config/dashboard-series.json`. Each card looks its series up by source name and series id, links to the series page once the series has an observation, and shows the source's notice. Visitors who aren't signed in read them, so the cards use public sources only:
+
+| Card | Source | Series id | Shown as |
+| --- | --- | --- | --- |
+| Gross Domestic Product | BEA | `bea_nipa/T10105.1.Q` (NIPA table 1.1.5, line 1, quarterly) | Trillions of dollars, seasonally adjusted annual rate |
+| Unemployment Rate | BLS | `LNS14000000` | Percent, seasonally adjusted |
+| Consumer Price Index | BLS | `CUSR0000SA0` | Index 1982-84=100, seasonally adjusted |
+| Nonfarm Payrolls | BLS | `CES0000000001` | Thousands of employees, seasonally adjusted |
+
+An entry's `fractionDigits` sets the decimals shown. `displayScale` (`thousands`, `millions`, `billions` or `trillions`) divides the stored value before it is shown: BEA stores GDP in dollars, so the GDP card divides by 10^12. `units` replaces the series' own units under the value, and is required with `displayScale`, since the stored units describe the unscaled value.
+
 ### Search and Filtering
 
 Submitting the header search opens the series explorer at `/explore?q=…`. In the explorer, searches run after a 250 ms pause in typing once the trimmed query contains at least two characters. A search shows up to its 100 most relevant results, 20 to a page, and can be re-sorted by title or by last update. Source and frequency filters narrow the results. Selecting a source without a query browses that source's series by title, 20 to a page fetched from the backend, through the whole source.

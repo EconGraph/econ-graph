@@ -4,7 +4,7 @@ import { Box, Card, CardActionArea, CardContent, Chip, Skeleton, Typography } fr
 import { Assessment as AssessmentIcon } from '@mui/icons-material';
 import { format, isValid, parseISO } from 'date-fns';
 
-import type { DashboardSeriesEntry } from '../../config/dashboardSeries';
+import { DISPLAY_SCALES, type DashboardSeriesEntry } from '../../config/dashboardSeries';
 import { useLatestObservation } from '../../hooks/useLatestObservation';
 import { formatDecimalString } from '../../utils/formatDecimal';
 import { SourceNoticePanel } from '../common/SourceNoticePanel';
@@ -24,7 +24,8 @@ interface LatestValueCardProps {
 }
 
 /**
- * A dashboard card with a series' newest value and its observation date. It links to the
+ * A dashboard card with a series' newest value, scaled and labelled as its entry says, and its
+ * observation date. It links to the
  * series page once the series is found, and says "No data yet" when the series is missing or
  * has no observations.
  * @param root0 - The component props.
@@ -68,23 +69,31 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
       </Typography>
     );
   } else {
-    const value =
+    const formatted =
       observation.value === null
         ? null
-        : (formatDecimalString(observation.value, entry.fractionDigits) ?? observation.value);
+        : formatDecimalString(
+            observation.value,
+            entry.fractionDigits,
+            entry.displayScale ? DISPLAY_SCALES[entry.displayScale] : 0
+          );
+    const value = formatted ?? observation.value;
+    // The entry's units describe the value as formatted (scaled); a value the formatter could
+    // not read is shown as stored, so it keeps the series' own units.
+    const units = formatted === null ? series.units : (entry.units ?? series.units);
     body = (
       <>
         <Typography variant='h4' component='div' sx={{ mb: 0.5, fontWeight: 600 }}>
           {value ?? 'No value reported'}
         </Typography>
-        {series.units && (
+        {units && (
           <Typography
             variant='body2'
             sx={{
               color: 'text.secondary',
             }}
           >
-            {series.units}
+            {units}
           </Typography>
         )}
         <Typography
