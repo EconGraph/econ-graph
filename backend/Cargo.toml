@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/econ-graph-core",
+    "crates/econ-graph-timeseries",
     "crates/econ-graph-services",
     "crates/econ-graph-auth",
     "crates/econ-graph-graphql",

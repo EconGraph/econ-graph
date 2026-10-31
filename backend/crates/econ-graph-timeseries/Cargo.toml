@@ -1,0 +1,32 @@
+[package]
+name = "econ-graph-timeseries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+econ-graph-core = { path = "../econ-graph-core" }
+anyhow.workspace = true
+async-trait.workspace = true
+bigdecimal.workspace = true
+chrono.workspace = true
+clap.workspace = true
+diesel.workspace = true
+diesel-async.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+url.workspace = true
+iceberg = "=0.10.1"
+iceberg-datafusion = "=0.10.1"
+iceberg-storage-opendal = { version = "=0.10.1", default-features = false, features = ["opendal-fs", "opendal-s3"] }
+arrow-array = "=58.3.0"
+arrow-schema = "=58.3.0"
+parquet = "=58.3.0"
+datafusion = { version = "=53.1.0", default-features = false, features = ["parquet", "regex_expressions"] }
+
+[dev-dependencies]
+tempfile.workspace = true
