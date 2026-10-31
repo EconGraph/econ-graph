@@ -7,7 +7,9 @@ redacts secrets from what a scenario writes; scenarios still never print a passw
 
 When the runner stops a scenario that overran its qa-timeout, it sends SIGTERM to the
 scenario's process group. Importing this module turns that into SystemExit, after stopping every
-command started with `run()`, so a scenario's `finally` blocks still clean up.
+command started with `run()`, so a scenario's `finally` blocks still clean up. A command started
+after that gets only what is left of the grace period, so cleanup ends before the runner's
+SIGKILL; the runner also kills, and reports, anything the scenario left running.
 """
 
 from __future__ import annotations
@@ -76,14 +78,32 @@ def _on_sigterm(signum, frame):
 signal.signal(signal.SIGTERM, _on_sigterm)
 
 
+def _margin() -> float:
+    """What a cleanup command leaves of the grace period: for the wait after it overruns (half)
+    and the rest of the cleanup."""
+    return min(5.0, STOP_GRACE / 5)
+
+
 def run(command: list[str], timeout: float, env: dict | None = None,
         capture: bool = True) -> subprocess.CompletedProcess:
     """Run a command in its own process group, killing the whole group if it overruns.
 
-    Raises subprocess.TimeoutExpired after `timeout` seconds, once the group is gone. Output
+    Raises subprocess.TimeoutExpired after `timeout` seconds, once the group is gone; its
+    `timeout` is the limit that applied. Once the scenario has been asked to stop, that is at
+    most what is left of its grace period, and with none left the command isn't started. Output
     is captured as text unless `capture` is false, when it goes to this scenario's output.
     """
     pipe = subprocess.PIPE if capture else None
+    if stopped_at is not None:
+        # Cleanup after the runner's SIGTERM: end before its SIGKILL, keeping a margin for the
+        # rest of the cleanup.
+        left = stopped_at + STOP_GRACE - _margin() - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired(command, 0)
+        timeout = min(timeout, left)
+    if env is not None and 'QA_RUN_MARKER' in os.environ:
+        # The runner finds what a scenario left running by this variable.
+        env = dict(env, QA_RUN_MARKER=os.environ['QA_RUN_MARKER'])
     proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=pipe, stderr=pipe,
                             text=True, start_new_session=True)
     _children.add(proc.pid)
@@ -91,8 +111,17 @@ def run(command: list[str], timeout: float, env: dict | None = None,
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         _signal_group(proc.pid, signal.SIGKILL)
-        proc.communicate()
-        raise
+        try:
+            # During cleanup the margin left before the runner's SIGKILL is short.
+            proc.communicate(timeout=_margin() / 2 if stopped_at is not None else 5)
+        except subprocess.TimeoutExpired:
+            # Something outside the group (a setsid) still holds the output; the runner kills
+            # it once the scenario ends. Don't let it hold up the rest of the cleanup.
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+            proc.wait()
+        raise subprocess.TimeoutExpired(command, timeout) from None
     finally:
         _children.discard(proc.pid)
         _signal_group(proc.pid, signal.SIGKILL)
@@ -296,8 +325,8 @@ class Kube:
         command = [self.kubectl, '--kubeconfig', self.kubeconfig, '--context', self.context, *args]
         try:
             done = run(command, timeout or self.timeout)
-        except subprocess.TimeoutExpired:
-            raise KubeError(f'kubectl {" ".join(args[:3])} overran {timeout or self.timeout:.0f}s') from None
+        except subprocess.TimeoutExpired as error:
+            raise KubeError(f'kubectl {" ".join(args[:3])} overran {error.timeout:.0f}s') from None
         if done.returncode:
             raise KubeError(f'kubectl {" ".join(args[:3])}: {done.stderr.strip()[-300:]}')
         return done.stdout

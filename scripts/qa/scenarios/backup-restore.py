@@ -100,7 +100,7 @@ def bounded(command, extra_env=None):
     try:
         return run_bounded(command, STEP_TIMEOUT, env=dict(os.environ, **(extra_env or {})))
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f'{command[0]} overran {STEP_TIMEOUT:.0f}s and was stopped') from error
+        raise RuntimeError(f'{command[0]} overran {error.timeout:.0f}s and was stopped') from error
 
 
 def psql(database_url, sql):
