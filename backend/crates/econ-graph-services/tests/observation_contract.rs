@@ -379,7 +379,7 @@ fn revised_observations(series_id: Uuid) -> Vec<Observation> {
             value: value.map(|v| BigDecimal::from_str(v).unwrap()),
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            attributes: BTreeMap::new(),
+            attributes: None,
         })
         .collect()
 }
@@ -647,7 +647,7 @@ fn projection_observations(series_id: Uuid) -> Vec<Observation> {
             value: Some(BigDecimal::from_str(value).unwrap()),
             created_at: now,
             updated_at: now,
-            attributes: BTreeMap::new(),
+            attributes: None,
         },
     )
     .collect()
