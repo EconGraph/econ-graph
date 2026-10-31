@@ -485,7 +485,7 @@ type DataPoint {
 	"""
 	Null means provider attributes were not captured for this stored observation.
 	"""
-	attributes: JSON
+	attributes: ObservationAttributes
 }
 
 """
@@ -706,11 +706,6 @@ type EconomicSeriesType {
 }
 
 """
-A scalar that can represent any JSON value.
-"""
-scalar JSON
-
-"""
 The newest observation of a series: its latest date, at the newest revision of that date
 """
 type LatestObservation {
@@ -729,7 +724,7 @@ type LatestObservation {
 	"""
 	Captured provider metadata for this exact observation revision, or null when unknown.
 	"""
-	attributes: JSON
+	attributes: ObservationAttributes
 }
 
 type Mutation {
@@ -797,6 +792,12 @@ Format: %Y-%m-%d
 * `2000-02-24`
 """
 scalar NaiveDate
+
+"""
+Provider JSON with exact native JSON numbers, including integers and fractional values
+wider than IEEE-754 or 64-bit integers. Clients must use a precision-preserving JSON parser.
+"""
+scalar ObservationAttributes
 
 """
 An observation attribute, e.g. `{name: "obs_status", value: "E"}`.
