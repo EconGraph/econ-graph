@@ -28,7 +28,8 @@
 #     "<path>\t<namespace>/<claim>" lines) and get pods -A prints
 #     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<volume>=<claim or host
 #     path>..." lines; default none), failing with FAKE_PV_FAILS=1 and
-#     FAKE_POD_LIST_FAILS=1; crictl ps on the storage node prints a container
+#     FAKE_POD_LIST_FAILS=1; crictl ps -q on econ-graph-worker, for a pod in
+#     econ-graph (any other crictl call is unsupported), prints a container
 #     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
 #     with FAKE_CRICTL_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
@@ -150,7 +151,7 @@ case " $* " in
     *" pg_restore "*) cat >"${FAKE_RESTORE_INPUT:-/dev/null}" ;;
     *" psql "*) : ;;
     *" wait "*) exit "${FAKE_WAIT_RC:-0}" ;;
-    *" crictl ps "*)
+    *" exec econ-graph-worker crictl ps -q --label io.kubernetes.pod.namespace=econ-graph --label io.kubernetes.pod.name="*)
         [[ -z "${FAKE_CRICTL_FAILS:-}" ]] || { echo "error: connect: no such file or directory" >&2; exit 1; }
         for a in "$@"; do
             case "${a}" in io.kubernetes.pod.name=*)

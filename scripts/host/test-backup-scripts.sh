@@ -251,22 +251,22 @@ refuse "app-prod when the pods can't be listed" \
     "could not ask the cluster (econ-graph-control-plane on unix:///var/run/docker.sock) which pods use /srv/econgraph/app-prod" \
     FAKE_POD_LIST_FAILS=1
 refuse "app-prod while another pod mounts app-postgres's claim" "still in use by: econ-graph/pg-debug." \
-    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume=\necon-graph/pg-debug\tscratch=\tdata=app-postgres-data-app-postgres-0\n'
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume==\necon-graph/pg-debug\tscratch==\tdata=app-postgres-data-app-postgres-0=\n'
 # shellcheck disable=SC2016 # $1 expands in the inner bash
 check "... and asks to stop it, not to scale Postgres" \
     bash -c 'grep -qF "stop or delete econ-graph/pg-debug" <<<"$1" && ! grep -qF "scale statefulset" <<<"$1"' _ "${out}"
 refuse "app-prod while a pod mounts a hand-made PersistentVolume on the subvolume" "still in use by: other/copy." \
-    'FAKE_PVS=/srv/econgraph/app-prod/\tother/hand-made\n' 'FAKE_POD_LIST=other/copy\tdata=hand-made\n'
+    'FAKE_PVS=/srv/econgraph/app-prod/\tother/hand-made\n' 'FAKE_POD_LIST=other/copy\tdata=hand-made=\n'
 for path in /srv/econgraph/app-prod /srv/econgraph/app-prod/app-pg/18 /srv/econgraph /srv/econgraph/ /srv / \
     /srv//econgraph/app-prod /srv/econgraph/./app-prod/app-pg /srv/econgraph// /srv/x/../econgraph/app-prod \
-    srv/econgraph/app-prod; do
+    srv/econgraph/app-prod . srv /proc/1/root/srv/econgraph/app-prod /proc; do
     refuse "app-prod while a pod has hostPath ${path}" "still in use by: econ-graph/shell." \
-        "FAKE_POD_LIST=econ-graph/shell\thost=${path}\n"
+        "FAKE_POD_LIST=econ-graph/shell\thost==${path}\n"
 done
 refuse "app-prod while a pod mounts a PersistentVolume spelled with // on the subvolume" "still in use by: econ-graph/pg-debug." \
-    'FAKE_PVS=/srv/econgraph//app-prod/app-pg\tecon-graph/side\n' 'FAKE_POD_LIST=econ-graph/pg-debug\tdata=side\n'
+    'FAKE_PVS=/srv/econgraph//app-prod/app-pg\tecon-graph/side\n' 'FAKE_POD_LIST=econ-graph/pg-debug\tdata=side=\n'
 refuse "app-prod while a generic ephemeral volume's claim is bound on the subvolume" "still in use by: econ-graph/dbg." \
-    'FAKE_PVS=/srv/econgraph/app-prod/scratch\tecon-graph/dbg-scratch\n' 'FAKE_POD_LIST=econ-graph/dbg\tscratch=\n'
+    'FAKE_PVS=/srv/econgraph/app-prod/scratch\tecon-graph/dbg-scratch\n' 'FAKE_POD_LIST=econ-graph/dbg\tscratch==\n'
 refuse "app-prod while app-postgres-0 is gone from the API but its container still runs" \
     "still in use by: econ-graph/app-postgres-0." FAKE_RUNNING=app-postgres-0
 check "... and says a container still runs on the storage node" \
@@ -278,17 +278,17 @@ refuse "app-prod when a Postgres pod comes back while the confirmation waits" \
     "still in use by: econ-graph/app-postgres-0." FAKE_PODS=app-postgres-0 FAKE_PODS_FROM_CALL=3
 check "... after the first check passed" grep -qF "= no pod uses @econgraph-app-prod" <<<"${out}"
 accept "app-prod with both Postgres pods gone and nothing else on it" \
-    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume=\necon-graph/econ-graph-backend-1\ttmp=\tcerts=\n'
+    'FAKE_POD_LIST=kube-system/coredns-1\tconfig-volume==\necon-graph/econ-graph-backend-1\ttmp==\tcerts==\n'
 accept "app-prod while postgresql-0 and the data plane's users exist" FAKE_PODS=postgresql-0 \
-    'FAKE_POD_LIST=econ-graph/postgresql-0\tdata=postgresql-data-postgresql-0\necon-graph/shell\thost=/srv/econgraph/data-plane\n'
+    'FAKE_POD_LIST=econ-graph/postgresql-0\tdata=postgresql-data-postgresql-0=\necon-graph/shell\thost==/srv/econgraph/data-plane\n'
 accept "app-prod while a pod has a look-alike path or a same-named claim elsewhere" \
-    'FAKE_POD_LIST=econ-graph/a\thost=/srv/econgraph/app-prod-old\nstaging/b\tdata=app-postgres-data-app-postgres-0\nstaging/app-postgres\t0=\n'
+    'FAKE_POD_LIST=econ-graph/a\thost==/srv/econgraph/app-prod-old\nstaging/b\tdata=app-postgres-data-app-postgres-0=\nstaging/app-postgres\t0==\necon-graph/c\tcfg==/etc/a=b\n'
 RESTORE_SNAP=data-plane.20261024T010000Z
 refuse "data-plane while postgresql-0 exists" "still in use by: econ-graph/postgresql-0." FAKE_PODS=postgresql-0
 check "... and names its StatefulSet to scale down" \
     grep -qF "scale statefulset/postgresql --replicas=0" <<<"${out}"
 refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ-graph/x." \
-    'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0\n'
+    'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0=\n'
 accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
 unset RESTORE_SNAP
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER

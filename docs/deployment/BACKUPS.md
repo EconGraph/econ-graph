@@ -385,8 +385,9 @@ is set aside, not deleted.
      `econ-graph-worker` (as after a force delete);
    - any other pod, in any namespace, that the API shows mounting it: a
      hostPath volume at, under or above `/srv/econgraph/<name>` (compared
-     after resolving `//`, `.` and `..`), or a claim (generic ephemeral
-     volumes included) bound to a PersistentVolume there.
+     as text after resolving `//`, `.` and `..`; links are not followed, so
+     any hostPath under `/proc` or not absolute counts too), or a claim
+     (generic ephemeral volumes included) bound to a PersistentVolume there.
 
    The refusal names each pod. It also refuses when the cluster can't be
    asked, and it checks again after the confirmation. Containers started

@@ -20,8 +20,9 @@
 # Steps: refuse unless every pod using that subvolume is gone: those Postgres
 # pods (in the API, and with no container still running on the storage
 # node), and any other pod, in any namespace, that the API shows mounting it
-# (a hostPath volume at, under or above /srv/econgraph/<name>, compared
-# after resolving //, . and .., or a claim, generic ephemeral ones included,
+# (a hostPath volume at, under or above /srv/econgraph/<name>, compared as
+# text after resolving //, . and .., links not followed, or anywhere under
+# /proc or relative; or a claim, generic ephemeral ones included,
 # bound to a PersistentVolume there). The refusal names each one; scale
 # their StatefulSets to 0 first. If the cluster can't be asked, refuse too.
 # The check runs again after the confirmation. Containers started outside
@@ -251,13 +252,16 @@ normalize() {
     (IFS=/; echo "/${out[*]}")
 }
 # path_overlaps <path>: whether <path> is $node_path, inside it or above it.
-# A path that is not absolute counts as overlapping: it can't be checked.
+# Compared as text, links not followed. A path that is not absolute, or one
+# under /proc (/proc/<pid>/root leads to the node's whole filesystem), counts
+# as overlapping: it can't be checked.
 path_overlaps() {
     local p
     case "$1" in /*) ;; *) return 0 ;; esac
     p="$(normalize "$1")"
     [ "$p" = "$node_path" ] || [ "${p#"$node_path"/}" != "$p" ] ||
-        [ "$p" = "/" ] || [ "${node_path#"$p"/}" != "$node_path" ]
+        [ "$p" = "/" ] || [ "${node_path#"$p"/}" != "$node_path" ] ||
+        [ "$p" = /proc ] || [ "${p#/proc/}" != "$p" ]
 }
 # check_unused: exit 1, naming them, if any pod uses the subvolume:
 #   - the plane's Postgres pods, as the API server reports them, or with a
@@ -267,7 +271,7 @@ path_overlaps() {
 #     $node_path, or a claim (named, or a generic ephemeral volume's
 #     <pod>-<volume>) bound to a PersistentVolume there.
 check_unused() {
-    local p state pvs line path claim all_pods fields id vol name v
+    local p state pvs line path claim all_pods fields id vol name rest
     local in_use=() others=() stuck=() claims=()
     for p in "${pods[@]}"; do
         state="$(k -n "$NAMESPACE" get pod "$p" --ignore-not-found -o name 2>&1)" ||
@@ -291,21 +295,26 @@ check_unused() {
             claims+=("$claim")
         fi
     done <<<"$pvs"
-    # Every pod, as "<namespace>/<name>", then a tab and "<volume>=<claim or
-    # host path>" for each volume.
-    all_pods="$(k get pods -A -o 'jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{range .spec.volumes[*]}{"\t"}{.name}={.persistentVolumeClaim.claimName}{.hostPath.path}{end}{"\n"}{end}' 2>&1)" ||
+    # Every pod, as "<namespace>/<name>", then a tab and
+    # "<volume>=<claim>=<host path>" for each volume (names and claims never
+    # contain "=", so the host path is everything after the second one).
+    all_pods="$(k get pods -A -o 'jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{range .spec.volumes[*]}{"\t"}{.name}={.persistentVolumeClaim.claimName}={.hostPath.path}{end}{"\n"}{end}' 2>&1)" ||
         cannot_ask "($KIND_NODE on $DOCKER_SOCK) which pods use $node_path" "$all_pods"
     while IFS=$'\t' read -r -a fields; do
         [ "${#fields[@]}" -gt 0 ] || continue
         id="${fields[0]}"
         for vol in "${fields[@]:1}"; do
             name="${vol%%=*}"
-            v="${vol#*=}"
-            case "$v" in
-                */*) path_overlaps "$v" || continue ;;
-                *) [[ " ${claims[*]} " == *" ${id%%/*}/$v "* || " ${claims[*]} " == *" $id-$name "* ]] ||
-                    continue ;;
-            esac
+            rest="${vol#*=}"
+            claim="${rest%%=*}"
+            path="${rest#*=}"
+            # A host path; a claim bound there; or a generic ephemeral
+            # volume's claim, <pod>-<volume>, bound there.
+            if ! { [ -n "$path" ] && path_overlaps "$path"; } &&
+                ! { [ -n "$claim" ] && [[ " ${claims[*]} " == *" ${id%%/*}/$claim "* ]]; } &&
+                [[ " ${claims[*]} " != *" $id-$name "* ]]; then
+                continue
+            fi
             if [[ " ${in_use[*]} " != *" ${id#"$NAMESPACE"/} "* ]] && [[ " ${others[*]} " != *" $id "* ]]; then
                 others+=("$id")
             fi
